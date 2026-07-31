@@ -3016,6 +3016,22 @@ struct VirtualMachine {
     int at_quick_exit_count;
     int at_quick_exit_cap;
 
+    // #680: run __attribute__((destructor)) functions on an explicit guest
+    // exit() call too, not only on normal return from main() -- matching GCC
+    // ("destructors run after main completes or exit() is called") and ISO C
+    // (_Exit()/quick_exit()/abort() deliberately run neither atexit handlers
+    // nor destructors, so those three are untouched). run_started gates the
+    // drain so -t/--testing and -r/--repl -- which never call cc_run(), so
+    // constructors never ran either -- stay symmetric: no ctors in, no dtors
+    // out. dtors_drained is the idempotence guard: wrap_exit (stdlib.c) sets
+    // it *before* running the dtor_list loop, so a destructor that itself
+    // calls exit() re-enters wrap_exit, sees the flag already set, skips the
+    // drain, and falls straight through to the real host exit() -- host
+    // exit() never returns, so cc_run's own end-of-function drain is
+    // unreachable after that point and needs no further coordination.
+    bool run_started;
+    bool dtors_drained;
+
     // GIL-backed pthread runtime state. Concrete pthread objects are kept
     // internal so the public CCCC struct does not expose host pthread ABI types.
     void *gil_mutex;

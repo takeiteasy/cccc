@@ -2316,6 +2316,10 @@ int cc_run(VirtualMachine *vm, int argc, char **argv) {
     fesetround(FE_TONEAREST);
     feclearexcept(FE_ALL_EXCEPT);
 
+    // #680: gates wrap_exit's (stdlib.c) destructor drain -- see the comment
+    // on run_started/dtors_drained in cccc.h.
+    vm->run_started = true;
+
     cc_run_init_entries(vm, vm->compiler.ctor_list, vm->compiler.ctor_count);
     int rc = cc_run_at(vm, vm->text_seg[0], argc, argv);
     // pthread_exit() called on the main thread reaches here the same way a
@@ -2328,13 +2332,18 @@ int cc_run(VirtualMachine *vm, int argc, char **argv) {
     // pthread's destructors running at thread-exit time, well before any
     // later process-level atexit.
     cccc_pthread_run_main_tss_destructors(vm);
-    // atexit handlers and destructors run only on normal return from
-    // main(); a guest exit()/_Exit()/abort() bypasses this (see
-    // docs/COVERAGE.md) since it calls straight through to the host libc
-    // function and tears down the process without returning here. An
-    // explicit guest exit() drains atexit_handlers itself (wrap_exit,
-    // stdlib.c) before this function is ever reached again.
+    // atexit handlers and destructors run here on normal return from main().
+    // An explicit guest exit() reaches this point differently -- it drains
+    // both atexit_handlers and dtor_list itself (wrap_exit, stdlib.c, #680)
+    // before ever returning to the host libc exit() call, so this function
+    // is never reached again in that case. _Exit()/quick_exit()/abort() are
+    // untouched: they run neither atexit handlers nor destructors, matching
+    // GCC and ISO C (see docs/COVERAGE.md).
     cc_run_atexit_entries(vm);
+    // Mark drained here too, purely so the flag's meaning ("destructors have
+    // run") stays accurate regardless of which of the two paths (normal
+    // return vs. wrap_exit) got here first -- nothing reads it after this.
+    vm->dtors_drained = true;
     cc_run_init_entries(vm, vm->compiler.dtor_list, vm->compiler.dtor_count);
     return rc;
 }

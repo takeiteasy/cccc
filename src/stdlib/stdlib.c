@@ -181,10 +181,43 @@ static void drain_exit_handlers_nested(VirtualMachine *vm, long long **list_ptr,
     }
 }
 
+// #680: run __attribute__((destructor)) functions from an explicit guest
+// exit() call, the same way cc_run_init_entries(dtor_list) does on normal
+// return from main() (vm.c) -- except here each destructor is invoked via
+// cccc_call_guest_callback's nested-reentry path since wrap_exit is itself
+// running mid-vm_eval with the GIL held (same reasoning as
+// drain_exit_handlers_nested above). Guarded by vm->run_started so
+// -t/--testing and -r/--repl -- which never call cc_run(), so constructors
+// never ran -- don't run destructors either. Guarded by vm->dtors_drained,
+// set *before* the loop runs, so a destructor that itself calls exit()
+// re-enters wrap_exit, finds the flag already set, and falls straight
+// through to the real host exit() instead of re-draining.
+static void drain_destructors_nested(VirtualMachine *vm) {
+    if (!vm->run_started || vm->dtors_drained)
+        return;
+    vm->dtors_drained = true;
+    CCCCInitEntry *list = vm->compiler.dtor_list;
+    int count = vm->compiler.dtor_count;
+    for (int i = 0; i < count; i++) {
+        long long ignored;
+        // code_addr is already a Pc (text_seg index, see codegen.c's
+        // fn->code_addr = vm->text_ptr + 1) -- cccc_call_guest_callback
+        // expects a guest function-pointer VALUE and converts it back to a
+        // Pc via cc_byte_offset_to_pc internally, so it must be re-encoded
+        // as a byte offset here first.
+        cccc_call_guest_callback(vm, cc_pc_to_byte_offset((Pc)list[i].code_addr),
+                                 NULL, 0, &ignored);
+        /* A faulting destructor doesn't abort the drain, matching
+           drain_exit_handlers_nested's identical policy above. */
+    }
+}
+
 static long long wrap_exit(long long status) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm)
+    if (vm) {
         drain_exit_handlers_nested(vm, &vm->atexit_handlers, &vm->atexit_count);
+        drain_destructors_nested(vm);
+    }
     exit((int)status);
     return 0; /* unreachable */
 }

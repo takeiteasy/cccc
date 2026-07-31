@@ -320,7 +320,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `nonnull` / `nonnull(N,...)` | GNU / C23 | ✓ | Warns when a statically- or flow-provably-null argument is passed to a nonnull-marked parameter (`-Wnonnull`, part of `-Wall`); a merely maybe-null argument warns under the opt-in `-Wmaybe-nonnull` |
 | `returns_nonnull` | GNU / C23 | ✓ | Warns when a statically- or flow-provably-null value is returned from a `returns_nonnull` function (`-Wnonnull`, part of `-Wall`); a merely maybe-null return warns under the opt-in `-Wmaybe-nonnull` |
 | `constructor` / `constructor(N)` | GNU (C23: `[[gnu::constructor]]`) | ✓ | Runs `void(void)` function before `main()`, ordered by priority (lower first; unprioritised functions run last) |
-| `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally, in reverse priority order (higher first; unprioritised functions run first) |
+| `destructor` / `destructor(N)` | GNU (C23: `[[gnu::destructor]]`) | ✓ | Runs `void(void)` function after `main()` returns normally or an explicit `exit()` call, in reverse priority order (higher first; unprioritised functions run first) |
 | `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
 | `alloc_size(n)` / `alloc_size(n,m)` | GNU (C23: `[[gnu::alloc_size]]`) | ✓ | Marks a function as an allocator whose return value has a compile-time-computable byte size: argument `n` (1-based) for the single-index form, or the product of arguments `n` and `m` for the two-index (calloc-style) form. Consulted by `__builtin_object_size`/`__builtin_dynamic_object_size` heap-allocation sizing (see below) — the sole recognition mechanism, superseding earlier hardcoded name matching |
 | `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
@@ -621,14 +621,15 @@ its cleanup runs.
 #### `__attribute__((constructor))` / `__attribute__((destructor))` / `[[gnu::constructor]]` / `[[gnu::destructor]]`
 
 Registers a `void(void)` function to run before `main()` (constructor) or
-after `main()` returns (destructor). An optional integer priority controls
-relative ordering among multiple constructors/destructors:
+after `main()` returns or an explicit `exit()` call (destructor). An
+optional integer priority controls relative ordering among multiple
+constructors/destructors:
 
 ```c
 __attribute__((constructor)) void init(void) { /* runs before main() */ }
 __attribute__((constructor(101))) void init_early(void) { /* lower number runs first */ }
 
-__attribute__((destructor)) void fini(void) { /* runs after main() returns */ }
+__attribute__((destructor)) void fini(void) { /* runs after main() returns or exit() is called */ }
 [[gnu::destructor(101)]] void fini_late(void) { /* higher number runs first */ }
 ```
 
@@ -641,10 +642,13 @@ semantics.
 
 **Limitations:**
 
-- Destructors run only on a **normal return from `main()`**. A guest
-  `exit()`, `_Exit()`, or `abort()` call passes straight through to the host
-  libc function and terminates the process without returning to CCCC's
-  startup path, so registered destructors do **not** run on those paths.
+- Destructors run on a **normal return from `main()`** and on an explicit
+  guest **`exit()`** call, in that same atexit-handlers-then-destructors
+  order either way. `_Exit()` and `quick_exit()` do **not** run destructors
+  (or atexit/at_quick_exit handlers) — matching GCC, which documents
+  destructors as running "after `main` completes or `exit` is called", and
+  ISO C (C23 7.24.4.4/7.24.4.7: `_Exit`/`quick_exit` terminate without
+  running atexit handlers). `abort()` does not run them either.
 - Constructors and destructors must have signature `void(void)` — the GCC
   extension allowing constructors to receive `argc`/`argv`/`envp` is not
   supported.
