@@ -1,3 +1,4 @@
+aio.h	register_posix_functions
 arpa/inet.h	register_posix_functions
 ctype.h	register_ctype_functions
 decimal_math.h	register_decimal_math_functions
@@ -7,6 +8,7 @@ errno.h	register_posix_functions
 fcntl.h	register_posix_functions
 fenv.h	register_fenv_functions
 fnmatch.h	register_posix_functions
+fts.h	register_posix_functions
 getopt.h	register_posix_functions
 glob.h	register_posix_functions
 grp.h	register_posix_functions
@@ -16,6 +18,8 @@ libgen.h	register_posix_functions
 locale.h	register_locale_functions
 math.h	register_math_functions
 monetary.h	register_posix_functions
+mqueue.h	register_posix_functions
+ndbm.h	register_posix_functions
 net/if.h	register_posix_functions
 netdb.h	register_posix_functions
 netinet/in.h	register_posix_functions

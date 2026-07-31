@@ -8,8 +8,10 @@
 // won't be visible on macOS (RFC 3542 options are opt-in there; Linux glibc
 // exposes them unconditionally).
 #define __APPLE_USE_RFC_3542
+#include <aio.h>
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <fts.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -85,9 +87,18 @@
 #include <wordexp.h>
 #ifdef __linux__
 #include <sys/vfs.h>
+// mqueue.h (#805) -- Linux-only, no macOS equivalent at all (see
+// include/mqueue.h). aio_read/aio_write/aio_error/aio_return/aio_cancel/
+// aio_suspend/aio_fsync/lio_listio (#804) and mq_open/mq_send/mq_receive/
+// mq_timedsend/mq_timedreceive/mq_notify/mq_setattr/mq_getattr all resolve
+// straight out of libc.so.6 with no extra link flag needed -- glibc >=
+// 2.34 merged librt's symbols into libc itself, verified by linking
+// without -lrt in both Linux containers (x86_64 and aarch64).
+#include <mqueue.h>
 #else
 #include <sys/mount.h>
 #include <sys/param.h>
+#include <ndbm.h>
 #endif
 
 // ---------------------------------------------------------------------------
@@ -1123,6 +1134,75 @@ static long long wrap_scandir(long long dirname, long long namelist, long long s
     return n;
 }
 
+// fts.h (#811) -- fts_open()'s comparator takes the same
+// int (*)(const FTSENT **, const FTSENT **) shape as scandir()'s compar
+// above, so it gets the same thread-local-slot + trampoline treatment.
+// fts_read()/fts_children() do real directory I/O, so they release the
+// GIL like the other blocking wrappers; fts_open()/fts_set()/fts_close()
+// don't block meaningfully (fts_open() itself may stat the root paths,
+// but that's a single bounded syscall, not an unbounded wait) so they
+// keep the GIL, matching opendir()'s category above.
+static _Thread_local long long g_fts_compar_value;
+static _Thread_local int g_fts_faulted;
+
+static int fts_compar_trampoline(const FTSENT **a, const FTSENT **b) {
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
+    long long result = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_fts_compar_value, args, 2, &result) != 0) {
+        g_fts_faulted = 1;
+        return 0;
+    }
+    return (int)result;
+}
+
+static long long wrap_fts_open(long long path_argv, long long options, long long compar) {
+    long long saved_compar = g_fts_compar_value;
+    int saved_faulted = g_fts_faulted;
+    g_fts_compar_value = compar;
+    g_fts_faulted = 0;
+
+    FTS *f = fts_open((char *const *)path_argv, (int)options,
+                      compar ? fts_compar_trampoline : NULL);
+
+    int faulted = g_fts_faulted;
+    g_fts_compar_value = saved_compar;
+    g_fts_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
+    return (long long)(intptr_t)f;
+}
+
+static long long wrap_fts_read(long long ftsp) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)(intptr_t)fts_read((FTS *)(intptr_t)ftsp);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    FTSENT *e = fts_read((FTS *)(intptr_t)ftsp);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)(intptr_t)e;
+}
+
+static long long wrap_fts_children(long long ftsp, long long options) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)(intptr_t)fts_children((FTS *)(intptr_t)ftsp, (int)options);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    FTSENT *e = fts_children((FTS *)(intptr_t)ftsp, (int)options);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)(intptr_t)e;
+}
+
+static long long wrap_fts_set(long long ftsp, long long f, long long instr) {
+    return (long long)fts_set((FTS *)(intptr_t)ftsp, (FTSENT *)(intptr_t)f, (int)instr);
+}
+
+static long long wrap_fts_close(long long ftsp) {
+    return (long long)fts_close((FTS *)(intptr_t)ftsp);
+}
+
 // search.h (#809) -- tsearch/tfind/tdelete/lfind/lsearch all take the same
 // int (*)(const void *, const void *) comparator shape, so they share one
 // trampoline + thread-local slot (each wrapper saves/restores around its
@@ -2017,6 +2097,245 @@ static long long wrap_wordfree(long long we) {
     return 0;
 }
 
+// aio.h (#804) -- struct aiocb is declared byte-exact per platform in
+// include/aio.h (see its comment); every aio_*()/lio_listio() argument is
+// a pointer, so these wrappers are plain pointer-cast pass-throughs, no
+// marshalling needed. aio_suspend()/lio_listio(LIO_WAIT) can block for an
+// unbounded time waiting on completion, so they release the GIL;
+// aio_read()/aio_write()/aio_error()/aio_return()/aio_cancel()/aio_fsync()
+// only enqueue or poll state and return promptly, so they keep it,
+// matching opendir()'s category above. SIGEV_THREAD (see signal.h's
+// struct sigevent comment) is rejected with EINVAL rather than silently
+// behaving like SIGEV_NONE, since CCCC has no callback path for a host
+// thread the VM never scheduled.
+static int aio_sigevent_ok(const struct sigevent *sev) {
+    if (!sev)
+        return 1;
+    if (sev->sigev_notify == SIGEV_THREAD) {
+        errno = EINVAL;
+        return 0;
+    }
+    return 1;
+}
+
+static long long wrap_aio_read(long long aiocbp) {
+    struct aiocb *cb = (struct aiocb *)(intptr_t)aiocbp;
+    if (!aio_sigevent_ok(&cb->aio_sigevent))
+        return -1;
+    return (long long)aio_read(cb);
+}
+
+static long long wrap_aio_write(long long aiocbp) {
+    struct aiocb *cb = (struct aiocb *)(intptr_t)aiocbp;
+    if (!aio_sigevent_ok(&cb->aio_sigevent))
+        return -1;
+    return (long long)aio_write(cb);
+}
+
+static long long wrap_aio_error(long long aiocbp) {
+    return (long long)aio_error((const struct aiocb *)(intptr_t)aiocbp);
+}
+
+static long long wrap_aio_return(long long aiocbp) {
+    return (long long)aio_return((struct aiocb *)(intptr_t)aiocbp);
+}
+
+static long long wrap_aio_cancel(long long fd, long long aiocbp) {
+    return (long long)aio_cancel((int)fd, (struct aiocb *)(intptr_t)aiocbp);
+}
+
+static long long wrap_aio_fsync(long long op, long long aiocbp) {
+    struct aiocb *cb = (struct aiocb *)(intptr_t)aiocbp;
+    if (!aio_sigevent_ok(&cb->aio_sigevent))
+        return -1;
+    return (long long)aio_fsync((int)op, cb);
+}
+
+static long long wrap_aio_suspend(long long aiocblist, long long nent, long long timeoutp) {
+    VirtualMachine *vm = current_vm();
+    const struct aiocb *const *list = (const struct aiocb *const *)(intptr_t)aiocblist;
+    const struct timespec *tp = (const struct timespec *)(intptr_t)timeoutp;
+    if (!vm || !vm->gil_initialized)
+        return (long long)aio_suspend(list, (int)nent, tp);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = aio_suspend(list, (int)nent, tp);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_lio_listio(long long mode, long long aiocblist, long long nent, long long sigp) {
+    struct sigevent *sev = (struct sigevent *)(intptr_t)sigp;
+    if (!aio_sigevent_ok(sev))
+        return -1;
+    VirtualMachine *vm = current_vm();
+    struct aiocb *const *list = (struct aiocb *const *)(intptr_t)aiocblist;
+    if (!vm || !vm->gil_initialized || (int)mode != LIO_WAIT)
+        return (long long)lio_listio((int)mode, list, (int)nent, sev);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = lio_listio((int)mode, list, (int)nent, sev);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+#ifdef __linux__
+// mqueue.h (#805) -- Linux-only (see include/mqueue.h). mq_send/
+// mq_receive/mq_timedsend/mq_timedreceive block on a full/empty queue, so
+// they release the GIL; mq_open/mq_close/mq_unlink/mq_notify/mq_setattr/
+// mq_getattr return promptly and keep it. mq_notify()'s SIGEV_THREAD is
+// rejected the same way aio's is, via aio_sigevent_ok() above (struct
+// sigevent has the same layout regardless of which header pulled it in).
+static long long wrap_mq_open(const char *name, long long oflag, ...) {
+    mqd_t r;
+    if ((int)oflag & O_CREAT) {
+        va_list ap;
+        va_start(ap, oflag);
+        mode_t mode = (mode_t)(unsigned int)va_arg(ap, unsigned int);
+        struct mq_attr *attr = va_arg(ap, struct mq_attr *);
+        va_end(ap);
+        r = mq_open(name, (int)oflag, mode, attr);
+    } else {
+        r = mq_open(name, (int)oflag);
+    }
+    return (long long)r;
+}
+
+static long long wrap_mq_close(long long mqdes) {
+    return (long long)mq_close((mqd_t)mqdes);
+}
+
+static long long wrap_mq_unlink(long long name) {
+    return (long long)mq_unlink((const char *)(intptr_t)name);
+}
+
+static long long wrap_mq_send(long long mqdes, long long msg_ptr, long long msg_len, long long msg_prio) {
+    VirtualMachine *vm = current_vm();
+    const char *p = (const char *)(intptr_t)msg_ptr;
+    if (!vm || !vm->gil_initialized)
+        return (long long)mq_send((mqd_t)mqdes, p, (size_t)msg_len, (unsigned int)msg_prio);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = mq_send((mqd_t)mqdes, p, (size_t)msg_len, (unsigned int)msg_prio);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_mq_receive(long long mqdes, long long msg_ptr, long long msg_len, long long msg_prio) {
+    VirtualMachine *vm = current_vm();
+    char *p = (char *)(intptr_t)msg_ptr;
+    unsigned int *prio = (unsigned int *)(intptr_t)msg_prio;
+    if (!vm || !vm->gil_initialized)
+        return (long long)mq_receive((mqd_t)mqdes, p, (size_t)msg_len, prio);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = mq_receive((mqd_t)mqdes, p, (size_t)msg_len, prio);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_mq_timedsend(long long mqdes, long long msg_ptr, long long msg_len,
+                                   long long msg_prio, long long abs_timeout) {
+    VirtualMachine *vm = current_vm();
+    const char *p = (const char *)(intptr_t)msg_ptr;
+    const struct timespec *ts = (const struct timespec *)(intptr_t)abs_timeout;
+    if (!vm || !vm->gil_initialized)
+        return (long long)mq_timedsend((mqd_t)mqdes, p, (size_t)msg_len, (unsigned int)msg_prio, ts);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    int r = mq_timedsend((mqd_t)mqdes, p, (size_t)msg_len, (unsigned int)msg_prio, ts);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_mq_timedreceive(long long mqdes, long long msg_ptr, long long msg_len,
+                                      long long msg_prio, long long abs_timeout) {
+    VirtualMachine *vm = current_vm();
+    char *p = (char *)(intptr_t)msg_ptr;
+    unsigned int *prio = (unsigned int *)(intptr_t)msg_prio;
+    const struct timespec *ts = (const struct timespec *)(intptr_t)abs_timeout;
+    if (!vm || !vm->gil_initialized)
+        return (long long)mq_timedreceive((mqd_t)mqdes, p, (size_t)msg_len, prio, ts);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = mq_timedreceive((mqd_t)mqdes, p, (size_t)msg_len, prio, ts);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_mq_notify(long long mqdes, long long notification) {
+    struct sigevent *sev = (struct sigevent *)(intptr_t)notification;
+    if (!aio_sigevent_ok(sev))
+        return -1;
+    return (long long)mq_notify((mqd_t)mqdes, sev);
+}
+
+static long long wrap_mq_setattr(long long mqdes, long long newattr, long long oldattr) {
+    return (long long)mq_setattr((mqd_t)mqdes, (const struct mq_attr *)(intptr_t)newattr,
+                                 (struct mq_attr *)(intptr_t)oldattr);
+}
+
+static long long wrap_mq_getattr(long long mqdes, long long attr) {
+    return (long long)mq_getattr((mqd_t)mqdes, (struct mq_attr *)(intptr_t)attr);
+}
+#else
+// ndbm.h (#810) -- macOS/BSD only (see include/ndbm.h). dbm_fetch/
+// dbm_firstkey/dbm_nextkey/dbm_delete/dbm_store take or return `datum` by
+// value; CCCC's FFI marshalling doesn't correctly handle a struct/union
+// crossing the host-call boundary by value (only a single 64-bit slot is
+// marshalled per argument/return -- same gap as wrap_semctl's union
+// semun above), so these five __cccc_dbm_* helpers are scalar-only
+// (pointer + length in, pointer + length out) and include/ndbm.h's
+// `static inline` shims reassemble the real `datum dbm_fetch(DBM*,
+// datum)` shape entirely on the guest side, never crossing the FFI
+// boundary with an aggregate. dbm_open/dbm_close/dbm_error/dbm_clearerr
+// take no datum, so they're registered as direct pass-throughs below with
+// no wrapper needed.
+static long long wrap_dbm_fetch(long long db, long long kptr, long long klen,
+                                long long out_dptr, long long out_dsize) {
+    datum key = { (void *)(intptr_t)kptr, (size_t)klen };
+    datum r = dbm_fetch((DBM *)(intptr_t)db, key);
+    *(void **)(intptr_t)out_dptr = r.dptr;
+    *(size_t *)(intptr_t)out_dsize = r.dsize;
+    return 0;
+}
+
+static long long wrap_dbm_firstkey(long long db, long long out_dptr, long long out_dsize) {
+    datum r = dbm_firstkey((DBM *)(intptr_t)db);
+    *(void **)(intptr_t)out_dptr = r.dptr;
+    *(size_t *)(intptr_t)out_dsize = r.dsize;
+    return 0;
+}
+
+static long long wrap_dbm_nextkey(long long db, long long out_dptr, long long out_dsize) {
+    datum r = dbm_nextkey((DBM *)(intptr_t)db);
+    *(void **)(intptr_t)out_dptr = r.dptr;
+    *(size_t *)(intptr_t)out_dsize = r.dsize;
+    return 0;
+}
+
+static long long wrap_dbm_delete(long long db, long long kptr, long long klen) {
+    datum key = { (void *)(intptr_t)kptr, (size_t)klen };
+    return (long long)dbm_delete((DBM *)(intptr_t)db, key);
+}
+
+static long long wrap_dbm_store(long long db, long long kptr, long long klen,
+                                long long vptr, long long vlen, long long flags) {
+    datum key = { (void *)(intptr_t)kptr, (size_t)klen };
+    datum content = { (void *)(intptr_t)vptr, (size_t)vlen };
+    return (long long)dbm_store((DBM *)(intptr_t)db, key, content, (int)flags);
+}
+
+static long long wrap_dbm_open(long long file, long long open_flags, long long file_mode) {
+    return (long long)(intptr_t)dbm_open((const char *)(intptr_t)file, (int)open_flags, (mode_t)file_mode);
+}
+
+static long long wrap_dbm_close(long long db) {
+    dbm_close((DBM *)(intptr_t)db);
+    return 0;
+}
+#endif
+
 // spawn.h (#801) -- posix_spawnattr_t/posix_spawn_file_actions_t are
 // opaque pointer-width handles on the guest (see include/spawn.h). *_init
 // mallocs a host-sized object (sizeof(posix_spawnattr_t) on the host --
@@ -2767,6 +3086,13 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "globfree", (void*)wrap_globfree, 1, 0);
     cc_register_cfunc(vm, "scandir",  (void*)wrap_scandir, 4, 0);
 
+    // fts.h (#811)
+    cc_register_cfunc(vm, "fts_open",     (void*)wrap_fts_open,     3, 0);
+    cc_register_cfunc(vm, "fts_read",     (void*)wrap_fts_read,     1, 0);
+    cc_register_cfunc(vm, "fts_children", (void*)wrap_fts_children, 2, 0);
+    cc_register_cfunc(vm, "fts_set",      (void*)wrap_fts_set,      3, 0);
+    cc_register_cfunc(vm, "fts_close",    (void*)wrap_fts_close,    1, 0);
+
     // sys/ipc.h, sys/shm.h, sys/sem.h, sys/msg.h (#812)
     cc_register_cfunc(vm, "ftok",    (void*)wrap_ftok,    2, 0);
     cc_register_cfunc(vm, "shmget",  (void*)wrap_shmget,  3, 0);
@@ -2784,6 +3110,44 @@ void register_posix_functions(VirtualMachine *vm) {
     // wordexp.h (#802)
     cc_register_cfunc(vm, "wordexp",  (void*)wrap_wordexp,  3, 0);
     cc_register_cfunc(vm, "wordfree", (void*)wrap_wordfree, 1, 0);
+
+    // aio.h (#804)
+    cc_register_cfunc(vm, "aio_read",    (void*)wrap_aio_read,    1, 0);
+    cc_register_cfunc(vm, "aio_write",   (void*)wrap_aio_write,   1, 0);
+    cc_register_cfunc(vm, "aio_error",   (void*)wrap_aio_error,   1, 0);
+    cc_register_cfunc(vm, "aio_return",  (void*)wrap_aio_return,  1, 0);
+    cc_register_cfunc(vm, "aio_cancel",  (void*)wrap_aio_cancel,  2, 0);
+    cc_register_cfunc(vm, "aio_fsync",   (void*)wrap_aio_fsync,   2, 0);
+    cc_register_cfunc(vm, "aio_suspend", (void*)wrap_aio_suspend, 3, 0);
+    cc_register_cfunc(vm, "lio_listio",  (void*)wrap_lio_listio,  4, 0);
+
+#ifdef __linux__
+    // mqueue.h (#805) -- Linux-only, see include/mqueue.h
+    cc_register_variadic_cfunc(vm, "mq_open", (void*)wrap_mq_open, 2, 0);
+    cc_register_cfunc(vm, "mq_close",         (void*)wrap_mq_close,         1, 0);
+    cc_register_cfunc(vm, "mq_unlink",        (void*)wrap_mq_unlink,        1, 0);
+    cc_register_cfunc(vm, "mq_send",          (void*)wrap_mq_send,          4, 0);
+    cc_register_cfunc(vm, "mq_receive",       (void*)wrap_mq_receive,       4, 0);
+    cc_register_cfunc(vm, "mq_timedsend",     (void*)wrap_mq_timedsend,     5, 0);
+    cc_register_cfunc(vm, "mq_timedreceive",  (void*)wrap_mq_timedreceive,  5, 0);
+    cc_register_cfunc(vm, "mq_notify",        (void*)wrap_mq_notify,        2, 0);
+    cc_register_cfunc(vm, "mq_setattr",       (void*)wrap_mq_setattr,       3, 0);
+    cc_register_cfunc(vm, "mq_getattr",       (void*)wrap_mq_getattr,       2, 0);
+#else
+    // ndbm.h (#810) -- macOS/BSD only, see include/ndbm.h. The five
+    // by-value-datum entry points are registered under their internal
+    // __cccc_dbm_* names, matched to include/ndbm.h's extern declarations
+    // for the static-inline shims to call.
+    cc_register_cfunc(vm, "dbm_open",           (void*)wrap_dbm_open,     3, 0);
+    cc_register_cfunc(vm, "dbm_close",          (void*)wrap_dbm_close,    1, 0);
+    cc_register_cfunc(vm, "dbm_error",          (void*)dbm_error,         1, 0);
+    cc_register_cfunc(vm, "dbm_clearerr",       (void*)dbm_clearerr,      1, 0);
+    cc_register_cfunc(vm, "__cccc_dbm_fetch",   (void*)wrap_dbm_fetch,    5, 0);
+    cc_register_cfunc(vm, "__cccc_dbm_firstkey",(void*)wrap_dbm_firstkey, 3, 0);
+    cc_register_cfunc(vm, "__cccc_dbm_nextkey", (void*)wrap_dbm_nextkey,  3, 0);
+    cc_register_cfunc(vm, "__cccc_dbm_delete",  (void*)wrap_dbm_delete,   3, 0);
+    cc_register_cfunc(vm, "__cccc_dbm_store",   (void*)wrap_dbm_store,    6, 0);
+#endif
 }
 #else
 void register_posix_functions(VirtualMachine *vm) {

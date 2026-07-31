@@ -17,7 +17,10 @@
 //   test_posix_search, test_posix_strfmon, test_posix_timer_macros,
 //   test_posix_ppoll, test_posix_locale_t,
 //   test_sysv_shm, test_sysv_sem, test_sysv_msg, test_sysv_ftok,
-//   test_sysv_linux_info, test_wordexp_basic, test_wordexp_header
+//   test_sysv_linux_info, test_wordexp_basic, test_wordexp_header,
+//   test_fts_walk, test_fts_set_skip, test_aio_write_read_roundtrip,
+//   test_aio_cancel, test_lio_listio_wait, test_mqueue_roundtrip,
+//   test_ndbm_roundtrip
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -76,6 +79,13 @@
 #include <sys/msg.h>
 #include <wordexp.h>
 #include <sys/statvfs.h>
+#include <fts.h>
+#include <aio.h>
+#ifdef __linux__
+#include <mqueue.h>
+#else
+#include <ndbm.h>
+#endif
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
@@ -2627,4 +2637,326 @@ int test_wordexp_header(void) {
     return 42;
 }
 
+// test_fts_walk (#811) -- walk a small temp tree, checking visit order
+// info, fts_level, fts_name, and that fts_statp->st_size is a real,
+// dereferenceable host struct stat* (the byte-exact pass-through proof).
+[[cccc::test(return = 42)]]
+int test_fts_walk(void) {
+    char dir[] = "/tmp/cccc_fts_walk_XXXXXX";
+    if (!mkdtemp(dir)) return 1;
+
+    char sub[512];
+    snprintf(sub, sizeof(sub), "%s/sub", dir);
+    if (mkdir(sub, 0755) != 0) return 2;
+
+    char f1[512];
+    snprintf(f1, sizeof(f1), "%s/a.txt", dir);
+    FILE *fp = fopen(f1, "w");
+    if (!fp) return 3;
+    fputs("hello", fp);
+    fclose(fp);
+
+    char *paths[2] = { dir, NULL };
+    FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+    if (!fts) return 4;
+
+    int saw_file = 0, saw_dir = 0, saw_root = 0;
+    FTSENT *e;
+    while ((e = fts_read(fts)) != NULL) {
+        if (e->fts_info == FTS_D && e->fts_level == FTS_ROOTLEVEL)
+            saw_root = 1;
+        if (e->fts_info == FTS_F && strcmp(e->fts_name, "a.txt") == 0) {
+            saw_file = 1;
+            if (e->fts_statp->st_size != 5) { fts_close(fts); return 5; }
+        }
+        if (e->fts_info == FTS_D && strcmp(e->fts_name, "sub") == 0)
+            saw_dir = 1;
+    }
+    fts_close(fts);
+
+    unlink(f1);
+    rmdir(sub);
+    rmdir(dir);
+
+    if (!saw_root || !saw_file || !saw_dir) return 6;
+    return 42;
+}
+
+// test_fts_set_skip (#811) -- fts_set(FTS_SKIP) prunes a subtree, and a
+// guest comparator callback through fts_open()'s 3rd argument (routed
+// through the #738 trampoline the same way scandir()'s compar is).
+static int fts_test_compar(const FTSENT **a, const FTSENT **b) {
+    return strcmp((*a)->fts_name, (*b)->fts_name);
+}
+
+[[cccc::test(return = 42)]]
+int test_fts_set_skip(void) {
+    char dir[] = "/tmp/cccc_fts_skip_XXXXXX";
+    if (!mkdtemp(dir)) return 1;
+
+    char skipme[512], keepme[512];
+    snprintf(skipme, sizeof(skipme), "%s/skipme", dir);
+    snprintf(keepme, sizeof(keepme), "%s/keepme", dir);
+    if (mkdir(skipme, 0755) != 0) return 2;
+    if (mkdir(keepme, 0755) != 0) return 3;
+
+    char inside[512];
+    snprintf(inside, sizeof(inside), "%s/should_not_visit.txt", skipme);
+    FILE *fp = fopen(inside, "w");
+    if (!fp) return 4;
+    fputs("x", fp);
+    fclose(fp);
+
+    char *paths[2] = { dir, NULL };
+    FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_test_compar);
+    if (!fts) return 5;
+
+    int saw_inside_skipped = 0, saw_keepme = 0;
+    FTSENT *e;
+    while ((e = fts_read(fts)) != NULL) {
+        if (e->fts_info == FTS_D && strcmp(e->fts_name, "skipme") == 0)
+            fts_set(fts, e, FTS_SKIP);
+        if (strcmp(e->fts_name, "should_not_visit.txt") == 0)
+            saw_inside_skipped = 1;
+        if (e->fts_info == FTS_D && strcmp(e->fts_name, "keepme") == 0)
+            saw_keepme = 1;
+    }
+    fts_close(fts);
+
+    unlink(inside);
+    rmdir(skipme);
+    rmdir(keepme);
+    rmdir(dir);
+
+    if (saw_inside_skipped) return 6;
+    if (!saw_keepme) return 7;
+    return 42;
+}
+
+// test_aio_write_read_roundtrip (#804) -- submit an aio_write, wait on
+// aio_suspend, verify aio_error/aio_return, then read the bytes back with
+// aio_read. Proves the round-trip assumption include/aio.h documents:
+// guest memory handed to a host aio request stays valid for the host's
+// helper-thread-driven completion to read/write it after the FFI call
+// that submitted the request has already returned.
+[[cccc::test(return = 42)]]
+int test_aio_write_read_roundtrip(void) {
+    char tmpl[] = "/tmp/cccc_aio_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return 1;
+
+    const char *msg = "hello aio world";
+    struct aiocb wcb;
+    memset(&wcb, 0, sizeof(wcb));
+    wcb.aio_fildes = fd;
+    wcb.aio_buf = (void *)msg;
+    wcb.aio_nbytes = strlen(msg);
+    wcb.aio_offset = 0;
+    wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
+
+    if (aio_write(&wcb) != 0) { unlink(tmpl); return 2; }
+    const struct aiocb *wlist[1] = { &wcb };
+    if (aio_suspend(wlist, 1, NULL) != 0) { unlink(tmpl); return 3; }
+    if (aio_error(&wcb) != 0) { unlink(tmpl); return 4; }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { unlink(tmpl); return 5; }
+
+    char buf[64];
+    memset(buf, 0, sizeof(buf));
+    struct aiocb rcb;
+    memset(&rcb, 0, sizeof(rcb));
+    rcb.aio_fildes = fd;
+    rcb.aio_buf = buf;
+    rcb.aio_nbytes = strlen(msg);
+    rcb.aio_offset = 0;
+    rcb.aio_sigevent.sigev_notify = SIGEV_NONE;
+
+    if (aio_read(&rcb) != 0) { unlink(tmpl); return 6; }
+    const struct aiocb *rlist[1] = { &rcb };
+    if (aio_suspend(rlist, 1, NULL) != 0) { unlink(tmpl); return 7; }
+    if (aio_error(&rcb) != 0) { unlink(tmpl); return 8; }
+    if (aio_return(&rcb) != (ssize_t)strlen(msg)) { unlink(tmpl); return 9; }
+    if (strcmp(buf, msg) != 0) { unlink(tmpl); return 10; }
+
+    close(fd);
+    unlink(tmpl);
+    return 42;
+}
+
+// test_aio_cancel (#804) -- aio_cancel() on a request returns one of the
+// documented AIO_* codes rather than an arbitrary value (the request may
+// legitimately already be done by the time cancel runs, so both ALLDONE
+// and CANCELED are accepted).
+[[cccc::test(return = 42)]]
+int test_aio_cancel(void) {
+    char tmpl[] = "/tmp/cccc_aio_cancel_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return 1;
+
+    struct aiocb cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.aio_fildes = fd;
+    static char payload[4096];
+    memset(payload, 'z', sizeof(payload));
+    cb.aio_buf = payload;
+    cb.aio_nbytes = sizeof(payload);
+    cb.aio_offset = 0;
+    cb.aio_sigevent.sigev_notify = SIGEV_NONE;
+
+    if (aio_write(&cb) != 0) { unlink(tmpl); return 2; }
+    int r = aio_cancel(fd, &cb);
+    if (r != AIO_ALLDONE && r != AIO_CANCELED && r != AIO_NOTCANCELED) {
+        unlink(tmpl);
+        return 3;
+    }
+    /* Whichever way it went, the request must reach a terminal state. */
+    const struct aiocb *list[1] = { &cb };
+    aio_suspend(list, 1, NULL);
+    (void)aio_error(&cb);
+    (void)aio_return(&cb);
+
+    close(fd);
+    unlink(tmpl);
+    return 42;
+}
+
+// test_lio_listio_wait (#804) -- submit two writes as a single
+// LIO_WAIT-mode lio_listio() call and confirm both landed.
+[[cccc::test(return = 42)]]
+int test_lio_listio_wait(void) {
+    char tmpl[] = "/tmp/cccc_lio_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return 1;
+
+    const char *a = "AAAA";
+    const char *b = "BBBB";
+    struct aiocb cb1, cb2;
+    memset(&cb1, 0, sizeof(cb1));
+    memset(&cb2, 0, sizeof(cb2));
+    cb1.aio_fildes = fd; cb1.aio_buf = (void *)a; cb1.aio_nbytes = 4; cb1.aio_offset = 0;
+    cb1.aio_sigevent.sigev_notify = SIGEV_NONE;
+    cb1.aio_lio_opcode = LIO_WRITE; /* lio_listio(), unlike aio_write(), needs this set */
+    cb2.aio_fildes = fd; cb2.aio_buf = (void *)b; cb2.aio_nbytes = 4; cb2.aio_offset = 4;
+    cb2.aio_sigevent.sigev_notify = SIGEV_NONE;
+    cb2.aio_lio_opcode = LIO_WRITE;
+
+    struct aiocb *list[2] = { &cb1, &cb2 };
+    if (lio_listio(LIO_WAIT, list, 2, NULL) != 0) { unlink(tmpl); return 2; }
+
+    char buf[9];
+    memset(buf, 0, sizeof(buf));
+    lseek(fd, 0, SEEK_SET);
+    if (read(fd, buf, 8) != 8) { unlink(tmpl); return 3; }
+    if (strcmp(buf, "AAAABBBB") != 0) { unlink(tmpl); return 4; }
+
+    close(fd);
+    unlink(tmpl);
+    return 42;
+}
+
+#ifdef __linux__
+// test_mqueue_roundtrip (#805) -- Linux-only. mq_open(O_CREAT), send/
+// receive round trip, mq_getattr field check, mq_timedreceive timeout on
+// an empty queue, mq_unlink cleanup.
+//
+// The `struct mq_attr`/`struct timespec` out-params are heap-allocated
+// here rather than stack locals, working around an unrelated pre-existing
+// CCCC compiler bug (not specific to mqueue.h): taking the address of a
+// stack-local struct and passing it as a variadic FFI argument corrupts
+// stack-tag/CHKP bookkeeping under the default safety tier, surfacing as
+// a delayed segfault in a later, unrelated test. Reproduced independent
+// of mq_open() (any variadic FFI call passing &stack_local behaves the
+// same way) and confirmed absent under -0. Filed as a follow-up (V010).
+[[cccc::test(return = 42)]]
+int test_mqueue_roundtrip(void) {
+    const char *name = "/cccc_test_mqueue";
+    mq_unlink(name);
+
+    struct mq_attr *attr = malloc(sizeof(struct mq_attr));
+    if (!attr) return 1;
+    memset(attr, 0, sizeof(*attr));
+    attr->mq_maxmsg = 4;
+    attr->mq_msgsize = 32;
+
+    mqd_t q = mq_open(name, O_CREAT | O_RDWR, 0644, attr);
+    free(attr);
+    if (q == (mqd_t)-1) return 2;
+
+    if (mq_send(q, "hi there", 8, 3) != 0) { mq_close(q); mq_unlink(name); return 3; }
+
+    char buf[64];
+    memset(buf, 0, sizeof(buf));
+    unsigned int prio = 0;
+    ssize_t n = mq_receive(q, buf, sizeof(buf), &prio);
+    if (n != 8 || strncmp(buf, "hi there", 8) != 0 || prio != 3) {
+        mq_close(q); mq_unlink(name);
+        return 4;
+    }
+
+    struct mq_attr *got = malloc(sizeof(struct mq_attr));
+    if (!got) { mq_close(q); mq_unlink(name); return 5; }
+    int gattr_rc = mq_getattr(q, got);
+    long got_maxmsg = got->mq_maxmsg, got_msgsize = got->mq_msgsize;
+    free(got);
+    if (gattr_rc != 0) { mq_close(q); mq_unlink(name); return 6; }
+    if (got_maxmsg != 4 || got_msgsize != 32) { mq_close(q); mq_unlink(name); return 7; }
+
+    struct timespec *deadline = malloc(sizeof(struct timespec));
+    if (!deadline) { mq_close(q); mq_unlink(name); return 8; }
+    deadline->tv_sec = time(NULL) + 1;
+    deadline->tv_nsec = 0;
+    ssize_t tr = mq_timedreceive(q, buf, sizeof(buf), &prio, deadline);
+    int tr_errno = errno;
+    free(deadline);
+    if (tr != -1 || tr_errno != ETIMEDOUT) { mq_close(q); mq_unlink(name); return 9; }
+
+    mq_close(q);
+    mq_unlink(name);
+    return 42;
+}
+#else
+// ndbm.h (#810) -- macOS/BSD only. dbm_store/dbm_fetch/dbm_delete
+// exercise the by-value datum static-inline shims declared in
+// include/ndbm.h; dbm_firstkey/dbm_nextkey exercise iteration.
+[[cccc::test(return = 42)]]
+int test_ndbm_roundtrip(void) {
+    char base[] = "/tmp/cccc_ndbm_test_XXXXXX";
+    int tfd = mkstemp(base);
+    if (tfd < 0) return 1;
+    close(tfd);
+    unlink(base); /* dbm_open wants a bare path, not an existing plain file */
+
+    char dbfile[600];
+    snprintf(dbfile, sizeof(dbfile), "%s.db", base);
+    unlink(dbfile);
+
+    DBM *db = dbm_open(base, O_RDWR | O_CREAT, 0644);
+    if (!db) return 2;
+
+    datum k1 = { "key1", 4 };
+    datum v1 = { "value1", 6 };
+    datum k2 = { "key2", 4 };
+    datum v2 = { "value2", 6 };
+    if (dbm_store(db, k1, v1, DBM_INSERT) != 0) { dbm_close(db); return 3; }
+    if (dbm_store(db, k2, v2, DBM_INSERT) != 0) { dbm_close(db); return 4; }
+
+    datum got = dbm_fetch(db, k1);
+    if (got.dptr == NULL || got.dsize != 6 || memcmp(got.dptr, "value1", 6) != 0) {
+        dbm_close(db);
+        return 5;
+    }
+
+    int count = 0;
+    for (datum key = dbm_firstkey(db); key.dptr != NULL; key = dbm_nextkey(db))
+        count++;
+    if (count != 2) { dbm_close(db); return 6; }
+
+    if (dbm_delete(db, k1) != 0) { dbm_close(db); return 7; }
+    datum gone = dbm_fetch(db, k1);
+    if (gone.dptr != NULL) { dbm_close(db); return 8; }
+
+    dbm_close(db);
+    unlink(dbfile);
+    return 42;
+}
+#endif
 #pragma cccc suite end
