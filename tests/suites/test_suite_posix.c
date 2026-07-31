@@ -15,7 +15,9 @@
 //   test_posix_statvfs, test_posix_sched, test_posix_locale,
 //   test_posix_spawn, test_posix_iconv, test_posix_langinfo,
 //   test_posix_search, test_posix_strfmon, test_posix_timer_macros,
-//   test_posix_ppoll, test_posix_locale_t
+//   test_posix_ppoll, test_posix_locale_t,
+//   test_sysv_shm, test_sysv_sem, test_sysv_msg, test_sysv_ftok,
+//   test_sysv_linux_info, test_wordexp_basic, test_wordexp_header
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -68,6 +70,11 @@
 #include <locale.h>
 #include <spawn.h>
 #include <sys/select.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/sem.h>
+#include <sys/msg.h>
+#include <wordexp.h>
 #include <sys/statvfs.h>
 
 // [from test_posix_extra_ffi]
@@ -2451,6 +2458,172 @@ int test_posix_locale_t(void) {
     freelocale(mon);
     freelocale(all);
 
+    return 42;
+}
+
+// test_sysv_shm (#812) -- shmget/shmat/shmdt/shmctl round trip. SysV IPC can
+// be disabled or exhausted (macOS's kern.sysv.shmmni is only 32 segments),
+// so a failure on the initial shmget is treated as a skip rather than a
+// failure; every path below still IPC_RMIDs on success since a leaked
+// segment burns one of those 32 slots until reboot.
+[[cccc::test(return = 42)]]
+int test_sysv_shm(void) {
+    int id = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
+    if (id < 0) {
+        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC || errno == EACCES) {
+            printf("test_sysv_shm: shmget unavailable (errno=%d), skipping\n", errno);
+            return 42;
+        }
+        return 1;
+    }
+
+    int *p = (int *)shmat(id, 0, 0);
+    if (p == (void *)-1) { shmctl(id, IPC_RMID, 0); return 2; }
+    *p = 12345;
+    int val = *p;
+    if (shmdt(p) != 0) { shmctl(id, IPC_RMID, 0); return 3; }
+
+    struct shmid_ds ds;
+    if (shmctl(id, IPC_STAT, &ds) != 0) { shmctl(id, IPC_RMID, 0); return 4; }
+    if (ds.shm_segsz != 4096) { shmctl(id, IPC_RMID, 0); return 5; }
+    if ((ds.shm_perm.mode & 0777) != 0600) { shmctl(id, IPC_RMID, 0); return 6; }
+
+    if (shmctl(id, IPC_RMID, 0) != 0) return 7;
+    return val == 12345 ? 42 : 8;
+}
+
+// test_sysv_sem (#812) -- semget/semop/semctl round trip: SETVAL, a down/up
+// pair through semop, GETVAL, and IPC_STAT. Same skip-on-unavailable
+// treatment as test_sysv_shm.
+[[cccc::test(return = 42)]]
+int test_sysv_sem(void) {
+    int id = semget(IPC_PRIVATE, 1, IPC_CREAT | 0600);
+    if (id < 0) {
+        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC || errno == EACCES) {
+            printf("test_sysv_sem: semget unavailable (errno=%d), skipping\n", errno);
+            return 42;
+        }
+        return 1;
+    }
+
+    if (semctl(id, 0, SETVAL, 1) < 0) { semctl(id, 0, IPC_RMID, 0); return 2; }
+    if (semctl(id, 0, GETVAL, 0) != 1) { semctl(id, 0, IPC_RMID, 0); return 3; }
+
+    struct sembuf down = {0, -1, 0};
+    if (semop(id, &down, 1) != 0) { semctl(id, 0, IPC_RMID, 0); return 4; }
+    if (semctl(id, 0, GETVAL, 0) != 0) { semctl(id, 0, IPC_RMID, 0); return 5; }
+
+    struct sembuf up = {0, 1, 0};
+    if (semop(id, &up, 1) != 0) { semctl(id, 0, IPC_RMID, 0); return 6; }
+    int val = semctl(id, 0, GETVAL, 0);
+    if (val != 1) { semctl(id, 0, IPC_RMID, 0); return 7; }
+
+    struct semid_ds ds;
+    if (semctl(id, 0, IPC_STAT, &ds) != 0) { semctl(id, 0, IPC_RMID, 0); return 8; }
+    if (ds.sem_nsems != 1) { semctl(id, 0, IPC_RMID, 0); return 9; }
+
+    if (semctl(id, 0, IPC_RMID, 0) < 0) return 10;
+    return 42;
+}
+
+// test_sysv_msg (#812) -- msgget/msgsnd/msgrcv/msgctl round trip. Same
+// skip-on-unavailable treatment as test_sysv_shm/test_sysv_sem.
+struct cccc_test_msgbuf {
+    long mtype;
+    char mtext[32];
+};
+
+[[cccc::test(return = 42)]]
+int test_sysv_msg(void) {
+    int id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
+    if (id < 0) {
+        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC || errno == EACCES) {
+            printf("test_sysv_msg: msgget unavailable (errno=%d), skipping\n", errno);
+            return 42;
+        }
+        return 1;
+    }
+
+    struct cccc_test_msgbuf mb = {1, "hello"};
+    if (msgsnd(id, &mb, sizeof("hello"), 0) < 0) { msgctl(id, IPC_RMID, 0); return 2; }
+
+    struct msqid_ds ds;
+    if (msgctl(id, IPC_STAT, &ds) != 0) { msgctl(id, IPC_RMID, 0); return 3; }
+    if (ds.msg_qnum != 1) { msgctl(id, IPC_RMID, 0); return 4; }
+
+    struct cccc_test_msgbuf rb = {0};
+    if (msgrcv(id, &rb, sizeof(rb.mtext), 0, 0) < 0) { msgctl(id, IPC_RMID, 0); return 5; }
+    if (strcmp(rb.mtext, "hello") != 0) { msgctl(id, IPC_RMID, 0); return 6; }
+
+    if (msgctl(id, IPC_RMID, 0) != 0) return 7;
+    return 42;
+}
+
+// test_sysv_ftok (#812) -- ftok() is stable across calls for the same
+// path/id pair.
+[[cccc::test(return = 42)]]
+int test_sysv_ftok(void) {
+    key_t k1 = ftok("/tmp", 1);
+    key_t k2 = ftok("/tmp", 1);
+    if (k1 == (key_t)-1) return 1;
+    if (k1 != k2) return 2;
+    return 42;
+}
+
+// test_sysv_linux_info (#812) -- Linux-only SHM_INFO/IPC_INFO introspection
+// commands. Compiled out (and trivially passing) on macOS, which has no
+// equivalent; the linux_amd64_test/linux_aarch64_test build targets are
+// what actually exercise this.
+[[cccc::test(return = 42)]]
+int test_sysv_linux_info(void) {
+#ifdef __linux__
+    int shmid = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
+    if (shmid < 0) return 1;
+    struct shm_info sinfo;
+    int rc = shmctl(shmid, SHM_INFO, (struct shmid_ds *)&sinfo);
+    shmctl(shmid, IPC_RMID, 0);
+    if (rc < 0) return 2;
+
+    struct shminfo info;
+    if (shmctl(0, IPC_INFO, (struct shmid_ds *)&info) < 0) return 3;
+    if (info.shmmax == 0) return 4;
+#endif
+    return 42;
+}
+
+// test_wordexp_basic (#802) -- basic word splitting and WRDE_NOCMD
+// rejection of command substitution. wordexp() forks a shell, so treat
+// WRDE_NOSYS as a skip like the SysV tests above.
+[[cccc::test(return = 42)]]
+int test_wordexp_basic(void) {
+    wordexp_t we;
+    int r = wordexp("a b c", &we, 0);
+    if (r != 0) {
+        if (r == WRDE_NOSYS) {
+            printf("test_wordexp_basic: wordexp unavailable, skipping\n");
+            return 42;
+        }
+        return 1;
+    }
+    if (we.we_wordc != 3) { wordfree(&we); return 2; }
+    if (strcmp(we.we_wordv[0], "a") != 0) { wordfree(&we); return 3; }
+    if (strcmp(we.we_wordv[1], "b") != 0) { wordfree(&we); return 4; }
+    if (strcmp(we.we_wordv[2], "c") != 0) { wordfree(&we); return 5; }
+    wordfree(&we);
+
+    wordexp_t we2;
+    r = wordexp("$(echo hi)", &we2, WRDE_NOCMD);
+    if (r != WRDE_CMDSUB) return 6;
+
+    return 42;
+}
+
+// test_wordexp_header (#802) -- struct layout / constant sanity.
+[[cccc::test(return = 42)]]
+int test_wordexp_header(void) {
+    if (sizeof(wordexp_t) == 0) return 1;
+    if (WRDE_APPEND == WRDE_DOOFFS) return 2;
+    if (WRDE_BADCHAR == WRDE_SYNTAX) return 3;
     return 42;
 }
 
