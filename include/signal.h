@@ -3,6 +3,8 @@
 #ifndef __SIGNAL_H
 #define __SIGNAL_H
 
+#include "stddef.h" /* offsetof */
+
 typedef int sig_atomic_t;
 
 #define SIG_DFL ((void (*)(int))0)
@@ -108,34 +110,41 @@ typedef struct {
 } siginfo_t;
 #endif
 
-/* struct sigevent (#804, #805) -- used by aio.h's aiocb.aio_sigevent and
-   mqueue.h's mq_notify() to describe how completion/message-arrival is
+/* struct sigevent (#804, #805, #870) -- used by aio.h's aiocb.aio_sigevent
+   and mqueue.h's mq_notify() to describe how completion/message-arrival is
    reported. Layout diverges between hosts (verified against the macOS SDK
-   and glibc's bits/types/sigevent_t.h in both Linux containers):
+   and glibc's bits/types/sigevent_t.h in both Linux containers, including
+   offsetof() of every field -- see below):
      macOS:  { int sigev_notify; int sigev_signo; union sigval sigev_value;
                void (*sigev_notify_function)(union sigval);
-               pthread_attr_t *sigev_notify_attributes; }        (32 bytes)
+               void *sigev_notify_attributes; }                   (32 bytes)
      glibc:  { union sigval sigev_value; int sigev_signo;
-               int sigev_notify; <64-byte-total padded union> }  (64 bytes)
-   Only SIGEV_NONE and SIGEV_SIGNAL are supported by CCCC's wrappers --
-   SIGEV_THREAD would require the host to spawn a thread that calls back
-   into guest bytecode, which needs the #738 cccc_call_guest_callback
-   trampoline wired up for a callback that fires on a host-created thread
-   CCCC never scheduled; deferred as a follow-up. The glibc branch's
-   notify-function/notify-attributes tail is therefore left as opaque
-   padding rather than laid out field-by-field -- its real offsets inside
-   the anonymous _sigev_un union are unverified and unneeded while only
-   NONE/SIGNAL are honored. The aio.h and mqueue.h wrappers in
-   src/stdlib/posix.c reject SIGEV_THREAD with EINVAL rather than passing
-   it through. */
+               int sigev_notify;
+               void (*sigev_notify_function)(union sigval);
+               void *sigev_notify_attributes;
+               <32 bytes of trailing pad to round _sigev_un out
+                to its full union size> }                         (64 bytes)
+   sigev_notify_attributes is declared void* rather than pthread_attr_t*
+   to avoid pulling in pthread.h from here; the pointee type doesn't affect
+   layout and CCCC's wrappers only ever pass NULL through it. SIGEV_THREAD
+   is honored by aio_read/aio_write/aio_fsync/lio_listio/mq_notify (see
+   sigevent_prepare() in src/stdlib/posix.c): the guest
+   sigev_notify_function is invoked from the VM's dispatch-loop safe point
+   (the same mechanism that delivers signals) once the host notification
+   thread has fired, not concurrently on that host thread. */
 #ifdef __APPLE__
 struct sigevent {
     int   sigev_notify;
     int   sigev_signo;
     union sigval sigev_value;
-    char  __sigev_pad[16]; /* sigev_notify_function + sigev_notify_attributes */
+    void  (*sigev_notify_function)(union sigval);
+    void  *sigev_notify_attributes;
 };
 _Static_assert(sizeof(struct sigevent) == 32, "macOS sigevent layout mismatch");
+_Static_assert(offsetof(struct sigevent, sigev_notify_function) == 16,
+              "macOS sigevent sigev_notify_function offset mismatch");
+_Static_assert(offsetof(struct sigevent, sigev_notify_attributes) == 24,
+              "macOS sigevent sigev_notify_attributes offset mismatch");
 
 #define SIGEV_NONE   0
 #define SIGEV_SIGNAL 1
@@ -145,9 +154,15 @@ struct sigevent {
     union sigval sigev_value;
     int   sigev_signo;
     int   sigev_notify;
-    char  __sigev_pad[48]; /* _sigev_un (notify-function/attributes or padding) */
+    void  (*sigev_notify_function)(union sigval);
+    void  *sigev_notify_attributes;
+    char  __sigev_pad[32]; /* rest of _sigev_un, unused */
 };
 _Static_assert(sizeof(struct sigevent) == 64, "glibc sigevent layout mismatch");
+_Static_assert(offsetof(struct sigevent, sigev_notify_function) == 16,
+              "glibc sigevent sigev_notify_function offset mismatch");
+_Static_assert(offsetof(struct sigevent, sigev_notify_attributes) == 24,
+              "glibc sigevent sigev_notify_attributes offset mismatch");
 
 #define SIGEV_SIGNAL 0
 #define SIGEV_NONE   1

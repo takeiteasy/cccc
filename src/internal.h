@@ -1078,6 +1078,19 @@ void register_signal_functions(VirtualMachine *vm);
 /* VM-managed signal pending flags (set only by async-safe native shims) */
 extern volatile sig_atomic_t _cccc_pending[CCCC_NSIG];
 extern volatile sig_atomic_t _cccc_any_pending;
+
+/* SIGEV_THREAD (#870) notification cookies -- set only by the async-safe
+   host trampoline cccc_sigev_thread_trampoline() (src/stdlib/posix.c),
+   polled by the VM dispatch loop's safe point (src/vm.c) alongside
+   _cccc_pending/_cccc_any_pending above. */
+#define CCCC_SIGEV_MAX 64
+extern volatile sig_atomic_t _cccc_sigev_pending[CCCC_SIGEV_MAX];
+extern volatile sig_atomic_t _cccc_sigev_any_pending;
+void cccc_sigev_cookie_free(int idx);
+/* out_sival_addr is the address of a persistent host-side union sigval
+   slot (not the raw 8 bytes) -- guest-to-guest calls pass struct/union
+   arguments by reference, see src/stdlib/posix.c's definition. */
+int cccc_sigev_cookie_guest_fn(int idx, long long *out_fn, long long *out_sival_addr);
 /* Comparison helpers for test attribute assertions (CmpOp). */
 static inline const char *cmp_op_str(CmpOp op) {
     switch (op) {

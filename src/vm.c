@@ -583,6 +583,57 @@ dispatch:
         if (_still_pending) _cccc_any_pending = 1;
     }
 
+    /* Poll pending SIGEV_THREAD notifications (#870) -- same safe point and
+       same shape as the pending-signal poll just above: a host notification
+       thread (aio_*()/mq_notify(), src/stdlib/posix.c) can only latch a
+       cookie async-signal-safely, so the guest sigev_notify_function is
+       actually invoked here, one notification per re-entry.
+       Caveat shared with the pending-signal poll above: this can land
+       between ANY two bytecode instructions, and REG_A0 (clobbered below)
+       is an ordinary general-purpose VM register, not call-boundary-only
+       scratch space -- guest code with a live value in REG_A0 at the
+       interruption point (e.g. mid-expression inside a tight computation
+       loop) can have it corrupted. Observed empirically: a guest busy-spin
+       loop polling a notified-flag is exactly the adversarial case, and a
+       test using one segfaulted intermittently until switched to polling
+       via a GIL-releasing call (usleep()) instead, which keeps the
+       interruption point at a call-return boundary rather than mid-loop.
+       Recommend the same to guest code waiting on a SIGEV_THREAD/signal
+       notification. Fixing the underlying register-liveness hazard is
+       larger than this ticket -- see the follow-up ticket referenced in
+       docs/COVERAGE.md's SIGEV_THREAD entries. */
+    if (__builtin_expect(_cccc_sigev_any_pending != 0, 0)) {
+        _cccc_sigev_any_pending = 0;
+        for (int _idx = 0; _idx < CCCC_SIGEV_MAX; _idx++) {
+            if (!_cccc_sigev_pending[_idx]) continue;
+            _cccc_sigev_pending[_idx] = 0;
+            long long _sigev_fn = 0, _sigev_sival_addr = 0;
+            if (!cccc_sigev_cookie_guest_fn(_idx, &_sigev_fn, &_sigev_sival_addr))
+                continue; /* cancelled/deregistered since the trampoline fired */
+            Pc _sigev_target = cc_byte_offset_to_pc(_sigev_fn);
+            if (_sigev_target == CCCC_INVALID_PC || _sigev_target > vm->text_ptr) {
+                fprintf(stderr, "error: invalid sigev_notify_function\n");
+                cccc_sigev_cookie_free(_idx);
+                continue;
+            }
+            if (check_stack_overflow(vm, 1)) VM_TRAP_OR_RETURN(-1);
+            *--vm->sp = (long long)vm->pc;
+            if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
+            /* union sigval is passed by reference (struct/union-by-value
+               ABI, see cccc_sigev_cookie_guest_fn's comment) -- REG_A0 is
+               the address of the cookie's persistent storage, not its
+               8 raw bytes. */
+            vm->regs[REG_A0] = _sigev_sival_addr;
+            cccc_sigev_cookie_free(_idx); /* one-shot, matches POSIX semantics */
+            vm->pc = _sigev_target;
+            /* Other notifications may still be pending behind this one. */
+            for (int _k = 0; _k < CCCC_SIGEV_MAX; _k++) {
+                if (_cccc_sigev_pending[_k]) { _cccc_sigev_any_pending = 1; break; }
+            }
+            goto dispatch;
+        }
+    }
+
     if (vm->flags & CCCC_ENABLE_DEBUGGER) {
         if (debugger_check_breakpoint(vm)) {
             printf("\nBreakpoint hit at PC %u\n", vm->pc);
