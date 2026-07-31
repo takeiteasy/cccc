@@ -1712,6 +1712,16 @@ File *new_file(VirtualMachine *vm, char *name, int file_no, char *contents) {
     return file;
 }
 
+// A leading "#!" line would otherwise be parsed as a preprocessor directive.
+// Overwrite it with spaces rather than deleting it so line and column numbers
+// in diagnostics still match the physical file.
+static void blank_shebang_line(char *p) {
+    if (p[0] != '#' || p[1] != '!')
+        return;
+    for (; *p && *p != '\n'; p++)
+        *p = ' ';
+}
+
 // Replaces \r or \r\n with \n.
 static void canonicalize_newline(char *p) {
     int i = 0, j = 0;
@@ -1800,7 +1810,7 @@ static void convert_universal_chars(VirtualMachine *vm, char *p) {
     *q = '\0';
 }
 
-Token *tokenize_file(VirtualMachine *vm, char *path) {
+Token *tokenize_file(VirtualMachine *vm, char *path, bool allow_shebang) {
     char *p = read_file(vm, path);
     if (!p)
         return NULL;
@@ -1813,6 +1823,8 @@ Token *tokenize_file(VirtualMachine *vm, char *path) {
         p += 3;
 
     canonicalize_newline(p);
+    if (allow_shebang)
+        blank_shebang_line(p);
     remove_backslash_newline(p);
     convert_universal_chars(vm, p);
 

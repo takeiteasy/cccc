@@ -177,6 +177,7 @@ language coverage figures apply.
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
 | `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths |
+| Leading `#!` (shebang) line | ✓ | CCCC-specific: a `#!` on line 1 of the command-line input file (or a file piped via `-`) is blanked before tokenization, so line numbers are unaffected. Not applied to `#include`d files, which still error on a stray `#!`. |
 
 ---
 

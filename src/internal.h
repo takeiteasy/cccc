@@ -486,7 +486,7 @@ void convert_pp_tokens(VirtualMachine *vm, Token *tok);
 File *new_file(VirtualMachine *vm, char *name, int file_no, char *contents);
 Token *tokenize_string_literal(VirtualMachine *vm, Token *tok, Type *basety);
 Token *tokenize(VirtualMachine *vm, File *file);
-Token *tokenize_file(VirtualMachine *vm, char *filename);
+Token *tokenize_file(VirtualMachine *vm, char *filename, bool allow_shebang);
 Token *tokenize_string(VirtualMachine *vm, char *name, char *contents);
 unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size);
 

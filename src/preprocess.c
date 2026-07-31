@@ -2114,7 +2114,7 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
     if (guard_name && hashmap_get(&vm->compiler.macros, guard_name))
         return tok;
 
-    Token *tok2 = tokenize_file(vm, path);
+    Token *tok2 = tokenize_file(vm, path, false);
     if (!tok2)
         error_tok(vm, filename_tok, "%s: cannot open file: %s", path,
                   strerror(errno));

@@ -12,7 +12,7 @@ Currently targets **MacOS** (aarch64/x86_64) and **Linux** (aarch64/x86_64). Win
 ## Usage
 
 ```text
-CCCC: Comprehensiev C Compensation Compiler
+CCCC: Comprehensive C Compensation Compiler
 https://git.sr.ht/~takeiteasy/cccc
 
 Usage: ./build/cccc [options] file...
@@ -330,6 +330,10 @@ Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its bui
 # With preprocessor flags
 ./cccc -I./include -DDEBUG -o debug.bin main.c
 ```
+
+A leading `#!` (shebang) line on the command-line input file is ignored, so a
+`.c` file can carry `#!/usr/bin/env cccc`, be marked executable, and run
+directly — dispatch through `env` is the kernel/shell's job, not cccc's.
 
 Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. Saved `.c4` files include relocation and ABI metadata so loaded programs re-anchor global pointers, function-pointer offsets, FFI entries, and aggregate return buffers to the new VM instance. See [VM.md](docs/VM.md) for the full instruction set, ABI, and file format.
 

@@ -20,7 +20,7 @@
 #include "./internal.h"
 
 static Token *must_tokenize_file(VirtualMachine *vm, char *path) {
-    Token *tok = tokenize_file(vm, path);
+    Token *tok = tokenize_file(vm, path, true);
     if (!tok)
         error("%s: %s", path, strerror(errno));
     return tok;

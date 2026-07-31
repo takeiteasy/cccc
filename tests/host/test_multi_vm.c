@@ -63,9 +63,9 @@ int main(void) {
     // First VM: tokenize three files, advancing file_no to 3.
     VirtualMachine vm1;
     cc_init(&vm1, 0);
-    tokenize_file(&vm1, (char *)file_a);
-    tokenize_file(&vm1, (char *)file_b);
-    tokenize_file(&vm1, (char *)file_c);
+    tokenize_file(&vm1, (char *)file_a, true);
+    tokenize_file(&vm1, (char *)file_b, true);
+    tokenize_file(&vm1, (char *)file_c, true);
     CHECK(vm1.compiler.file_no == 3, "vm1.compiler.file_no = %d, expected 3",
           vm1.compiler.file_no);
     cc_destroy(&vm1);
@@ -74,7 +74,7 @@ int main(void) {
     // must start fresh, not continue from vm1's counters.
     VirtualMachine vm2;
     cc_init(&vm2, 0);
-    tokenize_file(&vm2, (char *)file_a);
+    tokenize_file(&vm2, (char *)file_a, true);
 
     CHECK(vm2.compiler.file_no == 1,
           "vm2.compiler.file_no = %d, expected 1 (counter leaked across VMs)",
