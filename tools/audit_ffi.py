@@ -31,9 +31,40 @@ the num_args/mask check since num_args there is only the fixed prefix by
 convention, but they still count as registered for the missing-registration
 and zero-registered-header checks below.
 
-Exit code is nonzero iff a mismatch, an unregistered declaration, or a
-zero-registered header (not in COMPILER_LOWERED_HEADERS) was found. Wired
-into `make audit-ffi` and the `audit_ffi` sub-suite of `make test` (#784).
+Exit code is nonzero iff a mismatch, an unregistered declaration, a
+zero-registered header (not in COMPILER_LOWERED_HEADERS), or a guard
+mismatch (see below) was found. Wired into `make audit-ffi` and the
+`audit_ffi` sub-suite of `make test` (#784).
+
+Guard-presence check (#869): a declaration can be wrapped in a preprocessor
+conditional (`#ifdef __linux__`, `#if defined(__linux__) ||
+defined(__CCCC_POSIX_EMULATION__)`, ...), and independently, each place a
+name is registered can be wrapped in its own conditional. This tool tracks
+only whether each side is guarded by *some* condition or not -- it does not
+attempt to decide whether two non-empty conditions are the same platform
+test, since that would require a real preprocessor evaluator, and a
+same-named macro can mean different things in different evaluation
+contexts anyway (see the `--posix-emulation` exemption below). What it does
+catch: a name declared under a real (non-boilerplate) conditional in its
+header but registered completely unconditionally somewhere, or declared
+completely unconditionally but only ever registered under a conditional --
+both are the shape of a #792-class bug (a guest can see -- or fail to see
+-- a declaration that doesn't match what got wired into the FFI table).
+Each file's own outermost wrapper (a header's `#ifndef X_H` include guard,
+or `src/stdlib/posix.c`/`pthread.c`'s whole-file `#if !defined(_WIN32) &&
+!defined(_WIN64)`) is detected and excluded automatically -- see
+strip_common_wrapper()'s docstring -- so it isn't mistaken for a real,
+per-symbol platform guard.
+
+Registration sites that sit inside a preprocessor conditional *and* are
+gated a second time by a `vm->flags &` runtime check (the `--posix-emulation`
+pattern used by ppoll/sched_setparam & co., src/stdlib/posix.c) are exempt
+from this check entirely, reported separately as "runtime-flag-gated,
+not checked" rather than silently passed or falsely flagged: the runtime
+flag corresponds to a macro (`__CCCC_POSIX_EMULATION__`) defined for the
+*guest*'s own preprocessor at guest-compile time, which is a wholly
+different evaluation context from `posix.c`'s own one-time host compile,
+so there is no sound way for this tool to relate the two.
 """
 import glob
 import re
@@ -87,6 +118,23 @@ FAMILY_MACRO_RE = re.compile(r'CCCC_REG_\w+_FAMILY\((\w+)\)')
 # machinery directly, not a plain FFI call).
 BUILTIN_SPECIAL_CASED = {"raise"}
 
+# Preprocessor conditions that only mean something to the *guest*'s own
+# preprocessor (a feature-test macro CCCC's front-end defines while parsing
+# guest source, e.g. __STDC_IEC_60559_DFP__ for C23 decimal support), with
+# no host-build-time counterpart posix.c/decimal_math.c could mirror --
+# same fundamental mismatch as the --posix-emulation runtime-flag pattern
+# (see RUNTIME_GATE_MARKER), just without a textual runtime-check marker to
+# detect it by. __cccc_dec_math1/2/3/i/n/p and __cccc_dec_strtod are
+# declared in include/*.h only under __STDC_IEC_60559_DFP__, but their host
+# wrapper always exists (a real BID-library implementation when built with
+# CCCC_HAS_DECIMAL, a clean ENOSYS-shaped stub otherwise) and is always
+# registered, by design -- the dispatch entry point must exist regardless
+# of whether a given guest translation unit happens to see the feature-test
+# macro. A declaration guard whose text matches one of these is exempt from
+# the guard-presence check entirely, the same way a runtime-gated
+# registration is.
+GUEST_ONLY_DECL_GUARDS = {"__STDC_IEC_60559_DFP__"}
+
 # Headers whose declared functions are lowered directly by the compiler
 # (dedicated opcodes / codegen special-casing) rather than going through
 # src/stdlib/*.c's cc_register_cfunc table at all, so they legitimately
@@ -106,6 +154,109 @@ def strip_comments(text):
     text = re.sub(r'/\*.*?\*/', '', text, flags=re.S)
     text = re.sub(r'//.*', '', text)
     return text
+
+
+COND_LINE_RE = re.compile(r'^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$')
+
+
+def scan_conditionals(text):
+    """Return a dict mapping 1-indexed line number -> the active
+    preprocessor guard stack at the start of that line, as a tuple of
+    condition strings (outermost first).
+
+    #elif/#else replace the current frame with the negated/alternate
+    condition rather than modeling true sibling-branch semantics -- adequate
+    for spotting presence/absence of a guard, not for evaluating it.
+    """
+    lines = text.split('\n')
+    stack = []  # list of display strings
+    line_guard = {}
+    for i, line in enumerate(lines, start=1):
+        line_guard[i] = tuple(stack)
+        m = COND_LINE_RE.match(line)
+        if m:
+            kind, rest = m.group(1), m.group(2).strip()
+            if kind == 'if':
+                stack.append(re.sub(r'\s+', ' ', rest))
+            elif kind == 'ifdef':
+                stack.append(rest)
+            elif kind == 'ifndef':
+                stack.append(f'!{rest}')
+            elif kind == 'elif':
+                if stack:
+                    stack.pop()
+                stack.append(re.sub(r'\s+', ' ', rest))
+            elif kind == 'else':
+                if stack:
+                    # Negate whatever text this frame's own #if/#ifdef/
+                    # #ifndef used, so collapse_exhaustive_guards can match
+                    # an if-branch's display against its else-branch's by
+                    # exact string negation regardless of which directive
+                    # spelling opened the frame.
+                    stack.append(f"!({stack.pop()})")
+            elif kind == 'endif':
+                if stack:
+                    stack.pop()
+    return line_guard
+
+
+def collapse_exhaustive_guards(guards):
+    """Collapse `#if COND ... #else ... #endif` pairs that both register the
+    same name: scan_conditionals gives the else-branch's frame the display
+    text `!(COND)`, so two guard tuples sharing an identical prefix whose
+    last elements are COND and `!(COND)` jointly cover every case -- replace
+    both with just the shared prefix (dropping that frame) and repeat to a
+    fixed point, so deeper nested if/else pairs collapse outward too. This
+    only recognizes a *textually* exact condition/negation pair (the same
+    shape scan_conditionals produces for a plain #if/#else, not #elif chains
+    or differently-worded but logically-equivalent conditions), so it's a
+    conservative "don't flag what's obviously exhaustive", not a general
+    proof of coverage.
+    """
+    guards = list(guards)
+    changed = True
+    while changed:
+        changed = False
+        groups = {}
+        empties = [g for g in guards if not g]
+        for g in guards:
+            if g:
+                groups.setdefault(g[:-1], []).append(g[-1])
+        next_guards = list(empties)
+        for prefix, lasts in groups.items():
+            lastset = set(lasts)
+            paired = set()
+            for c in list(lastset):
+                neg = f"!({c})"
+                if neg in lastset and c not in paired and neg not in paired:
+                    paired.add(c)
+                    paired.add(neg)
+                    next_guards.append(prefix)
+                    changed = True
+            for c in lastset - paired:
+                next_guards.append(prefix + (c,))
+        guards = next_guards
+    return guards
+
+
+def strip_common_wrapper(entries):
+    """Given [(name, guard_tuple), ...] all drawn from one source file, drop
+    the outermost frame from every guard if -- and only if -- every entry
+    that has any guard at all shares the identical outermost condition. That
+    identifies a whole-file wrapper (a header's own `#ifndef` include guard,
+    or `posix.c`/`pthread.c`'s `#if !defined(_WIN32) && !defined(_WIN64)`)
+    rather than a real per-symbol platform test, without needing to
+    special-case either idiom by name. A file with no such uniform outer
+    frame (declarations/registrations at mixed depths, e.g. math.c's
+    occasional standalone `#ifdef __APPLE__`) is returned unchanged.
+    """
+    guarded = [g for _, g in entries if g]
+    if not guarded:
+        return entries
+    first_frames = {g[0] for g in guarded}
+    if len(first_frames) != 1 or len(guarded) != len(entries):
+        return entries
+    return [(name, g[1:]) for name, g in entries]
 
 
 def param_kind(t):
@@ -131,12 +282,19 @@ def load_declarations():
         if any(rel.startswith(d) for d in SKIP_HEADER_DIRS):
             continue
         text = strip_comments(open(path).read())
+        line_guard = scan_conditionals(text)
+        file_decls = []  # (name, ret, args, guard)
         for m in DECL_RE.finditer(text):
             ret, name, argstr = m.group(1).strip(), m.group(2), m.group(3).strip()
+            args = [] if argstr in ('', 'void') else [a.strip() for a in argstr.split(',')]
+            lineno = text.count('\n', 0, m.start()) + 1
+            guard = line_guard.get(lineno, ())
+            file_decls.append((name, ret, args, guard))
+        stripped = strip_common_wrapper([(n, g) for n, _, _, g in file_decls])
+        for (name, ret, args, _), (_, guard) in zip(file_decls, stripped):
             if name in decls:
                 continue  # first declaration wins (e.g. redeclared under #if)
-            args = [] if argstr in ('', 'void') else [a.strip() for a in argstr.split(',')]
-            decls[name] = (ret, args, rel)
+            decls[name] = (ret, args, rel, guard)
     return decls
 
 
@@ -148,22 +306,52 @@ def expected_mask(args):
     return sum(1 << i for i, a in enumerate(args) if param_kind(a) == 'double')
 
 
+RUNTIME_GATE_MARKER = "vm->flags &"
+# How many lines above a registration call to search for RUNTIME_GATE_MARKER.
+# The real pattern (src/stdlib/posix.c's ppoll/sched_setparam et al.) is
+# "if (vm->flags & CCCC_POSIX_EMULATION) {" one line above a small run of
+# registration calls; this just needs to comfortably cover that block.
+RUNTIME_GATE_LOOKBACK_LINES = 8
+
+
 def audit():
     decls = load_declarations()
     problems = []
     registered = set()
+    # name -> [(path, guard_tuple, runtime_gated), ...], one entry per
+    # registration occurrence, for the guard-presence check below.
+    reg_occurrences = {}
 
     for path in sorted(glob.glob(STDLIB_GLOB)):
         text = strip_comments(open(path).read())
+        lines = text.split('\n')
+        line_guard = scan_conditionals(text)
+        file_regs = []  # (name, guard, runtime_gated) for this file's strip pass
+
+        def record(name, m):
+            lineno = text.count('\n', 0, m.start()) + 1
+            guard = line_guard.get(lineno, ())
+            # Bounded lookback rather than "since this frame opened": at
+            # shallow nesting (e.g. just inside a whole-file wrapper) the
+            # enclosing frame can span thousands of lines, so searching its
+            # full text would pick up an unrelated "vm->flags &" from
+            # distant, unconnected code. The real pattern here is always
+            # "if (vm->flags & ...) { <registration> }" a line or two above.
+            window_start = max(0, lineno - 1 - RUNTIME_GATE_LOOKBACK_LINES)
+            window = '\n'.join(lines[window_start:lineno])
+            runtime_gated = bool(guard) and RUNTIME_GATE_MARKER in window
+            file_regs.append((name, guard, runtime_gated))
+
         for m in REG_RE.finditer(text):
             _ex, name, target, na, rd, mask = m.groups()
             registered.add(name)
+            record(name, m)
             # Only check when the FFI target itself is a declared libc/libm
             # function -- calls wrapping a local static helper aren't in
             # decls and are silently skipped (see module docstring).
             if target not in decls:
                 continue
-            ret, args, hdr = decls[target]
+            ret, args, hdr, _decl_guard = decls[target]
             if any(a == '...' for a in args):
                 continue
             probs = []
@@ -182,10 +370,15 @@ def audit():
         for m in VARIADIC_RE.finditer(text):
             name = m.group(1)
             registered.add(name)
+            record(name, m)
 
         for m in FAMILY_MACRO_RE.finditer(text):
             base = m.group(1)
             registered |= {base, base + 'f', base + 'l'}
+
+        stripped = strip_common_wrapper([(n, g) for n, g, _ in file_regs])
+        for (name, _, runtime_gated), (_, guard) in zip(file_regs, stripped):
+            reg_occurrences.setdefault(name, []).append((path, guard, runtime_gated))
 
     registered |= BUILTIN_SPECIAL_CASED
 
@@ -194,11 +387,11 @@ def audit():
     # avoids false positives on headers that aren't meant to be FFI-wired
     # at all (pure type/macro headers, or ones registered via a bespoke
     # mechanism this regex-based scanner can't see).
-    headers_with_decls = {hdr for name, (ret, args, hdr) in decls.items()}
-    in_scope_headers = {hdr for name, (ret, args, hdr) in decls.items() if name in registered}
+    headers_with_decls = {hdr for name, (ret, args, hdr, guard) in decls.items()}
+    in_scope_headers = {hdr for name, (ret, args, hdr, guard) in decls.items() if name in registered}
 
     missing = []
-    for name, (ret, args, hdr) in sorted(decls.items()):
+    for name, (ret, args, hdr, guard) in sorted(decls.items()):
         if hdr in in_scope_headers and name not in registered and not any(a == '...' for a in args):
             missing.append((name, ret, hdr))
 
@@ -211,13 +404,49 @@ def audit():
         if hdr not in in_scope_headers and hdr not in COMPILER_LOWERED_HEADERS
     )
 
-    return problems, missing, zero_registered
+    # Guard-presence check (#869): see module docstring. Only meaningful for
+    # names this tool can actually see a declaration for. Occurrences are
+    # collapsed (see collapse_exhaustive_guards) before judging, so a name
+    # registered via a complete #if/#else pair -- covering every case, just
+    # via two different code paths -- reads as unconditional, not as two
+    # separate "guarded" occurrences.
+    guard_mismatches = []
+    runtime_gated_count = 0
+    for name, occurrences in sorted(reg_occurrences.items()):
+        if name not in decls:
+            continue
+        _ret, _args, hdr, decl_guard = decls[name]
+        if any(cond in GUEST_ONLY_DECL_GUARDS for cond in decl_guard):
+            continue
+        decl_is_guarded = bool(decl_guard)
+
+        checkable = [(path, guard) for path, guard, runtime_gated in occurrences if not runtime_gated]
+        runtime_gated_count += len(occurrences) - len(checkable)
+        if not checkable:
+            continue
+        paths = sorted({path for path, _ in checkable})
+        collapsed = collapse_exhaustive_guards([guard for _, guard in checkable])
+        registered_unconditionally = any(not g for g in collapsed)
+
+        if decl_is_guarded and registered_unconditionally:
+            guard_mismatches.append(
+                (paths, name, hdr, "declared conditionally but registered unconditionally"))
+        elif not decl_is_guarded and not registered_unconditionally:
+            conditions = sorted({g[-1] for g in collapsed if g})
+            guard_mismatches.append(
+                (paths, name, hdr,
+                 f"declared unconditionally but only registered under: {', '.join(conditions)}"))
+
+    return problems, missing, zero_registered, guard_mismatches, runtime_gated_count
 
 
 def main():
-    problems, missing, zero_registered = audit()
-    if not problems and not missing and not zero_registered:
+    problems, missing, zero_registered, guard_mismatches, runtime_gated_count = audit()
+    if not problems and not missing and not zero_registered and not guard_mismatches:
         print("audit_ffi: no mismatches found")
+        if runtime_gated_count:
+            print(f"({runtime_gated_count} runtime-flag-gated registration(s) not checked "
+                  f"for guard presence -- see module docstring)")
         return 0
 
     for path, name, target, probs in problems:
@@ -232,8 +461,16 @@ def main():
         print(f"{hdr}: declares functions but registers none (guest including only "
               f"this header would fail at call time -- see #792)")
 
+    for paths, name, hdr, reason in guard_mismatches:
+        where = ", ".join(str(Path(p).relative_to(REPO_ROOT)) for p in paths)
+        print(f"{where}: \"{name}\" (declared in {hdr}) -- {reason}")
+
     print(f"\naudit_ffi: {len(problems)} mismatch(es), {len(missing)} unregistered "
-          f"declaration(s), {len(zero_registered)} zero-registered header(s)")
+          f"declaration(s), {len(zero_registered)} zero-registered header(s), "
+          f"{len(guard_mismatches)} guard mismatch(es)")
+    if runtime_gated_count:
+        print(f"({runtime_gated_count} runtime-flag-gated registration(s) not checked "
+              f"for guard presence -- see module docstring)")
     return 1
 
 
