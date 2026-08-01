@@ -1128,22 +1128,25 @@ committed. `./cccc --build build.c`'s default build is a two-pass build:
 3. The real `cccc` is (re)compiled against the regenerated `src/std.c`.
 
 `src/std.c` can therefore never go stale, and `make stdlib` no longer
-exists. A fresh clone has no `src/std.c` yet; `src/std_seed.c` (committed —
-a minimal stand-in containing only `reflection.h`, the one header
-`implicit_reflection_tokens()` in `src/macros.c` hard-requires to run any
-comptime code at all) is what the Makefile links against in that case. That
-seed compiler can run `-G` (the regen step needs only `reflection.h`) but
-**not** `--build` (needs `building.h`, absent from the seed) — so the
-stage0-to-full path on a fresh clone is:
+exists. A fresh clone has no `src/std.c` yet; `src/std_stub.c` (committed —
+its three accessors just return `0`, nothing embedded) is what the Makefile
+links against in that case. The stage0 compiler needing a private header —
+`implicit_reflection_tokens()` in `src/macros.c` needs `reflection.h` to run
+any comptime code at all; `cc_run_build`/`cc_run_tests` need `building.h`/
+`testing.h` — falls back to resolving `cccc/<name>.h` on disk via the normal
+`-I` include search path (`tokenize_private_header()` in
+`src/preprocess.c`), which works as long as `include/` is reachable via `-I`
+(`tools/regen_stdlib.sh` always passes `-I./include`). So the stage0-to-full
+path on a fresh clone is:
 
 ```sh
-make bootstrap                       # stage0 (src/std_seed.c) -> regen the
+make bootstrap                       # stage0 (src/std_stub.c) -> regen the
                                       # real src/std.c -> unconditional relink
 ./cccc --build build.c               # now works; its own two-pass regen is
                                       # a no-op from here on
 ```
 
-`make bootstrap` (#857) is `$(MAKE) cccc` (links against `src/std_seed.c` on
+`make bootstrap` (#857) is `$(MAKE) cccc` (links against `src/std_stub.c` on
 a fresh clone), `sh tools/regen_stdlib.sh ./cccc`, then an `rm -f cccc` and
 a second `$(MAKE) cccc` against the now-real `src/std.c`. The `rm -f` is
 required, not cosmetic: a plain second `make cccc` relies on `make`'s
@@ -1151,9 +1154,9 @@ mtime-based dependency check, and `regen_stdlib.sh`'s `mv` can land
 `src/std.c`'s mtime in the same clock tick as the just-linked binary on a
 fast filesystem/CI runner — `make` treats an *equal* mtime as up to date,
 not stale, and silently skips the relink (`make: 'cccc' is up to date.`),
-leaving the stage0 binary permanently linked against the seed. Removing the
+leaving the stage0 binary permanently linked against the stub. Removing the
 binary first forces an unconditional relink regardless of mtime comparison.
-(`SRCS` picks `src/std.c` over the seed automatically once it exists on
+(`SRCS` picks `src/std.c` over the stub automatically once it exists on
 disk — this only needs a *recursive* `$(MAKE)` because that choice is made
 by `$(wildcard src/std.c)` at make-parse time, once per invocation.)
 

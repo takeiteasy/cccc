@@ -28,8 +28,7 @@ char *read_header_file(const char *path) {
 // memcpy below only ever copies 10 of those 14 bytes -- the emitted prefix
 // has always been "__builtin_". Harmless: the same function both generates
 // the definition and every reference to it, so it's self-consistent; this is
-// a documentation fix, not a behaviour change -- changing the emitted prefix
-// would require also regenerating and re-committing src/std_seed.c.)
+// a documentation fix, not a behaviour change.)
 char *make_global_name(const char *header) {
     char *buf = malloc(strlen(header) + 12);
     memcpy(buf, "__builtin_std_", 10);
@@ -100,7 +99,7 @@ char **discover_headers(void) {
     int public_count = 0;
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         const char *name = copy_header_name(g.gl_pathv[i]);
-        int skip = (strncmp(name, "cccc/", 4) == 0);
+        int skip = (strncmp(name, "cccc/", 5) == 0);
         free((void *)name);
         if (!skip) public_count++;
     }
@@ -113,7 +112,7 @@ char **discover_headers(void) {
     headers[n++] = copy_header_name("building.h");
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         char *name = copy_header_name(g.gl_pathv[i]);
-        if (strncmp(name, "cccc/", 4) == 0) {
+        if (strncmp(name, "cccc/", 5) == 0) {
             free(name);
             continue;
         }

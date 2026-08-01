@@ -3894,27 +3894,129 @@ Pc cc_find_function_entry(VirtualMachine *vm, const char *name);
 */
 DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name);
 
+//
+// CLI driver support -- used by src/main.c (the `cccc` command-line front
+// end) and defined by the source file named in each comment. Not part of
+// the embedding API surface proper, but exposed here (rather than
+// internal.h) because their only caller outside their own definer is
+// main.c.
+//
+
+// tokenize.c
+void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok);
+
+// preprocess.c
+int cc_rehydrate_asm_passthru(VirtualMachine *vm);
+void init_mode_macros(VirtualMachine *vm);
+
+// vm.c
+void cc_vm_profile_print(VirtualMachine *vm, FILE *f);
+int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
+                             const char *input_name);
+long long generate_random_canary(void);
+
+// analyze.c: -a/--analyze n-gram + fusion-candidate reports.
+typedef struct {
+    int n;        // 2 or 3
+    int top_n;
+    bool per_file;
+} CcAnalyzeNgramOptions;
+
+typedef struct CcNgramState CcNgramState;
+
+CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts);
+void cc_analyze_ngram_feed(CcNgramState *st, const InstrWord *text,
+                           long long num_words, const char *label, FILE *out);
+void cc_analyze_ngram_finish(CcNgramState *st, FILE *out);
+
+// host_backtrace.c
 /*!
- @function cc_dlopen
- @abstract Open a dynamic library.
- @param vm The CCCC instance.
- @param lib_path Path to the dynamic library to open.
- @return 0 on success, -1 on failure.
+ @function cc_host_backtrace_init
+ @abstract Initialise libbacktrace state and warm up DWARF/Mach-O caches.
+ @param argv0 Used to locate the running binary.
+ @discussion Must be called once at process startup (not in a signal
+ handler) before cc_host_backtrace_install_fatal().
 */
-int cc_dlopen(VirtualMachine *vm, const char *lib_path);
+void cc_host_backtrace_init(const char *argv0);
 
 /*!
- @function cc_dlsym
- @abstract Resolve a symbol in a dynamic library.
- @param vm The CCCC instance.
- @param name Name of the symbol to resolve.
- @param func_ptr Pointer to the function to resolve.
- @param num_args Number of arguments the function expects.
- @param returns_double 1 if function returns double, 0 if returns long long.
- @return 0 on success, -1 on failure.
+ @function cc_host_backtrace_install_fatal
+ @abstract Install top-level crash handlers (SIGSEGV/SIGBUS/SIGFPE/SIGILL)
+ that print a host C backtrace to stderr then re-raise the signal so the
+ process dies with the original signal/exit code.
+ @discussion No-op when CCCC_HAS_BACKTRACE is off or on Windows.
 */
-int cc_dlsym(VirtualMachine *vm, const char *name, void *func_ptr, int num_args,
-             int returns_double);
+void cc_host_backtrace_install_fatal(void);
+
+// dump_ast.c
+void cc_dump_ast(FILE *f, Obj *prog, int verbose);
+void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
+
+// testing.c / debugger.c
+void   cc_load_test_runtime(VirtualMachine *vm);
+void   cc_load_symbolize_runtime(VirtualMachine *vm);
+/*!
+ @function cc_run_tests
+ @abstract Run all [[cccc::test]] functions in a compiled program.
+ @param vm The CCCC instance.
+ @param prog The compiled program (from cc_parse/cc_compile).
+ @param opts Test selection/output options; see CcTestOptions.
+ @return Process exit code (0 on all tests passing).
+*/
+int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts);
+
+// exec.c
+char *make_tmp_path(const char *suffix);
+
+// Native compile flags extracted from a CCCC vm instance, forwarded to
+// -c=native and --build target compiles.
+typedef struct {
+    const char **inc_paths;       int inc_paths_count;
+    const char **sys_inc_paths;   int sys_inc_paths_count;
+    const char **lib_paths;       int lib_paths_count;
+    const char **libs;            int libs_count;
+    const char **defines;         int defines_count;
+    const char **undefs;          int undefs_count;
+    const char  *std_arg;
+} CcNativeCompileArgs;
+
+// build.c (--build mode)
+typedef struct {
+    const char *entry_name;             // --build-entry override, or NULL
+    const char *target_name;            // --build-target=NAME, or NULL (build all)
+    const char *out_dir;                // -O/--build-out-dir, or NULL (default "build")
+    int         verbose;                // -v (also enables host-runner verbose output)
+    int         build_verbose;          // --build-verbose: per-target headers + command lines
+    int         quiet;                  // --build-quiet: suppress per-step command lines
+    int         keep_going;             // --build-keep-going: continue past target failures
+    int         dry_run;                // --build-dry-run: print commands, run nothing
+    int         jobs;                   // --build-jobs=N: parallel source compile slots (0/1 = serial)
+    const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std forwarded to each target
+    const char **tool_allow;            // --build-tool-allow names (NULL = allow-all)
+    int          tool_allow_count;
+    int          list_targets;          // --build-list-targets: print factory names and exit
+    const char  *profile;               // --build-profile=NAME: debug|release|relwithdebinfo|minsizerel
+    const char  *cross_triple;          // --build-triple=TRIPLE: clang-style cross target triple (#547)
+    const char  *cross_cc;              // --build-cc=COMPILER: override CC binary globally (#547)
+    const char  *build_cache;           // --build-cache[=PATH]: NULL=off, ""=default path, else given path (#546)
+    const char  *cccc_self;             // path to the cccc binary (argv[0]); used for kind=bytecode targets (#545)
+    const char **build_options;         // --build-option=key=value strings (#559)
+    int          build_options_count;
+    int          build_install;         // --build-install: copy artifacts after build (#560)
+    const char **user_args;            // positional args after -- on the CLI (#558)
+    int          user_args_count;
+} CcBuildOptions;
+
+void   cc_load_build_runtime(VirtualMachine *vm);
+/*!
+ @function cc_run_build
+ @abstract Run a [[cccc::build]] script's build graph.
+ @param vm The CCCC instance.
+ @param prog The compiled build script (from cc_parse/cc_compile).
+ @param opts Build target/output options; see CcBuildOptions.
+ @return Process exit code (0 on success).
+*/
+int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts);
 
 #ifdef __cplusplus
 }

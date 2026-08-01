@@ -30,7 +30,7 @@ Both are #include'd by src/macros.c *and* src/reflection.c, so any drift
 between reflection.h's prototype and reflection.c's definition is now a
 compile error, not just an unregistered/mismatched-arity builtin.
 
-These files are committed (like src/std_seed.c, unlike the gitignored
+These files are committed (like src/std_stub.c, unlike the gitignored
 src/std.c) so that plain `make` -- no python3 required -- still satisfies
 the stage0 bootstrap invariant documented in the Makefile. `./cccc --build
 build.c`'s default build regenerates them via the reflection-ffi-gen step;

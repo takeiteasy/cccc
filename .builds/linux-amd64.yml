@@ -13,11 +13,11 @@ tasks:
   - bootstrap: |
       # Stage0 invariant (#842): a plain `make` with only a system cc and
       # libffi must produce a working compiler. On a fresh clone (no
-      # src/std.c, gitignored) it links against src/std_seed.c instead --
-      # a minimal seed with only enough of the embedded-header table
-      # (reflection.h) to run tools/generate_stdlib.c, NOT enough to run
-      # --build (which needs building.h). `make bootstrap` (#857) finishes
-      # the bootstrap: regenerate the real src/std.c, then unconditionally
+      # src/std.c, gitignored) it links against src/std_stub.c instead --
+      # a stand-in whose embedded-header table is empty; the private headers
+      # (reflection.h/testing.h/building.h) it needs are found on disk via
+      # -I./include instead. `make bootstrap` (#857) finishes the
+      # bootstrap: regenerate the real src/std.c, then unconditionally
       # relink against it (a plain second `make cccc` is subject to an
       # mtime race and can silently skip the relink -- see the Makefile's
       # `bootstrap` target for the full explanation). From this point on,

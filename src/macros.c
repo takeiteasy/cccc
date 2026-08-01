@@ -588,19 +588,6 @@ static void reflection_enum_names_restore(VirtualMachine *vm, void **saved) {
 }
 
 static Token *implicit_reflection_tokens(VirtualMachine *vm) {
-    char *header = get_std_header("reflection.h");
-    if (!header)
-        error("could not load embedded reflection.h");
-
-    // Sanity-check that the embedded string wasn't truncated (e.g. by a
-    // C array that was too small in std.c after reflection.h grew).
-    // A truncated string silently drops the closing #endif, producing the
-    // cryptic "unterminated conditional directive" error.  Run
-    // `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to re-embed
-    // the header after editing it.
-    if (!strstr(header, "#endif // CCCC_REFLECTION_H"))
-        error("embedded reflection.h appears truncated — run `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to regenerate src/std.c");
-
     // Temporarily suppress user-defined TK_*/NK_* macros (TypeKind/NodeKind
     // enum constant names) so they can't expand inside reflection.h's enum
     // initializers.  reflection.h's own #define macros (WithFn, VM, etc.)
@@ -635,7 +622,7 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     vm->compiler.warnings = 0;
     vm->compiler.warning_errors = 0;
 
-    Token *tokens = tokenize_string(vm, "<implicit-reflection.h>", header);
+    Token *tokens = tokenize_private_header(vm, "reflection.h", "<implicit-reflection.h>");
     Token *result = preprocess(vm, tokens);
 
     vm->compiler.warnings = saved_warnings;

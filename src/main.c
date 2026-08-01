@@ -18,7 +18,7 @@
 */
 
 #include "./cccc.h"
-#include "./driver.h"
+#include "./internal.h"
 #include <getopt.h>
 #if defined(_WIN32)
 #include <io.h>

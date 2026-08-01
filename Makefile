@@ -30,17 +30,18 @@ UNAME_S := $(shell uname -s)
 
 # std.c is the generated embedded-stdlib table (see build.c's default
 # two-pass build). A fresh clone has no src/std.c until a build has run
-# once; src/std_seed.c is a small committed stand-in with just enough of the
-# table (reflection.h) to bootstrap the comptime machinery
-# tools/generate_stdlib.c needs to produce the real src/std.c. Once std.c
+# once; src/std_stub.c is a small committed stand-in whose accessors return
+# nothing, used only to bootstrap the comptime machinery
+# tools/generate_stdlib.c needs to produce the real src/std.c (the private
+# headers it needs are found on disk via -I./include instead). Once std.c
 # exists on disk it always wins (self-correcting: no explicit step needed to
-# switch back). See #842 Step 3 / docs/BUILDING.md.
+# switch back). See docs/BUILDING.md.
 ifeq ($(wildcard src/std.c),)
-STDLIB_SRC := src/std_seed.c
+STDLIB_SRC := src/std_stub.c
 else
 STDLIB_SRC := src/std.c
 endif
-SRCS := $(filter-out src/ops.c src/std.c src/std_seed.c, $(wildcard src/*.c src/stdlib/*.c)) $(STDLIB_SRC)
+SRCS := $(filter-out src/ops.c src/std.c src/std_stub.c, $(wildcard src/*.c src/stdlib/*.c)) $(STDLIB_SRC)
 
 CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch -pthread
 LDFLAGS := -pthread
@@ -78,17 +79,17 @@ cccc$(EXE): $(SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # bootstrap (#857): the full stage0 dance in one target -- link against
-# src/std_seed.c, regenerate the real src/std.c, then relink against it.
+# src/std_stub.c, regenerate the real src/std.c, then relink against it.
 # Needs a *recursive* $(MAKE), not three lines run back to back: STDLIB_SRC
 # above is chosen by $(wildcard src/std.c) at make-parse time, so switching
-# from the seed to the real stdlib only takes effect in a fresh make
+# from the stub to the real stdlib only takes effect in a fresh make
 # invocation. The `rm -f` between the two links is required, not cosmetic:
 # make's prerequisite check treats an *equal* mtime as up to date (not
 # stale), and regen_stdlib.sh's mv() can land src/std.c's mtime in the same
 # clock tick as the just-linked cccc binary on a fast filesystem/CI runner --
 # observed intermittently as "make: `cccc' is up to date." even though
-# src/std.c had just switched from the seed to the real stdlib, leaving the
-# stage0 binary permanently linked against std_seed.c. Removing the binary
+# src/std.c had just switched from the stub to the real stdlib, leaving the
+# stage0 binary permanently linked against std_stub.c. Removing the binary
 # first forces an unconditional relink regardless of mtime comparison.
 .PHONY: bootstrap
 bootstrap:

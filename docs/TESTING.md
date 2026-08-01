@@ -441,10 +441,10 @@ wouldn't fire it either).
 
 Every CI job — sr.ht or Actions, any platform — repeats the same
 stage0-bootstrap dance before building, because a fresh clone has no
-`src/std.c` (gitignored) and the stage0 binary lacks `building.h`:
+`src/std.c` (gitignored):
 
 ```bash
-make bootstrap                  # stage0 (src/std_seed.c) -> regen the real
+make bootstrap                  # stage0 (src/std_stub.c) -> regen the real
                                  # src/std.c -> unconditional relink (#857)
 ./cccc --build build.c          # real build (own two-pass regen is now a no-op)
 python3 tools/run_tests.py --binary build/cccc -j 4
@@ -455,12 +455,15 @@ run by hand because a plain second `make cccc` is subject to a real race:
 `regen_stdlib.sh`'s `mv` can land `src/std.c`'s mtime in the same clock
 tick as the just-linked stage0 binary on a fast CI runner, and `make`
 treats an equal mtime as up to date — silently skipping the relink and
-leaving the binary linked against `src/std_seed.c`. `make bootstrap` avoids
+leaving the binary linked against `src/std_stub.c`. `make bootstrap` avoids
 this by `rm -f`ing the binary between the two links, forcing an
 unconditional relink; see the Makefile's `bootstrap` target for the full
-explanation. Skipping the regen step (or hitting the race) produces a
-confusing build failure complaining about a missing `building.h`, not an
-obviously-related error. The GitHub Actions jobs use `-j 4` rather than
+explanation. Skipping the regen step (or hitting the race) leaves the
+binary running comptime code against `src/std.c` from a stale prior build
+(or, on a genuinely fresh clone with the regen skipped, produces a build
+failure complaining that `cccc/reflection.h` can't be found — check that
+`./cccc` is being invoked with `-I./include` reachable from the current
+directory). The GitHub Actions jobs use `-j 4` rather than
 sr.ht's `-j 8` — hosted runners have fewer cores than the sr.ht builder, and
 parallel-load timing sensitivity is exactly what surfaced #853.
 

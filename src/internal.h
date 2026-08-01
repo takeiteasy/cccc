@@ -23,7 +23,6 @@
 #pragma once
 
 #include "cccc.h"
-#include "driver.h"
 
 #include <fenv.h> // for feraiseexcept(FE_INVALID) in cccc_f64_to_i64/cccc_f32_to_i64 (#775)
 
@@ -468,6 +467,9 @@ Token *preprocess(VirtualMachine *vm, Token *tok);
 // tokenize.c
 //
 
+noreturn void error(char *fmt, ...) __attribute__((format(printf, 1, 2)));
+uint64_t cccc_warning_mask_for_name(const char *name);
+bool cccc_warning_is_group_name(const char *name);
 void error_at(VirtualMachine *vm, char *loc, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...)
@@ -498,11 +500,14 @@ unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size
 //
 
 char *cccc_path_find_executable(const char *name);
+char *cccc_find_native_cc(void);
+void define_std_macros(VirtualMachine *vm);
 char *get_std_header(char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);
 const char *get_std_header_name(int i);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
+Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag);
 void init_macros(VirtualMachine *vm);
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
@@ -514,6 +519,7 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
 // parse.c
 //
 
+bool is_flonum(Type *ty);
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 // #815/#816: shared duplicate/overlapping case-label check -- used by the
@@ -874,9 +880,6 @@ long long wrap_fread(long long ptr, long long size, long long nmemb,
                      long long stream);
 long long wrap_fwrite(long long ptr, long long size, long long nmemb,
                       long long stream);
-//
-// main.c
-//
 
 //
 // codegen.c
@@ -946,6 +949,21 @@ void cc_optimize(VirtualMachine *vm, int level);
 //
 // analyze.c
 //
+// CcAnalyzeNgramOptions/cc_analyze_ngram_* live in cccc.h (main.c-only);
+// the fusion-candidate half lives here since optimize.c calls it too.
+
+typedef struct {
+    int top_n;
+    bool json;    // emit JSON instead of text
+} CcAnalyzeFusionOptions;
+
+typedef struct CcFusionState CcFusionState;
+
+CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts);
+void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
+                            long long num_words, const char *label,
+                            FILE *out);
+void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
 
 typedef struct {
     int def_op;
@@ -958,10 +976,6 @@ typedef struct {
     int use_byte;
 } CcFusionCandidate;
 
-// CcAnalyzeNgramOptions, CcAnalyzeFusionOptions, CcNgramState, CcFusionState,
-// and the cc_analyze_ngram_*/cc_analyze_fusion_begin/feed/finish declarations
-// live in driver.h (#664).
-
 CcFusionCandidate *cc_analyze_fusion_collect(CcFusionState *st, int *out_count);
 
 //
@@ -969,21 +983,17 @@ CcFusionCandidate *cc_analyze_fusion_collect(CcFusionState *st, int *out_count);
 //
 
 void debugger_init(VirtualMachine *vm);
-void cc_debug_repl(VirtualMachine *vm);
 void cc_debug_repl_host_fault(VirtualMachine *vm, int sig, void *fault_addr);
 void debugger_disassemble_current(VirtualMachine *vm);
 void debugger_print_stack(VirtualMachine *vm, int count);
 int debugger_check_breakpoint(VirtualMachine *vm);
 int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int access_type);
 void debugger_print_registers(VirtualMachine *vm);
-void debugger_print_stack(VirtualMachine *vm, int count);
-void debugger_disassemble_current(VirtualMachine *vm);
 int debugger_run(VirtualMachine *vm, int argc, char **argv);
 
 //
 // host_backtrace.c
 //
-// cc_host_backtrace_init/cc_host_backtrace_install_fatal live in driver.h (#664).
 
 /* Print a host C backtrace to stderr.  Safe to call from a signal handler
  * after cc_host_backtrace_init() has completed. */
@@ -996,7 +1006,6 @@ void cc_host_backtrace_print(void);
 //
 // dump_ast.c
 //
-// cc_dump_ast/cc_dump_ast_json live in driver.h (#664).
 
 void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
 const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
@@ -1039,8 +1048,9 @@ extern VirtualMachine *__builtin_current_vm;
 // heap; see type_shadow_copy's doc comment in ops.c for full semantics.
 void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len);
 
-// cc_load_test_runtime, cc_load_symbolize_runtime, cc_inject_test_header, and
-// cc_run_tests live in driver.h (#664).
+// Preprocess include/cccc/testing.h and register CCCC_ASSERT* macros; see
+// cc_inject_test_header's definition (src/testing.c) for the full contract.
+Token *cc_inject_test_header(VirtualMachine *vm);
 
 // preprocess.c — parse a whitespace-separated CLI-flag string (as allowed in
 // Parses a whitespace-separated CLI-flag string from [[cccc::test(flags="...")]]
@@ -1052,18 +1062,27 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                          const char *flags_str, const char *test_name,
                          CcTestFlagsDelta *out);
 
-// ArgVec/argv_push/make_tmp_path/run_argv, CcNativeCompileArgs, and
-// CcBuildOptions/cc_load_build_runtime/cc_inject_build_header/cc_run_build
-// live in driver.h (#664).
+// exec.c: shared infrastructure for spawning host toolchain processes
+// (cc/ar/ld), used by both -c=native (main.c) and --build (build.c).
+typedef struct {
+    const char **data;
+    int          len;
+    int          cap;
+} ArgVec;
+
+void argv_push(ArgVec *args, const char *arg);
+int  run_argv(char *const argv[]);
+int  run_argv_env(char *const argv[], char *const envp[]);
+
+// Preprocess include/cccc/building.h; see cc_inject_build_header's
+// definition (src/build.c) for the full contract.
+Token *cc_inject_build_header(VirtualMachine *vm);
 
 //
 // build.c (--build mode)
 //
 char  *cccc_find_native_tool(const char *tool);
 char  *cccc_path_find_executable(const char *name); // silent PATH probe (no error print)
-
-// serialize.c
-void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only);
 
 void register_ctype_functions(VirtualMachine *vm);
 void register_fenv_functions(VirtualMachine *vm);

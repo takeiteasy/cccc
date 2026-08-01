@@ -555,15 +555,13 @@ void cc_load_test_runtime(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__builtin_assert_bits_msg",    (void *)impl_assert_bits_msg,      9, 0);
 }
 
-// Preprocess src/testing.h (loaded via the embedded std registry). As a
-// side effect, registers all CCCC_ASSERT* macros in vm->compiler.macros so
-// they expand correctly when the test file is preprocessed. Returns the
-// processed declaration tokens to prepend to the parse stream.
+// Preprocess include/cccc/testing.h (loaded via the embedded std registry,
+// or from disk in stage0). As a side effect, registers all CCCC_ASSERT*
+// macros in vm->compiler.macros so they expand correctly when the test file
+// is preprocessed. Returns the processed declaration tokens to prepend to
+// the parse stream.
 Token *cc_inject_test_header(VirtualMachine *vm) {
-    char *src = get_std_header("testing.h");
-    if (!src)
-        error("could not load embedded testing.h — run `make bootstrap` (or `sh tools/regen_stdlib.sh <cccc>`) to regenerate src/std.c");
-    Token *toks = tokenize_string(vm, "<testing.h>", src);
+    Token *toks = tokenize_private_header(vm, "testing.h", "<testing.h>");
     return preprocess(vm, toks);
 }
 

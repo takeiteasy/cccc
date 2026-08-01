@@ -1954,6 +1954,29 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     return NULL;
 }
 
+// Tokenize one of CCCC's private headers (include/cccc/reflection.h,
+// testing.h, building.h) for internal injection (implicit_reflection_tokens,
+// cc_inject_test_header, cc_inject_build_header). Prefers the embedded std
+// table; falls back to resolving "cccc/<name>" on disk via the normal -I
+// include search path, so a stage0 compiler linked against src/std_stub.c
+// (which embeds nothing) can still find these via `-I./include`.
+Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag) {
+    char *src = get_std_header(name);
+    if (src)
+        return tokenize_string(vm, tag, src);
+
+    char *rel = format("cccc/%s", name);
+    char *path = search_include_paths(vm, rel, (int)strlen(rel), false);
+    if (!path)
+        error("cannot find cccc/%s -- run `make bootstrap` (or pass "
+              "-I<repo>/include) to make it resolvable", name);
+
+    Token *toks = tokenize_file(vm, path, false);
+    if (!toks)
+        error("cannot open %s", path);
+    return toks;
+}
+
 static char *search_include_next(VirtualMachine *vm, char *filename) {
     // First search include_paths
     for (; vm->compiler.include_next_idx < vm->compiler.include_paths.len;

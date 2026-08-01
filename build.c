@@ -212,13 +212,12 @@ static void add_cccc_sources(Builder *ctx, BuildTarget *t) {
     AddSourcesGlob(t, "src/*.c");
     AddSourcesGlob(t, "src/stdlib/*.c");
     ExcludeSource(t, "src/ops.c");
-    // src/std.c (generated) and src/std_seed.c (committed stage0 fallback,
-    // #842 Step 3) both define get_std_header/get_stdlib_reg_fn_name/
-    // get_std_header_name -- never compile both into the same target.
-    // std.c wins whenever it exists on disk; same self-correcting rule the
-    // Makefile's SRCS uses.
+    // src/std.c (generated) and src/std_stub.c (committed stage0 stand-in)
+    // both define get_std_header/get_stdlib_reg_fn_name/get_std_header_name
+    // -- never compile both into the same target. std.c wins whenever it
+    // exists on disk; same self-correcting rule the Makefile's SRCS uses.
     if (FileExists(ctx, "src/std.c"))
-        ExcludeSource(t, "src/std_seed.c");
+        ExcludeSource(t, "src/std_stub.c");
     else
         ExcludeSource(t, "src/std.c"); // no-op when absent; harmless
 }
