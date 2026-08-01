@@ -42,35 +42,25 @@ static int find_ffi_function(VirtualMachine *vm, const char *name) {
     if (!vm || !name)
         return -1;
 
-    // Exact match: compare using the cached name_len to avoid repeated strlen. (#164)
+    // Exact match only: compare using the cached name_len to avoid repeated
+    // strlen. (#164)
+    //
+    // This used to also fall back to stripping a trailing digit suffix and
+    // matching a registered *variadic* base name (e.g. "printf2" ->
+    // "printf"), intended to support libc's "overloaded" names like
+    // execl/execle/execlp resolving through one variadic slot. That
+    // fallback wasn't scoped to those names -- any guest-defined function
+    // whose name happened to end in a digit and match a registered
+    // variadic base name (a guest's own `printf2`, `open2`, etc.) was
+    // silently rebound to the host function instead of the guest's own
+    // definition (#876). Removed: nothing in the standard headers or
+    // stdlib declares a digit-suffixed name over a variadic base, so
+    // there's nothing left relying on it.
     size_t len = strlen(name);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         if (vm->compiler.ffi_table[i].name_len == len &&
             memcmp(vm->compiler.ffi_table[i].name, name, len) == 0) {
             return i;
-        }
-    }
-
-    // If no exact match, check if this looks like a specialized variadic name
-    // (e.g. "printf2" → base "printf"). Compute base_len once.
-    if ((len > 1 && isdigit(name[len - 1])) ||
-        (len > 2 && isdigit(name[len - 1]) && isdigit(name[len - 2]))) {
-        char base_name[256];
-        strncpy(base_name, name, sizeof(base_name) - 1);
-        base_name[sizeof(base_name) - 1] = '\0';
-
-        size_t base_len = len;
-        while (base_len > 0 && isdigit(base_name[base_len - 1])) {
-            base_len--;
-        }
-        base_name[base_len] = '\0';
-
-        for (int i = 0; i < vm->compiler.ffi_count; i++) {
-            if (vm->compiler.ffi_table[i].is_variadic &&
-                vm->compiler.ffi_table[i].name_len == base_len &&
-                memcmp(vm->compiler.ffi_table[i].name, base_name, base_len) == 0) {
-                return i;
-            }
         }
     }
 
@@ -6521,11 +6511,20 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                    (node->func_ty->is_pure ||
                                     node->func_ty->is_func_const);
             if (!skip_dead_calln) {
+                // Meta word (InstrWord = uint32_t) layout: bits 0-15 nargs,
+                // bit 16 returns_double, bit 17 returns_float, bit 18
+                // is_variadic, bits 19-31 fixed_param_count (13 bits, up to
+                // 8191 fixed params) (#874/#875 -- lets op_CALLN_fn tell
+                // fixed flonum params (FREG_A0+) from variadic-tail doubles
+                // (bit-pattern in REG_A0+, matching the internal-call ABI
+                // above) and select ffi_prep_cif_var for the callee).
                 emit(vm, CALLN);
                 emit_word(vm, ENCODE_R(r_fn));
                 emit_word(vm, ((InstrWord)(node->ty->kind == TY_FLOAT ? 0
                                                 : is_flonum(node->ty) ? 1 : 0) << 16) |
                                   ((InstrWord)(node->ty->kind == TY_FLOAT ? 1 : 0) << 17) |
+                                  ((InstrWord)(is_variadic_call ? 1 : 0) << 18) |
+                                  ((InstrWord)(fixed_param_count & 0x1FFF) << 19) |
                                   (InstrWord)(nargs & 0xFFFF));
                 emit_i64(vm, (long long)call_double_arg_mask);
                 emit_i64(vm, (long long)call_float_arg_mask);
@@ -8329,7 +8328,11 @@ void gen(VirtualMachine *vm, Obj *prog) {
             const char *fn_name = obj_external_name(target);
             int ffi_idx = find_ffi_function(vm, fn_name);
             if (ffi_idx >= 0) {
-                // FFI function used as a value: store token so JMPI/CALLN can call it.
+                // FFI function used as a value: store token so CALLN can
+                // call it. (JMPI, the other indirect-control-flow opcode,
+                // carries no callsite metadata and is only ever emitted for
+                // computed goto -- landing on this token there is a runtime
+                // error, not a call.)
                 cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
             } else if ((vm->compiler.compile_only || vm->compiler.deferred_link) && fn_name) {
                 // Cross-module function-pointer: record addr reloc for link-time patching (#566).

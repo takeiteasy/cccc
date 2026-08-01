@@ -2704,12 +2704,29 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
     int actual_nargs = (int)(meta & 0xFFFF);
     int returns_double = (int)((meta >> 16) & 1);
     int returns_float = (int)((meta >> 17) & 1);
+    // #874/#875: callsite-declared variadic shape, so both the
+    // DynamicSymbol and FFI-token branches below can tell fixed flonum
+    // params (FREG_A0+) from variadic-tail doubles (bit pattern in
+    // REG_A0+) and thread is_variadic through to the FFI ABI. See
+    // src/codegen.c's CALLN emitter for the bit layout.
+    int callsite_is_variadic = (int)((meta >> 18) & 1);
+    int callsite_fixed_param_count = (int)((meta >> 19) & 0x1FFF);
     uint64_t double_arg_mask = (uint64_t)cc_read_i64(vm);
     uint64_t float_arg_mask = (uint64_t)cc_read_i64(vm);
 
     long long target_value = vm->regs[rs];
     DynamicSymbol *sym = cccc_find_dynamic_symbol(vm, target_value);
-    if (sym) {
+    bool is_ffi_token = !sym && target_value <= CCCC_FFI_TOKEN_BASE;
+    ForeignFunc *ff = NULL;
+    if (is_ffi_token) {
+        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - target_value);
+        if (ffi_idx >= 0 && ffi_idx < vm->compiler.ffi_count)
+            ff = &vm->compiler.ffi_table[ffi_idx];
+        else
+            is_ffi_token = false;
+    }
+
+    if (sym || ff) {
         enum { CALLN_STACK_ARG_SLOTS = 32 };
         long long stack_args_buf[CALLN_STACK_ARG_SLOTS];
         long long *heap_args = NULL;
@@ -2723,44 +2740,49 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
             args = heap_args;
         }
 
+        // Layout comes from the callsite (what codegen actually emitted),
+        // not from the FFI registration -- the two can diverge if the
+        // guest declares the pointer with a different arity than the
+        // registration.
         int int_reg_idx = 0;
         int fp_reg_idx = 0;
         for (int i = 0; i < actual_nargs; i++) {
+            bool is_tail_double = callsite_is_variadic &&
+                                   i >= callsite_fixed_param_count;
             if (i >= 8) {
                 args[i] = vm->sp[i - 8];
             } else if (i < 64 && (float_arg_mask & (1ULL << i))) {
                 args[i] = (long long)(unsigned int)cccc_freg_raw_f32(
                     vm, FREG_A0 + fp_reg_idx++);
-            } else if (i < 64 && (double_arg_mask & (1ULL << i))) {
+            } else if (i < 64 && (double_arg_mask & (1ULL << i)) &&
+                       !is_tail_double) {
                 args[i] = cccc_freg_raw_f64(vm, FREG_A0 + fp_reg_idx++);
             } else {
                 args[i] = vm->regs[REG_A0 + int_reg_idx++];
             }
         }
 
-        int rc = cccc_call_native_function(vm, sym->func_ptr, sym->name, args,
-                                          actual_nargs, double_arg_mask,
-                                          float_arg_mask, returns_double,
-                                          returns_float, 0, actual_nargs);
+        // ABI (variadic-ness, fixed arg count for ffi_prep_cif_var) comes
+        // from the registration when we have one; a dlsym'd symbol has no
+        // registration, so it falls back to what the callsite declared.
+        int rc;
+        if (ff) {
+            rc = cccc_call_native_function(vm, ff->func_ptr, ff->name, args,
+                                           actual_nargs, double_arg_mask,
+                                           float_arg_mask, ff->returns_double,
+                                           ff->returns_float, ff->is_variadic,
+                                           ff->num_fixed_args);
+        } else {
+            rc = cccc_call_native_function(vm, sym->func_ptr, sym->name, args,
+                                           actual_nargs, double_arg_mask,
+                                           float_arg_mask, returns_double,
+                                           returns_float, callsite_is_variadic,
+                                           callsite_is_variadic
+                                               ? callsite_fixed_param_count
+                                               : actual_nargs);
+        }
         free(heap_args);
         return rc;
-    }
-
-    // Built-in FFI function pointer (registered via cc_register_cfunc etc.)
-    if (target_value <= CCCC_FFI_TOKEN_BASE) {
-        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - target_value);
-        if (ffi_idx >= 0 && ffi_idx < vm->compiler.ffi_count) {
-            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
-            long long args[8];
-            int nargs = ff->num_args < 8 ? ff->num_args : 8;
-            for (int i = 0; i < nargs; i++)
-                args[i] = vm->regs[REG_A0 + i];
-            return cccc_call_native_function(vm, ff->func_ptr, ff->name,
-                                             args, nargs,
-                                             ff->double_arg_mask, 0,
-                                             ff->returns_double, ff->returns_float,
-                                             ff->is_variadic, ff->num_fixed_args);
-        }
     }
 
     long long ret_addr = (long long)vm->pc;
@@ -2799,27 +2821,17 @@ static inline int op_JMPI_fn(VirtualMachine *vm) {
     DECODE_R(operands, rs);
     long long target_value = vm->regs[rs];
 
-    // dlopen-loaded function pointer
-    DynamicSymbol *sym = cccc_find_dynamic_symbol(vm, target_value);
-    if (sym)
-        return cccc_call_native_function(vm, sym->func_ptr, sym->name,
-                                         NULL, 0, 0, 0, 0, 0, 0, 0);
-
-    // Built-in FFI function pointer (registered via cc_register_cfunc etc.)
-    if (target_value <= CCCC_FFI_TOKEN_BASE) {
-        int ffi_idx = (int)(CCCC_FFI_TOKEN_BASE - target_value);
-        if (ffi_idx >= 0 && ffi_idx < vm->compiler.ffi_count) {
-            ForeignFunc *ff = &vm->compiler.ffi_table[ffi_idx];
-            long long args[8];
-            int nargs = ff->num_args < 8 ? ff->num_args : 8;
-            for (int i = 0; i < nargs; i++)
-                args[i] = vm->regs[REG_A0 + i];
-            return cccc_call_native_function(vm, ff->func_ptr, ff->name,
-                                             args, nargs,
-                                             ff->double_arg_mask, 0,
-                                             ff->returns_double, ff->returns_float,
-                                             ff->is_variadic, ff->num_fixed_args);
-        }
+    // JMPI (computed goto: `goto *expr`) carries a single operand word --
+    // no per-callsite nargs/masks the way CALL/CALLN do -- so there is no
+    // sound way to dispatch a foreign function from here (#874). A target
+    // landing on a dlopen'd symbol or an FFI token means the guest took
+    // the address of a foreign function and jumped to it directly, which
+    // is not a supported use of computed goto; report it instead of
+    // silently calling with zero (and possibly wrong-ABI) arguments.
+    if (cccc_find_dynamic_symbol(vm, target_value) ||
+        target_value <= CCCC_FFI_TOKEN_BASE) {
+        printf("error: indirect jump target is a foreign function pointer\n");
+        return -1;
     }
 
     Pc target = cc_byte_offset_to_pc(target_value);

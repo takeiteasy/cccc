@@ -1830,14 +1830,17 @@ void cc_register_variadic_cfunc(VirtualMachine *vm, const char *name, void *func
 
     ensure_ffi_capacity(vm, "cc_register_variadic_cfunc");
 
-    // Add variadic function to registry
-    // Note: num_args will be updated dynamically during CALLF based on actual call
-    // For now, we set it to num_fixed_args as a placeholder
+    // Add variadic function to registry. num_args is set to num_fixed_args
+    // and stays that way -- CALLF/CALLN never update it; both instead
+    // carry the real per-callsite argument count as an instruction operand
+    // and use that directly. num_args here is only a placeholder for
+    // registration bookkeeping, not a value any dispatch path should read
+    // for a variadic entry.
     vm->compiler.ffi_table[vm->compiler.ffi_count++] = (ForeignFunc){
         .name = strdup(name),
         .name_len = strlen(name),
         .func_ptr = func_ptr,
-        .num_args = num_fixed_args,  // Will be updated during CALLF
+        .num_args = num_fixed_args,
         .returns_double = (returns_double == 1),
         .returns_float = (returns_double == 2),
         .is_variadic = 1,

@@ -157,7 +157,7 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `CALLI` | 1 | Indirect call through register (`rs`) |
 | `CALLN` | 6 | Native-aware indirect call: tries dynamic symbol first, falls back to VM call |
 | `JMPT` | 3 | Jump table: `table_pc`, `count`, `default_pc`; index in `REG_A0` |
-| `JMPI` | 1 | Indirect jump through register |
+| `JMPI` | 1 | Indirect jump through register. Only emitted for computed goto (`goto *expr`); a register that resolves to a dynamic-symbol or FFI token target is not a supported use of computed goto and is a runtime error |
 | `JZ3` | 2 | Branch if `regs[rs] == 0` |
 | `JNZ3` | 2 | Branch if `regs[rs] != 0` |
 
@@ -558,7 +558,7 @@ to prevent in the dangling-pointer detector).
 | Opcode | Description |
 |--------|-------------|
 | `CALLF` | Registered foreign-function call via `libffi`.  Operands: `ffi_idx`, `nargs`, `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words |
-| `CALLN` | Native-aware indirect call (dynamic symbol or VM function).  Operands: `rs`, `meta` (bits 0-15 = nargs, bit 16 = returns_double, bit 17 = returns_float), `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words |
+| `CALLN` | Native-aware indirect call (dynamic symbol or FFI-token function pointer, falling back to a VM function).  Operands: `rs`, `meta` (bits 0-15 = nargs, bit 16 = returns_double, bit 17 = returns_float, bit 18 = is_variadic, bits 19-31 = fixed_param_count), `double_arg_mask` (2 words), `float_arg_mask` (2 words) — total 6 operand words. The variadic/fixed-param-count bits let the handler tell fixed flonum params (passed in `FREG_A0+`) apart from variadic-tail doubles (bit pattern in `REG_A0+`, matching the internal-call ABI so `va_arg` can read them after `ENT3` spills), and select the correct `libffi` prep (`ffi_prep_cif` vs `ffi_prep_cif_var`) for the callee |
 
 #### Declaring Libraries from Source
 
