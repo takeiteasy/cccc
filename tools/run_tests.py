@@ -14,17 +14,21 @@ Sub-suites:
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
+  fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
 
 Optional:
   --bench  — run the cross-compiler benchmark after the test suites
+  --perf   — run an instrumented VM-opcode pass over tests/benchmarks/ (ticket #625)
 
 Usage:
   python3 tools/run_tests.py [-j N] [--binary PATH] [--quiet] [--process-timeout N]
   python3 tools/run_tests.py --bench               # also run bench.py after tests
+  python3 tools/run_tests.py --perf                # also run the perf sub-suite
   make test                                         # calls this script
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -287,6 +291,95 @@ def _run_reflection_ffi_check():
         return f"FAILED ({e})", False
 
 
+def _run_fuzz_suite(cccc):
+    """Run the fuzz regression corpus replay (#625).
+
+    Compile-only against tests/fuzz/corpus/. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "fuzz_replay.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fuzz_replay", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(["--binary", str(cccc)])
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_perf_suite(cccc):
+    """Run an instrumented VM-opcode pass over tests/benchmarks/*.c (#625).
+
+    Informational only -- always returns ok=True; perf numbers on a laptop
+    or shared CI runner are too noisy to threshold on. Writes per-benchmark
+    JSON to profile/perf/ and prints an aggregate summary: total instructions
+    retired per benchmark and the top-N hottest opcodes across the set.
+    """
+    bench_dir = REPO_ROOT / "tests" / "benchmarks"
+    sources = sorted(bench_dir.glob("*.c"))
+    if not sources:
+        return "skipped (no benchmark sources)", True
+
+    out_dir = REPO_ROOT / "profile" / "perf"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    totals = {}
+    opcode_totals = {}
+    for src in sources:
+        try:
+            r = subprocess.run(
+                [str(cccc), "--vm-profile", "--json", "-I./include", str(src)],
+                cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"  {src.name}: timeout")
+            continue
+
+        # Guest stdout (e.g. the benchmark's own "result: N" line) precedes
+        # the profiler's JSON blob on stdout -- find where the JSON starts.
+        brace = r.stdout.find("{")
+        if brace == -1:
+            print(f"  {src.name}: no profile JSON produced")
+            continue
+
+        try:
+            data = json.loads(r.stdout[brace:])
+        except json.JSONDecodeError:
+            print(f"  {src.name}: malformed profile JSON")
+            continue
+
+        out_path = out_dir / f"{src.stem}.json"
+        with open(out_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        total_opcodes = data.get("total_opcodes", 0)
+        totals[src.stem] = total_opcodes
+        for op in data.get("opcodes", []):
+            opcode_totals[op["opcode"]] = opcode_totals.get(op["opcode"], 0) + op["count"]
+
+        print(f"  {src.name}: {total_opcodes:,} opcodes retired -> {out_path.relative_to(REPO_ROOT)}")
+
+    if totals:
+        print()
+        print("  Total instructions retired per benchmark:")
+        for name, count in sorted(totals.items(), key=lambda kv: -kv[1]):
+            print(f"    {name:<15} {count:>15,}")
+
+        print()
+        print("  Top 10 hottest opcodes across the set:")
+        for opcode, count in sorted(opcode_totals.items(), key=lambda kv: -kv[1])[:10]:
+            print(f"    {opcode:<15} {count:>15,}")
+
+    return f"reported ({len(totals)}/{len(sources)} benchmarks)", True
+
+
 def _run_bench(cccc):
     """Run the cross-compiler benchmark as a subprocess (bench.py uses sys.exit)."""
     script = _TOOLS_DIR / "bench.py"
@@ -323,6 +416,10 @@ def main():
     parser.add_argument(
         "--bench", action="store_true",
         help="Run the cross-compiler benchmark after the test suites"
+    )
+    parser.add_argument(
+        "--perf", action="store_true",
+        help="Run an instrumented VM-opcode pass over tests/benchmarks/ (informational, never fails)"
     )
     args = parser.parse_args()
 
@@ -408,6 +505,13 @@ def main():
     print(f"  {enum_status}")
     suite_results["audit_reflection_enums"] = ok_enum
 
+    # --- Fuzz regression corpus replay ---
+    print()
+    print("[ fuzz replay ]")
+    fuzz_status, ok_fuzz = _run_fuzz_suite(cccc)
+    print(f"  {fuzz_status}")
+    suite_results["fuzz"] = ok_fuzz
+
     # --- Optional bench ---
     if args.bench:
         print()
@@ -415,6 +519,14 @@ def main():
         bench_status, ok_bench = _run_bench(cccc)
         print(f"  {bench_status}")
         suite_results["bench"] = ok_bench
+
+    # --- Optional perf (VM opcode profile over tests/benchmarks/) ---
+    if args.perf:
+        print()
+        print("[ perf ]")
+        perf_status, ok_perf = _run_perf_suite(cccc)
+        print(f"  {perf_status}")
+        suite_results["perf"] = ok_perf
 
     # --- Unified summary ---
     print()
