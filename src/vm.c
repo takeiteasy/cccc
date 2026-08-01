@@ -547,8 +547,17 @@ dispatch:
                 _still_pending = true;
                 continue;
             }
-            _cccc_pending[_sig] = 0;
             SigSlot *_slot = &vm->vm_sigslots[_sig];
+            /* #877: a VM handler needs a SigFrame slot to carry its
+               register-file snapshot (async delivery can land mid-
+               instruction, unlike a call boundary). If the frame stack is
+               full, defer this delivery -- leave it pending -- rather than
+               deliver with unsaved registers. */
+            if (_slot->action == 2 && vm->sig_depth >= CCCC_SIG_FRAME_MAX) {
+                _still_pending = true;
+                continue;
+            }
+            _cccc_pending[_sig] = 0;
             if (_slot->action == 1) continue; /* IGN */
             if (_slot->action == 2) {
                 /* VM handler: push return address and jump to handler */
@@ -561,7 +570,7 @@ dispatch:
                 *--vm->sp = (long long)vm->pc;
                 if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
                 vm->regs[REG_A0] = (long long)_sig;
-                int _flags = cccc_signal_prepare_delivery(vm, _sig, _slot);
+                int _flags = cccc_signal_prepare_delivery(vm, _sig, _slot, /*async=*/true);
                 if (_flags & SA_SIGINFO) {
                     /* #745: real captured siginfo -- this path only runs
                        after an actual host-level signal delivery. */
@@ -588,24 +597,24 @@ dispatch:
        thread (aio_*()/mq_notify(), src/stdlib/posix.c) can only latch a
        cookie async-signal-safely, so the guest sigev_notify_function is
        actually invoked here, one notification per re-entry.
-       Caveat shared with the pending-signal poll above: this can land
-       between ANY two bytecode instructions, and REG_A0 (clobbered below)
-       is an ordinary general-purpose VM register, not call-boundary-only
-       scratch space -- guest code with a live value in REG_A0 at the
-       interruption point (e.g. mid-expression inside a tight computation
-       loop) can have it corrupted. Observed empirically: a guest busy-spin
-       loop polling a notified-flag is exactly the adversarial case, and a
-       test using one segfaulted intermittently until switched to polling
-       via a GIL-releasing call (usleep()) instead, which keeps the
-       interruption point at a call-return boundary rather than mid-loop.
-       Recommend the same to guest code waiting on a SIGEV_THREAD/signal
-       notification. Fixing the underlying register-liveness hazard is
-       larger than this ticket -- see the follow-up ticket referenced in
-       docs/COVERAGE.md's SIGEV_THREAD entries. */
+       Shares the pending-signal poll's async-delivery hazard -- this can
+       land between ANY two bytecode instructions, not just a call
+       boundary -- and shares its fix (#877): cccc_signal_push_async_frame
+       snapshots the full register file into a SigFrame before REG_A0 is
+       overwritten below, and cccc_signal_poll_handler_returns (called at
+       the top of this same dispatch loop, gated on vm->sig_depth != 0)
+       restores it once the guest sigev_notify_function genuinely returns.
+       As with the pending-signal poll, a full frame stack defers this
+       notification (leaves it pending) rather than delivering with
+       unsaved registers. */
     if (__builtin_expect(_cccc_sigev_any_pending != 0, 0)) {
         _cccc_sigev_any_pending = 0;
         for (int _idx = 0; _idx < CCCC_SIGEV_MAX; _idx++) {
             if (!_cccc_sigev_pending[_idx]) continue;
+            if (vm->sig_depth >= CCCC_SIG_FRAME_MAX) {
+                _cccc_sigev_any_pending = 1; /* defer -- retry once a frame frees up */
+                break;
+            }
             _cccc_sigev_pending[_idx] = 0;
             long long _sigev_fn = 0, _sigev_sival_addr = 0;
             if (!cccc_sigev_cookie_guest_fn(_idx, &_sigev_fn, &_sigev_sival_addr))
@@ -619,6 +628,7 @@ dispatch:
             if (check_stack_overflow(vm, 1)) VM_TRAP_OR_RETURN(-1);
             *--vm->sp = (long long)vm->pc;
             if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
+            cccc_signal_push_async_frame(vm); /* snapshot regs before REG_A0 is clobbered below */
             /* union sigval is passed by reference (struct/union-by-value
                ABI, see cccc_sigev_cookie_guest_fn's comment) -- REG_A0 is
                the address of the cookie's persistent storage, not its
@@ -1288,6 +1298,12 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->vm_profile_trigram_counts) {
         free(vm->vm_profile_trigram_counts);
         vm->vm_profile_trigram_counts = NULL;
+    }
+    // #877: async-delivery register-snapshot save area, lazily malloc'd on
+    // first use -- see AsyncRegSave in src/cccc.h.
+    if (vm->async_reg_saves) {
+        free(vm->async_reg_saves);
+        vm->async_reg_saves = NULL;
     }
 
     // Free VM runtime HashMaps. Integer keys (keylen == -1) are skipped by
@@ -2232,8 +2248,14 @@ int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
 
     long long saved_regs[NUM_REGS];
     FReg saved_fregs[NUM_REGS];
+    VReg saved_vregs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
+    // #877: same defect class as the async-delivery register-liveness fix
+    // just above in this file -- vregs was missing here even though
+    // cccc_exec_state_save (this file) saves it, and a vector local can
+    // legitimately be live in vregs[] across the nested reentry.
+    memcpy(saved_vregs, vm->vregs, sizeof(saved_vregs));
     Pc saved_pc = vm->pc;
     long long *saved_bp = vm->bp;
     long long *saved_sp = vm->sp;
@@ -2283,6 +2305,7 @@ int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
 
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
+    memcpy(vm->vregs, saved_vregs, sizeof(saved_vregs));
     vm->pc = saved_pc;
     vm->bp = saved_bp;
     vm->sp = saved_sp;

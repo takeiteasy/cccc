@@ -1144,6 +1144,14 @@ The central loop reads the next opcode, increments the cycle counter, optionally
 
 When `CCCC_ENABLE_DEBUGGER` is set, every dispatch checks breakpoints, single-step flags, and step-over / step-out conditions before executing the opcode.  `BTRAP` can also force entry into the interactive REPL.
 
+### Async Signal / Notification Delivery
+
+Two safe points near the top of the dispatch loop poll for asynchronous events and can deliver them between *any* two bytecode instructions, not just at a call boundary: a pending real signal (`_cccc_pending`, set by an async-signal-safe host shim) and a pending `SIGEV_THREAD` notification (`_cccc_sigev_pending`, set by a host notification thread — `<aio.h>`/`<mqueue.h>`). Both jump into guest bytecode (a VM signal handler or a `sigev_notify_function`) the same way `VRAISE` does: push a return address, then set `vm->pc` to the handler.
+
+Because delivery isn't pinned to a call boundary, the normal caller-saved calling-convention ABI doesn't protect the interrupted code's registers the way it does for a synchronous call. Before jumping to the handler, the dispatch loop snapshots the full register file (`regs`/`fregs`/`vregs`) into a `SigFrame` (`src/cccc.h`) — the same structure that already tracks handler-entry/return for `sa_mask`/`SA_NODEFER`/`SA_RESETHAND` enforcement — backed by a lazily-allocated save area (`vm->async_reg_saves`, one slot per `SigFrame`) so a program that never takes a signal pays nothing for it. `cccc_signal_poll_handler_returns`, called at the top of every dispatch iteration once any frame is active, restores the snapshot once the handler genuinely returns (`sp`/`pc` back exactly where the interruption happened) — a handler that `longjmp()`s out instead is left alone, since `SETJMP`/`LONGJMP` (see Non-Local Jumps below) already own `REG_A0` on that path. If every `SigFrame` slot is in use (`CCCC_SIG_FRAME_MAX`, currently 8), a new async delivery is deferred — left pending — rather than delivered without a place to save its snapshot.
+
+`VRAISE` (synchronous `raise()`) does not use this machinery: it always runs at a call boundary, where the ordinary calling convention already protects the caller, so no snapshot is taken.
+
 ## Safety Integration
 
 The VM does not rely on external sanitizer libraries.  Instead, the compiler injects safety opcodes at compile time and the interpreter implements the checks inline:

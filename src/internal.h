@@ -1168,12 +1168,27 @@ long long cccc_guest_siginfo_for(int sig, int synthesized);
    resets the disposition to SIG_DFL before returning. Returns the sa_flags
    value as it stood at the moment of delivery (the caller's SA_SIGINFO
    check must use this return value, not slot->sa_flags, since SA_RESETHAND
-   may have just zeroed the live slot). See src/stdlib/signal.c. */
-int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot);
+   may have just zeroed the live slot). `async` must be true from the
+   dispatch loop's pending-signal poll (asynchronous, can land mid-
+   instruction -- takes a register-file snapshot, #877) and false from
+   op_VRAISE_fn (synchronous, runs at a call boundary -- no snapshot
+   needed). See src/stdlib/signal.c. */
+int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot, bool async);
+/* #877: called by the SIGEV_THREAD poll (vm.c), which has no SigSlot of
+   its own, immediately after pushing the handler's return address onto
+   the VM stack and before jumping to it -- same register-snapshot
+   protection as cccc_signal_prepare_delivery's async path, without the
+   sa_mask/SA_RESETHAND machinery a real signal slot carries. Caller must
+   check vm->sig_depth < CCCC_SIG_FRAME_MAX first and defer (leave the
+   notification pending) rather than call this when full. See
+   src/stdlib/signal.c. */
+void cccc_signal_push_async_frame(VirtualMachine *vm);
 /* #787: called from the dispatch loop, gated on vm->sig_depth != 0. Pops
    any SigFrame(s) whose handler has returned (vm->sp risen back above
    f->sp_at_entry) and restores vm->sig_blocked, so a signal deferred while
-   blocked can be redelivered. See src/stdlib/signal.c. */
+   blocked can be redelivered. #877: also restores the register-file
+   snapshot taken at async delivery, but only on a genuine handler return
+   (not a longjmp() out of the handler). See src/stdlib/signal.c. */
 void cccc_signal_poll_handler_returns(VirtualMachine *vm);
 void register_stdio_functions(VirtualMachine *vm);
 void register_stdlib_functions(VirtualMachine *vm);

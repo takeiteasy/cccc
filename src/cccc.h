@@ -1800,10 +1800,30 @@ typedef struct {
    new opcode, so it doesn't perturb the text segment or .c4 round-trip. */
 #define CCCC_SIG_FRAME_MAX 8
 
+/* #877: async delivery (the dispatch loop's pending-signal poll and
+   SIGEV_THREAD poll, src/vm.c) can land between ANY two bytecode
+   instructions, not just at a call boundary -- unlike a real hardware
+   interrupt, it wrote straight into REG_A0 (an ordinary caller-saved
+   general-purpose register, live across many instructions, e.g. inside a
+   loop body) with no save/restore, corrupting whatever the interrupted
+   code had there. Fixed by giving each async SigFrame a snapshot of the
+   full register file, taken at delivery and restored when the handler
+   genuinely returns (see save_slot/saved_pc below and
+   cccc_signal_poll_handler_returns in src/stdlib/signal.c). Synchronous
+   delivery (raise()/VRAISE, op_VRAISE_fn in ops.c) doesn't need this --
+   it runs at a call boundary, where the normal caller-saved ABI already
+   protects the caller. */
 typedef struct {
     int sig;
     unsigned int saved_blocked;
     long long *sp_at_entry;
+    Pc saved_pc;    /* async only: pc to compare against on return, so a
+                        longjmp() out of the handler (which also changes pc,
+                        but not back to this exact value) doesn't trigger a
+                        register restore over the jmp_buf's own REG_A0 */
+    int save_slot;  /* index into vm->async_reg_saves, or -1 if this frame
+                        carries no register snapshot (sync delivery, or the
+                        save-area allocation failed) */
 } SigFrame;
 
 /* The floating-point register file is a flat double. The frontend already
@@ -1834,6 +1854,21 @@ typedef union {
     int16_t  i16[32];
     int8_t   i8[64];
 } VReg;
+
+/* #877: one slot's worth of register-file snapshot for async signal/
+   SIGEV_THREAD delivery (see the SigFrame comment above). 32 matches
+   NUM_REGS (src/internal.h) -- duplicated as a literal here the same way
+   VirtualMachine::regs[32]/fregs[32]/vregs[32] already are, since
+   internal.h includes this header rather than the reverse. The array of
+   CCCC_SIG_FRAME_MAX slots is lazily malloc'd on a VM's first async
+   delivery (VirtualMachine is stack-allocated in main.c/fuzzing.c -- a
+   program that never takes a signal shouldn't pay for it) and freed at VM
+   teardown. */
+typedef struct {
+    long long regs[32];
+    FReg fregs[32];
+    VReg vregs[32];
+} AsyncRegSave;
 
 /*!
  @typedef AsmCallback
@@ -2999,6 +3034,10 @@ struct VirtualMachine {
     unsigned int sig_blocked;
     SigFrame sig_frames[CCCC_SIG_FRAME_MAX];
     int sig_depth;
+    // #877: register-snapshot save area for async delivery, lazily
+    // malloc'd to CCCC_SIG_FRAME_MAX slots on first use -- see AsyncRegSave
+    // and the SigFrame comment above.
+    AsyncRegSave *async_reg_saves;
 
     // VM-managed atexit()/at_quick_exit() handler lists (#738). These hold
     // guest function-pointer values (byte offsets or FFI tokens), NOT raw

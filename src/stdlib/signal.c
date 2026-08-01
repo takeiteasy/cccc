@@ -143,21 +143,74 @@ long long cccc_guest_siginfo_for(int sig, int synthesized) {
 //
 // See the SigFrame comment in cccc.h for why handler-return detection is an
 // sp watermark rather than a dedicated opcode.
-int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot) {
+// #877: pushes a SigFrame carrying a full register-file snapshot, used for
+// ASYNC delivery only (the dispatch loop's pending-signal poll and the
+// SIGEV_THREAD poll, both in src/vm.c). Async delivery can land between
+// ANY two bytecode instructions -- not just at a call boundary -- so
+// unlike synchronous raise()/VRAISE (which runs at a call boundary, where
+// the normal caller-saved ABI already protects the interrupted code) it
+// needs its own save/restore, mirroring how a real hardware interrupt
+// preserves the state it clobbers. Callers have already verified
+// vm->sig_depth < CCCC_SIG_FRAME_MAX -- a full frame stack means "defer
+// this delivery," decided by the caller in vm.c before pushing the return
+// address or getting here at all. `sig` is the real signal number for the
+// pending-signal poll, or 0 for a SIGEV_THREAD notification (there's no
+// signal involved, just a callback function pointer).
+static void push_async_frame(VirtualMachine *vm, int sig, unsigned int saved_blocked) {
+    SigFrame *f = &vm->sig_frames[vm->sig_depth];
+    f->sig = sig;
+    f->saved_blocked = saved_blocked;
+    f->sp_at_entry = vm->sp;
+    f->saved_pc = vm->pc; // the interruption point -- also what was just
+                          // pushed as the handler's return address
+    f->save_slot = -1;
+
+    if (!vm->async_reg_saves)
+        vm->async_reg_saves = malloc(sizeof(AsyncRegSave) * CCCC_SIG_FRAME_MAX);
+    if (vm->async_reg_saves) {
+        AsyncRegSave *save = &vm->async_reg_saves[vm->sig_depth];
+        memcpy(save->regs, vm->regs, sizeof(save->regs));
+        memcpy(save->fregs, vm->fregs, sizeof(save->fregs));
+        memcpy(save->vregs, vm->vregs, sizeof(save->vregs));
+        f->save_slot = vm->sig_depth;
+    }
+    /* If the malloc failed, save_slot stays -1 -- the frame still tracks
+       sig_blocked/sp_at_entry/saved_pc correctly, it just can't restore
+       registers on return (fails safe: same exposure as before #877,
+       not worse). */
+    vm->sig_depth++;
+}
+
+// #877: SIGEV_THREAD poll (src/vm.c) has no SigSlot/sa_mask of its own to
+// enforce, just needs the same register-snapshot protection as a real
+// signal. saved_blocked is vm->sig_blocked unchanged, so the eventual
+// unwind in cccc_signal_poll_handler_returns is a no-op for the mask.
+void cccc_signal_push_async_frame(VirtualMachine *vm) {
+    push_async_frame(vm, 0, vm->sig_blocked);
+}
+
+int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot, bool async) {
     int flags = slot->sa_flags;
     unsigned int bit = 1u << (unsigned)(sig - 1);
     unsigned int newly_blocked = slot->sa_mask;
     if (!(flags & SA_NODEFER)) newly_blocked |= bit;
 
-    if (vm->sig_depth < CCCC_SIG_FRAME_MAX) {
+    if (async) {
+        // Caller (vm.c) already checked sig_depth < CCCC_SIG_FRAME_MAX.
+        push_async_frame(vm, sig, vm->sig_blocked);
+    } else if (vm->sig_depth < CCCC_SIG_FRAME_MAX) {
         SigFrame *f = &vm->sig_frames[vm->sig_depth++];
         f->sig = sig;
         f->saved_blocked = vm->sig_blocked;
         f->sp_at_entry = vm->sp;
+        f->saved_pc = vm->pc;
+        f->save_slot = -1; // sync: call-boundary ABI already protects the caller
     }
-    /* If the frame stack overflowed (pathological recursive-signal case),
-       still apply the block -- it just won't be automatically unblocked on
-       return. Delivering unmasked would be worse (immediate re-entrancy). */
+    /* If the frame stack overflowed (pathological recursive-signal case --
+       sync path only; async never reaches here with a full stack, see
+       above), still apply the block -- it just won't be automatically
+       unblocked on return. Delivering unmasked would be worse (immediate
+       re-entrancy). */
     vm->sig_blocked |= newly_blocked;
 
     if (flags & SA_RESETHAND) {
@@ -174,7 +227,22 @@ void cccc_signal_poll_handler_returns(VirtualMachine *vm) {
     while (vm->sig_depth > 0 &&
            vm->sp > vm->sig_frames[vm->sig_depth - 1].sp_at_entry) {
         vm->sig_depth--;
-        vm->sig_blocked = vm->sig_frames[vm->sig_depth].saved_blocked;
+        SigFrame *f = &vm->sig_frames[vm->sig_depth];
+        vm->sig_blocked = f->saved_blocked;
+        // #877: only restore the register snapshot on a genuine handler
+        // return -- sp landed exactly one past sp_at_entry (the pushed
+        // return address was popped by a real LEV3) and pc landed back
+        // exactly on the interruption point. A handler that longjmp()'d
+        // out instead moves sp/pc in ways that generally won't satisfy
+        // both, and op_LONGJMP_fn (ops.c) owns REG_A0 (the setjmp return
+        // value) on that path -- restoring over it would corrupt it.
+        if (f->save_slot >= 0 && vm->async_reg_saves &&
+            vm->sp == f->sp_at_entry + 1 && vm->pc == f->saved_pc) {
+            AsyncRegSave *save = &vm->async_reg_saves[f->save_slot];
+            memcpy(vm->regs, save->regs, sizeof(save->regs));
+            memcpy(vm->fregs, save->fregs, sizeof(save->fregs));
+            memcpy(vm->vregs, save->vregs, sizeof(save->vregs));
+        }
         /* A signal deferred while blocked may now be deliverable. */
         _cccc_any_pending = 1;
     }

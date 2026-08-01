@@ -2772,6 +2772,31 @@ int test_sigevent_layout(void) {
     return 42;
 }
 
+// #877 regression: waits for *flag to go non-zero while carrying a live
+// checksum across a TIGHT bytecode loop with no host calls in its body --
+// no usleep(), no GIL-releasing call anywhere. Async SIGEV_THREAD delivery
+// (the VM dispatch loop's safe point, src/vm.c) can then only land
+// between two ordinary arithmetic instructions inside the loop, not at a
+// call boundary -- exactly the adversarial case that used to corrupt
+// REG_A0 mid-loop before #877's register-snapshot fix (previously worked
+// around here by polling via usleep() instead, which pins the
+// interruption point to a call-return boundary and sidesteps the hazard
+// rather than testing it). Returns 1 if the checksum recomputed from
+// scratch for the actual number of spins taken matches the live one
+// (register state survived every interruption intact), 0 if it didn't.
+static int busy_spin_wait_checked(volatile int *flag, long long max_spins) {
+    long long checksum = 0;
+    long long spins = 0;
+    while (!*flag && spins < max_spins) {
+        checksum += (spins ^ (spins << 3)) - (checksum >> 1);
+        spins++;
+    }
+    long long expected = 0;
+    for (long long s = 0; s < spins; s++)
+        expected += (s ^ (s << 3)) - (expected >> 1);
+    return checksum == expected;
+}
+
 static volatile int g_aio_sigev_notified = 0;
 static volatile long long g_aio_sigev_val = -1;
 
@@ -2790,7 +2815,7 @@ static void aio_sigev_notify_fn(union sigval sv) {
 // CCCC -- verified with a plain host C program using the real system
 // libc): when that happens there is nothing left to verify, so the test
 // passes rather than failing on a host limitation outside CCCC's control.
-[[cccc::test(return = 42, timeout = 5000)]]
+[[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_sigev_thread(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_XXXXXX";
     int fd = mkstemp(tmpl);
@@ -2818,17 +2843,16 @@ int test_aio_sigev_thread(void) {
         return (saved_errno == EAGAIN) ? 42 : 2; /* host limitation, not ours */
     }
 
-    /* Poll with usleep(), not a tight bytecode busy-spin -- see the
-       "delivery timing" note in docs/COVERAGE.md's signal.h/aio.h entries
-       for why a guest computation loop is the wrong way to wait for an
-       async notification. */
-    for (int _i = 0; !g_aio_sigev_notified && _i < 500; _i++) usleep(1000);
+    /* #877 regression: a tight bytecode busy-spin with a live register
+       value, not usleep() -- see busy_spin_wait_checked's comment above. */
+    int reg_intact = busy_spin_wait_checked(&g_aio_sigev_notified, 2000000);
 
     close(fd);
     unlink(tmpl);
 
     if (!g_aio_sigev_notified) return 3;
     if (g_aio_sigev_val != 4242) return 4;
+    if (!reg_intact) return 5; // async delivery corrupted a live register (#877)
     return 42;
 }
 
@@ -3065,7 +3089,7 @@ static void mq_sigev_notify_fn(union sigval sv) {
 // runs (deferred to the VM dispatch loop's safe point, same mechanism as
 // test_aio_sigev_thread above -- see sigevent_prepare()/wrap_mq_notify()
 // in src/stdlib/posix.c).
-[[cccc::test(return = 42, timeout = 5000)]]
+[[cccc::test(return = 42, timeout = 10000)]]
 int test_mqueue_sigev_thread(void) {
     const char *name = "/cccc_test_mqueue_sigev";
     mq_unlink(name);
@@ -3092,13 +3116,16 @@ int test_mqueue_sigev_thread(void) {
     if (mq_notify(q, &sev) != 0) { mq_close(q); mq_unlink(name); return 3; }
     if (mq_send(q, "hi", 2, 0) != 0) { mq_close(q); mq_unlink(name); return 4; }
 
-    for (int _i = 0; !g_mq_sigev_notified && _i < 500; _i++) usleep(1000);
+    /* #877 regression: tight bytecode busy-spin, not usleep() -- see
+       busy_spin_wait_checked's comment near test_aio_sigev_thread. */
+    int reg_intact = busy_spin_wait_checked(&g_mq_sigev_notified, 2000000);
 
     mq_close(q);
     mq_unlink(name);
 
     if (!g_mq_sigev_notified) return 5;
     if (g_mq_sigev_val != 4343) return 6;
+    if (!reg_intact) return 7; // async delivery corrupted a live register (#877)
     return 42;
 }
 #else

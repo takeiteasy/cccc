@@ -5134,7 +5134,7 @@ static inline int op_VRAISE_fn(VirtualMachine *vm) {
         *--vm->sp = (long long)vm->pc;
         if (vm->flags & CCCC_CFI) *--vm->shadow_sp = (long long)vm->pc;
         vm->regs[REG_A0] = (long long)sig;
-        int flags = cccc_signal_prepare_delivery(vm, sig, slot);
+        int flags = cccc_signal_prepare_delivery(vm, sig, slot, /*async=*/false);
         if (flags & SA_SIGINFO) {
             /* #745: raise() never goes through the host signal mechanism,
                so synthesize real POSIX raise() semantics instead of real
