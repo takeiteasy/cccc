@@ -1136,14 +1136,72 @@ static long long wrap_scandir(long long dirname, long long namelist, long long s
 
 // fts.h (#811) -- fts_open()'s comparator takes the same
 // int (*)(const FTSENT **, const FTSENT **) shape as scandir()'s compar
-// above, so it gets the same thread-local-slot + trampoline treatment.
-// fts_read()/fts_children() do real directory I/O, so they release the
-// GIL like the other blocking wrappers; fts_open()/fts_set()/fts_close()
-// don't block meaningfully (fts_open() itself may stat the root paths,
-// but that's a single bounded syscall, not an unbounded wait) so they
-// keep the GIL, matching opendir()'s category above.
+// above, so it gets the same thread-local-slot + trampoline treatment for
+// the duration of any single host call. Unlike scandir()/glob(), though,
+// the comparator isn't only invoked inside fts_open() itself -- libc
+// retains it on the FTS handle and calls it again from every fts_read()
+// (sorting each directory's children as it descends), so the slot has to
+// be re-armed on every wrapper call that might invoke it, not just at
+// fts_open() time (#878: fts_read() was calling the trampoline with the
+// slot back at its default 0 value, which cccc_call_guest_callback
+// resolved as a jump to byte offset 0 -- the unknown-opcode trap at the
+// top of the text segment -- so the comparator silently never ran).
+//
+// The handle -> comparator binding lives in a small fixed-size table
+// (guarded by the GIL, not thread-local -- one VM, one GIL, no need for
+// per-thread copies) keyed on the FTS* pointer, populated by wrap_fts_open
+// on success and cleared by wrap_fts_close.
+//
+// fts_open()/fts_set()/fts_close() don't block meaningfully (fts_open()
+// itself may stat the root paths, but that's a single bounded syscall, not
+// an unbounded wait) so they keep the GIL, matching opendir()'s category
+// above. fts_read()/fts_children() do real directory I/O and normally
+// release the GIL like the other blocking wrappers -- but only when the
+// handle has no guest comparator: a comparator firing mid-fts_read() needs
+// cccc_call_guest_callback to reenter vm_eval on this same thread, which
+// requires the GIL, and would otherwise race the ExecState snapshot that
+// posix_save_and_release_gil parked for restoration. So a handle with a
+// comparator holds the GIL across fts_read()/fts_children() for its whole
+// traversal instead.
 static _Thread_local long long g_fts_compar_value;
 static _Thread_local int g_fts_faulted;
+
+#define CCCC_FTS_HANDLE_MAX 16
+typedef struct {
+    FTS *handle;
+    long long compar;
+} FtsHandleBinding;
+static FtsHandleBinding g_fts_handles[CCCC_FTS_HANDLE_MAX];
+
+static long long fts_handle_compar(FTS *f) {
+    for (int i = 0; i < CCCC_FTS_HANDLE_MAX; i++)
+        if (g_fts_handles[i].handle == f)
+            return g_fts_handles[i].compar;
+    return 0;
+}
+
+static void fts_handle_bind(FTS *f, long long compar) {
+    for (int i = 0; i < CCCC_FTS_HANDLE_MAX; i++) {
+        if (!g_fts_handles[i].handle) {
+            g_fts_handles[i].handle = f;
+            g_fts_handles[i].compar = compar;
+            return;
+        }
+    }
+    // Table full: comparator won't be retained past fts_open(). Rare
+    // (16 concurrent guest traversals) and fails safe -- unsorted
+    // children rather than a crash.
+}
+
+static void fts_handle_unbind(FTS *f) {
+    for (int i = 0; i < CCCC_FTS_HANDLE_MAX; i++) {
+        if (g_fts_handles[i].handle == f) {
+            g_fts_handles[i].handle = NULL;
+            g_fts_handles[i].compar = 0;
+            return;
+        }
+    }
+}
 
 static int fts_compar_trampoline(const FTSENT **a, const FTSENT **b) {
     VirtualMachine *vm = cccc_current_ffi_vm();
@@ -1170,28 +1228,73 @@ static long long wrap_fts_open(long long path_argv, long long options, long long
     g_fts_faulted = saved_faulted;
     if (faulted)
         errno = EFAULT;
+    if (f && compar)
+        fts_handle_bind(f, compar);
     return (long long)(intptr_t)f;
 }
 
 static long long wrap_fts_read(long long ftsp) {
+    FTS *f = (FTS *)(intptr_t)ftsp;
+    long long compar = fts_handle_compar(f);
     VirtualMachine *vm = current_vm();
-    if (!vm || !vm->gil_initialized)
-        return (long long)(intptr_t)fts_read((FTS *)(intptr_t)ftsp);
-    ExecState state;
-    posix_save_and_release_gil(vm, &state);
-    FTSENT *e = fts_read((FTS *)(intptr_t)ftsp);
-    posix_acquire_and_restore_gil(vm, &state);
+
+    if (!compar || !vm || !vm->gil_initialized) {
+        // No guest comparator bound: safe to release the GIL for the
+        // blocking directory I/O, same as before.
+        if (!vm || !vm->gil_initialized)
+            return (long long)(intptr_t)fts_read(f);
+        ExecState state;
+        posix_save_and_release_gil(vm, &state);
+        FTSENT *e = fts_read(f);
+        posix_acquire_and_restore_gil(vm, &state);
+        return (long long)(intptr_t)e;
+    }
+
+    // A comparator is bound: keep the GIL held (the trampoline reenters
+    // vm_eval on this thread) and re-arm the thread-local slot, since
+    // wrap_fts_open's own set/restore only covered its own call.
+    long long saved_compar = g_fts_compar_value;
+    int saved_faulted = g_fts_faulted;
+    g_fts_compar_value = compar;
+    g_fts_faulted = 0;
+
+    FTSENT *e = fts_read(f);
+
+    int faulted = g_fts_faulted;
+    g_fts_compar_value = saved_compar;
+    g_fts_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)e;
 }
 
 static long long wrap_fts_children(long long ftsp, long long options) {
+    FTS *f = (FTS *)(intptr_t)ftsp;
+    long long compar = fts_handle_compar(f);
     VirtualMachine *vm = current_vm();
-    if (!vm || !vm->gil_initialized)
-        return (long long)(intptr_t)fts_children((FTS *)(intptr_t)ftsp, (int)options);
-    ExecState state;
-    posix_save_and_release_gil(vm, &state);
-    FTSENT *e = fts_children((FTS *)(intptr_t)ftsp, (int)options);
-    posix_acquire_and_restore_gil(vm, &state);
+
+    if (!compar || !vm || !vm->gil_initialized) {
+        if (!vm || !vm->gil_initialized)
+            return (long long)(intptr_t)fts_children(f, (int)options);
+        ExecState state;
+        posix_save_and_release_gil(vm, &state);
+        FTSENT *e = fts_children(f, (int)options);
+        posix_acquire_and_restore_gil(vm, &state);
+        return (long long)(intptr_t)e;
+    }
+
+    long long saved_compar = g_fts_compar_value;
+    int saved_faulted = g_fts_faulted;
+    g_fts_compar_value = compar;
+    g_fts_faulted = 0;
+
+    FTSENT *e = fts_children(f, (int)options);
+
+    int faulted = g_fts_faulted;
+    g_fts_compar_value = saved_compar;
+    g_fts_faulted = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)e;
 }
 
@@ -1200,7 +1303,9 @@ static long long wrap_fts_set(long long ftsp, long long f, long long instr) {
 }
 
 static long long wrap_fts_close(long long ftsp) {
-    return (long long)fts_close((FTS *)(intptr_t)ftsp);
+    FTS *f = (FTS *)(intptr_t)ftsp;
+    fts_handle_unbind(f);
+    return (long long)fts_close(f);
 }
 
 // search.h (#809) -- tsearch/tfind/tdelete/lfind/lsearch all take the same

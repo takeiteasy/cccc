@@ -2687,12 +2687,22 @@ int test_fts_walk(void) {
 // test_fts_set_skip (#811) -- fts_set(FTS_SKIP) prunes a subtree, and a
 // guest comparator callback through fts_open()'s 3rd argument (routed
 // through the #738 trampoline the same way scandir()'s compar is).
+//
+// The comparator stays bound to the FTS handle for every fts_read() call,
+// not just fts_open() -- libc re-sorts each directory's children as the
+// walk descends into it, so a two-level tree like this test's (dir/skipme,
+// dir/keepme) invokes it at least once more after fts_open() returns. The
+// call counter below catches a regression where the comparator is silently
+// never invoked (the fix for a bug where it wasn't).
+static int fts_compar_calls;
 static int fts_test_compar(const FTSENT **a, const FTSENT **b) {
+    fts_compar_calls++;
     return strcmp((*a)->fts_name, (*b)->fts_name);
 }
 
 [[cccc::test(return = 42)]]
 int test_fts_set_skip(void) {
+    fts_compar_calls = 0;
     char dir[] = "/tmp/cccc_fts_skip_XXXXXX";
     if (!mkdtemp(dir)) return 1;
 
@@ -2732,6 +2742,7 @@ int test_fts_set_skip(void) {
 
     if (saw_inside_skipped) return 6;
     if (!saw_keepme) return 7;
+    if (fts_compar_calls <= 0) return 8; // comparator never invoked (#878)
     return 42;
 }
 
