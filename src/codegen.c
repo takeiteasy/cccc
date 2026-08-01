@@ -71,6 +71,23 @@ static const char *obj_external_name(Obj *obj) {
     return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
 }
 
+// FFI resolution for a call/tail-call *callee*, as opposed to a bare name
+// lookup (find_ffi_function above, still used directly by the reloc/patch
+// passes and by runtime-helper lookups that have no guest Obj at all).
+//
+// A guest program can define its own function whose name happens to match
+// a registered FFI symbol -- e.g. `int printf(const char *fmt, ...) { ... }`
+// wrapping the real one. find_ffi_function's exact-name match doesn't know
+// about the guest's own definition, so calls to that name were compiled as
+// CALLF to the *host* printf instead of CALL to the guest's own body,
+// silently calling the wrong code (#880). A bare declaration (the ordinary
+// libc case -- no body) must still resolve to FFI; only a body wins.
+static int ffi_index_for_callee(VirtualMachine *vm, Obj *callee) {
+    if (callee && callee->body)
+        return -1;
+    return find_ffi_function(vm, obj_external_name(callee));
+}
+
 static Obj *find_global_obj(Obj *prog, const char *name) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->name && strlen(obj->name) == strlen(name) &&
@@ -1402,7 +1419,7 @@ static bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     if (!lhs || lhs->kind != ND_VAR || !lhs->var->is_function)
         return false;
     Obj *callee = lhs->var;
-    if (find_ffi_function(vm, obj_external_name(callee)) >= 0)
+    if (ffi_index_for_callee(vm, callee) >= 0)
         return false; // FFI — goes through CALLF, not CALL
     if (callee->is_nested)
         return false; // needs static link in REG_A0
@@ -5897,7 +5914,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // double_arg_mask)
         int ffi_idx = -1;
         if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
-            ffi_idx = find_ffi_function(vm, obj_external_name(node->lhs->var));
+            ffi_idx = ffi_index_for_callee(vm, node->lhs->var);
         }
 
         if (ffi_idx >= 0) {

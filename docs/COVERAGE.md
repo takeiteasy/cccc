@@ -1067,6 +1067,13 @@ a subset of GCC's `__builtin_*` functions. The standard library headers
 in `include/` are compiled into the binary; the builtins are lowered directly
 in the compiler and do not require any header include or host libc linkage.
 
+A guest program can define its own function under a name that also happens
+to be a registered FFI symbol (e.g. `int isatty(int fd) { ... }`) — a real
+function *definition* always shadows the registered host symbol, and calls
+to that name compile to an ordinary in-VM `CALL` to the guest's own body.
+A bare *declaration* with no body — the ordinary case for calling libc —
+still resolves to the host function through FFI as usual; only a body wins.
+
 ### Built-in Functions
 
 CCCC supports a subset of GCC's `__builtin_*` functions. These are parsed and
