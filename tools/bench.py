@@ -10,14 +10,14 @@ Usage:
     python3 bench.py [options]
 
 Options:
-    --benchmarks DIR    benchmark source directory (default: profile/benchmarks)
+    --benchmarks DIR    benchmark source directory (default: tests/benchmarks)
     --runs N            timed iterations per (bench, config) (default: 3)
     --warmup N          warmup iterations discarded (default: 1)
     --cccc PATH          path to cccc binary (default: ./cccc)
     --gcc PATH          path to gcc binary (default: gcc)
     --include PATH      include flag for cccc (default: -I./include)
     --format FMT        output: table, json, both (default: both)
-    --json-out PATH     json output file (default: profile/benchmarks/results/run-<utc>.json)
+    --json-out PATH     json output file (default: profile/bench-results/run-<utc>.json)
     --filter PATTERN    glob filter on benchmark source names
     --no-correctness    skip the stdout-equality check
     --no-c4             skip the cccc-c4* (precompiled bytecode) configs
@@ -395,7 +395,7 @@ def make_run_id():
 
 def main():
     p = argparse.ArgumentParser(description="Cross-compiler benchmark runner for CCCC")
-    p.add_argument("--benchmarks", default="profile/benchmarks")
+    p.add_argument("--benchmarks", default="tests/benchmarks")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmup", type=int, default=1)
     p.add_argument("--cccc", default="./cccc")
@@ -427,8 +427,9 @@ def main():
     build_dir = root / "build"
     build_dir.mkdir(exist_ok=True)
     args.run_id = make_run_id()
+    results_root = root / "profile" / "bench-results"
     if args.vm_profile:
-        args.vm_profile_dir = bench_dir / "results" / f"vm-profile-{args.run_id}"
+        args.vm_profile_dir = results_root / f"vm-profile-{args.run_id}"
         args.vm_profile_dir.mkdir(parents=True, exist_ok=True)
     else:
         args.vm_profile_dir = None
@@ -540,8 +541,8 @@ def main():
         if args.json_out:
             out_path = Path(args.json_out)
         else:
-            results_dir = bench_dir / "results"
-            results_dir.mkdir(exist_ok=True)
+            results_dir = results_root
+            results_dir.mkdir(parents=True, exist_ok=True)
             out_path = results_dir / f"run-{run_id}.json"
 
         payload = {

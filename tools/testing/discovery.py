@@ -10,12 +10,16 @@ def discover_tests(tests_dir, match=None, suites=False, legacy=False):
     Excludes any path containing a 'failures' or 'host' component. 'host'
     holds host-side harnesses (see tests/host/) that link directly against
     the compiler sources and are built/run via `make host-tests`, not guest
-    sources compiled by cccc through the exit-code-42 protocol.
+    sources compiled by cccc through the exit-code-42 protocol. 'fuzz' holds
+    the fuzz regression corpus (tests/fuzz/corpus/) which tools/fuzz_replay.py
+    compile-only replays; a hand-added test_*.c reproducer there must never
+    be picked up as a normal test.
     Exactly one of match/suites/legacy may be active at a time.
     """
     test_files = sorted(
         f for f in Path(tests_dir).rglob("test_*.c")
         if "failures" not in f.parts and "host" not in f.parts
+        and "fuzz" not in f.parts
     )
     if match:
         test_files = [f for f in test_files if fnmatch.fnmatch(f.name, match)]

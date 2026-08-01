@@ -10,7 +10,7 @@
 /profile/*.massif
 /profile/*.prof
 /profile/*.txt
-/fuzz/corpus
+/fuzz/seeds
 /fuzz/out
 
 # Host-produced build directory: object files, native binaries, and

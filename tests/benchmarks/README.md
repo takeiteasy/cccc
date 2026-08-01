@@ -2,7 +2,7 @@
 
 Cross-compiler micro-benchmarks for comparing **CCCC** (across all `--optimize` levels, in both parse+exec and precompiled-bytecode modes) against **GCC** (across `-O0..-O3`).
 
-Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `tools/bench.py` and the standard `tools/tests.py` smoke-runs them.
+Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `tools/bench.py`; `tools/tests.py` does not run them (see `--perf` in `tools/run_tests.py` for an instrumented pass over these sources).
 
 ## Programs
 

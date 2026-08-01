@@ -108,6 +108,22 @@ static void maybe_add_decimal(Builder *ctx, BuildTarget *t) {
     AddLdFlag(t, bid_a);
 }
 
+// ---- ndbm on Linux (optional; controlled by CCCC_HAS_NDBM env var) --------
+// <ndbm.h> is macOS/BSD-native; on Linux it's reachable only via
+// libgdbm-compat (real header, byte-identical to gdbm-ndbm.h, plus
+// libgdbm_compat.{so,a}) -- an extra dependency for a legacy interface, so
+// this stays opt-in rather than probed-for-and-silently-enabled like
+// maybe_add_curl above. macOS needs no extra lib (ndbm ships in libc).
+
+static void maybe_add_ndbm(Builder *ctx, BuildTarget *t) {
+    const char *v = GetEnv(ctx, "CCCC_HAS_NDBM");
+    if (!v || strcmp(v, "0") == 0)
+        return;
+    AddDefine(t, "CCCC_HAS_NDBM", "1");
+    if (strcmp(BuildHost(ctx), "linux") == 0)
+        AddLib(t, "gdbm_compat");
+}
+
 // ---- Vendored libbacktrace (src/backtrace/) -------------------------------
 // Compiled with distinct flags: no -std=c23 (sources are C99/C11), separate
 // warning suppressions, and platform-specific format reader.
@@ -199,6 +215,7 @@ static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
     probe_libffi(ctx, t);
     maybe_add_curl(ctx, t);
     maybe_add_decimal(ctx, t);
+    maybe_add_ndbm(ctx, t);
     if (bt) {
         AddDefine(t, "CCCC_HAS_BACKTRACE", "1");
         AddInclude(t, "src/backtrace");
@@ -331,8 +348,11 @@ BuildTarget *sanitizers(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *clean(Builder *ctx) {
     DeleteDir(ctx, BuildOutDir(ctx));
-    DeleteDir(ctx, "fuzz/corpus");
+    DeleteDir(ctx, "fuzz/seeds");
     DeleteDir(ctx, "fuzz/out");
+    DeleteDir(ctx, "profile/vm-opcodes");
+    DeleteDir(ctx, "profile/bench-results");
+    DeleteDir(ctx, "profile/perf");
     DeleteFile(ctx, "profile/bench.json");
     DeleteFile(ctx, "profile/cpu.prof");
     DeleteFile(ctx, "profile/mem-leaks.txt");
@@ -541,7 +561,7 @@ BuildTarget *profile_cpu(Builder *ctx) {
     // argv[0]="env" invocation the shell's plain command parser handles fine.
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "mkdir -p profile && env CPUPROFILE=profile/cpu.prof %s -I./include profile/benchmarks/mandelbrot.c || true",
+        "mkdir -p profile && env CPUPROFILE=profile/cpu.prof %s -I./include tests/benchmarks/mandelbrot.c || true",
         TargetOutput(t));
     BuildTarget *step = RunCustom(ctx, "profile-cpu", cmd);
     DependsOn(step, t);
@@ -555,13 +575,13 @@ BuildTarget *profile_mem(Builder *ctx) {
     char cmd[512];
     if (strcmp(BuildHost(ctx), "darwin") == 0)
         snprintf(cmd, sizeof(cmd),
-            "mkdir -p profile && leaks -atExit -- %s -I./include profile/benchmarks/mandelbrot.c "
+            "mkdir -p profile && leaks -atExit -- %s -I./include tests/benchmarks/mandelbrot.c "
             "> profile/mem-leaks.txt 2>&1 || true",
             TargetOutput(cccc));
     else
         snprintf(cmd, sizeof(cmd),
             "mkdir -p profile && valgrind --tool=massif --massif-out-file=profile/mem.massif "
-            "%s -I./include profile/benchmarks/mandelbrot.c || true",
+            "%s -I./include tests/benchmarks/mandelbrot.c || true",
             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "profile-mem", cmd);
     DependsOn(step, cccc);
@@ -929,7 +949,7 @@ BuildTarget *bench(Builder *ctx) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
         "mkdir -p profile && hyperfine --warmup 3 --ignore-failure "
-        "--export-json profile/bench.json '%s -I./include profile/benchmarks/mandelbrot.c'",
+        "--export-json profile/bench.json '%s -I./include tests/benchmarks/mandelbrot.c'",
         TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "bench", cmd);
     DependsOn(step, cccc);

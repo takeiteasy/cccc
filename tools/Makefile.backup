@@ -85,6 +85,18 @@ first (the Intel BID library is never vendored in this repo).)
   endif
 endif
 
+# Optional <ndbm.h> support on Linux, via libgdbm-compat (macOS/BSD ship
+# ndbm natively, no extra lib needed there).
+# Enable with: make CCCC_HAS_NDBM=1 or export CCCC_HAS_NDBM=1
+ifdef CCCC_HAS_NDBM
+  ifneq ($(CCCC_HAS_NDBM),0)
+    CFLAGS += -DCCCC_HAS_NDBM=1
+    ifeq ($(shell uname -s),Linux)
+      LDFLAGS += -lgdbm_compat
+    endif
+  endif
+endif
+
 # Optional readline support for the interactive REPL (-r/--repl) line
 # history/editing. Falls back to plain fgets (no history) when not found.
 LIBREADLINE_CFLAGS := $(shell $(PKG_CONFIG) --cflags readline 2>/dev/null)
@@ -306,7 +318,7 @@ host-tests: $(HOST_TEST_BINS)
 
 # --- Fuzzing targets (moved from fuzz/Makefile) ---
 
-FUZZ_CORPUS := fuzz/corpus
+FUZZ_CORPUS := fuzz/seeds
 FUZZ_OUT := fuzz/out
 FUZZ_CRASHES := $(FUZZ_OUT)/crashes
 FUZZ_TIMEOUT := 1000
@@ -318,6 +330,7 @@ fuzz-all: fuzz-seed fuzz-run
 fuzz-seed:
 	@echo "Seeding corpus from tests/..."
 	@mkdir -p $(FUZZ_CORPUS)
+	@cp tests/fuzz/corpus/*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
 	@cp tests/test_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
 	@cp tests/macros/test_macros_*.c $(FUZZ_CORPUS)/ 2>/dev/null || true
 	@echo "Corpus seeded with $$(ls $(FUZZ_CORPUS) | wc -l) files"
@@ -562,7 +575,7 @@ all: clean $(EXE_OUT) $(LIB_OUT) test
 HAS_HYPERFINE := $(shell which hyperfine 2>/dev/null || echo "")
 HAS_GPROFILER := $(shell test -f /opt/homebrew/lib/libprofiler.dylib && echo "yes" || test -f /usr/lib/libprofiler.so && echo "yes" || echo "")
 
-PROFILE_TEST ?= profile/benchmarks/mandelbrot.c
+PROFILE_TEST ?= tests/benchmarks/mandelbrot.c
 
 bench:
 ifeq ($(HAS_HYPERFINE),)
@@ -626,8 +639,8 @@ endif
 
 clean:
 	@$(RM) -f $(EXE_OUT) $(LIB_OUT) $(SAN_OUT) $(MACOS_X86_64_BINARY) cccc-afl cccc-afl-asan cccc-prof fuzz_harness
-	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif
-	@$(RM) -rf fuzz/corpus fuzz/out
+	@$(RM) -rf profile/*.prof profile/*.txt profile/*.json profile/*.massif profile/vm-opcodes profile/bench-results profile/perf
+	@$(RM) -rf fuzz/seeds fuzz/out
 	@$(RM) -rf build/host_tests
 	@$(RM) -rf $(LIBBACKTRACE_OBJS_DIR) $(LIBBACKTRACE_A)
 

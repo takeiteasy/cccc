@@ -660,8 +660,8 @@ On Linux it uses `valgrind --tool=massif`.
 ### VM Opcode Profiling
 
 ```bash
-./cccc --vm-profile -I./include profile/benchmarks/mandelbrot.c
-./cccc --vm-profile --json -I./include profile/benchmarks/mandelbrot.c > profile/vm-opcodes/mandelbrot.json
+./cccc --vm-profile -I./include tests/benchmarks/mandelbrot.c
+./cccc --vm-profile --json -I./include tests/benchmarks/mandelbrot.c > profile/vm-opcodes/mandelbrot.json
 ./cccc -Y build/fib.c4
 ```
 
@@ -678,13 +678,13 @@ any execution), cccc has two in-process analyses:
 
 ```bash
 # Static n-gram mining on a pre-compiled .c4
-./cccc -o /tmp/sieve.c4 -I./include profile/benchmarks/sieve.c
+./cccc -o /tmp/sieve.c4 -I./include tests/benchmarks/sieve.c
 ./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.c4
 ./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.c4
 ./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.c4
 
 # Same analysis directly on .c source — compiles in-process first
-./cccc --ngrams=2 --ngrams-top=15 -I./include profile/benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
 
 # Use-def fusion candidate detection
 ./cccc --fusion-candidates=50 /tmp/sieve.c4
@@ -711,18 +711,18 @@ profile to surface the strongest fusion candidates.
 
 ```bash
 # Single test
-hyperfine --warmup 3 './cccc -I./include profile/benchmarks/mandelbrot.c'
+hyperfine --warmup 3 './cccc -I./include tests/benchmarks/mandelbrot.c'
 
 # Compare two versions
 hyperfine --warmup 3 \
-  -n 'main' './cccc -I./include profile/benchmarks/mandelbrot.c' \
-  -n 'branch' './cccc-branch -I./include profile/benchmarks/mandelbrot.c'
+  -n 'main' './cccc -I./include tests/benchmarks/mandelbrot.c' \
+  -n 'branch' './cccc-branch -I./include tests/benchmarks/mandelbrot.c'
 ```
 
 #### macOS `sample` (built-in, no install needed)
 
 ```bash
-./cccc -I./include profile/benchmarks/mandelbrot.c &
+./cccc -I./include tests/benchmarks/mandelbrot.c &
 PID=$!
 sample $PID -mayDie -file profile/sample.txt
 ```
@@ -730,7 +730,7 @@ sample $PID -mayDie -file profile/sample.txt
 #### macOS `heap` (built-in heap profiler)
 
 ```bash
-heap -s -guessNonObjects ./cccc -I./include profile/benchmarks/mandelbrot.c
+heap -s -guessNonObjects ./cccc -I./include tests/benchmarks/mandelbrot.c
 ```
 
 #### gperftools CPU profiler
@@ -738,8 +738,8 @@ heap -s -guessNonObjects ./cccc -I./include profile/benchmarks/mandelbrot.c
 ```bash
 make profile-cpu-build
 
-CPUPROFILE=profile/out.prof ./cccc-prof -I./include profile/benchmarks/mandelbrot.c
-CPUPROFILE_FREQUENCY=1000 ./cccc-prof -I./include profile/benchmarks/mandelbrot.c
+CPUPROFILE=profile/out.prof ./cccc-prof -I./include tests/benchmarks/mandelbrot.c
+CPUPROFILE_FREQUENCY=1000 ./cccc-prof -I./include tests/benchmarks/mandelbrot.c
 ```
 
 ### `tools/tests.py` Integration
@@ -768,7 +768,7 @@ All profiling output is written to `profile/`:
 | `profile/cpu.txt` | gperftools | Text CPU profile summary |
 | `profile/mem.massif` | valgrind | Memory allocation timeline (Linux) |
 | `profile/vm-opcodes/*.json` | CCCC VM profiler | Dynamic opcode counts per test |
-| `profile/benchmarks/results/vm-profile-*/` | CCCC VM profiler | Opcode profiles for benchmark configs |
+| `profile/bench-results/vm-profile-*/` | CCCC VM profiler | Opcode profiles for benchmark configs |
 
 ---
 
@@ -839,7 +839,7 @@ Validation run (2026-06-18, `--runs 2`, Homebrew GCC-15): all correctness checks
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
-JSON output is also written to `profile/benchmarks/results/run-<UTC>.json` for tracking over time. Each `cccc-c4*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
+JSON output is also written to `profile/bench-results/run-<UTC>.json` for tracking over time. Each `cccc-c4*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
 
 ### The Benchmark Suite
 
@@ -870,7 +870,7 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tools/t
 8. **Report** as a human-readable table + a JSON file.
 
 With `--vm-profile`, CCCC and CCCC-C4 configs also write dynamic opcode count
-profiles to `profile/benchmarks/results/vm-profile-<UTC>/`.
+profiles to `profile/bench-results/vm-profile-<UTC>/`.
 
 ### What's Being Measured
 
@@ -883,7 +883,7 @@ The `cccc-c4*` columns are the cleanest apples-to-apples comparison with GCC: bo
 ### Bytecode (.c4) Configs
 
 ```bash
-./cccc --optimize=N -o build/fib.c4 profile/benchmarks/fib.c   # compile once
+./cccc --optimize=N -o build/fib.c4 tests/benchmarks/fib.c   # compile once
 ./cccc build/fib.c4                                    # run many times
 ```
 
@@ -902,11 +902,11 @@ The optional `--fma` flag enables true single-rounding FMA. This can yield a few
 - **Use `--filter`** to iterate on a single benchmark.
 - **Use `--no-c4`** when iterating on parse/compile performance.
 - **Use `--vm-profile`** when optimizing bytecode generation or VM dispatch.
-- **Compare JSON files over time** — `profile/benchmarks/results/run-*.json` includes compiler versions, host info, and run settings.
+- **Compare JSON files over time** — `profile/bench-results/run-*.json` includes compiler versions, host info, and run settings.
 
 ### Adding a New Benchmark
 
-1. Drop a `<name>.c` in `profile/benchmarks/`.
+1. Drop a `<name>.c` in `tests/benchmarks/`.
 2. The contract: plain C99/C11, optionally `#define BENCH_N <default>`, print `result: <value>`, `return 42`.
 3. `python3 tools/bench.py --filter "<name>.c"` to verify it runs and matches GCC.
 4. The standard `tools/tests.py` will pick it up automatically (exit code 42).
@@ -947,7 +947,8 @@ This produces `cccc-afl` in the project root, compiled with `afl-clang-fast`.
 make fuzz-seed
 ```
 
-Copies all `tests/test_*.c` files into `fuzz/corpus/` as seed inputs.
+Copies the committed `tests/fuzz/corpus/` regression corpus and all
+`tests/test_*.c` files into `fuzz/seeds/` as seed inputs.
 
 #### 3. Run AFL++
 
@@ -956,7 +957,7 @@ make fuzz-run
 ```
 
 Starts `afl-fuzz` in the background with sensible defaults:
-- Input: `fuzz/corpus/`
+- Input: `fuzz/seeds/`
 - Output: `fuzz/out/`
 - Timeout: 1000ms
 - Memory: none (unlimited)
@@ -974,14 +975,14 @@ make fuzz-minimize   # minimize all crashes with afl-tmin
 
 ```bash
 # Seed corpus from existing tests
-cp tests/test_*.c fuzz/corpus/
+cp tests/test_*.c fuzz/seeds/
 
 # Run AFL++ (single instance)
-afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
+afl-fuzz -i fuzz/seeds -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
 
 # Run with ASan + AFL++ (slower but catches more bugs)
 make afl-asan
-afl-fuzz -i fuzz/corpus -o fuzz/out -m none -t 1000 -- ./cccc-afl-asan -I./include -c @@
+afl-fuzz -i fuzz/seeds -o fuzz/out -m none -t 1000 -- ./cccc-afl-asan -I./include -c @@
 
 # Resume a stopped session
 afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
@@ -1006,7 +1007,7 @@ Build and run it with:
 
 ```bash
 make fuzz_harness
-./fuzz_harness fuzz/corpus/
+./fuzz_harness fuzz/seeds/
 ```
 
 ### Cleanup
