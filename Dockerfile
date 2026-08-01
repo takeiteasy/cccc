@@ -10,6 +10,7 @@ RUN apt-get update \
         llvm \
         file \
         libffi-dev \
+        libgdbm-compat-dev \
         make \
         pkg-config \
         python3 \

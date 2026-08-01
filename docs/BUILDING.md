@@ -866,6 +866,28 @@ is set, the tool name must appear in it or the probe/spawn is refused.
 `"CaptureCommand"` to allow it when an allowlist is active. `cc`/`ar`/`ld`
 invocations by the host runner bypass the allowlist entirely.
 
+### Optional feature knobs (`CCCC_HAS_*` env vars)
+
+A handful of guest-visible features are off by default because they pull in
+an extra host dependency most builds don't need. Each is gated behind its
+own `CCCC_HAS_*` environment variable, read by `build.c`'s
+`maybe_add_curl`/`maybe_add_decimal`/`maybe_add_ndbm` (and mirrored in
+`tools/Makefile.backup` for the escape-hatch Makefile) and republished into
+the guest macro namespace so headers can guard on it (e.g. `__CCCC_HAS_NDBM__`
+in `src/preprocess.c`):
+
+| Env var | Feature | Extra dependency |
+|---|---|---|
+| `CCCC_HAS_CURL=1` | URL-based `#include` directives | `libcurl` |
+| `CCCC_HAS_DECIMAL=1` | `_Decimal32/64/128` via the Intel BID library | never vendored — run `tools/fetch_intel_bid.sh` first |
+| `CCCC_HAS_NDBM=1` | `<ndbm.h>` on Linux (macOS/BSD have it natively, no knob needed there) | `libgdbm-compat-dev` (links `-lgdbm_compat`) |
+| `CCCC_HAS_BACKTRACE=0` | opts *out* of the vendored libbacktrace (nicer crash traces); on by default | — |
+
+```
+CCCC_HAS_NDBM=1 ./cccc --build build.c
+CCCC_HAS_NDBM=1 make -f tools/Makefile.backup cccc
+```
+
 ### Build options (#559)
 
 Zig-style typed build options let users parameterise a build script from the

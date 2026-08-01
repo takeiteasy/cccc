@@ -4717,6 +4717,12 @@ void init_macros(VirtualMachine *vm) {
     if (vm->flags & CCCC_POSIX_EMULATION)
         define_macro(vm, "__CCCC_POSIX_EMULATION__", "1");
 
+    // Republish the host-side CCCC_HAS_NDBM build knob into the guest macro
+    // namespace so include/ndbm.h can guard itself on Linux (#871).
+#ifdef CCCC_HAS_NDBM
+    define_macro(vm, "__CCCC_HAS_NDBM__", "1");
+#endif
+
     define_macro(vm, "__has_include(x)", "0");
     define_macro(vm, "__has_feature(x)", "0");
     define_macro(vm, "__has_extension(x)", "0");

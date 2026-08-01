@@ -4,6 +4,7 @@ packages:
   - make
   - pkg-config
   - libffi-dev
+  - libgdbm-compat-dev
   - python3
 sources:
   - https://git.sr.ht/~takeiteasy/cccc

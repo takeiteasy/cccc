@@ -85,7 +85,8 @@
 #include <aio.h>
 #ifdef __linux__
 #include <mqueue.h>
-#else
+#endif
+#if defined(__APPLE__) || defined(__CCCC_HAS_NDBM__)
 #include <ndbm.h>
 #endif
 
@@ -3128,10 +3129,17 @@ int test_mqueue_sigev_thread(void) {
     if (!reg_intact) return 7; // async delivery corrupted a live register (#877)
     return 42;
 }
-#else
-// ndbm.h (#810) -- macOS/BSD only. dbm_store/dbm_fetch/dbm_delete
+#endif
+
+#if defined(__APPLE__) || defined(__CCCC_HAS_NDBM__)
+// ndbm.h (#810, #871) -- macOS/BSD natively; Linux when built with
+// CCCC_HAS_NDBM=1 against libgdbm-compat. dbm_store/dbm_fetch/dbm_delete
 // exercise the by-value datum static-inline shims declared in
 // include/ndbm.h; dbm_firstkey/dbm_nextkey exercise iteration.
+// DBM_INSERT and DBM_REPLACE are both exercised explicitly (not just one
+// mode) because a GDBM_INSERT/GDBM_REPLACE value mismatch on the Linux
+// path would silently swap insert/replace behaviour -- a wrong-answer
+// bug, not a build failure -- rather than fail loudly.
 [[cccc::test(return = 42)]]
 int test_ndbm_roundtrip(void) {
     char base[] = "/tmp/cccc_ndbm_test_XXXXXX";
@@ -3154,10 +3162,23 @@ int test_ndbm_roundtrip(void) {
     if (dbm_store(db, k1, v1, DBM_INSERT) != 0) { dbm_close(db); return 3; }
     if (dbm_store(db, k2, v2, DBM_INSERT) != 0) { dbm_close(db); return 4; }
 
+    /* DBM_INSERT must not clobber an existing key. */
+    datum v1_dup = { "should-not-land", 16 };
+    if (dbm_store(db, k1, v1_dup, DBM_INSERT) == 0) { dbm_close(db); return 9; }
+
     datum got = dbm_fetch(db, k1);
     if (got.dptr == NULL || got.dsize != 6 || memcmp(got.dptr, "value1", 6) != 0) {
         dbm_close(db);
         return 5;
+    }
+
+    /* DBM_REPLACE must overwrite the existing value. */
+    datum v1_new = { "newval1", 7 };
+    if (dbm_store(db, k1, v1_new, DBM_REPLACE) != 0) { dbm_close(db); return 10; }
+    datum replaced = dbm_fetch(db, k1);
+    if (replaced.dptr == NULL || replaced.dsize != 7 || memcmp(replaced.dptr, "newval1", 7) != 0) {
+        dbm_close(db);
+        return 11;
     }
 
     int count = 0;
