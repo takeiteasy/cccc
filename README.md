@@ -133,7 +133,7 @@ Memory Safety Options (can be combined with safety levels):
 	   --memory-tagging          Temporal memory tagging (track pointer generation tags)
 	-T/--thread-safety           Threading safety diagnostics: race detection, lock-order
 	                             inversion, double-lock, and atomic cast warnings
-	-V/--vm-heap                 VM heap is on by default; pass -V to route malloc/free
+	-V/--no-vm-heap             VM heap is on by default; pass -V to route malloc/free
 	                             through the host allocator instead. Not compatible with
 	                             -1/-2/-3 (or --safety=basic/standard/max), or with
 	                             --bounds-checks/--uaf-detection/--type-checks/
@@ -246,7 +246,7 @@ Example:
 - **JSON reflection output** — dump all function, struct, union, enum, and global definitions
   - `./cccc --ffi-decls -o lib.json lib.h` — useful for generating FFI wrappers
 - **VM heap** — built-in allocator that intercepts `malloc`/`free`/`calloc`/`realloc` at compile time
-  - On by default at every safety level, including `-0`; pass `-V`/`--vm-heap` to opt back into the
+  - On by default at every safety level, including `-0`; pass `-V`/`--no-vm-heap` to opt back into the
     host allocator (only valid at safety level 0 — `-1`/`-2`/`-3` require the VM heap)
 
 ## Building

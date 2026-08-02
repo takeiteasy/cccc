@@ -16,7 +16,7 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 ./cccc --safety=none program.c
 ```
 
-**Enabled features:** None. The VM heap allocator is still active by default at every level (add `-V`/`--vm-heap` to opt back into the host allocator); see [VM Heap Allocator](#vm-heap-allocator) below.
+**Enabled features:** None. The VM heap allocator is still active by default at every level (add `-V`/`--no-vm-heap` to opt back into the host allocator); see [VM Heap Allocator](#vm-heap-allocator) below.
 
 ---
 
@@ -640,7 +640,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   - Zero overhead when disabled
   - Works with all function calls including recursion and indirect calls
   - Automatically skips validation for main() exit (no corresponding CALL)
-- `-V` / `--vm-heap` **VM heap allocator** — see [VM Heap Allocator](#vm-heap-allocator) below;
+- `-V` / `--no-vm-heap` **VM heap allocator** — see [VM Heap Allocator](#vm-heap-allocator) below;
   as of #665 this flag *disables* the VM heap (it's on by default) and cannot be combined with
   `-1`/`-2`/`-3` or `--safety=basic/standard/max`, nor (as of #845) with any individual flag
   whose checks key off the VM heap's `AllocHeader` metadata: `--bounds-checks`,
@@ -657,7 +657,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
 `-0`. This is what makes the heap safety features below usable without any special opt-in in
 normal code.
 
-- `-V` / `--vm-heap` **turns the VM heap off**, reverting all of the above to the host allocator
+- `-V` / `--no-vm-heap` **turns the VM heap off**, reverting all of the above to the host allocator
   via FFI. It is only valid at safety level 0 (default or explicit `-0`) with none of
   `--bounds-checks`/`--uaf-detection`/`--type-checks`/`--heap-canaries`/
   `--memory-leak-detection`/`--memory-tagging`/`--pointer-sanitizer` set; combining it with any

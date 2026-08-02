@@ -6,7 +6,7 @@
 // registered in the VM's FFI table or codegen allocator dispatch, so any
 // call to it failed with "undefined function: reallocarray". Now routes
 // through the overflow-checked REALCA opcode on the default VM-heap path,
-// and through the cccc_reallocarray polyfill on the --vm-heap (-V) host
+// and through the cccc_reallocarray polyfill on the --no-vm-heap (-V) host
 // allocator path.
 
 int main(void) {

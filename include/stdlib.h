@@ -74,7 +74,7 @@ extern void free_aligned_sized(void* ptr, size_t alignment, size_t size);
 extern void* malloc(size_t size) __attribute__((alloc_size(1), malloc));
 extern void* realloc(void* ptr, size_t size) __attribute__((alloc_size(2)));
 // (#699) Routed through the VM heap's overflow-checked REALCA opcode by
-// default, or the cccc_reallocarray polyfill on the -V/--vm-heap host
+// default, or the cccc_reallocarray polyfill on the -V/--no-vm-heap host
 // allocator path -- not a native host FFI call, since not every libc
 // provides reallocarray (e.g. this SDK's macOS does not).
 extern void* reallocarray(void* ptr, size_t nmemb, size_t size) __attribute__((alloc_size(2, 3)));

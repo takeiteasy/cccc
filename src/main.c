@@ -261,7 +261,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --memory-tagging          Temporal memory tagging (track pointer generation tags)\n");
     printf("\t-T/--thread-safety           Threading safety diagnostics: race detection, lock-order\n"
            "\t                             inversion, double-lock, and atomic cast warnings\n");
-    printf("\t-V/--vm-heap                 VM heap is on by default; pass -V to route malloc/free\n");
+    printf("\t-V/--no-vm-heap             VM heap is on by default; pass -V to route malloc/free\n");
     printf("\t                             through the host allocator instead. Not compatible with\n");
     printf("\t                             -1/-2/-3 (or --safety=basic/standard/max), or with\n");
     printf("\t                             --bounds-checks/--uaf-detection/--type-checks/\n");
@@ -706,7 +706,7 @@ int main(int argc, const char *argv[]) {
     uint32_t flags = CCCC_VM_HEAP; // CCCCFlags bitfield for runtime features; VM heap is on by default (#665)
     uint32_t cli_flags_mask = 0; // Bits explicitly set via CLI; wins over #pragma cccc config(...) (#357)
     bool safety_level_gt0 = false; // True if -1/-2/-3 or --safety=basic/standard/max was requested (#665)
-    bool vm_heap_disable_requested = false; // True if -V/--vm-heap was passed (now toggles the heap off) (#665)
+    bool vm_heap_disable_requested = false; // True if -V/--no-vm-heap was passed (now toggles the heap off) (#665)
     bool cli_opt_level_set = false; // True if -O/--optimize was passed on the CLI (#357)
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
@@ -838,7 +838,7 @@ int main(int argc, const char *argv[]) {
         {"random-canaries", no_argument, 0, 1081},
         {"memory-poisoning", no_argument, 0, 1007},
         {"memory-tagging", no_argument, 0, 1045},
-        {"vm-heap", no_argument, 0, 'V'},
+        {"no-vm-heap", no_argument, 0, 'V'},
         {"control-flow-integrity", no_argument, 0, 1111},
         {"no-comptime", no_argument, 0, 'C'},
         {"thread-safety", no_argument, 0, 'T'},
@@ -1115,7 +1115,7 @@ int main(int argc, const char *argv[]) {
             flags |= CCCC_THREAD_SAFETY;
             break;
         case 'V':
-            // VM heap is on by default (#665); -V/--vm-heap now toggles it
+            // VM heap is on by default (#665); -V/--no-vm-heap now toggles it
             // off. Resolved after the option loop since it must see the
             // final safety level regardless of flag order.
             vm_heap_disable_requested = true;
@@ -1579,7 +1579,7 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    // Resolve -V/--vm-heap now that the final safety level is known (#665).
+    // Resolve -V/--no-vm-heap now that the final safety level is known (#665).
     // VM heap is required by -1/-2/-3, so disabling it there is a hard error;
     // at level 0 (default or explicit -0) -V just turns the default off.
     //
@@ -1594,7 +1594,7 @@ int main(int argc, const char *argv[]) {
     if (vm_heap_disable_requested) {
         if (safety_level_gt0) {
             fprintf(stderr,
-                    "error: -V/--vm-heap cannot be combined with -1/-2/-3 "
+                    "error: -V/--no-vm-heap cannot be combined with -1/-2/-3 "
                     "(or --safety=basic/standard/max); those levels require "
                     "the VM heap\n");
             usage(argv[0], 1);
@@ -1603,7 +1603,7 @@ int main(int argc, const char *argv[]) {
             flags & (CCCC_VM_HEAP_TRIGGERS & ~(uint32_t)CCCC_VM_HEAP);
         if (vm_heap_dependent) {
             fprintf(stderr,
-                    "error: -V/--vm-heap cannot be combined with "
+                    "error: -V/--no-vm-heap cannot be combined with "
                     "--bounds-checks/--uaf-detection/--type-checks/"
                     "--heap-canaries/--memory-leak-detection or memory "
                     "tagging; those checks require the VM heap\n");

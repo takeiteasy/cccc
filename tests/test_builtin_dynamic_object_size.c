@@ -10,7 +10,7 @@
 // array, constant-offset chain) the result is computed at compile time
 // (identical to __builtin_object_size).
 //
-// Runtime path, heap: uses the VM heap (-V / --vm-heap) so that malloc/
+// Runtime path, heap: uses the VM heap (-V / --no-vm-heap) so that malloc/
 // calloc/realloc are routed through the MALC/CALC/REALC opcodes which write
 // an AllocHeader before each allocation and record the base address in
 // vm->sorted_allocs.  DYNOBJSZ binary-searches sorted_allocs for the
@@ -45,7 +45,7 @@
 
 // ---------------------------------------------------------------------------
 // Static fold — same as __builtin_object_size for statically-known objects.
-// No --vm-heap needed: these are resolved at compile time.
+// No -V/--no-vm-heap needed: these are resolved at compile time.
 // ---------------------------------------------------------------------------
 
 [[cccc::test]]
@@ -91,7 +91,8 @@ void test_dynobj_static_struct_subobject(void) {
 
 // ---------------------------------------------------------------------------
 // Runtime heap sizing via DYNOBJSZ + AllocHeader.
-// Requires --vm-heap so malloc/calloc/realloc go through MALC/CALC/REALC
+// Requires the VM heap (i.e. no -V/--no-vm-heap) so malloc/calloc/realloc
+// go through MALC/CALC/REALC
 // and write the AllocHeader that DYNOBJSZ reads at runtime.
 // ---------------------------------------------------------------------------
 
@@ -177,7 +178,7 @@ void test_dynobj_heap_reallocarray(void) {
 // through a function parameter resolves via vm->stack_intervals (STKTAG),
 // not the conservative fallback -- the escaping local's extent was tagged
 // with its creating frame's epoch, and that frame is still live here.
-// These do not require --vm-heap: the stack path is independent of it.
+// These do not require the VM heap: the stack path is independent of it.
 // ---------------------------------------------------------------------------
 
 // Helper: function-parameter pointer has no statically-known backing object,
@@ -328,7 +329,7 @@ void test_dynobj_fortify_style_heap(void) {
 // alloca()/VLA buffers (#648 follow-up to #640). Both lower to MALC (a VM
 // heap bump allocation with a full AllocHeader), so they resolve through the
 // same sorted_allocs path as malloc -- no new mechanism, just a regression
-// lock proving it. No --vm-heap needed: MALC always carries an AllocHeader.
+// lock proving it. No -V/--no-vm-heap needed: MALC always carries an AllocHeader.
 // ---------------------------------------------------------------------------
 
 [[cccc::test]]

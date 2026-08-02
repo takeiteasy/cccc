@@ -5191,7 +5191,12 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_MEMORY_TAGGING);
         } else if (strcmp(tok, "--thread-safety") == 0) {
             SET_FLAG(CCCC_THREAD_SAFETY);
-        } else if (strcmp(tok, "-V") == 0 || strcmp(tok, "--vm-heap") == 0) {
+        } else if (strcmp(tok, "-V") == 0 || strcmp(tok, "--require-vm-heap") == 0) {
+            // Test-dialect only: -V/--require-vm-heap means "this test
+            // requires the VM heap" (force it on). Deliberately NOT the CLI's
+            // --no-vm-heap, which means the opposite (disable the heap) --
+            // accepting it here would silently force the heap on for a test
+            // that asked to disable it.
             SET_FLAG(CCCC_VM_HEAP);
         } else if (strcmp(tok, "-C") == 0 || strcmp(tok, "--control-flow-integrity") == 0) {
             SET_FLAG(CCCC_CFI);

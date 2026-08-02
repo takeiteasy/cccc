@@ -126,7 +126,7 @@ serially to keep the wall-clock time down.
 
 Each test runs **twice**: once normally to get the real pass/fail verdict,
 and again under the platform's leak tool to check for unfreed memory. The
-second run adds `-V`/`--vm-heap`, which routes the **guest** program's
+second run adds `-V`/`--no-vm-heap`, which routes the **guest** program's
 malloc/free through the host allocator instead of cccc's internal VM-heap
 arena -- without it, the whole VM heap looks like one allocation to
 `leaks`/valgrind and every test trivially reports zero leaks.
@@ -1435,9 +1435,19 @@ accepted by `cccc` for safety, optimisation, or warnings can be used:
 `--memory-leak-detection`, `--memory-tagging`, `--uninitialized-detection`,
 `--stack-instrumentation`, `--alignment-checks`, `--provenance-tracking`,
 `--invalid-arithmetic`, `--format-string-checks`, `--random-canaries`,
-`--memory-poisoning`, `--thread-safety`, `--dangling-pointers`, `-V`/`--vm-heap`,
+`--memory-poisoning`, `--thread-safety`, `--dangling-pointers`, `-V`/`--require-vm-heap`,
 `-C`/`--control-flow-integrity`, `--fma`, `--ffi-errors-fatal`,
 `--ffi-allow=NAME` (additive; adds to any suite-level allow list)
+
+Note: in the test-dialect, `-V`/`--require-vm-heap` means "this test requires
+the VM heap" and forces it on — the opposite of the CLI's `-V`/`--no-vm-heap`
+(which disables it). The dialect keeps `-V`/`--require-vm-heap` rather than the
+CLI name because per-test flags take precedence over the CLI (see Semantics
+below): a heap-dependent test declared with `-V` keeps the VM heap active for
+itself even when the suite is run under `--leaks`, which injects the CLI `-V`
+to expose guest allocations. The CLI's disable flag is deliberately not
+accepted here — `flags="--no-vm-heap"` would force the heap *on*, the opposite
+of what its name says.
 
 **Safety presets:** `-0`/`-1`/`-2`/`-3` and `--safety=none|basic|standard|max`
 
