@@ -86,6 +86,24 @@ int test_dlfcn_call(void) {
     return 42;
 }
 
+// test_dlfcn_call_inline_cast
+// Ticket V010 (#885): casting a dlsym() result to a function pointer type
+// and calling through it in the SAME expression -- `((ty)dlsym(...))(...)`
+// -- used to crash/mis-execute. The callee expression itself contains a
+// call (dlsym), and codegen evaluated it after already staging the outer
+// call's own arguments into REG_A0-A7, so dlsym's own argument setup
+// clobbered them. Regression-tests the inline-cast-and-call shape directly;
+// test_dlfcn_call above (named-variable form) was unaffected and stayed green.
+[[cccc::test(return = 42)]]
+int test_dlfcn_call_inline_cast(void) {
+    void *handle = dlopen(0, RTLD_NOW);
+    if (!handle) return 1;
+
+    if (((unsigned long (*)(const char *))dlsym(handle, "strlen"))("dynamic") != 7)
+        return 2;
+    return 42;
+}
+
 // test_dlfcn_close_no_symbols
 [[cccc::test(return = 42)]]
 int test_dlfcn_close_no_symbols(void) {

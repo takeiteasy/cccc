@@ -6271,6 +6271,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Calculate how many args go on stack (args 8+)
         int num_stack_args = (nargs > 8) ? (nargs - 8) : 0;
 
+        // #885: for an indirect call whose callee expression itself contains
+        // a call (e.g. `((int(*)(int,int))dlsym(h,"f"))(a,b)`), evaluating
+        // the callee AFTER staging args into REG_A0-A7 (the old order, below)
+        // lets the nested call clobber those registers -- op_ENT3_fn only
+        // saves bp, not the register file, so a temp register isn't safe
+        // across it either. Overflow args (8+) are pushed straight to the
+        // stack, not through REG_A0-A7, so they aren't at risk -- only the
+        // register-arg staging loop below is. Direct calls (node->lhs is a
+        // known Obj*) are unaffected -- they never evaluate node->lhs at all.
+        bool is_indirect_call = !(node->lhs->kind == ND_VAR && node->lhs->var->is_function);
+        bool hoist_callee = is_indirect_call && nargs > 0 && contains_funcall(node->lhs);
+
         // Push overflow args (8+) right-to-left BEFORE register args
         // Stack grows downward, so push last arg first
         // After all pushes and CALL, these will be at bp[+2], bp[+3], etc.
@@ -6313,6 +6325,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_psh3(vm, REG_T0);
                 }
             }
+        }
+
+        // #885: spill the callee now -- after the overflow-arg pushes (which
+        // op_CALLN_fn reads via vm->sp[i-8], so nothing may intervene between
+        // them and CALLN except a strictly-balanced push/pop) but before the
+        // register-arg staging loop the callee's own call would clobber.
+        int hoisted_callee_reg = -1;
+        if (hoist_callee) {
+            hoisted_callee_reg = alloc_temp_reg();
+            gen_expr(vm, node->lhs, hoisted_callee_reg);
+            emit_psh3(vm, hoisted_callee_reg);
+            free_temp_reg(hoisted_callee_reg);
         }
 
         // Check which arguments contain function calls (to handle register
@@ -6521,7 +6545,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // the callee's function type is annotated pure/const and the
             // result is unused.
             int r_fn = alloc_temp_reg();
-            gen_expr(vm, node->lhs, r_fn);
+            if (hoist_callee) {
+                // #885: already evaluated and spilled above, before any arg
+                // register was staged -- pop it back now instead of
+                // re-evaluating (which would run its side effects, e.g. the
+                // dlsym() call, a second time).
+                emit_pop3(vm, r_fn);
+            } else {
+                gen_expr(vm, node->lhs, r_fn);
+            }
             bool skip_dead_calln = vm->compiler.opt_level >= 1 &&
                                    dest_reg == REG_ZERO &&
                                    node->func_ty &&
