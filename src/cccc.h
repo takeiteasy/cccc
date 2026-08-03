@@ -2426,6 +2426,10 @@ typedef struct Compiler {
     // mistakes the fresh File for "the block's file has ended" and silently
     // auto-closes an open #pragma cccc comptime/emit block.
     int      pp_const_expr_depth;
+    HashMap  cli_macro_snapshot;      // #888: -D/-U state snapshotted after CLI processing, before the primary
+                                       // file is preprocessed; re-applied after isolate_comptime_macros strips a
+                                       // same-named source #define that shadowed a -D value in the live table
+    bool     has_cli_macro_snapshot;  // True once cli_macro_snapshot has been initialized
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token
     Node **macro_vararg_nodes;        // Active inline macro variadic AST args

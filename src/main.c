@@ -2082,6 +2082,17 @@ int main(int argc, const char *argv[]) {
     for (int i = 0; i < undefs_count; i++)
         cc_undef(&vm, (char *)undefs[i]);
 
+    // #888: snapshot the macro table here, right after -D/-U processing and
+    // before the primary file is preprocessed. A same-named source #define
+    // later overwrites the -D entry in vm.compiler.macros; isolate_comptime_macros
+    // then strips it (define_tok != NULL) and the -D value is gone from the
+    // comptime pass. This snapshot lets isolate_comptime_macros re-apply any
+    // -D that got shadowed that way. macro_snapshot_backup (macros.c) is
+    // taken later, after the runtime preprocess, so it is already polluted
+    // with source #defines and cannot be reused for this.
+    vm.compiler.cli_macro_snapshot = hashmap_snapshot(&vm.compiler.macros);
+    vm.compiler.has_cli_macro_snapshot = true;
+
     vm.compiler.skip_preprocess = skip_preprocess;
 
     // Inject mode headers before preprocessing so their types/macros are in

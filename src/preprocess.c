@@ -76,6 +76,7 @@ struct Macro {
     macro_handler_fn *handler;
     int use_count;    // number of times this macro has been expanded
     Token *define_tok; // token at the #define site (the macro name token)
+    bool is_shared;    // #888: #define @shared NAME -- survives isolate_comptime_macros
 };
 
 static Token *preprocess2(VirtualMachine *vm, Token *tok);
@@ -1505,6 +1506,19 @@ static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest, Token *to
 }
 
 static void read_macro_definition(VirtualMachine *vm, Token **rest, Token *tok) {
+    // #888: #define @shared NAME ... opts this one macro into visibility
+    // during the isolated comptime preprocessing pass (isolate_comptime_macros
+    // keeps entries with is_shared set even though define_tok != NULL). Any
+    // other route attribute on #define is rejected by the caller before this
+    // function is reached, so the only route possible here is SHARED or NORMAL.
+    bool is_shared = false;
+    Token *route_rest = tok;
+    IncludeRoute route = read_include_route(&route_rest);
+    if (route == INCLUDE_ROUTE_SHARED) {
+        is_shared = true;
+        tok = route_rest;
+    }
+
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "macro name must be an identifier");
     char *name = arena_strndup(vm, tok->loc, tok->len);
@@ -1512,20 +1526,21 @@ static void read_macro_definition(VirtualMachine *vm, Token **rest, Token *tok) 
     Token *name_tok = tok;   // Save for define_tok
     tok = tok->next;
 
+    Macro *m;
     if (!tok->has_space && equal(tok, "(")) {
         // Function-like macro
         char *va_args_name = NULL;
         MacroParam *params =
             read_macro_params(vm, &tok, tok->next, &va_args_name);
 
-        Macro *m =
-            add_macro(vm, name, name_len, false, copy_line(vm, rest, tok), name_tok);
+        m = add_macro(vm, name, name_len, false, copy_line(vm, rest, tok), name_tok);
         m->params = params;
         m->va_args_name = va_args_name;
     } else {
         // Object-like macro
-        add_macro(vm, name, name_len, true, copy_line(vm, rest, tok), name_tok);
+        m = add_macro(vm, name, name_len, true, copy_line(vm, rest, tok), name_tok);
     }
+    m->is_shared = is_shared;
 }
 
 static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest, Token *tok,
@@ -4344,12 +4359,14 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 }
             }
         }
-        // @shared / [[cccc::shared]] is only meaningful on #include; reject it
-        // on other directives before falling into the switch.
+        // @shared / [[cccc::shared]] is only meaningful on #include and
+        // #define (#888 -- per-macro opt-in into the isolated comptime macro
+        // table); reject it on any other directive before falling into the
+        // switch.
         if (directive_route == INCLUDE_ROUTE_SHARED &&
-            pp_directive(tok) != PP_INCLUDE) {
+            pp_directive(tok) != PP_INCLUDE && pp_directive(tok) != PP_DEFINE) {
             error_tok(vm, route_start,
-                      "@shared is only valid on #include");
+                      "@shared is only valid on #include or #define");
         }
 
         // Auto-capture: when not using --emit-only, record directives from the
@@ -5133,29 +5150,52 @@ static int isolate_comptime_macro_iter(char *key, int keylen, void *val,
     (void)key; (void)keylen;
     HashMap *macros = (HashMap *)user_data;
     Macro *m = (Macro *)val;
-    // Keep only command-line and builtin macros (define_tok == NULL).
-    // All source-file #defines — whether from the primary file or any included
-    // header — are removed so they are not visible during the comptime
-    // preprocessing pass. @shared / @comptime header macros are removed here
-    // but re-added when their queued re-includes are re-processed by the
-    // comptime pass. (tickets #552, #627)
-    if (m->define_tok)
+    // Keep only command-line and builtin macros (define_tok == NULL), plus
+    // per-macro #define @shared opt-ins (#888).
+    // All other source-file #defines — whether from the primary file or any
+    // included header — are removed so they are not visible during the
+    // comptime preprocessing pass. @shared / @comptime header macros are
+    // removed here but re-added when their queued re-includes are
+    // re-processed by the comptime pass. (tickets #552, #627)
+    if (m->define_tok && !m->is_shared)
         hashmap_delete2(macros, key, keylen);
+    return 0; // continue
+}
+
+// hashmap_foreach callback used by isolate_comptime_macros to re-apply a -D
+// that a same-named source #define shadowed in the live macro table before
+// the strip pass above ran. (#888)
+static int reapply_cli_define_iter(char *key, int keylen, void *val,
+                                   void *user_data) {
+    HashMap *macros = (HashMap *)user_data;
+    if (!hashmap_get2(macros, key, keylen))
+        hashmap_put2(macros, key, keylen, val);
     return 0; // continue
 }
 
 // Strip all source-file #define macros from vm->compiler.macros so that the
 // comptime preprocessing pass starts with an isolated macro state containing
-// only CCCC builtins and command-line -D defines (define_tok == NULL).
+// only CCCC builtins, command-line -D defines (define_tok == NULL), and
+// #define @shared opt-ins (m->is_shared, #888).
 // Primary-file user #defines are NOT forwarded; users opt macros into the
-// comptime context via @shared includes. @shared / @comptime header macros are
-// removed here but re-added when their queued re-includes are re-preprocessed.
+// comptime context via @shared includes/defines. @shared / @comptime header
+// macros are removed here but re-added when their queued re-includes are
+// re-preprocessed.
 // Safe to call while compile_macro_program holds a snapshot: hashmap_delete2
 // writes a TOMBSTONE and hashmap_foreach iterates by bucket index, matching the
 // pattern in undefine_guard_macro_iter. (ticket #627)
 void isolate_comptime_macros(VirtualMachine *vm) {
     hashmap_foreach(&vm->compiler.macros, isolate_comptime_macro_iter,
                     &vm->compiler.macros);
+    // #888: a same-named source #define may have overwritten a -D value in
+    // vm->compiler.macros before the strip pass above ran (the hashmap holds
+    // one entry per name, and the source #define wins the last write). That
+    // shadowed -D never gets deleted by the loop above -- it's simply gone,
+    // taking the -D value down with it. Re-apply anything from the
+    // pre-preprocessing CLI snapshot that isn't present now.
+    if (vm->compiler.has_cli_macro_snapshot)
+        hashmap_foreach(&vm->compiler.cli_macro_snapshot,
+                        reapply_cli_define_iter, &vm->compiler.macros);
 }
 
 // Entry point function of the preprocessor.

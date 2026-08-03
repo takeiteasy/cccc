@@ -11385,14 +11385,17 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // preprocessing has NOT already substituted it, unlike in the rest of
         // the file. Point at the actual cause and the supported fixes rather
         // than leaving the reporter to conclude preprocessing is broken.
+        // #888: #define @shared NAME is the closest fix to what a reporter in
+        // this situation usually wants (opt the one macro in, in place,
+        // without moving it to a header) -- list it first.
         char *msg;
         if (vm->compiler.in_macro_mode &&
             cc_is_source_define_name(vm, tok->loc, tok->len)) {
             msg = arena_format(vm,
                 "undefined variable '%.*s' (it is a #define from the "
                 "runtime translation unit; #defines are not forwarded into "
-                "comptime bodies -- route the header with @shared, pass -D, "
-                "or use --comptime-include-all)",
+                "comptime bodies -- add @shared to its #define, route the "
+                "header with @shared, pass -D, or use --comptime-include-all)",
                 tok->len, tok->loc);
         } else {
             msg = arena_format(vm, "undefined variable '%.*s'", tok->len,

@@ -105,10 +105,28 @@ headers are not visible to comptime functions unless the include is annotated
 
 The scoping applies to **declarations and types** but **not preprocessor
 `#define` macros**. The comptime pass starts with an isolated macro state
-containing only CCCC builtins and command-line `-D` defines. `#define`s from
-the main source file and any included headers are **not** forwarded to comptime
-function bodies. Use `@shared` routing to make a header's `#define`s visible in
-both the runtime and comptime contexts.
+containing only CCCC builtins, command-line `-D` defines, and any `#define
+@shared` opt-ins (see below). `#define`s from the main source file and any
+included headers are **not** forwarded to comptime function bodies otherwise.
+Use `@shared` routing on the `#include` to make a whole header's `#define`s
+visible in both the runtime and comptime contexts, or `@shared` on the
+`#define` itself to opt in a single macro in place:
+
+```c
+#define @shared AOT_MAX_SCOPE 64   // visible to both the runtime TU and comptime bodies
+#define AOT_OTHER 1                // visible only to the runtime TU
+
+[[cccc::comptime]]
+Node *gen(void) {
+    int floats[AOT_MAX_SCOPE];     // fine
+    return MakeIntLiteral(0);
+}
+```
+
+`[[cccc::shared]]` and `__attribute__((shared))` work identically to `@shared`
+on `#define`, same as they do on `#include`. A `-D` command-line define
+survives even if the source file later `#define`s the same name — the CLI
+value is what the comptime pass sees.
 
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
@@ -138,11 +156,11 @@ are always available regardless of this flag.
 
 Referencing an identifier that's only defined via a runtime-TU `#define`
 inside a comptime function body produces `undefined variable`, with a note
-pointing at `@shared` routing, `-D`, or `--comptime-include-all` — the
-identifier is genuinely invisible at that point, not a bug in ordinary
-preprocessing. A comptime compile that collects any such error aborts
-cleanly (with diagnostics) rather than compiling and executing the
-partial/invalid program.
+pointing at `#define @shared`, `@shared` include routing, `-D`, or
+`--comptime-include-all` — the identifier is genuinely invisible at that
+point, not a bug in ordinary preprocessing. A comptime compile that collects
+any such error aborts cleanly (with diagnostics) rather than compiling and
+executing the partial/invalid program.
 
 ### Macro isolation between comptime functions
 
@@ -164,11 +182,12 @@ void generate(void) {
 ```
 
 `#define`s from `reflection.h`, `#include [[cccc::comptime]]` /
-`#pragma cccc comptime begin...end` blocks, and `@shared`-included headers are
-part of the macro table *before* any comptime function body begins and remain
-visible to every comptime function body. Primary-file `#define`s are **not**
-forwarded; place them in an `@shared` header to opt them into the comptime
-context (see [Include scoping](#include-scoping)).
+`#pragma cccc comptime begin...end` blocks, `@shared`-included headers, and
+individual `#define @shared` macros are part of the macro table *before* any
+comptime function body begins and remain visible to every comptime function
+body. Primary-file `#define`s are **not** forwarded otherwise; place them in
+an `@shared` header, or mark the individual `#define` itself `@shared`, to
+opt them into the comptime context (see [Include scoping](#include-scoping)).
 
 Pass `--allow-comptime-pp-bleed` to restore the pre-isolation behavior, where
 all comptime function bodies share a single macro table and `#define`/`#undef`
@@ -803,6 +822,8 @@ header reaches:
 | `#include <header>` | ✓ | ✗ (default) |
 | `#include @comptime <header>` | ✗ | ✓ |
 | `#include @shared <header>` | ✓ | ✓ |
+| `#define NAME ...` | ✓ | ✗ (default) |
+| `#define @shared NAME ...` | ✓ | ✓ |
 
 All three forms accept the three interchangeable spelling styles:
 
@@ -849,8 +870,10 @@ int main(void) {
 }
 ```
 
-`@shared` is only valid on `#include`. Applying it to other directives (e.g.
-`#define @shared`) is a compile error.
+`@shared` is valid on `#include` and `#define` (see
+[Macro isolation between comptime functions](#macro-isolation-between-comptime-functions)
+for `#define @shared`'s per-macro semantics). Applying it to any other
+directive (e.g. `#undef @shared`, `#ifdef @shared`) is a compile error.
 
 **`--comptime-include-all`** — global flag that restores the legacy behavior:
 forward all `#include`d header declarations **and `#define` macros** to comptime
@@ -861,10 +884,12 @@ escape hatch when porting code that relied on the old all-headers forwarding.
 generated output only (see
 [Emit directives and includes in generated output](#emit-directives-and-includes-in-generated-output)).
 
-> **Note:** `@shared` and `@comptime` on non-include directives (e.g. `#define`,
-> `#ifdef`) continue to work as before — they route the directive to the
-> corresponding preprocessing context. Only `@shared` is new and only for
-> `#include`.
+> **Note:** `@comptime` on non-include directives (e.g. `#define`, `#ifdef`)
+> continues to work as before, routing the directive to the comptime
+> preprocessing context. `@shared` on `#define` is different: it does not
+> route the macro anywhere else — it opts that one macro into the isolated
+> comptime macro table while leaving it in the runtime TU as well. `@shared`
+> on any directive other than `#include` or `#define` is rejected.
 
 ### Mode-conditional directives (`@build` / `@test`)
 
