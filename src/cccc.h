@@ -2418,6 +2418,14 @@ typedef struct Compiler {
     int      macro_scope_stack_len;
     int      macro_scope_stack_cap;
     bool     allow_comptime_pp_bleed; // --allow-comptime-pp-bleed: restore pre-#283 shared macro table across comptime fn bodies
+    // #889: depth counter incremented around the recursive preprocess2() call
+    // eval_const_expr makes to evaluate a #if/#elif expression. defined(...)
+    // and __has_include(...) splice in synthetic tokens minted via a fresh
+    // File* (new_num_token); while evaluating those, comptime/emit block
+    // interception must not run its by-pointer File* comparison, or it
+    // mistakes the fresh File for "the block's file has ended" and silently
+    // auto-closes an open #pragma cccc comptime/emit block.
+    int      pp_const_expr_depth;
     int macro_recursion_limit;       // 0 = unlimited, default = 256
     Token *macro_call_tok;           // Active macro invocation token
     Node **macro_vararg_nodes;        // Active inline macro variadic AST args

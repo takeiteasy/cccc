@@ -1370,7 +1370,16 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     Token *expr = read_const_expr(vm, rest, tok->next);
+    // #889: defined(...) / __has_include(...) inside expr are rewritten by
+    // read_const_expr into synthetic tokens minted via new_num_token(), which
+    // allocates a fresh File*. The recursive preprocess2() below must not let
+    // comptime/emit block interception see those tokens as "the block's file
+    // changed" and auto-close an open block -- bump the depth counter so
+    // those interception sites stand down for the duration of this call.
+    int saved_depth = vm->compiler.pp_const_expr_depth;
+    vm->compiler.pp_const_expr_depth = saved_depth + 1;
     expr = preprocess2(vm, expr);
+    vm->compiler.pp_const_expr_depth = saved_depth;
 
     if (expr->kind == TK_EOF)
         error_tok(vm, start, "no expression");
@@ -4195,7 +4204,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 
             // Inside a #pragma cccc comptime begin...end block: intercept
             // unannotated function definitions and variable declarations.
-            ComptimeCtxEntry *comptime_top = ctx_top(vm);
+            // #889: skip this entirely while evaluating a #if/#elif constant
+            // expression (pp_const_expr_depth > 0) -- defined(...)/
+            // __has_include(...) mint synthetic tokens under a fresh File*,
+            // which must not be mistaken by the check below for "the file
+            // that opened the block has ended".
+            ComptimeCtxEntry *comptime_top =
+                vm->compiler.pp_const_expr_depth ? NULL : ctx_top(vm);
             if (comptime_top && comptime_top->type == CTX_COMPTIME) {
                 // Auto-close if the file that opened the block has ended.
                 if (tok->file != comptime_top->file) {
