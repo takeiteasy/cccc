@@ -156,6 +156,38 @@ Pass `--allow-comptime-pp-bleed` to restore the pre-isolation behavior, where
 all comptime function bodies share a single macro table and `#define`/`#undef`
 in one body affects the others.
 
+### Calling one comptime function from another
+
+Because all `[[cccc::comptime]]` function bodies are assembled into a single
+compilation unit (see above), a prototype for every comptime function is
+emitted before any definition. This means mutual recursion between comptime
+helper functions works without a forward declaration:
+
+```c
+[[cccc::comptime]]
+int is_even(int n) {
+    if (n == 0) return 1;
+    return is_odd(n - 1);   // is_odd's prototype is already in scope
+}
+
+[[cccc::comptime]]
+int is_odd(int n) {
+    if (n == 0) return 0;
+    return is_even(n - 1);
+}
+```
+
+A bodyless `[[cccc::comptime]] ret name(params);` declaration is therefore
+unnecessary and is treated as a no-op. If the name is never captured with an
+attributed definition elsewhere in the file, that's flagged as a compile
+error (`comptime function 'name' declared but never defined`) rather than
+silently compiling nothing.
+
+This is unrelated to forward-declaring *generated runtime* functions the
+macro program emits into the output program (`PublishNode` / `MakeFunction`
+promoting an existing forward declaration) — see
+[Function Generation](#function-generation).
+
 ### Custom Attributes
 
 Comptime macros can register declaration attributes for file-scope declarations:

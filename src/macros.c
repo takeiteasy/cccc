@@ -1252,10 +1252,38 @@ static bool compile_macro_program(VirtualMachine *vm) {
     return true;
 }
 
+// #884: a bodyless `[[cccc::comptime]] ret name(params);` declaration is a
+// no-op (forward declarations are unnecessary -- compile_all_macros already
+// emits prototypes for every captured function before any definition). But
+// if the name was never captured with an attributed definition, that's a
+// mistake worth flagging rather than silently compiling nothing. Called from
+// both compile_all_macros (the lazy, call-triggered path) and the top of
+// cc_execute_inline_macros (which also runs when macro_fns is empty --
+// otherwise a declared-but-unused, entirely bodyless comptime function would
+// never be checked at all).
+static void check_comptime_decls_defined(VirtualMachine *vm) {
+    for (ComptimeDeclRecord *d = vm->compiler.comptime_decls; d; d = d->next) {
+        bool defined = false;
+        for (MacroFn *p = vm->compiler.macro_fns; p; p = p->next) {
+            if (p->is_macro_entry && strcmp(p->name, d->name) == 0) {
+                defined = true;
+                break;
+            }
+        }
+        if (!defined)
+            error_tok(vm, d->tok,
+                      "comptime function '%s' declared but never defined",
+                      d->name);
+    }
+}
+
 // Compile all macro functions and comptime helpers (idempotent)
 static void compile_all_macros(VirtualMachine *vm) {
     if (vm->compiler.no_comptime)
         return;
+
+    check_comptime_decls_defined(vm);
+
     if (!vm->compiler.macro_fns)
         return;
     // Guard: compile once even if called from both the pre-parse inline phase
@@ -2249,6 +2277,9 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
 void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int count) {
     if (!vm)
         return;
+
+    if (!vm->compiler.no_comptime)
+        check_comptime_decls_defined(vm);
 
     if (!vm->compiler.macro_fns) {
         for (int fi = 0; fi < count; fi++)

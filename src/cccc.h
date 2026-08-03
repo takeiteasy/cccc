@@ -1642,6 +1642,20 @@ struct BuildFnRecord {
     BuildFnRecord *next;
 };
 
+// A bodyless `[[cccc::comptime]] ret name(params);` declaration (#884).
+// Forward declarations are unnecessary -- compile_macro_program already
+// emits prototypes for every captured comptime function before any
+// definition, so mutual recursion between comptime functions works without
+// one. The declaration itself is a no-op; this only exists so that a name
+// declared but never captured with an attributed definition can be
+// diagnosed instead of silently ignored.
+typedef struct ComptimeDeclRecord ComptimeDeclRecord;
+struct ComptimeDeclRecord {
+    char *name;
+    Token *tok;              // Declaration site, for the "never defined" error
+    ComptimeDeclRecord *next;
+};
+
 // A factory function registered via [[cccc::build_target]] (or with kind=native).
 // When --build-target=NAME matches a factory name the runner calls the factory
 // directly (skipping build_main) and builds its returned target.
@@ -2370,6 +2384,7 @@ typedef struct Compiler {
 
     // Compile-time macro state
     MacroFn *macro_fns;              // Linked list of captured macro functions
+    ComptimeDeclRecord *comptime_decls; // Linked list of bodyless [[cccc::comptime]] decls (#884)
     ComptimeVar *comptime_vars;      // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns;          // Linked list of [[cccc::test]] function names
     TestSetupRecord *test_setups;    // Linked list of [[cccc::test_setup/teardown]] records

@@ -80,6 +80,7 @@ struct Macro {
 
 static Token *preprocess2(VirtualMachine *vm, Token *tok);
 static Macro *find_macro(VirtualMachine *vm, Token *tok);
+static bool probe_function_definition(Token *tok);
 static bool file_exists(char *path);
 static char *format_relative_path(VirtualMachine *vm, char *base_file, char *filename);
 static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
@@ -167,6 +168,13 @@ static void macro_scope_push(VirtualMachine *vm, HashMap snap) {
 }
 
 static HashMap macro_scope_pop(VirtualMachine *vm) {
+    // Underflow means a TK_MACRO_SCOPE_PUSH/POP pair went unbalanced
+    // upstream -- e.g. #884's extraction-swallow bug jumped a later
+    // extraction pass over a PUSH marker. That bug is fixed at the source,
+    // but this guard turns any future imbalance into a diagnostic instead
+    // of a NULL-based read.
+    if (vm->compiler.macro_scope_stack_len == 0)
+        error("internal error: unbalanced compile-time macro scope stack");
     return vm->compiler.macro_scope_stack[--vm->compiler.macro_scope_stack_len];
 }
 
@@ -475,8 +483,11 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
         tok = tok->next;
     }
 
-    // Now find the opening brace
-    while (tok && tok->kind != TK_EOF && !equal(tok, "{"))
+    // Now find the opening brace. Stop at a bodyless declaration's ";"
+    // instead of walking past it into whatever follows (#884) -- without
+    // this, a forward declaration silently swallows the next top-level
+    // construct into this function's captured body.
+    while (tok && tok->kind != TK_EOF && !equal(tok, "{") && !equal(tok, ";"))
         tok = tok->next;
 
     if (!equal(tok, "{")) {
@@ -3209,6 +3220,7 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
     // Probe what follows attr_end: function or variable?
     // Heuristic: scan (respecting brace depth) for "ident (" before ";" or "=".
     bool looks_like_function = false;
+    Token *comptime_decl_name_tok = NULL;
     {
         Token *probe = attr_end;
         int brace_depth = 0;
@@ -3220,12 +3232,22 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                 if (probe->kind == TK_IDENT && probe->next &&
                     equal(probe->next, "(")) {
                     looks_like_function = true;
+                    comptime_decl_name_tok = probe;
                     break;
                 }
             }
             probe = probe->next;
         }
     }
+    // #884: a bodyless declaration (`ident (...)` reaches ";" with no "{")
+    // must not be routed into extract_macro_function -- that scans forward
+    // past the ";" hunting for a "{", swallowing whatever follows and
+    // corrupting downstream prototype extraction (the original crash). It's
+    // a no-op: compile_all_macros already emits prototypes for every
+    // captured comptime function before any definition, so a forward
+    // declaration is never needed for comptime-to-comptime calls.
+    bool is_bodyless_comptime_decl = is_comptime_kind && looks_like_function &&
+                                     !probe_function_definition(attr_end);
 
     // [[cccc::test]] / __attribute__((test)): record the function name, strip
     // the attribute, keep the function definition in the normal compilation stream.
@@ -3387,6 +3409,31 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
 
     // Route to function or variable extraction.
     if (emit_scan) return false;  // comptime/macro extraction invalid inside emit blocks
+
+    if (is_bodyless_comptime_decl) {
+        // Record the name (for the never-defined check in compile_all_macros)
+        // and drop the ENTIRE declaration, attribute included -- comptime
+        // functions are never real Objs/symbols, so a leftover plain
+        // prototype serves no purpose in the token stream. Worse, leaving
+        // it in place is actively unsafe: scan_and_execute_global_calls'
+        // "file-scope macro call" heuristic matches purely on token shape
+        // (IDENT "(" ... ")" ";") and cannot tell a parameter list from call
+        // arguments, so `int is_odd(int n);` would be misread as a
+        // zero-context call to the comptime function `is_odd` and executed.
+        if (comptime_decl_name_tok) {
+            ComptimeDeclRecord *rec = calloc(1, sizeof(ComptimeDeclRecord));
+            rec->name = strndup(comptime_decl_name_tok->loc, comptime_decl_name_tok->len);
+            rec->tok  = comptime_decl_name_tok;
+            rec->next = vm->compiler.comptime_decls;
+            vm->compiler.comptime_decls = rec;
+        }
+        Token *decl_end = attr_end;
+        while (decl_end && decl_end->kind != TK_EOF && !equal(decl_end, ";"))
+            decl_end = decl_end->next;
+        *tok_ptr = decl_end && decl_end->kind != TK_EOF ? decl_end->next : decl_end;
+        return true;
+    }
+
     if (looks_like_function) {
         *tok_ptr = extract_macro_function(vm, attr_end, true,
                                           attribute_name);
