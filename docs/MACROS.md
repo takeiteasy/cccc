@@ -115,6 +115,16 @@ used by global-generation macros, but it does not compile arbitrary non-macro
 program definitions into the macro VM. Function bodies, file-scope macro calls,
 and initialized global definitions are skipped.
 
+A `typedef` (or a struct/union/enum type definition) written directly inside a
+`#pragma cccc comptime begin/end` region, or marked with `[[cccc::comptime]]`
+itself, is passed through into the main source file's token stream unchanged —
+it declares a type, not a comptime function or variable, so it needs no
+comptime execution at all. It reaches the macro program the same way any other
+main-file typedef does: via the declaration snapshot above, which means it
+inherits that snapshot's main-source-file filter — a typedef written this way
+inside an `#include`d header is still invisible to comptime bodies unless the
+include is `@shared` or `--comptime-include-all` is passed.
+
 Note: global variable definitions whose scalar initializer expression contains a
 `Node *`-returning comptime call (see
 [Comptime functions in global initializers](#comptime-functions-in-global-initializers))
@@ -125,6 +135,14 @@ Pass `--comptime-include-all` to restore the legacy behavior and forward all
 `#include`d header declarations **and `#define` macros** to the comptime pass.
 `#include [[cccc::comptime]]` and `#pragma cccc comptime begin...end` blocks
 are always available regardless of this flag.
+
+Referencing an identifier that's only defined via a runtime-TU `#define`
+inside a comptime function body produces `undefined variable`, with a note
+pointing at `@shared` routing, `-D`, or `--comptime-include-all` — the
+identifier is genuinely invisible at that point, not a bug in ordinary
+preprocessing. A comptime compile that collects any such error aborts
+cleanly (with diagnostics) rather than compiling and executing the
+partial/invalid program.
 
 ### Macro isolation between comptime functions
 
@@ -970,6 +988,12 @@ array members are not accessible this way.
 - Pointer and string variables produce a compile-time error at this point;
   use `MakeStringLiteral` inside the macro body instead.
 - Comptime variables are **not emitted** into the output binary.
+- This restriction applies only to comptime *variables* — an actual value that
+  needs its own relocation in the macro program's data segment. A `typedef`
+  marked `[[cccc::comptime]]` (or written inside a `#pragma cccc comptime
+  begin/end` region) declares no object at all, including a function-pointer
+  typedef, and is unaffected — see
+  [Pre-parse macro declaration context](#pre-parse-macro-declaration-context).
 
 ### constexpr variables
 

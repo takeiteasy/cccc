@@ -1070,6 +1070,34 @@ static int undefine_guard_macro_iter(char *key, int keylen, void *val,
 
 // Compile all macro functions and comptime helpers as one compile-time program so
 // macro bytecode can make ordinary function calls across the whole set.
+// Shared failure-path teardown for compile_macro_program: unwinds every bit
+// of compiler state it pushed before attempting to compile the macro
+// program, so a failed comptime compile leaves the runtime TU exactly as it
+// would have been without the attempt. Used by all three of that function's
+// abort points (parse-returned-NULL, a captured MacroFn missing from the
+// parsed program, and -- #887 -- the comptime program having collected
+// parse/type errors via error_tok_recover despite parse() still returning a
+// non-NULL tree).
+static void restore_macro_compile_state(VirtualMachine *vm, Obj *saved_locals,
+                                        Obj *saved_current_fn, Obj *saved_globals,
+                                        Scope *saved_scope, int saved_num_call_patches,
+                                        int saved_num_func_addr_patches,
+                                        HashMap saved_macros) {
+    vm->compiler.locals = saved_locals;
+    vm->compiler.current_fn = saved_current_fn;
+    vm->compiler.globals = saved_globals;
+    for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
+        hashmap_deinit_borrowed(&sc->var_map);
+        hashmap_deinit_borrowed(&sc->tag_map);
+    }
+    vm->compiler.scope = saved_scope;
+    vm->compiler.in_macro_mode = false;
+    vm->compiler.num_call_patches = saved_num_call_patches;
+    vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+    vm->compiler.has_macro_snapshot = false;
+    hashmap_restore(&vm->compiler.macros, saved_macros);
+}
+
 static bool compile_macro_program(VirtualMachine *vm) {
     int count = 0;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
@@ -1150,6 +1178,13 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.include_guards = (HashMap){};
     hashmap_foreach(&vm->compiler.guard_macros, undefine_guard_macro_iter,
                     &vm->compiler.macros);
+    // #887: any error collected while preprocessing/parsing the comptime
+    // program (e.g. an undefined identifier caught by error_tok_recover)
+    // must abort the comptime compile rather than let a program built from
+    // ty_error placeholder nodes reach gen_function and execute as garbage
+    // bytecode. collect_errors defaults on (src/main.c), so parse() can
+    // return a non-NULL tree that still isn't safe to compile.
+    int saved_error_count = vm->error_count;
     tokens = preprocess(vm, tokens);
     // Restore include guard state; the comptime-specific maps own their key copies
     // (via hashmap_put) so must be freed with hashmap_deinit, not _borrowed.
@@ -1160,20 +1195,11 @@ static bool compile_macro_program(VirtualMachine *vm) {
     Obj *macro_prog = parse(vm, tokens);
     vm->compiler.warnings = saved_warnings;
     vm->compiler.warning_errors = saved_werror;
-    if (!macro_prog) {
-        vm->compiler.locals = saved_locals;
-        vm->compiler.current_fn = saved_current_fn;
-        vm->compiler.globals = saved_globals;
-        for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
-            hashmap_deinit_borrowed(&sc->var_map);
-            hashmap_deinit_borrowed(&sc->tag_map);
-        }
-        vm->compiler.scope = saved_scope;
-        vm->compiler.in_macro_mode = false;
-        vm->compiler.num_call_patches = saved_num_call_patches;
-        vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
-        vm->compiler.has_macro_snapshot = false;
-        hashmap_restore(&vm->compiler.macros, saved_macros);
+    if (!macro_prog || vm->error_count > saved_error_count) {
+        restore_macro_compile_state(vm, saved_locals, saved_current_fn,
+                                    saved_globals, saved_scope,
+                                    saved_num_call_patches,
+                                    saved_num_func_addr_patches, saved_macros);
         return false;
     }
     vm->compiler.macro_context_scope = vm->compiler.scope;
@@ -1185,19 +1211,10 @@ static bool compile_macro_program(VirtualMachine *vm) {
                 fprintf(stderr,
                         "Could not find macro function '%s' after parsing\n",
                         macros[i]->name);
-            vm->compiler.locals = saved_locals;
-            vm->compiler.current_fn = saved_current_fn;
-            vm->compiler.globals = saved_globals;
-            for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
-                hashmap_deinit_borrowed(&sc->var_map);
-                hashmap_deinit_borrowed(&sc->tag_map);
-            }
-            vm->compiler.scope = saved_scope;
-            vm->compiler.in_macro_mode = false;
-            vm->compiler.num_call_patches = saved_num_call_patches;
-            vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
-            vm->compiler.has_macro_snapshot = false;
-        hashmap_restore(&vm->compiler.macros, saved_macros);
+            restore_macro_compile_state(vm, saved_locals, saved_current_fn,
+                                        saved_globals, saved_scope,
+                                        saved_num_call_patches,
+                                        saved_num_func_addr_patches, saved_macros);
             return false;
         }
         macros[i]->compiled_fn = func;
@@ -1304,7 +1321,13 @@ static void compile_all_macros(VirtualMachine *vm) {
     // Register reflection API as FFI
     register_reflection_ffi(vm);
 
-    if (!compile_macro_program(vm))
+    // #887: compile_macro_program's own failure paths (including the
+    // collected-error check) already report the real diagnostics via the
+    // normal error-collection mechanism, printed in source order once the
+    // caller reaches cc_print_all_errors. Printing a generic warning here
+    // too puts a content-free banner ahead of (and out of order with) the
+    // actual errors it's describing; keep it debug-only.
+    if (!compile_macro_program(vm) && vm->debug_vm)
         fprintf(stderr, "Warning: Failed to compile macro functions\n");
 }
 

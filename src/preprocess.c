@@ -1431,6 +1431,22 @@ static Macro *find_macro(VirtualMachine *vm, Token *tok) {
     return hashmap_get2(&vm->compiler.macros, tok->loc, tok->len);
 }
 
+// #887: used by parse.c's undefined-variable diagnostic (in_macro_mode only)
+// to tell a genuinely undefined identifier apart from one that's only
+// invisible because isolate_comptime_macros stripped it before the comptime
+// preprocess/parse (source-file #defines are never forwarded into comptime
+// bodies -- see docs/MACROS.md). Looks the name up in the pre-isolation
+// snapshot taken by compile_macro_program (macro_snapshot_backup), which
+// stays populated for the lifetime of that compile. define_tok is non-NULL
+// only for a #define with a real source site (NULL for CCCC builtins and
+// -D command-line defines, which the comptime pass forwards anyway).
+bool cc_is_source_define_name(VirtualMachine *vm, const char *name, int len) {
+    if (!vm->compiler.has_macro_snapshot)
+        return false;
+    Macro *m = hashmap_get2(&vm->compiler.macro_snapshot_backup, name, len);
+    return m && m->define_tok != NULL;
+}
+
 static Macro *add_macro(VirtualMachine *vm, char *name, int name_len, bool is_objlike,
                         Token *body, Token *define_tok) {
     Macro *m = arena_alloc(&vm->compiler.parser_arena, sizeof(Macro));
@@ -3004,6 +3020,18 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
 // If the attribute block contains no macro/comptime marker (e.g. [[nodiscard]],
 // __attribute__((unused))), *tok_ptr is left unchanged and the function returns
 // false so the token flows to the parser as normal.
+// #886: a declaration inside comptime-executed code (whether marked with
+// [[cccc::comptime]] or written inside a `#pragma cccc comptime begin/end`
+// region) that starts with `typedef` is a type declaration, never a comptime
+// function or a comptime variable -- it declares no object, so neither the
+// function/variable dispatch heuristics below nor the ticket #188
+// pointer/string-variable check apply to it. Keywords are still TK_IDENT at
+// this point in preprocessing (convert_pp_tokens hasn't run yet), so this is
+// a plain identifier-text comparison.
+static bool starts_with_typedef(Token *tok) {
+    return tok && tok->kind == TK_IDENT && equal(tok, "typedef");
+}
+
 static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
                                     char **attribute_name) {
     if (!macro_tok || !macro_tok->next || !equal(macro_tok->next, "("))
@@ -3216,6 +3244,19 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
          !is_setup_kind && !is_teardown_kind && !is_build_kind &&
          !is_build_target_kind) || !attr_end)
         return false;
+
+    // #886: [[cccc::comptime]] typedef ...; -- a typedef is neither a
+    // function nor a variable. Drop the attribute and let the typedef
+    // itself flow through unchanged; it needs no comptime handling at all.
+    // Must run before the function/variable probe below: that probe matches
+    // on bare "ident (" token shape, which a function-pointer typedef's
+    // declarator (e.g. `typedef int (*fn_t)(int);`) satisfies by accident
+    // (on the leading `int (`), misrouting it into extract_macro_function
+    // or extract_comptime_var.
+    if (is_comptime_kind && starts_with_typedef(attr_end)) {
+        *tok_ptr = attr_end;
+        return true;
+    }
 
     // Probe what follows attr_end: function or variable?
     // Heuristic: scan (respecting brace depth) for "ident (" before ";" or "=".
@@ -3512,6 +3553,34 @@ static Token *probe_struct_type_def_end(Token *tok) {
     return p->next;                               // token after ';'
 }
 
+// #886: if tok starts a `typedef ...;` declaration, return the token AFTER
+// the terminating ';'. Return NULL otherwise. Used to bulk-pass typedefs
+// through the comptime block handler -- same rationale as
+// probe_struct_type_def_end just above: reprocessing a typedef's individual
+// body tokens one at a time (rather than as one block) lets a later token
+// (e.g. the parameter-list identifier in a function-pointer declarator) get
+// mistaken for the start of its own variable declaration by
+// probe_var_declaration, which is paren-blind. Depth tracks '(' / '[' / '{'
+// so a ';' inside e.g. an array-size expression or a nested declarator
+// doesn't end the scan early.
+static Token *probe_typedef_end(Token *tok) {
+    if (!starts_with_typedef(tok)) return NULL;
+    Token *p = tok->next;
+    int paren = 0, bracket = 0, brace = 0;
+    while (p && p->kind != TK_EOF) {
+        if (equal(p, "("))      paren++;
+        else if (equal(p, ")")) paren--;
+        else if (equal(p, "[")) bracket++;
+        else if (equal(p, "]")) bracket--;
+        else if (equal(p, "{")) brace++;
+        else if (equal(p, "}")) brace--;
+        else if (paren == 0 && bracket == 0 && brace == 0 && equal(p, ";"))
+            return p->next;
+        p = p->next;
+    }
+    return NULL;
+}
+
 // Inside a #pragma cccc comptime begin...end block, try to intercept an
 // unannotated function definition or variable declaration and extract it
 // as an implicit [[cccc::comptime]] entity.  Called from preprocess2 AFTER
@@ -3521,6 +3590,11 @@ static Token *probe_struct_type_def_end(Token *tok) {
 // probe_struct_type_def_end; this function will never see them.
 static bool try_extract_comptime_block_decl(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
+
+    // #886: typedefs are handled by the caller in preprocess2 via
+    // probe_typedef_end, passed through en bloc before this function is
+    // ever reached -- same treatment as struct/union/enum type definitions
+    // via probe_struct_type_def_end. This function should never see one.
 
     if (probe_function_definition(tok)) {
         *tok_ptr = extract_macro_function(vm, tok, true, NULL);
@@ -4131,11 +4205,14 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                  "block closed automatically");
                     ctx_pop(vm);
                 } else {
-                    // struct/union/enum type definitions must pass through
-                    // en-bloc so body tokens don't trigger false extractions.
+                    // struct/union/enum type definitions and typedefs must
+                    // pass through en-bloc so body tokens don't trigger
+                    // false extractions.
                     Token *struct_end = probe_struct_type_def_end(tok);
-                    if (struct_end) {
-                        while (tok != struct_end) {
+                    Token *typedef_end = struct_end ? NULL : probe_typedef_end(tok);
+                    Token *passthrough_end = struct_end ? struct_end : typedef_end;
+                    if (passthrough_end) {
+                        while (tok != passthrough_end) {
                             tok->line_delta = tok->file->line_delta;
                             tok->filename = tok->file->display_name;
                             tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;

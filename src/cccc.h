@@ -3521,6 +3521,7 @@ ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr)
  @param count Number of token streams in the array.
 */
 void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int count);
+bool cc_is_source_define_name(VirtualMachine *vm, const char *name, int len);
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
 

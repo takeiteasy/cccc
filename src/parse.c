@@ -11272,6 +11272,33 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         VarScope *sc = find_var(vm, tok);
         *rest = tok->next;
 
+        // #887 repro 2: compile_macro_program isolates the comptime compile
+        // by nulling vm->compiler.globals, but never resets vm->compiler.scope
+        // -- so if this comptime program is compiled lazily, after cc_parse has
+        // already registered some of the runtime TU's own globals (e.g. a
+        // deferred global-initializer macro call reached via cc_expand_macros,
+        // as opposed to the eager pre-parse path), find_var can still resolve
+        // a real runtime Obj through the surviving scope chain. That Obj's
+        // data-segment offset belongs to the runtime program, not this
+        // isolated macro program, so building a var node from it produces
+        // bytecode that reads/writes through a meaningless offset -- observed
+        // as a host SIGSEGV at runtime, not a clean compile error. Reject any
+        // non-local, non-function global that isn't actually part of this
+        // macro program's own (freshly nulled-and-rebuilt) global list, and
+        // let it fall through to the ordinary undefined-variable path below.
+        // The $symbol reflection path (above, in this same TK_IDENT branch's
+        // sibling handling) is deliberately exempt: reaching into the runtime
+        // Obj table for its address is that path's entire purpose.
+        if (vm->compiler.in_macro_mode && sc && sc->var &&
+            !sc->var->is_local && !sc->var->is_function) {
+            bool in_macro_program = false;
+            for (Obj *o = vm->compiler.globals; o; o = o->next) {
+                if (o == sc->var) { in_macro_program = true; break; }
+            }
+            if (!in_macro_program)
+                sc = NULL;
+        }
+
         // For "static inline" function
         if (sc && sc->var && sc->var->is_function) {
             if (vm->compiler.current_fn)
@@ -11352,18 +11379,35 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_var_node(vm, fn, tok);
         }
 
+        // #887: an identifier that's undefined here only because it's a
+        // #define from the runtime translation unit -- isolate_comptime_macros
+        // strips those before the comptime preprocess/parse, so ordinary
+        // preprocessing has NOT already substituted it, unlike in the rest of
+        // the file. Point at the actual cause and the supported fixes rather
+        // than leaving the reporter to conclude preprocessing is broken.
+        char *msg;
+        if (vm->compiler.in_macro_mode &&
+            cc_is_source_define_name(vm, tok->loc, tok->len)) {
+            msg = arena_format(vm,
+                "undefined variable '%.*s' (it is a #define from the "
+                "runtime translation unit; #defines are not forwarded into "
+                "comptime bodies -- route the header with @shared, pass -D, "
+                "or use --comptime-include-all)",
+                tok->len, tok->loc);
+        } else {
+            msg = arena_format(vm, "undefined variable '%.*s'", tok->len,
+                               tok->loc);
+        }
+
         // Try error recovery if enabled
-        if (vm->collect_errors &&
-            error_tok_recover(vm, tok, "undefined variable '%.*s'", tok->len,
-                              tok->loc)) {
+        if (vm->collect_errors && error_tok_recover(vm, tok, "%s", msg)) {
             // Return error placeholder node instead of aborting
             Node *node = new_var_node(vm, &vm->compiler.error_var, tok);
             node->ty = ty_error;
             return node;
         }
 
-        error_tok(vm, tok, "undefined variable '%.*s'", tok->len,
-                  tok->loc);
+        error_tok(vm, tok, "%s", msg);
     }
 
     if (tok->kind == TK_STR) {
