@@ -1153,10 +1153,14 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->dyn_next_token = 1;
     vm->dyn_error = NULL;
 
-    // Add default system include path for <...> includes.
-    // Track it as the builtin dir so --use-system-headers can skip it when
-    // searching for SDK copies of non-owned standard headers.
-    cc_system_include(vm, "./include");
+    // CCCC's own header directory, used only as an on-disk fallback for
+    // standard headers (search_include_paths tries the embedded src/std.c
+    // table first) and for the stage0 std_stub.c build, where the embedded
+    // table is empty. Deliberately not pushed into include_paths or
+    // system_include_paths: standard headers no longer need a search-path
+    // entry to resolve (see docs/HEADERS.md), and keeping this out of both
+    // lists means a user -I always wins, and -c=native never forwards
+    // CCCC's polyfill headers to the native compiler.
     vm->compiler.builtin_include_dir = "./include";
 
     cc_define(vm, "CCCC_HAS_FFI", "1");

@@ -18,7 +18,7 @@ Run each group independently:
 python3 tools/tests.py --suites     # framework suites only (tests/suites/)
 python3 tools/tests.py --legacy     # legacy single-file tests only (tests/)
 python3 tools/tests.py              # all tests in both directories
-python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + audit_ffi + reflection_ffi_check + audit_reflection_enums)
+python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + header_resolution_smoke + audit_ffi + reflection_ffi_check + audit_reflection_enums)
 
 ./cccc --build build.c --build-target=test_suites   # build + run framework suites
 ./cccc --build build.c --build-target=test_legacy   # build + run legacy tests
@@ -236,6 +236,24 @@ curl -fsSL -o tools/sqlite-amalgamation-3530200.zip \
 
 Phase 2 takes ~9 seconds (9 MB amalgamation). Preprocess-only (phase 1) is
 under 1 second.
+
+### Header resolution smoke-test
+
+The `test` build.c target's `run_tests.py` also runs
+`tools/header_resolution_smoke.py` (also available standalone as
+`./cccc --build build.c --build-target=header_resolution_smoke`, or directly
+via `python3 tools/header_resolution_smoke.py`). Unlike the main suites, it
+invokes the built `cccc` from a *temporary directory outside the repo*, with
+no `-I`/`-i` flags — `tools/tests.py`'s own runner always passes
+`-I./include` and runs from the repo root, so it structurally cannot catch a
+regression in resolving CCCC's own bundled headers from a foreign CWD
+(ticket #891). Cases covered: `<stdbool.h>` and `<stdio.h>` with zero flags;
+a `[[cccc::comptime]]` program (exercising `<implicit-reflection.h>`'s own
+`#include <stdbool.h>`); an owned header under `--no-builtin-includes
+--use-system-headers`; and two `-c=native` cases (a real `#include
+<stdio.h>` that must compile *and* run without a `typedef` collision, and a
+primary file with a sibling quoted project header). See
+[HEADERS.md](HEADERS.md) for the header search order these exercise.
 
 ## Architecture build and test workflows
 

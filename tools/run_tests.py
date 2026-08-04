@@ -11,6 +11,7 @@ Sub-suites:
   repl                — interactive REPL PTY integration (POSIX only, ticket #661)
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
+  header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
@@ -215,6 +216,31 @@ def _run_sqlite_suite(cccc):
         rc = mod.main()
         if rc == 0:
             return "passed (or skipped: zip absent)", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_header_resolution_suite():
+    """Run the header resolution smoke tests (#891).
+
+    Invokes the built cccc from a temp directory with no include flags, so
+    it exercises resolution paths tools/tests.py's own -I./include can't
+    reach. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "header_resolution_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("header_resolution_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
         return "FAILED", False
     except Exception as e:
         return f"FAILED ({e})", False
@@ -483,6 +509,13 @@ def main():
     sqlite_status, ok_sqlite = _run_sqlite_suite(cccc)
     print(f"  {sqlite_status}")
     suite_results["sqlite"] = ok_sqlite
+
+    # --- Header resolution smoke (#891) ---
+    print()
+    print("[ header_resolution_smoke ]")
+    hdr_status, ok_hdr = _run_header_resolution_suite()
+    print(f"  {hdr_status}")
+    suite_results["header_resolution_smoke"] = ok_hdr
 
     # --- FFI registration audit ---
     print()

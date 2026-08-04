@@ -1916,6 +1916,17 @@ static bool is_compiler_owned_header(const char *name) {
     return false;
 }
 
+// Whether CCCC's own copy of a standard header — the embedded src/std.c
+// table (tried by the PP_INCLUDE handler before ever calling this function;
+// see docs/HEADERS.md) or the on-disk builtin_include_dir fallback below —
+// should be considered at all for this header name: always for owned
+// headers (no valid SDK substitute exists for them), and for other known-std
+// headers unless --no-builtin-includes was passed (which asks to fail
+// outright, rather than silently fall back, once the SDK copy is missing).
+static bool wants_builtin_header(VirtualMachine *vm, bool is_std, bool owned) {
+    return owned || (is_std && !vm->compiler.no_builtin_includes);
+}
+
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system) {
     if (filename[0] == '/')
@@ -1930,16 +1941,16 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     //
     // Default mode (use_system_headers=false):
     //   All headers known to CCCC (get_std_header != NULL) are forced to
-    //   resolve from CCCC's ./include rather than any system directory.
+    //   resolve from CCCC's own copies rather than any system directory.
     //
     // --use-system-headers mode:
     //   Headers in is_compiler_owned_header() are still forced to CCCC.
     //   All other std headers prefer system_include_paths first, then fall
-    //   back to ./include (unless --no-builtin-includes is also set).
+    //   back to CCCC's own copy (unless --no-builtin-includes is also set).
     //
     // --no-builtin-includes (requires --use-system-headers):
-    //   Non-owned std headers do NOT fall back to ./include; if missing from
-    //   system paths the include fails with "cannot open file".
+    //   Non-owned std headers do NOT fall back to CCCC's own copy; if
+    //   missing from system paths the include fails with "cannot open file".
     bool is_std = get_std_header(filename) != NULL;
     // `owned` must NOT be gated on is_std (#842): is_std reflects whatever
     // subset of headers happens to be in the embedded get_std_header table
@@ -1950,16 +1961,14 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     // de-protects them under --use-system-headers.
     bool owned  = is_compiler_owned_header(filename);
     bool force_cccc = owned || (!vm->compiler.use_system_headers && is_std);
+    bool try_builtin = wants_builtin_header(vm, is_std, owned);
 
     if (vm->compiler.use_system_headers && is_std && !owned && is_system) {
-        // In system-header mode, try SDK directories before ./include.
-        // Skip CCCC's own builtin include directory — we want genuine SDK
-        // headers here, not our polyfills (those are the fallback below).
-        const char *bdir = vm->compiler.builtin_include_dir;
+        // In system-header mode, try SDK directories before CCCC's own copy.
+        // CCCC's own builtin include dir is never registered in
+        // system_include_paths (see cc_init), so no skip is needed here.
         for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
             const char *dir = vm->compiler.system_include_paths.data[i];
-            if (bdir && !strcmp(dir, bdir))
-                continue; // skip the CCCC builtin dir
             char *path = format("%s/%s", dir, filename);
             if (file_exists(path)) {
                 hashmap_put2(&vm->compiler.include_cache, filename,
@@ -1971,7 +1980,7 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
             free(path);
         }
         // SDK copy not found. If --no-builtin-includes, do not fall back.
-        if (vm->compiler.no_builtin_includes)
+        if (!try_builtin)
             return NULL;
     }
 
@@ -1983,6 +1992,23 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         if (file_exists(path)) {
             hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
             vm->compiler.include_next_idx = i + 1;
+            return path;
+        }
+        free(path);
+    }
+
+    // CCCC's own bundled headers, on disk. This is a fallback only — the
+    // PP_INCLUDE handler tries the embedded src/std.c table first, which
+    // covers standard headers without touching the filesystem at all (see
+    // docs/HEADERS.md). This path still matters for: a stage0 build linked
+    // against src/std_stub.c (embeds nothing, so the embedded lookup always
+    // misses); the three private headers (reflection.h/testing.h/building.h,
+    // via tokenize_private_header) on a stage0 build; and as a safety net if
+    // a build's embedded table is stale or partial.
+    if (try_builtin && vm->compiler.builtin_include_dir) {
+        char *path = format("%s/%s", vm->compiler.builtin_include_dir, filename);
+        if (file_exists(path)) {
+            hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
             return path;
         }
         free(path);
@@ -2202,6 +2228,73 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
     guard_name = detect_include_guard(vm, tok2);
     if (guard_name) {
         hashmap_put(&vm->compiler.include_guards, path, guard_name);
+        hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
+    }
+
+    return append(vm, tok2, tok);
+}
+
+// The embedded table also carries CCCC's three *private* headers under
+// their bare names ("reflection.h", "testing.h", "building.h") -- see
+// tools/generate_stdlib.c -- because that's the exact name
+// tokenize_private_header() looks them up by for internal injection
+// (implicit_reflection_tokens et al). They are deliberately not
+// user-includable: `#include <cccc/reflection.h>` is the public spelling
+// (search_include_paths, disk-only). An ordinary `#include <reflection.h>`
+// must keep failing (see test_builtin_reflection_header_unavailable.c).
+static bool is_private_embedded_header(const char *name) {
+    return !strcmp(name, "reflection.h") || !strcmp(name, "testing.h") ||
+          !strcmp(name, "building.h");
+}
+
+// #891: the embedded src/std.c table's fallback for a standard header not
+// found on disk (foreign CWD with no ./include alongside the cccc binary,
+// or a copied binary with no repo at all). Only tried once search_include_paths()
+// has already come up empty (both the -I search and the on-disk
+// builtin_include_dir fallback), so an on-disk copy always wins when one is
+// reachable. Returns NULL for anything not a known *public* standard header,
+// or when wants_builtin_header() says CCCC's own copy shouldn't be
+// considered here (--no-builtin-includes on a non-owned header).
+static char *try_embedded_std_header(VirtualMachine *vm, char *filename) {
+    if (is_private_embedded_header(filename))
+        return NULL;
+    char *src = get_std_header(filename);
+    if (!src)
+        return NULL;
+    bool owned = is_compiler_owned_header(filename);
+    if (!wants_builtin_header(vm, /*is_std=*/true, owned))
+        return NULL;
+    return src;
+}
+
+// Splice an embedded standard header's tokens into the include stream.
+// Mirrors include_file()'s #pragma once / include-guard bookkeeping, keyed
+// by a synthetic "<embedded>/name" string since there is no real path on
+// disk to key on.
+static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
+                                      char *filename, char *src,
+                                      Token *filename_tok) {
+    char *key = arena_format(vm, "<embedded>/%s", filename);
+
+    if (hashmap_get(&vm->compiler.pragma_once, key))
+        return tok;
+
+    char *guard_name = hashmap_get(&vm->compiler.include_guards, key);
+    if (guard_name && hashmap_get(&vm->compiler.macros, guard_name))
+        return tok;
+
+    Token *tok2 = tokenize_string(vm, key, src);
+    if (!tok2)
+        error_tok(vm, filename_tok, "%s: cannot tokenize embedded header",
+                  filename);
+    if (tok2->file)
+        tok2->file->is_system_header = true;
+
+    register_stdlib_for_header(vm, filename);
+
+    guard_name = detect_include_guard(vm, tok2);
+    if (guard_name) {
+        hashmap_put(&vm->compiler.include_guards, key, guard_name);
         hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
     }
 
@@ -4515,6 +4608,24 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             if (!path && is_dquote) {
                 path = search_include_paths(vm, filename, filename_len, true);
                 found_in_sys = (path != NULL);
+            }
+
+            if (!path) {
+                // Nothing on disk (no -I hit, no CCCC ./include fallback —
+                // e.g. cccc running from a CWD that isn't its own repo, or a
+                // copied binary with no include/ alongside it). Fall back to
+                // the header text embedded in the binary itself (src/std.c),
+                // the same table tokenize_private_header() already uses for
+                // reflection.h et al. This is what makes standard headers
+                // resolve with zero configuration regardless of process CWD
+                // (#891).
+                char *embedded_src = try_embedded_std_header(vm, filename);
+                if (embedded_src) {
+                    tok = include_embedded_header(vm, tok, filename,
+                                                  embedded_src,
+                                                  start->next->next);
+                    break;
+                }
             }
 
             tok = include_file(vm, tok, path ? path : filename,

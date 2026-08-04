@@ -23,7 +23,8 @@
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
 //   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
-//   audit_ffi, audit_reflection_enums, reflection_ffi_gen / _check
+//   header_resolution_smoke, audit_ffi, audit_reflection_enums,
+//   reflection_ffi_gen / _check
 //   macos_x86_64             macOS x86_64 cross-build only (Rosetta needed to run it)
 //   macos_x86_64_smoke       + Rosetta smoke test + the build_cache_arch_smoke guard
 //   macos_x86_64_test        + full test suite (source, --c4, host-signal debugger)
@@ -467,6 +468,25 @@ BuildTarget *sqlite_smoke(Builder *ctx) {
         "&& python3 tools/sqlite_smoke.py",
         TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "sqlite-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *header_resolution_smoke(Builder *ctx) {
+    // tools/header_resolution_smoke.py (#891) hardcodes root/"cccc", same as
+    // sqlite_smoke.py above -- see the comment on sqlite_smoke for why the
+    // built binary is placed via `cp` + atomic `mv` rather than a direct
+    // `cp` onto ./cccc.
+    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+        "cp %s ./cccc.header-resolution-smoke-tmp && "
+        "mv ./cccc.header-resolution-smoke-tmp ./cccc "
+        "&& python3 tools/header_resolution_smoke.py",
+        TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "header-resolution-smoke", cmd);
     DependsOn(step, cccc);
     return step;
 }

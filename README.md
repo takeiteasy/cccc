@@ -22,7 +22,7 @@ Options:
 	-I <path>                Add <path> to include search paths
 	-i/--isystem <path>      Add <path> to system include paths (for non-standard headers)
 	   --use-system-headers  Prefer SDK headers over CCCC polyfills for non-owned standard headers
-	   --no-builtin-includes Do not fall back to CCCC's ./include for non-owned standard headers (requires --use-system-headers)
+	   --no-builtin-includes Do not fall back to CCCC's own bundled headers for non-owned standard headers (requires --use-system-headers)
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
@@ -311,7 +311,7 @@ CCCC_NATIVE_CC=clang ./cccc -c=native -o program program.c
 ./cccc -c=native -I./include -DDEBUG -L./lib -lz -o app app.c
 ```
 
-Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, `--std=`, and generated-output attribute policy from `--attr-target=` are forwarded through the frontend; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`.
+Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, `--std=`, and generated-output attribute policy from `--attr-target=` are forwarded through the frontend; VM-only options (bytecode output, disassembler, `--optimize`, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. Plain runtime `#include <stdio.h>` (and other real system headers) works here — CCCC avoids re-emitting its own polyfill typedefs where they'd collide with the real ones; see [HEADERS.md](docs/HEADERS.md) for the full header resolution search order and CCCC's own bundled headers, which resolve with zero configuration from any directory.
 
 ### Run in the VM
 

@@ -32,6 +32,24 @@
 #endif
 
 
+// Host-side dirname, for the -I forwarded to the native compiler below.
+// Doesn't mutate its argument (unlike POSIX dirname()) and doesn't need
+// <libgen.h> (which is a CCCC-guest-only polyfill, not a host header here).
+static char *host_dirname_dup(const char *path) {
+    if (!path || !*path)
+        return strdup(".");
+    const char *slash = strrchr(path, '/');
+    if (!slash)
+        return strdup(".");
+    if (slash == path)
+        return strdup("/");
+    size_t len = (size_t)(slash - path);
+    char *dir = malloc(len + 1);
+    memcpy(dir, path, len);
+    dir[len] = '\0';
+    return dir;
+}
+
 static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
                               const char **inc_paths, int inc_paths_count,
                               const char **sys_inc_paths,
@@ -97,6 +115,18 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
         snprintf(std_flag, sizeof(std_flag), "-std=%s", std_arg);
         argv_push(&cc_args, std_flag);
     }
+    // #891: cccc auto-captures the primary file's own #include directives
+    // (preprocess.c) and re-emits them verbatim into source_path, which
+    // lives in a temp directory -- so a quoted `#include "local.h"` that
+    // cccc itself resolved relative to the primary file's own directory
+    // would otherwise be unresolvable to the native compiler. Forward that
+    // directory explicitly so re-emitted quoted includes still find it.
+    char *primary_dir = NULL;
+    if (vm->compiler.primary_file && vm->compiler.primary_file->name) {
+        primary_dir = host_dirname_dup(vm->compiler.primary_file->name);
+        argv_push(&cc_args, "-I");
+        argv_push(&cc_args, primary_dir);
+    }
     for (int i = 0; i < inc_paths_count; i++) {
         argv_push(&cc_args, "-I");
         argv_push(&cc_args, inc_paths[i]);
@@ -132,6 +162,7 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     free(source_path);
     free(exe_path);
     free(cc);
+    free(primary_dir);
     return rc;
 }
 
@@ -146,8 +177,9 @@ static void usage(const char *argv0, int exit_code) {
            "non-standard headers)\n");
     printf("\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
            "non-owned standard headers\n");
-    printf("\t   --no-builtin-includes Do not fall back to CCCC's ./include for "
-           "non-owned standard headers (requires --use-system-headers)\n");
+    printf("\t   --no-builtin-includes Do not fall back to CCCC's own bundled "
+           "headers for non-owned standard headers (requires "
+           "--use-system-headers)\n");
     printf("\t   --sysroot <path>      Set SDK root; adds <path>/usr/include to "
            "system include paths and implies --use-system-headers\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
@@ -2047,8 +2079,10 @@ int main(int argc, const char *argv[]) {
     if (!skip_stdlib)
         cc_load_stdlib(&vm);
 
-    // Add CCCC's standard library header directory
-    cc_include(&vm, "./include");
+    // CCCC's standard library header directory is no longer pushed as an
+    // -I entry here: search_include_paths() resolves standard headers from
+    // the embedded src/std.c table first, with vm->compiler.builtin_include_dir
+    // (set in cc_init) as an on-disk fallback. See docs/HEADERS.md.
 
     // Add user-specified include paths (these take precedence via search order)
     for (int i = 0; i < inc_paths_count; i++)

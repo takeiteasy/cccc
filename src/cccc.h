@@ -2119,6 +2119,18 @@ typedef struct TypeNameRecord {
     int name_len;
     Obj *owner_fn;
     bool is_tag;
+    // #891: provenance, used by cc_serialize_program's !generated_only path
+    // (-c=native, -M without -G) to avoid re-emitting a definition the
+    // consumer's own #include already provides -- e.g. `typedef void FILE;`
+    // alongside an auto-captured `#include <stdio.h>` colliding with the
+    // real system stdio.h's `struct __sFILE`. from_include is true when the
+    // declaring token's file is not the primary source file (so it came
+    // from some #include, whether CCCC's own polyfill or a project header).
+    // always_emit overrides from_include for comptime/reflection-synthesized
+    // records (src/reflection.c), which have no primary-file token to check
+    // and must never be silently dropped from generated output.
+    bool from_include;
+    bool always_emit;
     struct TypeNameRecord *next;
 } TypeNameRecord;
 

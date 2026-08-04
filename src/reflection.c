@@ -3298,6 +3298,10 @@ static void reflect_push_tag_scope(VirtualMachine *vm, const char *name, int nam
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
     rec->is_tag = true;
+    // #891: comptime/reflection-synthesized -- no primary-file token to
+    // check provenance against, and it must never be silently dropped from
+    // -c=native / -M output the way a header-sourced type now is.
+    rec->always_emit = true;
     rec->next = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
@@ -3329,6 +3333,8 @@ static void reflect_push_typedef_scope(VirtualMachine *vm, const char *name, int
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
     rec->is_tag = false;
+    // #891: see the matching comment in reflect_push_tag_scope above.
+    rec->always_emit = true;
     rec->next = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }

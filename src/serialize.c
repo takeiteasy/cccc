@@ -145,6 +145,11 @@ typedef struct {
     char *name;
     int name_len;
     Obj *owner_fn;
+    // #891: mirrors TypeNameRecord.from_include/always_emit (cccc.h) -- used
+    // in !generated_only mode (-c=native, -M without -G) to avoid re-emitting
+    // a definition the consumer's own #include already provides.
+    bool from_include;
+    bool always_emit;
 } TypeName;
 
 typedef struct {
@@ -158,6 +163,12 @@ typedef struct {
     int typedefs_cap;
     Obj *current_fn;
     bool generated_only; // skip header typedefs; output is consumed alongside normal headers
+    // #891: --emit-only suppresses auto-capture (preprocess.c), so under it
+    // the primary file's own #include directives are NOT re-emitted -- a
+    // header-sourced typedef/tag has no re-emitted #include to collide with
+    // and must still be serialized. Only skip has_include gates when this
+    // is false.
+    bool emit_strict;
     int anon_local_counter; // names compiler-synthesized temps (e.g. ++/-- desugaring)
 } SerializeContext;
 
@@ -225,7 +236,8 @@ static void type_vec_push(TypeVec *vec, Type *ty) {
 }
 
 static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
-                           char *name, int name_len, Obj *owner_fn) {
+                           char *name, int name_len, Obj *owner_fn,
+                           bool from_include, bool always_emit) {
     if (!ty || !name || name_len <= 0)
         return;
 
@@ -238,6 +250,8 @@ static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
     (*items)[*len].name = name;
     (*items)[*len].name_len = name_len;
     (*items)[*len].owner_fn = owner_fn;
+    (*items)[*len].from_include = from_include;
+    (*items)[*len].always_emit = always_emit;
     (*len)++;
 }
 
@@ -245,11 +259,13 @@ static void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
     for (TypeNameRecord *rec = vm->compiler.type_names; rec; rec = rec->next) {
         if (rec->is_tag)
             type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, rec->ty,
-                           rec->name, rec->name_len, rec->owner_fn);
+                           rec->name, rec->name_len, rec->owner_fn,
+                           rec->from_include, rec->always_emit);
         else
             type_name_push(&ctx->typedefs, &ctx->typedefs_len,
                            &ctx->typedefs_cap, rec->ty, rec->name,
-                           rec->name_len, rec->owner_fn);
+                           rec->name_len, rec->owner_fn,
+                           rec->from_include, rec->always_emit);
     }
 }
 
@@ -1183,6 +1199,17 @@ static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
                                     TypeName *alias) {
     if (!alias || aggregate_typedef_is_definition(ctx, alias))
         return;
+    // #891: in !generated_only mode (-c=native, -M without -G), a
+    // header-sourced typedef would collide with the consumer's own
+    // #include of the same header (auto-capture re-emits that #include
+    // verbatim) -- e.g. `typedef void FILE;` from CCCC's own stdio.h
+    // polyfill alongside a real `#include <stdio.h>`. Comptime/reflection-
+    // synthesized aliases (always_emit) are exempt: they have no header of
+    // their own to collide with, and dropping them would silently delete
+    // macro-generated typedefs from the output.
+    if (!ctx->generated_only && !ctx->emit_strict && alias->from_include &&
+        !alias->always_emit)
+        return;
 
     char name[256];
     int len = alias->name_len;
@@ -1208,8 +1235,21 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // Types with no tag and no typedef alias have nothing to refer back
         // to them by, so they're serialized inline at their point of use
         // (e.g. `struct { int x; } pt;`) instead of as a standalone def.
-        if (!find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
-            !find_anonymous_typedef_name(ctx, ty))
+        TypeName *tag = find_tag_name(ctx, ty);
+        TypeName *alias = find_typedef_name(ctx, ty);
+        if (!tag && !alias && !find_anonymous_typedef_name(ctx, ty))
+            continue;
+        // #891: same reasoning as serialize_typedef_alias -- in
+        // !generated_only mode, a header-sourced struct/enum tag (e.g.
+        // `struct tm` from `#include <time.h>`) would collide with the
+        // consumer's own #include of that header, whether it's named by a
+        // tag (`struct tm`) or only by a typedef alias to an anonymous
+        // struct/union/enum. Usage sites still refer to it by name
+        // (find_tag_name/find_typedef_name above are unaffected); only the
+        // standalone definition is suppressed.
+        TypeName *provenance_source = tag ? tag : alias;
+        if (!ctx->generated_only && !ctx->emit_strict && provenance_source &&
+            provenance_source->from_include && !provenance_source->always_emit)
             continue;
         if (ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, ty);
@@ -1234,7 +1274,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     if (!f || !prog)
         return;
 
-    SerializeContext ctx = {.generated_only = generated_only};
+    SerializeContext ctx = {.generated_only = generated_only,
+                           .emit_strict = vm->compiler.emit_strict != 0};
     collect_scope_names(&ctx, vm);
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)

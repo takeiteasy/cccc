@@ -771,8 +771,12 @@ static VarScope *push_scope(VirtualMachine *vm, char *name, int name_len) {
     return (VarScope *)node;
 }
 
+// decl_tok is the token the name/tag was declared at, used to tell whether
+// this declaration came from an #include (see TypeNameRecord.from_include in
+// cccc.h). NULL is treated as "not from an include" (the synthetic-token
+// callers, if any are added later, should prefer always_emit instead).
 static void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
-                             bool is_tag) {
+                             bool is_tag, Token *decl_tok) {
     if (!ty || !name || name_len <= 0)
         return;
 
@@ -784,6 +788,8 @@ static void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
     rec->is_tag = is_tag;
+    rec->from_include = decl_tok && decl_tok->file &&
+                        decl_tok->file != vm->compiler.primary_file;
     rec->next = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
@@ -1036,7 +1042,7 @@ static void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty) {
     node->next = vm->compiler.scope->tags;
     vm->compiler.scope->tags = node;
     hashmap_put2_borrowed(&vm->compiler.scope->tag_map, tok->loc, tok->len, node);
-    record_type_name(vm, ty, tok->loc, tok->len, true);
+    record_type_name(vm, ty, tok->loc, tok->len, true, tok);
 }
 
 typedef enum {
@@ -11487,7 +11493,7 @@ static Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAtt
         sc->type_def = ty;
         sc->is_deprecated = ty->is_deprecated;
         sc->deprecated_msg = ty->deprecated_msg;
-        record_type_name(vm, ty, name, ty->name->len, false);
+        record_type_name(vm, ty, name, ty->name->len, false, ty->name);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty,
                               NULL, ty->name);
     }
