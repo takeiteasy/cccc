@@ -255,7 +255,7 @@ a `[[cccc::comptime]]` program (exercising `<implicit-reflection.h>`'s own
 primary file with a sibling quoted project header). See
 [HEADERS.md](HEADERS.md) for the header search order these exercise.
 
-### Comptime/native serializer smoke-test
+### Native-backend serializer smoke-test
 
 The `test` build.c target's `run_tests.py` also runs
 `tools/comptime_native_smoke.py` (also available standalone as
@@ -263,16 +263,26 @@ The `test` build.c target's `run_tests.py` also runs
 via `python3 tools/comptime_native_smoke.py`). The serializer that
 reconstructs a runtime translation unit only runs under `-m`/`-G`/
 `-c=native` — the main VM-only source suite never touches it, so a
-serializer regression like ticket #892 (two distinct opaque/incomplete
-struct types incorrectly compared as "the same type" in
-`same_type_or_origin()`, `src/serialize.c`) needs its own smoke test. Cases
-covered: an end-to-end `-c=native` compile+run of the `@shared`
-opaque-handle idiom (`typedef struct Foo Foo;`) alongside a
-`[[cccc::comptime]]` function; a direct assertion that `-m` output keeps
-distinct opaque typedefs distinct rather than collapsing them onto a
-synthesized tag (e.g. reflection.h's `AttrTarget`); the same check for
-typedefs declared directly in the primary file (no `@shared` involved); and
-a check that a successful compile+run emits nothing on stderr.
+serializer regression is invisible there and needs its own smoke test.
+Despite the module's name (kept for history — it started as a
+comptime-specific regression test for #892), it now covers native-backend
+serializer bugs in general. Cases covered:
+
+- an end-to-end `-c=native` compile+run of the `@shared` opaque-handle idiom
+  (`typedef struct Foo Foo;`) alongside a `[[cccc::comptime]]` function;
+- a direct assertion that `-m` output keeps distinct opaque typedefs
+  distinct rather than collapsing them onto a synthesized tag (e.g.
+  reflection.h's `AttrTarget`) — ticket #892's `same_type_or_origin()` bug;
+- the same check for typedefs declared directly in the primary file (no
+  `@shared` involved);
+- a check that a successful compile+run emits nothing on stderr;
+- #896: a plain `#include` of a file that itself routes through
+  `@comptime`/`@shared`/etc. must build and run under `-c=native`;
+- #897: a struct (and, separately, a union) passed *by value* to a function
+  must serialize with its real tag, not the parameter's own declarator name;
+  and a file-scope struct referenced by pointer from two functions plus by
+  value from a third, covering #897's broader "definition emitted inside the
+  wrong function" symptom in the same program.
 
 ## Architecture build and test workflows
 

@@ -8009,8 +8009,26 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
 }
 
 // struct-union-decl = attribute? ident? ("{" struct-members)?
+//
+// is_definition reports whether this call parsed a `{ ... }` member-list
+// (a genuine definition) as opposed to a bare reference/forward-declaration
+// to an existing or not-yet-defined tag. struct_decl/union_decl use it to
+// avoid re-running install_tag_definition on every *reference* to a tag,
+// which used to (a) redundantly recompute member offsets on an already-
+// complete type and (b) call install_tag_definition with `ty->name` -- for
+// the reference branch below `ty` is a *fresh, throwaway* Type whose ->name
+// was never installed anywhere, but for the same-named "install into
+// caller's scope" bug that mattered here, the real hazard is: the returned
+// `ty2` is the canonical, shared Type for the tag, and declarator()
+// overwrites *its* ->name with each declarator's own identifier (the
+// hazard #892's Type.struct_tag field was added to survive). Running
+// install_tag_definition again after such an overwrite used `ty->name`
+// (by then some unrelated parameter/variable name) as the tag, silently
+// re-registering the type under the wrong name in the *referencing
+// function's* scope -- see #897.
 static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
-                               TypeKind kind) {
+                               TypeKind kind, bool *is_definition) {
+    *is_definition = false;
     Type *ty = struct_type(vm);
     ty->kind = kind;
     tok = attribute_list(vm, tok, ty, NULL);
@@ -8051,14 +8069,25 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     struct_members(vm, &tok, tok, ty);
     tok = attribute_list(vm, tok, ty, NULL);
     *rest = c23_attribute_list(vm, tok, ty, NULL);
+    *is_definition = true;
     return ty;
 }
 
 // struct-decl = struct-union-decl
 static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
-    Type *ty = struct_union_decl(vm, rest, tok, TY_STRUCT);
+    bool is_definition = false;
+    Type *ty = struct_union_decl(vm, rest, tok, TY_STRUCT, &is_definition);
 
     if (ty->size < 0)
+        return ty;
+
+    // A bare reference to an already-complete tag (not a `{ ... }`
+    // definition) -- nothing new to install. Re-running the block below
+    // would both needlessly recompute member offsets and re-install the
+    // tag under whatever name `ty->name` (the *shared* canonical type's
+    // name field, mutated by every declarator that has since reused it)
+    // currently happens to hold; see the struct_union_decl comment (#897).
+    if (!is_definition)
         return ty;
 
     // Assign offsets within the struct to members.
@@ -8096,14 +8125,19 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     ty->size = align_to(bits, ty->align * 8) / 8;
-    return install_tag_definition(vm, ty->name, ty, "struct");
+    return install_tag_definition(vm, ty->struct_tag, ty, "struct");
 }
 
 // union-decl = struct-union-decl
 static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
-    Type *ty = struct_union_decl(vm, rest, tok, TY_UNION);
+    bool is_definition = false;
+    Type *ty = struct_union_decl(vm, rest, tok, TY_UNION, &is_definition);
 
     if (ty->size < 0)
+        return ty;
+
+    // See the matching comment in struct_decl above (#897).
+    if (!is_definition)
         return ty;
 
     // If union, we don't have to assign offsets because they
@@ -8116,7 +8150,7 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             ty->size = mem->ty->size;
     }
     ty->size = align_to(ty->size, ty->align);
-    return install_tag_definition(vm, ty->name, ty, "union");
+    return install_tag_definition(vm, ty->struct_tag, ty, "union");
 }
 
 // Find a struct member by name.
