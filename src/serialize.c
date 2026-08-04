@@ -962,6 +962,14 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
     }
 }
 
+// KNOWN ISSUE (#897): a struct/union-by-value parameter's type is
+// mis-serialized here as "struct <param-name>" instead of its real tag --
+// e.g. `int helper(struct Point q)` emits "struct q" in the generated
+// native C, which clang then rejects as an incomplete/undeclared type.
+// Found incidentally while fixing #896; confirmed unrelated to #896's
+// #include/@comptime handling (reproduces in a single file with no
+// #include at all). Not fixed here -- see #897 for the repro and a
+// (unverified) hypothesis about the root cause.
 static void serialize_function_signature(FILE *f, SerializeContext *ctx,
                                          Obj *fn) {
     if (fn->is_static)
@@ -1355,8 +1363,22 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     }
 
     // Prepend preprocessor directives routed to generated output.
-    for (int i = 0; i < vm->compiler.emit_directives.len; i++)
-        fprintf(f, "%s\n", vm->compiler.emit_directives.data[i]);
+    // #896: an auto-captured #include line whose resolved file (directly, or
+    // transitively through its own plain #includes) contains cccc-only
+    // routing syntax (@comptime/@shared/@emit/@build/@test, or the
+    // [[cccc::...]] spellings) is never re-emitted here -- a downstream
+    // system compiler opening that file directly would choke on syntax it
+    // doesn't understand (see run_native_backend, main.c). serialize_typedef_alias
+    // / serialize_type_defs_for_owner compensate by no longer treating that
+    // file's types as from_include, so their definitions are still emitted
+    // below instead of being silently dropped.
+    for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
+        char *line = vm->compiler.emit_directives.data[i];
+        char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
+        if (resolved && cc_file_is_cccc_only(vm, resolved))
+            continue;
+        fprintf(f, "%s\n", line);
+    }
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
 

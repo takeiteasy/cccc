@@ -788,8 +788,15 @@ static void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
     rec->is_tag = is_tag;
+    // #896: a type declared in a file whose contents (directly or
+    // transitively) use cccc-only routing syntax is never treated as
+    // from_include -- serialize.c's native-backend re-emission filter
+    // suppresses the raw #include of such a file, so its own definition
+    // has to be serialized normally instead of relying on that #include
+    // to supply it to the downstream compiler.
     rec->from_include = decl_tok && decl_tok->file &&
-                        decl_tok->file != vm->compiler.primary_file;
+                        decl_tok->file != vm->compiler.primary_file &&
+                        !cc_file_is_cccc_only(vm, decl_tok->file->name);
     rec->next = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
@@ -11403,6 +11410,19 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 "runtime translation unit; #defines are not forwarded into "
                 "comptime bodies -- add @shared to its #define, route the "
                 "header with @shared, pass -D, or use --comptime-include-all)",
+                tok->len, tok->loc);
+        } else if (vm->compiler.in_macro_mode &&
+                   cc_is_dropped_comptime_global(vm, tok->loc, tok->len)) {
+            // #893: an initialized global that build_macro_context_tokens saw
+            // and declined to forward -- either its initializer isn't a
+            // self-contained constant, or it isn't declared in the primary
+            // source file.
+            msg = arena_format(vm,
+                "undefined variable '%.*s' (it is an initialized global in "
+                "the runtime translation unit; only constant-initialized "
+                "globals declared directly in the main source file are "
+                "forwarded to comptime bodies -- mark it [[cccc::comptime]] "
+                "(see #188), or route its value through a #define @shared)",
                 tok->len, tok->loc);
         } else {
             msg = arena_format(vm, "undefined variable '%.*s'", tok->len,

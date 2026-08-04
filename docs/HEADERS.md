@@ -119,6 +119,28 @@ code path: its output is meant to be compiled *alongside* normal headers,
 so it has never re-emitted header-sourced typedefs (see `generated_only` in
 `serialize.c`).
 
+### Included files that use cccc-only routing
+
+A file reached via a plain `#include` can itself use CCCC-only
+preprocessor routing (`#include @comptime <...>`, `@shared`, `[[cccc::...]]`
+spellings — see [Include scoping](MACROS.md#include-scoping) in
+docs/MACROS.md) — none of which means anything to a real system compiler.
+If the primary file's auto-captured `#include` of such a file were
+re-emitted verbatim, the native compiler would open it directly and choke
+(`expected "FILENAME" or <FILENAME>` for `#include @comptime`, for example).
+
+CCCC tracks which files use this routing — directly, or transitively
+through their own plain `#include`s — and drops the auto-captured
+`#include` line for any of them rather than handing broken syntax to the
+downstream compiler. The file's own declarations are still serialized
+normally (not treated as "already supplied by a re-emitted `#include`", the
+way an ordinary header's are), so types and functions it defines remain
+available in the generated native C. Passing such files as separate
+positional arguments to `cccc` (`cccc -c=native -o out lib.c main.c`, no
+`#include` at all) also works and avoids the situation entirely, since each
+file is then preprocessed and merged by CCCC itself before native
+serialization.
+
 ## Private headers
 
 `include/cccc/reflection.h`, `testing.h`, and `building.h` are CCCC's own

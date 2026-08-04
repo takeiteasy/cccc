@@ -284,11 +284,51 @@ static bool comptime_ctx_file_allowed(VirtualMachine *vm, const char *filename) 
     return false;
 }
 
+// #893: true if every token strictly between `eq` (the top-level '=') and
+// `semi` (the terminating ';') is a literal, punctuator, or keyword --
+// never a bare identifier. Tokens here are already macro-expanded (this
+// runs on the same preprocessed streams cc_execute_inline_macros hands to
+// build_combined_macro_tokens), so ordinary object-like #define constants
+// and NULL are already gone by this point; a surviving TK_IDENT means a
+// function call, another global, an enum constant, or a typedef-name cast,
+// none of which are safely resolvable inside the isolated comptime
+// program, so such initializers are rejected rather than guessed at.
+static bool initializer_is_self_contained(Token *eq, Token *semi) {
+    for (Token *t = eq->next; t && t != semi; t = t->next) {
+        if (t->kind == TK_IDENT)
+            return false;
+    }
+    return true;
+}
+
+// #893: the declared name is the last identifier seen before the top-level
+// '=', mirroring extract_comptime_var's heuristic (preprocess.c). Used only
+// to record a name for the "declared but not forwarded" diagnostic hint; a
+// miss here just means that one case falls back to the plain "undefined
+// variable" message.
+static Token *decl_name_before_eq(Token *start, Token *eq) {
+    Token *name = NULL;
+    for (Token *t = start; t && t != eq; t = t->next) {
+        if (t->kind == TK_IDENT)
+            name = t;
+    }
+    return name;
+}
+
 // Capture file-scope declarations that can safely be prepended to the macro
-// bytecode program: typedefs, tag declarations, prototypes, externs, and other
-// declarations without top-level initializers. Function bodies and file-scope
-// macro calls are skipped so ordinary program code is not compiled into the
-// macro VM.
+// bytecode program: typedefs, tag declarations, prototypes, externs, and
+// other declarations without top-level initializers. Function bodies and
+// file-scope macro calls are skipped so ordinary program code is not
+// compiled into the macro VM. #893: a declaration WITH a top-level
+// initializer is also forwarded, but only when it is declared directly in
+// the primary source file (regardless of --comptime-include-all -- routed
+// @shared/comptime includes are already textually spliced into the comptime
+// TU elsewhere in build_combined_macro_tokens, so forwarding a *definition*
+// from an included file here too would redefine it there) and its
+// initializer is self-contained (see initializer_is_self_contained). Every
+// other initialized global is dropped, same as before, but its name is
+// recorded in vm->compiler.comptime_dropped_globals so the undefined-
+// variable diagnostic can give a targeted hint instead of a bare message.
 static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_tokens,
                                          int count) {
     Token head = {};
@@ -316,6 +356,7 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
 
             bool has_top_level_eq = false;
             bool is_function_body = false;
+            Token *eq_tok = NULL;
             int paren_depth = 0;
             int bracket_depth = 0;
             int brace_depth = 0;
@@ -324,8 +365,11 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
             while (tok && tok->kind != TK_EOF) {
                 if (brace_depth == 0 && paren_depth == 0 &&
                     bracket_depth == 0) {
-                    if (equal(tok, "="))
+                    if (equal(tok, "=")) {
                         has_top_level_eq = true;
+                        if (!eq_tok)
+                            eq_tok = tok;
+                    }
 
                     if (equal(tok, "{") && prev_sig &&
                         equal(prev_sig, ")")) {
@@ -343,6 +387,23 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
                                 for (Token *t = start; t != tok->next &&
                                      t && t->kind != TK_EOF; t = t->next)
                                     cur = cur->next = copy_macro_token(vm, t);
+                            }
+                        } else {
+                            bool is_primary = vm->compiler.primary_file &&
+                                start->filename &&
+                                strcmp(start->filename,
+                                       vm->compiler.primary_file->display_name) == 0;
+                            if (is_primary &&
+                                initializer_is_self_contained(eq_tok, tok)) {
+                                for (Token *t = start; t != tok->next &&
+                                     t && t->kind != TK_EOF; t = t->next)
+                                    cur = cur->next = copy_macro_token(vm, t);
+                            } else {
+                                Token *name_tok = decl_name_before_eq(start, eq_tok);
+                                if (name_tok)
+                                    arena_strarray_push(vm,
+                                        &vm->compiler.comptime_dropped_globals,
+                                        arena_strndup(vm, name_tok->loc, name_tok->len));
                             }
                         }
                         tok = tok->next;
@@ -379,6 +440,19 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
         return NULL;
     cur->next = new_macro_eof(vm, cur);
     return head.next;
+}
+
+// #893: used by parse.c's undefined-variable diagnostic (in_macro_mode only)
+// to tell a genuinely undefined identifier apart from a runtime-TU global
+// that build_macro_context_tokens saw and deliberately declined to forward
+// (non-constant initializer, or declared outside the primary file).
+bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len) {
+    for (int i = 0; i < vm->compiler.comptime_dropped_globals.len; i++) {
+        char *g = vm->compiler.comptime_dropped_globals.data[i];
+        if (g && (int)strlen(g) == len && strncmp(g, name, len) == 0)
+            return true;
+    }
+    return false;
 }
 
 // Find the first top-level '=' in a token list (brace-depth 0).

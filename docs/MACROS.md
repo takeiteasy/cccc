@@ -134,8 +134,38 @@ value is what the comptime pass sees.
 
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
-program definitions into the macro VM. Function bodies, file-scope macro calls,
-and initialized global definitions are skipped.
+program definitions into the macro VM. Function bodies and file-scope macro
+calls are always skipped.
+
+An initialized global declared directly in the **main source file** is
+forwarded too, but only when its initializer is a self-contained constant —
+literals, punctuators, `sizeof`/casts, no identifiers (so no function calls,
+no references to other globals, no enum constants, no typedef-name casts):
+
+```c
+static const char *g_name = "widget"; // forwarded -- literal initializer
+static const int g_max = 64;          // forwarded
+
+[[cccc::comptime]]
+Node *gen(void) {
+    int n = (int)strlen(g_name) + g_max; // g_name, g_max both visible
+    return MakeIntLiteral(n);
+}
+```
+
+The comptime pass sees a *snapshot* of the initial value — writes to the
+global inside a comptime body do not reach the runtime translation unit.
+This is deliberately narrower than "any constant global anywhere": a global
+declared in an `#include`d header is never forwarded this way, even with
+`--comptime-include-all`, because routed `@shared`/comptime includes are
+already textually spliced into the comptime translation unit elsewhere, and
+forwarding the same definition again here would redefine it. Everything else
+with a top-level initializer — a non-constant initializer, or any initialized
+global outside the main source file — is dropped exactly as before;
+referencing one from a comptime body produces `undefined variable` with a
+hint naming `[[cccc::comptime]]` variables (see
+[Comptime Variables](#comptime-variables)) or `#define @shared` as the
+supported ways to make the value visible instead.
 
 A `typedef` (or a struct/union/enum type definition) written directly inside a
 `#pragma cccc comptime begin/end` region, or marked with `[[cccc::comptime]]`
@@ -838,6 +868,12 @@ header itself defines a `[[cccc::comptime]]` function or variable — see
 `@comptime`/`@shared` remain necessary for declaration-only headers (e.g.
 `<glob.h>`) that a comptime function needs but does not itself define comptime
 code in.
+
+`-c=native` re-emits a plain `#include`d file's own `#include` line verbatim
+for the downstream system compiler; a file that itself uses this routing
+syntax is never re-emitted that way, since none of it means anything outside
+CCCC — see [`#include`d files that use cccc-only routing](HEADERS.md#included-files-that-use-cccc-only-routing)
+in docs/HEADERS.md.
 
 All three forms accept the three interchangeable spelling styles:
 
@@ -2113,8 +2149,11 @@ The canonical form used in this document and in CCCC examples is `[[cccc::compti
 - Macro code runs at compile time and cannot inspect runtime values.
 - Global-generation macros compile before the main parse. They can see safe
   file-scope declarations from preprocessed includes and source, but arbitrary
-  non-macro function bodies and initialized globals are not compiled into the
-  macro VM.
+  non-macro function bodies are not compiled into the macro VM. A
+  constant-initialized global declared in the main source file is visible
+  (its snapshot value, not a live reference — see
+  [Pre-parse macro declaration context](#pre-parse-macro-declaration-context));
+  any other initialized global is not.
 - Global-generation macros run before the main parse, so generated definitions
   are visible everywhere. Inline macros expand at the call site and follow
   normal C declaration rules for any side-effect definitions they emit.

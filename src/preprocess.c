@@ -330,6 +330,64 @@ static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
     return true;
 }
 
+// #896: mark `filename` as containing cccc-only preprocessor routing syntax
+// (@comptime/@shared/@emit/@build/@test, or the [[cccc::...]]/
+// __attribute__((...)) spellings) -- never valid to hand to a downstream
+// system compiler as raw text. See run_native_backend's re-emission filter
+// (main.c) and cc_file_is_cccc_only below.
+static void mark_cccc_only_file(VirtualMachine *vm, const char *filename) {
+    if (!filename)
+        return;
+    hashmap_put(&vm->compiler.cccc_only_files, filename, (void *)1);
+}
+
+// #896: record that `parent` contains a plain #include resolving to
+// `child_path`. Used to find a file that, when opened directly by a
+// downstream compiler (because cccc auto-re-emitted a raw #include of it),
+// would itself open a file containing cccc-only routing syntax -- the
+// routing site may be several #include levels deeper than the file cccc
+// actually re-emits.
+static void record_include_edge(VirtualMachine *vm, const char *parent,
+                                const char *child_path) {
+    if (!parent || !child_path)
+        return;
+    StringArray *children = hashmap_get(&vm->compiler.include_children, parent);
+    if (!children) {
+        children = arena_alloc(&vm->compiler.parser_arena, sizeof(StringArray));
+        memset(children, 0, sizeof(StringArray));
+        hashmap_put(&vm->compiler.include_children, parent, children);
+    }
+    arena_strarray_push(vm, children, arena_strdup(vm, child_path));
+}
+
+// #896: true if `filename` itself uses cccc-only routing, or plain-
+// #includes (directly or transitively) a file that does. `visited` guards
+// against pathological include cycles -- ordinary #include guards normally
+// prevent an edge from ever being recorded for a cycle, but this is cheap
+// insurance against a false-positive infinite recursion.
+static bool file_is_cccc_only_closure(VirtualMachine *vm, const char *filename,
+                                      HashMap *visited) {
+    if (!filename || hashmap_get(visited, filename))
+        return false;
+    hashmap_put(visited, filename, (void *)1);
+    if (hashmap_get(&vm->compiler.cccc_only_files, filename))
+        return true;
+    StringArray *children = hashmap_get(&vm->compiler.include_children, filename);
+    if (!children)
+        return false;
+    for (int i = 0; i < children->len; i++)
+        if (file_is_cccc_only_closure(vm, children->data[i], visited))
+            return true;
+    return false;
+}
+
+bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename) {
+    HashMap visited = {0};
+    bool result = file_is_cccc_only_closure(vm, filename, &visited);
+    hashmap_deinit(&visited);
+    return result;
+}
+
 static IncludeRoute read_include_route(Token **tok_ptr) {
     IncludeRoute route = INCLUDE_ROUTE_NORMAL;
     Token *rest = NULL;
@@ -4371,6 +4429,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         Token *route_start = tok->next;
         Token *route_after = route_start;
         IncludeRoute directive_route = read_include_route(&route_after);
+        // #896: a directive using any cccc-only routing taints its own file
+        // -- that syntax is never valid to a downstream system compiler, so
+        // the file can't be re-emitted as a raw #include for -c=native. This
+        // applies regardless of which file the directive is in, not just the
+        // primary file (see run_native_backend's re-emission filter).
+        if (directive_route != INCLUDE_ROUTE_NORMAL && start->file)
+            mark_cccc_only_file(vm, start->file->name);
         if (directive_route == INCLUDE_ROUTE_EMIT) {
             char *line =
                 copy_routed_directive_line(vm, start, route_start, route_after);
@@ -4470,6 +4535,11 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // part of the user-visible source.
         // For @shared includes, emit a clean line (route stripped) so generated
         // output contains a plain #include rather than #include @shared.
+        char *ac_include_line = NULL; // #896: set below when this directive
+                                       // is a primary-file #include that got
+                                       // auto-captured, so the PP_INCLUDE
+                                       // case can pair it with its resolved
+                                       // path once that's known
         {
             ComptimeCtxEntry *_ac = ctx_top(vm);
             if (!vm->compiler.emit_strict &&
@@ -4485,6 +4555,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     : copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
                 cc_record_emit_source(vm, _ac_line);
+                if (pp_directive(tok) == PP_INCLUDE)
+                    ac_include_line = _ac_line;
             }
         }
 
@@ -4590,6 +4662,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 char *path =
                     format_relative_path(vm, start->file->name, filename);
                 if (file_exists(path)) {
+                    record_include_edge(vm, start->file ? start->file->name : NULL, path); // #896
+                    if (ac_include_line) // #896
+                        hashmap_put(&vm->compiler.emit_include_paths, ac_include_line, path);
                     tok = include_file(vm, tok, path, start->next->next,
                                        filename, start->file->is_system_header);
                     break;
@@ -4628,6 +4703,11 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 }
             }
 
+            record_include_edge(vm, start->file ? start->file->name : NULL,
+                               path ? path : filename); // #896
+            if (ac_include_line) // #896
+                hashmap_put(&vm->compiler.emit_include_paths, ac_include_line,
+                           path ? path : filename);
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next, filename,
                                !is_dquote || found_in_sys);
@@ -4640,6 +4720,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                                    &filename_len);
             tok = skip_line(vm, tok);
             char *path = search_include_next(vm, filename);
+            record_include_edge(vm, start->file ? start->file->name : NULL,
+                               path ? path : filename); // #896
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next, filename, !ignore);
             break;

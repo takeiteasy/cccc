@@ -2451,6 +2451,11 @@ typedef struct Compiler {
     bool macro_vararg_string_mode;    // True when varargs are char* token strings
     Token *macro_context_tokens;      // Safe file-scope decls visible to macro bytecode
     Scope *macro_context_scope;       // Parser scope produced from macro_context_tokens
+    StringArray comptime_dropped_globals; // #893: names of primary-file initialized globals
+                                       // that build_macro_context_tokens declined to forward
+                                       // (non-constant initializer, or not in the primary
+                                       // file); used to give the undefined-variable error at
+                                       // parse.c a targeted hint instead of a bare message
     Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
     EmitEvent *emit_events_head;  // Ordered generated-output events
@@ -2564,6 +2569,21 @@ typedef struct Compiler {
     StringArray pragma_link_libs; // Library names queued by #pragma cccc link(...) /
                                    // #pragma comment(lib, ...) (#357), merged into
                                    // the -l/--library list before FFI resolution
+
+    // #896: files whose contents use cccc-only preprocessor routing syntax
+    // (@comptime/@shared/@emit/@build/@test, or the [[cccc::...]] spellings)
+    // -- never valid to hand to a downstream system compiler as raw text --
+    // plus the plain #include edges needed to find such a file transitively
+    // (a re-emitted #include of an untainted file that itself #includes a
+    // tainted one has the same problem once the system compiler opens it).
+    // See cc_file_is_cccc_only() / mark_cccc_only_file() / record_include_edge()
+    // in preprocess.c and run_native_backend's re-emission filter (main.c).
+    HashMap cccc_only_files;   // filename -> (void*)1
+    HashMap include_children;  // filename -> StringArray* of #include'd child filenames
+    HashMap emit_include_paths; // auto-captured #include directive line text -> resolved
+                                 // on-disk path, so run_native_backend's re-emission filter
+                                 // can test cc_file_is_cccc_only() against the path a line
+                                 // in emit_directives actually resolved to
 
     // Code generation state
     int label_counter; // For generating unique labels
@@ -3547,6 +3567,8 @@ ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr)
 */
 void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int count);
 bool cc_is_source_define_name(VirtualMachine *vm, const char *name, int len);
+bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len); // #893
+bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename); // #896
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
 

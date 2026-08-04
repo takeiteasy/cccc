@@ -26,6 +26,11 @@ Cases:
   4. A successful `-c=native` compile+run of case 1's program must emit
      nothing on stderr (regression guard: libbacktrace's warm-up pass used
      to print "no debug info" noise on every run, see host_backtrace.c).
+  5. #896 regression: a plain `#include "lib.c"` of a file that itself
+     contains `#include @comptime <...>` must build and run under
+     `-c=native` -- the auto-captured re-emission of that #include (#891)
+     must not hand cccc-only routing syntax to the downstream system
+     compiler.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -148,6 +153,41 @@ def case_no_stderr_noise(cccc: Path, tmp: str) -> bool:
     return True
 
 
+LIB_INCLUDES_COMPTIME = (
+    "#include @comptime <dlfcn.h>\n"
+    "\n"
+    "[[cccc::comptime]]\n"
+    "void gen(void) {\n"
+    "}\n"
+    "gen();\n"
+    "\n"
+    "int helper(void) { return 42; }\n"
+)
+
+MAIN_INCLUDES_LIB = (
+    '#include "lib.c"\n'
+    "int main(void) { return helper(); }\n"
+)
+
+
+def case_native_include_of_comptime_routed_file(cccc: Path, tmp: str) -> bool:
+    print("  5: -c=native, plain #include of a file using @comptime routing (#896)")
+    write(Path(tmp) / "lib.c", LIB_INCLUDES_COMPTIME)
+    src = Path(tmp) / "main_896.c"
+    out = Path(tmp) / "main_896_out"
+    write(src, MAIN_INCLUDES_LIB)
+    result = run([str(cccc), "-c=native", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -164,6 +204,7 @@ def main() -> int:
             case_dump_expanded_no_attrtarget,
             case_primary_file_typedefs_stay_distinct,
             case_no_stderr_noise,
+            case_native_include_of_comptime_routed_file,
         ]
         results = [case(cccc, tmp) for case in cases]
 
