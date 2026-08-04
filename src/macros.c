@@ -249,6 +249,41 @@ static bool starts_file_scope_call(Token *tok) {
     return tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, "(");
 }
 
+// #890: a file-scope declaration is forwarded to the comptime pass if it
+// comes from the primary source file, OR from any file that itself defines
+// a comptime entity: a [[cccc::comptime]] function, captured in macro_fns,
+// or a [[cccc::comptime]] variable, captured in comptime_vars. Narrower than
+// "any file with comptime-related syntax in it" — a #pragma cccc comptime
+// begin/end block containing only a typedef, or a [[cccc::comptime]] typedef,
+// declares a type rather than a comptime function or variable and does not
+// widen the allowed set on its own (see docs/MACROS.md's "Pre-parse macro
+// declaration context" section for the exact rule stated in prose).
+// Rule: a comptime function or variable can always see the declarations
+// written alongside it in its own file, regardless of #include depth —
+// #include is textual, so a call to it made from a file that #includes it
+// must behave identically to one appended directly to that file. This is
+// deliberately narrower than "any non-system header": declarations in a
+// third file that defines no comptime code of its own still need @shared to
+// reach the comptime pass, matching #551/#552's isolation intent.
+static bool comptime_ctx_file_allowed(VirtualMachine *vm, const char *filename) {
+    if (!filename)
+        return false;
+    if (vm->compiler.primary_file &&
+        strcmp(filename, vm->compiler.primary_file->display_name) == 0)
+        return true;
+    for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
+        if (pm->body_tokens && pm->body_tokens->filename &&
+            strcmp(filename, pm->body_tokens->filename) == 0)
+            return true;
+    }
+    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
+        if (cv->decl_tokens && cv->decl_tokens->filename &&
+            strcmp(filename, cv->decl_tokens->filename) == 0)
+            return true;
+    }
+    return false;
+}
+
 // Capture file-scope declarations that can safely be prepended to the macro
 // bytecode program: typedefs, tag declarations, prototypes, externs, and other
 // declarations without top-level initializers. Function bodies and file-scope
@@ -260,14 +295,11 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
     Token *cur = &head;
 
     // By default (runtime-only include scoping) only declarations whose tokens
-    // originate from the main source file are forwarded to the comptime pass.
-    // --comptime-include-all restores the old all-headers behavior.
-    // Use primary_file->display_name — the same name stamped onto tok->filename
-    // during preprocessing — so the comparison is reliable regardless of which
-    // token happens to appear first in the stream.
-    char *main_filename = NULL;
-    if (!vm->compiler.comptime_include_all && vm->compiler.primary_file)
-        main_filename = vm->compiler.primary_file->display_name;
+    // originate from the main source file, or from a file that itself defines
+    // comptime code (see comptime_ctx_file_allowed, #890), are forwarded to the
+    // comptime pass. --comptime-include-all restores the old all-headers
+    // behavior.
+    bool filter_active = !vm->compiler.comptime_include_all && vm->compiler.primary_file;
 
     for (int fi = 0; fi < count; fi++) {
         Token *tok = input_tokens[fi];
@@ -305,9 +337,8 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
 
                     if (equal(tok, ";")) {
                         if (!has_top_level_eq) {
-                            bool skip = main_filename &&
-                                         start->filename &&
-                                         strcmp(start->filename, main_filename) != 0;
+                            bool skip = filter_active && start->filename &&
+                                         !comptime_ctx_file_allowed(vm, start->filename);
                             if (!skip) {
                                 for (Token *t = start; t != tok->next &&
                                      t && t->kind != TK_EOF; t = t->next)

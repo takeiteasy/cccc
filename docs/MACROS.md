@@ -98,10 +98,14 @@ snapshot of safe file-scope declarations from the preprocessed source. That
 snapshot includes typedefs, struct/union/enum tag declarations, function
 prototypes, `extern` declarations, and declarations without function bodies.
 
-Only declarations whose tokens originate from the **main source file** are
-forwarded to the comptime pass by default. Declarations from regular `#include`d
-headers are not visible to comptime functions unless the include is annotated
-`@shared` (see [Include scoping](#include-scoping)).
+Declarations are forwarded to the comptime pass by default from the **main
+source file**, and from **any file that itself defines a `[[cccc::comptime]]`
+function or variable** — a comptime function can always see the declarations
+written alongside it in its own file, regardless of `#include` depth, because
+`#include` is textual and the two cases must be indistinguishable. Declarations
+in a *third* file — one that defines no comptime code of its own — are still
+not visible to comptime functions unless that include is annotated `@shared`
+(see [Include scoping](#include-scoping)).
 
 The scoping applies to **declarations and types** but **not preprocessor
 `#define` macros**. The comptime pass starts with an isolated macro state
@@ -138,10 +142,11 @@ A `typedef` (or a struct/union/enum type definition) written directly inside a
 itself, is passed through into the main source file's token stream unchanged —
 it declares a type, not a comptime function or variable, so it needs no
 comptime execution at all. It reaches the macro program the same way any other
-main-file typedef does: via the declaration snapshot above, which means it
-inherits that snapshot's main-source-file filter — a typedef written this way
-inside an `#include`d header is still invisible to comptime bodies unless the
-include is `@shared` or `--comptime-include-all` is passed.
+typedef does: via the declaration snapshot above, which means it inherits that
+snapshot's filter — a typedef written this way inside an `#include`d header is
+visible to comptime bodies if that header also defines a comptime function or
+variable, and otherwise only if the include is `@shared` or
+`--comptime-include-all` is passed.
 
 Note: global variable definitions whose scalar initializer expression contains a
 `Node *`-returning comptime call (see
@@ -824,6 +829,15 @@ header reaches:
 | `#include @shared <header>` | ✓ | ✓ |
 | `#define NAME ...` | ✓ | ✗ (default) |
 | `#define @shared NAME ...` | ✓ | ✓ |
+
+This table describes headers whose *own* declarations reach the comptime pass
+through this routing. It is not the whole story for regular `#include`:
+a plain `#include`d header's declarations also reach the comptime pass if that
+header itself defines a `[[cccc::comptime]]` function or variable — see
+[Pre-parse macro declaration context](#pre-parse-macro-declaration-context).
+`@comptime`/`@shared` remain necessary for declaration-only headers (e.g.
+`<glob.h>`) that a comptime function needs but does not itself define comptime
+code in.
 
 All three forms accept the three interchangeable spelling styles:
 
