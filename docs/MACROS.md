@@ -889,6 +889,30 @@ int main(void) {
 for `#define @shared`'s per-macro semantics). Applying it to any other
 directive (e.g. `#undef @shared`, `#ifdef @shared`) is a compile error.
 
+The conventional C opaque-handle idiom -- forward-declare a struct and
+typedef it to its own name (`typedef struct Foo Foo;`) -- works normally in
+a `@shared` header, including when the file also defines
+`[[cccc::comptime]]` functions:
+
+```c
+/* handle.h */
+typedef struct Foo Foo;
+Foo *foo_make(void);
+```
+
+```c
+#include @shared "handle.h"
+
+[[cccc::comptime]]
+Node *check(void) { return MakeIntLiteral(0); }
+
+int main(void) {
+    Foo *f = foo_make();
+    (void)f;
+    return check();
+}
+```
+
 **`--comptime-include-all`** — global flag that restores the legacy behavior:
 forward all `#include`d header declarations **and `#define` macros** to comptime
 without needing per-include `@shared` annotations. Use this as a migration

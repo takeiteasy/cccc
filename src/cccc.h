@@ -998,6 +998,7 @@ struct Type {
     bool is_flexible;
     bool is_packed;
     bool designated_init; // __attribute__((designated_init)): all initializers of this struct type must be designated (#659)
+    Token *struct_tag;    // tag name token (survives declarator name-overwrite, #892)
 
     // Enum
     EnumConstant *enum_constants;

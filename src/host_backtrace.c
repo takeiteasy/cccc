@@ -10,8 +10,12 @@
  * signal handler after the initial warm-up call.
  *
  * On Linux the -g build embeds DWARF inline → full file:line out of the box.
- * On macOS the binary carries only a debug map; run `make dsym` first to
- * produce cccc.dSYM and unlock file:line resolution.
+ * On macOS the binary carries only a debug map; run
+ * `./cccc --build build.c --build-target=dsym` first to produce cccc.dSYM
+ * and unlock file:line resolution. Without a dSYM, libbacktrace reports "no
+ * debug info" during its warm-up pass on every run -- expected, and kept
+ * silent (see bt_init_error_cb below) rather than printed on every
+ * successful, non-crashing invocation.
  */
 
 #include "internal.h"
@@ -39,6 +43,18 @@ static void bt_error_cb(void *data, const char *msg, int errnum) {
         fprintf(stderr, "  [backtrace error: %s (%d)]\n", msg, errnum);
     else
         fprintf(stderr, "  [backtrace error: %s]\n", msg);
+}
+
+/* Silent variant used only for state creation and the warm-up pass (see
+ * cc_host_backtrace_init below): on macOS without a .dSYM, libbacktrace
+ * reports "no debug info in Mach-O executable" during warm-up on every
+ * single run, even fully successful ones with no crash -- that's normal,
+ * expected, and not something a user running `cccc foo.c` should ever see
+ * on stderr. A missing-debug-info message is only actually useful when it
+ * happens at cc_host_backtrace_print() time, i.e. while resolving a real
+ * crash, so bt_error_cb above stays wired up there. */
+static void bt_init_error_cb(void *data, const char *msg, int errnum) {
+    (void)data; (void)msg; (void)errnum;
 }
 
 typedef struct {
@@ -111,14 +127,16 @@ static int bt_warmup_cb(void *data, uintptr_t pc,
 }
 
 void cc_host_backtrace_init(const char *argv0) {
-    /* threaded=1: use atomic ops for thread safety. */
-    bt_state = backtrace_create_state(argv0, 1, bt_error_cb, NULL);
+    /* threaded=1: use atomic ops for thread safety. bt_init_error_cb: see
+     * its comment above -- state creation/warm-up failures (e.g. no .dSYM
+     * on macOS) are expected and must not print on a successful run. */
+    bt_state = backtrace_create_state(argv0, 1, bt_init_error_cb, NULL);
 
     /* Warm-up: perform one full backtrace now so that libbacktrace loads and
      * mmaps all DWARF/Mach-O data before any signal occurs.  After this call
      * the handler path never calls malloc or opens files. */
     if (bt_state)
-        backtrace_full(bt_state, 0, bt_warmup_cb, bt_error_cb, NULL);
+        backtrace_full(bt_state, 0, bt_warmup_cb, bt_init_error_cb, NULL);
 }
 
 void cc_host_backtrace_install_fatal(void) {

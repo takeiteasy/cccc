@@ -8015,6 +8015,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
         tag = tok;
         ty->name = tag;
         ty->name_pos = tag;
+        ty->struct_tag = tag; // #892: survives declarator name-overwrite
         tok = tok->next;
     }
 

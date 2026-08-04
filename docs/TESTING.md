@@ -18,7 +18,7 @@ Run each group independently:
 python3 tools/tests.py --suites     # framework suites only (tests/suites/)
 python3 tools/tests.py --legacy     # legacy single-file tests only (tests/)
 python3 tools/tests.py              # all tests in both directories
-python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + header_resolution_smoke + audit_ffi + reflection_ffi_check + audit_reflection_enums)
+python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + header_resolution_smoke + comptime_native_smoke + audit_ffi + reflection_ffi_check + audit_reflection_enums)
 
 ./cccc --build build.c --build-target=test_suites   # build + run framework suites
 ./cccc --build build.c --build-target=test_legacy   # build + run legacy tests
@@ -254,6 +254,25 @@ a `[[cccc::comptime]]` program (exercising `<implicit-reflection.h>`'s own
 <stdio.h>` that must compile *and* run without a `typedef` collision, and a
 primary file with a sibling quoted project header). See
 [HEADERS.md](HEADERS.md) for the header search order these exercise.
+
+### Comptime/native serializer smoke-test
+
+The `test` build.c target's `run_tests.py` also runs
+`tools/comptime_native_smoke.py` (also available standalone as
+`./cccc --build build.c --build-target=comptime_native_smoke`, or directly
+via `python3 tools/comptime_native_smoke.py`). The serializer that
+reconstructs a runtime translation unit only runs under `-m`/`-G`/
+`-c=native` — the main VM-only source suite never touches it, so a
+serializer regression like ticket #892 (two distinct opaque/incomplete
+struct types incorrectly compared as "the same type" in
+`same_type_or_origin()`, `src/serialize.c`) needs its own smoke test. Cases
+covered: an end-to-end `-c=native` compile+run of the `@shared`
+opaque-handle idiom (`typedef struct Foo Foo;`) alongside a
+`[[cccc::comptime]]` function; a direct assertion that `-m` output keeps
+distinct opaque typedefs distinct rather than collapsing them onto a
+synthesized tag (e.g. reflection.h's `AttrTarget`); the same check for
+typedefs declared directly in the primary file (no `@shared` involved); and
+a check that a successful compile+run emits nothing on stderr.
 
 ## Architecture build and test workflows
 

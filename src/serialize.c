@@ -199,6 +199,34 @@ static bool same_type_or_origin(Type *a, Type *b) {
 
     if (a && b && a->kind == b->kind &&
         (a->kind == TY_STRUCT || a->kind == TY_UNION)) {
+        // #892: distinguish tagged aggregates by tag name before falling
+        // back to structural (member-wise) comparison below. Without this,
+        // two unrelated opaque (incomplete) structs -- which have no
+        // members for the loop below to compare -- collapsed into "the
+        // same type" (the loop body never runs for either side, so the
+        // function fell through to `ma == NULL && mb == NULL` == true).
+        // That corrupted find_tag_name()'s linear scan into returning
+        // whichever opaque tag happens to appear first in scope (e.g.
+        // reflection.h's `AttrTarget`) for every opaque handle typedef'd
+        // in a comptime-using file. A tag mismatch is conclusive; a
+        // tagged-vs-anonymous pairing falls through to the structural
+        // comparison unchanged (an anonymous *incomplete* aggregate can't
+        // exist in valid C, so this only affects complete types, e.g.
+        // `typedef struct { int x; } Foo;`).
+        if (a->struct_tag && b->struct_tag) {
+            bool tag_match = a->struct_tag->len == b->struct_tag->len &&
+                             strncmp(a->struct_tag->loc, b->struct_tag->loc,
+                                     a->struct_tag->len) == 0;
+            if (!tag_match)
+                return false;
+        }
+
+        // Incomplete aggregates have no members to compare -- tag identity
+        // above is the only signal available (mutual anonymity can't occur
+        // for an incomplete type).
+        if (a->size < 0 || b->size < 0)
+            return a->struct_tag != NULL && b->struct_tag != NULL;
+
         Member *ma = a->members;
         Member *mb = b->members;
         for (; ma && mb; ma = ma->next, mb = mb->next) {

@@ -12,6 +12,7 @@ Sub-suites:
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
+  comptime_native_smoke — comptime/native serializer opaque-struct regression (ticket #892)
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
@@ -235,6 +236,33 @@ def _run_header_resolution_suite():
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location("header_resolution_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_comptime_native_suite():
+    """Run the comptime/native serializer smoke tests (#892).
+
+    The serializer that reconstructs a runtime translation unit only runs
+    under -m/-G/-c=native, none of which the VM-only source suite exercises,
+    so a serializer regression like #892 (two distinct opaque struct types
+    collapsing into "the same type") needs its own smoke test. Returns
+    (status_str, ok).
+    """
+    script = _TOOLS_DIR / "comptime_native_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("comptime_native_smoke", script)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
@@ -516,6 +544,13 @@ def main():
     hdr_status, ok_hdr = _run_header_resolution_suite()
     print(f"  {hdr_status}")
     suite_results["header_resolution_smoke"] = ok_hdr
+
+    # --- Comptime/native serializer smoke (#892) ---
+    print()
+    print("[ comptime_native_smoke ]")
+    ctn_status, ok_ctn = _run_comptime_native_suite()
+    print(f"  {ctn_status}")
+    suite_results["comptime_native_smoke"] = ok_ctn
 
     # --- FFI registration audit ---
     print()
