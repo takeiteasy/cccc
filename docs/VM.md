@@ -1094,6 +1094,19 @@ int cc_link_bytecode(VirtualMachine *vm, const char *path);
 segment-append and symbol-resolution steps.  It is called by the compiler after
 generating a bytecode executable with unresolved external `CALL` sites:
 
+0. Before codegen, `cc_collect_link_symbols` (also in `src/bytecode.c`) pre-scans
+   each `--link lib.c4a` path's exported symbol names into `vm->compiler.link_syms`.
+   Codegen consults this set wherever it would otherwise resolve a bodiless callee to
+   a registered FFI symbol — both a direct `CALL` (`ffi_index_for_callee`, the
+   call-patch pass) and a function-pointer address-of inside a function body (the
+   `func_addr_patches` pass) — so a name that is both an FFI symbol and defined in a
+   linked library resolves to the library's definition instead of silently binding to
+   the host function (#882). Scoped to what's knowable at this point: a standalone
+   `-c` object with no matching `--link` path, a symbol supplied only later via a
+   runtime `cc_load_module()` call, or a **file-scope** global initializer's
+   address-of (`apply_global_relocations` has no relocation mechanism for an
+   unresolved data-segment reference by name, unlike the text-segment case above),
+   still resolve to FFI.
 1. The compiler emits text-relocation entries instead of erroring when a called
    symbol is declared but not yet defined (`deferred_link` mode).  Function-pointer
    address-of expressions against cross-module symbols similarly emit address-relocation

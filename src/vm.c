@@ -1375,6 +1375,10 @@ void cc_destroy(VirtualMachine *vm) {
     // insert); values are integers, arena-allocated, or freed separately.
     hashmap_deinit(&vm->compiler.included_headers);
 
+    // Free link_syms HashMap (#882: --link symbol pre-scan; presence-only
+    // set, values are not pointers to free)
+    hashmap_deinit(&vm->compiler.link_syms);
+
     // Free sorted allocation arrays
     if (vm->sorted_allocs.addresses)
         free(vm->sorted_allocs.addresses);

@@ -397,6 +397,21 @@ Function-pointer decay to cross-module symbols (taking the address of a function
 defined in a `.c4a`) is supported: the text-relocation pass resolves both direct
 `CALL` sites and address-taken references to exported symbols (#566).
 
+A guest definition in a linked `.c4a` takes precedence over a same-named host FFI
+symbol: every `--link` path is pre-scanned for its exported symbol names before
+codegen runs, so a call to a name that is both a registered FFI symbol (e.g. libc's
+`abs`) and defined in a linked library resolves to the library's own definition, not
+silently to the host function. The same precedence applies to taking a bodiless
+function's address inside a function body (`int (*fp)(int) = abs;` as a local). This
+only covers the compile-time-knowable case — a standalone `-c` object built with no
+matching `--link` path on the same command line, or a symbol supplied only later via
+a runtime `cc_load_module()` call, still resolves to the host FFI symbol. One
+narrower gap remains even with a matching `--link` path: a **file-scope** global
+variable's initializer taking that address (`int (*fp)(int) = abs;` at file scope,
+as opposed to inside a function body) still resolves to the host FFI symbol —
+`apply_global_relocations` (`src/codegen.c`) has no relocation mechanism for an
+unresolved data-segment reference by name, unlike the text-segment case.
+
 ### The `--link` compiler flag
 
 ```sh

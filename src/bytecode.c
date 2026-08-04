@@ -1467,6 +1467,38 @@ int cc_link_bytecode(VirtualMachine *vm, const char *path) {
     return cc_load_module(vm, path);
 }
 
+// cc_collect_link_symbols: pre-scan a .c4a library's exported symbol names
+// into vm->compiler.link_syms, *before* gen() runs (#882). See the
+// discussion in cccc.h. Deliberately silent on failure -- a bad/missing
+// --link path is still caught by cc_link_bytecode's own error path at the
+// point it actually tries to link, and this pre-scan must not become a
+// second, earlier place that error is reported (would print to stderr on
+// paths that are supposed to fail cleanly later, and -- more importantly --
+// would print nothing-new noise on paths that succeed, since a staged
+// cc_load_bytecode of a well-formed library never errors here).
+void cc_collect_link_symbols(VirtualMachine *vm, const char *path) {
+    if (!vm || !path)
+        return;
+
+    VirtualMachine stage;
+    memset(&stage, 0, sizeof(stage));
+    cc_init(&stage, 0);
+    if (cc_load_bytecode(&stage, path) != 0) {
+        cc_destroy(&stage);
+        return;
+    }
+
+    for (int i = 0; i < stage.compiler.num_sym_table; i++) {
+        const char *name = stage.compiler.sym_table[i].name;
+        size_t name_len = stage.compiler.sym_table[i].name_len;
+        if (!name || name_len == 0)
+            continue;
+        hashmap_put2(&vm->compiler.link_syms, name, (int)name_len, (void *)1);
+    }
+
+    cc_destroy(&stage);
+}
+
 static int source_index_cmp(const void *a, const void *b) {
     const SourceIndex *sa = (const SourceIndex *)a;
     const SourceIndex *sb = (const SourceIndex *)b;

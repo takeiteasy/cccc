@@ -1811,6 +1811,15 @@ int main(int argc, const char *argv[]) {
     vm.compiler.native_mode = (compile_format == COMPILE_NATIVE);
     vm.compiler.compile_only = compile_only;
     vm.compiler.deferred_link = (link_paths_count > 0 && !compile_only);
+    // #882: pre-scan every --link library's exported symbols before gen()
+    // runs, so codegen can prefer a guest definition that --link will
+    // supply over a same-named host FFI symbol. Also covers the
+    // compile_only case (a -c bytecode target built alongside --link libs
+    // still runs codegen and can carry the same shadowing hazard).
+    if (link_paths_count > 0) {
+        for (int i = 0; i < link_paths_count; i++)
+            cc_collect_link_symbols(&vm, link_paths[i]);
+    }
     vm.compiler.asm_passthru = asm_passthru;
     vm.compiler.no_comptime = no_comptime;
     vm.compiler.comptime_include_all = comptime_include_all;

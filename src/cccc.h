@@ -2669,6 +2669,20 @@ typedef struct Compiler {
     // from codegen to the post-link check in main.c (#565).
     int deferred_link;
 
+    // Symbol names exported by every --link library on this command line,
+    // pre-scanned (via cc_collect_link_symbols, src/bytecode.c) before gen()
+    // runs so codegen can tell a same-named FFI symbol apart from a guest
+    // definition that will be supplied by --link at link time (#882): a
+    // guest program calling a function that is itself defined in a linked
+    // module, under a name that also happens to be a registered FFI symbol,
+    // must resolve to the linked module's definition, not silently bind to
+    // the host FFI function. Values are unused (presence-only set, like a
+    // HashSet); keys owned by the map. Only covers the compile-time-knowable
+    // case -- a standalone `-c` object (no --link on this command line) or a
+    // module appended later via cc_load_module() still binds such a call to
+    // the host FFI symbol, since codegen has no way to know about it yet.
+    HashMap link_syms;
+
     LabelEntry label_table[MAX_LABELS];
     int num_labels;
     GotoPatch goto_patches[MAX_LABELS];
@@ -3853,6 +3867,24 @@ int cc_load_module(VirtualMachine *vm, const char *path);
  @return 0 on success, -1 on error.
 */
 int cc_link_bytecode(VirtualMachine *vm, const char *path);
+
+/*!
+ @function cc_collect_link_symbols
+ @abstract Pre-scan a `.c4a` library's exported symbol names into vm->compiler.link_syms.
+ @discussion Stages the module exactly as cc_load_module does (a throwaway VM,
+             cc_load_bytecode, then cc_destroy) but only copies the exported
+             *names*, not the code/data. Called once per `--link` path before
+             gen() so codegen can tell a guest definition that will be
+             supplied by --link apart from a same-named host FFI symbol
+             (#882). A bad/missing path is silently ignored here -- the
+             existing text-relocation error path in cc_link_bytecode still
+             catches it at actual link time, so this must never be the first
+             place a bad --link path is reported.
+ @param vm   The VM instance being compiled (vm->compiler.link_syms is populated).
+ @param path Path to the .c4a bytecode library file.
+ @return void; failures are silent (see @discussion).
+*/
+void cc_collect_link_symbols(VirtualMachine *vm, const char *path);
 
 /*!
  @function cc_add_breakpoint
