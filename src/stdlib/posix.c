@@ -185,6 +185,69 @@ static long long wrap_pread_gil(long long fd, long long buf, long long count, lo
     return (long long)r;
 }
 
+// preadv/pwritev (#793) -- the readv/writev analogs of pread/pwrite:
+// scatter/gather I/O at an explicit offset. Blocking, like pread/pwrite
+// above, so they release the GIL the same way. struct iovec needs no
+// guest/host translation (void* + size_t, identical on both hosts), so
+// unlike ioctl below there is no layout risk here.
+static long long wrap_preadv_gil(long long fd, long long iov, long long iovcnt, long long offset) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)preadv((int)fd, (const struct iovec *)iov, (int)iovcnt, (off_t)offset);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = preadv((int)fd, (const struct iovec *)iov, (int)iovcnt, (off_t)offset);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_pwritev_gil(long long fd, long long iov, long long iovcnt, long long offset) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)pwritev((int)fd, (const struct iovec *)iov, (int)iovcnt, (off_t)offset);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = pwritev((int)fd, (const struct iovec *)iov, (int)iovcnt, (off_t)offset);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+#ifdef __linux__
+// preadv2/pwritev2 (#793) -- same as preadv/pwritev plus an RWF_* flags
+// word; Linux-only syscalls (glibc >= 2.26), same gap class as
+// mremap/fallocate/splice registered further down. Forward-declared
+// locally for the same reason (host <sys/uio.h> gates these behind
+// _GNU_SOURCE; glibc exports them regardless).
+extern ssize_t preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags);
+extern ssize_t pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags);
+
+static long long wrap_preadv2_gil(long long fd, long long iov, long long iovcnt,
+                                   long long offset, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)preadv2((int)fd, (const struct iovec *)iov, (int)iovcnt,
+                                  (off_t)offset, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = preadv2((int)fd, (const struct iovec *)iov, (int)iovcnt, (off_t)offset, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_pwritev2_gil(long long fd, long long iov, long long iovcnt,
+                                    long long offset, long long flags) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)pwritev2((int)fd, (const struct iovec *)iov, (int)iovcnt,
+                                   (off_t)offset, (int)flags);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = pwritev2((int)fd, (const struct iovec *)iov, (int)iovcnt, (off_t)offset, (int)flags);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+#endif
+
 // poll.h (#821) -- POLLRDNORM/POLLRDBAND share the same bit values on both
 // hosts, but POLLWRNORM/POLLWRBAND diverge (macOS aliases POLLWRNORM to
 // POLLOUT and uses 0x0100 for POLLWRBAND; glibc uses 0x0100/0x0200). CCCC's
@@ -3220,8 +3283,16 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setgroups",(void*)setgroups,2, 0);
     cc_register_cfunc(vm, "initgroups",(void*)initgroups,2, 0);
     cc_register_cfunc(vm, "nice",     (void*)nice,     1, 0);
+    // readv/writev are blocking I/O like read/write, but unlike
+    // read/write/pread/pwrite above are registered as plain (non-GIL-
+    // releasing) cfuncs -- a pre-existing gap noted while adding
+    // preadv/pwritev below (#793); every other VM thread stalls for the
+    // duration of a readv/writev call. Follow-up filed to bring them in
+    // line with pread/pwrite/preadv/pwritev.
     cc_register_cfunc(vm, "readv",    (void*)readv,    3, 0);
     cc_register_cfunc(vm, "writev",   (void*)writev,   3, 0);
+    cc_register_cfunc(vm, "preadv",   (void*)wrap_preadv_gil,  4, 0);
+    cc_register_cfunc(vm, "pwritev",  (void*)wrap_pwritev_gil, 4, 0);
     cc_register_variadic_cfunc(vm, "open",   (void*)wrap_open,  2, 0);
     cc_register_cfunc(vm, "creat",   (void*)wrap_creat, 2, 0);
     cc_register_variadic_cfunc(vm, "fcntl",  (void*)fcntl, 2, 0);
@@ -3345,6 +3416,9 @@ void register_posix_functions(VirtualMachine *vm) {
     extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
                           size_t len, unsigned int flags);
     cc_register_cfunc(vm, "splice", (void*)splice, 6, 0);
+    // preadv2/pwritev2 (#793): declared+wrapped above, next to preadv/pwritev.
+    cc_register_cfunc(vm, "preadv2",  (void*)wrap_preadv2_gil,  5, 0);
+    cc_register_cfunc(vm, "pwritev2", (void*)wrap_pwritev2_gil, 5, 0);
 #endif
     cc_register_cfunc(vm, "stat",    (void*)stat,    2, 0);
     cc_register_cfunc(vm, "fstat",   (void*)fstat,   2, 0);

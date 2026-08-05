@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing --posix-emulation
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
-// Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_utime, test_posix_vfs_decls,
+// Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_preadv_pwritev, test_posix_utime, test_posix_vfs_decls,
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
@@ -644,6 +644,74 @@ int test_posix_unistd_fcntl(void) {
 
     if (close(fd) != 0) return 6;
     if (unlink(path) != 0) return 7;
+
+    return 42;
+}
+
+// test_posix_preadv_pwritev
+// #793: preadv/pwritev are the readv/writev analogs of pread/pwrite --
+// scatter/gather I/O at an explicit offset that doesn't disturb the fd's
+// own file position. Write two iovecs via pwritev at a non-zero offset,
+// read them back via preadv into two differently-sized iovecs, and check
+// the bytes/counts round-trip; also check preadv at EOF returns 0. On
+// Linux this additionally round-trips through preadv2/pwritev2 with
+// flags == 0, which must behave identically to the flag-less calls.
+[[cccc::test(return = 42)]]
+int test_posix_preadv_pwritev(void) {
+    char path[] = "/tmp/cccc-preadv-pwritev-test";
+    int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd < 0) return 1;
+
+    /* Write "Hello" + "World!" starting at offset 10, via two iovecs. */
+    struct iovec wiov[2];
+    wiov[0].iov_base = "Hello";
+    wiov[0].iov_len = 5;
+    wiov[1].iov_base = "World!";
+    wiov[1].iov_len = 6;
+    ssize_t wn = pwritev(fd, wiov, 2, 10);
+    if (wn != 11) return 2;
+
+    /* Confirm pwritev did not move the fd's own file position: a plain
+       write() right after should still land at offset 0, not 21. */
+    if (lseek(fd, 0, SEEK_CUR) != 0) return 3;
+
+    /* Read back into two differently-sized iovecs: 3 bytes then 8 bytes. */
+    char part1[3] = {0};
+    char part2[8] = {0};
+    struct iovec riov[2];
+    riov[0].iov_base = part1;
+    riov[0].iov_len = sizeof(part1);
+    riov[1].iov_base = part2;
+    riov[1].iov_len = sizeof(part2);
+    ssize_t rn = preadv(fd, riov, 2, 10);
+    if (rn != 11) return 4;
+    if (memcmp(part1, "Hel", 3) != 0) return 5;
+    if (memcmp(part2, "loWorld!", 8) != 0) return 6;
+
+    /* preadv at EOF -> 0, no error. */
+    struct iovec eiov;
+    char ebuf[4];
+    eiov.iov_base = ebuf;
+    eiov.iov_len = sizeof(ebuf);
+    if (preadv(fd, &eiov, 1, 21) != 0) return 7;
+
+#ifdef __linux__
+    /* preadv2/pwritev2 with flags == 0 must behave identically. */
+    struct iovec wiov2;
+    wiov2.iov_base = "!!";
+    wiov2.iov_len = 2;
+    if (pwritev2(fd, &wiov2, 1, 21, 0) != 2) return 8;
+
+    char rbuf2[2] = {0};
+    struct iovec riov2;
+    riov2.iov_base = rbuf2;
+    riov2.iov_len = sizeof(rbuf2);
+    if (preadv2(fd, &riov2, 1, 21, 0) != 2) return 9;
+    if (memcmp(rbuf2, "!!", 2) != 0) return 10;
+#endif
+
+    if (close(fd) != 0) return 11;
+    if (unlink(path) != 0) return 12;
 
     return 42;
 }
