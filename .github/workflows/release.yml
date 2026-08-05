@@ -10,15 +10,41 @@ name: Release
 # exact release binary before packaging it -- an artifact that skipped the
 # optimized-build audit on its own platform defeats the point of gating on
 # it (see man/RELEASING.md's Audit gate section).
+#
+# workflow_dispatch lets a fixed release be re-run against an existing tag
+# (e.g. after fixing a platform-specific build bug the first run surfaced)
+# without moving the tag -- publishing was skipped on the v0.1.0 run that
+# found the linux CC selection + -fgnu89-inline issues below, since
+# `publish` needs all four platform jobs green.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish (e.g. v0.1.0)"
+        required: true
 
 jobs:
   linux-amd64:
     runs-on: ubuntu-24.04
+    env:
+      # Resolved per-job, used everywhere below instead of raw
+      # GITHUB_REF_NAME -- on a workflow_dispatch run GITHUB_REF_NAME is
+      # the branch the workflow was dispatched against (e.g. "main"), not
+      # the tag being (re)released.
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      # ubuntu-24.04's preinstalled `cc` is gcc, which rejects -std=c23
+      # ("did you mean -std=c2x?") -- see ci.yml's linux-aarch64 job for
+      # the two separate compiler-selection mechanisms (CC for the stage0
+      # Makefile, CCCC_NATIVE_CC for build.c's own compiler probe) that
+      # both need overriding.
+      CC: clang
+      CCCC_NATIVE_CC: clang
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -30,7 +56,7 @@ jobs:
       - name: Package
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           NAME="cccc-${VERSION}-linux-x86_64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
@@ -44,12 +70,15 @@ jobs:
   linux-aarch64:
     runs-on: ubuntu-24.04-arm
     env:
-      # See ci.yml's linux-aarch64 job for why both CC and CCCC_NATIVE_CC
-      # need overriding on this runner image.
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      # See linux-amd64's comment above for why both CC and CCCC_NATIVE_CC
+      # need overriding on this runner image too.
       CC: clang
       CCCC_NATIVE_CC: clang
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -61,7 +90,7 @@ jobs:
       - name: Package
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           NAME="cccc-${VERSION}-linux-aarch64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
@@ -74,8 +103,12 @@ jobs:
 
   macos-arm64:
     runs-on: macos-15
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Install dependencies
         run: brew install libffi pkg-config
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -87,7 +120,7 @@ jobs:
       - name: Package
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           NAME="cccc-${VERSION}-macos-arm64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
@@ -102,8 +135,12 @@ jobs:
     # Native Intel build+test -- NOT build.c's macos_x86_64 cross-compile
     # target (see ci.yml's macos-x86_64 job for why).
     runs-on: macos-15-intel
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Install dependencies
         run: brew install libffi pkg-config
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -115,7 +152,7 @@ jobs:
       - name: Package
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           NAME="cccc-${VERSION}-macos-x86_64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
@@ -129,8 +166,12 @@ jobs:
   publish:
     needs: [linux-amd64, linux-aarch64, macos-arm64, macos-x86_64]
     runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -142,13 +183,14 @@ jobs:
       - name: Extract changelog section
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           awk -v ver="$VERSION" '
               /^## \[/ { if (found) exit; if ($0 ~ "\\[" ver "\\]") { found=1; next } }
               found { print }
           ' CHANGELOG.md > RELEASE_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           body_path: RELEASE_NOTES.md
           files: |
             dist/cccc-*.tar.gz

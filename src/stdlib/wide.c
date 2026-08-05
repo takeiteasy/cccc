@@ -27,7 +27,18 @@ typedef unsigned char cccc_char8_t;
 #endif
 #endif
 
+// wctob/btowc/mbrlen are glibc extern-inline functions (see <wchar.h>);
+// taking their address directly (as cc_register_cfunc below used to for
+// btowc/mbrlen) makes clang emit an out-of-line copy in every TU that
+// registers them -- at -O0 these come out weak/discardable, but at any
+// -O1+ clang emits them as strong symbols, causing "multiple definition"
+// link errors the moment two TUs both pull the same header in (#883,
+// reproduced on Linux aarch64/clang 18.1.3). A local wrapper function is
+// never itself an extern-inline candidate, so its address is always safe
+// to take.
 static long long wrap_wctob(long long c) { return (long long)wctob((wint_t)c); }
+static long long wrap_btowc(long long c) { return (long long)btowc((int)c); }
+static long long wrap_mbrlen(long long s, long long n, long long ps) { return (long long)mbrlen((const char *)s, (size_t)n, (mbstate_t *)ps); }
 static long long wrap_mbsinit(long long ps) { return (long long)mbsinit((const mbstate_t *)ps); }
 static long long wrap_wcscmp(long long a, long long b) { return (long long)wcscmp((const wchar_t *)a, (const wchar_t *)b); }
 static long long wrap_wcsncmp(long long a, long long b, long long n) { return (long long)wcsncmp((const wchar_t *)a, (const wchar_t *)b, (size_t)n); }
@@ -287,7 +298,7 @@ static size_t cccc_c8rtomb(char *s, cccc_char8_t c8, mbstate_t *ps) {
 
 void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mbsinit", (void*)wrap_mbsinit, 1, 0);
-    cc_register_cfunc(vm, "mbrlen", (void*)mbrlen, 3, 0);
+    cc_register_cfunc(vm, "mbrlen", (void*)wrap_mbrlen, 3, 0);
     cc_register_cfunc(vm, "mbrtowc", (void*)mbrtowc, 4, 0);
     cc_register_cfunc(vm, "wcrtomb", (void*)wcrtomb, 3, 0);
     cc_register_cfunc(vm, "mbsrtowcs", (void*)mbsrtowcs, 4, 0);
@@ -311,7 +322,7 @@ void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "wcstoul", (void*)wcstoul, 3, 0);
     cc_register_cfunc(vm, "wcstoull", (void*)wcstoull, 3, 0);
     cc_register_cfunc(vm, "wctob", (void*)wrap_wctob, 1, 0);
-    cc_register_cfunc(vm, "btowc", (void*)btowc, 1, 0);
+    cc_register_cfunc(vm, "btowc", (void*)wrap_btowc, 1, 0);
 
     cc_register_cfunc(vm, "iswalnum", (void*)wrap_iswalnum, 1, 0);
     cc_register_cfunc(vm, "iswalpha", (void*)wrap_iswalpha, 1, 0);

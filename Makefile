@@ -62,7 +62,13 @@ ifeq ($(UNAME_S),Darwin)
 	# is needed on Linux.
 	LDFLAGS += -liconv
 else
-	CFLAGS += -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
+	# Clang -O1/-O2/-O3 miscompiles glibc's extern-inline pthread.h/wchar.h
+	# functions (pthread_equal, btowc, wctob, mbrlen) as strong symbols
+	# instead of discardable ones, causing "multiple definition" link errors
+	# -- see build.c's add_cccc_flags_opt() for the full writeup (#883).
+	# Only matters for MODE=release here (stage0 debug is always -O0), but
+	# harmless to always pass.
+	CFLAGS += -fgnu89-inline -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
 	LDFLAGS += -lm
 endif
 

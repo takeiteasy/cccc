@@ -227,6 +227,16 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
         AddDefine(t, "_DEFAULT_SOURCE", (const char *)0);
         AddDefine(t, "_POSIX_C_SOURCE", "200809L");
         AddLib(t, "m");
+        // Clang -O1/-O2/-O3 (any level above -O0) miscompiles glibc's
+        // extern-inline pthread.h/wchar.h functions (pthread_equal, btowc,
+        // wctob, mbrlen) as strong (non-weak) symbols instead of discardable
+        // ones, causing "multiple definition" link errors across TUs that
+        // merely #include <pthread.h>/<wchar.h> -- reproduced with a minimal
+        // two-TU repro on Linux aarch64/clang 18.1.3 (#883's release build
+        // was the first thing to ever build this codebase above -O0 on
+        // Linux). -fgnu89-inline forces the old GNU89 inline linkage
+        // semantics, which resolves it; verified with the same repro.
+        AddCFlag(t, "-fgnu89-inline");
     } else if (strcmp(BuildHost(ctx), "darwin") == 0) {
         // iconv() is declared in libSystem's <iconv.h> but the symbols only
         // resolve at link time via libiconv (Makefile:97-101, verified there:
