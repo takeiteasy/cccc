@@ -3,7 +3,7 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-08-05
 
 First release. There is no prior version to diff against, so this entry
 summarizes the feature surface rather than a set of changes.
