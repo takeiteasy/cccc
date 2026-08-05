@@ -8898,12 +8898,13 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 #undef MAX_FMT_ARGS
 
 // ---------------------------------------------------------------------
-// Flow-sensitive nonnull tracking (#679, follow-up to #655)
+// Flow-sensitive nonnull tracking (#679, follow-up to #655; loop/switch
+// precision from #689, follow-up to #687)
 //
 // validate_nonnull_call() below only catches literal/constant-folded null
-// arguments. This post-parse pass extends that with a light forward walk
+// arguments. This post-parse pass extends that with a forward dataflow walk
 // over each function body that tracks simple local pointer null-state
-// through straight-line code, catching the case named in #679:
+// through the function, catching the case named in #679:
 //
 //     int *p = 0;
 //     f(p);          // p flows from a null initializer -- now warns
@@ -8914,20 +8915,50 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 //     int *p = 0; if (cond) p = &x; f(p);
 // -- warns separately under the opt-in -Wmaybe-nonnull (#687), which has a
 // higher false-positive risk on real code and so is never folded into -Wall
-// or -Wextra. No interprocedural analysis (tracked as #688, deferred until
-// this NN_MAYBE lattice can feed it a callee-may-return-null fact).
+// or -Wextra. No interprocedural analysis beyond the whole-TU may-return-null
+// summary below (#688).
 //
-// Implementation: at ND_IF/ND_COND and short-circuit &&/|| the env is cloned
-// per live branch and *merged* back at the join point (nn_join(), below) --
-// real per-branch dataflow, not just a barrier. Loops and switch still use
-// the simpler "barrier" scheme: any local assigned somewhere inside is reset
-// to UNKNOWN on exit, which is sound without needing back-edge fixpoint
-// iteration (loops) or per-case merge (switch) -- both out of scope for this
-// light pass (tracked as a follow-up). A label resets the whole env (a goto
-// target is a merge point from unknown predecessors).
-// Locals whose address has escaped (Obj->addr_escapes, set by the
-// mark_addr_escapes() pass that already ran) are never tracked, since a
-// reassignment through an escaped alias is invisible to this walk.
+// Implementation: at ND_IF/ND_COND, short-circuit &&/||, ND_FOR/ND_DO, and
+// ND_SWITCH the env is cloned per live branch/iteration/case and *merged*
+// back at the join point (nn_join(), below) -- real dataflow, not a barrier.
+// Loops use a bounded back-edge fixpoint (NN_LOOP_ITER_CAP iterations) with
+// break/continue envs accumulated per loop via a jump-target stack
+// (NNJumpTarget) and joined in at the right point (loop exit / loop header,
+// respectively); ND_DO additionally excludes the zero-trip path from its
+// exit env, since a do-while body always runs at least once. ND_SWITCH does
+// a single pass with no fixpoint: each ND_CASE joins the switch's entry env
+// into the fall-through env, and break envs are joined into the switch's
+// exit env (plus the entry env itself, if there's no `default`, since the
+// whole switch is then skippable). Constructs the fixpoint/join scheme can't
+// safely model -- a user goto/label anywhere inside (a merge point from
+// unknown predecessors), a computed goto, or a case label reachable from a
+// loop body without an intervening switch of its own (Duff's device) -- fall
+// back to the original coarse "barrier" scheme (nn_collect_assigned(), still
+// below): every local assigned anywhere inside the construct is reset to
+// UNKNOWN before the body walk, and the body env is discarded on exit. Also
+// falls back to the barrier on non-convergence within the iteration cap, or
+// on exhausting the per-function env pool or node-visit budget (NNCtx) --
+// all of which only ever *lose* a warning, never manufacture one, so the
+// pass stays sound (never a plain-`-Wnonnull` false positive) regardless of
+// which path a given construct takes.
+//
+// Applied unconditionally under either -Wnonnull or -Wmaybe-nonnull (not
+// gated behind the latter): NN_NULL, the only fact plain -Wnonnull consumes,
+// means "null on every live path" -- nn_join() demotes anything conditional
+// to NN_MAYBE -- so precise merging can only make the NN_NULL set *more*
+// correct, never introduce a new one. Gating it would make -Wnonnull's own
+// output depend on whether -Wmaybe-nonnull was also passed, which is a
+// user-visible surprise the whole-TU summary pass avoids by construction
+// (its only fact is NN_MAYBE-only, so plain -Wnonnull is untouched either
+// way -- not true here, since loop/switch merging changes the NN_NULL set
+// too).
+//
+// A label resets the whole env (a goto target is a merge point from unknown
+// predecessors). Locals whose address has escaped (Obj->addr_escapes, set by
+// the mark_addr_escapes() pass that already ran) or which are
+// volatile-qualified are never tracked, since a reassignment through an
+// escaped alias, or an asynchronous change to a volatile pointer, is
+// invisible to this walk.
 typedef enum { NN_UNKNOWN, NN_NULL, NN_NONNULL, NN_MAYBE } NNState;
 
 typedef struct {
@@ -8942,11 +8973,20 @@ typedef struct {
 typedef struct {
     NNEnvEntry entries[NN_MAX_TRACKED];
     int count;
+    bool live;     // false == BOTTOM: this program point is unreachable
+                    // (e.g. right after a return/break/continue). A join
+                    // with a bottom env yields exactly the other side.
+    bool overflow; // an nn_env_slot() append was dropped somewhere in this
+                    // env's history -- purely informational; overflow itself
+                    // never causes a false positive (see nn_env_slot), but
+                    // callers building a fixpoint treat it as "stop trying
+                    // to converge precisely" since a dropped var can make
+                    // equality checks spuriously agree.
 } NNEnv;
 
 static bool nn_trackable(Obj *v) {
     return v && v->is_local && !v->is_param && !v->addr_escapes &&
-           v->ty && v->ty->kind == TY_PTR;
+           v->ty && v->ty->kind == TY_PTR && !v->ty->is_volatile;
 }
 
 static NNState nn_env_get(NNEnv *env, Obj *v) {
@@ -8954,6 +8994,13 @@ static NNState nn_env_get(NNEnv *env, Obj *v) {
         if (env->entries[i].var == v)
             return env->entries[i].state;
     return NN_UNKNOWN;
+}
+
+static bool nn_env_has(const NNEnv *env, Obj *v) {
+    for (int i = 0; i < env->count; i++)
+        if (env->entries[i].var == v)
+            return true;
+    return false;
 }
 
 // Returns NULL on scratch-array overflow -- callers must treat that as "stop
@@ -8967,6 +9014,7 @@ static NNState *nn_env_slot(NNEnv *env, Obj *v) {
         env->entries[env->count].state = NN_UNKNOWN;
         return &env->entries[env->count++].state;
     }
+    env->overflow = true;
     return NULL;
 }
 
@@ -9030,8 +9078,9 @@ static NNState nn_join(NNState a, NNState b) {
 
 // Barrier: collect every trackable local assigned anywhere in `node`'s
 // subtree and reset it to UNKNOWN in `env`. Used at the exit of an
-// if/loop/switch construct so a conditionally-taken write can't leave a
-// stale (and possibly wrong) null-state behind for the fall-through path.
+// if/loop/switch construct the precise scheme below can't (or couldn't
+// safely) handle, so a conditionally-taken write can't leave a stale (and
+// possibly wrong) null-state behind for the fall-through path.
 static void nn_collect_assigned(Node *node, NNEnv *env) {
     for (; node; node = node->next) {
         if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR &&
@@ -9052,7 +9101,175 @@ static void nn_collect_assigned(Node *node, NNEnv *env) {
     }
 }
 
-static void nn_check_call_args(VirtualMachine *vm, NNEnv *env, Node *call) {
+// Per-function context for the walk. Bundled into one struct (rather than
+// threading several extra parameters through nn_walk/nn_walk_branch/etc)
+// since `quiet`, the node-visit budget, the jump-target stack, and the env
+// pool all need to reach the same call sites.
+typedef struct NNJumpTarget NNJumpTarget;
+
+// #689: a bounded pool of NNEnv scratch buffers, allocated in chunks from
+// the function's own parser_arena entry (never freed individually -- the
+// whole arena is bump-only -- but reused via nn_env_alloc/nn_env_release's
+// stack discipline within one check_nonnull_flow() call). Each NNEnv is
+// several KB (256 tracked-var slots), and a loop fixpoint needs roughly a
+// dozen live at once per nesting level on top of nn_walk_branch's own three
+// per `if` level, so keeping them off the C stack matters once loops are
+// modeled precisely. Chunked (rather than one large up-front block) so a
+// function with no loops/switches never pays for the pool at all.
+#define NN_ENV_CHUNK 8
+#define NN_ENV_MAX_CHUNKS 12 // 96 envs total; exhaustion is a bail-out, never a crash
+
+typedef struct {
+    VirtualMachine *vm;
+    Obj  *fn;
+    bool  quiet;     // fixpoint iteration in progress: the two nn_check_*
+                      // choke points below emit nothing while this is set
+    bool  exhausted; // node-visit budget spent: nn_walk degrades to a safe
+                      // give-up (UNKNOWN/live) rather than keep walking
+    long  budget;     // node-visit budget for the whole function
+    NNJumpTarget *jumps; // innermost-first break/continue/switch-entry stack
+    NNEnv *chunks[NN_ENV_MAX_CHUNKS];
+    int    n_chunks;
+    int    pool_top;
+} NNCtx;
+
+// One frame per loop or switch currently being analysed *precisely* (a
+// construct running in barrier mode pushes no frame at all -- see the
+// ND_GOTO handling in nn_walk for why an unmatched break/continue is exactly
+// the signal that its target is such a construct). `cont_label` is NULL for
+// a switch frame (a switch never redefines the continue target -- `continue`
+// inside a switch continues the nearest enclosing *loop*, found by walking
+// past this frame). `switch_entry` is non-NULL only for a switch frame.
+struct NNJumpTarget {
+    char  *brk_label;
+    char  *cont_label;
+    NNEnv *brk_env;       // accumulated join of every break's env this pass
+    NNEnv *cont_env;      // accumulated join of every continue's env
+    NNEnv *switch_entry;  // the env on entry to the switch (NULL for a loop)
+    NNJumpTarget *parent;
+};
+
+static NNEnv *nn_env_alloc(NNCtx *ctx) {
+    int chunk_idx = ctx->pool_top / NN_ENV_CHUNK;
+    int slot_idx  = ctx->pool_top % NN_ENV_CHUNK;
+    if (chunk_idx >= NN_ENV_MAX_CHUNKS)
+        return NULL;
+    if (chunk_idx >= ctx->n_chunks) {
+        ctx->chunks[chunk_idx] = arena_alloc(&ctx->vm->compiler.parser_arena,
+                                              sizeof(NNEnv) * NN_ENV_CHUNK);
+        ctx->n_chunks = chunk_idx + 1;
+    }
+    NNEnv *e = &ctx->chunks[chunk_idx][slot_idx];
+    e->count = 0;
+    e->live = true;
+    e->overflow = false;
+    ctx->pool_top++;
+    return e;
+}
+
+// Stack-discipline release: rewind to a mark captured before a construct's
+// own allocations, making every slot from there on reusable by the next
+// sibling construct. Never actually frees arena memory (the arena doesn't
+// support that) -- just moves the pool's own free-list pointer back.
+static void nn_env_release(NNCtx *ctx, int mark) {
+    ctx->pool_top = mark;
+}
+
+// Node-visit / env-operation budget, spent by nn_walk (per node) and by the
+// O(env-size) operations below (join, equality). Nested loops multiply work
+// by up to NN_LOOP_ITER_CAP+1 per level, so this -- not the per-loop
+// iteration cap alone -- is what actually bounds the cost of deep nesting;
+// once spent, nn_walk degrades to a safe give-up everywhere, never a crash
+// or a hang.
+#define NN_WALK_BUDGET 200000
+
+static void nn_charge(NNCtx *ctx, long cost) {
+    ctx->budget -= cost;
+    if (ctx->budget <= 0)
+        ctx->exhausted = true;
+}
+
+// Pointwise join of two full branch-end envs into `dst` (#687, extended by
+// #689 to handle BOTTOM): dst[v] := join(a[v], b[v]) for every var known to
+// either side, where "known to a side" that never touched v (absent from its
+// entries) reads as whatever that side's snapshot already had for v -- which
+// for `a`/`b` produced by `NNEnv x = *env; nn_walk(..., &x)` is exactly the
+// pre-branch value, since the struct copy starts with every entry `env`
+// already had. If either side is BOTTOM (unreachable -- e.g. the env right
+// after a return/break/continue, or right after a switch case that was only
+// ever reached by an unconditional break), the join is just the other side,
+// which is what makes break/continue/return composition correct: a
+// mid-construct exit's env genuinely never reaches this join point, so it
+// must not weaken (or strengthen) whatever the *other* path already proved.
+// dst may safely alias `a` (and thus `env`, the common caller pattern): each
+// var is looked up in `a`/`b` before writing dst, and in the dst==a case the
+// in-place overwrite of index i only happens after that index's value has
+// already been read for the join, so no iteration reads a value another
+// iteration has already clobbered.
+static void nn_env_join_into(NNCtx *ctx, NNEnv *dst, const NNEnv *a, const NNEnv *b) {
+    nn_charge(ctx, a->count + b->count);
+    if (!a->live && !b->live) {
+        dst->count = 0;
+        dst->live = false;
+        dst->overflow = a->overflow || b->overflow;
+        return;
+    }
+    if (!a->live) {
+        if (dst != a) *dst = *b;
+        else *dst = *b; // dst==a is impossible when a is bottom and b isn't
+        return;
+    }
+    if (!b->live) {
+        *dst = *a;
+        return;
+    }
+    bool overflow = a->overflow || b->overflow;
+    for (int i = 0; i < a->count; i++) {
+        Obj *v = a->entries[i].var;
+        NNState joined = nn_join(a->entries[i].state, nn_env_get((NNEnv *)b, v));
+        NNState *slot = nn_env_slot(dst, v);
+        if (slot) *slot = joined; // overflow: stop tracking, never a false positive
+    }
+    // Vars known only to `b` (never present in `a`, so the loop above never
+    // wrote them): join against NN_UNKNOWN, the implicit `a`-side state.
+    for (int i = 0; i < b->count; i++) {
+        Obj *v = b->entries[i].var;
+        if (nn_env_has(a, v))
+            continue;
+        NNState *slot = nn_env_slot(dst, v);
+        if (slot) *slot = nn_join(NN_UNKNOWN, b->entries[i].state);
+    }
+    dst->live = true;
+    dst->overflow = overflow || dst->overflow;
+}
+
+// Order-insensitive equality of two envs, used to detect loop-fixpoint
+// convergence. Absent-from-entries reads as NN_UNKNOWN on both sides (same
+// convention as nn_env_get), so two envs that differ only in which vars
+// happen to have an explicit NN_UNKNOWN entry still compare equal.
+static bool nn_env_equal(NNCtx *ctx, const NNEnv *a, const NNEnv *b) {
+    nn_charge(ctx, a->count + b->count);
+    if (a->live != b->live)
+        return false;
+    if (!a->live)
+        return true; // both bottom
+    for (int i = 0; i < a->count; i++)
+        if (nn_env_get((NNEnv *)b, a->entries[i].var) != a->entries[i].state)
+            return false;
+    for (int i = 0; i < b->count; i++) {
+        Obj *v = b->entries[i].var;
+        if (nn_env_has(a, v))
+            continue; // already compared above
+        if (b->entries[i].state != NN_UNKNOWN)
+            return false;
+    }
+    return true;
+}
+
+static void nn_check_call_args(NNCtx *ctx, NNEnv *env, Node *call) {
+    if (ctx->quiet || !env->live)
+        return;
+    VirtualMachine *vm = ctx->vm;
     Type *func_ty = call->func_ty;
     if (!func_ty || (!func_ty->nonnull_all && !func_ty->nonnull_mask))
         return;
@@ -9089,7 +9306,11 @@ static void nn_check_call_args(VirtualMachine *vm, NNEnv *env, Node *call) {
     }
 }
 
-static void nn_check_return(VirtualMachine *vm, NNEnv *env, Obj *fn, Node *ret_expr) {
+static void nn_check_return(NNCtx *ctx, NNEnv *env, Node *ret_expr) {
+    if (ctx->quiet || !env->live)
+        return;
+    VirtualMachine *vm = ctx->vm;
+    Obj *fn = ctx->fn;
     if (!fn->ty->returns_nonnull)
         return;
     Node *stripped = nn_strip_cast(ret_expr);
@@ -9107,46 +9328,264 @@ static void nn_check_return(VirtualMachine *vm, NNEnv *env, Obj *fn, Node *ret_e
                  "value may be null when returned from function declared with 'returns_nonnull'");
 }
 
-static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env);
+static void nn_walk(NNCtx *ctx, Node *node, NNEnv *env);
 
-static bool nn_env_has(const NNEnv *env, Obj *v) {
-    for (int i = 0; i < env->count; i++)
-        if (env->entries[i].var == v)
-            return true;
-    return false;
+// True if `node`'s subtree contains nothing nn_walk's precise loop/switch
+// handling can't safely model: no user goto/label (a jump target from
+// unknown predecessors), no computed goto, and -- when scanning a *loop*
+// body (`in_switch` starts false) -- no case label reachable without first
+// passing through a nested switch of its own (Duff's device: a case label
+// belonging to an *enclosing* switch, reached by jumping straight into the
+// middle of the loop body, which the fixpoint has no way to model since
+// that entry point was never one of the header states it converged over).
+// `in_switch` flips to true only for the subtree rooted at a nested
+// ND_SWITCH's own body, so a case genuinely belonging to that inner switch
+// doesn't trip the same check -- it's fully contained and handled by that
+// switch's own (separate) precise pass.
+static bool nn_precise_ok(Node *node, bool in_switch) {
+    for (; node; node = node->next) {
+        bool then_in_switch = in_switch;
+        switch (node->kind) {
+        case ND_LABEL:
+            return false;
+        case ND_GOTO:
+            if (!node->unique_label)
+                return false; // a real `goto`, not break/continue
+            break;
+        case ND_GOTO_EXPR:
+        case ND_LABEL_VAL:
+            return false; // computed goto / labels-as-values
+        case ND_CASE:
+            if (!in_switch)
+                return false; // Duff's device: case label with no owning switch here
+            break;
+        case ND_SWITCH:
+            then_in_switch = true; // node->then is this switch's own body
+            break;
+        default:
+            break;
+        }
+        if (!nn_precise_ok(node->lhs, in_switch)) return false;
+        if (!nn_precise_ok(node->rhs, in_switch)) return false;
+        if (!nn_precise_ok(node->cond, in_switch)) return false;
+        if (!nn_precise_ok(node->then, then_in_switch)) return false;
+        if (!nn_precise_ok(node->els, in_switch)) return false;
+        if (!nn_precise_ok(node->init, in_switch)) return false;
+        if (!nn_precise_ok(node->inc, in_switch)) return false;
+        if (!nn_precise_ok(node->body, in_switch)) return false;
+        for (Node *a = node->args; a; a = a->next)
+            if (!nn_precise_ok(a, in_switch)) return false;
+    }
+    return true;
 }
 
-// Pointwise join of two full branch-end envs into `dst` (#687): dst[v] :=
-// join(a[v], b[v]) for every var known to either side, where "known to a
-// side" that never touched v (absent from its entries) reads as whatever
-// that side's snapshot already had for v -- which for `a`/`b` produced by
-// `NNEnv x = *env; nn_walk(..., &x)` is exactly the pre-branch value, since
-// the struct copy starts with every entry `env` already had. The only case
-// a var is present in one side's entries but not the other's is a var that
-// didn't exist in the pre-branch env at all and got added purely by one
-// branch's own assignment -- there nn_env_get() on the side missing it
-// correctly reports NN_UNKNOWN (never assigned along that path).
-// dst may alias env itself (the common case): each var is looked up in `a`
-// and `b` (not `dst`) before writing, so aliasing is safe.
-static void nn_env_join_into(NNEnv *dst, const NNEnv *a, const NNEnv *b) {
-    for (int i = 0; i < a->count; i++) {
-        Obj *v = a->entries[i].var;
-        NNState joined = nn_join(a->entries[i].state, nn_env_get((NNEnv *)b, v));
-        NNState *slot = nn_env_slot(dst, v);
-        if (slot) *slot = joined; // overflow: stop tracking, never a false positive
+// Innermost frame whose `unique_label` matches a break/continue ND_GOTO.
+// Matching is by pointer identity, not strcmp: new_unique_name() hands the
+// identical string pointer to both the construct's brk_label/cont_label and
+// every break/continue targeting it (see parse.c's while/do/for/switch
+// construction and the break/continue statement parser).
+static NNJumpTarget *nn_find_target(NNCtx *ctx, Node *g) {
+    for (NNJumpTarget *t = ctx->jumps; t; t = t->parent) {
+        if (t->brk_label && t->brk_label == g->unique_label) return t;
+        if (t->cont_label && t->cont_label == g->unique_label) return t;
     }
-    // Vars known only to `b` (never present in `a`, so the loop above never
-    // wrote them): join against NN_UNKNOWN, the implicit `a`-side state.
-    for (int i = 0; i < b->count; i++) {
-        Obj *v = b->entries[i].var;
-        if (nn_env_has(a, v))
-            continue;
-        NNState *slot = nn_env_slot(dst, v);
-        if (slot) *slot = nn_join(NN_UNKNOWN, b->entries[i].state);
-    }
+    return NULL;
 }
 
-// Shared handling for ND_IF and ND_COND (ternary): both use cond/then/els.
+// Nearest enclosing switch frame, skipping any loop frames in between (a
+// `continue` inside a switch inside a loop must find the *loop*, but a case
+// label always belongs to the nearest switch regardless of what's between).
+static NNJumpTarget *nn_innermost_switch(NNCtx *ctx) {
+    for (NNJumpTarget *t = ctx->jumps; t; t = t->parent)
+        if (t->switch_entry) return t;
+    return NULL;
+}
+
+static void nn_walk_loop_barrier(NNCtx *ctx, Node *node, NNEnv *env) {
+    if (node->cond) nn_walk(ctx, node->cond, env);
+    // Barrier before entering the body: the loop may run 0+ times and
+    // repeat, so a var the body assigns must already read as UNKNOWN on
+    // entry to avoid a false positive on a later iteration or on the
+    // (already-executed) first one.
+    nn_collect_assigned(node->then, env);
+    if (node->inc) nn_collect_assigned(node->inc, env);
+    NNEnv body_env = *env;
+    nn_walk(ctx, node->then, &body_env);
+    if (node->inc) nn_walk(ctx, node->inc, &body_env);
+}
+
+static void nn_walk_switch_barrier(NNCtx *ctx, Node *node, NNEnv *env) {
+    // Case labels make precise per-branch merging impractical here --
+    // barrier the whole body instead. (Caller has already walked node->cond.)
+    nn_collect_assigned(node->then, env);
+    NNEnv body_env = *env;
+    nn_walk(ctx, node->then, &body_env);
+}
+
+#define NN_LOOP_ITER_CAP 5 // lattice height (3) + a round to observe stability + slack
+
+// Bounded back-edge fixpoint for ND_FOR/ND_DO (#689). `is_do` selects
+// do-while semantics: the body always runs at least once, so (unlike
+// ND_FOR/while) the pre-loop state does not flow directly into the exit env.
+// Caller has already walked node->init (it runs exactly once regardless of
+// which path -- precise or barrier -- ends up handling the rest) and must
+// fall back to nn_walk_loop_barrier() if this returns false.
+static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env, bool is_do) {
+    if (ctx->exhausted)
+        return false;
+    if (!nn_precise_ok(node->then, false) ||
+        (node->inc  && !nn_precise_ok(node->inc,  false)) ||
+        (node->cond && !nn_precise_ok(node->cond, false)))
+        return false;
+
+    int mark = ctx->pool_top;
+    NNEnv *header_in   = nn_env_alloc(ctx);
+    NNEnv *cur         = nn_env_alloc(ctx);
+    NNEnv *next        = nn_env_alloc(ctx);
+    NNEnv *probe       = nn_env_alloc(ctx);
+    NNEnv *body_out    = nn_env_alloc(ctx);
+    NNEnv *back        = nn_env_alloc(ctx);
+    NNEnv *brk         = nn_env_alloc(ctx);
+    NNEnv *cont        = nn_env_alloc(ctx);
+    NNEnv *final_env   = nn_env_alloc(ctx);
+    NNEnv *exit_normal = nn_env_alloc(ctx);
+    NNEnv *exit_env    = nn_env_alloc(ctx);
+    if (!header_in || !cur || !next || !probe || !body_out || !back ||
+        !brk || !cont || !final_env || !exit_normal || !exit_env) {
+        nn_env_release(ctx, mark);
+        return false;
+    }
+
+    *header_in = *env;
+    *cur = *header_in;
+
+    NNJumpTarget frame = {
+        .brk_label = node->brk_label, .cont_label = node->cont_label,
+        .brk_env = brk, .cont_env = cont, .switch_entry = NULL,
+        .parent = ctx->jumps,
+    };
+    ctx->jumps = &frame;
+
+    bool saved_quiet = ctx->quiet;
+    ctx->quiet = true;
+    bool converged = false;
+
+    for (int iter = 0; iter < NN_LOOP_ITER_CAP && !ctx->exhausted; iter++) {
+        brk->count = 0;  brk->live = false;  brk->overflow = false;
+        cont->count = 0; cont->live = false; cont->overflow = false;
+
+        *probe = *cur;
+        if (!is_do && node->cond) nn_walk(ctx, node->cond, probe);
+        *body_out = *probe;
+        nn_walk(ctx, node->then, body_out);
+        nn_env_join_into(ctx, back, body_out, cont); // continue lands at inc/cond
+        if (node->inc) nn_walk(ctx, node->inc, back);
+        if (is_do && node->cond) nn_walk(ctx, node->cond, back);
+
+        nn_env_join_into(ctx, next, header_in, back);
+        if (ctx->exhausted || next->overflow)
+            break;
+        if (nn_env_equal(ctx, next, cur)) {
+            converged = true;
+            break;
+        }
+        *cur = *next;
+    }
+
+    ctx->quiet = saved_quiet;
+
+    if (!converged) {
+        ctx->jumps = frame.parent;
+        nn_env_release(ctx, mark);
+        return false;
+    }
+
+    // Single final reporting pass, at the converged fixpoint, with `quiet`
+    // restored to whatever the caller had. This is the only walk of this
+    // loop's subtree that can emit a diagnostic -- every fixpoint iteration
+    // above ran fully quiet, so nothing above this point has emitted yet.
+    brk->count = 0;  brk->live = false;  brk->overflow = false;
+    cont->count = 0; cont->live = false; cont->overflow = false;
+
+    *final_env = *cur;
+    if (!is_do && node->cond) nn_walk(ctx, node->cond, final_env);
+    // for/while: cond is checked *before* the body, so "cond false" (the
+    // state right after walking cond, before the body runs at all) is a
+    // genuine exit path -- this is the zero-trip case. A `for (;;)` with no
+    // cond at all (node->cond == NULL) has no such path -- it can only ever
+    // exit via a break -- so exit_normal must be BOTTOM, not *final_env,
+    // or a break-only infinite loop would spuriously pick up an
+    // unreachable "fell out normally" predecessor and lose precision.
+    if (!is_do) {
+        if (node->cond) *exit_normal = *final_env;
+        else {
+            exit_normal->count = 0;
+            exit_normal->live = false;
+            exit_normal->overflow = false;
+        }
+    }
+
+    nn_walk(ctx, node->then, final_env);
+    nn_env_join_into(ctx, back, final_env, cont);
+    if (node->inc) nn_walk(ctx, node->inc, back);
+    if (is_do && node->cond) nn_walk(ctx, node->cond, back);
+    // do-while: cond is checked *after* the body, so the body always runs at
+    // least once and the only exit path is "cond false" once execution has
+    // already reached `back` (post body+inc+cond) -- unlike for/while, this
+    // must NOT include header_in (no zero-trip path exists for a do-while).
+    if (is_do) *exit_normal = *back;
+
+    nn_env_join_into(ctx, exit_env, exit_normal, brk);
+    *env = *exit_env;
+
+    ctx->jumps = frame.parent;
+    nn_env_release(ctx, mark);
+    return true;
+}
+
+// Single-pass (no fixpoint needed -- no back edge) precise ND_SWITCH
+// handling. Caller has already walked node->cond and must fall back to
+// nn_walk_switch_barrier() if this returns false.
+static bool nn_walk_switch_precise(NNCtx *ctx, Node *node, NNEnv *env) {
+    if (ctx->exhausted || !nn_precise_ok(node->then, true))
+        return false;
+
+    int mark = ctx->pool_top;
+    NNEnv *entry    = nn_env_alloc(ctx);
+    NNEnv *brk      = nn_env_alloc(ctx);
+    NNEnv *body     = nn_env_alloc(ctx);
+    NNEnv *exit_env = nn_env_alloc(ctx);
+    if (!entry || !brk || !body || !exit_env) {
+        nn_env_release(ctx, mark);
+        return false;
+    }
+    *entry = *env;
+    brk->count = 0; brk->live = false; brk->overflow = false;
+
+    NNJumpTarget frame = {
+        .brk_label = node->brk_label, .cont_label = NULL,
+        .brk_env = brk, .cont_env = NULL, .switch_entry = entry,
+        .parent = ctx->jumps,
+    };
+    ctx->jumps = &frame;
+
+    body->count = 0;
+    body->live = false; // nothing before the first case label is reachable
+    body->overflow = false;
+    nn_walk(ctx, node->then, body);
+
+    nn_env_join_into(ctx, exit_env, body, brk);
+    if (!node->default_case)
+        // No `default`: the whole switch is itself skippable, so the
+        // pre-switch entry env is also a valid predecessor of the exit.
+        nn_env_join_into(ctx, exit_env, exit_env, entry);
+    *env = *exit_env;
+
+    ctx->jumps = frame.parent;
+    nn_env_release(ctx, mark);
+    return true;
+}
+
 // Real per-branch merge dataflow (#687): each live branch is walked with its
 // own full copy of env, then the live branches' end-states are joined back
 // into `env` via nn_env_join_into(). A statically-dead branch (per
@@ -9157,84 +9596,178 @@ static void nn_env_join_into(NNEnv *dst, const NNEnv *a, const NNEnv *b) {
 // whole if" path -- which is itself live (and joins in the pre-branch state
 // unchanged) unless the condition is statically always-true (bv == 1), in
 // which case skipping is provably impossible.
-static void nn_walk_branch(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
-    nn_walk(vm, fn, node->cond, env);
+static void nn_walk_branch(NNCtx *ctx, Node *node, NNEnv *env) {
+    nn_walk(ctx, node->cond, env);
 
-    int bv = static_branch_value(vm, node->cond);
+    int bv = static_branch_value(ctx->vm, node->cond);
     bool then_dead = (bv == 0);
     bool els_specified = node->els != NULL;
     bool els_dead = els_specified && (bv == 1);
     bool implicit_skip_live = !els_specified && bv != 1;
 
-    NNEnv pre = *env; // snapshot for the implicit-skip / "b absent" case below
-    NNEnv then_env, els_env;
+    int mark = ctx->pool_top;
+    NNEnv *pre = nn_env_alloc(ctx);
+    NNEnv *then_env = nn_env_alloc(ctx);
+    NNEnv *els_env = nn_env_alloc(ctx);
+    if (!pre || !then_env || !els_env) {
+        // Pool exhausted: give up precisely (rather than mis-tracking a
+        // branch we can't afford to clone) and fall back to a safe reset.
+        nn_env_release(ctx, mark);
+        env->count = 0;
+        env->live = true;
+        return;
+    }
+    *pre = *env; // snapshot for the implicit-skip / "b absent" case below
     bool then_live = !then_dead;
     bool right_live = (els_specified && !els_dead) || implicit_skip_live;
 
     if (then_live) {
-        then_env = *env;
-        nn_walk(vm, fn, node->then, &then_env);
+        *then_env = *env;
+        nn_walk(ctx, node->then, then_env);
     }
     NNEnv *right_env = NULL;
     if (els_specified && !els_dead) {
-        els_env = *env;
-        nn_walk(vm, fn, node->els, &els_env);
-        right_env = &els_env;
+        *els_env = *env;
+        nn_walk(ctx, node->els, els_env);
+        right_env = els_env;
     } else if (implicit_skip_live) {
-        right_env = &pre; // "skip the if" path: env unchanged
+        right_env = pre; // "skip the if" path: env unchanged
     }
 
     if (then_live && right_live)
-        nn_env_join_into(env, &then_env, right_env);
+        nn_env_join_into(ctx, env, then_env, right_env);
     else if (then_live)
-        *env = then_env;
+        *env = *then_env;
     else if (right_live)
         *env = *right_env;
-    // else: both sides dead -- unreachable code; env (== pre) is already correct.
+    // else: both sides dead -- unreachable code; env (== *pre) is already correct.
+
+    nn_env_release(ctx, mark);
 }
 
-static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
+static void nn_walk(NNCtx *ctx, Node *node, NNEnv *env) {
     for (; node; node = node->next) {
+        if (ctx->exhausted) {
+            env->count = 0;
+            env->live = true; // safe give-up: UNKNOWN never warns
+            return;
+        }
+        if (--ctx->budget <= 0) {
+            ctx->exhausted = true;
+            env->count = 0;
+            env->live = true;
+            return;
+        }
         switch (node->kind) {
         case ND_LABEL:
-        case ND_CASE:
-            // A goto label or switch case is a jump target -- the switch
-            // head can dispatch straight into any case, skipping whatever
-            // an earlier case in the same body did (no fall-through model
-            // here), so it's a merge point from unknown predecessors just
-            // like a goto label. Discard all tracked state to stay sound.
+            // A goto label is a jump target reachable from unknown
+            // predecessors -- discard all tracked state to stay sound, but
+            // it *is* reachable (unlike the unreachable-code-after-a-goto
+            // case below), so live must come back to true here.
             env->count = 0;
-            nn_walk(vm, fn, node->lhs, env);
+            env->live = true;
+            nn_walk(ctx, node->lhs, env);
+            continue;
+
+        case ND_CASE: {
+            // #689: precise per-case merge -- join the switch's entry env
+            // into the fall-through env, replacing the old "reset to
+            // UNKNOWN" treatment. In barrier mode (no enclosing switch frame
+            // -- either this switch bailed, or nn_walk reached this case via
+            // some other unmodeled path) fall back to the reset.
+            NNJumpTarget *sw = nn_innermost_switch(ctx);
+            if (sw)
+                nn_env_join_into(ctx, env, env, sw->switch_entry);
+            else {
+                env->count = 0;
+                env->live = true;
+            }
+            nn_walk(ctx, node->lhs, env);
+            continue;
+        }
+
+        case ND_GOTO:
+            if (node->unique_label) {
+                NNJumpTarget *t = nn_find_target(ctx, node);
+                if (t) {
+                    // A break or continue whose target we're precisely
+                    // tracking: accumulate this path's env into the target
+                    // construct's break/continue accumulator, then this
+                    // path is gone (bottom) from here on.
+                    bool is_cont = (t->cont_label && t->cont_label == node->unique_label);
+                    NNEnv *acc = is_cont ? t->cont_env : t->brk_env;
+                    nn_env_join_into(ctx, acc, acc, env);
+                    env->live = false;
+                } else {
+                    // Unmatched: the target construct pushed no frame,
+                    // meaning it's being walked in barrier mode (it bailed
+                    // out of the precise scheme -- see nn_precise_ok). We
+                    // are therefore *inside* that barrier walk right now,
+                    // and this break/continue does not actually exit any
+                    // precise construct we're tracking -- structurally,
+                    // control still falls through to whatever textually
+                    // follows in the barrier-walked body. Treating it as
+                    // bottom here would be unsound (it could make an
+                    // unrelated outer loop's fixpoint miss a live path and
+                    // manufacture a plain-nonnull false positive); a safe
+                    // reset is the correct, conservative answer instead.
+                    //
+                    // NOTE: it's not fully established whether this branch is
+                    // actually reachable. nn_walk_loop_barrier() and
+                    // nn_walk_switch_barrier() both walk their body into a
+                    // throwaway `body_env` copy and never write the result
+                    // back into the caller's `env` -- so a break/continue
+                    // inside a barrier-mode construct is already isolated by
+                    // that discard, regardless of what it does to `env` here.
+                    // Reaching this branch would need an unmatched
+                    // break/continue whose env *does* flow forward into
+                    // something live, e.g. nested inside a precise construct
+                    // that is itself inside a barrier one. Kept as defensive,
+                    // zero-cost insurance either way: if that isolation
+                    // property above ever changes, this is still the correct
+                    // (conservative, never-false-positive) answer.
+                    env->count = 0;
+                    env->live = true;
+                }
+            } else {
+                // A real `goto`: the enclosing construct was already
+                // rejected by nn_precise_ok for containing one, so we must
+                // be in barrier mode here. Code after this point in the same
+                // statement list is unreachable via fall-through (it's only
+                // reachable, if at all, via some ND_LABEL elsewhere, which
+                // resets env itself when reached).
+                env->count = 0;
+                env->live = false;
+            }
             continue;
 
         case ND_ASSIGN:
-            if (node->rhs) nn_walk(vm, fn, node->rhs, env);
+            if (node->rhs) nn_walk(ctx, node->rhs, env);
             if (node->lhs && node->lhs->kind != ND_VAR)
-                nn_walk(vm, fn, node->lhs, env);
+                nn_walk(ctx, node->lhs, env);
             if (node->lhs && node->lhs->kind == ND_VAR && nn_trackable(node->lhs->var)) {
                 NNState *slot = nn_env_slot(env, node->lhs->var);
-                if (slot) *slot = nn_state_of_expr(vm, env, node->rhs);
+                if (slot) *slot = nn_state_of_expr(ctx->vm, env, node->rhs);
             }
             continue;
 
         case ND_FUNCALL:
             for (Node *a = node->args; a; a = a->next)
-                nn_walk(vm, fn, a, env);
-            if (vm->compiler.warnings & (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL))
-                nn_check_call_args(vm, env, node);
+                nn_walk(ctx, a, env);
+            nn_check_call_args(ctx, env, node);
             continue;
 
         case ND_RETURN:
             if (node->lhs) {
-                nn_walk(vm, fn, node->lhs, env);
-                if (vm->compiler.warnings & (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL))
-                    nn_check_return(vm, env, fn, node->lhs);
+                nn_walk(ctx, node->lhs, env);
+                nn_check_return(ctx, env, node->lhs);
             }
+            env->live = false; // control does not fall through past a return
             continue;
 
         case ND_IF:
         case ND_COND:
-            nn_walk_branch(vm, fn, node, env);
+            nn_walk_branch(ctx, node, env);
             continue;
 
         case ND_LOGAND:
@@ -9243,57 +9776,44 @@ static void nn_walk(VirtualMachine *vm, Obj *fn, Node *node, NNEnv *env) {
             // clone-then-join merge as an ND_IF/ND_COND branch (#687): the
             // "rhs evaluated" path and the "short-circuited, rhs skipped"
             // path (env right after lhs, unchanged) are joined back in.
-            nn_walk(vm, fn, node->lhs, env);
+            nn_walk(ctx, node->lhs, env);
             {
                 NNEnv pre = *env;
                 NNEnv rhs_env = *env;
-                nn_walk(vm, fn, node->rhs, &rhs_env);
-                nn_env_join_into(env, &rhs_env, &pre);
+                nn_walk(ctx, node->rhs, &rhs_env);
+                nn_env_join_into(ctx, env, &rhs_env, &pre);
             }
             continue;
 
         case ND_FOR:
         case ND_DO:
-            if (node->init) nn_walk(vm, fn, node->init, env);
-            if (node->cond) nn_walk(vm, fn, node->cond, env);
-            // Barrier before entering the body: the loop may run 0+ times
-            // and repeat, so a var the body assigns must already read as
-            // UNKNOWN on entry to avoid a false positive on a later
-            // iteration or on the (already-executed) first one.
-            nn_collect_assigned(node->then, env);
-            if (node->inc) nn_collect_assigned(node->inc, env);
-            {
-                NNEnv body_env = *env;
-                nn_walk(vm, fn, node->then, &body_env);
-                if (node->inc) nn_walk(vm, fn, node->inc, &body_env);
-            }
+            if (node->init) nn_walk(ctx, node->init, env);
+            if (nn_walk_loop_precise(ctx, node, env, node->kind == ND_DO))
+                continue;
+            nn_walk_loop_barrier(ctx, node, env);
             continue;
 
         case ND_SWITCH:
-            if (node->cond) nn_walk(vm, fn, node->cond, env);
-            // Case labels make precise per-branch merging impractical for a
-            // light pass -- barrier the whole body instead.
-            nn_collect_assigned(node->then, env);
-            {
-                NNEnv body_env = *env;
-                nn_walk(vm, fn, node->then, &body_env);
-            }
+            if (node->cond) nn_walk(ctx, node->cond, env);
+            if (nn_walk_switch_precise(ctx, node, env))
+                continue;
+            nn_walk_switch_barrier(ctx, node, env);
             continue;
 
         default:
             break;
         }
 
-        nn_walk(vm, fn, node->lhs, env);
-        nn_walk(vm, fn, node->rhs, env);
-        nn_walk(vm, fn, node->cond, env);
-        nn_walk(vm, fn, node->then, env);
-        nn_walk(vm, fn, node->els, env);
-        nn_walk(vm, fn, node->init, env);
-        nn_walk(vm, fn, node->inc, env);
-        nn_walk(vm, fn, node->body, env);
+        nn_walk(ctx, node->lhs, env);
+        nn_walk(ctx, node->rhs, env);
+        nn_walk(ctx, node->cond, env);
+        nn_walk(ctx, node->then, env);
+        nn_walk(ctx, node->els, env);
+        nn_walk(ctx, node->init, env);
+        nn_walk(ctx, node->inc, env);
+        nn_walk(ctx, node->body, env);
         for (Node *a = node->args; a; a = a->next)
-            nn_walk(vm, fn, a, env);
+            nn_walk(ctx, a, env);
     }
 }
 
@@ -9494,8 +10014,13 @@ static void check_nonnull_flow(VirtualMachine *vm, Obj *fn) {
         return;
     if (!(vm->compiler.warnings & (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL)))
         return;
+    NNCtx ctx = {0};
+    ctx.vm = vm;
+    ctx.fn = fn;
+    ctx.budget = NN_WALK_BUDGET;
     NNEnv env = {0};
-    nn_walk(vm, fn, fn->body, &env);
+    env.live = true;
+    nn_walk(&ctx, fn->body, &env);
 }
 
 // Warn on statically-provable-null arguments passed to a parameter marked

@@ -712,13 +712,31 @@ handle(p);   // -Wnonnull: silent; -Wmaybe-nonnull: warns
 ```
 
 is diagnosed separately under the opt-in `-Wmaybe-nonnull`, via real
-per-branch merge dataflow (each live branch of an `if`/ternary/`&&`/`||` is
-walked independently and the resulting null-states are joined at the merge
-point). `-Wmaybe-nonnull` has a higher false-positive rate on real code than
-plain `-Wnonnull`, so it is never implied by `-Wall` or `-Wextra` — pass it
-explicitly. Loops and `switch` are not merged precisely by either flag (a
-local assigned anywhere inside is conservatively treated as unknown on exit,
-so no maybe-null warning fires there).
+dataflow: each live branch of an `if`/ternary/`&&`/`||` is walked
+independently and the resulting null-states are joined at the merge point;
+a `for`/`while`/`do` loop is walked as a bounded back-edge fixpoint (a
+handful of iterations is always enough to converge, given the null-state
+lattice's small height), with every `break`/`continue` site's state tracked
+separately and joined in at the loop's exit/header respectively — a
+`do`-loop's exit correctly excludes the zero-trip case, since its body
+always runs at least once; a `switch` is a single pass with no fixpoint
+needed, where each `case` label joins the switch's entry state into the
+fall-through state (so `case 0: p = 0; /* fall */ case 1: use(p);` reports
+maybe-null at `case 1`, matching real per-case dispatch), `break` states are
+joined into the exit, and — when there's no `default` — the pre-switch state
+is *also* a live exit predecessor, since the whole switch is then skippable.
+This applies to `-Wnonnull` too, not just `-Wmaybe-nonnull`: a loop/switch
+that is provably null on every live path (no conditional branch involved)
+now warns under plain `-Wnonnull`, where it previously fell back to the
+conservative "reset to unknown on exit" scheme and stayed silent. A
+construct the fixpoint/join scheme can't safely model — a `goto`/label
+anywhere inside it (a jump target from an unknown predecessor), a computed
+goto, or a `case` label reachable from a loop body without an intervening
+`switch` of its own (Duff's device) — falls back to that original
+conservative scheme instead, which can only miss a warning, never fabricate
+one. `-Wmaybe-nonnull` has a higher false-positive rate on real code than
+plain `-Wnonnull` regardless, so it is never implied by `-Wall` or
+`-Wextra` — pass it explicitly.
 
 A limited form of **interprocedural** tracking also feeds the same
 `-Wmaybe-nonnull` lattice: a whole-translation-unit pass flags any
