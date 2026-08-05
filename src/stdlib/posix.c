@@ -633,11 +633,13 @@ static long long wrap_pause_gil(void) {
 // reentrant and unaffected.
 //
 // nss_static_mutex (#785) additionally serializes these against the
-// gethostbyname_r/gethostbyaddr_r/getnetbyname_r shims below, so the static
-// buffer is at least never *written* concurrently -- the plain functions'
-// returned pointer is still only valid until the next call from any thread
-// on any of these six functions, which the mutex cannot fix; that's what
-// the _r variants are for.
+// gethostbyname_r/gethostbyaddr_r/getnetbyname_r *portable shim* below, so
+// the static buffer is at least never *written* concurrently -- the plain
+// functions' returned pointer is still only valid until the next call from
+// any thread on any of these six functions, which the mutex cannot fix;
+// that's what the _r variants are for. On Linux the _r functions instead
+// forward straight to glibc's own native _r variants (#791), which touch no
+// static storage at all and therefore never take this mutex.
 #if !defined(_WIN32) && !defined(_WIN64)
 static pthread_mutex_t nss_static_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
@@ -758,6 +760,13 @@ static long long wrap_getnetbyaddr_gil(long long net, long long type) {
 // functions on Linux instead of this shim, for true reentrancy without
 // serialization. nss_static_mutex itself is declared above, next to the
 // plain wrappers it also protects.
+//
+// This shim (and its nss_r_layout_size/nss_r_copy_ptr_array/nss_count_list
+// helpers) is only compiled where it is actually used -- everywhere except
+// Linux, which forwards to glibc's native _r functions instead (#791,
+// wrap_gethostbyname_r_gil etc. below) and would otherwise leave these as
+// unused statics.
+#ifndef __linux__
 
 // Required buffer size for a NULL-terminated char* array of `count` non-NULL
 // entries (whose combined string bytes, each including its NUL, are
@@ -796,7 +805,7 @@ static int nss_count_list(char **list) {
     return n;
 }
 
-static long long wrap_gethostbyname_r_gil(long long name, long long ret, long long buf,
+static long long nss_gethostbyname_r_shim(long long name, long long ret, long long buf,
                                            long long buflen, long long result, long long h_errnop) {
     struct hostent *out = (struct hostent *)ret;
     char *b = (char *)buf;
@@ -871,7 +880,7 @@ done:
     return (long long)rc;
 }
 
-static long long wrap_gethostbyaddr_r_gil(long long addr, long long len, long long type, long long ret,
+static long long nss_gethostbyaddr_r_shim(long long addr, long long len, long long type, long long ret,
                                            long long buf, long long buflen, long long result, long long h_errnop) {
     struct hostent *out = (struct hostent *)ret;
     char *b = (char *)buf;
@@ -942,7 +951,7 @@ done2:
     return (long long)rc;
 }
 
-static long long wrap_getnetbyname_r_gil(long long name, long long ret, long long buf,
+static long long nss_getnetbyname_r_shim(long long name, long long ret, long long buf,
                                           long long buflen, long long result, long long h_errnop) {
     struct netent *out = (struct netent *)ret;
     char *b = (char *)buf;
@@ -995,6 +1004,91 @@ done3:
 #endif
     if (gil) posix_acquire_and_restore_gil(vm, &state);
     return (long long)rc;
+}
+
+#endif /* !__linux__ */
+
+// ---------------------------------------------------------------------------
+// gethostbyname_r/gethostbyaddr_r/getnetbyname_r dispatch (#791): on Linux,
+// forward straight to glibc's own native _r variants instead of the
+// portable shim above. glibc's _r functions use no static/shared storage at
+// all (that's the entire point of the _r family), so this path deliberately
+// takes no lock -- unlike the shim, which serializes every guest thread's
+// lookup through nss_static_mutex. Guest-visible signature/behavior (return
+// value, *result, *h_errnop, ERANGE on a too-small buffer) is unchanged;
+// this is a Linux-only implementation swap for less contention, not an API
+// change (see the deferred-from-#785 followup that filed this). Forward-
+// declared locally rather than flipping on _GNU_SOURCE for the whole TU --
+// same gap class as mremap/fallocate/splice/ppoll above -- glibc exports
+// these regardless of feature-test macros. macOS and every other platform
+// keep using the portable shim, since they have no native _r variants at
+// all (glibc-only extensions).
+//
+// One deliberate behavior refinement on the Linux path: on a not-found
+// lookup, the portable shim above always sets *h_errnop = HOST_NOT_FOUND,
+// whereas glibc's native _r functions set *h_errnop to whichever of
+// HOST_NOT_FOUND/TRY_AGAIN/NO_RECOVERY/NO_DATA actually applies -- strictly
+// more accurate, not a regression (the shim's HOST_NOT_FOUND-only behavior
+// was never a documented guarantee, just what the shim happened to do).
+#ifdef __linux__
+extern int gethostbyname_r(const char *name, struct hostent *ret,
+                           char *buf, size_t buflen,
+                           struct hostent **result, int *h_errnop);
+extern int gethostbyaddr_r(const void *addr, socklen_t len, int type,
+                           struct hostent *ret, char *buf, size_t buflen,
+                           struct hostent **result, int *h_errnop);
+extern int getnetbyname_r(const char *name, struct netent *ret,
+                          char *buf, size_t buflen,
+                          struct netent **result, int *h_errnop);
+#endif
+
+static long long wrap_gethostbyname_r_gil(long long name, long long ret, long long buf,
+                                           long long buflen, long long result, long long h_errnop) {
+#ifdef __linux__
+    VirtualMachine *vm = current_vm();
+    ExecState state;
+    int gil = vm && vm->gil_initialized;
+    if (gil) posix_save_and_release_gil(vm, &state);
+    int rc = gethostbyname_r((const char *)name, (struct hostent *)ret, (char *)buf,
+                             (size_t)buflen, (struct hostent **)result, (int *)h_errnop);
+    if (gil) posix_acquire_and_restore_gil(vm, &state);
+    return (long long)rc;
+#else
+    return nss_gethostbyname_r_shim(name, ret, buf, buflen, result, h_errnop);
+#endif
+}
+
+static long long wrap_gethostbyaddr_r_gil(long long addr, long long len, long long type, long long ret,
+                                           long long buf, long long buflen, long long result, long long h_errnop) {
+#ifdef __linux__
+    VirtualMachine *vm = current_vm();
+    ExecState state;
+    int gil = vm && vm->gil_initialized;
+    if (gil) posix_save_and_release_gil(vm, &state);
+    int rc = gethostbyaddr_r((const void *)addr, (socklen_t)len, (int)type,
+                             (struct hostent *)ret, (char *)buf, (size_t)buflen,
+                             (struct hostent **)result, (int *)h_errnop);
+    if (gil) posix_acquire_and_restore_gil(vm, &state);
+    return (long long)rc;
+#else
+    return nss_gethostbyaddr_r_shim(addr, len, type, ret, buf, buflen, result, h_errnop);
+#endif
+}
+
+static long long wrap_getnetbyname_r_gil(long long name, long long ret, long long buf,
+                                          long long buflen, long long result, long long h_errnop) {
+#ifdef __linux__
+    VirtualMachine *vm = current_vm();
+    ExecState state;
+    int gil = vm && vm->gil_initialized;
+    if (gil) posix_save_and_release_gil(vm, &state);
+    int rc = getnetbyname_r((const char *)name, (struct netent *)ret, (char *)buf,
+                            (size_t)buflen, (struct netent **)result, (int *)h_errnop);
+    if (gil) posix_acquire_and_restore_gil(vm, &state);
+    return (long long)rc;
+#else
+    return nss_getnetbyname_r_shim(name, ret, buf, buflen, result, h_errnop);
+#endif
 }
 
 // ---------------------------------------------------------------------------

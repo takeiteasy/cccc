@@ -451,6 +451,16 @@ int test_posix_dns_gil_concurrency(void) {
 // assert the result points *inside* that buffer (proving a real deep copy,
 // not an alias into shared static storage that a concurrent call could
 // overwrite), plus the correctness/ERANGE/not-found contracts.
+//
+// On Linux this also exercises #791's forwarding to glibc's native
+// gethostbyname_r/gethostbyaddr_r/getnetbyname_r (src/stdlib/posix.c
+// wrap_gethostbyname_r_gil etc.) instead of the portable shim used
+// elsewhere: same functional test, no code here needs to know which path
+// is active, since the guest-visible contract is identical either way. The
+// two threads *not* serializing against each other on Linux (the actual
+// point of #791) is structural rather than something this test can time
+// reliably -- the Linux dispatcher simply never touches nss_static_mutex;
+// see that function's comment for the reasoning.
 static void *gethostbyname_r_worker(void *arg) {
     int iterations = *(int *)arg;
     char buf[2048];
