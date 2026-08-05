@@ -2030,6 +2030,17 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
         (existing->kind == TY_ENUM && !existing->enum_constants &&
          ty->enum_constants)) {
         *existing = *ty;
+        // #906: completing a forward-declared tag (e.g. `typedef struct
+        // Alpha Alpha;` in a header, `struct Alpha { ... };` in the primary
+        // file) must re-record the tag with the *definition's* declaration
+        // token. The forward declaration's record -- created by
+        // push_tag_scope with the header token -- has from_include true, so
+        // serialize.c's #891 filter (serialize_type_defs_for_owner) would
+        // suppress the standalone definition from -m/-c=native output on the
+        // assumption the re-emitted #include supplies the header. Provenance
+        // belongs to the definition, not the first mention (the same rule
+        // Type.struct_tag was added for in #892/#897).
+        record_type_name(vm, existing, tag->loc, tag->len, true, tag);
         return existing;
     }
 
