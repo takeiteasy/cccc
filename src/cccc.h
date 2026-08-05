@@ -2430,7 +2430,9 @@ typedef struct Compiler {
     HashMap macro_snapshot_backup;
     bool reflection_attrs_registered; // True after ensure_reflection_attrs_registered has run (#235)
     bool no_comptime;                // --no-comptime: skip entire comptime/macro phase (for TUs that don't use comptime)
-    bool comptime_include_all;       // --comptime-include-all: forward all #include decls to comptime pass (legacy behavior)
+    bool comptime_include_all;       // --comptime-include-all: forward all #define macros to
+                                       // the comptime pass, and widen the demand-driven
+                                       // declaration index (#894) to include system headers
     HashMap *macro_scope_stack;       // Snapshot stack for per-comptime-fn macro isolation (#283)
     int      macro_scope_stack_len;
     int      macro_scope_stack_cap;
@@ -2453,13 +2455,39 @@ typedef struct Compiler {
     char **macro_vararg_strs;         // Active global macro variadic string args
     int macro_vararg_count;           // Number of active variadic args
     bool macro_vararg_string_mode;    // True when varargs are char* token strings
-    Token *macro_context_tokens;      // Safe file-scope decls visible to macro bytecode
-    Scope *macro_context_scope;       // Parser scope produced from macro_context_tokens
-    StringArray comptime_dropped_globals; // #893: names of primary-file initialized globals
-                                       // that build_macro_context_tokens declined to forward
-                                       // (non-constant initializer, or not in the primary
-                                       // file); used to give the undefined-variable error at
-                                       // parse.c a targeted hint instead of a bare message
+    Scope *macro_context_scope;       // Parser scope produced by compiling the macro program
+    StringArray comptime_dropped_globals; // #893: names of initialized globals that the
+                                       // demand-driven declaration index (below) declined to
+                                       // splice into the comptime program (non-constant
+                                       // initializer, or not in the primary file); used to
+                                       // give the undefined-variable error at parse.c a
+                                       // targeted hint instead of a bare message
+    // #894: demand-driven declaration index, replacing an earlier eager,
+    // file-scoped snapshot. Built once from the preprocessed runtime
+    // streams; entries are token ranges, resolved into the comptime program
+    // lazily on a lookup miss during the comptime parse (is_typename/
+    // find_tag/primary()'s hooks in src/parse.c, calling back into
+    // src/macros.c's cc_comptime_index_* / cc_comptime_resolve_* functions).
+    HashMap comptime_decl_index;      // name (ordinary namespace) -> ComptimeDecl* chain
+    HashMap comptime_tag_index;       // name (tag namespace: struct/union/enum) -> ComptimeDecl* chain
+    bool has_comptime_decl_index;     // True once the index above has been built for this compile
+    Scope *macro_file_scope;          // #894: the comptime program's own file scope, so a
+                                       // demand-driven splice lands its declaration there
+                                       // rather than in whatever scope the comptime parser
+                                       // happens to be in when the miss occurs
+    // #894: true for the duration of a demand-driven splice's own reentrant
+    // parse (cc_parse_splice_range, src/parse.c) or a Quote()/QuoteN()
+    // template parse (quote_core, src/reflection.c) triggered from comptime
+    // *execution* -- i.e. after compile_macro_program already reset
+    // in_macro_mode to false. is_typename()/find_tag()/primary()'s splice
+    // hooks check (in_macro_mode || comptime_splice_active) so a name
+    // referenced only from inside such a reentrant parse can still trigger
+    // further splicing. Deliberately NOT folded into in_macro_mode itself:
+    // that flag also gates primary()'s macro-vs-ordinary-call dispatch and
+    // the #887 stale-global guard, and forcing it broadly during Quote()
+    // was found (#894 testing) to wrongly route macro-to-macro calls
+    // written inside a Quote() template through the ordinary-call path.
+    bool comptime_splice_active;
     Obj *macro_globals; // Globals defined by inline macros (injected into
                         // the final program before codegen)
     EmitEvent *emit_events_head;  // Ordered generated-output events
@@ -3589,6 +3617,18 @@ bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len
 bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename); // #896
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
+
+// #894: demand-driven comptime declaration index. Defined in src/macros.c
+// (which owns the index's data structures); cc_parse_splice_range is
+// defined in src/parse.c (which owns the reentrant declaration parser) and
+// called back into from macros.c's resolvers below. See "Pre-parse macro
+// declaration context" in docs/MACROS.md.
+bool cc_parse_splice_range(VirtualMachine *vm, Token *tok);
+bool cc_comptime_resolve_typename(VirtualMachine *vm, Token *name_tok);
+bool cc_comptime_resolve_tag(VirtualMachine *vm, Token *name_tok);
+bool cc_comptime_resolve_var(VirtualMachine *vm, Token *name_tok);
+bool cc_comptime_resolve_type_name(VirtualMachine *vm, const char *name, int len);
+bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name, int len);
 
 /*!
  @function cc_expand_macros

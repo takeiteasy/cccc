@@ -136,14 +136,10 @@ static Obj *reflect_new_anon_gvar(VirtualMachine *vm, Type *ty) {
 // Type Lookup and Introspection
 // ============================================================================
 
-Type *__builtin_ast_find_type(const char *name) {
-    VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
-        return NULL;
-
-    size_t name_len = strlen(name);
-
-    // Search through all scopes, starting from innermost
+// Walk the current scope chain for a struct/union/enum tag OR typedef
+// registered under `name`. Factored out of __builtin_ast_find_type so it
+// can be retried once after a #894 demand-driven splice attempt.
+static Type *find_type_in_scope(VirtualMachine *vm, const char *name, size_t name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         // First search struct/union/enum tags
         for (TagScopeNode *node = sc->tags; node; node = node->next) {
@@ -160,6 +156,29 @@ Type *__builtin_ast_find_type(const char *name) {
             }
         }
     }
+    return NULL;
+}
+
+Type *__builtin_ast_find_type(const char *name) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !name)
+        return NULL;
+
+    size_t name_len = strlen(name);
+
+    Type *ty = find_type_in_scope(vm, name, name_len);
+    if (ty)
+        return ty;
+
+    // #894: GetType("Name") (and FindType et al) run at comptime *execution*
+    // time -- there is no identifier token to intercept on a miss the way
+    // is_typename()/find_tag() do during the comptime *parse*, so retry
+    // once here by plain name against the same demand-driven declaration
+    // index instead. Not gated on in_macro_mode: this runs after
+    // compile_macro_program has already reset it to false (see
+    // comptime_index_splice's comment, src/macros.c).
+    if (cc_comptime_resolve_type_name(vm, name, (int)name_len))
+        return find_type_in_scope(vm, name, name_len);
 
     return NULL;
 }
@@ -513,17 +532,36 @@ int64_t __builtin_ast_offsetof_chain(Type *ty,
 // Global Symbol Introspection
 // ============================================================================
 
+static Obj *find_global_in_list(VirtualMachine *vm, const char *name, size_t name_len) {
+    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
+        if (strlen(obj->name) == name_len &&
+            strncmp(obj->name, name, name_len) == 0)
+            return obj;
+    }
+    return NULL;
+}
+
 Obj *__builtin_ast_find_global(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !name)
         return NULL;
 
     size_t name_len = strlen(name);
-    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
-        if (strlen(obj->name) == name_len &&
-            strncmp(obj->name, name, name_len) == 0)
-            return obj;
-    }
+    Obj *obj = find_global_in_list(vm, name, name_len);
+    if (obj)
+        return obj;
+
+    // #894: FindGlobal("name") is a public reflection.h entry point (also
+    // used internally by __builtin_ast_var_ref) and runs at comptime
+    // *execution* time, so retry once by plain name against the
+    // demand-driven declaration index, same as __builtin_ast_find_type/
+    // __builtin_ast_var_ref above. Not gated on in_macro_mode here --
+    // cc_comptime_resolve_value_name only splices a CDK_OBJECT registration
+    // while in_macro_mode is true (see comptime_index_splice, src/macros.c);
+    // CDK_PROTO/CDK_ENUM_CONST have no such restriction.
+    if (cc_comptime_resolve_value_name(vm, name, (int)name_len))
+        return find_global_in_list(vm, name, name_len);
+
     return NULL;
 }
 
@@ -657,14 +695,9 @@ Node *__builtin_ast_string_literal(const char *str) {
     return node;
 }
 
-Node *__builtin_ast_var_ref(const char *name) {
-    VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name)
-        return NULL;
-
-    // Look up the variable in current scope
-    size_t name_len = strlen(name);
-
+// Scope-then-globals lookup behind __builtin_ast_var_ref. Factored out so
+// it can be retried once after a #894 demand-driven splice attempt.
+static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
             if (node->name_len == (int)name_len &&
@@ -689,6 +722,28 @@ Node *__builtin_ast_var_ref(const char *name) {
         n->ty = global->ty;
         return n;
     }
+
+    return NULL;
+}
+
+Node *__builtin_ast_var_ref(const char *name) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !name)
+        return NULL;
+
+    size_t name_len = strlen(name);
+    Node *n = var_ref_lookup(vm, name, name_len);
+    if (n)
+        return n;
+
+    // #894: VarRef("name") (and similar reflection lookups) run at comptime
+    // *execution* time -- there is no identifier token to intercept on a
+    // miss the way primary()'s hook does during the comptime *parse*, so
+    // retry once here by plain name against the same demand-driven
+    // declaration index instead. Not gated on in_macro_mode -- see
+    // __builtin_ast_find_global above.
+    if (cc_comptime_resolve_value_name(vm, name, (int)name_len))
+        return var_ref_lookup(vm, name, name_len);
 
     return NULL;
 }
@@ -2805,6 +2860,13 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
     var->name = name;
     var->ty = ty;
     var->align = ty->align;
+    // #894: a $k/$@k quote placeholder behaves like a local pseudo-variable
+    // (scoped to this one quote_core call, never a real global with
+    // data-segment storage) -- mark it is_local so the #887 guard in
+    // primary() (src/parse.c), which now also applies while Quote() forces
+    // in_macro_mode true for its own reentrant parse, doesn't mistake it
+    // for a non-local global that needs to be part of vm->compiler.globals.
+    var->is_local = true;
 
     VarScopeNode *snode =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
@@ -3151,6 +3213,26 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
     }
 
     // 5. Parse (auto-detect expr vs stmt)
+    //
+    // #894: Quote()/QuoteN() are called from comptime *execution* (a
+    // comptime function's body calling Quote(...) as it runs), which for a
+    // file-scope-called macro like this one happens after
+    // compile_macro_program already reset in_macro_mode to false -- same
+    // situation as GetType()/VarRef()/FindGlobal() in this file. Set
+    // comptime_splice_active for the duration so a name referenced only
+    // inside the quoted template (e.g. an FFI builtin declared but never
+    // otherwise mentioned in the comptime program's own source) can still
+    // trigger is_typename()/find_tag()/primary()'s demand-driven splice
+    // hooks in src/parse.c. Deliberately NOT in_macro_mode itself: that
+    // flag also gates primary()'s macro-vs-ordinary-call dispatch, and a
+    // Quote()d call to a *sibling comptime function* (e.g.
+    // Quote("other_comptime_fn()")) needs that dispatch to keep behaving
+    // as if in_macro_mode were still false here, exactly as it already did
+    // before this call -- forcing in_macro_mode itself was tried first and
+    // broke exactly that case (a comptime-to-comptime call written inside a
+    // quoted template).
+    bool saved_splice_active = vm->compiler.comptime_splice_active;
+    vm->compiler.comptime_splice_active = true;
     Token *rest = NULL;
     Node *result = NULL;
     if (quote_is_stmt(toks)) {
@@ -3158,6 +3240,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
     } else {
         result = cc_parse_expr(vm, &rest, toks);
     }
+    vm->compiler.comptime_splice_active = saved_splice_active;
 
     quote_rebind_macro_scope(result, &quote_scope, quote_scope.next);
 

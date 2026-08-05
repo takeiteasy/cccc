@@ -161,10 +161,11 @@ Preprocessor Options:
 	-n/--max-errors=N             Cap diagnostics at N (default: 20)
 	-C/--no-comptime              Skip the comptime/macro phase entirely (for
 	                              large TUs that don't use [[cccc::comptime]])
-	   --comptime-include-all     Forward all #include'd declarations to the
-	                              comptime pass (legacy behavior; default is
-	                              runtime-only; use #include @shared to opt in
-	                              individual headers)
+	   --comptime-include-all     Forward all #define macros to the comptime pass,
+	                              and widen the declaration index to include
+	                              system headers (both default off; declarations
+	                              from non-system headers already resolve
+	                              on demand without this flag)
 	   --allow-comptime-pp-bleed  Allow #define/#undef inside one
 	                              [[cccc::comptime]] function body to remain
 	                              visible to other comptime function bodies

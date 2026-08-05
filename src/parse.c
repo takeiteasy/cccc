@@ -637,7 +637,7 @@ static void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src) {
     tail->next = src;
 }
 
-static Type *find_tag(VirtualMachine *vm, Token *tok) {
+static Type *find_tag_scan(VirtualMachine *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         if (sc->tag_map.buckets) {
             TagScopeNode *node = hashmap_get2(&sc->tag_map, tok->loc, tok->len);
@@ -651,6 +651,24 @@ static Type *find_tag(VirtualMachine *vm, Token *tok) {
             }
         }
     }
+    return NULL;
+}
+
+static Type *find_tag(VirtualMachine *vm, Token *tok) {
+    Type *ty = find_tag_scan(vm, tok);
+    if (ty)
+        return ty;
+
+    // #894: on a miss during the comptime parse, ask the demand-driven
+    // declaration index to splice a matching struct/union/enum tag in, then
+    // retry once. Note find_tag_in_current_scope (below) -- the redefinition
+    // check -- is deliberately NOT hooked; splicing must never make a fresh
+    // declaration look like a collision with something not actually there
+    // yet.
+    if ((vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
+        tok->kind == TK_IDENT && cc_comptime_resolve_tag(vm, tok))
+        return find_tag_scan(vm, tok);
+
     return NULL;
 }
 
@@ -3810,14 +3828,28 @@ static void init_typename_map(void) {
 static bool is_typename(VirtualMachine *vm, Token *tok) {
     pthread_once(&typename_map_once, init_typename_map);
 
+    if (hashmap_get2(&typename_map, tok->loc, tok->len) || find_typedef(vm, tok))
+        return true;
+
+    // #894: an unresolved identifier during the comptime parse may name a
+    // typedef the demand-driven declaration index has seen but not yet
+    // spliced in. Retry find_typedef() once after a successful splice --
+    // deliberately NOT folded into find_typedef() itself, since the
+    // $Name/$type(Name) reflection operators (primary(), further down this
+    // file) call find_typedef() directly to reach into the *runtime*
+    // Obj/Type tables, which must never be redirected through this index.
+    if ((vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
+        tok->kind == TK_IDENT &&
+        cc_comptime_resolve_typename(vm, tok) && find_typedef(vm, tok))
+        return true;
+
     // "bool" is only a typename when it was actually classified as a C23
     // keyword; in pre-C23 modes it is downgraded to TK_IDENT and may be
     // used as an ordinary identifier (e.g. without <stdbool.h>), so it is
     // deliberately not added to the hashmap above (which matches by text
     // regardless of token kind).
-    return hashmap_get2(&typename_map, tok->loc, tok->len) || find_typedef(vm, tok) ||
-           (tok->kind == TK_KEYWORD &&
-            (equal(tok, "bool") || equal(tok, "thread_local")));
+    return tok->kind == TK_KEYWORD &&
+           (equal(tok, "bool") || equal(tok, "thread_local"));
 }
 
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
@@ -11904,6 +11936,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
+
         *rest = tok->next;
 
         // #887 repro 2: compile_macro_program isolates the comptime compile
@@ -11932,6 +11965,21 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             if (!in_macro_program)
                 sc = NULL;
         }
+
+        // #894: on a miss during the comptime parse, ask the demand-driven
+        // declaration index to splice a matching object/function/enum
+        // constant in, then retry once. Deliberately placed AFTER the #887
+        // guard above, not before it: find_var() can resolve a *stale*
+        // runtime-TU Obj through the surviving scope chain (exactly what
+        // #887 rejects), and checking "sc == NULL" before that guard runs
+        // would wrongly treat that stale hit as "already resolved, don't
+        // bother splicing" and skip straight to the same undefined-variable
+        // error #887 was trying to avoid. A freshly spliced object -- which
+        // new_gvar prepends to vm->compiler.globals, this compile's own list
+        // -- needs no re-check: it is by construction part of "in_macro_program".
+        if (!sc && (vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
+            cc_comptime_resolve_var(vm, tok))
+            sc = find_var(vm, tok);
 
         // For "static inline" function
         if (sc && sc->var && sc->var->is_function) {
@@ -12033,10 +12081,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 tok->len, tok->loc);
         } else if (vm->compiler.in_macro_mode &&
                    cc_is_dropped_comptime_global(vm, tok->loc, tok->len)) {
-            // #893: an initialized global that build_macro_context_tokens saw
-            // and declined to forward -- either its initializer isn't a
-            // self-contained constant, or it isn't declared in the primary
-            // source file.
+            // #893: an initialized global that the demand-driven declaration
+            // index (src/macros.c, #894) declined to splice in -- either its
+            // initializer isn't a self-contained constant, or it isn't
+            // declared in the primary source file.
             msg = arena_format(vm,
                 "undefined variable '%.*s' (it is an initialized global in "
                 "the runtime translation unit; only constant-initialized "
@@ -13195,18 +13243,14 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     vm->compiler.builtin_free->is_definition = false;
 }
 
-// program = (typedef | function-definition | global-variable)*
-Obj *parse(VirtualMachine *vm, Token *tok) {
-    // Initialize error recovery placeholder
-    vm->compiler.error_var.name = "<error>";
-    vm->compiler.error_var.ty = ty_error;
-
-    // Initialize global scope
-    enter_scope(vm);
-
-    declare_builtin_functions(vm);
-    vm->compiler.globals = NULL;
-
+// Parse file-scope declarations (typedef | function-definition |
+// global-variable | static_assert) from `tok` until TK_EOF, into whatever
+// scope and vm->compiler.globals list the caller has already set up. Does
+// NOT enter/leave scope, reset globals, or run any post-parse passes -- it
+// is the shared unit of work behind parse()'s top-level loop, REPL top-level
+// declarations (cc_parse_repl_unit), and demand-driven comptime declaration
+// splicing (splice_comptime_decl, #894).
+static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         // _Static_assert or static_assert (C23) - check before declspec
         if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
@@ -13273,6 +13317,104 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
         // Global variable
         tok = global_variable(vm, tok, basety, &attr);
     }
+    return tok;
+}
+
+// #894: parse an already-materialized, EOF-terminated file-scope declaration
+// (produced by the comptime declaration index's splice path in macros.c)
+// into the comptime program's own file scope
+// (vm->compiler.macro_file_scope), regardless of where in the comptime
+// parse the miss that triggered this happened.
+//
+// Contained: a malformed splice (most plausibly reachable only via
+// --comptime-include-all widening the index into an exotic system-header
+// declaration cccc can't parse in isolation) degrades to returning false --
+// an ordinary "not found" at the use site -- instead of the longjmp/exit an
+// uncontained error_tok()/error_at() would perform out of the whole
+// compile. Not fully transactional: a declaration that fails partway
+// through may leave an inert (never looked up again) partial Obj in
+// vm->compiler.globals or a partial scope registration. Accepted as a
+// bounded, one-shot cost -- the caller marks the failing entry CD_FAILED
+// and never retries it -- rather than adding a full scope/globals
+// snapshot-restore for what should be a rare path.
+bool cc_parse_splice_range(VirtualMachine *vm, Token *tok) {
+    Obj *saved_locals = vm->compiler.locals;
+    Obj *saved_current_fn = vm->compiler.current_fn;
+    Scope *saved_scope = vm->compiler.scope;
+    bool saved_lookahead = vm->compiler.in_type_lookahead;
+    bool saved_splice_active = vm->compiler.comptime_splice_active;
+    uint64_t saved_warnings = vm->compiler.warnings;
+    uint64_t saved_werror = vm->compiler.warning_errors;
+    int saved_error_count = vm->error_count;
+    jmp_buf *saved_jmp = vm->error_jmp_buf;
+    jmp_buf local;
+
+    vm->compiler.locals = NULL;
+    vm->compiler.current_fn = NULL;
+    if (vm->compiler.macro_file_scope)
+        vm->compiler.scope = vm->compiler.macro_file_scope;
+    // #894: a splice can be triggered two ways -- during the comptime
+    // *parse* (is_typename/find_tag/primary()'s hooks, in_macro_mode
+    // already true) or during comptime *execution*, well after
+    // compile_macro_program reset in_macro_mode to false (reflection.c's
+    // GetType()/VarRef()/FindGlobal(), via cc_comptime_resolve_type_name/
+    // _value_name). Either way, the declaration being spliced in here must
+    // itself parse AS IF still inside the comptime parse -- e.g. a struct
+    // member naming another not-yet-spliced tag needs find_tag()'s own hook
+    // to fire recursively. comptime_splice_active (not in_macro_mode itself
+    // -- see its declaration, src/cccc.h) is what those hooks check.
+    vm->compiler.comptime_splice_active = true;
+    // Several is_typename() call sites probe in a lookahead-suppressed mode
+    // (sizeof, cast, _Alignof, _Generic); a splice triggered from inside one
+    // must not inherit that suppression, or the spliced declaration itself
+    // would silently skip real work.
+    vm->compiler.in_type_lookahead = false;
+    // Suppress warnings for the duration -- a spliced header declaration
+    // (e.g. -Wredundant-decls on a struct also visible via @shared) is not
+    // something the user can act on from here.
+    vm->compiler.warnings = 0;
+    vm->compiler.warning_errors = 0;
+    vm->error_jmp_buf = &local;
+
+    bool ok;
+    if (setjmp(local) == 0) {
+        parse_file_scope_decls(vm, tok);
+        ok = (vm->error_count == saved_error_count);
+    } else {
+        ok = false;
+    }
+
+    vm->error_jmp_buf = saved_jmp;
+    vm->compiler.warnings = saved_warnings;
+    vm->compiler.warning_errors = saved_werror;
+    vm->compiler.in_type_lookahead = saved_lookahead;
+    vm->compiler.comptime_splice_active = saved_splice_active;
+    vm->compiler.scope = saved_scope;
+    vm->compiler.current_fn = saved_current_fn;
+    vm->compiler.locals = saved_locals;
+    return ok;
+}
+
+// program = (typedef | function-definition | global-variable)*
+Obj *parse(VirtualMachine *vm, Token *tok) {
+    // Initialize error recovery placeholder
+    vm->compiler.error_var.name = "<error>";
+    vm->compiler.error_var.ty = ty_error;
+
+    // Initialize global scope
+    enter_scope(vm);
+
+    // #894: remember the comptime program's own file scope so a
+    // demand-driven splice (splice_comptime_decl, below) can land its
+    // declaration there even when the miss that triggered it happened deep
+    // inside a comptime function body's block scope.
+    if (vm->compiler.in_macro_mode)
+        vm->compiler.macro_file_scope = vm->compiler.scope;
+
+    declare_builtin_functions(vm);
+    vm->compiler.globals = NULL;
+
+    tok = parse_file_scope_decls(vm, tok);
 
     for (Obj *var = vm->compiler.globals; var; var = var->next)
         if (var->is_root)
@@ -13336,44 +13478,10 @@ ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr)
         return REPL_UNIT_EMPTY;
 
     if (is_decl_start(vm, tok)) {
-        // Same body as parse()'s top-level loop (src/parse.c:parse()), minus
-        // the scope/globals reset -- a REPL "line" may itself contain more
-        // than one declaration (e.g. "int a; int b = a + 1;").
-        while (tok->kind != TK_EOF) {
-            if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
-                tok = static_assert_decl(vm, tok);
-                continue;
-            }
-
-            VarAttr attr = {};
-            Type *basety = declspec(vm, &tok, tok, &attr);
-
-            if (attr.is_typedef) {
-                tok = parse_typedef(vm, tok, basety, &attr);
-                continue;
-            }
-
-            if (is_function(vm, tok, basety)) {
-                tok = is_function_decl_list(vm, tok, basety)
-                          ? function_declaration_list(vm, tok, basety, &attr)
-                          : function(vm, tok, basety, &attr);
-                continue;
-            }
-
-            if (equal(tok, ";")) {
-                if (has_custom_attrs(basety, &attr)) {
-                    char *name = NULL;
-                    if (basety->name)
-                        name = arena_strndup(vm, basety->name->loc, basety->name->len);
-                    run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE, name,
-                                          basety, NULL, basety->name);
-                }
-                tok = tok->next;
-                continue;
-            }
-
-            tok = global_variable(vm, tok, basety, &attr);
-        }
+        // Same unit of work as parse()'s top-level loop, minus the
+        // scope/globals reset -- a REPL "line" may itself contain more than
+        // one declaration (e.g. "int a; int b = a + 1;").
+        parse_file_scope_decls(vm, tok);
         return REPL_UNIT_DECL;
     }
 

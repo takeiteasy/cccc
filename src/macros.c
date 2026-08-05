@@ -301,45 +301,337 @@ static bool initializer_is_self_contained(Token *eq, Token *semi) {
     return true;
 }
 
-// #893: the declared name is the last identifier seen before the top-level
-// '=', mirroring extract_comptime_var's heuristic (preprocess.c). Used only
-// to record a name for the "declared but not forwarded" diagnostic hint; a
-// miss here just means that one case falls back to the plain "undefined
-// variable" message.
-static Token *decl_name_before_eq(Token *start, Token *eq) {
-    Token *name = NULL;
-    for (Token *t = start; t && t != eq; t = t->next) {
-        if (t->kind == TK_IDENT)
-            name = t;
-    }
-    return name;
+// ---------------------------------------------------------------------
+// #894: demand-driven comptime declaration index.
+//
+// Earlier revisions of this file (#890/#893) took an eager, file-scoped
+// snapshot of "safe" file-scope declarations up front and prepended it to
+// every comptime program, filtered by a file-identity heuristic (forward a
+// declaration only from the primary source file, or from a file that
+// itself defines comptime code). That eager prelude is gone: this index
+// instead records WHERE each file-scope declaration lives in the
+// preprocessed runtime streams, keyed by the name(s) it declares, and
+// resolves nothing until the comptime parse actually asks for a name it
+// can't find (is_typename/find_tag/primary()'s hooks in src/parse.c, via
+// cc_comptime_resolve_typename/_tag/_var below). Cost is now proportional
+// to what comptime code actually references, and a third file that defines
+// no comptime code of its own no longer needs @shared just to be visible.
+//
+// System headers are excluded from the index by default (matching the old
+// prelude's "system headers need @shared/@comptime/--comptime-include-all"
+// behavior for #551/#552 isolation) and join it only under
+// --comptime-include-all, which now widens the index in addition to its
+// existing job of forwarding all #define macros (isolate_comptime_macros,
+// below). See docs/MACROS.md's "Pre-parse macro declaration context".
+// ---------------------------------------------------------------------
+
+typedef enum {
+    CDK_TYPEDEF,
+    CDK_TAG,
+    CDK_OBJECT,
+    CDK_PROTO,
+    CDK_ENUM_CONST,
+} ComptimeDeclKind;
+
+typedef enum {
+    CD_NEW,
+    CD_IN_PROGRESS,
+    CD_DONE,
+    CD_FAILED,
+} ComptimeDeclState;
+
+// One file-scope declaration *statement*. It may be reachable under several
+// names -- a tag name and one or more typedef/object declarator names can
+// all name the SAME statement (e.g. `typedef struct Foo { ... } Foo, *FooP;`
+// registers "Foo" as a tag, "Foo" as a typedef, and "FooP" as a typedef, all
+// pointing here). State lives on the shared statement, not per name, so
+// splicing via any one of its names parses the statement exactly once --
+// this is what makes it safe to register a tag-with-body and its trailing
+// declarators as separate names without risking a "redefinition" error from
+// parsing the same statement twice under two different lookups.
+typedef struct ComptimeDecl {
+    Token *start;       // first token of the declaration
+    Token *end;         // token AFTER the terminating ';' (exclusive)
+    File *file;
+    const char *filename;
+    bool has_top_level_eq;
+    bool initializer_self_contained; // meaningful only if has_top_level_eq
+    ComptimeDeclState state;
+} ComptimeDecl;
+
+// One name -> declaration registration, chained on hashmap-key collision.
+// Collisions cover both a genuine same-name conflict (two different input
+// files each declaring `static int counter;`) and ordinary chaining.
+typedef struct ComptimeDeclName {
+    struct ComptimeDeclName *next;
+    ComptimeDecl *decl;
+    ComptimeDeclKind kind;
+} ComptimeDeclName;
+
+static void register_comptime_decl_name(VirtualMachine *vm, HashMap *map,
+                                        Token *name_tok, ComptimeDecl *decl,
+                                        ComptimeDeclKind kind) {
+    if (!name_tok || name_tok->kind != TK_IDENT)
+        return;
+    ComptimeDeclName *reg =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeDeclName));
+    reg->decl = decl;
+    reg->kind = kind;
+    reg->next = hashmap_get2(map, name_tok->loc, name_tok->len);
+    hashmap_put2(map, name_tok->loc, name_tok->len, reg);
 }
 
-// Capture file-scope declarations that can safely be prepended to the macro
-// bytecode program: typedefs, tag declarations, prototypes, externs, and
-// other declarations without top-level initializers. Function bodies and
-// file-scope macro calls are skipped so ordinary program code is not
-// compiled into the macro VM. #893: a declaration WITH a top-level
-// initializer is also forwarded, but only when it is declared directly in
-// the primary source file (regardless of --comptime-include-all -- routed
-// @shared/comptime includes are already textually spliced into the comptime
-// TU elsewhere in build_combined_macro_tokens, so forwarding a *definition*
-// from an included file here too would redefine it there) and its
-// initializer is self-contained (see initializer_is_self_contained). Every
-// other initialized global is dropped, same as before, but its name is
-// recorded in vm->compiler.comptime_dropped_globals so the undefined-
-// variable diagnostic can give a targeted hint instead of a bare message.
-static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_tokens,
-                                         int count) {
-    Token head = {};
-    Token *cur = &head;
+// Register each enumerator inside an enum body [brace, semi), where `brace`
+// is the enum's own opening '{'. An enumerator is any identifier at
+// brace-depth 1 immediately preceded by '{' or ','.
+static void index_enum_constants(VirtualMachine *vm, HashMap *ordinary_map,
+                                 Token *brace, Token *semi, ComptimeDecl *decl) {
+    int depth = 0;
+    Token *prev_sig = NULL;
+    for (Token *t = brace; t && t != semi; t = t->next) {
+        if (equal(t, "{")) {
+            depth++;
+        } else if (equal(t, "}")) {
+            depth--;
+            if (depth == 0)
+                return;
+        } else if (depth == 1 && t->kind == TK_IDENT && prev_sig &&
+                   (equal(prev_sig, "{") || equal(prev_sig, ","))) {
+            register_comptime_decl_name(vm, ordinary_map, t, decl, CDK_ENUM_CONST);
+        }
+        prev_sig = t;
+    }
+}
 
-    // By default (runtime-only include scoping) only declarations whose tokens
-    // originate from the main source file, or from a file that itself defines
-    // comptime code (see comptime_ctx_file_allowed, #890), are forwarded to the
-    // comptime pass. --comptime-include-all restores the old all-headers
-    // behavior.
-    bool filter_active = !vm->compiler.comptime_include_all && vm->compiler.primary_file;
+// Token immediately before the first top-level (depth-0) '[' array-dimension
+// group in [seg_start, seg_last], or seg_last itself if there is none --
+// the candidate declared name for a simple (non-function) declarator, with
+// any trailing array dimensions skipped. Tokens are singly-linked, so this
+// is a forward scan that remembers the position rather than a true
+// backward walk.
+static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
+    Token *result = seg_last;
+    bool found_bracket = false;
+    int depth = 0;
+    Token *prev = NULL;
+    for (Token *t = seg_start; ; t = t->next) {
+        if (equal(t, "[")) {
+            if (depth == 0 && !found_bracket) {
+                result = prev;
+                found_bracket = true;
+            }
+            depth++;
+        } else if (equal(t, "]") && depth > 0) {
+            depth--;
+        }
+        if (t == seg_last)
+            break;
+        prev = t;
+    }
+    return result;
+}
+
+// Returns the '(' token matching `close` (a ')' token in the same segment),
+// scanning forward from `seg_start` with a small paren stack. NULL if
+// unmatched or the segment is implausibly deeply nested.
+#define CD_PAREN_STACK_MAX 32
+static Token *find_matching_open_paren(Token *seg_start, Token *close) {
+    Token *stack[CD_PAREN_STACK_MAX];
+    int sp = 0;
+    for (Token *t = seg_start; t; t = t->next) {
+        if (equal(t, "(")) {
+            if (sp >= CD_PAREN_STACK_MAX)
+                return NULL;
+            stack[sp++] = t;
+        } else if (equal(t, ")")) {
+            if (sp == 0)
+                return NULL;
+            Token *open = stack[--sp];
+            if (t == close)
+                return open;
+        }
+        if (t == close)
+            break;
+    }
+    return NULL;
+}
+
+// Extract the declared name from one comma-delimited declarator segment
+// [seg_start, seg_last]. Handles plain declarators (skipping trailing
+// arrays), simple function prototypes ("NAME ( ... )"), and function-pointer
+// declarators ("( * NAME ) ( ... )", any number of leading '*'). Returns
+// NULL -- register nothing -- for anything less confident than that,
+// including multi-level function-pointer nesting. Sets *is_simple_proto
+// when the segment is specifically the "NAME ( ... )" shape, so the caller
+// can tell a function prototype apart from a function-pointer object/typedef
+// declarator (both end in ')', but only the former needs CDK_PROTO instead
+// of CDK_OBJECT/CDK_TYPEDEF).
+static Token *extract_declarator_name(Token *seg_start, Token *seg_last,
+                                      bool *is_simple_proto) {
+    *is_simple_proto = false;
+    if (equal(seg_last, ")")) {
+        Token *open = find_matching_open_paren(seg_start, seg_last);
+        if (!open)
+            return NULL;
+        Token *before_open = NULL;
+        for (Token *t = seg_start; t && t != open; t = t->next)
+            before_open = t;
+        if (before_open && before_open->kind == TK_IDENT) {
+            *is_simple_proto = true;
+            return before_open;
+        }
+        if (before_open && equal(before_open, ")")) {
+            Token *inner_open = find_matching_open_paren(seg_start, before_open);
+            if (inner_open) {
+                Token *name = NULL;
+                for (Token *t = inner_open->next; t && t != before_open; t = t->next)
+                    if (t->kind == TK_IDENT)
+                        name = t;
+                if (name)
+                    return name; // function-pointer-shaped declarator
+            }
+        }
+        return NULL;
+    }
+    Token *name = segment_declarator_name(seg_start, seg_last);
+    return (name && name->kind == TK_IDENT) ? name : NULL;
+}
+
+// Register one already-delimited file-scope declaration [start, semi]
+// (`semi` is the terminating ';') into the comptime declaration index.
+// `has_top_level_eq`/`eq_tok` come from cc_comptime_index_build's own
+// depth-tracked scan (below), letting #893's initializer rule be applied
+// later, per name, at splice time (comptime_index_splice) rather than
+// eagerly here. Conservative throughout: any segment whose declared name
+// can't be confidently identified is simply not registered, which just
+// means it stays invisible to demand-driven resolution.
+static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
+                              bool has_top_level_eq, Token *eq_tok) {
+    if (!start->filename)
+        return;
+    File *file = start->file;
+    if (file && file->is_system_header && !vm->compiler.comptime_include_all)
+        return;
+
+    bool saw_typedef = false;
+    for (Token *t = start; t != semi; t = t->next) {
+        if (equal(t, "typedef")) {
+            saw_typedef = true;
+            break;
+        }
+    }
+
+    ComptimeDecl *decl = arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeDecl));
+    decl->start = start;
+    decl->end = semi->next;
+    decl->file = file;
+    decl->filename = start->filename;
+    decl->has_top_level_eq = has_top_level_eq;
+    decl->initializer_self_contained =
+        has_top_level_eq && eq_tok && initializer_is_self_contained(eq_tok, semi);
+    decl->state = CD_NEW;
+
+    // --- tag: only the first "struct|union|enum IDENT" pair is inspected ---
+    Token *decl_list_start = start;
+    for (Token *t = start; t != semi; t = t->next) {
+        if ((equal(t, "struct") || equal(t, "union") || equal(t, "enum")) &&
+            t->next && t->next->kind == TK_IDENT) {
+            Token *tagname = t->next;
+            Token *after = tagname->next;
+            if (after == semi || equal(after, "{") || equal(after, "*") ||
+                equal(after, ",")) {
+                register_comptime_decl_name(vm, &vm->compiler.comptime_tag_index,
+                                            tagname, decl, CDK_TAG);
+                decl_list_start = after;
+                if (equal(after, "{")) {
+                    if (equal(t, "enum"))
+                        index_enum_constants(vm, &vm->compiler.comptime_decl_index,
+                                             after, semi, decl);
+                    Token *close = find_matching_brace(after);
+                    decl_list_start = close ? close->next : after;
+                }
+            }
+            break;
+        }
+    }
+
+    if (decl_list_start == semi)
+        return; // tag-only: "struct Foo;" or "struct Foo { ... };"
+
+    // --- declarator list: split on top-level (depth-0) commas ---
+    int paren_depth = 0, bracket_depth = 0, brace_depth = 0;
+    Token *seg_start = decl_list_start;
+    for (Token *t = decl_list_start; ; t = t->next) {
+        bool at_boundary = (t == semi) ||
+            (paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 &&
+             equal(t, ","));
+        if (at_boundary) {
+            Token *seg_last = NULL;
+            for (Token *u = seg_start; u != t; u = u->next)
+                seg_last = u;
+            // Truncate at this segment's own top-level '=', if any: an
+            // initializer's tokens (e.g. the "plain_var" in
+            // "int *p = &plain_var") must never be mistaken for the
+            // declared name.
+            if (seg_last) {
+                int eq_depth = 0;
+                for (Token *u = seg_start; ; u = u->next) {
+                    if (equal(u, "(") || equal(u, "[") || equal(u, "{"))
+                        eq_depth++;
+                    else if (equal(u, ")") || equal(u, "]") || equal(u, "}"))
+                        eq_depth--;
+                    else if (eq_depth == 0 && equal(u, "=")) {
+                        Token *before_eq = NULL;
+                        for (Token *v = seg_start; v != u; v = v->next)
+                            before_eq = v;
+                        seg_last = before_eq;
+                        break;
+                    }
+                    if (u == seg_last)
+                        break;
+                }
+            }
+            if (seg_last) {
+                bool is_simple_proto = false;
+                Token *name = extract_declarator_name(seg_start, seg_last,
+                                                       &is_simple_proto);
+                if (name) {
+                    ComptimeDeclKind kind = saw_typedef ? CDK_TYPEDEF :
+                        (is_simple_proto ? CDK_PROTO : CDK_OBJECT);
+                    register_comptime_decl_name(vm, &vm->compiler.comptime_decl_index,
+                                                name, decl, kind);
+                }
+            }
+            if (t == semi)
+                break;
+            seg_start = t->next;
+            continue;
+        }
+        if (equal(t, "("))
+            paren_depth++;
+        else if (equal(t, ")") && paren_depth > 0)
+            paren_depth--;
+        else if (equal(t, "["))
+            bracket_depth++;
+        else if (equal(t, "]") && bracket_depth > 0)
+            bracket_depth--;
+        else if (equal(t, "{"))
+            brace_depth++;
+        else if (equal(t, "}") && brace_depth > 0)
+            brace_depth--;
+    }
+}
+
+// Build the comptime declaration index over all input streams. Idempotent
+// per compile (has_comptime_decl_index guards re-entry). The
+// declaration-boundary scan (file-scope call skip, function-body skip via
+// brace matching, depth-tracked '='/';' detection) records an index entry
+// at each terminator via index_declaration, above.
+static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
+                                    int count) {
+    if (vm->compiler.has_comptime_decl_index)
+        return;
+    vm->compiler.has_comptime_decl_index = true;
 
     for (int fi = 0; fi < count; fi++) {
         Token *tok = input_tokens[fi];
@@ -380,32 +672,7 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
                     }
 
                     if (equal(tok, ";")) {
-                        if (!has_top_level_eq) {
-                            bool skip = filter_active && start->filename &&
-                                         !comptime_ctx_file_allowed(vm, start->filename);
-                            if (!skip) {
-                                for (Token *t = start; t != tok->next &&
-                                     t && t->kind != TK_EOF; t = t->next)
-                                    cur = cur->next = copy_macro_token(vm, t);
-                            }
-                        } else {
-                            bool is_primary = vm->compiler.primary_file &&
-                                start->filename &&
-                                strcmp(start->filename,
-                                       vm->compiler.primary_file->display_name) == 0;
-                            if (is_primary &&
-                                initializer_is_self_contained(eq_tok, tok)) {
-                                for (Token *t = start; t != tok->next &&
-                                     t && t->kind != TK_EOF; t = t->next)
-                                    cur = cur->next = copy_macro_token(vm, t);
-                            } else {
-                                Token *name_tok = decl_name_before_eq(start, eq_tok);
-                                if (name_tok)
-                                    arena_strarray_push(vm,
-                                        &vm->compiler.comptime_dropped_globals,
-                                        arena_strndup(vm, name_tok->loc, name_tok->len));
-                            }
-                        }
+                        index_declaration(vm, start, tok, has_top_level_eq, eq_tok);
                         tok = tok->next;
                         break;
                     }
@@ -435,16 +702,179 @@ static Token *build_macro_context_tokens(VirtualMachine *vm, Token **input_token
                 continue;
         }
     }
+}
 
-    if (!head.next)
-        return NULL;
-    cur->next = new_macro_eof(vm, cur);
+// Copy [start, end) (the range recorded on a ComptimeDecl) into a fresh,
+// EOF-terminated token list via copy_macro_token, so the runtime stream
+// itself is never mutated or re-linked by the reentrant parse.
+static Token *materialize_comptime_range(VirtualMachine *vm, Token *start, Token *end) {
+    Token head = {};
+    Token *cur = &head;
+    for (Token *t = start; t && t != end && t->kind != TK_EOF; t = t->next)
+        cur = cur->next = copy_macro_token(vm, t);
+    cur->next = new_macro_eof(vm, cur != &head ? cur : start);
     return head.next;
+}
+
+// Shared lookup+splice path behind cc_comptime_resolve_typename/_tag/_var
+// (token-based, for the parser's own miss hooks) and
+// cc_comptime_resolve_type_name/_value_name (plain-string, for reflection.c
+// API entry points like GetType()/VarRef() that look a name up at comptime
+// *execution* time rather than during the comptime *parse* -- there is no
+// token to intercept there, so those go through this same path by name
+// instead). `map` is the appropriate namespace (comptime_decl_index for
+// typedefs/objects/functions/enum constants, comptime_tag_index for
+// struct/union/enum tags); `kind_mask` restricts which registration(s)
+// under the name are eligible -- e.g. a typename lookup only wants a
+// CDK_TYPEDEF registration, never an object of the same name that happens
+// to share the ordinary-namespace map.
+//
+// Prefers a registration whose declaration is in the primary file when
+// several files register the same name under the requested kind (the
+// multi-input-file duplicate-name case); otherwise takes the first
+// matching-kind registration.
+static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
+                                  const char *loc, int len, unsigned kind_mask) {
+    // Note: NOT gated on vm->compiler.in_macro_mode here -- reflection.c's
+    // callers (cc_comptime_resolve_type_name/_value_name) run at comptime
+    // *execution* time, after compile_macro_program has already returned
+    // and reset in_macro_mode to false. The CDK_OBJECT branch below applies
+    // its own, narrower in_macro_mode requirement for the one kind where
+    // that distinction is load-bearing.
+    if (!vm->compiler.has_comptime_decl_index)
+        return false;
+
+    ComptimeDeclName *chain = hashmap_get2(map, loc, len);
+    if (!chain)
+        return false;
+
+    ComptimeDeclName *pick = NULL;
+    for (ComptimeDeclName *r = chain; r; r = r->next) {
+        if (!(kind_mask & (1u << r->kind)))
+            continue;
+        if (!pick)
+            pick = r;
+        if (vm->compiler.primary_file && r->decl->file == vm->compiler.primary_file) {
+            pick = r;
+            break;
+        }
+    }
+    if (!pick)
+        return false;
+
+    ComptimeDecl *decl = pick->decl;
+    // CD_IN_PROGRESS: a cycle (mutually recursive tags/typedefs) -- the
+    // declaration currently being spliced references itself, directly or
+    // transitively; let the caller's own lookup fail normally (correct for
+    // an incomplete-type reference, e.g. a pointer member). CD_DONE/
+    // CD_FAILED: already resolved (successfully or not) -- never retried.
+    if (decl->state != CD_NEW)
+        return false;
+
+    // #890/#893 object-splice gate: types, prototypes, and enum constants
+    // splice freely once indexed (index-build time already excluded system
+    // headers unless --comptime-include-all), but a plain OBJECT declarator
+    // is real storage -- init_macro_globals zero-fills the macro program's
+    // data segment for it, so an ungated splice would let a comptime body
+    // silently read back 0 for a global it should never have been able to
+    // see, replacing today's loud "undefined variable". Apply the same
+    // #890/#893 rule this project has always applied to initialized
+    // globals: no initializer -> primary file or a comptime-defining file
+    // (comptime_ctx_file_allowed); has an initializer -> primary file only,
+    // and only when the initializer is a self-contained constant. Anything
+    // else is refused. A refused *initialized* global is recorded for the
+    // "declared but not forwarded" diagnostic hint (#893,
+    // cc_is_dropped_comptime_global, parse.c) -- that hint's wording
+    // specifically describes an initializer, so a refused *uninitialized*
+    // global (out-of-scope file, #890's rule) is deliberately left off the
+    // list and falls through to the ordinary bare "undefined variable"
+    // message instead.
+    if (pick->kind == CDK_OBJECT) {
+        // Objects additionally require in_macro_mode: compile_macro_program
+        // allocates data-segment storage for every global (init_macro_globals,
+        // Step 1) exactly once, immediately after the comptime *parse*
+        // finishes and before in_macro_mode resets to false. A splice
+        // triggered later -- from reflection.c's VarRef()/FindGlobal(),
+        // called during comptime *execution* -- would prepend an Obj that
+        // never gets a data-segment slot, i.e. a reference to uninitialized
+        // storage. There is exactly one compile_macro_program call per
+        // compile (macro_fns_compiled guards it), so this is a permanent,
+        // not transient, refusal: mark CD_FAILED rather than CD_NEW so nothing
+        // retries it. Types, prototypes, and enum constants have no such
+        // restriction and splice fine at any point (see below).
+        if (!vm->compiler.in_macro_mode) {
+            decl->state = CD_FAILED;
+            return false;
+        }
+        bool is_primary = vm->compiler.primary_file &&
+                          decl->file == vm->compiler.primary_file;
+        bool allowed = decl->has_top_level_eq
+            ? (is_primary && decl->initializer_self_contained)
+            : comptime_ctx_file_allowed(vm, decl->filename);
+        if (!allowed) {
+            decl->state = CD_FAILED;
+            if (decl->has_top_level_eq)
+                arena_strarray_push(vm, &vm->compiler.comptime_dropped_globals,
+                                    arena_strndup(vm, loc, len));
+            return false;
+        }
+    }
+
+    decl->state = CD_IN_PROGRESS;
+    Token *materialized = materialize_comptime_range(vm, decl->start, decl->end);
+    bool ok = cc_parse_splice_range(vm, materialized);
+    decl->state = ok ? CD_DONE : CD_FAILED;
+    return ok;
+}
+
+bool cc_comptime_resolve_tag(VirtualMachine *vm, Token *name_tok) {
+    return comptime_index_splice(vm, &vm->compiler.comptime_tag_index,
+                                 name_tok->loc, name_tok->len, 1u << CDK_TAG);
+}
+
+bool cc_comptime_resolve_var(VirtualMachine *vm, Token *name_tok) {
+    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index,
+                                 name_tok->loc, name_tok->len,
+                                 (1u << CDK_OBJECT) | (1u << CDK_PROTO) |
+                                 (1u << CDK_ENUM_CONST));
+}
+
+bool cc_comptime_resolve_typename(VirtualMachine *vm, Token *name_tok) {
+    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index,
+                                 name_tok->loc, name_tok->len, 1u << CDK_TYPEDEF);
+}
+
+// #894: plain-string variants of the resolvers above, for reflection.c API
+// entry points (GetType(), VarRef(), ...) that a comptime program calls at
+// bytecode-execution time with a name string rather than a source token --
+// there is no identifier token to intercept on a miss there, so
+// __builtin_ast_find_type/__builtin_ast_var_ref call these directly by name
+// instead of going through is_typename/find_tag/primary()'s hooks.
+// GetType("Name") in particular needs BOTH namespaces tried: it resolves a
+// struct/union/enum tag or a typedef through the same call, matching how
+// __builtin_ast_find_type's own scope walk checks sc->tags and sc->vars'
+// type_def entries together.
+bool cc_comptime_resolve_type_name(VirtualMachine *vm, const char *name, int len) {
+    if (!name || len <= 0)
+        return false;
+    if (comptime_index_splice(vm, &vm->compiler.comptime_tag_index, name, len,
+                              1u << CDK_TAG))
+        return true;
+    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index, name, len,
+                                 1u << CDK_TYPEDEF);
+}
+
+bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name, int len) {
+    if (!name || len <= 0)
+        return false;
+    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index, name, len,
+                                 (1u << CDK_OBJECT) | (1u << CDK_PROTO) |
+                                 (1u << CDK_ENUM_CONST));
 }
 
 // #893: used by parse.c's undefined-variable diagnostic (in_macro_mode only)
 // to tell a genuinely undefined identifier apart from a runtime-TU global
-// that build_macro_context_tokens saw and deliberately declined to forward
+// that comptime_index_splice saw and deliberately declined to splice in
 // (non-constant initializer, or declared outside the primary file).
 bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len) {
     for (int i = 0; i < vm->compiler.comptime_dropped_globals.len; i++) {
@@ -776,9 +1206,6 @@ static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_
         Token *inc_toks = tokenize_string(vm, "<comptime-include>", src);
         cur = append_token_list(vm, cur, inc_toks);
     }
-
-    if (vm->compiler.macro_context_tokens)
-        cur = append_token_list(vm, cur, vm->compiler.macro_context_tokens);
 
     // Reverse comptime_vars to source order (list is prepended, so reversed).
     int nv = 0;
@@ -2416,9 +2843,12 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
         return;
     }
 
-    if (!vm->compiler.macro_context_tokens)
-        vm->compiler.macro_context_tokens =
-            build_macro_context_tokens(vm, input_tokens, count);
+    // #894: build the demand-driven declaration index. Nothing is forwarded
+    // to the comptime program up front any more (that was the eager
+    // build_macro_context_tokens snapshot, removed) -- declarations resolve
+    // lazily, on a lookup miss, via is_typename/find_tag/primary()'s hooks
+    // in src/parse.c (splice_comptime_decl et al).
+    cc_comptime_index_build(vm, input_tokens, count);
 
     // Quick check: are there any file-scope macro calls in the token streams?
     // If not, skip init+compile here — they will happen lazily in cc_expand_macros

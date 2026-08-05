@@ -318,10 +318,11 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
     printf("\t-C/--no-comptime              Skip the comptime/macro phase entirely (for\n");
     printf("\t                              large TUs that don't use [[cccc::comptime]])\n");
-    printf("\t   --comptime-include-all     Forward all #include'd declarations to the\n");
-    printf("\t                              comptime pass (legacy behavior; default is\n");
-    printf("\t                              runtime-only; use #include @shared to opt in\n");
-    printf("\t                              individual headers)\n");
+    printf("\t   --comptime-include-all     Forward all #define macros to the comptime pass,\n");
+    printf("\t                              and widen the declaration index to include\n");
+    printf("\t                              system headers (both default off; declarations\n");
+    printf("\t                              from non-system headers already resolve\n");
+    printf("\t                              on demand without this flag)\n");
     printf("\t   --allow-comptime-pp-bleed  Allow #define/#undef inside one\n");
     printf("\t                              [[cccc::comptime]] function body to remain\n");
     printf("\t                              visible to other comptime function bodies\n");

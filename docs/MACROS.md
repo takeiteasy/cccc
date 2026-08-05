@@ -93,28 +93,39 @@ CCCC supports two macro execution forms:
 ### Pre-parse macro declaration context
 
 Global-generation macros compile and execute **before the main parse begins**.
-The macro program has CCCC's private `reflection.h` API plus a conservative
-snapshot of safe file-scope declarations from the preprocessed source. That
-snapshot includes typedefs, struct/union/enum tag declarations, function
-prototypes, `extern` declarations, and declarations without function bodies.
+The macro program has CCCC's private `reflection.h` API plus **demand-driven
+access** to file-scope declarations from the preprocessed source: typedefs,
+struct/union/enum tags (and their enumerators), function prototypes, `extern`
+declarations, and declarations without function bodies. Nothing is forwarded
+up front — a declaration resolves into the comptime program only when
+comptime code actually references its name (directly, or via a
+`reflection.h` lookup like `GetType("Name")`/`VarRef("name")`/
+`FindGlobal("name")`), and only once, regardless of how many places
+reference it.
 
-Declarations are forwarded to the comptime pass by default from the **main
-source file**, and from **any file that itself defines a `[[cccc::comptime]]`
-function or variable** — a comptime function can always see the declarations
-written alongside it in its own file, regardless of `#include` depth, because
-`#include` is textual and the two cases must be indistinguishable. Declarations
-in a *third* file — one that defines no comptime code of its own — are still
-not visible to comptime functions unless that include is annotated `@shared`
-(see [Include scoping](#include-scoping)).
+This applies to declarations from **any non-system file** in the
+translation unit — the primary source file, a header that defines
+`[[cccc::comptime]]` code, or a plain declaration-only header with no
+comptime code of its own. `#include` boundaries are not semantically
+meaningful for declaration visibility: a comptime function can name a type
+or prototype from any regular `#include`d header, the same as if it were
+written in its own file. **System headers** (resolved via `<...>`, e.g.
+`<glob.h>`) are the one exception — see below.
 
-The scoping applies to **declarations and types** but **not preprocessor
-`#define` macros**. The comptime pass starts with an isolated macro state
-containing only CCCC builtins, command-line `-D` defines, and any `#define
-@shared` opt-ins (see below). `#define`s from the main source file and any
-included headers are **not** forwarded to comptime function bodies otherwise.
-Use `@shared` routing on the `#include` to make a whole header's `#define`s
-visible in both the runtime and comptime contexts, or `@shared` on the
-`#define` itself to opt in a single macro in place:
+Referencing a name a comptime body never actually needs costs nothing: an
+unused declaration, however large, is never parsed into the comptime
+program. A struct that transitively names other types (a member of another
+struct, a typedef chain) pulls in exactly its dependencies, resolved
+recursively as each is needed.
+
+The scoping above applies to **declarations and types** but **not
+preprocessor `#define` macros**. The comptime pass starts with an isolated
+macro state containing only CCCC builtins, command-line `-D` defines, and
+any `#define @shared` opt-ins (see below). `#define`s from the main source
+file and any included headers are **not** forwarded to comptime function
+bodies otherwise. Use `@shared` routing on the `#include` to make a whole
+header's `#define`s visible in both the runtime and comptime contexts, or
+`@shared` on the `#define` itself to opt in a single macro in place:
 
 ```c
 #define @shared AOT_MAX_SCOPE 64   // visible to both the runtime TU and comptime bodies
@@ -137,14 +148,15 @@ used by global-generation macros, but it does not compile arbitrary non-macro
 program definitions into the macro VM. Function bodies and file-scope macro
 calls are always skipped.
 
-An initialized global declared directly in the **main source file** is
-forwarded too, but only when its initializer is a self-contained constant —
-literals, punctuators, `sizeof`/casts, no identifiers (so no function calls,
-no references to other globals, no enum constants, no typedef-name casts):
+An initialized global (an object, not a type or prototype) is narrower: it is
+only resolved when declared directly in the **main source file**, and only
+when its initializer is a self-contained constant — literals, punctuators,
+`sizeof`/casts, no identifiers (so no function calls, no references to other
+globals, no enum constants, no typedef-name casts):
 
 ```c
-static const char *g_name = "widget"; // forwarded -- literal initializer
-static const int g_max = 64;          // forwarded
+static const char *g_name = "widget"; // resolves -- literal initializer
+static const int g_max = 64;          // resolves
 
 [[cccc::comptime]]
 Node *gen(void) {
@@ -154,16 +166,18 @@ Node *gen(void) {
 ```
 
 The comptime pass sees a *snapshot* of the initial value — writes to the
-global inside a comptime body do not reach the runtime translation unit.
-This is deliberately narrower than "any constant global anywhere": a global
-declared in an `#include`d header is never forwarded this way, even with
-`--comptime-include-all`, because routed `@shared`/comptime includes are
-already textually spliced into the comptime translation unit elsewhere, and
-forwarding the same definition again here would redefine it. Everything else
-with a top-level initializer — a non-constant initializer, or any initialized
-global outside the main source file — is dropped exactly as before;
-referencing one from a comptime body produces `undefined variable` with a
-hint naming `[[cccc::comptime]]` variables (see
+global inside a comptime body do not reach the runtime translation unit. An
+uninitialized object (`static int counter;`) follows the same rule as types:
+it resolves from the main source file or from a file that itself defines
+`[[cccc::comptime]]` code, on demand. This asymmetry — types/prototypes
+resolve from any non-system file, but *objects* only from the main file (or,
+uninitialized, a comptime-defining file) — exists because an object is real
+storage: the comptime program's data segment is allocated once, right after
+its own declarations are parsed, so an object resolved any later (say, from
+inside a `GetType`/`VarRef` call at comptime *execution* time) would have no
+slot to read or write through. Referencing an initialized global that fails
+this rule from a comptime body produces `undefined variable` with a hint
+naming `[[cccc::comptime]]` variables (see
 [Comptime Variables](#comptime-variables)) or `#define @shared` as the
 supported ways to make the value visible instead.
 
@@ -172,11 +186,7 @@ A `typedef` (or a struct/union/enum type definition) written directly inside a
 itself, is passed through into the main source file's token stream unchanged —
 it declares a type, not a comptime function or variable, so it needs no
 comptime execution at all. It reaches the macro program the same way any other
-typedef does: via the declaration snapshot above, which means it inherits that
-snapshot's filter — a typedef written this way inside an `#include`d header is
-visible to comptime bodies if that header also defines a comptime function or
-variable, and otherwise only if the include is `@shared` or
-`--comptime-include-all` is passed.
+typedef does: on demand, from any non-system file.
 
 Note: global variable definitions whose scalar initializer expression contains a
 `Node *`-returning comptime call (see
@@ -184,10 +194,11 @@ Note: global variable definitions whose scalar initializer expression contains a
 are the exception — those initializers are evaluated after the main parse completes,
 once all symbols are in scope.
 
-Pass `--comptime-include-all` to restore the legacy behavior and forward all
-`#include`d header declarations **and `#define` macros** to the comptime pass.
-`#include [[cccc::comptime]]` and `#pragma cccc comptime begin...end` blocks
-are always available regardless of this flag.
+Pass `--comptime-include-all` to widen declaration resolution to **system
+headers** too (e.g. `<glob.h>`'s `glob_t`, otherwise still only reachable via
+`@shared`/`@comptime` routing) and to forward all `#define` macros to the
+comptime pass. `#include [[cccc::comptime]]` and `#pragma cccc comptime
+begin...end` blocks are always available regardless of this flag.
 
 Referencing an identifier that's only defined via a runtime-TU `#define`
 inside a comptime function body produces `undefined variable`, with a note
@@ -860,14 +871,18 @@ header reaches:
 | `#define NAME ...` | ✓ | ✗ (default) |
 | `#define @shared NAME ...` | ✓ | ✓ |
 
-This table describes headers whose *own* declarations reach the comptime pass
-through this routing. It is not the whole story for regular `#include`:
-a plain `#include`d header's declarations also reach the comptime pass if that
-header itself defines a `[[cccc::comptime]]` function or variable — see
+This table describes headers whose *own* `#define` macros reach the comptime
+pass through this routing, and headers a comptime body needs *without* also
+landing in the runtime TU (`@comptime`). It is not the whole story for
+regular `#include`: a plain, unrouted `#include`d header's **declarations**
+(types, tags, prototypes, enum constants) already reach the comptime pass on
+demand, whether or not that header defines any `[[cccc::comptime]]` code of
+its own — see
 [Pre-parse macro declaration context](#pre-parse-macro-declaration-context).
-`@comptime`/`@shared` remain necessary for declaration-only headers (e.g.
-`<glob.h>`) that a comptime function needs but does not itself define comptime
-code in.
+`@comptime`/`@shared` are still necessary for a header's `#define` macros
+(never forwarded to comptime automatically) and for keeping a comptime-only
+header out of the runtime TU entirely; they are **not** needed just to make a
+declaration-only header's types visible to comptime code any more.
 
 `-c=native` re-emits a plain `#include`d file's own `#include` line verbatim
 for the downstream system compiler; a file that itself uses this routing
@@ -949,10 +964,10 @@ int main(void) {
 }
 ```
 
-**`--comptime-include-all`** — global flag that restores the legacy behavior:
-forward all `#include`d header declarations **and `#define` macros** to comptime
-without needing per-include `@shared` annotations. Use this as a migration
-escape hatch when porting code that relied on the old all-headers forwarding.
+**`--comptime-include-all`** — global flag with two effects: widen declaration
+resolution to **system headers** (non-system headers already resolve on
+demand without it), and forward all `#define` macros to comptime without
+needing per-include/per-macro `@shared` annotations.
 
 **Emit includes** — `#include [[cccc::emit]]` routes an include to serialized
 generated output only (see

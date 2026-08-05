@@ -1,8 +1,13 @@
-// Ticket #890: an @shared-included header that itself defines a
-// [[cccc::comptime]] function is now ALSO forwarded via the #890
-// allowed-file snapshot (because it defines comptime code), on top of the
-// existing @shared replay. Confirms that double-forwarding is benign
-// (repeated typedefs/tentative defs are legal C) rather than assumed so.
+// Ticket #890 (superseded by #894's demand-driven declaration index): an
+// @shared-included header that also defines a [[cccc::comptime]] function.
+// Under the old eager snapshot this header's declarations were forwarded
+// twice -- once via the @shared replay, once via #890's own-file
+// allowed-list -- and stayed benign only because repeated typedefs/
+// tentative defs are legal C. The demand-driven index removes that
+// redundancy entirely: @shared's textual replay is still the only thing
+// that puts shared_plan_t/shared_plan_value in scope (nothing here is
+// eagerly forwarded any more), so this now just confirms @shared routing
+// itself still works end to end alongside a comptime-defining header.
 #include @shared "comptime_shared_comptime_fn_890.h"
 
 [[cccc::comptime]]
