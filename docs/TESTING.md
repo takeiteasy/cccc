@@ -290,7 +290,12 @@ serializer bugs in general. Cases covered:
   header-sourced declaration (e.g. `printf` via `#include <stdio.h>`) must
   NOT get a serialized prototype, since the re-emitted `#include` already
   supplies it; and an `extern` global must serialize as `extern`, not a bare
-  tentative definition that collides with the real symbol at link time.
+  tentative definition that collides with the real symbol at link time;
+- #904: a program using `stdout`/`errno` (which CCCC's own polyfill headers
+  expand, at preprocessing time, into a call to an internal accessor shim
+  like `__cccc_stdout()`) must compile and run under `-c=native`, with the
+  used shims defined in terms of the real re-emitted symbol rather than
+  left as calls to an undeclared function.
 
 ## Architecture build and test workflows
 

@@ -122,6 +122,18 @@ by default). Two things follow from that:
   compiler, which needs an explicit declaration for any call. A
   header-sourced bare declaration is left out, since the auto-captured
   `#include` already supplies it to the native compiler.
+- CCCC's own polyfill headers (`stdio.h`, `errno.h`, `getopt.h` in
+  `src/std.c`) define a handful of identifiers (`stdout`/`stderr`/`stdin`,
+  `errno`, `optarg`/`optind`/`opterr`/`optopt`) as macros that expand, at
+  preprocessing time, to a call into an internal accessor shim (e.g.
+  `__cccc_stdout()`) so they reflect the real host state instead of being
+  inert guest globals. Since that expansion happens before this backend
+  ever runs, the AST already contains the shim call with no record of the
+  original identifier. `cc_serialize_program` (`src/serialize.c`) defines
+  each shim actually used (`serialize_native_accessor_shims`) in terms of
+  the real symbol immediately after the real header is re-emitted — e.g.
+  `static FILE *__cccc_stdout(void) { return stdout; }` — rather than
+  leaving the call to an undeclared function in the generated C.
 
 `-G`/`--emit-generated` (without `-c=native`) is a separate, unaffected
 code path: its output is meant to be compiled *alongside* normal headers,

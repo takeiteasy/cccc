@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -65,6 +65,15 @@ Cases:
       as `extern int g;` in `-m` output, never a bare `int g;` (which is a
       tentative *definition* that collides with the real symbol at link
       time).
+  14. #904 regression: a program that `#include <stdio.h>`/`<errno.h>` and
+      references `stdout`/`errno` must compile and run under `-c=native`
+      -- those macros expand (during preprocessing, before this backend
+      ever sees the AST) into calls to internal accessor shims
+      (`__cccc_stdout()`, `__cccc_errno_ptr()`) with no native counterpart;
+      the fix (`serialize_native_accessor_shims`) defines each one actually
+      used in terms of the real re-emitted symbol.
+  15. #904 regression, direct assertion: `-m` output for case 14's program
+      must contain `return stdout;` and `return &errno;` shim bodies.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -360,11 +369,39 @@ def case_extern_global_m_output(cccc: Path, tmp: str) -> bool:
     return True
 
 
+ACCESSOR_SHIM_PROGRAM = (
+    "#include <stdio.h>\n"
+    "#include <errno.h>\n"
+    "int main(void) { (void)stdout; return errno == 0 ? 42 : 1; }\n"
+)
+
+
+def case_accessor_shim_end_to_end(cccc: Path, tmp: str) -> bool:
+    print("  14: -c=native, stdout/errno macro-expanded accessor shims compile and run (#904)")
+    return _native_run_case(cccc, tmp, "accessor_shim_904", ACCESSOR_SHIM_PROGRAM)
+
+
+def case_accessor_shim_m_output(cccc: Path, tmp: str) -> bool:
+    print("  15: -m output defines the accessor shims actually used, in terms of the real symbol (#904)")
+    src = Path(tmp) / "accessor_shim_dump_904.c"
+    write(src, ACCESSOR_SHIM_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if "return stdout;" not in out:
+        print(f"    FAIL: -m output missing '__cccc_stdout' shim body\n    {out}")
+        return False
+    if "return &errno;" not in out:
+        print(f"    FAIL: -m output missing '__cccc_errno_ptr' shim body\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -385,6 +422,8 @@ def main() -> int:
             case_bodiless_decl_m_output,
             case_header_decl_not_reemitted,
             case_extern_global_m_output,
+            case_accessor_shim_end_to_end,
+            case_accessor_shim_m_output,
         ]
         results = [case(cccc, tmp) for case in cases]
 

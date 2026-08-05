@@ -1339,6 +1339,55 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
 }
 
 // Public API: Serialize entire program to C source
+// #904: CCCC's own polyfill headers (stdio.h/errno.h/getopt.h in src/std.c)
+// define stdout/stderr/stdin/errno/optarg/optind/opterr/optopt as macros
+// that expand to a call into an internal accessor shim (__cccc_stdout(),
+// etc -- see src/stdlib/stdio.c and src/stdlib/posix.c) so they reflect
+// the real host state instead of being inert, always-zero/NULL guest
+// globals (#736). That macro expansion happens during preprocessing,
+// before this backend ever runs, so the AST already contains a call to
+// e.g. __cccc_stdout() with no record that it started life as `stdout`.
+// Under -c=native the #901 fix correctly declines to serialize a
+// prototype for these (they're declared in CCCC's own header, not the
+// primary file, so #901's from_include check excludes them) -- but with
+// no prototype AND no definition, the generated call is entirely
+// undeclared and the downstream compiler rejects it outright. Define each
+// shim actually used in terms of the real symbol instead: the auto-capture
+// mechanism (this same function, just above) has already re-emitted the
+// real #include that provides it, since that's the only way the macro
+// which expands to this shim call could have been reached in the first
+// place.
+static const struct {
+    const char *name;
+    const char *def;
+} native_accessor_shims[] = {
+    {"__cccc_stdin",      "static FILE *__cccc_stdin(void) { return stdin; }\n"},
+    {"__cccc_stdout",     "static FILE *__cccc_stdout(void) { return stdout; }\n"},
+    {"__cccc_stderr",     "static FILE *__cccc_stderr(void) { return stderr; }\n"},
+    {"__cccc_errno_ptr",  "static int *__cccc_errno_ptr(void) { return &errno; }\n"},
+    {"__cccc_optarg_ptr", "static char **__cccc_optarg_ptr(void) { return &optarg; }\n"},
+    {"__cccc_optind_ptr", "static int *__cccc_optind_ptr(void) { return &optind; }\n"},
+    {"__cccc_opterr_ptr", "static int *__cccc_opterr_ptr(void) { return &opterr; }\n"},
+    {"__cccc_optopt_ptr", "static int *__cccc_optopt_ptr(void) { return &optopt; }\n"},
+};
+
+static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
+    bool any = false;
+    for (size_t i = 0; i < sizeof(native_accessor_shims) / sizeof(native_accessor_shims[0]); i++) {
+        for (Obj *obj = prog; obj; obj = obj->next) {
+            if (!obj->is_function || !obj->is_used)
+                continue;
+            if (strcmp(obj->name, native_accessor_shims[i].name) != 0)
+                continue;
+            fprintf(f, "%s", native_accessor_shims[i].def);
+            any = true;
+            break;
+        }
+    }
+    if (any)
+        fprintf(f, "\n");
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -1414,6 +1463,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     }
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
+
+    // #904: real symbols for internal host-accessor shims (stdout/errno/
+    // etc) -- only meaningful once the real headers above are visible, and
+    // only outside generated_only (-G), matching the from_include filter's
+    // gating for the same reason (see the comment on this function).
+    if (!generated_only)
+        serialize_native_accessor_shims(f, prog);
 
     // Serialize file-scope type definitions before declarations that reference them.
     serialize_type_defs_for_owner(f, &ctx, NULL);
