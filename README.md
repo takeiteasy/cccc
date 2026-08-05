@@ -185,7 +185,9 @@ Optimization:
 	--posix-emulation            Enable lossy/approximate emulation of POSIX functions the
 	                             host doesn't natively support (e.g. ppoll() on macOS). Off
 	                             by default: such functions are undeclared/unregistered,
-	                             matching a native compiler on the same host. VM-only.
+	                             matching a native compiler on the same host. Also restores
+	                             raw ioctl() passthrough for request codes outside the
+	                             layout-verified allowlist (off by default there too). VM-only.
 	--inline-limit=N             Limit inlining to N AST nodes (default: 256)
 
 Static Bytecode Analysis (compile or load input, walk text segment, exit):

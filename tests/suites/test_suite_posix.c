@@ -769,6 +769,25 @@ int test_posix_vfs_decls(void) {
                   + (MAP_FAILED == (void*)-1) + (fl.l_type != 0) + (ws.ws_row == 0)
                   + (sfs.f_bsize == 0) + (sizeof(fns) > 0) + MIN(1,2) + MAX(1,2);
     (void)constants;
+
+    /* #795: this suite runs with --posix-emulation (top of file), so a
+       request code outside wrap_ioctl's allowlist should still reach the
+       raw host ioctl() rather than being rejected -- confirming the
+       --posix-emulation escape hatch itself works, complementing
+       test_ioctl_allowlist.c (which runs *without* the flag and asserts
+       the same call is rejected with -1/EINVAL there instead). Not
+       asserting a specific return value here: the host's actual response
+       to a bogus request code is host/kernel-version-dependent, the point
+       is only that this must not crash and must not exit early via the
+       allowlist's own EINVAL path. */
+    int fd = open("/tmp/cccc-ioctl-passthrough-test", O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd >= 0) {
+        int dummy = 0;
+        ioctl(fd, 0x12345678, &dummy);
+        close(fd);
+        unlink("/tmp/cccc-ioctl-passthrough-test");
+    }
+
     return 42;
 }
 

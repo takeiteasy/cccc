@@ -1173,6 +1173,57 @@ static long long wrap_creat(const char *path, long long mode) {
     return (long long)creat(path, (mode_t)mode);
 }
 
+// wrap_ioctl (#795): request-code allowlist. See the registration comment
+// (register_posix_functions) for why this exists; see include/sys/ioctl.h
+// for the allowlisted constants themselves. Switches on `request` before
+// touching va_arg at all, since the no-arg requests (TIOCSCTTY/TIOCNOTTY)
+// must not consume a variadic argument the guest never passed.
+static long long wrap_ioctl(long long fd, long long request, ...) {
+    va_list ap;
+    switch ((unsigned long)request) {
+    case TIOCGWINSZ:
+    case TIOCSWINSZ:
+    case FIONREAD:
+    case FIONBIO: {
+        va_start(ap, request);
+        void *arg = va_arg(ap, void *);
+        va_end(ap);
+        return (long long)ioctl((int)fd, (unsigned long)request, arg);
+    }
+    case TIOCSCTTY:
+    case TIOCNOTTY:
+        return (long long)ioctl((int)fd, (unsigned long)request);
+    default:
+        break;
+    }
+
+    VirtualMachine *vm = current_vm();
+    if (vm && (vm->flags & CCCC_POSIX_EMULATION)) {
+        // Opted into raw passthrough (--posix-emulation) -- same
+        // unverified-layout risk as before #795, now explicit.
+        va_start(ap, request);
+        void *arg = va_arg(ap, void *);
+        va_end(ap);
+        return (long long)ioctl((int)fd, (unsigned long)request, arg);
+    }
+
+    // Rejected: this request code's guest/host argument layout has not
+    // been verified. One-shot diagnostic (not per-call) so a guest loop
+    // calling an unsupported ioctl in a hot path can't spam stderr.
+    static int warned = 0;
+    if (!warned) {
+        warned = 1;
+        fprintf(stderr,
+                "cccc: ioctl() request 0x%lx is not in the verified allowlist "
+                "(see include/sys/ioctl.h); rejecting to avoid a guest/host "
+                "struct-layout mismatch. Pass --posix-emulation to allow raw "
+                "passthrough at your own risk.\n",
+                (unsigned long)request);
+    }
+    errno = EINVAL;
+    return -1;
+}
+
 // The following wrappers are non-blocking or return immediately; they
 // intentionally hold the GIL: close, lseek, access, unlink, rmdir, chdir,
 // getcwd, stat/fstat/lstat, chmod, mkdir, mkfifo, umask, pipe, fork, _exit,
@@ -3300,14 +3351,17 @@ void register_posix_functions(VirtualMachine *vm) {
     // anywhere -- same "undefined function" gap class as #783, surfaced by
     // widening tools/audit_ffi.py's header scan for #784/#792.
     cc_register_cfunc(vm, "flock",   (void*)flock,   2, 0);
-    // ioctl is a general passthrough (like the real syscall) -- only the
-    // two request codes include/sys/ioctl.h declares, TIOCGWINSZ/
-    // TIOCSWINSZ, have a verified guest/host struct winsize layout match
-    // (both 8 bytes: 4x unsigned short). Any other request code risks the
-    // same guest/host struct-size mismatch that statfs had (see
-    // wrap_statfs below) -- that's inherent to ioctl's design, not
-    // something this registration can guard against generically.
-    cc_register_variadic_cfunc(vm, "ioctl", (void*)ioctl, 2, 0);
+    // ioctl (#795): request-code allowlist, not a raw passthrough. ioctl's
+    // pointer argument is handed straight to the host syscall with no
+    // translation, and unlike statfs/fstatfs (a fixed struct CCCC can
+    // translate against) there is no bound on what a request code might
+    // expect -- an unverified code risks the same guest/host struct-size
+    // mismatch that statfs had before wrap_statfs below. wrap_ioctl only
+    // forwards the handful of request codes whose guest/host argument
+    // layout has been verified (see include/sys/ioctl.h); anything else
+    // fails with -1/EINVAL unless the caller opted into raw passthrough via
+    // --posix-emulation (same policy as ppoll/sched_* under #824).
+    cc_register_variadic_cfunc(vm, "ioctl", (void*)wrap_ioctl, 2, 0);
     cc_register_cfunc(vm, "statfs",  (void*)wrap_statfs,  2, 0);
     cc_register_cfunc(vm, "fstatfs", (void*)wrap_fstatfs, 2, 0);
     cc_register_cfunc(vm, "statvfs",  (void*)wrap_statvfs,  2, 0);

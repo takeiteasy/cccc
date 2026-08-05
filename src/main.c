@@ -342,7 +342,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t--posix-emulation            Enable lossy/approximate emulation of POSIX functions the\n");
     printf("\t                             host doesn't natively support (e.g. ppoll() on macOS). Off\n");
     printf("\t                             by default: such functions are undeclared/unregistered,\n");
-    printf("\t                             matching a native compiler on the same host. VM-only.\n");
+    printf("\t                             matching a native compiler on the same host. Also restores\n");
+    printf("\t                             raw ioctl() passthrough for request codes outside the\n");
+    printf("\t                             layout-verified allowlist (off by default there too). VM-only.\n");
     printf("\t--inline-limit=N             Limit inlining to N AST nodes (default: 256)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text segment, exit):\n");
     printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)\n");

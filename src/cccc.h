@@ -556,8 +556,12 @@ typedef enum {
                     // POSIX functions the host doesn't natively support
                     // (--posix-emulation). Off by default: such functions
                     // are simply undeclared/unregistered, matching what a
-                    // native compiler on the same host would do. VM-only;
-                    // rejected under -c=native.
+                    // native compiler on the same host would do. Also
+                    // restores raw ioctl() passthrough for request codes
+                    // outside wrap_ioctl's layout-verified allowlist (#795,
+                    // src/stdlib/posix.c) -- off by default there too, for
+                    // the same "don't risk an unverified host ABI without
+                    // being asked" reason. VM-only; rejected under -c=native.
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =
