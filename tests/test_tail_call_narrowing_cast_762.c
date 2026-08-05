@@ -20,7 +20,7 @@
 //
 // The fix (return_repr_key/cast_is_repr_noop in codegen.c, ~line 1350) only
 // strips a return-site cast when it is a representation no-op on a value
-// already normalised to the source type -- see docs/VM.md's tail-call
+// already normalised to the source type -- see man/VM.md's tail-call
 // Eligibility list.
 
 #include <stddef.h>

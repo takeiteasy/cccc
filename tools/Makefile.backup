@@ -18,7 +18,7 @@
 # nothing, used only to bootstrap the comptime machinery
 # tools/generate_stdlib.c needs to produce the real src/std.c. Once std.c
 # exists on disk it always wins (self-correcting: no explicit step needed to
-# switch back). See docs/BUILDING.md.
+# switch back). See man/BUILDING.md.
 ifeq ($(wildcard src/std.c),)
 STDLIB_SRC := src/std_stub.c
 else
@@ -416,14 +416,14 @@ test-legacy: $(EXE_OUT)
 	@python3 tools/tests.py --legacy -j $(TEST_JOBS)
 
 # SQLite amalgamation smoke-test (preprocess #584 + compile+run #587/#588).
-# Skips cleanly when tools/sqlite-amalgamation-3530200.zip is absent; see docs/TESTING.md.
+# Skips cleanly when tools/sqlite-amalgamation-3530200.zip is absent; see man/TESTING.md.
 sqlite-smoke: $(EXE_OUT)
 	@python3 tools/sqlite_smoke.py
 
 # Audit src/stdlib/*.c FFI registrations against include/**/*.h declarations
 # (num_args/returns_double/double_arg_mask mismatches, unregistered
 # declarations, headers that register nothing at all). Pure source scan, no
-# build required. See tools/audit_ffi.py and docs/TESTING.md.
+# build required. See tools/audit_ffi.py and man/TESTING.md.
 audit-ffi:
 	@python3 tools/audit_ffi.py
 
@@ -497,7 +497,7 @@ macos-x86_64-test: macos-x86_64-smoke
 linux-x86_64-check:
 	@$(COLIMA) status -p $(COLIMA_PROFILE) >/dev/null 2>&1 || { \
 		echo "Error: Colima profile '$(COLIMA_PROFILE)' is not running."; \
-		echo "See docs/TESTING.md for the VZ/Rosetta profile setup."; \
+		echo "See man/TESTING.md for the VZ/Rosetta profile setup."; \
 		exit 1; \
 	}
 
@@ -543,7 +543,7 @@ linux-aarch64-check:
 		echo "Error: Colima profile '$(LINUX_ARM64_PROFILE)' is not running."; \
 		echo "Start it with:"; \
 		echo "  colima start $(LINUX_ARM64_PROFILE) --runtime containerd --arch aarch64 --vm-type vz --cpu 4 --memory 4"; \
-		echo "See docs/TESTING.md for setup details."; \
+		echo "See man/TESTING.md for setup details."; \
 		exit 1; \
 	}
 

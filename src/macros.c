@@ -256,7 +256,7 @@ static bool starts_file_scope_call(Token *tok) {
 // "any file with comptime-related syntax in it" — a #pragma cccc comptime
 // begin/end block containing only a typedef, or a [[cccc::comptime]] typedef,
 // declares a type rather than a comptime function or variable and does not
-// widen the allowed set on its own (see docs/MACROS.md's "Pre-parse macro
+// widen the allowed set on its own (see man/MACROS.md's "Pre-parse macro
 // declaration context" section for the exact rule stated in prose).
 // Rule: a comptime function or variable can always see the declarations
 // written alongside it in its own file, regardless of #include depth —
@@ -322,7 +322,7 @@ static bool initializer_is_self_contained(Token *eq, Token *semi) {
 // behavior for #551/#552 isolation) and join it only under
 // --comptime-include-all, which now widens the index in addition to its
 // existing job of forwarding all #define macros (isolate_comptime_macros,
-// below). See docs/MACROS.md's "Pre-parse macro declaration context".
+// below). See man/MACROS.md's "Pre-parse macro declaration context".
 // ---------------------------------------------------------------------
 
 typedef enum {

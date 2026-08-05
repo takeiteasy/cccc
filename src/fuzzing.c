@@ -18,7 +18,7 @@ static int compile_only_from_string(const char *src, size_t len) {
     vm.max_errors = 5;
 
     // Standard headers resolve from the embedded src/std.c table (see
-    // search_include_paths / docs/HEADERS.md); no -I needed here.
+    // search_include_paths / man/HEADERS.md); no -I needed here.
     cc_load_stdlib(&vm);
 
     // Set up error recovery via setjmp/longjmp

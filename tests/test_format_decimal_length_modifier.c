@@ -6,7 +6,7 @@
  * (%Hf/%Df/%DDf). Both calls below use ordinary (non-decimal) arguments, so
  * this test runs identically whether or not the binary was built with
  * CCCC_HAS_DECIMAL=1 -- the format checker itself only inspects declared
- * types, which always exist (see docs/COVERAGE.md: "declarations/sizeof/
+ * types, which always exist (see man/COVERAGE.md: "declarations/sizeof/
  * struct layout always work" regardless of the flag).
  *
  * A %Df/%Hf/%DDf argument is passed *by pointer*, unlike every other

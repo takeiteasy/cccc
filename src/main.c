@@ -166,12 +166,47 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     return rc;
 }
 
+static void print_version(void) {
+    printf("cccc %s", CCCC_RELEASE_VERSION);
+    if (CCCC_GIT_DESC[0])
+        printf(" (%s)", CCCC_GIT_DESC);
+    printf("\n");
+#if defined(__aarch64__) || defined(_M_ARM64)
+#define CCCC_HOST_ARCH "aarch64"
+#elif defined(__x86_64__) || defined(_M_X64)
+#define CCCC_HOST_ARCH "x86_64"
+#else
+#define CCCC_HOST_ARCH "unknown"
+#endif
+#if defined(__APPLE__)
+#define CCCC_HOST_OS "darwin"
+#elif defined(__linux__)
+#define CCCC_HOST_OS "linux"
+#else
+#define CCCC_HOST_OS "unknown"
+#endif
+    printf("host: %s-%s\n", CCCC_HOST_ARCH, CCCC_HOST_OS);
+    printf("bytecode format: v%d\n", CCCC_VERSION);
+    printf("features:");
+#ifdef CCCC_HAS_BACKTRACE
+    printf(" backtrace");
+#endif
+#ifdef CCCC_HAS_DECIMAL
+    printf(" decimal");
+#endif
+#ifdef CCCC_HAS_CURL
+    printf(" curl");
+#endif
+    printf("\n");
+}
+
 static void usage(const char *argv0, int exit_code) {
     printf("CCCC: Comprehensive C Compensation Compiler\n");
     printf("https://git.sr.ht/~takeiteasy/cccc\n\n");
     printf("Usage: %s [options] file...\n\n", argv0);
     printf("Options:\n");
     printf("\t-h/--help                Show this message\n");
+    printf("\t   --version             Print version, git describe, host triple, and enabled features\n");
     printf("\t-I <path>                Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
@@ -1008,6 +1043,7 @@ int main(int argc, const char *argv[]) {
         {"no-builtin-includes", no_argument,      0, 1113},
         {"sysroot",            required_argument, 0, 1114},
         {"trap-fp-divzero",  no_argument, 0, 1116},
+        {"version",          no_argument, 0, 1118},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -1025,6 +1061,9 @@ int main(int argc, const char *argv[]) {
         case 'h':
             usage(argv[0], 0);
             break;
+        case 1118: // --version
+            print_version();
+            exit(0);
         case '0':
             // Safety level 0: None - explicitly clear all safety flags, but
             // VM heap stays on by default (#665); use -V to turn it off too.
@@ -2163,7 +2202,7 @@ int main(int argc, const char *argv[]) {
     // CCCC's standard library header directory is no longer pushed as an
     // -I entry here: search_include_paths() resolves standard headers from
     // the embedded src/std.c table first, with vm->compiler.builtin_include_dir
-    // (set in cc_init) as an on-disk fallback. See docs/HEADERS.md.
+    // (set in cc_init) as an on-disk fallback. See man/HEADERS.md.
 
     // Add user-specified include paths (these take precedence via search order)
     for (int i = 0; i < inc_paths_count; i++)

@@ -28,7 +28,7 @@ python3 tools/bench.py --no-c4 --filter fib.c    # skip the cccc-c4* (precompile
 python3 tools/bench.py --filter fib.c --vm-profile # write VM opcode profiles too
 ```
 
-See [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) for the full guide — how the runner works, how to read the table, and how to add new benchmarks.
+See [man/BENCHMARKS.md](../man/BENCHMARKS.md) for the full guide — how the runner works, how to read the table, and how to add new benchmarks.
 
 ## Results
 

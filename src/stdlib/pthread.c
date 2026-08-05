@@ -774,7 +774,7 @@ static void call_tss_destructor_top_level(VirtualMachine *vm, long long destruct
 // Drains the main thread's TSS/pthread-key destructors after pthread_exit()
 // was called ON THE MAIN THREAD -- POSIX/glibc run them in that case, unlike
 // a plain `return` from main() (which must NOT run them; see #863 and the
-// <threads.h> row in docs/COVERAGE.md). Called exactly once, from cc_run
+// <threads.h> row in man/COVERAGE.md). Called exactly once, from cc_run
 // (vm.c) right after cc_run_at(main) returns and before atexit handlers/
 // destructors run -- a no-op if pthread_exit() was never called on main.
 //

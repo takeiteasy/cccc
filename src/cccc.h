@@ -1354,7 +1354,7 @@ struct Obj {
     // (safe: LEA3 records into vm->stack_ptr_epochs unless this is proven
     // true) -- any address-of this scan fails to classify simply stays
     // recorded, so under-approximation here can only cost a wasted hashmap
-    // entry, never reintroduce the #673 false negative. See docs/SAFETY.md.
+    // entry, never reintroduce the #673 false negative. See man/SAFETY.md.
     bool addr_escapes;
 
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
@@ -3622,7 +3622,7 @@ void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
 // (which owns the index's data structures); cc_parse_splice_range is
 // defined in src/parse.c (which owns the reentrant declaration parser) and
 // called back into from macros.c's resolvers below. See "Pre-parse macro
-// declaration context" in docs/MACROS.md.
+// declaration context" in man/MACROS.md.
 bool cc_parse_splice_range(VirtualMachine *vm, Token *tok);
 bool cc_comptime_resolve_typename(VirtualMachine *vm, Token *name_tok);
 bool cc_comptime_resolve_tag(VirtualMachine *vm, Token *name_tok);

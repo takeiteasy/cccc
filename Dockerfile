@@ -26,7 +26,7 @@ COPY . .
 # (a fresh clone has no src/std.c yet -- it's a gitignored build artifact).
 # `make bootstrap` (#857) finishes the dance: regenerate the real src/std.c,
 # then unconditionally relink against it. From here, `./cccc --build build.c`
-# is the real build system (see build.c's own header and docs/BUILDING.md) --
+# is the real build system (see build.c's own header and man/BUILDING.md) --
 # mirrors the `bootstrap` + `build` steps in .builds/linux-amd64.yml.
 RUN make bootstrap && ./cccc --build build.c
 

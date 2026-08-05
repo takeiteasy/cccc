@@ -1245,7 +1245,7 @@ build shell (`src/build_shell.c`) supports — so those are delegated to real
 shell scripts (`tools/macos_x86_64_smoke.sh`, `tools/macos_x86_64_test.sh`,
 `tools/linux_container_smoke.sh`, `tools/linux_amd64_test.sh`,
 `tools/linux_amd64_msan_test.sh`) rather than inlined into `RunCustom`
-command strings. See [docs/TESTING.md](TESTING.md#architecture-build-and-test-workflows)
+command strings. See [man/TESTING.md](TESTING.md#architecture-build-and-test-workflows)
 for the full walkthrough of each, including the required Colima/Rosetta
 setup.
 
@@ -1332,6 +1332,6 @@ link/archive-step staleness check.
 
 ## See also
 
-- [docs/TESTING.md](TESTING.md) — `--testing` mode, the working analog this mode mirrors.
-- [docs/MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
-- [docs/COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
+- [man/TESTING.md](TESTING.md) — `--testing` mode, the working analog this mode mirrors.
+- [man/MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
+- [man/COVERAGE.md](COVERAGE.md) — the C surface a build script can use.

@@ -14,7 +14,7 @@
 // the address of a caller local, so `main`'s call into `use` became a
 // CALLT, `use`'s own frame overwrote the slot `x` lived in, and `*p` read
 // garbage. See can_emit_tail_call / tail_arg_carries_frame_addr in
-// codegen.c and docs/VM.md's tail-call Eligibility list.
+// codegen.c and man/VM.md's tail-call Eligibility list.
 //
 // Each helper below is address-precise: `use_val` takes a *value* (safe,
 // keeps TCO), while the `use_*` variants that receive a frame-local address

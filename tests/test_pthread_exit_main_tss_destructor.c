@@ -3,7 +3,7 @@
 // destructors for values the main thread set, matching real glibc -- unlike
 // a plain `return` from main(), which must NOT run them (see
 // test_threads_tss.c / test_pthread_key_destructor.c for that side, and the
-// <threads.h> row in docs/COVERAGE.md).
+// <threads.h> row in man/COVERAGE.md).
 //
 // main calls pthread_exit() with a deliberately WRONG status (3). If the
 // destructor never runs, the process falls through with that wrong status

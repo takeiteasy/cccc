@@ -9,7 +9,7 @@
 # --build-target=cccc_msan` instead).
 #
 # NOTE (#844): MSan reports ~262/700 known false positives from an
-# uninstrumented libc/libffi blind spot, documented in docs/TESTING.md. A
+# uninstrumented libc/libffi blind spot, documented in man/TESTING.md. A
 # nonzero exit here is expected, not on its own a regression signal --
 # compare the failure count/names against that documented baseline.
 set -e

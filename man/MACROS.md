@@ -896,7 +896,7 @@ declaration-only header's types visible to comptime code any more.
 for the downstream system compiler; a file that itself uses this routing
 syntax is never re-emitted that way, since none of it means anything outside
 CCCC — see [`#include`d files that use cccc-only routing](HEADERS.md#included-files-that-use-cccc-only-routing)
-in docs/HEADERS.md.
+in man/HEADERS.md.
 
 All three forms accept the three interchangeable spelling styles:
 

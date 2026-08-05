@@ -8,7 +8,7 @@
 // --link handling and always disassembled the *unlinked* image, with any
 // cross-module CALL left at its unresolved placeholder operand of 0. Now it
 // disassembles the fully linked image, same as -o/--testing/the plain run
-// (see docs/BUILDING.md, "The --link compiler flag").
+// (see man/BUILDING.md, "The --link compiler flag").
 //
 // This locks that contract down two ways:
 //   1. `cccc main.c --link lib.c4a --disassemble` must be byte-identical to

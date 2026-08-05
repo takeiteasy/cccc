@@ -427,7 +427,7 @@ void test_dynobj_stack_dangling_conservative(void) {
 // that tail-call shape lets the optimizer lower it to CALLT, which retires
 // *this* frame's epoch before the callee runs (correct: TCO hands this
 // frame's stack memory to the callee immediately, so a still-live epoch
-// here would be a lie -- see docs/SAFETY.md's #675 interval note). A
+// here would be a lie -- see man/SAFETY.md's #675 interval note). A
 // non-tail-call keeps this frame nested and its epoch live for the
 // duration of the call, which is what this test means to exercise.
 static size_t recurse_and_size(int depth) {

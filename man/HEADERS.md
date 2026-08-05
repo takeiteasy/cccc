@@ -145,7 +145,7 @@ so it has never re-emitted header-sourced typedefs (see `generated_only` in
 A file reached via a plain `#include` can itself use CCCC-only
 preprocessor routing (`#include @comptime <...>`, `@shared`, `[[cccc::...]]`
 spellings — see [Include scoping](MACROS.md#include-scoping) in
-docs/MACROS.md) — none of which means anything to a real system compiler.
+man/MACROS.md) — none of which means anything to a real system compiler.
 If the primary file's auto-captured `#include` of such a file were
 re-emitted verbatim, the native compiler would open it directly and choke
 (`expected "FILENAME" or <FILENAME>` for `#include @comptime`, for example).

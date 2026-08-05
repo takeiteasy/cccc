@@ -1503,7 +1503,7 @@ static Macro *find_macro(VirtualMachine *vm, Token *tok) {
 // to tell a genuinely undefined identifier apart from one that's only
 // invisible because isolate_comptime_macros stripped it before the comptime
 // preprocess/parse (source-file #defines are never forwarded into comptime
-// bodies -- see docs/MACROS.md). Looks the name up in the pre-isolation
+// bodies -- see man/MACROS.md). Looks the name up in the pre-isolation
 // snapshot taken by compile_macro_program (macro_snapshot_backup), which
 // stays populated for the lifetime of that compile. define_tok is non-NULL
 // only for a #define with a real source site (NULL for CCCC builtins and
@@ -1976,7 +1976,7 @@ static bool is_compiler_owned_header(const char *name) {
 
 // Whether CCCC's own copy of a standard header — the embedded src/std.c
 // table (tried by the PP_INCLUDE handler before ever calling this function;
-// see docs/HEADERS.md) or the on-disk builtin_include_dir fallback below —
+// see man/HEADERS.md) or the on-disk builtin_include_dir fallback below —
 // should be considered at all for this header name: always for owned
 // headers (no valid SDK substitute exists for them), and for other known-std
 // headers unless --no-builtin-includes was passed (which asks to fail
@@ -2058,7 +2058,7 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     // CCCC's own bundled headers, on disk. This is a fallback only — the
     // PP_INCLUDE handler tries the embedded src/std.c table first, which
     // covers standard headers without touching the filesystem at all (see
-    // docs/HEADERS.md). This path still matters for: a stage0 build linked
+    // man/HEADERS.md). This path still matters for: a stage0 build linked
     // against src/std_stub.c (embeds nothing, so the embedded lookup always
     // misses); the three private headers (reflection.h/testing.h/building.h,
     // via tokenize_private_header) on a stage0 build; and as a safety net if

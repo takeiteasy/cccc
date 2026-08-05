@@ -40,6 +40,10 @@
 #include <stdio.h>
 #include <string.h>
 
+// Forward declaration: defined near stdlib_gen() below, used earlier by
+// release() (#883) to regenerate src/std.c before the release build.
+static BuildTarget *stdlib_regen_step(Builder *ctx, BuildTarget *bt);
+
 // ---- libffi probing -------------------------------------------------------
 
 static void probe_libffi(Builder *ctx, BuildTarget *t) {
@@ -190,10 +194,29 @@ static BuildTarget *make_libbacktrace(Builder *ctx) {
 }
 
 // ---- Common compile + link flags for all cccc-family targets --------------
+//
+// add_cccc_flags_opt() takes an explicit host-compiler optimization flag so
+// callers can pick a build mode:
+//   - "-O0" (debug, the default): safety checks + fast iteration, what every
+//     existing target used before build modes existed (#883).
+//   - "-O2" (release): what tools/release.sh and the `release` target below
+//     build with, plus -DNDEBUG. This is the *host* compiler optimizing the
+//     cccc binary itself -- unrelated to CCCC's own guest-side `--optimize`
+//     bytecode passes or the `-0`/`-1`/`-2`/`-3` guest safety levels, which
+//     this does not change.
+//   - "-O1"/"-O3" (opt_test_* targets below): not shipped, exist only to run
+//     the test suite against cccc built at those levels, to catch UB the
+//     interpreter gets away with at -O0 (aliasing, uninitialized reads,
+//     signed overflow) that only misbehaves once the host compiler starts
+//     optimizing across it.
+// -g is kept in every mode, including release: symbols are stripped at
+// packaging time (see tools/release.sh), not compile time, so a release
+// binary a user hands back a crash report from is still debuggable.
 
-static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
+static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
+                                const char *opt_flag) {
     AddCFlag(t, "-Wall");
-    AddCFlag(t, "-O0");
+    AddCFlag(t, opt_flag);
     AddCFlag(t, "-g");
     AddCFlag(t, "-std=c23");
     AddCFlag(t, "-Wno-deprecated-declarations");
@@ -222,6 +245,22 @@ static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
         AddInclude(t, "src/backtrace");
         LinkWith(t, bt);
     }
+    // Git describe stamping for --version (#883). Absent in release
+    // tarballs (no .git) -- CCCC_GIT_DESC then falls back to "" (see
+    // src/internal.h) and --version shows CCCC_RELEASE_VERSION alone.
+    if (FileExists(ctx, ".git")) {
+        const char *desc = CaptureCommand(ctx, "git describe --tags --always --dirty 2>/dev/null");
+        if (desc && *desc) {
+            char quoted[256];
+            snprintf(quoted, sizeof(quoted), "\"%s\"", desc);
+            AddDefine(t, "CCCC_GIT_DESC", quoted);
+        }
+    }
+}
+
+// Debug mode (the default everywhere except release/opt_test_* below).
+static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
+    add_cccc_flags_opt(ctx, t, bt, "-O0");
 }
 
 // ---- Source glob shared by all cccc executable targets -------------------
@@ -242,12 +281,22 @@ static void add_cccc_sources(Builder *ctx, BuildTarget *t) {
 
 // ---- Reusable cccc executable factory ------------------------------------
 
-static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt, const char *name) {
+// opt_flag/ndebug let release() and the opt_test_* targets below reuse this
+// without duplicating add_cccc_sources()'s exclusion rules.
+static BuildTarget *make_cccc_exe_named_opt(Builder *ctx, BuildTarget *bt,
+                                             const char *name, const char *opt_flag,
+                                             bool ndebug) {
     BuildTarget *t = Executable(ctx, name);
     SetOutput(t, name);
     add_cccc_sources(ctx, t);
-    add_cccc_flags(ctx, t, bt);
+    add_cccc_flags_opt(ctx, t, bt, opt_flag);
+    if (ndebug)
+        AddDefine(t, "NDEBUG", (const char *)0);
     return t;
+}
+
+static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt, const char *name) {
+    return make_cccc_exe_named_opt(ctx, bt, name, "-O0", false);
 }
 
 // ---- [[cccc::build_target]] factories (invoked via --build-target=NAME) --
@@ -316,6 +365,52 @@ BuildTarget *libcccc(Builder *ctx) {
     AddCFlag(t, "-fPIC");
     return t;
 }
+
+// ---- release build mode (#883) ---------------------------------------------
+// -O2 -g -DNDEBUG, as a first-class target rather than an ad-hoc flag
+// override -- what tools/release.sh builds and packages. Output is named
+// cccc-release (not cccc) so it never collides with a debug build sitting in
+// the same out_dir.
+
+[[cccc::build_target]]
+BuildTarget *release(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *gen = stdlib_regen_step(ctx, bt);
+    BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
+    BuildTarget *final = make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
+    DependsOn(final, gen);
+    DependsOn(final, reflection_gen);
+    return final;
+}
+
+// ---- opt_test_O1 / O2 / O3 (#883) ------------------------------------------
+// Build cccc at a given host optimization level and run the full suite
+// against it. Not shipped -- these exist purely to catch UB the interpreter
+// gets away with at -O0 (aliasing, uninitialized reads, signed overflow)
+// that only misbehaves once the host compiler starts optimizing across it.
+
+static BuildTarget *make_opt_test(Builder *ctx, const char *level, const char *opt_flag) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    char exe_name[32];
+    snprintf(exe_name, sizeof(exe_name), "cccc-opt-%s", level);
+    BuildTarget *cccc = make_cccc_exe_named_opt(ctx, bt, exe_name, opt_flag, false);
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s", TargetOutput(cccc));
+    char step_name[32];
+    snprintf(step_name, sizeof(step_name), "opt-test-%s", level);
+    BuildTarget *step = RunCustom(ctx, step_name, cmd);
+    DependsOn(step, cccc);
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *opt_test_O1(Builder *ctx) { return make_opt_test(ctx, "O1", "-O1"); }
+
+[[cccc::build_target]]
+BuildTarget *opt_test_O2(Builder *ctx) { return make_opt_test(ctx, "O2", "-O2"); }
+
+[[cccc::build_target]]
+BuildTarget *opt_test_O3(Builder *ctx) { return make_opt_test(ctx, "O3", "-O3"); }
 
 // ---- Sanitizer aggregate (Makefile:217-227) --------------------------------
 // No meta-target concept exists in the builder API; a no-op RunCustom that
@@ -914,7 +1009,7 @@ BuildTarget *linux_aarch64_test(Builder *ctx) {
 
 // MSan build + full in-container test run (Makefile:523-526). Expected to
 // report failures: an uninstrumented libc/libffi MSan blind spot
-// (documented in docs/TESTING.md, #844) accounts for ~262/700 of them --
+// (documented in man/TESTING.md, #844) accounts for ~262/700 of them --
 // not a regression on its own, compare against that documented baseline.
 [[cccc::build_target]]
 BuildTarget *linux_amd64_msan_test(Builder *ctx) {

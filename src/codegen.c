@@ -1914,7 +1914,7 @@ static Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
 // LEA3: rd = bp + offset. `skip_record` sets LEA3_NO_RECORD (#676), telling
 // op_LEA3_fn to skip its vm->stack_ptr_epochs write for this address -- pass
 // true only when the result is proven never to escape its creating frame
-// (see docs/SAFETY.md and the mark_addr_escapes pass in parse.c).
+// (see man/SAFETY.md and the mark_addr_escapes pass in parse.c).
 static Pc emit_lea3_ex(VirtualMachine *vm, int rd, long long offset, bool skip_record) {
     emit_word(vm, LEA3);
     emit_word(vm, ENCODE_R(rd) | (skip_record ? LEA3_NO_RECORD : 0));
@@ -1927,7 +1927,7 @@ static Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
 }
 
 // STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch,
-// for interior dangling-pointer resolution (#675). See docs/SAFETY.md.
+// for interior dangling-pointer resolution (#675). See man/SAFETY.md.
 static Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
     emit_word(vm, STKTAG);
     emit_word(vm, 0); // unused (no register operand)

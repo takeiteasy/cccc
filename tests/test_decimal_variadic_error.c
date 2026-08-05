@@ -2,7 +2,7 @@
 // C23 (#402, revised by #829): a _Decimal value through the *variadic tail*
 // of a call is now supported (#829 wired it up: passed by pointer to a
 // caller-frame scratch copy, see gen_decimal_arg_ptr in src/codegen.c and
-// docs/VM.md's Decimal Floating-Point section) -- that's what this test used
+// man/VM.md's Decimal Floating-Point section) -- that's what this test used
 // to check was rejected. What's still rejected is a decimal value as a
 // *fixed* parameter through a native FFI call: libffi has no decimal
 // ffi_type, so there's no sound by-value marshalling convention for it yet

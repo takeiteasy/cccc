@@ -1158,7 +1158,7 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     // table first) and for the stage0 std_stub.c build, where the embedded
     // table is empty. Deliberately not pushed into include_paths or
     // system_include_paths: standard headers no longer need a search-path
-    // entry to resolve (see docs/HEADERS.md), and keeping this out of both
+    // entry to resolve (see man/HEADERS.md), and keeping this out of both
     // lists means a user -I always wins, and -c=native never forwards
     // CCCC's polyfill headers to the native compiler.
     vm->compiler.builtin_include_dir = "./include";
@@ -2423,7 +2423,7 @@ int cc_run(VirtualMachine *vm, int argc, char **argv) {
     // before ever returning to the host libc exit() call, so this function
     // is never reached again in that case. _Exit()/quick_exit()/abort() are
     // untouched: they run neither atexit handlers nor destructors, matching
-    // GCC and ISO C (see docs/COVERAGE.md).
+    // GCC and ISO C (see man/COVERAGE.md).
     cc_run_atexit_entries(vm);
     // Mark drained here too, purely so the flag's meaning ("destructors have
     // run") stays accurate regardless of which of the two paths (normal

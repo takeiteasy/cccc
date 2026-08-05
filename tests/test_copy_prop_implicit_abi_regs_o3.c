@@ -29,7 +29,7 @@
 // MOV3, across every construction tried. Both entries are still correct and
 // necessary (documented invariant + required for the opt_elim_ext fix in
 // the companion #761 test), just not reachable as a live miscompile under
-// today's codegen. See docs/OPTIMIZATION.md for the invariant.
+// today's codegen. See man/OPTIMIZATION.md for the invariant.
 static int overflow_pair(int sum, int t) {
     int r1, r2;
     int of1 = __builtin_add_overflow(sum, t, &r1);

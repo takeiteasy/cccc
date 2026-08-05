@@ -1258,7 +1258,7 @@ static bool op_byte0_is_src(int op) {
 // and sub-pass A clears all copy facts for them (see the AXCHG/ACAS/IOVFL/
 // VRAISE case below) before falling through to default -- so this listing
 // is currently dead code for both sub-passes, kept so the invariant
-// documented in docs/OPTIMIZATION.md ("every immediate-carrying operand
+// documented in man/OPTIMIZATION.md ("every immediate-carrying operand
 // word must be listed here") doesn't silently lie about these two.
 static bool op_operand_word_is_immediate(int op) {
     switch (op) {

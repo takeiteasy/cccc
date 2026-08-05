@@ -35,7 +35,7 @@ UNAME_S := $(shell uname -s)
 # tools/generate_stdlib.c needs to produce the real src/std.c (the private
 # headers it needs are found on disk via -I./include instead). Once std.c
 # exists on disk it always wins (self-correcting: no explicit step needed to
-# switch back). See docs/BUILDING.md.
+# switch back). See man/BUILDING.md.
 ifeq ($(wildcard src/std.c),)
 STDLIB_SRC := src/std_stub.c
 else
@@ -43,7 +43,16 @@ STDLIB_SRC := src/std.c
 endif
 SRCS := $(filter-out src/ops.c src/std.c src/std_stub.c, $(wildcard src/*.c src/stdlib/*.c)) $(STDLIB_SRC)
 
+# MODE=release optimizes the stage0 binary itself (mirrors build.c's release
+# target, #883); does not affect the optimization level of any binary stage0
+# goes on to produce via `./cccc --build build.c`, which is compiled by the
+# host cc directly through build.c's own target flags.
+MODE ?= debug
+ifeq ($(MODE),release)
+CFLAGS := -Wall -O2 -g -DNDEBUG -std=c23 -Wno-deprecated-declarations -Wno-switch -pthread
+else
 CFLAGS := -Wall -O0 -g -std=c23 -Wno-deprecated-declarations -Wno-switch -pthread
+endif
 LDFLAGS := -pthread
 
 ifeq ($(UNAME_S),Darwin)

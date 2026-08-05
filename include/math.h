@@ -68,7 +68,7 @@ int __cccc_fpclassify_d(double);
  * isnand32/64/128 etc as static inline definitions once CCCC_HAS_DECIMAL is
  * linked. Guarded on __STDC_IEC_60559_DFP__ so the default (decimal-off)
  * build never references a name that doesn't exist -- _Decimal32/64/128
- * are valid type names in every build (see docs/VM.md), but decimal_math.h
+ * are valid type names in every build (see man/VM.md), but decimal_math.h
  * itself is a compile error to include without the library. */
 #ifdef __STDC_IEC_60559_DFP__
 #include "decimal_math.h"
