@@ -531,27 +531,53 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
         has_top_level_eq && eq_tok && initializer_is_self_contained(eq_tok, semi);
     decl->state = CD_NEW;
 
-    // --- tag: only the first "struct|union|enum IDENT" pair is inspected ---
+    // --- tag: only the first "struct|union|enum IDENT" pair AT DEPTH 0 is
+    // inspected. A pair inside a function declarator's parameter list (e.g.
+    // "typedef int (*fp)(struct S *);", or a plain prototype
+    // "int f(struct S *);") is nested inside '(' ... ')' and is not this
+    // declaration's own tag -- it must be skipped, not treated as the tag
+    // and used to (wrongly) seed decl_list_start. Depth tracking also
+    // correctly ignores a tag pair inside an initializer's "sizeof(struct
+    // X)" and, via brace_depth, a nested tag inside an anonymous member
+    // (e.g. "struct { struct T *p; } v;" no longer misregisters T as this
+    // statement's tag). Mirrors the depth-tracked declarator-list split
+    // loop just below.
     Token *decl_list_start = start;
-    for (Token *t = start; t != semi; t = t->next) {
-        if ((equal(t, "struct") || equal(t, "union") || equal(t, "enum")) &&
-            t->next && t->next->kind == TK_IDENT) {
-            Token *tagname = t->next;
-            Token *after = tagname->next;
-            if (after == semi || equal(after, "{") || equal(after, "*") ||
-                equal(after, ",")) {
-                register_comptime_decl_name(vm, &vm->compiler.comptime_tag_index,
-                                            tagname, decl, CDK_TAG);
-                decl_list_start = after;
-                if (equal(after, "{")) {
-                    if (equal(t, "enum"))
-                        index_enum_constants(vm, &vm->compiler.comptime_decl_index,
-                                             after, semi, decl);
-                    Token *close = find_matching_brace(after);
-                    decl_list_start = close ? close->next : after;
+    {
+        int paren_depth = 0, bracket_depth = 0, brace_depth = 0;
+        for (Token *t = start; t != semi; t = t->next) {
+            if (paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 &&
+                (equal(t, "struct") || equal(t, "union") || equal(t, "enum")) &&
+                t->next && t->next->kind == TK_IDENT) {
+                Token *tagname = t->next;
+                Token *after = tagname->next;
+                if (after == semi || equal(after, "{") || equal(after, "*") ||
+                    equal(after, ",")) {
+                    register_comptime_decl_name(vm, &vm->compiler.comptime_tag_index,
+                                                tagname, decl, CDK_TAG);
+                    decl_list_start = after;
+                    if (equal(after, "{")) {
+                        if (equal(t, "enum"))
+                            index_enum_constants(vm, &vm->compiler.comptime_decl_index,
+                                                 after, semi, decl);
+                        Token *close = find_matching_brace(after);
+                        decl_list_start = close ? close->next : after;
+                    }
                 }
+                break;
             }
-            break;
+            if (equal(t, "("))
+                paren_depth++;
+            else if (equal(t, ")") && paren_depth > 0)
+                paren_depth--;
+            else if (equal(t, "["))
+                bracket_depth++;
+            else if (equal(t, "]") && bracket_depth > 0)
+                bracket_depth--;
+            else if (equal(t, "{"))
+                brace_depth++;
+            else if (equal(t, "}") && brace_depth > 0)
+                brace_depth--;
         }
     }
 

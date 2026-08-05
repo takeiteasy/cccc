@@ -118,6 +118,14 @@ program. A struct that transitively names other types (a member of another
 struct, a typedef chain) pulls in exactly its dependencies, resolved
 recursively as each is needed.
 
+The tag a declaration registers under (for `struct`/`union`/`enum` lookups)
+is only the `struct|union|enum IDENT` in that declaration's own
+specifiers, at the statement's top level — never one that merely appears
+nested inside a function declarator's parameter list. `typedef int
+(*fp)(struct S *);` and `int f(struct S *);` both register `fp`/`f` as the
+name a comptime body can look up; `struct S` there is a reference, not this
+statement's own tag (fixed in cccc #907).
+
 The scoping above applies to **declarations and types** but **not
 preprocessor `#define` macros**. The comptime pass starts with an isolated
 macro state containing only CCCC builtins, command-line `-D` defines, and
