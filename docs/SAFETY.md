@@ -353,7 +353,7 @@ The POSIX `<pthread.h>` VM runtime serializes bytecode execution with the VM GIL
 
 **GIL release around blocking POSIX calls**
 
-Blocking calls — `read`, `write`, `pwrite`, `poll`, `accept`, `connect`, `wait`, `waitpid`, `sleep`, `usleep` — release the GIL while blocked so other VM threads can make progress. Non-blocking calls (`close`, `lseek`, `stat`, `open`, and most control-plane socket calls) intentionally hold the GIL.
+Blocking calls — `read`, `write`, `pread`, `pwrite`, `readv`, `writev`, `preadv`, `pwritev`, `poll`, `accept`, `connect`, `wait`, `waitpid`, `sleep`, `usleep` — release the GIL while blocked so other VM threads can make progress. Non-blocking calls (`close`, `lseek`, `stat`, `open`, and most control-plane socket calls) intentionally hold the GIL.
 
 **Thread-aware stack canaries**
 

@@ -185,6 +185,32 @@ static long long wrap_pread_gil(long long fd, long long buf, long long count, lo
     return (long long)r;
 }
 
+// readv/writev -- scatter/gather I/O at the fd's own file position.
+// Blocking, like read/write above, so they release the GIL the same way.
+// struct iovec needs no guest/host translation (void* + size_t, identical
+// on both hosts), so unlike ioctl below there is no layout risk here.
+static long long wrap_readv_gil(long long fd, long long iov, long long iovcnt) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)readv((int)fd, (const struct iovec *)iov, (int)iovcnt);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = readv((int)fd, (const struct iovec *)iov, (int)iovcnt);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+static long long wrap_writev_gil(long long fd, long long iov, long long iovcnt) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)writev((int)fd, (const struct iovec *)iov, (int)iovcnt);
+    ExecState state;
+    posix_save_and_release_gil(vm, &state);
+    ssize_t r = writev((int)fd, (const struct iovec *)iov, (int)iovcnt);
+    posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
 // preadv/pwritev (#793) -- the readv/writev analogs of pread/pwrite:
 // scatter/gather I/O at an explicit offset. Blocking, like pread/pwrite
 // above, so they release the GIL the same way. struct iovec needs no
@@ -3334,14 +3360,9 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setgroups",(void*)setgroups,2, 0);
     cc_register_cfunc(vm, "initgroups",(void*)initgroups,2, 0);
     cc_register_cfunc(vm, "nice",     (void*)nice,     1, 0);
-    // readv/writev are blocking I/O like read/write, but unlike
-    // read/write/pread/pwrite above are registered as plain (non-GIL-
-    // releasing) cfuncs -- a pre-existing gap noted while adding
-    // preadv/pwritev below (#793); every other VM thread stalls for the
-    // duration of a readv/writev call. Follow-up filed to bring them in
-    // line with pread/pwrite/preadv/pwritev.
-    cc_register_cfunc(vm, "readv",    (void*)readv,    3, 0);
-    cc_register_cfunc(vm, "writev",   (void*)writev,   3, 0);
+    // readv/writev release the GIL like read/write/pread/pwrite.
+    cc_register_cfunc(vm, "readv",    (void*)wrap_readv_gil,  3, 0);
+    cc_register_cfunc(vm, "writev",   (void*)wrap_writev_gil, 3, 0);
     cc_register_cfunc(vm, "preadv",   (void*)wrap_preadv_gil,  4, 0);
     cc_register_cfunc(vm, "pwritev",  (void*)wrap_pwritev_gil, 4, 0);
     cc_register_variadic_cfunc(vm, "open",   (void*)wrap_open,  2, 0);
