@@ -143,7 +143,14 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         profile_json = vm_profile_path(profile_dir, test_name, "c4")
         profile_args = ["--vm-profile", "--json"] if profile_json else []
         run_args = ["--", *per_test_run_args] if per_test_run_args else []
-        run_cmd = [str(cccc), *profile_args, str(c4_path), *run_args]
+        # Re-apply per_test_flags on the run step too, not just the save
+        # step above: runtime-checked flags like --ffi-type-checking take
+        # effect in the VM at execution time, not compile time, so a saved
+        # .c4 re-run without them silently skips that check instead of
+        # exercising it (#883). Compile-only flags (-O2, --std=, -Wall, ...)
+        # are harmless no-ops when passed alongside a .c4 file to execute
+        # directly -- verified they don't error or change behavior.
+        run_cmd = [str(cccc), *profile_args, *per_test_flags, str(c4_path), *run_args]
         start = time.perf_counter() if bench else None
         try:
             run = subprocess.run(
