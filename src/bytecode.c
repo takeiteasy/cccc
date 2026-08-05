@@ -1336,22 +1336,43 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         }
     }
 
-    // --- Merge return-buffer pool entries ---
-    for (int i = 0; i < stage.compiler.return_buffer_count; i++) {
-        long long old_off = stage.compiler.return_buffer_offsets[i];
-        if (old_off < 0) continue;
-        long long new_off = data_shift + old_off;
-        int idx = vm->compiler.return_buffer_count;
-        if (idx >= RETURN_BUFFER_POOL_SIZE) {
-            fprintf(stderr, "cc_load_module: return-buffer pool full; "
-                    "module return buffers not added\n");
-            break;
+    // --- Adopt return-buffer pool (#899) ---
+    // The pool is a fixed-size *rotating scratch* pool (RETURN_BUFFER_POOL_SIZE
+    // slots), not a per-module resource list: a host VM produced by normal
+    // codegen (codegen.c's struct/union-return allocation pass) always
+    // starts with all slots already filled, and struct-returning calls
+    // resolve their buffer purely at runtime from the host's pool via the
+    // RETBUF opcode (op_RETBUF_fn, ops.c) -- appended module text uses the
+    // host's buffers correctly with no merge needed. So a merge here would
+    // never have anything to do against a real host VM; it used to always
+    // warn and bail on the first iteration instead. Only adopt the module's
+    // own pool wholesale, and only for a from-scratch VM that has none of
+    // its own yet (e.g. a staging VM built solely to hold a loaded module).
+    // Size and pool must move together: op_RETBUF_fn's type_shadow_clear()
+    // clears return_buffer_size bytes per slot, so adopting a different size
+    // while keeping the host's own buffer pointers would over/under-run them.
+    if (vm->compiler.return_buffer_pool[0] == NULL &&
+        stage.compiler.return_buffer_count > 0 &&
+        stage.compiler.return_buffer_size > 0) {
+        int n = stage.compiler.return_buffer_count;
+        if (n > RETURN_BUFFER_POOL_SIZE) n = RETURN_BUFFER_POOL_SIZE;
+        int adopted = 0;
+        for (int i = 0; i < n; i++) {
+            long long old_off = stage.compiler.return_buffer_offsets[i];
+            if (old_off < 0) continue;
+            long long new_off = data_shift + old_off;
+            vm->compiler.return_buffer_offsets[adopted] = new_off;
+            vm->compiler.return_buffer_pool[adopted] = vm->data_seg + new_off;
+            adopted++;
         }
-        vm->compiler.return_buffer_offsets[idx] = new_off;
-        vm->compiler.return_buffer_pool[idx] = vm->data_seg + new_off;
-        vm->compiler.return_buffer_count++;
-        if (vm->compiler.return_buffer_size == 0 && stage.compiler.return_buffer_size > 0)
+        if (adopted > 0) {
+            vm->compiler.return_buffer_count = adopted;
             vm->compiler.return_buffer_size = stage.compiler.return_buffer_size;
+        }
+    } else if (vm->debug_vm && stage.compiler.return_buffer_count > 0) {
+        printf("cc_load_module: host return-buffer pool already populated; "
+               "'%s' module buffers not merged (rotating pool is shared)\n",
+               path);
     }
 
     // --- Merge FFI table ---

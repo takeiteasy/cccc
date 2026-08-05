@@ -500,6 +500,43 @@ static int verify_dynamic_externs(VirtualMachine *vm) {
     return ok ? 0 : -1;
 }
 
+// apply_link_pass: run the bytecode linker pass for every --link lib.c4a,
+// appending each library into the VM and resolving pending text/address
+// relocations (#565/#566), then hard-erroring on anything left unresolved.
+// Runs once, immediately after codegen, so it applies uniformly to every
+// terminal sink that follows (--testing, --disassemble, --ngrams/--fusion,
+// -o <file>, and the plain in-memory run) rather than only to the -o path
+// (#898: previously --link without -o skipped linking entirely and ran a
+// corrupt image with unresolved CALLs left at PC 0).
+static int apply_link_pass(VirtualMachine *vm, const char **paths, int count) {
+    for (int i = 0; i < count; i++) {
+        if (cc_link_bytecode(vm, paths[i]) != 0) {
+            fprintf(stderr, "error: failed to link %s\n", paths[i]);
+            return -1;
+        }
+    }
+    int ok = 1;
+    // Error on any remaining unresolved text relocations.
+    for (int i = 0; i < vm->compiler.num_text_relocs; i++) {
+        if (!vm->compiler.text_relocs[i].resolved) {
+            fprintf(stderr, "error: unresolved external: %s\n",
+                    vm->compiler.text_relocs[i].name
+                    ? vm->compiler.text_relocs[i].name : "(unknown)");
+            ok = 0;
+        }
+    }
+    // Error on any remaining unresolved address relocations (#566).
+    for (int i = 0; i < vm->compiler.num_addr_relocs; i++) {
+        if (!vm->compiler.addr_relocs[i].resolved) {
+            fprintf(stderr, "error: unresolved function pointer: %s\n",
+                    vm->compiler.addr_relocs[i].name
+                    ? vm->compiler.addr_relocs[i].name : "(unknown)");
+            ok = 0;
+        }
+    }
+    return ok ? 0 : -1;
+}
+
 static char *read_stdin_to_tmp(void) {
 #if defined(_WIN32)
     char tmpPath[MAX_PATH + 1];
@@ -1741,6 +1778,16 @@ int main(int argc, const char *argv[]) {
                     "error: -c=native requires -o <file>\n");
             usage(argv[0], 1);
         }
+        if (link_paths_count > 0) {
+            // --link resolves against the CCCC bytecode linker (#565); the
+            // native backend hands off to the host C compiler and has no
+            // way to consume a .c4a library, so this silently dropped the
+            // library and failed later with a confusing "implicit function
+            // declaration" error from the native compiler instead.
+            fprintf(stderr,
+                    "error: -c=native cannot be combined with --link\n");
+            usage(argv[0], 1);
+        }
     }
 
     if (run_ngrams || run_fusion) {
@@ -1939,6 +1986,18 @@ int main(int argc, const char *argv[]) {
         size_t len = strlen(input_file);
         if (len > 3 &&
             strncmp(input_file + len - 3, ".c4", sizeof(".c4")) == 0) {
+            // --link only runs as part of the compile-time linker pass
+            // (apply_link_pass(), #898), which requires codegen to have
+            // just produced pending text/address relocations to resolve.
+            // A prebuilt .c4 has none of that in this process, so --link
+            // here silently did nothing; reject it instead.
+            if (link_paths_count > 0) {
+                fprintf(stderr,
+                        "error: --link is not supported when running a "
+                        "prebuilt .c4 file (%s)\n", input_file);
+                exit_code = 1;
+                goto BAIL;
+            }
             // Load bytecode file
             if (cc_load_bytecode(&vm, input_file) != 0) {
                 fprintf(stderr, "error: failed to load bytecode from %s\n",
@@ -2367,6 +2426,17 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
+    // Run the bytecode linker pass for --link libs (#565/#566/#898). A -c
+    // bytecode target (compile_only) is handled separately below with its
+    // own "--link has no effect" warning -- deferred_link left its text
+    // relocations unresolved on purpose so a later --link can resolve them.
+    if (link_paths_count > 0 && !compile_only) {
+        if (apply_link_pass(&vm, link_paths, link_paths_count) != 0) {
+            exit_code = 1;
+            goto BAIL;
+        }
+    }
+
     // -c/--compile: write bytecode (or hand off to native) and exit. This
     // runs BEFORE the "save bytecode to out_file, then run" branch below so
     // -c=bytecode can write to stdout / arbitrary paths and -c=native can
@@ -2488,40 +2558,15 @@ int main(int argc, const char *argv[]) {
     }
 
     if (compile_format == COMPILE_BYTECODE) {
-        // Run the bytecode linker pass: for each --link lib.c4a, append the
-        // library into the VM and resolve any pending text relocations (#565).
+        // --link has no effect when writing a .c4a library: the linker pass
+        // now runs unconditionally right after codegen (see apply_link_pass()
+        // above, #898), but a -c/--compile bytecode target is always
+        // compile_only, so that pass is a no-op here and the library output
+        // still retains its text relocations for a later --link to resolve.
         if (link_paths_count > 0 && compile_only) {
             fprintf(stderr,
                     "warning: --link has no effect when combined with -c bytecode "
                     "(library output retains its text relocations)\n");
-        }
-        if (link_paths_count > 0 && !compile_only) {
-            for (int i = 0; i < link_paths_count; i++) {
-                if (cc_link_bytecode(&vm, link_paths[i]) != 0) {
-                    fprintf(stderr, "error: failed to link %s\n", link_paths[i]);
-                    exit_code = 1;
-                    goto BAIL;
-                }
-            }
-            // Error on any remaining unresolved text relocations.
-            for (int i = 0; i < vm.compiler.num_text_relocs; i++) {
-                if (!vm.compiler.text_relocs[i].resolved) {
-                    fprintf(stderr, "error: unresolved external: %s\n",
-                            vm.compiler.text_relocs[i].name
-                            ? vm.compiler.text_relocs[i].name : "(unknown)");
-                    exit_code = 1;
-                }
-            }
-            // Error on any remaining unresolved address relocations (#566).
-            for (int i = 0; i < vm.compiler.num_addr_relocs; i++) {
-                if (!vm.compiler.addr_relocs[i].resolved) {
-                    fprintf(stderr, "error: unresolved function pointer: %s\n",
-                            vm.compiler.addr_relocs[i].name
-                            ? vm.compiler.addr_relocs[i].name : "(unknown)");
-                    exit_code = 1;
-                }
-            }
-            if (exit_code != 0) goto BAIL;
         }
         if (out_file) {
             if (cc_save_bytecode(&vm, out_file) != 0) {
@@ -2610,33 +2655,9 @@ int main(int argc, const char *argv[]) {
     }
 
     if (out_file) {
-        // Run the bytecode linker pass for --link libs (#565).
-        if (link_paths_count > 0) {
-            for (int i = 0; i < link_paths_count; i++) {
-                if (cc_link_bytecode(&vm, link_paths[i]) != 0) {
-                    fprintf(stderr, "error: failed to link %s\n", link_paths[i]);
-                    exit_code = 1;
-                    goto BAIL;
-                }
-            }
-            for (int i = 0; i < vm.compiler.num_text_relocs; i++) {
-                if (!vm.compiler.text_relocs[i].resolved) {
-                    fprintf(stderr, "error: unresolved external: %s\n",
-                            vm.compiler.text_relocs[i].name
-                            ? vm.compiler.text_relocs[i].name : "(unknown)");
-                    exit_code = 1;
-                }
-            }
-            for (int i = 0; i < vm.compiler.num_addr_relocs; i++) {
-                if (!vm.compiler.addr_relocs[i].resolved) {
-                    fprintf(stderr, "error: unresolved function pointer: %s\n",
-                            vm.compiler.addr_relocs[i].name
-                            ? vm.compiler.addr_relocs[i].name : "(unknown)");
-                    exit_code = 1;
-                }
-            }
-            if (exit_code != 0) goto BAIL;
-        }
+        // The bytecode linker pass for --link libs already ran, right after
+        // codegen (apply_link_pass(), #898) — it applies uniformly whether
+        // we end up here, at cc_run() below, or in --testing/--disassemble.
         // Save bytecode to file and exit (legacy path: no -c, just -o).
         if (cc_save_bytecode(&vm, out_file) != 0) {
             fprintf(stderr, "error: failed to save bytecode to %s\n", out_file);

@@ -418,13 +418,21 @@ unresolved data-segment reference by name, unlike the text-segment case.
 cccc src/main.c -o app.c4 --link build/lib/mylib.c4a
 ```
 
-`--link lib.c4a` appends the library's text and data into the compiled exe, resolves
-any unresolved `CALL` sites that match exported symbols, and then writes the fully
-linked `.c4` file.  Multiple `--link` flags are processed in order.  Any symbol
-that remains unresolved after all libraries are linked causes a hard error.
+`--link lib.c4a` appends the library's text and data into the compiled program,
+resolves any unresolved `CALL` sites that match exported symbols, and then writes
+the fully linked `.c4` file.  Multiple `--link` flags are processed in order.  Any
+symbol that remains unresolved after all libraries are linked causes a hard error.
 
-The flag is only meaningful when writing a `.c4` output file (`-o file`).  Using
-`--link` with `--compile=bytecode` (library output) emits a warning and is a no-op.
+The linker pass runs once, immediately after codegen, so it applies uniformly no
+matter what happens next: writing a `.c4` file (`-o file`), running the program
+directly in-memory (no `-o`), `--testing`, and `--disassemble` all see the fully
+linked program. Using `--link` with `--compile=bytecode` (library output) emits a
+warning and is a no-op, since a library target is meant to retain its own
+unresolved text relocations for a later consumer to link. `--link` cannot be
+combined with `-c=native` (the native backend hands off to the host C compiler,
+which has no notion of a `.c4a` library) or with running a prebuilt `.c4` file as
+input (there is no fresh codegen output for the pass to resolve against) — both
+are rejected with a clean error.
 
 ### Runtime module loading — `cc_load_module`
 

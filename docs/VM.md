@@ -1067,8 +1067,16 @@ then merges its segments into the host VM:
 3. **Data append**: staging data bytes are appended; all data-reloc pointer slots
    are re-anchored to the host VM's segment base addresses.
 4. **TLS merge**: TLS template and relocs from the module are appended and adjusted.
-5. **Return-buffer merge**: return-buffer pool entries are merged with adjusted
-   `data_shift` offsets.
+5. **Return-buffer pool**: the return-buffer pool is a fixed-size *rotating scratch*
+   pool (`RETURN_BUFFER_POOL_SIZE` slots), not a per-module resource list — a host
+   VM produced by normal codegen always starts with every slot already filled, and
+   struct/union-returning calls in appended module text resolve their buffer purely
+   at runtime from the *host's* pool (the `RETBUF` opcode). So a host VM with its
+   own pool keeps it as-is and the module's entries are not merged. The module's
+   pool is adopted wholesale only when the host has none of its own yet (e.g. a
+   from-scratch VM built solely to stage a loaded module) — offsets and pool
+   pointers are re-anchored by `data_shift` together with `return_buffer_size`,
+   since a slot's size and its buffer pointers must always move together.
 6. **FFI merge**: FFI table entries from the module are merged (name strings are
    transferred; `asm_src` passthru entries remain independently rehydratable).
 7. **Symbol resolution**: the host VM's pending text relocations (`vm->compiler.text_relocs`)
@@ -1117,8 +1125,19 @@ generating a bytecode executable with unresolved external `CALL` sites:
    has its LTA3 i64 immediate patched to the byte-offset of the resolved symbol.
 4. After all libraries are linked, any remaining unresolved text or address relocations
    cause a hard link error.
-5. The final bytecode (with all CALL and function-pointer sites resolved) is written
-   to `-o <file>`.
+5. Linking runs once, immediately after codegen — before any terminal sink decides
+   what to do with the result. So the fully linked program is what gets written to
+   `-o <file>`, what `--testing`/`--disassemble` operate on, and what runs when there
+   is no `-o` at all (the compiled program executes directly in-memory). Earlier
+   versions only linked on the `-o` path; `--link` with no `-o` silently skipped
+   linking and ran the unlinked image, whose deferred `CALL` sites were left at their
+   unpatched placeholder operand of 0.
+
+`--link` cannot be combined with `-c=native` (no bytecode linker step exists in the
+native-backend handoff to the host C compiler) or with a prebuilt `.c4` file as input
+(there is no fresh codegen output in that process for the pass to resolve relocations
+against); both are rejected with a clean CLI error rather than silently ignoring the
+flag.
 
 The build system automatically adds `--link dep.c4a` flags for all `LinkWith` edges
 on a `kind=bytecode` executable target.  `.c4a` dependencies are compiled standalone
