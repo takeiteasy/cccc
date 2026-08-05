@@ -990,11 +990,37 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
     free(rt);
 
     bool first = true;
-    for (Obj *param = fn->params; param; param = param->next) {
-        if (!first)
-            fprintf(f, ", ");
-        first = false;
-        serialize_type_decl(f, ctx, param->ty, param->name);
+    if (fn->params) {
+        for (Obj *param = fn->params; param; param = param->next) {
+            if (!first)
+                fprintf(f, ", ");
+            first = false;
+            serialize_type_decl(f, ctx, param->ty, param->name);
+        }
+    } else if (fn->ty) {
+        // #901: a bodiless declaration (e.g. `int abs(int x);`) never runs
+        // the body-parsing path that populates fn->params (the Obj-based
+        // parameter list created for stack-slot allocation) -- only
+        // fn->ty->params (the Type-based prototype list) exists. Fall back
+        // to it so such a declaration serializes its real parameter types
+        // instead of degrading to "()"/"(void)".
+        int anon = 0;
+        for (Type *param = fn->ty->params; param; param = param->next) {
+            if (!first)
+                fprintf(f, ", ");
+            first = false;
+            char buf[64];
+            if (param->name) {
+                int len = param->name->len;
+                if (len > (int)sizeof(buf) - 1)
+                    len = (int)sizeof(buf) - 1;
+                memcpy(buf, param->name->loc, len);
+                buf[len] = '\0';
+            } else {
+                snprintf(buf, sizeof buf, "__a%d", anon++);
+            }
+            serialize_type_decl(f, ctx, param, buf);
+        }
     }
 
     if (fn->ty && fn->ty->is_variadic && !first) {
@@ -1075,6 +1101,13 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
 
     if (var->is_static)
         fprintf(f, "static ");
+    else if (!var->is_definition)
+        // #901: a global written `extern int g;` (no initializer, no
+        // tentative-definition fallback -- parse.c sets is_definition =
+        // !attr->is_extern) is a declaration, not a definition. Emitting
+        // it as a bare `int g;` produces a tentative definition that
+        // collides with the real symbol at link time.
+        fprintf(f, "extern ");
 
     serialize_type_decl(f, ctx, var->ty, var->name);
 
@@ -1398,8 +1431,31 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
-        if (!obj->is_function || (!obj->is_definition && !obj->body))
+        if (!obj->is_function)
             continue;
+        if (!obj->is_definition && !obj->body) {
+            // #901: a bare declaration with no body (e.g. `int abs(int
+            // x);`) used to be dropped entirely here. The VM path needs
+            // no native declaration -- it resolves the call as an FFI
+            // symbol with a known signature -- but the downstream system
+            // compiler does, so silently omitting it produced an
+            // undeclared-function error in the generated C. Emit it when
+            // it was written in the primary file (or in a cccc-only-
+            // routed include, whose own #include is never re-emitted --
+            // #896); a header-sourced declaration is left out, since the
+            // auto-captured #include (see TypeNameRecord.from_include)
+            // already supplies it to the native compiler. An implicit
+            // declaration's guessed signature is skipped outright -- it
+            // could conflict with the real one from a re-emitted header.
+            if (obj->is_implicit)
+                continue;
+            Token *t = obj->tok;
+            bool from_primary = t && t->file &&
+                (t->file == vm->compiler.primary_file ||
+                 cc_file_is_cccc_only(vm, t->file->name));
+            if (!from_primary)
+                continue;
+        }
         serialize_function_signature(f, &ctx, obj);
         fprintf(f, ";\n\n");
     }

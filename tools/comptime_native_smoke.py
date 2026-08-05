@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -46,6 +46,25 @@ Cases:
      must name the real tag (`struct Point`) and must never contain the
      bogus tag (`struct q`, named after the parameter's own identifier) --
      the same style of direct assertion as case 2 for #892.
+  10. #901 regression: a bodiless function declaration written in the
+      primary file (e.g. `int abs(int x);`, no #include, no definition
+      elsewhere) must compile and run under `-c=native` -- the VM path
+      resolves such a call as an FFI symbol with no native declaration
+      needed, but the downstream system compiler does, and the prototype
+      used to be silently dropped from the generated C entirely.
+  11. #901 regression, direct assertion: `-m` output for case 10's program
+      must contain the real parameter type (`int abs(int`), not a
+      parameter-less signature -- serialize_function_signature used to
+      degrade a bodiless declaration's params to `(void)` since only a
+      parsed body populates the Obj-based parameter list it read.
+  12. #901 regression guard: a program that `#include <stdio.h>` and calls
+      `printf` must NOT get a serialized `printf` prototype in `-m` output
+      -- the re-emitted `#include` already supplies it; only primary-file
+      (or cccc-only-routed) declarations should be serialized.
+  13. #901 regression: `extern int g;` in the primary file must serialize
+      as `extern int g;` in `-m` output, never a bare `int g;` (which is a
+      tentative *definition* that collides with the real symbol at link
+      time).
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -280,11 +299,72 @@ def case_struct_byval_m_output(cccc: Path, tmp: str) -> bool:
     return True
 
 
+BODILESS_DECL_PROGRAM = (
+    "int abs(int x);\n"
+    "int main(void) { return abs(-1) + 41; }\n"
+)
+
+PRINTF_INCLUDE_PROGRAM = (
+    "#include <stdio.h>\n"
+    "int main(void) { printf(\"%d\\n\", 1); return 42; }\n"
+)
+
+EXTERN_GLOBAL_PROGRAM = (
+    "extern int g;\n"
+    "int g = 5;\n"
+    "int main(void) { return g == 5 ? 42 : 1; }\n"
+)
+
+
+def case_bodiless_decl_end_to_end(cccc: Path, tmp: str) -> bool:
+    print("  10: -c=native, primary-file bodiless declaration compiles and runs (#901)")
+    return _native_run_case(cccc, tmp, "bodiless_decl_901", BODILESS_DECL_PROGRAM)
+
+
+def case_bodiless_decl_m_output(cccc: Path, tmp: str) -> bool:
+    print("  11: -m output for a bodiless declaration keeps its real parameter type (#901)")
+    src = Path(tmp) / "bodiless_decl_dump_901.c"
+    write(src, BODILESS_DECL_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if "int abs(int" not in out:
+        print(f"    FAIL: -m output missing 'int abs(int ...)' prototype\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_header_decl_not_reemitted(cccc: Path, tmp: str) -> bool:
+    print("  12: -m output never serializes a header-sourced declaration like printf (#901 regression guard)")
+    src = Path(tmp) / "printf_include_dump_901.c"
+    write(src, PRINTF_INCLUDE_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if "int printf(" in out:
+        print(f"    FAIL: -m output serialized a printf prototype\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_extern_global_m_output(cccc: Path, tmp: str) -> bool:
+    print("  13: -m output for an extern global keeps 'extern', never a bare tentative definition (#901)")
+    src = Path(tmp) / "extern_global_dump_901.c"
+    write(src, EXTERN_GLOBAL_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if "extern int g;" not in out:
+        print(f"    FAIL: -m output missing 'extern int g;'\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897)")
+    print("Native-backend serializer smoke tests (#892/#897/#901)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -301,6 +381,10 @@ def main() -> int:
             case_union_byval_param,
             case_struct_multi_use_and_byval,
             case_struct_byval_m_output,
+            case_bodiless_decl_end_to_end,
+            case_bodiless_decl_m_output,
+            case_header_decl_not_reemitted,
+            case_extern_global_m_output,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -259,17 +259,37 @@ bool __builtin_ast_type_is_variadic(Type *ty) {
     return ty->is_variadic;
 }
 
+// #900: struct_union_decl/enum_specifier (src/parse.c) set a fresh tag
+// Type's ->name to the tag token, but a *reference* to an existing tag
+// (e.g. a second function parameter of the same struct type) returns the
+// canonical, shared Type -- and declarator() then overwrites that shared
+// type's ->name with the declarator's own identifier (parameter/variable
+// name), not the tag. #892 added Type.struct_tag/Type.enum_tag to survive
+// that overwrite (see src/cccc.h); src/serialize.c already prefers them.
+// Prefer the same fields here so TypeName()/TypeCName() report the real
+// tag instead of whichever declarator last clobbered the shared Type.
+static Token *type_name_token(Type *ty) {
+    if (!ty)
+        return NULL;
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->struct_tag)
+        return ty->struct_tag;
+    if (ty->kind == TY_ENUM && ty->enum_tag)
+        return ty->enum_tag;
+    return ty->name;
+}
+
 const char *__builtin_ast_type_name(Type *ty) {
-    if (!ty || !ty->name)
+    Token *name = type_name_token(ty);
+    if (!name)
         return NULL;
 
     // Extract string from token into an arena-allocated buffer -- a shared
     // static buffer would alias across calls (e.g. for callers building a
     // name array across multiple types).
     VirtualMachine *vm = __builtin_current_vm;
-    int len = ty->name->len;
+    int len = name->len;
     char *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
-    memcpy(buffer, ty->name->loc, len);
+    memcpy(buffer, name->loc, len);
     buffer[len] = '\0';
     return buffer;
 }
@@ -304,7 +324,7 @@ const char *__builtin_ast_type_c_name(Type *ty) {
     if (base)
         return arena_strdup(vm, base);
 
-    if (ty->name)
+    if (type_name_token(ty))
         return __builtin_ast_type_name(ty);
 
     return NULL;
@@ -3348,6 +3368,7 @@ Type *__builtin_ast_make_struct(const char *name) {
     Type *ty = struct_type(vm);
     int name_len = (int)strlen(name);
     ty->name = reflect_make_name_token(vm, name, name_len);
+    ty->struct_tag = ty->name; // #900: survives any later declarator name-overwrite
     ty->size = 0;
     ty->align = 1;
     reflect_push_tag_scope(vm, name, name_len, ty);
@@ -3362,6 +3383,7 @@ Type *__builtin_ast_make_union(const char *name) {
     Type *ty = union_type(vm);
     int name_len = (int)strlen(name);
     ty->name = reflect_make_name_token(vm, name, name_len);
+    ty->struct_tag = ty->name; // #900: survives any later declarator name-overwrite
     ty->size = 0;
     ty->align = 1;
     reflect_push_tag_scope(vm, name, name_len, ty);
@@ -3436,6 +3458,7 @@ Type *__builtin_ast_make_enum(const char *name) {
     Type *ty = enum_type(vm);
     int name_len = (int)strlen(name);
     ty->name = reflect_make_name_token(vm, name, name_len);
+    ty->enum_tag = ty->name; // #900: survives any later declarator name-overwrite
     reflect_push_tag_scope(vm, name, name_len, ty);
     return ty;
 }

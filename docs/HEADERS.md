@@ -113,6 +113,15 @@ by default). Two things follow from that:
   collide with) are exempt and always re-emitted. This filter is itself
   skipped under `--emit-only`, since that flag turns auto-capture off — the
   header isn't re-emitted there, so the type definitions are still needed.
+- A function declared with no body anywhere in the program (e.g. `int
+  abs(int x);` with no matching definition) is serialized as a prototype
+  only when it was written in the primary file (or in a cccc-only-routed
+  include, whose own `#include` is never re-emitted — see below). The VM
+  path needs no such prototype, since it resolves the call as an FFI
+  symbol with a known signature; the native path hands the C to a system
+  compiler, which needs an explicit declaration for any call. A
+  header-sourced bare declaration is left out, since the auto-captured
+  `#include` already supplies it to the native compiler.
 
 `-G`/`--emit-generated` (without `-c=native`) is a separate, unaffected
 code path: its output is meant to be compiled *alongside* normal headers,

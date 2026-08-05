@@ -282,7 +282,15 @@ serializer bugs in general. Cases covered:
   must serialize with its real tag, not the parameter's own declarator name;
   and a file-scope struct referenced by pointer from two functions plus by
   value from a third, covering #897's broader "definition emitted inside the
-  wrong function" symptom in the same program.
+  wrong function" symptom in the same program;
+- #901: a bodiless function declaration written in the primary file (e.g.
+  `int abs(int x);` with no definition anywhere) must still compile and run
+  under `-c=native`, with its real parameter type reaching the generated
+  prototype — not silently dropped, and not degraded to `(void)`; a
+  header-sourced declaration (e.g. `printf` via `#include <stdio.h>`) must
+  NOT get a serialized prototype, since the re-emitted `#include` already
+  supplies it; and an `extern` global must serialize as `extern`, not a bare
+  tentative definition that collides with the real symbol at link time.
 
 ## Architecture build and test workflows
 

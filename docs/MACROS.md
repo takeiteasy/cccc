@@ -1962,7 +1962,7 @@ Underlying functions: `__builtin_macroexpand_1(Node *node)` and
 | `TypeParamCount(ty)` | Count function parameters |
 | `TypeParamAt(ty, i)` | Get function parameter type |
 | `TypeIsVariadic(ty)` | Test variadic function type |
-| `TypeName(ty)` | Get a type name when available |
+| `TypeName(ty)` | Get a type name when available — for a tagged struct/union/enum, always the tag (never a typedef alias spelling, even when looked up by one) |
 | `MakePointer(base)` | Create pointer type |
 | `MakeArray(base, len)` | Create array type |
 
