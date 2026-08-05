@@ -71,6 +71,15 @@ void test_dynobj_static_array_offset(void) {
 }
 
 [[cccc::test]]
+void test_dynobj_static_array_sub_inline(void) {
+    // #701: constant ND_SUB is now peeled by objsize_resolve_ptr, same as
+    // __builtin_object_size's static fold.
+    char buf[64];
+    size_t sz = __builtin_dynamic_object_size(buf + 16 - 4, 0);
+    AssertEq((unsigned long long)sz, 52ULL);
+}
+
+[[cccc::test]]
 void test_dynobj_static_scalar(void) {
     int x = 0;
     size_t sz = __builtin_dynamic_object_size(&x, 0);

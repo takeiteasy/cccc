@@ -119,11 +119,20 @@ void test_fortify_style_wrapper(void) {
     AssertEq(dst[4], 'o');
 }
 
+// #701: `char *p = buf;` (a plain array-base pointer variable, offset 0) is
+// no longer an "unknown pointer" -- it's exactly the array-base derived-var
+// case this ticket closes, and now resolves to sizeof(buf) like the bare
+// array/direct-offset forms above. A genuinely unknown pointer needs a
+// backing object with no compile-time provenance at all, e.g. a function
+// parameter (see safe_memcpy's `dst` above) or an unannotated function's
+// return value.
+static char *test_objsize_opaque_ptr(char *in) { return in; }
+
 [[cccc::test]]
 void test_unknown_ptr_type0_conservative(void) {
     // Conservative max: unknown pointer → (size_t)-1
     char buf[4];
-    char *p = buf; // pointer variable, not a bare array → unknown
+    char *p = test_objsize_opaque_ptr(buf); // routed through an opaque call → unknown
     size_t sz = __builtin_object_size(p, 0);
     AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
 }
@@ -132,9 +141,22 @@ void test_unknown_ptr_type0_conservative(void) {
 void test_unknown_ptr_type2_conservative(void) {
     // Conservative min: unknown pointer → 0
     char buf[4];
-    char *p = buf;
+    char *p = test_objsize_opaque_ptr(buf);
     size_t sz = __builtin_object_size(p, 2);
     AssertEq((unsigned long long)sz, 0ULL);
+}
+
+// #701: the plain array-base derived-var case that replaced the two tests
+// above -- `char *p = buf;` (offset 0) now resolves exactly, same as
+// test_object_size_array_base_var_zero_offset below but placed here to keep
+// the "conservative fallback" section's own regression coverage next to what
+// it displaced.
+[[cccc::test]]
+void test_array_base_ptr_var_now_precise(void) {
+    char buf[4];
+    char *p = buf;
+    size_t sz = __builtin_object_size(p, 0);
+    AssertEq((unsigned long long)sz, 4ULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -716,4 +738,150 @@ void test_object_size_derived_var_loop_reassign_conservative(void) {
     }
     AssertEq(sum, 3ULL * (unsigned long long)(size_t)-1);
     free(m);
+}
+
+// ---------------------------------------------------------------------------
+// #701: two follow-up precision gaps left conservative by #697/#700.
+//
+// (1) Constant pointer *subtraction* was never peeled by
+//     objsize_peel_offset_chain/objsize_resolve_ptr -- only ND_ADD was. `q -
+//     const` (both the inline #697 form and the derived-variable #700 form)
+//     now resolves exactly, as does a negative intermediate offset relative
+//     to a derived var that is still non-negative relative to the true root
+//     (e.g. `q - 16` where `q = p + 64` is 16 bytes before `q` but 48 bytes
+//     into the real allocation).
+//
+// (2) An intermediate variable derived from a *statically-sized array* base
+//     (`char *q = buf + k;`), not just a heap allocation, is now tracked the
+//     same way #700 tracks a heap-derived var -- closing the gap between the
+//     already-resolved direct form (`__builtin_object_size(buf + k, 0)`) and
+//     the previously-conservative variable form.
+// ---------------------------------------------------------------------------
+
+static char objsize_701_gbuf[64];
+
+[[cccc::test]]
+void test_object_size_sub_inline(void) {
+    char buf[64];
+    // Peeled down to +12 before hitting the base var -- exercises the
+    // ND_ADD/ND_SUB mix in a single chain.
+    AssertEq((unsigned long long)__builtin_object_size(buf + 16 - 4, 0), 52ULL);
+}
+
+[[cccc::test]]
+void test_object_size_sub_derived(void) {
+    // The ticket's own example: q - 16 is 16 bytes *before* q, but q itself
+    // is 64 bytes into a 128-byte allocation, so the true root-relative
+    // offset is +48 -- verified against real clang/gcc.
+    char *p = malloc(128);
+    char *q = p + 64;
+    AssertEq((unsigned long long)__builtin_object_size(q - 16, 0), 80ULL);
+    free(p);
+}
+
+[[cccc::test]]
+void test_object_size_sub_derived_decl(void) {
+    char *p = malloc(128);
+    char *q = p + 64;
+    char *r = q - 16; // r is itself now a derived var, root-relative offset 48
+    AssertEq((unsigned long long)__builtin_object_size(r, 0), 80ULL);
+    free(p);
+}
+
+[[cccc::test]]
+void test_object_size_sub_ptr_diff_conservative(void) {
+    // ptr - ptr is an element count (node->ty == ty_long, no base type), not
+    // a pointer offset -- must not be misread as one.
+    char *p = malloc(128);
+    char *q = p + 64;
+    long diff = q - p;
+    AssertEq(diff, 64L);
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 64ULL);
+    free(p);
+}
+
+[[cccc::test]]
+void test_object_size_sub_underflow_conservative(void) {
+    // p itself is the true root: p - 16 resolves to a negative root-relative
+    // offset (before the allocation) and must stay conservative, not report
+    // an oversized "remaining" count.
+    char *p = malloc(128);
+    char *r = p - 16;
+    AssertEq((unsigned long long)__builtin_object_size(r, 0),
+             (unsigned long long)(size_t)-1);
+    free(p);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_var(void) {
+    // The ticket's second example.
+    char buf[64];
+    char *q = buf + 8;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 56ULL);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_var_zero_offset(void) {
+    char buf[64];
+    char *q = buf;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 64ULL);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_global(void) {
+    char *q = objsize_701_gbuf + 8;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 56ULL);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_static(void) {
+    static char sbuf[32];
+    char *q = sbuf + 4;
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 28ULL);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_chain(void) {
+    char buf[64];
+    char *q = buf + 8;  // 56 remaining
+    char *r = q + 8;    // 48 remaining
+    AssertEq((unsigned long long)__builtin_object_size(q, 0), 56ULL);
+    AssertEq((unsigned long long)__builtin_object_size(r, 0), 48ULL);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_reassigned_conservative(void) {
+    char buf[64];
+    char other[16];
+    char *q = buf + 8;
+    q = other; // q reassigned after derivation -> poisoned directly
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_addr_taken_conservative(void) {
+    char buf[64];
+    char *q = buf + 8;
+    char **qq = &q;
+    AssertTrue(qq != NULL);
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_vla_conservative(void) {
+    int n = 32;
+    char vla[n];
+    char *q = vla + 4; // VLA base has no compile-time size -> conservative
+    AssertEq((unsigned long long)__builtin_object_size(q, 0),
+             (unsigned long long)(size_t)-1);
+}
+
+[[cccc::test]]
+void test_object_size_array_base_type1(void) {
+    char buf[64];
+    char *q = buf + 8;
+    // type 1: nearest subobject -- for a plain array, whole == subobject.
+    AssertEq((unsigned long long)__builtin_object_size(q, 1), 56ULL);
 }

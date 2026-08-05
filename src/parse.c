@@ -2454,8 +2454,9 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
                     var->objsize_init_assign = expr;
                     var->objsize_decl_fn = vm->compiler.current_fn;
                 } else if (objsize_peel_offset_chain(vm, expr->rhs, &base, &base_offset) &&
-                           base->objsize_has_alloc &&
-                           base->objsize_decl_fn == vm->compiler.current_fn) {
+                           ((base->objsize_has_alloc &&
+                             base->objsize_decl_fn == vm->compiler.current_fn) ||
+                            (base->ty && base->ty->kind == TY_ARRAY && base->ty->size > 0))) {
                     // #700: `q = p + const`, where p is itself alloc-tracked
                     // (directly or transitively) and declared in the same
                     // function. q's effective size is resolved at query time
@@ -2467,6 +2468,17 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
                     // objsize_decl_fn: a cross-function derivation could
                     // resolve (and freeze) before a later reassignment in the
                     // enclosing scope is even parsed.
+                    //
+                    // #701: a base that is a statically-sized array object
+                    // (not itself alloc-tracked) is also accepted, without the
+                    // same-function restriction -- an array's size is fixed at
+                    // declaration and its name is never reassignable, so there
+                    // is no reassignment hazard to sidestep (this is also why
+                    // a global/static array base is fine here). A TY_VLA base
+                    // has no compile-time size and is excluded by `size > 0`.
+                    // An array-typed *parameter* can't reach this arm: cccc
+                    // decays array parameters to TY_PTR at declaration, so
+                    // `base->ty->kind` is never TY_ARRAY for one.
                     var->objsize_has_alloc = true;
                     var->objsize_derived_from = base;
                     var->objsize_derived_offset = base_offset;
@@ -5141,19 +5153,33 @@ static bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r) 
     case ND_ADDR:
         // &lvalue → resolve the lvalue.
         return objsize_resolve_lvalue(vm, node->lhs, r);
-    case ND_ADD: {
-        // ptr + scaled_int (rhs is already byte-scaled by new_add).
-        // Only proceed if the offset is a compile-time constant.
+    case ND_ADD:
+    case ND_SUB: {
+        // ptr + scaled_int / ptr - scaled_int (rhs is already byte-scaled by
+        // new_add()/new_sub()). ND_SUB also covers ptr - ptr (element count,
+        // node->ty == ty_long), which must NOT be peeled here -- excluded by
+        // the node->ty->base check (a ptr-ptr node has no base type).
+        if (node->kind == ND_SUB && !(node->ty && node->ty->base))
+            return false;
         ObjSizeInfo base;
         if (!objsize_resolve_ptr(vm, node->lhs, &base))
             return false;
         if (!is_const_expr(vm, node->rhs))
             return false;
         int64_t byte_delta = eval(vm, node->rhs);
+        if (node->kind == ND_SUB)
+            byte_delta = -byte_delta;
+        if (byte_delta < INT_MIN || byte_delta > INT_MAX)
+            return false; // avoid narrowing overflow below
+        int64_t new_base_off = (int64_t)base.base_offset + byte_delta;
+        int64_t new_sub_off  = (int64_t)base.sub_offset  + byte_delta;
+        if (new_base_off < 0 || new_base_off > INT_MAX ||
+            new_sub_off  < 0 || new_sub_off  > INT_MAX)
+            return false; // pointer moved before the start of the (sub)object
         r->base_size   = base.base_size;
-        r->base_offset = base.base_offset + (int)byte_delta;
+        r->base_offset = (int)new_base_off;
         r->sub_size    = base.sub_size;
-        r->sub_offset  = base.sub_offset + (int)byte_delta;
+        r->sub_offset  = (int)new_sub_off;
         return true;
     }
     case ND_VAR:
@@ -5231,13 +5257,21 @@ static bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out) {
     return true;
 }
 
-// #697/#700: peel casts and constant-offset ND_ADDs off `node`, accumulating
-// the total byte delta (rhs is already byte-scaled by new_add()), down to a
-// bare ND_VAR. Succeeds only if the walk bottoms out at a plain variable and
-// the accumulated offset is non-negative and fits an `int` -- callers additionally
-// check `objsize_has_alloc` on *out_base, this helper only does the syntactic
-// peel. Shared by the #697 inline-interior-pointer builtin-argument case and
-// the #700 `q = p + const` derived-declaration case.
+// #697/#700/#701: peel casts and constant-offset ND_ADD/ND_SUBs off `node`,
+// accumulating the total byte delta (rhs is already byte-scaled by
+// new_add()/new_sub()), down to a bare ND_VAR. `*out_offset` is the offset of
+// `node`'s pointer value *relative to `*out_base`*, and may legitimately be
+// negative here -- e.g. `q - 16` where `q` is itself a derived variable
+// (`q = p + 64`) peels to base=q, offset=-16, which is only 16 bytes before
+// `q`, not before the ultimate allocation (48 bytes into it). Only the final,
+// fully-chased offset from the true root (computed by
+// objsize_effective_remaining, which knows the whole derivation chain) must
+// be non-negative -- this helper just does the syntactic peel and range-checks
+// the narrowing to `int`. `p->ty->base` (ND_SUB only) excludes `ptr - ptr`
+// (element-count subtraction, node->ty == ty_long) from being misread as a
+// pointer offset. Callers additionally check `objsize_has_alloc` on
+// *out_base; shared by the #697 inline-interior-pointer builtin-argument case
+// and the #700/#701 `q = p +/- const` derived-declaration case.
 static bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base, int *out_offset) {
     Node *p = node;
     int64_t offset = 0;
@@ -5247,11 +5281,17 @@ static bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_
         } else if (p->kind == ND_ADD && is_const_expr(vm, p->rhs)) {
             offset += eval(vm, p->rhs);
             p = p->lhs;
+        } else if (p->kind == ND_SUB && is_const_expr(vm, p->rhs)) {
+            add_type(vm, p);
+            if (!(p->ty && p->ty->base))
+                break;
+            offset -= eval(vm, p->rhs);
+            p = p->lhs;
         } else {
             break;
         }
     }
-    if (offset < 0 || offset > INT_MAX)
+    if (offset < INT_MIN || offset > INT_MAX)
         return false;
     if (p->kind != ND_VAR || !p->var)
         return false;
@@ -5497,27 +5537,48 @@ static void mark_nested_captures(Obj *fn, Node *node) {
     }
 }
 
-// #700: resolve `var`'s effective remaining byte count `offset` bytes into
-// its tracked allocation, following the objsize_derived_from chain (`q = p +
-// k` initializers, possibly nested). Returns -1 if `var` itself is unsafe, or
-// any ancestor in the chain is unsafe -- a reassignment/address-of anywhere
-// in the chain must poison every var derived from it, since the derived
-// var's tracked size is only sound if every ancestor held its originally-
-// assigned allocation for the whole function (single-assignment, never
-// address-taken; see objsize_poison_scan). `depth` bounds recursion; the
-// chain is only ever as deep as nested `q = p + k` initializers, so this is
-// just a defensive cap, not expected to be hit.
-static int64_t objsize_effective_remaining(Obj *var, int offset, int depth) {
+// #700/#701: resolve `var`'s effective remaining byte count `offset` bytes
+// into its tracked allocation, following the objsize_derived_from chain (`q =
+// p +/- k` initializers, possibly nested). Returns -1 if `var` itself is
+// unsafe, or any ancestor in the chain is unsafe -- a reassignment/address-of
+// anywhere in the chain must poison every var derived from it, since the
+// derived var's tracked size is only sound if every ancestor held its
+// originally-assigned allocation for the whole function (single-assignment,
+// never address-taken; see objsize_poison_scan). `depth` bounds recursion;
+// the chain is only ever as deep as nested `q = p +/- k` initializers, so
+// this is just a defensive cap, not expected to be hit.
+//
+// `offset` is accumulated *downward* toward the root at each step (rather
+// than composed back up via subtraction) so that a negative intermediate
+// offset -- e.g. `q - 16` where `q = p + 64` peels to offset -16 relative to
+// `q` itself, but +48 relative to the true root -- cannot be mistaken for a
+// before-the-object address until the *total*, root-relative offset is known.
+// Composing via subtraction at each level instead (the #700 original scheme)
+// is unsound here: it only ever range-checks the final `rem`, and a
+// sufficiently negative root-relative offset makes `rem` come out larger
+// than the object (e.g. `root_size - (-36) = root_size + 36`), which reads as
+// a *valid*, oversized remaining count instead of the conservative fallback
+// a before-the-object pointer must get.
+static int64_t objsize_effective_remaining(Obj *var, int64_t offset, int depth) {
     if (!var || var->objsize_unsafe || depth > 64)
         return -1;
-    if (var->objsize_derived_from) {
-        int64_t base_rem = objsize_effective_remaining(
-            var->objsize_derived_from, var->objsize_derived_offset, depth + 1);
-        if (base_rem < 0)
-            return -1;
-        return base_rem - offset;
-    }
-    return (int64_t)var->objsize_alloc - offset;
+    if (var->objsize_derived_from)
+        return objsize_effective_remaining(var->objsize_derived_from,
+                                            (int64_t)var->objsize_derived_offset + offset,
+                                            depth + 1);
+    // `var` is the true root of the chain: `offset` is now the total,
+    // root-relative byte offset. Reject a before-the-object pointer here,
+    // where the check is finally meaningful.
+    if (offset < 0)
+        return -1;
+    // #701: a root can be a statically-sized array base (rather than a
+    // malloc-family allocation) once the derived-tracking site below also
+    // accepts an array Obj as a base.
+    int64_t root_size = (var->ty && var->ty->kind == TY_ARRAY && var->ty->size > 0 &&
+                          !var->objsize_has_alloc)
+                       ? (int64_t)var->ty->size
+                       : (int64_t)var->objsize_alloc;
+    return root_size - offset;
 }
 
 static void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
