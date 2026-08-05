@@ -142,6 +142,12 @@ def case_native_quoted_include(cccc: Path, tmp: str) -> bool:
 
 
 def sysroot() -> str:
+    # xcrun is macOS-only; on any other platform (e.g. the Linux CI
+    # container) it doesn't exist at all, and subprocess.run() raises
+    # FileNotFoundError rather than giving a non-zero returncode to check --
+    # go straight to the "/" fallback instead of letting that propagate.
+    if sys.platform != "darwin":
+        return "/"
     result = subprocess.run(["xcrun", "--show-sdk-path"], capture_output=True, text=True)
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
