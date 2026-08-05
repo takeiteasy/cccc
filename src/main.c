@@ -500,6 +500,18 @@ static int verify_dynamic_externs(VirtualMachine *vm) {
     return ok ? 0 : -1;
 }
 
+// report_link_with_prebuilt_c4: --link only runs as part of the compile-time
+// linker pass (apply_link_pass(), below), which requires codegen to have
+// just produced pending text/address relocations to resolve. A prebuilt .c4
+// loaded fresh in this process has none of that, so --link against one is a
+// silent no-op rather than an error; reject it instead. Shared by both the
+// single-.c4 run path and the multi-.c4 --ngrams/--fusion-candidates
+// analysis path (#902) so the message can't drift between the two.
+static void report_link_with_prebuilt_c4(const char *path) {
+    fprintf(stderr, "error: --link is not supported when running a "
+                    "prebuilt .c4 file (%s)\n", path);
+}
+
 // apply_link_pass: run the bytecode linker pass for every --link lib.c4a,
 // appending each library into the VM and resolving pending text/address
 // relocations (#565/#566), then hard-erroring on anything left unresolved.
@@ -1935,6 +1947,11 @@ int main(int argc, const char *argv[]) {
             }
         }
         if (all_c4) {
+            if (link_paths_count > 0) {
+                report_link_with_prebuilt_c4(input_files[0]);
+                exit_code = 1;
+                goto BAIL;
+            }
             if (run_ngrams) {
                 CcAnalyzeNgramOptions opts = {
                     .n = run_ngrams,
@@ -1986,15 +2003,8 @@ int main(int argc, const char *argv[]) {
         size_t len = strlen(input_file);
         if (len > 3 &&
             strncmp(input_file + len - 3, ".c4", sizeof(".c4")) == 0) {
-            // --link only runs as part of the compile-time linker pass
-            // (apply_link_pass(), #898), which requires codegen to have
-            // just produced pending text/address relocations to resolve.
-            // A prebuilt .c4 has none of that in this process, so --link
-            // here silently did nothing; reject it instead.
             if (link_paths_count > 0) {
-                fprintf(stderr,
-                        "error: --link is not supported when running a "
-                        "prebuilt .c4 file (%s)\n", input_file);
+                report_link_with_prebuilt_c4(input_file);
                 exit_code = 1;
                 goto BAIL;
             }

@@ -1137,7 +1137,10 @@ generating a bytecode executable with unresolved external `CALL` sites:
 native-backend handoff to the host C compiler) or with a prebuilt `.c4` file as input
 (there is no fresh codegen output in that process for the pass to resolve relocations
 against); both are rejected with a clean CLI error rather than silently ignoring the
-flag.
+flag. The prebuilt-`.c4`-input rejection covers every `.c4` input file, not just the
+single-file run/`--testing`/`--disassemble` dispatch: the `--ngrams`/`--fusion-candidates`
+static-analysis dispatch, which accepts and walks one or more prebuilt `.c4` files via
+`cc_load_bytecode`, hits the same rejection when `--link` is also on the command line.
 
 The build system automatically adds `--link dep.c4a` flags for all `LinkWith` edges
 on a `kind=bytecode` executable target.  `.c4a` dependencies are compiled standalone

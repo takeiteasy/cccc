@@ -432,7 +432,9 @@ unresolved text relocations for a later consumer to link. `--link` cannot be
 combined with `-c=native` (the native backend hands off to the host C compiler,
 which has no notion of a `.c4a` library) or with running a prebuilt `.c4` file as
 input (there is no fresh codegen output for the pass to resolve against) — both
-are rejected with a clean error.
+are rejected with a clean error. The prebuilt-`.c4` rejection applies to every
+`.c4` input, including the `--ngrams`/`--fusion-candidates` static-analysis mode
+when it's given one or more prebuilt `.c4` files to walk.
 
 ### Runtime module loading — `cc_load_module`
 

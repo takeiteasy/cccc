@@ -702,6 +702,16 @@ instruction has a single reader. Add `--json` to get JSON output for scripting.
 
 These two analyses are mutually exclusive with `--vm-profile*`, `-g/--debug`,
 `-d/--disassemble`, `-c=native`, and any safety / execution / output flags.
+
+`--ngrams`/`--fusion-candidates` with one or more prebuilt `.c4` inputs rejects
+`--link` on the same command line — a prebuilt `.c4` has no fresh codegen output
+in that process for the linker pass to resolve relocations against, so `--link`
+there would otherwise be a silent no-op (same reasoning as `--link` against a
+single prebuilt `.c4` in the run/`--testing`/`--disassemble` dispatch). Analysing
+a **source** input still links normally: `--link lib.c4a` runs the same
+compile-time linker pass first, and the analysis then walks the fully linked
+text segment.
+
 See [VM.md](VM.md) for how to combine the static counts with the dynamic bigram
 profile to surface the strongest fusion candidates.
 
