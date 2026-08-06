@@ -100,7 +100,6 @@ extern "C" {
  *           functions that need it read it internally from a process-global
  *           set for the duration of macro execution. */
 typedef struct VirtualMachine VirtualMachine;
-typedef struct VirtualMachine VirtualMachine;
 
 /*! @brief Opaque compiler type descriptor (primitive, pointer, array,
  *           function, struct/union, or enum). Inspect it with the
