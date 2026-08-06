@@ -29,18 +29,20 @@ MARKDOWN_SUPPORT        = YES
 ENABLE_PREPROCESSING    = YES
 MACRO_EXPANSION         = NO
 
-# Coverage of the underlying FFI functions is uneven right now (see the
-# ticket-908 follow-ups); EXTRACT_ALL keeps every declared function/macro/
-# typedef in the index even where @param/@return prose is still missing, so
-# the generated docs show the complete public surface rather than silently
-# dropping undocumented entries.
+# building.h/testing.h/reflection.h @param/@return coverage landed in
+# #909/#910/#911. EXTRACT_ALL stays YES regardless: reflection.h's internal
+# __builtin_dispatch_*/_1/_2/_3 plumbing macros are deliberately undocumented
+# (they back the public macro wrappers but aren't part of the macro-author
+# API), and EXTRACT_ALL keeps them in the index without WARN_IF_UNDOCUMENTED
+# treating that as an error.
 EXTRACT_ALL              = YES
 
 WARN_IF_UNDOCUMENTED     = YES
 WARN_NO_PARAMDOC         = YES
-# Flip to YES once the building.h/testing.h/reflection.h coverage follow-ups
-# land -- turning this on now would fail the build immediately.
-WARN_AS_ERROR            = NO
+# Coverage follow-ups (#909/#910/#911) landed, so this is now a real
+# completeness gate: the docs build target (and CI's docs task) fails on
+# any @param/@return gap or Doxygen markup error.
+WARN_AS_ERROR            = YES
 WARN_LOGFILE             = build/docs/doxygen-warnings.log
 
 QUIET                    = YES

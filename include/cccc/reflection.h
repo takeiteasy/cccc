@@ -1411,20 +1411,20 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 
 // Quasi-quoting helpers (ticket #1, #172)
 /*! @def Quote
- * @brief Parse a C code template string into an AST node, substituting @c $N / @c $@N splice points with the given argument nodes.
+ * @brief Parse a C code template string into an AST node, substituting `$N` / `$@N` splice points with the given argument nodes.
  * @param tmpl A C expression or statement as a string literal with splice points.
  * @param ... Node* arguments corresponding to the splice points (up to 64; use QuoteN for more). */
 #define Quote(tmpl, ...) __builtin_quote(tmpl, ##__VA_ARGS__)
 /*! @def QuoteN
  * @brief Array-form quasi-quote that validates the splice count and supports more nodes than Quote's variadic form.
- * @param tmpl Template string with @c $N / @c $@N splice points.
+ * @param tmpl Template string with `$N` / `$@N` splice points.
  * @param nodes Array of Node* splice arguments.
  * @param count Length of the nodes array. */
 #define QuoteN(tmpl, nodes, count) __builtin_quote_n(tmpl, nodes, count)
 // Build a ->next-linked chain from a compound-literal array for $@k splices:
 //   NodeList((Node*[]){ a, b, c }, 3)
 /*! @def NodeList
- * @brief Build a @c ->next-linked node chain from an array, for use as a @c $@k list-splice argument.
+ * @brief Build a `->next`-linked node chain from an array, for use as a `$@k` list-splice argument.
  * @param nodes Array of Node* to link together.
  * @param count Number of elements in the array. */
 #define NodeList(nodes, count) __builtin_node_list(nodes, count)
@@ -2179,11 +2179,11 @@ Node *__builtin_get_comptime_member(const char *var_name,
                                   const char *field);
 
 /*! @def GetComptimeInt
- * @brief Read an integer-typed @c #pragma comptime variable's value at compile time.
+ * @brief Read an integer-typed @c \#pragma comptime variable's value at compile time.
  * @param name The comptime variable's name. */
 #define GetComptimeInt(name)           __builtin_get_comptime_int(name)
 /*! @def GetComptimeFloat
- * @brief Read a float/double-typed @c #pragma comptime variable's value at compile time.
+ * @brief Read a float/double-typed @c \#pragma comptime variable's value at compile time.
  * @param name The comptime variable's name. */
 #define GetComptimeFloat(name)         __builtin_get_comptime_float(name)
 /*! @def GetComptimeVar

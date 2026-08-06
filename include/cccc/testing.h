@@ -35,7 +35,7 @@
  * @param expr Stringified expression for diagnostic output.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c cond is non-zero; otherwise prints the failure location/expression and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c cond is non-zero; otherwise prints the failure location/expression and terminates the test with a non-zero exit code.
  * @details Backend for @c Assert and @c AssertTrue.
  */
 void __builtin_assert(int cond, const char *expr, const char *file, int line);
@@ -45,7 +45,7 @@ void __builtin_assert(int cond, const char *expr, const char *file, int line);
  * @param expr Stringified expression for diagnostic output.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c cond is zero; otherwise prints the failure location/expression and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c cond is zero; otherwise prints the failure location/expression and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertFalse.
  */
 void __builtin_assert_false(int cond, const char *expr, const char *file, int line);
@@ -53,7 +53,7 @@ void __builtin_assert_false(int cond, const char *expr, const char *file, int li
 /*! @brief Unconditionally fail a test.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Always prints the failure location and terminates the test with a non-zero exit code.
+ * @note Always prints the failure location and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertFail.
  */
 void __builtin_assert_fail(const char *file, int line);
@@ -62,7 +62,7 @@ void __builtin_assert_fail(const char *file, int line);
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Always prints @c msg and the failure location, then terminates the test with a non-zero exit code.
+ * @note Always prints @c msg and the failure location, then terminates the test with a non-zero exit code.
  * @details Backend for @c AssertFailMsg.
  */
 void __builtin_assert_fail_msg(const char *msg, const char *file, int line);
@@ -74,7 +74,7 @@ void __builtin_assert_fail_msg(const char *msg, const char *file, int line);
  * @param bs Stringified right expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a equals @c b; otherwise prints both values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a equals @c b; otherwise prints both values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertEq.
  */
 void __builtin_assert_eq(long long a, long long b, const char *as, const char *bs,
@@ -87,7 +87,7 @@ void __builtin_assert_eq(long long a, long long b, const char *as, const char *b
  * @param bs Stringified right expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a differs from @c b; otherwise prints both values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a differs from @c b; otherwise prints both values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertNeq.
  */
 void __builtin_assert_neq(long long a, long long b, const char *as, const char *bs,
@@ -100,7 +100,7 @@ void __builtin_assert_neq(long long a, long long b, const char *as, const char *
  * @param bs Stringified right expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a is greater than @c b; otherwise prints both values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a is greater than @c b; otherwise prints both values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertGt.
  */
 void __builtin_assert_gt(long long a, long long b, const char *as, const char *bs,
@@ -113,7 +113,7 @@ void __builtin_assert_gt(long long a, long long b, const char *as, const char *b
  * @param bs Stringified right expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a is less than @c b; otherwise prints both values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a is less than @c b; otherwise prints both values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertLt.
  */
 void __builtin_assert_lt(long long a, long long b, const char *as, const char *bs,
@@ -126,7 +126,7 @@ void __builtin_assert_lt(long long a, long long b, const char *as, const char *b
  * @param bs Stringified right expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a is greater than or equal to @c b; otherwise prints both values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a is greater than or equal to @c b; otherwise prints both values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertGe.
  */
 void __builtin_assert_ge(long long a, long long b, const char *as, const char *bs,
@@ -139,7 +139,7 @@ void __builtin_assert_ge(long long a, long long b, const char *as, const char *b
  * @param bs Stringified right expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a is less than or equal to @c b; otherwise prints both values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a is less than or equal to @c b; otherwise prints both values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertLe.
  */
 void __builtin_assert_le(long long a, long long b, const char *as, const char *bs,
@@ -154,7 +154,7 @@ void __builtin_assert_le(long long a, long long b, const char *as, const char *b
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c |actual - expected| <= delta; otherwise prints all three values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c |actual - expected| <= delta; otherwise prints all three values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertWithin.  Passes if
  *             |actual - expected| <= delta.
  */
@@ -167,7 +167,7 @@ void __builtin_assert_within(long long delta, long long expected, long long actu
  * @param ps Stringified pointer expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c p is NULL; otherwise prints the pointer value and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c p is NULL; otherwise prints the pointer value and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertNull.
  */
 void __builtin_assert_null(const void *p, const char *ps,
@@ -178,7 +178,7 @@ void __builtin_assert_null(const void *p, const char *ps,
  * @param ps Stringified pointer expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c p is non-NULL; otherwise terminates the test with a non-zero exit code.
+ * @note Passes silently if @c p is non-NULL; otherwise terminates the test with a non-zero exit code.
  * @details Backend for @c AssertNotNull.
  */
 void __builtin_assert_not_null(const void *p, const char *ps,
@@ -191,7 +191,7 @@ void __builtin_assert_not_null(const void *p, const char *ps,
  * @param bs Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a and @c b compare equal via @c strcmp; otherwise prints both strings and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a and @c b compare equal via @c strcmp; otherwise prints both strings and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertStrEq.  Uses strcmp for comparison.
  */
 void __builtin_assert_streq(const char *a, const char *b,
@@ -206,7 +206,7 @@ void __builtin_assert_streq(const char *a, const char *b,
  * @param bs Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a and @c b compare equal for the first @c len characters via @c strncmp; otherwise prints both strings and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a and @c b compare equal for the first @c len characters via @c strncmp; otherwise prints both strings and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertStrEqLen.  Uses strncmp for comparison.
  */
 void __builtin_assert_streq_len(const char *a, const char *b, long long len,
@@ -221,7 +221,7 @@ void __builtin_assert_streq_len(const char *a, const char *b, long long len,
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if the two regions compare equal via @c memcmp; otherwise terminates the test with a non-zero exit code.
+ * @note Passes silently if the two regions compare equal via @c memcmp; otherwise terminates the test with a non-zero exit code.
  * @details Backend for @c AssertMemEq.  Uses memcmp for comparison.
  */
 void __builtin_assert_mem_eq(const void *expected, const void *actual, long long len,
@@ -237,7 +237,7 @@ void __builtin_assert_mem_eq(const void *expected, const void *actual, long long
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c |actual - expected| <= delta; otherwise prints all three values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c |actual - expected| <= delta; otherwise prints all three values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertFloatWithin and @c AssertFloatEq.
  *             Passes if |actual - expected| <= delta.
  */
@@ -254,7 +254,7 @@ void __builtin_assert_float_within(double delta, double expected, double actual,
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c |actual - expected| <= delta; otherwise prints all three values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c |actual - expected| <= delta; otherwise prints all three values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertDoubleWithin and @c AssertDoubleEq.
  *             Passes if |actual - expected| <= delta.
  */
@@ -271,7 +271,7 @@ void __builtin_assert_double_within(double delta, double expected, double actual
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c (actual & mask) == (expected & mask); otherwise prints all three values and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c (actual & mask) == (expected & mask); otherwise prints all three values and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertBits.  Passes if
  *             (actual & mask) == (expected & mask).
  */
@@ -286,7 +286,7 @@ void __builtin_assert_bits(long long mask, long long expected, long long actual,
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if bit @c bit of @c actual is set; otherwise terminates the test with a non-zero exit code.
+ * @note Passes silently if bit @c bit of @c actual is set; otherwise terminates the test with a non-zero exit code.
  * @details Backend for @c AssertBitHigh.  Passes if (actual >> bit) & 1.
  */
 void __builtin_assert_bit_high(int bit, long long actual,
@@ -300,7 +300,7 @@ void __builtin_assert_bit_high(int bit, long long actual,
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if bit @c bit of @c actual is clear; otherwise terminates the test with a non-zero exit code.
+ * @note Passes silently if bit @c bit of @c actual is clear; otherwise terminates the test with a non-zero exit code.
  * @details Backend for @c AssertBitLow.  Passes if !((actual >> bit) & 1).
  */
 void __builtin_assert_bit_low(int bit, long long actual,
@@ -316,7 +316,7 @@ void __builtin_assert_bit_low(int bit, long long actual,
  * @param as Stringified actual expression.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if the two arrays compare equal via @c memcmp; otherwise terminates the test with a non-zero exit code.
+ * @note Passes silently if the two arrays compare equal via @c memcmp; otherwise terminates the test with a non-zero exit code.
  * @details Backend for @c AssertArrayEq.  Uses memcmp internally.
  */
 void __builtin_assert_eq_array(const void *expected, const void *actual,
@@ -334,7 +334,7 @@ void __builtin_assert_eq_array(const void *expected, const void *actual,
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c cond is non-zero; otherwise prints @c msg and the failure location, then terminates the test with a non-zero exit code.
+ * @note Passes silently if @c cond is non-zero; otherwise prints @c msg and the failure location, then terminates the test with a non-zero exit code.
  * @details Backend for @c AssertMsg and @c AssertTrueMsg.
  */
 void __builtin_assert_msg(int cond, const char *expr, const char *msg,
@@ -348,7 +348,7 @@ void __builtin_assert_msg(int cond, const char *expr, const char *msg,
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a equals @c b; otherwise prints both values, @c msg, and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a equals @c b; otherwise prints both values, @c msg, and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertEqMsg.
  */
 void __builtin_assert_eq_msg(long long a, long long b,
@@ -363,7 +363,7 @@ void __builtin_assert_eq_msg(long long a, long long b,
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c a and @c b compare equal via @c strcmp; otherwise prints both strings, @c msg, and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c a and @c b compare equal via @c strcmp; otherwise prints both strings, @c msg, and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertStrEqMsg.
  */
 void __builtin_assert_streq_msg(const char *a, const char *b,
@@ -376,7 +376,7 @@ void __builtin_assert_streq_msg(const char *a, const char *b,
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c p is NULL; otherwise prints @c msg and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c p is NULL; otherwise prints @c msg and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertNullMsg.
  */
 void __builtin_assert_null_msg(const void *p, const char *ps, const char *msg,
@@ -388,7 +388,7 @@ void __builtin_assert_null_msg(const void *p, const char *ps, const char *msg,
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c p is non-NULL; otherwise prints @c msg and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c p is non-NULL; otherwise prints @c msg and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertNotNullMsg.
  */
 void __builtin_assert_not_null_msg(const void *p, const char *ps, const char *msg,
@@ -404,7 +404,7 @@ void __builtin_assert_not_null_msg(const void *p, const char *ps, const char *ms
  * @param msg Custom failure message.
  * @param file Source file name.
  * @param line Source line number.
- * @return None. Passes silently if @c (actual & mask) == (expected & mask); otherwise prints all three values, @c msg, and terminates the test with a non-zero exit code.
+ * @note Passes silently if @c (actual & mask) == (expected & mask); otherwise prints all three values, @c msg, and terminates the test with a non-zero exit code.
  * @details Backend for @c AssertBitsMsg.  Passes if
  *             (actual & mask) == (expected & mask).
  */
