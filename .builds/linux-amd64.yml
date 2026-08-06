@@ -6,6 +6,7 @@ packages:
   - libffi-dev
   - libgdbm-compat-dev
   - python3
+  - doxygen
 sources:
   - https://git.sr.ht/~takeiteasy/cccc
 environment:
@@ -43,3 +44,10 @@ tasks:
       cd cccc
       set -e
       python3 tools/run_tests.py --binary build/cccc -j 8
+  - docs: |
+      # Doxygen HTML for the public headers. WARN_AS_ERROR is off in the
+      # Doxyfile (coverage is still incomplete), so this only catches
+      # malformed doc comments and doxygen crashes, not missing @param/@return.
+      cd cccc
+      set -e
+      ./cccc --build build.c --build-target=docs

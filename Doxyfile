@@ -1,0 +1,46 @@
+# Doxyfile for CCCC's public API headers.
+#
+# Scope is intentionally narrow: only the three headers under include/cccc/
+# that CCCC injects into user code (--build, --testing, and the reflection/
+# macro FFI). The rest of include/ is ~90 libc/POSIX polyfill headers that
+# must not be swept into this documentation.
+#
+# Run via `./cccc --build build.c --build-target=docs` (see build.c's `docs`
+# target) or directly with `doxygen Doxyfile` from the repo root. Output is
+# gitignored (build/docs/) and never committed -- see man/BUILDING.md for the
+# build-target writeup.
+
+PROJECT_NAME             = CCCC
+PROJECT_BRIEF            = "C bytecode compiler + VM interpreter"
+
+INPUT                   = include/cccc/building.h \
+                           include/cccc/reflection.h \
+                           include/cccc/testing.h
+
+OUTPUT_DIRECTORY        = build/docs
+
+GENERATE_HTML           = YES
+GENERATE_LATEX          = NO
+GENERATE_MAN            = NO
+
+OPTIMIZE_OUTPUT_FOR_C   = YES
+MARKDOWN_SUPPORT        = YES
+
+ENABLE_PREPROCESSING    = YES
+MACRO_EXPANSION         = NO
+
+# Coverage of the underlying FFI functions is uneven right now (see the
+# ticket-908 follow-ups); EXTRACT_ALL keeps every declared function/macro/
+# typedef in the index even where @param/@return prose is still missing, so
+# the generated docs show the complete public surface rather than silently
+# dropping undocumented entries.
+EXTRACT_ALL              = YES
+
+WARN_IF_UNDOCUMENTED     = YES
+WARN_NO_PARAMDOC         = YES
+# Flip to YES once the building.h/testing.h/reflection.h coverage follow-ups
+# land -- turning this on now would fail the build immediately.
+WARN_AS_ERROR            = NO
+WARN_LOGFILE             = build/docs/doxygen-warnings.log
+
+QUIET                    = YES

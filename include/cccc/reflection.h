@@ -175,19 +175,15 @@ typedef enum {
     ATTR_TARGET_GLOBAL = 4,
 } AttrTargetKind;
 
-/*!
- * @function __builtin_gensym
- * @abstract Generate a unique identifier string for macro-created symbols.
+/*! @brief Generate a unique identifier string for macro-created symbols.
  * @param prefix Prefix for the generated name.
  * @return An arena-allocated string of the form "<prefix>__<n>".
- * @discussion Convenience wrapper: Gensym(prefix).
+ * @details Convenience wrapper: Gensym(prefix).
  */
 const char *__builtin_gensym(const char *prefix);
 
-/*!
- * @function __builtin_macroexpand_1
- * @abstract Lisp-style single-step macro expansion (macroexpand-1 semantics).
- * @discussion If @a node is an @c NK_MACRO_CALL node, execute the macro once
+/*! @brief Lisp-style single-step macro expansion (macroexpand-1 semantics).
+ * @details If @a node is an @c NK_MACRO_CALL node, execute the macro once
  *             and return the resulting node without splicing it into the AST
  *             or recursing into nested macro calls. If @a node is not a macro
  *             call, it is returned unchanged (identity).
@@ -197,10 +193,8 @@ const char *__builtin_gensym(const char *prefix);
  */
 Node *__builtin_macroexpand_1(Node *node);
 
-/*!
- * @function __builtin_macroexpand
- * @abstract Lisp-style full macro expansion.
- * @discussion Repeatedly calls @c __builtin_macroexpand_1 on the top-level node
+/*! @brief Lisp-style full macro expansion.
+ * @details Repeatedly calls @c __builtin_macroexpand_1 on the top-level node
  *             until it is no longer an @c NK_MACRO_CALL (i.e. the form is
  *             stable). Does not recurse into child nodes. Respects the VM's
  *             @c macro_recursion_limit.  Convenience wrapper: MacroExpand(node).
@@ -209,29 +203,23 @@ Node *__builtin_macroexpand_1(Node *node);
  */
 Node *__builtin_macroexpand(Node *node);
 
-/*!
- * @function __builtin_ast_vararg_count
- * @abstract Return the number of variadic arguments for the active macro call.
+/*! @brief Return the number of variadic arguments for the active macro call.
  * @return Number of arguments after the fixed parameters.
  */
 int __builtin_ast_vararg_count(void);
 
-/*!
- * @function __builtin_ast_vararg_at
- * @abstract Return an inline macro's variadic AST argument by zero-based index.
+/*! @brief Return an inline macro's variadic AST argument by zero-based index.
  * @param index Zero-based variadic argument index.
  * @return The argument node.
- * @discussion Emits a compile-time error if @a index is out of range or the
+ * @details Emits a compile-time error if @a index is out of range or the
  *             active macro call is a global-generation string macro.
  */
 Node *__builtin_ast_vararg_at(int index);
 
-/*!
- * @function __builtin_ast_varargs_as_array
- * @abstract Return an inline macro's variadic AST arguments as an array.
+/*! @brief Return an inline macro's variadic AST arguments as an array.
  * @return Borrowed array of variadic argument nodes, or NULL when the active
  *         inline macro call has no variadic arguments.
- * @discussion The returned array is read-only and valid only for the current
+ * @details The returned array is read-only and valid only for the current
  *             macro call's lifetime. It shares nodes with the original macro
  *             arguments and does not consume or clone them. Emits a
  *             compile-time error if the active macro call is a
@@ -239,12 +227,10 @@ Node *__builtin_ast_vararg_at(int index);
  */
 Node **__builtin_ast_varargs_as_array(void);
 
-/*!
- * @function __builtin_ast_vararg_str_at
- * @abstract Return a global-generation macro's stringified variadic argument.
+/*! @brief Return a global-generation macro's stringified variadic argument.
  * @param index Zero-based variadic argument index.
  * @return The stringified token argument.
- * @discussion Emits a compile-time error if @a index is out of range or the
+ * @details Emits a compile-time error if @a index is out of range or the
  *             active macro call is an inline AST macro.
  */
 const char *__builtin_ast_vararg_str_at(int index);
@@ -253,53 +239,43 @@ const char *__builtin_ast_vararg_str_at(int index);
 // Generated Node Source Locations (ticket #173)
 // ============================================================================
 
-/*!
- * @function __builtin_ast_current_token
- * @abstract Return the token for the macro invocation currently being executed.
+/*! @brief Return the token for the macro invocation currently being executed.
  * @return Opaque token for the active macro call site, or NULL outside macro
  *         execution.
- * @discussion Convenience wrapper: CurrentToken().
+ * @details Convenience wrapper: CurrentToken().
  */
 Token *__builtin_ast_current_token(void);
 
-/*!
- * @function __builtin_ast_synthetic_token
- * @abstract Create an opaque synthetic source token for generated AST nodes.
+/*! @brief Create an opaque synthetic source token for generated AST nodes.
  * @param label Short diagnostic label for the synthetic location.
  * @return Arena-allocated synthetic token, or NULL on error.
- * @discussion Use this when a generated node should diagnose against a stable
+ * @details Use this when a generated node should diagnose against a stable
  *             generated location instead of the macro call or an input node.
  *             Convenience wrapper: SyntheticToken(label).
  */
 Token *__builtin_ast_synthetic_token(const char *label);
 
-/*!
- * @function __builtin_ast_token_from_node
- * @abstract Return the opaque source token attached to a node.
+/*! @brief Return the opaque source token attached to a node.
  * @param node Node to inspect.
  * @return The node token, or NULL.
- * @discussion Convenience wrapper: TokenFromNode(node).
+ * @details Convenience wrapper: TokenFromNode(node).
  */
 Token *__builtin_ast_token_from_node(Node *node);
 
-/*!
- * @function __builtin_ast_set_token
- * @abstract Attach an opaque source token to a node.
+/*! @brief Attach an opaque source token to a node.
  * @param node Node to update.
  * @param tok Token from __builtin_ast_current_token(),
  *            __builtin_ast_synthetic_token(), or __builtin_ast_token_from_node().
  * @return node, for chaining.
- * @discussion Convenience wrapper: SetToken(node, tok).
+ * @details Convenience wrapper: SetToken(node, tok).
  */
 Node *__builtin_ast_set_token(Node *node, Token *tok);
 
-/*!
- * @function __builtin_ast_copy_location
- * @abstract Copy the source token from one node to another.
+/*! @brief Copy the source token from one node to another.
  * @param dst Generated node to update.
  * @param src Source node whose location should be reused.
  * @return dst, for chaining.
- * @discussion Convenience wrapper: CopyLocation(dst, src).
+ * @details Convenience wrapper: CopyLocation(dst, src).
  */
 Node *__builtin_ast_copy_location(Node *dst, Node *src);
 
@@ -307,13 +283,11 @@ Node *__builtin_ast_copy_location(Node *dst, Node *src);
 // Macro Diagnostics (ticket #78)
 // ============================================================================
 
-/*!
- * @function __builtin_macro_error_at
- * @abstract Emit a compiler error pointing at the source location of a node.
+/*! @brief Emit a compiler error pointing at the source location of a node.
  * @param node A node whose tok field provides file/line/col. May be NULL
  *             (falls back to a location-less error).
  * @param fmt printf-style format string, followed by format arguments.
- * @discussion Behaves like the compiler's error_tok(): in normal mode it
+ * @details Behaves like the compiler's error_tok(): in normal mode it
  *             prints the error with file/line/col and source snippet then
  *             aborts via longjmp or exit.  When vm->collect_errors is set
  *             it records the error and compilation may continue.
@@ -322,21 +296,17 @@ Node *__builtin_ast_copy_location(Node *dst, Node *src);
 void __builtin_macro_error_at(Node *node, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 
-/*!
- * @function __builtin_macro_warning_at
- * @abstract Emit a compiler warning pointing at the source location of a node.
+/*! @brief Emit a compiler warning pointing at the source location of a node.
  * @param node A node whose tok field provides file/line/col. May be NULL.
  * @param fmt printf-style format string, followed by format arguments.
- * @discussion Emitted only when -Wcccc-macro is enabled. Non-fatal unless
+ * @details Emitted only when -Wcccc-macro is enabled. Non-fatal unless
  *             promoted with -Werror or -Werror=cccc-macro.
  *             Convenience wrapper: MacroWarningAt(node, ...).
  */
 void __builtin_macro_warning_at(Node *node, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 
-/*!
- * @function __builtin_quote
- * @abstract Parse a C code template string into an AST node, substituting
+/*! @brief Parse a C code template string into an AST node, substituting
  *           splice points with the provided argument nodes.
  * @param tmpl A C expression or statement as a string literal.
  *
@@ -360,7 +330,7 @@ void __builtin_macro_warning_at(Node *node, const char *fmt, ...)
  *
  * @param ... Node* arguments corresponding to the splice points.
  * @return The parsed and substituted AST node, or NULL on error.
- * @discussion Template is parsed and substituted at macro-execution (compile)
+ * @details Template is parsed and substituted at macro-execution (compile)
  *             time; there is no runtime overhead.  Expressions and statements
  *             are auto-detected. The variadic form supports up to 64 splice
  *             nodes; use __builtin_quote_n for larger node arrays.
@@ -368,29 +338,25 @@ void __builtin_macro_warning_at(Node *node, const char *fmt, ...)
  */
 Node *__builtin_quote(const char *tmpl, ...);
 
-/*!
- * @function __builtin_quote_n
- * @abstract Array-form quasi-quote that validates the caller-provided splice
+/*! @brief Array-form quasi-quote that validates the caller-provided splice
  *           count and supports larger node arrays than the variadic form.
- * @param tmpl A C expression or statement as a string literal with $N / $@N
+ * @param tmpl A C expression or statement as a string literal with `$N` / `$@N`
  *             splice points.
  * @param nodes Array of Node* splice arguments.
  * @param count Length of the nodes array.  If any $K in the template exceeds
  *              count, a compile-time error is emitted.
  * @return The parsed and substituted AST node, or NULL on error.
- * @discussion Convenience wrapper: QuoteN(tmpl, nodes, count).
+ * @details Convenience wrapper: QuoteN(tmpl, nodes, count).
  */
 Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count);
 
-/*!
- * @function __builtin_node_list
- * @abstract Build a `->next`-linked node chain from an array, returning the
+/*! @brief Build a `->next`-linked node chain from an array, returning the
  *           head.  Use the result as the argument to a `$@k` list splice.
  * @param nodes Array of Node* to link together.  Linking stops at the first
  *              NULL element or at count, whichever comes first.
  * @param count Number of elements in the array.
  * @return Head of the chain, or NULL if count == 0 or nodes is NULL.
- * @discussion A single node is a valid chain of length 1.  An existing
+ * @details A single node is a valid chain of length 1.  An existing
  *             `->next` chain (e.g. `__builtin_ast_block(...)->body`) can also be
  *             passed directly as the splice argument without going through
  *             this helper.  Convenience wrapper: NodeList(nodes, count).
@@ -401,199 +367,157 @@ Node *__builtin_node_list(Node **nodes, int count);
 // Type Lookup and Introspection
 // ============================================================================
 
-/*!
- * @function __builtin_ast_find_type
- * @abstract Look up a type by tag name (struct/union/enum).
+/*! @brief Look up a type by tag name (struct/union/enum).
  * @param name The tag name to look up.
  * @return The matching Type*, or NULL if not found.
- * @discussion Convenience wrapper: FindType(name).
+ * @details Convenience wrapper: FindType(name).
  */
 Type *__builtin_ast_find_type(const char *name);
 
-/*!
- * @function __builtin_ast_type_exists
- * @abstract Check whether a type is currently in scope by name.
+/*! @brief Check whether a type is currently in scope by name.
  * @param name The type name to look up.
  * @return True if the name resolves to a type, false otherwise.
- * @discussion Convenience wrapper: TypeExists(name).
+ * @details Convenience wrapper: TypeExists(name).
  */
 bool __builtin_ast_type_exists(const char *name);
 
-/*!
- * @function __builtin_ast_get_type
- * @abstract Look up a type by name, falling back to the built-in primitives.
+/*! @brief Look up a type by name, falling back to the built-in primitives.
  * @param name The type name to look up.
  * @return The matching Type*, or NULL if not found.
- * @discussion Convenience wrapper: GetType(name).
+ * @details Convenience wrapper: GetType(name).
  */
 Type *__builtin_ast_get_type(const char *name);
 
-/*!
- * @function __builtin_ast_type_kind
- * @abstract Return the TypeKind tag of a type.
+/*! @brief Return the TypeKind tag of a type.
  * @param ty The type to inspect.
  * @return The type kind (TK_INT, TK_STRUCT, TK_PTR, ...).
- * @discussion Convenience wrapper: GetTypeKind(ty).
+ * @details Convenience wrapper: GetTypeKind(ty).
  */
 TypeKind __builtin_ast_type_kind(Type *ty);
 
-/*!
- * @function __builtin_ast_type_size
- * @abstract Return sizeof(ty) in bytes.
+/*! @brief Return sizeof(ty) in bytes.
  * @param ty The type to inspect.
  * @return The size in bytes.
- * @discussion Convenience wrapper: TypeSize(ty).
+ * @details Convenience wrapper: TypeSize(ty).
  */
 int __builtin_ast_type_size(Type *ty);
 
-/*!
- * @function __builtin_ast_type_align
- * @abstract Return _Alignof(ty) in bytes.
+/*! @brief Return _Alignof(ty) in bytes.
  * @param ty The type to inspect.
  * @return The alignment in bytes.
- * @discussion Convenience wrapper: TypeAlign(ty).
+ * @details Convenience wrapper: TypeAlign(ty).
  */
 int __builtin_ast_type_align(Type *ty);
 
-/*!
- * @function __builtin_ast_type_is_unsigned
- * @abstract Test whether an integer type is unsigned.
+/*! @brief Test whether an integer type is unsigned.
  * @param ty The type to inspect.
  * @return True for unsigned integer types, false otherwise.
- * @discussion Convenience wrapper: TypeIsUnsigned(ty).
+ * @details Convenience wrapper: TypeIsUnsigned(ty).
  */
 bool __builtin_ast_type_is_unsigned(Type *ty);
 
-/*!
- * @function __builtin_ast_type_is_const
- * @abstract Test whether a type is const-qualified.
+/*! @brief Test whether a type is const-qualified.
  * @param ty The type to inspect.
  * @return True if ty has a const qualifier, false otherwise.
- * @discussion Convenience wrapper: TypeIsConst(ty).
+ * @details Convenience wrapper: TypeIsConst(ty).
  */
 bool __builtin_ast_type_is_const(Type *ty);
 
-/*!
- * @function __builtin_ast_type_base
- * @abstract Return the element type of a pointer or array.
+/*! @brief Return the element type of a pointer or array.
  * @param ty The pointer/array type to inspect.
  * @return The base Type*, or NULL if ty is not a pointer or array.
- * @discussion Convenience wrapper: TypeBase(ty).
+ * @details Convenience wrapper: TypeBase(ty).
  */
 Type *__builtin_ast_type_base(Type *ty);
 
-/*!
- * @function __builtin_ast_type_array_len
- * @abstract Return the fixed length of an array type.
+/*! @brief Return the fixed length of an array type.
  * @param ty The array type to inspect.
  * @return The element count for TY_ARRAY types, -1 otherwise.
- * @discussion Convenience wrapper: TypeArrayLen(ty).
+ * @details Convenience wrapper: TypeArrayLen(ty).
  */
 int __builtin_ast_type_array_len(Type *ty);
 
-/*!
- * @function __builtin_ast_type_return_type
- * @abstract Return the return type of a function type.
+/*! @brief Return the return type of a function type.
  * @param ty The function type to inspect.
  * @return The return Type*, or NULL if ty is not a function type.
- * @discussion Convenience wrapper: TypeReturnType(ty).
+ * @details Convenience wrapper: TypeReturnType(ty).
  */
 Type *__builtin_ast_type_return_type(Type *ty);
 
-/*!
- * @function __builtin_ast_type_param_count
- * @abstract Return the number of declared parameters of a function type.
+/*! @brief Return the number of declared parameters of a function type.
  * @param ty The function type to inspect.
  * @return The parameter count for TY_FUNC types, -1 otherwise.
- * @discussion Convenience wrapper: TypeParamCount(ty).
+ * @details Convenience wrapper: TypeParamCount(ty).
  */
 int __builtin_ast_type_param_count(Type *ty);
 
-/*!
- * @function __builtin_ast_type_param_at
- * @abstract Return the type of the parameter at the given index.
+/*! @brief Return the type of the parameter at the given index.
  * @param ty The function type to inspect.
  * @param index Zero-based parameter index.
  * @return The parameter's Type*, or NULL on out-of-range or non-function ty.
- * @discussion Convenience wrapper: TypeParamAt(ty, index).
+ * @details Convenience wrapper: TypeParamAt(ty, index).
  */
 Type *__builtin_ast_type_param_at(Type *ty, int index);
 
-/*!
- * @function __builtin_ast_type_is_variadic
- * @abstract Test whether a function type is variadic.
+/*! @brief Test whether a function type is variadic.
  * @param ty The type to inspect.
  * @return True for variadic function types, false otherwise.
- * @discussion Convenience wrapper: TypeIsVariadic(ty).
+ * @details Convenience wrapper: TypeIsVariadic(ty).
  */
 bool __builtin_ast_type_is_variadic(Type *ty);
 
-/*!
- * @function __builtin_ast_type_name
- * @abstract Return the user-visible name of a type, if any.
+/*! @brief Return the user-visible name of a type, if any.
  * @param ty The type to inspect.
  * @return A freshly-allocated NUL-terminated string, or NULL for anonymous types.
- * @discussion Convenience wrapper: TypeName(ty).
+ * @details Convenience wrapper: TypeName(ty).
  */
 const char *__builtin_ast_type_name(Type *ty);
 
-/*!
- * @function __builtin_ast_type_c_name
- * @abstract Return a valid C identifier fragment naming `ty`.
+/*! @brief Return a valid C identifier fragment naming `ty`.
  * @param ty The type to inspect.
  * @return TypeName(ty) for named types, or a builtin spelling ("int",
  *   "double", "ulong", ...) for builtin scalar types, or NULL.
- * @discussion Convenience wrapper: TypeCName(ty). Intended for naming
+ * @details Convenience wrapper: TypeCName(ty). Intended for naming
  *   generated functions, e.g. sum_<T> from GenerateSum(elem_type).
  */
 const char *__builtin_ast_type_c_name(Type *ty);
 
-/*!
- * @function __builtin_ast_make_pointer
- * @abstract Build a pointer-to-base type.
+/*! @brief Build a pointer-to-base type.
  * @param base The pointed-to type.
  * @return A Type* representing "base *", or NULL on error.
- * @discussion Convenience wrapper: MakePointer(base).
+ * @details Convenience wrapper: MakePointer(base).
  */
 Type *__builtin_ast_make_pointer(Type *base);
 
-/*!
- * @function __builtin_ast_make_array
- * @abstract Build a fixed-length array type.
+/*! @brief Build a fixed-length array type.
  * @param base The element type.
  * @param length The element count.
  * @return A Type* representing "base[length]", or NULL on error.
- * @discussion Convenience wrapper: MakeArray(base, length).
+ * @details Convenience wrapper: MakeArray(base, length).
  */
 Type *__builtin_ast_make_array(Type *base, int length);
 
-/*!
- * @function __builtin_ast_make_func_ptr_type
- * @abstract Build a pointer-to-function type, e.g. "T (*)(T)".
+/*! @brief Build a pointer-to-function type, e.g. "T (*)(T)".
  * @param return_ty The function's return type.
  * @param param_types Array of parameter types (each copy_type()'d internally).
  * @param nparams Number of entries in param_types (max 16).
  * @return A Type* representing "return_ty (*)(param_types...)", or NULL on error.
- * @discussion Convenience wrapper: MakeFuncPtrType(return_ty, param_types, nparams).
+ * @details Convenience wrapper: MakeFuncPtrType(return_ty, param_types, nparams).
  */
 Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
                                         Type **param_types, int nparams);
 
 // Ticket #171: qualified type constructors
-/*!
- * @function __builtin_ast_make_const
- * @abstract Return a const-qualified copy of ty.
+/*! @brief Return a const-qualified copy of ty.
  * @param ty The type to qualify.
  * @return A const-qualified Type*, or NULL on error.
- * @discussion Convenience wrapper: MakeConst(ty).
+ * @details Convenience wrapper: MakeConst(ty).
  */
 Type *__builtin_ast_make_const(Type *ty);
-/*!
- * @function __builtin_ast_make_volatile
- * @abstract Return a volatile-qualified copy of ty.
+/*! @brief Return a volatile-qualified copy of ty.
  * @param ty The type to qualify.
  * @return A volatile-qualified Type*, or NULL on error.
- * @discussion Convenience wrapper: MakeVolatile(ty).
+ * @details Convenience wrapper: MakeVolatile(ty).
  */
 Type *__builtin_ast_make_volatile(Type *ty);
 
@@ -601,113 +525,91 @@ Type *__builtin_ast_make_volatile(Type *ty);
 // Enum Reflection
 // ============================================================================
 
-/*!
- * @function __builtin_ast_enum_count
- * @abstract Return the number of constants in an enum type.
+/*! @brief Return the number of constants in an enum type.
  * @param enum_type The enum type to inspect.
  * @return The constant count, or -1 if enum_type is not an enum.
- * @discussion Convenience wrapper: EnumCount(ty).
+ * @details Convenience wrapper: EnumCount(ty).
  */
 int __builtin_ast_enum_count(Type *enum_type);
 
-/*!
- * @function __builtin_ast_enum_at
- * @abstract Return the enum constant at a given index.
+/*! @brief Return the enum constant at a given index.
  * @param enum_type The enum type to inspect.
  * @param index Zero-based index.
  * @return The EnumConstant*, or NULL on out-of-range or non-enum.
- * @discussion Convenience wrapper: EnumAt(ty, index).
+ * @details Convenience wrapper: EnumAt(ty, index).
  */
 EnumConstant *__builtin_ast_enum_at(Type *enum_type, int index);
 
-/*!
- * @function __builtin_ast_enum_find
- * @abstract Look up an enum constant by name.
+/*! @brief Look up an enum constant by name.
  * @param enum_type The enum type to search.
  * @param name The constant name to look up.
  * @return The matching EnumConstant*, or NULL if not found.
- * @discussion Convenience wrapper: EnumFind(ty, name).
+ * @details Convenience wrapper: EnumFind(ty, name).
  */
 EnumConstant *__builtin_ast_enum_find(Type *enum_type,
                                     const char *name);
 
-/*!
- * @function __builtin_ast_enum_constant_name
- * @abstract Return the name of an enum constant.
+/*! @brief Return the name of an enum constant.
  * @param ec The enum constant.
  * @return A NUL-terminated string owned by ec.
- * @discussion Convenience wrapper: EnumConstantName(ec).
+ * @details Convenience wrapper: EnumConstantName(ec).
  */
 const char *__builtin_ast_enum_constant_name(EnumConstant *ec);
 
-/*!
- * @function __builtin_ast_enum_constant_value
- * @abstract Return the integer value of an enum constant.
+/*! @brief Return the integer value of an enum constant.
  * @param ec The enum constant.
  * @return The constant's integer value (int64_t to support C23 wide underlying types).
- * @discussion Convenience wrapper: EnumConstantValue(ec).
+ * @details Convenience wrapper: EnumConstantValue(ec).
  */
 int64_t __builtin_ast_enum_constant_value(EnumConstant *ec);
 
-/*!
- * @function __builtin_ast_enum_name
- * @abstract Return the tag name of an enum type.
+/*! @brief Return the tag name of an enum type.
  * @param e The enum type to inspect.
  * @return A NUL-terminated string owned by e.
- * @discussion Convenience wrapper: EnumName(ty).
+ * @details Convenience wrapper: EnumName(ty).
  */
 const char *__builtin_ast_enum_name(Type *e);
 
-/*!
- * @function __builtin_ast_enum_value_count
- * @abstract Return the number of values in an enum type.
+/*! @brief Return the number of values in an enum type.
  * @param e The enum type to inspect.
  * @return The constant count, or -1 if e is not an enum.
- * @discussion Convenience wrapper: EnumValueCount(ty).
+ * @details Convenience wrapper: EnumValueCount(ty).
  */
 int __builtin_ast_enum_value_count(Type *e);
 
-/*!
- * @function __builtin_ast_enum_value_name
- * @abstract Return the name of the enum constant at the given index.
+/*! @brief Return the name of the enum constant at the given index.
  * @param e The enum type to inspect.
  * @param index Zero-based index.
  * @return A NUL-terminated string, or NULL on out-of-range.
- * @discussion Convenience wrapper: EnumValueName(ty, index).
+ * @details Convenience wrapper: EnumValueName(ty, index).
  */
 const char *__builtin_ast_enum_value_name(Type *e, int index);
 
-/*!
- * @function __builtin_ast_enum_value
- * @abstract Return the integer value of the enum constant at the given index.
+/*! @brief Return the integer value of the enum constant at the given index.
  * @param e The enum type to inspect.
  * @param index Zero-based index.
  * @return The constant's integer value (int64_t), or -1 on out-of-range.
- * @discussion Convenience wrapper: EnumValue(ty, index).
+ * @details Convenience wrapper: EnumValue(ty, index).
  */
 int64_t __builtin_ast_enum_value(Type *e, int index);
 
-/*!
- * @function __builtin_ast_enum_to_string_switch
- * @abstract Build a `switch (expr) { case V0: return "Name0"; ...
+/*! @brief Build a `switch (expr) { case V0: return "Name0"; ...
  *           default: return ""; }` over the constants of an enum type.
  * @param ty The enum type.
  * @param expr The expression to switch on (the enum value).
  * @return An NK_SWITCH node. Caller wraps it in a function returning
  *         `const char *`.
- * @discussion Convenience wrapper: EnumToString(ty, expr).
+ * @details Convenience wrapper: EnumToString(ty, expr).
  */
 Node *__builtin_ast_enum_to_string_switch(Type *ty, Node *expr);
 
-/*!
- * @function __builtin_ast_enum_from_string_chain
- * @abstract Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
+/*! @brief Build a block of `if (strcmp(expr, "Name0") == 0) return V0; ...
  *           return -1;` over the constants of an enum type.
  * @param ty The enum type.
  * @param expr The expression to compare (a `const char *`).
  * @return An NK_BLOCK node. Caller wraps it in a function returning the
  *         enum type (or an int).
- * @discussion Convenience wrapper: EnumFromString(ty, expr).
+ * @details Convenience wrapper: EnumFromString(ty, expr).
  */
 Node *__builtin_ast_enum_from_string_chain(Type *ty, Node *expr);
 
@@ -715,90 +617,72 @@ Node *__builtin_ast_enum_from_string_chain(Type *ty, Node *expr);
 // Struct/Union Member Introspection
 // ============================================================================
 
-/*!
- * @function __builtin_ast_struct_member_count
- * @abstract Return the number of members of a struct or union type.
+/*! @brief Return the number of members of a struct or union type.
  * @param struct_type The struct or union type to inspect.
  * @return The member count, or -1 if struct_type is not a struct/union.
- * @discussion Convenience wrapper: StructMemberCount(ty).
+ * @details Convenience wrapper: StructMemberCount(ty).
  */
 int __builtin_ast_struct_member_count(Type *struct_type);
 
-/*!
- * @function __builtin_ast_struct_member_at
- * @abstract Return the member at the given index.
+/*! @brief Return the member at the given index.
  * @param struct_type The struct or union type to inspect.
  * @param index Zero-based member index.
  * @return The Member*, or NULL on out-of-range or non-aggregate.
- * @discussion Convenience wrapper: StructMemberAt(ty, index).
+ * @details Convenience wrapper: StructMemberAt(ty, index).
  */
 Member *__builtin_ast_struct_member_at(Type *struct_type,
                                         int index);
 
-/*!
- * @function __builtin_ast_struct_member_find
- * @abstract Look up a struct or union member by name.
+/*! @brief Look up a struct or union member by name.
  * @param struct_type The struct or union type to search.
  * @param name The member name to look up.
  * @return The matching Member*, or NULL if not found.
- * @discussion Convenience wrapper: StructMemberFind(ty, name).
+ * @details Convenience wrapper: StructMemberFind(ty, name).
  */
 Member *__builtin_ast_struct_member_find(Type *struct_type,
                                         const char *name);
 
-/*!
- * @function __builtin_ast_member_name
- * @abstract Return the name of a struct/union member.
+/*! @brief Return the name of a struct/union member.
  * @param m The member to inspect.
  * @return A NUL-terminated string owned by m.
- * @discussion Convenience wrapper: MemberName(m).
+ * @details Convenience wrapper: MemberName(m).
  */
 const char *__builtin_ast_member_name(Member *m);
 
-/*!
- * @function __builtin_ast_member_type
- * @abstract Return the type of a struct/union member.
+/*! @brief Return the type of a struct/union member.
  * @param m The member to inspect.
  * @return The member's Type*.
- * @discussion Convenience wrapper: MemberType(m).
+ * @details Convenience wrapper: MemberType(m).
  */
 Type *__builtin_ast_member_type(Member *m);
 
-/*!
- * @function __builtin_ast_member_offset
- * @abstract Return the byte offset of a struct/union member.
+/*! @brief Return the byte offset of a struct/union member.
  * @param m The member to inspect.
  * @return The offset in bytes.
- * @discussion Convenience wrapper: MemberOffset(m).
+ * @details Convenience wrapper: MemberOffset(m).
  */
 int __builtin_ast_member_offset(Member *m);
 
-/*!
- * @function __builtin_ast_member_is_bitfield
- * @abstract Test whether a member is a bitfield.
+/*! @brief Test whether a member is a bitfield.
  * @param m The member to inspect.
  * @return True if the member is a bitfield, false otherwise.
- * @discussion Convenience wrapper: MemberIsBitfield(m).
+ * @details Convenience wrapper: MemberIsBitfield(m).
  */
 bool __builtin_ast_member_is_bitfield(Member *m);
 
-/*!
- * @function __builtin_ast_member_bitfield_width
- * @abstract Return the bit width of a bitfield member.
+/*! @brief Return the bit width of a bitfield member.
  * @param m The member to inspect.
  * @return The bit width for bitfield members, 0 otherwise.
- * @discussion Convenience wrapper: MemberBitfieldWidth(m).
+ * @details Convenience wrapper: MemberBitfieldWidth(m).
  */
 int __builtin_ast_member_bitfield_width(Member *m);
 
-/*!
- * @function __builtin_ast_offsetof_chain
- * @abstract Compute the byte offset of a (possibly nested) member chain.
+/*! @brief Compute the byte offset of a (possibly nested) member chain.
  * @param ty The starting struct/union type.
  * @param names An array of member names to walk, innermost last.
  * @param n The number of names in the chain.
  * @return The summed byte offset, or -1 if any name cannot be resolved.
- * @discussion Convenience wrapper: OffsetofChain(ty, "a", "b", ...).
+ * @details Convenience wrapper: OffsetofChain(ty, "a", "b", ...).
  */
 int64_t __builtin_ast_offsetof_chain(Type *ty,
                                    const char **names, int n);
@@ -807,104 +691,78 @@ int64_t __builtin_ast_offsetof_chain(Type *ty,
 // Global Symbol Introspection
 // ============================================================================
 
-/*!
- * @function __builtin_ast_find_global
- * @abstract Look up a global symbol by name.
+/*! @brief Look up a global symbol by name.
  * @param name The global name to look up.
  * @return The matching Obj*, or NULL if not found.
- * @discussion Convenience wrapper: FindGlobal(name).
+ * @details Convenience wrapper: FindGlobal(name).
  */
 Obj *__builtin_ast_find_global(const char *name);
 
-/*!
- * @function __builtin_ast_global_count
- * @abstract Return the total number of global symbols.
+/*! @brief Return the total number of global symbols.
  * @return The count of globals.
- * @discussion Convenience wrapper: GlobalCount().
+ * @details Convenience wrapper: GlobalCount().
  */
 int __builtin_ast_global_count(void);
 
-/*!
- * @function __builtin_ast_global_at
- * @abstract Return the global symbol at the given index.
+/*! @brief Return the global symbol at the given index.
  * @param index Zero-based global index.
  * @return The Obj* at the given slot, or NULL on out-of-range.
- * @discussion Convenience wrapper: GlobalAt(index).
+ * @details Convenience wrapper: GlobalAt(index).
  */
 Obj *__builtin_ast_global_at(int index);
 
-/*!
- * @function __builtin_ast_obj_name
- * @abstract Return the name of a global object.
+/*! @brief Return the name of a global object.
  * @param obj The object to inspect.
  * @return A NUL-terminated string owned by obj.
- * @discussion Convenience wrapper: ObjName(obj).
+ * @details Convenience wrapper: ObjName(obj).
  */
 const char *__builtin_ast_obj_name(Obj *obj);
 
-/*!
- * @function __builtin_ast_obj_type
- * @abstract Return the type of a global object.
+/*! @brief Return the type of a global object.
  * @param obj The object to inspect.
  * @return The object's Type*.
- * @discussion Convenience wrapper: ObjType(obj).
+ * @details Convenience wrapper: ObjType(obj).
  */
 Type *__builtin_ast_obj_type(Obj *obj);
 
-/*!
- * @function __builtin_ast_obj_is_function
- * @abstract Test whether a global object is a function.
+/*! @brief Test whether a global object is a function.
  * @param obj The object to inspect.
  * @return True for functions, false for variables.
- * @discussion Convenience wrapper: ObjIsFunction(obj).
+ * @details Convenience wrapper: ObjIsFunction(obj).
  */
 bool __builtin_ast_obj_is_function(Obj *obj);
 
-/*!
- * @function __builtin_ast_obj_is_definition
- * @abstract Test whether a global object has a definition.
+/*! @brief Test whether a global object has a definition.
  * @param obj The object to inspect.
  * @return True for defined objects, false for declarations only.
- * @discussion Convenience wrapper: ObjIsDefinition(obj).
+ * @details Convenience wrapper: ObjIsDefinition(obj).
  */
 bool __builtin_ast_obj_is_definition(Obj *obj);
 
-/*!
- * @function __builtin_ast_obj_is_static
- * @abstract Test whether a global object has internal (static) linkage.
+/*! @brief Test whether a global object has internal (static) linkage.
  * @param obj The object to inspect.
  * @return True for static linkage, false for external.
- * @discussion Convenience wrapper: ObjIsStatic(obj).
+ * @details Convenience wrapper: ObjIsStatic(obj).
  */
 bool __builtin_ast_obj_is_static(Obj *obj);
 
-/*!
- * @function __builtin_attr_target_kind
- * @abstract Return the kind of declaration decorated by a custom attribute.
+/*! @brief Return the kind of declaration decorated by a custom attribute.
  */
 int __builtin_attr_target_kind(AttrTarget *target);
 
-/*!
- * @function __builtin_attr_target_name
- * @abstract Return the decorated declaration's source name, when available.
+/*! @brief Return the decorated declaration's source name, when available.
  */
 const char *__builtin_attr_target_name(AttrTarget *target);
 
-/*!
- * @function __builtin_attr_target_type
- * @abstract Return the decorated declaration's type.
+/*! @brief Return the decorated declaration's type.
  */
 Type *__builtin_attr_target_type(AttrTarget *target);
 
-/*!
- * @function __builtin_attr_target_obj
- * @abstract Return the decorated function or global object, or NULL for type targets.
+/*! @brief Return the decorated function or global object, or NULL for type targets.
  */
 Obj *__builtin_attr_target_obj(AttrTarget *target);
 
-/*!
- * @function __builtin_attr_target_token
- * @abstract Return a source token for the decorated declaration.
+/*! @brief Return a source token for the decorated declaration.
  */
 Token *__builtin_attr_target_token(AttrTarget *target);
 
@@ -912,49 +770,39 @@ Token *__builtin_attr_target_token(AttrTarget *target);
 // AST Node Construction - Literals
 // ============================================================================
 
-/*!
- * @function __builtin_ast_int_literal
- * @abstract Build an integer literal AST node.
+/*! @brief Build an integer literal AST node.
  * @param value The integer value.
  * @return An NK_NUM node for value.
- * @discussion Convenience wrapper: MakeIntLiteral(value).
+ * @details Convenience wrapper: MakeIntLiteral(value).
  */
 Node *__builtin_ast_int_literal(int64_t value);
 
-/*!
- * @function __builtin_ast_float_literal
- * @abstract Build a floating-point literal AST node.
+/*! @brief Build a floating-point literal AST node.
  * @param value The floating-point value.
  * @return An NK_NUM node for value.
- * @discussion Convenience wrapper: MakeFloatLiteral(value).
+ * @details Convenience wrapper: MakeFloatLiteral(value).
  */
 Node *__builtin_ast_float_literal(double value);
 
-/*!
- * @function __builtin_ast_string_literal
- * @abstract Build a string literal AST node.
+/*! @brief Build a string literal AST node.
  * @param str A NUL-terminated string.
  * @return An NK_NUM string-literal node.
- * @discussion Convenience wrapper: MakeStringLiteral(str).
+ * @details Convenience wrapper: MakeStringLiteral(str).
  */
 Node *__builtin_ast_string_literal(const char *str);
 
-/*!
- * @function __builtin_ast_var_ref
- * @abstract Build a variable reference AST node.
+/*! @brief Build a variable reference AST node.
  * @param name The variable name.
  * @return An NK_VAR node referencing name.
- * @discussion Convenience wrapper: MakeVarRef(name).
+ * @details Convenience wrapper: MakeVarRef(name).
  */
 Node *__builtin_ast_var_ref(const char *name);
 
-/*!
- * @function __builtin_ast_param_ref
- * @abstract Build a reference to a function parameter by name.
+/*! @brief Build a reference to a function parameter by name.
  * @param fn The function object whose parameter is being referenced.
  * @param name The parameter name.
  * @return An NK_VAR node for the named parameter.
- * @discussion Use this when building function bodies to reference parameters
+ * @details Use this when building function bodies to reference parameters
  *             by name.  Convenience wrapper: MakeParamRef(fn, name).
  */
 Node *__builtin_ast_param_ref(Obj *fn, const char *name);
@@ -963,104 +811,84 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name);
 // AST Node Construction - Expressions
 // ============================================================================
 
-/*!
- * @function __builtin_ast_binary
- * @abstract Build a binary operation AST node.
+/*! @brief Build a binary operation AST node.
  * @param op The operator kind (NK_ADD, NK_SUB, ...).
  * @param left The left-hand operand.
  * @param right The right-hand operand.
  * @return The binary expression node.
- * @discussion Convenience wrapper: MakeBinary(op, left, right).
+ * @details Convenience wrapper: MakeBinary(op, left, right).
  */
 Node *__builtin_ast_binary(NodeKind op, Node *left,
                             Node *right);
 
-/*!
- * @function __builtin_ast_unary
- * @abstract Build a unary operation AST node.
+/*! @brief Build a unary operation AST node.
  * @param op The operator kind (NK_NEG, NK_DEREF, ...).
  * @param operand The operand expression.
  * @return The unary expression node.
- * @discussion Convenience wrapper: MakeUnary(op, operand).
+ * @details Convenience wrapper: MakeUnary(op, operand).
  */
 Node *__builtin_ast_unary(NodeKind op, Node *operand);
 
-/*!
- * @function __builtin_ast_cast
- * @abstract Build a type cast AST node.
+/*! @brief Build a type cast AST node.
  * @param expr The expression to cast.
  * @param target_type The type to cast to.
  * @return An NK_CAST node.
- * @discussion Convenience wrapper: MakeCast(expr, target_type).
+ * @details Convenience wrapper: MakeCast(expr, target_type).
  */
 Node *__builtin_ast_cast(Node *expr, Type *target_type);
 
 // Ticket #171: new expression builders
 
-/*!
- * @function __builtin_ast_cond
- * @abstract Build a ternary conditional expression node (cond ? then : else).
+/*! @brief Build a ternary conditional expression node (cond ? then : else).
  * @param cond The condition expression.
  * @param then_expr The expression evaluated when cond is non-zero.
  * @param else_expr The expression evaluated when cond is zero.
  * @return An NK_COND node.
- * @discussion Convenience wrapper: MakeCond(cond, then_expr, else_expr).
+ * @details Convenience wrapper: MakeCond(cond, then_expr, else_expr).
  */
 Node *__builtin_ast_cond(Node *cond, Node *then_expr,
                           Node *else_expr);
 
-/*!
- * @function __builtin_ast_null
- * @abstract Build a typed null pointer node: (void *)0.
+/*! @brief Build a typed null pointer node: (void *)0.
  * @return An NK_NUM node representing a typed NULL.
- * @discussion Convenience wrapper: MakeNull().
+ * @details Convenience wrapper: MakeNull().
  */
 Node *__builtin_ast_null(void);
 
-/*!
- * @function __builtin_ast_sizeof_type
- * @abstract Emit sizeof(ty) as a compile-time integer literal.
+/*! @brief Emit sizeof(ty) as a compile-time integer literal.
  * @param ty The type to measure.
  * @return An NK_NUM node holding sizeof(ty).
- * @discussion Convenience wrapper: MakeSizeofType(ty).
+ * @details Convenience wrapper: MakeSizeofType(ty).
  */
 Node *__builtin_ast_sizeof_type(Type *ty);
 
-/*!
- * @function __builtin_ast_alignof_type
- * @abstract Emit _Alignof(ty) as a compile-time integer literal.
+/*! @brief Emit _Alignof(ty) as a compile-time integer literal.
  * @param ty The type to measure.
  * @return An NK_NUM node holding _Alignof(ty).
- * @discussion Convenience wrapper: MakeAlignofType(ty).
+ * @details Convenience wrapper: MakeAlignofType(ty).
  */
 Node *__builtin_ast_alignof_type(Type *ty);
 
-/*!
- * @function __builtin_ast_sizeof_expr
- * @abstract Emit sizeof(expr): resolve the expression's type then its size.
+/*! @brief Emit sizeof(expr): resolve the expression's type then its size.
  * @param expr The expression whose type to measure.
  * @return An NK_NUM node holding sizeof(expr).
- * @discussion Convenience wrapper: MakeSizeofExpr(expr).
+ * @details Convenience wrapper: MakeSizeofExpr(expr).
  */
 Node *__builtin_ast_sizeof_expr(Node *expr);
 
-/*!
- * @function __builtin_ast_subscript
- * @abstract Build an array subscript node: arr[idx], desugared as *(arr+idx).
+/*! @brief Build an array subscript node: arr[idx], desugared as *(arr+idx).
  * @param arr The array (or pointer) expression.
  * @param idx The index expression.
  * @return An NK_ADD / NK_DEREF node pair representing the subscript.
- * @discussion Convenience wrapper: MakeSubscript(arr, idx).
+ * @details Convenience wrapper: MakeSubscript(arr, idx).
  */
 Node *__builtin_ast_subscript(Node *arr, Node *idx);
 
-/*!
- * @function __builtin_ast_comma
- * @abstract Build a comma expression: evaluate lhs, yield rhs.
+/*! @brief Build a comma expression: evaluate lhs, yield rhs.
  * @param lhs The expression evaluated for side effects.
  * @param rhs The expression whose value is the result.
  * @return An NK_COMMA node.
- * @discussion Convenience wrapper: MakeComma(lhs, rhs).
+ * @details Convenience wrapper: MakeComma(lhs, rhs).
  */
 Node *__builtin_ast_comma(Node *lhs, Node *rhs);
 
@@ -1068,87 +896,71 @@ Node *__builtin_ast_comma(Node *lhs, Node *rhs);
 // AST Node Construction - Statements
 // ============================================================================
 
-/*!
- * @function __builtin_ast_return
- * @abstract Build a return statement node.
+/*! @brief Build a return statement node.
  * @param expr The value to return (may be NULL for `return;` in void functions).
  * @return An NK_RETURN node.
- * @discussion Convenience wrapper: MakeReturn(expr).
+ * @details Convenience wrapper: MakeReturn(expr).
  */
 Node *__builtin_ast_return(Node *expr);
 
-/*!
- * @function __builtin_ast_block
- * @abstract Build a block (compound statement) node.
+/*! @brief Build a block (compound statement) node.
  * @param stmts Array of statement nodes, or NULL if count is 0.
  * @param count Number of statements in the array.
  * @return An NK_BLOCK node.
- * @discussion Convenience wrapper: MakeBlock(stmts, count).
+ * @details Convenience wrapper: MakeBlock(stmts, count).
  */
 Node *__builtin_ast_block(Node **stmts, int count);
 
-/*!
- * @function __builtin_ast_block_add_stmt
- * @abstract Append a statement to a block node.
+/*! @brief Append a statement to a block node.
  * @param block The NK_BLOCK node to modify.
  * @param stmt The statement to append.
  * @return The block on success, or NULL on invalid arguments.
- * @discussion Convenience wrapper: BlockAddStmt(block, stmt), or
+ * @details Convenience wrapper: BlockAddStmt(block, stmt), or
  *             BlockAddStmt(stmt) inside WithBlock(block).
  */
 Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt);
 
-/*!
- * @function __builtin_ast_if
- * @abstract Build an if statement node.
+/*! @brief Build an if statement node.
  * @param cond The condition expression.
  * @param then_body The body executed when cond is non-zero.
  * @param else_body The body executed when cond is zero, or NULL.
  * @return An NK_IF node.
- * @discussion Convenience wrapper: MakeIf(cond, then_body, else_body).
+ * @details Convenience wrapper: MakeIf(cond, then_body, else_body).
  */
 Node *__builtin_ast_if(Node *cond, Node *then_body,
                         Node *else_body);
 
-/*!
- * @function __builtin_ast_switch
- * @abstract Build a switch statement node.
+/*! @brief Build a switch statement node.
  * @param cond The expression to switch on.
  * @return An NK_SWITCH node.  Use __builtin_ast_switch_add_case and
  *         __builtin_ast_switch_set_default to populate it.
- * @discussion Convenience wrapper: MakeSwitch(cond).
+ * @details Convenience wrapper: MakeSwitch(cond).
  */
 Node *__builtin_ast_switch(Node *cond);
 
-/*!
- * @function __builtin_ast_switch_add_case
- * @abstract Append a case to a switch statement.
+/*! @brief Append a case to a switch statement.
  * @param switch_node The switch node returned by __builtin_ast_switch.
  * @param value The case value expression.
  * @param body The body statement for this case.
- * @discussion Convenience wrapper: SwitchAddCase(sw, value, body), or
+ * @details Convenience wrapper: SwitchAddCase(sw, value, body), or
  *             SwitchAddCase(value, body) inside WithSwitch(sw).
  */
 void __builtin_ast_switch_add_case(Node *switch_node,
                                 Node *value, Node *body);
 
-/*!
- * @function __builtin_ast_switch_set_default
- * @abstract Set the default case for a switch statement.
+/*! @brief Set the default case for a switch statement.
  * @param switch_node The switch node returned by __builtin_ast_switch.
  * @param body The default-case body statement.
- * @discussion Convenience wrapper: SwitchSetDefault(sw, body), or
+ * @details Convenience wrapper: SwitchSetDefault(sw, body), or
  *             SwitchSetDefault(body) inside WithSwitch(sw).
  */
 void __builtin_ast_switch_set_default(Node *switch_node,
                                     Node *body);
 
-/*!
- * @function __builtin_ast_expr_stmt
- * @abstract Build an expression statement node.
+/*! @brief Build an expression statement node.
  * @param expr The expression to evaluate for side effects.
  * @return An NK_EXPR_STMT node.
- * @discussion Convenience wrapper: MakeExprStmt(expr).
+ * @details Convenience wrapper: MakeExprStmt(expr).
  */
 Node *__builtin_ast_expr_stmt(Node *expr);
 
@@ -1156,9 +968,7 @@ Node *__builtin_ast_expr_stmt(Node *expr);
 // AST Node Construction - Local Variable Injection (ticket #77)
 // ============================================================================
 
-/*!
- * @function __builtin_ast_local_var
- * @abstract Declare a named local variable in the current function scope
+/*! @brief Declare a named local variable in the current function scope
  *           and return a variable-reference node for it.
  * @param name The variable name (user-visible).
  * @param ty The variable type.
@@ -1168,36 +978,30 @@ Node *__builtin_ast_expr_stmt(Node *expr);
  *        and will receive a stack offset when the function is compiled.
  *        For temporaries that must not capture user names, prefer
  *        __builtin_ast_local_var_unique().
- * @discussion Convenience wrapper: MakeLocalVar(name, ty).
+ * @details Convenience wrapper: MakeLocalVar(name, ty).
  */
 Node *__builtin_ast_local_var(const char *name, Type *ty);
 
-/*!
- * @function __builtin_ast_local_var_unique
- * @abstract Declare a hygienic (gensym'd) local variable in the current
+/*! @brief Declare a hygienic (gensym'd) local variable in the current
  *           function scope and return a variable-reference node for it.
  * @param ty The variable type.
  * @return A NK_VAR node referencing the new local, or NULL on error.
  * @note  The generated name begins with ".L.." and is therefore not
  *        expressible as a user identifier — guaranteed no name capture.
  *        This is the safe default for macro temporaries.
- * @discussion Convenience wrapper: MakeLocalVarUnique(ty).
+ * @details Convenience wrapper: MakeLocalVarUnique(ty).
  */
 Node *__builtin_ast_local_var_unique(Type *ty);
 
-/*!
- * @function __builtin_ast_assign
- * @abstract Build an assignment node (target = value).
+/*! @brief Build an assignment node (target = value).
  * @param target The lvalue expression being assigned to.
  * @param value The rvalue expression to assign.
  * @return An NK_ASSIGN node, or NULL on error.
- * @discussion Convenience wrapper: MakeAssign(target, value).
+ * @details Convenience wrapper: MakeAssign(target, value).
  */
 Node *__builtin_ast_assign(Node *target, Node *value);
 
-/*!
- * @function __builtin_ast_member
- * @abstract Create a struct/union member access node (obj.name).
+/*! @brief Create a struct/union member access node (obj.name).
  * @param obj An expression node whose type must be a struct or union.
  * @param name The member name as a NUL-terminated string.
  * @return A NK_MEMBER node, or NULL if the member is not found or
@@ -1205,53 +1009,45 @@ Node *__builtin_ast_assign(Node *target, Node *value);
  * @note The callee is responsible for dereferencing pointers first;
  *       pass the struct value directly (use __builtin_ast_unary(NK_DEREF,…)
  *       for pointer-to-struct access).
- * @discussion Convenience wrapper: MakeMember(obj, name).
+ * @details Convenience wrapper: MakeMember(obj, name).
  */
 Node *__builtin_ast_member(Node *obj, const char *name);
 
-/*!
- * @function __builtin_ast_funcall
- * @abstract Create a function call node.
+/*! @brief Create a function call node.
  * @param callee An expression node that evaluates to a function (or function
  *               pointer). The callee's lhs field holds this expression.
  * @param args Array of argument nodes (may be NULL if n == 0).
  * @param n Number of arguments.
  * @return A NK_FUNCALL node, or NULL on error.
- * @discussion Convenience wrapper: MakeFuncCall(callee, args, n).
+ * @details Convenience wrapper: MakeFuncCall(callee, args, n).
  */
 Node *__builtin_ast_funcall(Node *callee, Node **args, int n);
 
-/*!
- * @function __builtin_ast_while
- * @abstract Create a while loop node.
+/*! @brief Create a while loop node.
  * @param cond The loop condition expression.
  * @param body The loop body statement.
  * @return A NK_FOR node (CCCC represents while as for with no init/inc),
  *         or NULL on error.
- * @discussion Convenience wrapper: MakeWhile(cond, body).
+ * @details Convenience wrapper: MakeWhile(cond, body).
  */
 Node *__builtin_ast_while(Node *cond, Node *body);
 
-/*!
- * @function __builtin_ast_for
- * @abstract Create a for loop node.
+/*! @brief Create a for loop node.
  * @param init Initialiser expression/statement (may be NULL).
  * @param cond Loop condition (may be NULL for infinite loop).
  * @param inc Increment expression (may be NULL).
  * @param body Loop body.
  * @return A NK_FOR node, or NULL on error.
- * @discussion Convenience wrapper: MakeFor(init, cond, inc, body).
+ * @details Convenience wrapper: MakeFor(init, cond, inc, body).
  */
 Node *__builtin_ast_for(Node *init, Node *cond,
                        Node *inc, Node *body);
 
-/*!
- * @function __builtin_ast_do_while
- * @abstract Create a do-while loop node.
+/*! @brief Create a do-while loop node.
  * @param body The loop body.
  * @param cond The loop condition (tested after each iteration).
  * @return A NK_DO node, or NULL on error.
- * @discussion Convenience wrapper: MakeDoWhile(body, cond).
+ * @details Convenience wrapper: MakeDoWhile(body, cond).
  */
 Node *__builtin_ast_do_while(Node *body, Node *cond);
 
@@ -1259,26 +1055,22 @@ Node *__builtin_ast_do_while(Node *body, Node *cond);
 // Function Generation
 // ============================================================================
 
-/*!
- * @function __builtin_ast_function
- * @abstract Create a new function object.
+/*! @brief Create a new function object.
  * @param name The function name.
  * @param return_type The return type.
  * @return The newly created function object, or NULL on error.
- * @discussion The function is automatically added to the globals list
+ * @details The function is automatically added to the globals list
  *             and will be compiled when the main program is compiled.
  *             Convenience wrapper: MakeFunction(name, return_type).
  */
 Obj *__builtin_ast_function(const char *name,
                             Type *return_type);
 
-/*!
- * @function __builtin_ast_publish
- * @abstract Make a generated object visible at the current source position.
+/*! @brief Make a generated object visible at the current source position.
  * @param obj A function or global variable object created by the AST builders.
  * @param tok Optional representative token for diagnostics, or NULL.
  * @return A no-op Node on success, or NULL on invalid arguments.
- * @discussion Top-level explicit macro calls run at their source position.
+ * @details Top-level explicit macro calls run at their source position.
  *             Call this after creating a function or global variable when
  *             later macro-generated code at the same parse point should be
  *             able to reference it without a handwritten declaration.
@@ -1286,86 +1078,70 @@ Obj *__builtin_ast_function(const char *name,
  */
 Node *__builtin_ast_publish(Obj *obj, Token *tok);
 
-/*!
- * @function __builtin_ast_publish_type
- * @abstract Accept a generated type declaration as already published.
+/*! @brief Accept a generated type declaration as already published.
  * @param ty A type created by MakeStruct, MakeUnion,
  *           MakeEnum, or MakeTypedef.
  * @param tok Optional representative token for diagnostics, or NULL.
  * @return A no-op Node on success, or NULL on invalid arguments.
- * @discussion Generated type builders self-register in tag or typedef scope.
+ * @details Generated type builders self-register in tag or typedef scope.
  *             This function lets PublishNode(type) be used uniformly; there
  *             is no separate convenience macro for this entry point.
  */
 Node *__builtin_ast_publish_type(Type *ty, Token *tok);
 
-/*!
- * @function __builtin_emit_directive
- * @abstract Emit one raw preprocessor directive line into generated output.
+/*! @brief Emit one raw preprocessor directive line into generated output.
  * @param line Complete directive text, for example "#ifdef _WIN32".
- * @discussion Convenience wrapper: EmitDirective(line).
+ * @details Convenience wrapper: EmitDirective(line).
  */
 void __builtin_emit_directive(const char *line);
 
 
-/*!
- * @function __builtin_ast_function_add_param
- * @abstract Add a parameter to a function.
+/*! @brief Add a parameter to a function.
  * @param fn The function object.
  * @param name The parameter name.
  * @param type The parameter type.
- * @discussion Parameters are added in order. Call this multiple times
+ * @details Parameters are added in order. Call this multiple times
  *             for multiple parameters.  Convenience wrapper:
  *             FunctionAddParam(fn, name, type).
  */
 void __builtin_ast_function_add_param(Obj *fn, const char *name,
                                 Type *type);
 
-/*!
- * @function __builtin_ast_function_set_body
- * @abstract Set the body of a function.
+/*! @brief Set the body of a function.
  * @param fn The function object.
  * @param body The function body (a statement or block node).
- * @discussion If body is not already a NK_BLOCK, it will be wrapped in one.
+ * @details If body is not already a NK_BLOCK, it will be wrapped in one.
  *             Convenience wrapper: FunctionSetBody(fn, body).
  */
 void __builtin_ast_function_set_body(Obj *fn, Node *body);
 
-/*!
- * @function __builtin_ast_function_set_static
- * @abstract Set whether a function has static linkage.
+/*! @brief Set whether a function has static linkage.
  * @param fn The function object.
  * @param is_static True for static linkage, false for external.
- * @discussion Convenience wrapper: FunctionSetStatic(fn, is_static).
+ * @details Convenience wrapper: FunctionSetStatic(fn, is_static).
  */
 void __builtin_ast_function_set_static(Obj *fn, bool is_static);
 
-/*!
- * @function __builtin_ast_function_set_inline
- * @abstract Set whether a function is inline.
+/*! @brief Set whether a function is inline.
  * @param fn The function object.
  * @param is_inline True for inline, false otherwise.
- * @discussion Convenience wrapper: FunctionSetInline(fn, is_inline).
+ * @details Convenience wrapper: FunctionSetInline(fn, is_inline).
  */
 void __builtin_ast_function_set_inline(Obj *fn, bool is_inline);
 
-/*!
- * @function __builtin_ast_function_set_variadic
- * @abstract Set whether a function is variadic.
+/*! @brief Set whether a function is variadic.
  * @param fn The function object.
  * @param is_variadic True for variadic, false otherwise.
- * @discussion Convenience wrapper: FunctionSetVariadic(fn, is_variadic).
+ * @details Convenience wrapper: FunctionSetVariadic(fn, is_variadic).
  */
 void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic);
 
 // Ticket #171: function prototype (forward declaration only, no body)
-/*!
- * @function __builtin_ast_function_prototype
- * @abstract Create a function forward declaration (prototype) without a body.
+/*! @brief Create a function forward declaration (prototype) without a body.
  * @param name The function name.
  * @param return_type The return type.
  * @return The declaration Obj*, or NULL on error.
- * @discussion Use FunctionAddParam to add parameters and
+ * @details Use FunctionAddParam to add parameters and
  *             PublishNode to expose it in scope. A subsequent
  *             MakeFunction call with the same name will reuse this Obj and
  *             fill in the body.  Convenience wrapper: FunctionPrototype(name, return_type).
@@ -1377,18 +1153,16 @@ Obj *__builtin_ast_function_prototype(const char *name,
 // Programmatic Attribute Application — ticket #619
 // ============================================================================
 
-/*!
- * @function __builtin_ast_add_attribute
- * @abstract Apply an attribute string to a programmatically created function.
+/*! @brief Apply an attribute string to a programmatically created function.
  * @param fn The function object to attribute (created by MakeFunction).
  * @param attr_text Attribute text as it would appear between [[ and ]] in source,
  *                  e.g. "cccc::test", "cccc::test(suite=\"gen\", timeout=5000)",
  *                  "nodiscard", "nodiscard(\"always check\")", or "@myattr".
  *                  GNU form __attribute__((…)) is also accepted as the full string.
- * @discussion Parses attr_text through the existing attribute pipeline and applies
+ * @details Parses attr_text through the existing attribute pipeline and applies
  *             the result to fn.  Supports mode attrs (test/build/build_target/
  *             test_setup/test_teardown), standard C23/GNU attrs (nodiscard, noreturn,
- *             pure, aligned, …), and custom @attribute handlers.
+ *             pure, aligned, …), and custom `@attribute` handlers.
  *             cccc::comptime cannot be applied this way and will error.
  *             Convenience wrapper: AddAttribute(fn, text).
  */
@@ -1400,34 +1174,28 @@ void __builtin_ast_add_build_target_attr(Obj *fn, const char *kind);
 
 // Ticket #171: struct/union/enum/typedef type builders
 
-/*!
- * @function __builtin_ast_make_struct
- * @abstract Create and expose a new named struct type.
+/*! @brief Create and expose a new named struct type.
  * @param name The struct tag name.
  * @return The new struct Type*, or NULL on error.
- * @discussion Use StructAddField to add fields after creation.
+ * @details Use StructAddField to add fields after creation.
  *             The type is immediately visible via FindType(name).
  *             Convenience wrapper: MakeStruct(name).
  */
 Type *__builtin_ast_make_struct(const char *name);
 
-/*!
- * @function __builtin_ast_make_union
- * @abstract Create and expose a new named union type.
+/*! @brief Create and expose a new named union type.
  * @param name The union tag name.
  * @return The new union Type*, or NULL on error.
- * @discussion Convenience wrapper: MakeUnion(name).
+ * @details Convenience wrapper: MakeUnion(name).
  */
 Type *__builtin_ast_make_union(const char *name);
 
-/*!
- * @function __builtin_ast_struct_add_field
- * @abstract Append a field to a struct or union and recompute its layout.
+/*! @brief Append a field to a struct or union and recompute its layout.
  * @param ty The struct or union type to modify.
  * @param name The field name.
  * @param field_type The field's type.
  * @return ty on success, or NULL on error.
- * @discussion For struct types, offsets are recalculated from scratch after
+ * @details For struct types, offsets are recalculated from scratch after
  *             each field addition. For union types, all fields stay at offset 0
  *             and the union size is updated to the maximum field size.
  *             Convenience wrapper: StructAddField(ty, name, field_type).
@@ -1435,23 +1203,19 @@ Type *__builtin_ast_make_union(const char *name);
 Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
                                    Type *field_type);
 
-/*!
- * @function __builtin_ast_make_enum
- * @abstract Create and expose a new named enum type.
+/*! @brief Create and expose a new named enum type.
  * @param name The enum tag name.
  * @return The new enum Type*, or NULL on error.
- * @discussion Use EnumAddConstant to add constants after creation.
+ * @details Use EnumAddConstant to add constants after creation.
  *             Convenience wrapper: MakeEnum(name).
  */
 Type *__builtin_ast_make_enum(const char *name);
 
-/*!
- * @function __builtin_ast_enum_add_constant
- * @abstract Add a named constant to an enum type and expose it in scope.
+/*! @brief Add a named constant to an enum type and expose it in scope.
  * @param ty The enum type.
  * @param name The constant name.
  * @param value The constant integer value.
- * @discussion The constant is appended to ty->enum_constants and also pushed
+ * @details The constant is appended to ty->enum_constants and also pushed
  *             into the current scope so it is usable as an integer constant in
  *             subsequently compiled code.  Convenience wrapper:
  *             EnumAddConstant(ty, name, value).
@@ -1459,13 +1223,11 @@ Type *__builtin_ast_make_enum(const char *name);
 void __builtin_ast_enum_add_constant(Type *ty, const char *name,
                                   int64_t value);
 
-/*!
- * @function __builtin_ast_make_typedef
- * @abstract Register a typedef alias for a type and expose it in scope.
+/*! @brief Register a typedef alias for a type and expose it in scope.
  * @param name The typedef name.
  * @param underlying The aliased type.
  * @return The aliased type after registration, or NULL on invalid arguments.
- * @discussion After this call, FindType(name) resolves to underlying and
+ * @details After this call, FindType(name) resolves to underlying and
  *             subsequently compiled code can use name as a type name.
  *             Convenience wrapper: MakeTypedef(name, underlying).
  */
@@ -1475,14 +1237,12 @@ Type *__builtin_ast_make_typedef(const char *name, Type *underlying);
 // Global Variable Generation (ticket #152)
 // ============================================================================
 
-/*!
- * @function __builtin_ast_global_var
- * @abstract Create a new named global variable definition.
+/*! @brief Create a new named global variable definition.
  * @param name The variable name (must be unique among globals).
  * @param ty   The variable type.  Use MakeArray(char_ty, len) for byte
  *             arrays so that the size matches the init_data length.
  * @return The new Obj*, or NULL on error.
- * @discussion The variable is registered in vm->compiler.globals.  For inline
+ * @details The variable is registered in vm->compiler.globals.  For inline
  *             macros the capture loop will stash it in macro_globals and emit
  *             an extern declaration into every input file's token stream so
  *             the parser can resolve references.
@@ -1490,23 +1250,19 @@ Type *__builtin_ast_make_typedef(const char *name, Type *underlying);
  */
 Obj *__builtin_ast_global_var(const char *name, Type *ty);
 
-/*!
- * @function __builtin_ast_global_var_set_init_data
- * @abstract Set the initial data for a generated global variable.
+/*! @brief Set the initial data for a generated global variable.
  * @param var  The global variable object.
  * @param data Pointer to the raw byte data.
  * @param len  Number of bytes to copy.  Must equal var->ty->size.
- * @discussion Convenience wrapper: GlobalVarSetInitData(var, data, len).
+ * @details Convenience wrapper: GlobalVarSetInitData(var, data, len).
  */
 void __builtin_ast_global_var_set_init_data(Obj *var,
                                         const char *data, int len);
 
-/*!
- * @function __builtin_ast_global_var_set_static
- * @abstract Set the static (internal linkage) flag on a generated global.
+/*! @brief Set the static (internal linkage) flag on a generated global.
  * @param var       The global variable object.
  * @param is_static True for internal linkage (file-scope static).
- * @discussion Convenience wrapper: GlobalVarSetStatic(var, is_static).
+ * @details Convenience wrapper: GlobalVarSetStatic(var, is_static).
  */
 void __builtin_ast_global_var_set_static(Obj *var, bool is_static);
 
@@ -1514,12 +1270,10 @@ void __builtin_ast_global_var_set_static(Obj *var, bool is_static);
 // Function-building context (ticket #148)
 // ============================================================================
 
-/*!
- * @function __builtin_ast_push_fn
- * @abstract Establish fn as the "function currently being built" so that
+/*! @brief Establish fn as the "function currently being built" so that
  *           Quote("return x;") applies the correct implicit return-type cast.
  * @param fn The generated function whose return type should be used.
- * @discussion Call __builtin_ast_pop_fn (or use the WithFn macro) to
+ * @details Call __builtin_ast_pop_fn (or use the WithFn macro) to
  *             restore the previous context.  execute_pragma_macro always
  *             restores current_fn after the macro returns, so unmatched pushes
  *             cannot leak into the main parse/codegen pass.  There is no
@@ -1528,31 +1282,25 @@ void __builtin_ast_global_var_set_static(Obj *var, bool is_static);
  */
 void __builtin_ast_push_fn(Obj *fn);
 
-/*!
- * @function __builtin_ast_pop_fn
- * @abstract Restore the function context saved by the most recent push.
- * @discussion Inverse of __builtin_ast_push_fn; typically used through the
+/*! @brief Restore the function context saved by the most recent push.
+ * @details Inverse of __builtin_ast_push_fn; typically used through the
  *             @c WithFn(fn) { ... } block helper, which performs the
  *             matching pop even on early exit.
  */
 void __builtin_ast_pop_fn(void);
 
-/*!
- * @function __builtin_ast_push_block
- * @abstract Establish a block as the current statement-append context.
+/*! @brief Establish a block as the current statement-append context.
  * @param block The NK_BLOCK node being populated.
- * @discussion Use with WithBlock(block) so BlockAddStmt(stmt) appends to
+ * @details Use with WithBlock(block) so BlockAddStmt(stmt) appends to
  *             block without repeating the block pointer.
  */
 void __builtin_ast_push_block(Node *block);
 void __builtin_ast_pop_block(void);
 Node *__builtin_ast_block_add_current_stmt(Node *stmt);
 
-/*!
- * @function __builtin_ast_push_struct
- * @abstract Establish a struct or union as the current field-add context.
+/*! @brief Establish a struct or union as the current field-add context.
  * @param ty The aggregate type being populated.
- * @discussion Use with WithStruct(ty) so StructAddField(name, ty) appends
+ * @details Use with WithStruct(ty) so StructAddField(name, ty) appends
  *             to the current aggregate.
  */
 void __builtin_ast_push_struct(Type *ty);
@@ -1560,11 +1308,9 @@ void __builtin_ast_pop_struct(void);
 Type *__builtin_ast_struct_add_current_field(const char *name,
                                             Type *field_type);
 
-/*!
- * @function __builtin_ast_push_switch
- * @abstract Establish a switch node as the current case/default context.
+/*! @brief Establish a switch node as the current case/default context.
  * @param switch_node The switch node being populated.
- * @discussion Use with WithSwitch(sw) so SwitchAddCase(value, body) and
+ * @details Use with WithSwitch(sw) so SwitchAddCase(value, body) and
  *             SwitchSetDefault(body) append to the current switch.
  */
 void __builtin_ast_push_switch(Node *switch_node);
@@ -1573,11 +1319,9 @@ void __builtin_ast_switch_add_current_case(Node *value,
                                        Node *body);
 void __builtin_ast_switch_set_current_default(Node *body);
 
-/*!
- * @function __builtin_ast_push_enum
- * @abstract Establish an enum as the current constant-add context.
+/*! @brief Establish an enum as the current constant-add context.
  * @param ty The enum type being populated.
- * @discussion Use with WithEnum(ty) so EnumAddConstant(name, value)
+ * @details Use with WithEnum(ty) so EnumAddConstant(name, value)
  *             appends to the current enum.
  */
 void __builtin_ast_push_enum(Type *ty);
@@ -1589,40 +1333,32 @@ void __builtin_ast_enum_add_current_constant(const char *name,
 // AST Dump Functions (ticket #58) — Nim-style dumpTree / dumpAstGen
 // ============================================================================
 
-/*!
- * @function __builtin_dump_tree
- * @abstract Print a human-readable tree representation of a node to stdout.
+/*! @brief Print a human-readable tree representation of a node to stdout.
  * @param node The root node to print.
- * @discussion Reuses the compiler's internal cc_dump_ast text renderer.
+ * @details Reuses the compiler's internal cc_dump_ast text renderer.
  *             Convenience wrapper: DumpTree(node).
  */
 void __builtin_dump_tree(Node *node);
 
-/*!
- * @function __builtin_dump_tree_to_string
- * @abstract Render the tree representation to a heap-allocated string.
+/*! @brief Render the tree representation to a heap-allocated string.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
- * @discussion Convenience wrapper: DumpTreeToString(node).
+ * @details Convenience wrapper: DumpTreeToString(node).
  */
 const char *__builtin_dump_tree_to_string(Node *node);
 
-/*!
- * @function __builtin_dump_ast_gen
- * @abstract Print __builtin_ast_*() builder calls that would reconstruct the node.
+/*! @brief Print __builtin_ast_*() builder calls that would reconstruct the node.
  * @param node The root node to emit builder calls for.
- * @discussion Covers all node kinds for which relfection.c has a builder.
+ * @details Covers all node kinds for which relfection.c has a builder.
  *             Unsupported kinds are emitted as C comments.
  *             Convenience wrapper: DumpAstGen(node).
  */
 void __builtin_dump_ast_gen(Node *node);
 
-/*!
- * @function __builtin_dump_ast_gen_to_string
- * @abstract Render the __builtin_ast_*() builder call sequence to a string.
+/*! @brief Render the __builtin_ast_*() builder call sequence to a string.
  * @param node The root node.
  * @return An arena-allocated NUL-terminated string, or NULL on error.
- * @discussion Convenience wrapper: DumpAstGenToString(node).
+ * @details Convenience wrapper: DumpAstGenToString(node).
  */
 const char *__builtin_dump_ast_gen_to_string(Node *node);
 
@@ -1899,50 +1635,40 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
     __builtin_ast_make_typedef(name, underlying)
 
 // Comptime variable access (ticket #188)
-/*!
- * @function __builtin_get_comptime_int
- * @abstract Read an integer-typed @c #pragma comptime variable's value at
+/*! @brief Read an integer-typed @c \#pragma comptime variable's value at
  *           compile time.
  * @param name The comptime variable's name.
  * @return The 64-bit integer value, or 0 if the variable is not defined.
- * @discussion Convenience wrapper: GetComptimeInt(name).
+ * @details Convenience wrapper: GetComptimeInt(name).
  */
 int64_t __builtin_get_comptime_int(const char *name);
-/*!
- * @function __builtin_get_comptime_float
- * @abstract Read a float/double-typed @c #pragma comptime variable's value
+/*! @brief Read a float/double-typed @c \#pragma comptime variable's value
  *           at compile time.
  * @param name The comptime variable's name.
  * @return The double value, or 0.0 if the variable is not defined.
- * @discussion Convenience wrapper: GetComptimeFloat(name).
+ * @details Convenience wrapper: GetComptimeFloat(name).
  */
 double __builtin_get_comptime_float(const char *name);
-/*!
- * @function __builtin_get_comptime_var
- * @abstract Read a comptime scalar variable as an AST literal node.
+/*! @brief Read a comptime scalar variable as an AST literal node.
  * @param name The comptime variable's name.
  * @return A NK_NUM node representing the variable's value, or NULL on error.
- * @discussion Convenience wrapper: GetComptimeVar(name).
+ * @details Convenience wrapper: GetComptimeVar(name).
  */
 Node *__builtin_get_comptime_var(const char *name);
-/*!
- * @function __builtin_get_comptime_ptr
- * @abstract Return the address of a comptime variable as a generated-code AST
+/*! @brief Return the address of a comptime variable as a generated-code AST
  *           pointer node.
  * @param name The comptime variable's name.
  * @return An NK_ADDR node pointing at a static shadow copy of the evaluated
  *         comptime variable, or NULL on error.
- * @discussion Convenience wrapper: GetComptimePtr(name).
+ * @details Convenience wrapper: GetComptimePtr(name).
  */
 Node *__builtin_get_comptime_ptr(const char *name);
-/*!
- * @function __builtin_get_comptime_member
- * @abstract Read a named field from a comptime struct variable as an AST
+/*! @brief Read a named field from a comptime struct variable as an AST
  *           literal node.
  * @param var_name The comptime struct variable's name.
  * @param field The field name to look up.
  * @return A NK_NUM node for the field's value, or NULL on error.
- * @discussion Convenience wrapper: GetComptimeMember(var_name, field).
+ * @details Convenience wrapper: GetComptimeMember(var_name, field).
  */
 Node *__builtin_get_comptime_member(const char *var_name,
                                   const char *field);
@@ -1954,14 +1680,12 @@ Node *__builtin_get_comptime_member(const char *var_name,
 #define GetComptimeMember(var, field)  __builtin_get_comptime_member(var, field)
 
 // Constexpr variable access (ticket #189)
-/*!
- * @function __builtin_get_constexpr_value
- * @abstract Read the evaluated initializer of a global @c constexpr variable
+/*! @brief Read the evaluated initializer of a global @c constexpr variable
  *           as an AST literal node.
  * @param name The constexpr variable's name.
  * @return A NK_NUM node (integer or float, depending on the variable's type),
  *         or NULL on error.
- * @discussion Errors at compile time if @a name does not refer to a visible
+ * @details Errors at compile time if @a name does not refer to a visible
  *             @c constexpr variable.  Convenience wrapper:
  *             GetConstexprValue(name).
  */
@@ -1974,20 +1698,20 @@ Node *__builtin_get_constexpr_value(const char *name);
 // ============================================================================
 
 /**
- * @abstract Build a positional compound literal: zero-initialise an anonymous
+ * @brief Build a positional compound literal: zero-initialise an anonymous
  *           local var then positionally assign @a inits via node_expand_init_splice.
  * @note Requires function scope (file-scope not supported in V1).
  */
 Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n);
 
 /**
- * @abstract Build an array compound literal.  Element type is explicit to avoid
+ * @brief Build an array compound literal.  Element type is explicit to avoid
  *           long-inference surprises with MakeIntLiteral.
  */
 Node *__builtin_ast_init_array(Type *elem_ty, Node **elems, int n);
 
 /**
- * @abstract Build a designated struct/union initializer.  Unmentioned fields
+ * @brief Build a designated struct/union initializer.  Unmentioned fields
  *           are zero-initialised.  Partial init (n < member count) is allowed.
  */
 Node *__builtin_ast_init_struct(Type *ty, const char **fields,
@@ -2014,7 +1738,7 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
 // ============================================================================
 
 /**
- * @abstract Build a block of memcpy() calls copying expr (of type ty)
+ * @brief Build a block of memcpy() calls copying expr (of type ty)
  *           byte-for-byte into buf (a void or char pointer). Struct/union
  *           types are copied member-by-member at their natural offsets,
  *           recursing into nested flat structs; scalar types are copied
@@ -2025,7 +1749,7 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
 Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf);
 
 /**
- * @abstract Build `*(ty*)buf` — reinterpret buf as a ty value.
+ * @brief Build `*(ty*)buf` — reinterpret buf as a ty value.
  * @note V1 placeholder: inherits the host's alignment requirements for ty;
  *       if Serialize ever produces a packed/portable layout this must
  *       change to field-by-field reconstruction.
@@ -2327,35 +2051,27 @@ void __builtin_attr_generate_constructor(AttrTarget *target) {
 // @macro functions, so they're callable from any [[cccc::comptime]] context,
 // not just from within reflection.h's own macro program.
 
-/*!
- * @function __builtin_generate_sum
- * @abstract Publish `T sum_T(T *arr, size_t n)` summing all elements.
- * @discussion Convenience wrapper: GenerateSum(elem_type).
+/*! @brief Publish `T sum_T(T *arr, size_t n)` summing all elements.
+ * @details Convenience wrapper: GenerateSum(elem_type).
  */
 void __builtin_generate_sum(Type *elem_ty);
 
-/*!
- * @function __builtin_generate_map
- * @abstract Publish `void map_T(T *arr, size_t n, T *out, T (*f)(T))`,
+/*! @brief Publish `void map_T(T *arr, size_t n, T *out, T (*f)(T))`,
  *   writing `f(arr[i])` into `out[i]` for each element.
- * @discussion Convenience wrapper: GenerateMap(elem_type).
+ * @details Convenience wrapper: GenerateMap(elem_type).
  */
 void __builtin_generate_map(Type *elem_ty);
 
-/*!
- * @function __builtin_generate_reduce
- * @abstract Publish `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))`,
+/*! @brief Publish `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))`,
  *   folding `f` over the array starting from `init`.
- * @discussion Convenience wrapper: GenerateReduce(elem_type).
+ * @details Convenience wrapper: GenerateReduce(elem_type).
  */
 void __builtin_generate_reduce(Type *elem_ty);
 
-/*!
- * @function __builtin_generate_filter
- * @abstract Publish `void filter_T(T *arr, size_t n, T *out, size_t *out_n,
+/*! @brief Publish `void filter_T(T *arr, size_t n, T *out, size_t *out_n,
  *   bool (*pred)(T))`, writing elements matching `pred` into `out` and
  *   setting `*out_n` to the match count.
- * @discussion Convenience wrapper: GenerateFilter(elem_type).
+ * @details Convenience wrapper: GenerateFilter(elem_type).
  */
 void __builtin_generate_filter(Type *elem_ty);
 

@@ -25,6 +25,7 @@
 //   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
 //   header_resolution_smoke, comptime_native_smoke, audit_ffi,
 //   audit_reflection_enums, reflection_ffi_gen / _check
+//   docs                Doxygen HTML API docs for include/cccc/*.h (needs doxygen)
 //   macos_x86_64             macOS x86_64 cross-build only (Rosetta needed to run it)
 //   macos_x86_64_smoke       + Rosetta smoke test + the build_cache_arch_smoke guard
 //   macos_x86_64_test        + full test suite (source, --c4, host-signal debugger)
@@ -658,6 +659,29 @@ BuildTarget *reflection_ffi_gen(Builder *ctx) {
 BuildTarget *reflection_ffi_check(Builder *ctx) {
     return RunCustom(ctx, "reflection-ffi-check",
         "python3 tools/gen_reflection_ffi.py --check");
+}
+
+// Doxygen HTML API docs for the three public headers.
+// Pure source scan -- no cccc binary needed, same reasoning as audit_ffi
+// above -- but doxygen is an external dependency, so it's guarded with
+// HaveTool the way bench() guards on hyperfine. Output is gitignored
+// (build/docs/) and never committed; not part of build_main() so the
+// default build stays dependency-free.
+[[cccc::build_target]]
+BuildTarget *docs(Builder *ctx) {
+    if (!HaveTool(ctx, "doxygen")) {
+        fprintf(stderr, "build: docs requires doxygen (not found in PATH) — "
+                        "install it (e.g. brew install doxygen / apt install doxygen)\n");
+        return RunCustom(ctx, "docs", "false");
+    }
+    BuildTarget *step = RunCustom(ctx, "docs",
+        "mkdir -p build/docs && doxygen Doxyfile");
+    AddInput(step, "Doxyfile");
+    AddInput(step, "include/cccc/building.h");
+    AddInput(step, "include/cccc/reflection.h");
+    AddInput(step, "include/cccc/testing.h");
+    DeclareOutput(step, "build/docs/html/index.html");
+    return step;
 }
 
 // ---- bench-compare{,-quick,-json} (Makefile:551-564) -----------------------

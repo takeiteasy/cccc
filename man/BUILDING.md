@@ -1230,7 +1230,24 @@ targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
 `test_legacy`, `sqlite_smoke`, `audit_ffi`, `audit_reflection_enums`,
 `reflection_ffi_gen`/`reflection_ffi_check`, `bench`/`bench_compare`/`bench_compare_quick`/
 `bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/`afl_asan`,
-and `stdlib_gen` (the two-pass regen alone, no final rebuild).
+`docs` (Doxygen HTML API docs), and `stdlib_gen` (the two-pass regen alone,
+no final rebuild).
+
+**`docs`** generates Doxygen HTML for the three public headers
+(`include/cccc/building.h`, `reflection.h`, `testing.h`) into
+`build/docs/html/` via `doxygen Doxyfile` at the repo root. It's a pure
+source scan — no `cccc` binary is built — but it needs `doxygen` on `PATH`
+(`brew install doxygen` / `apt install doxygen`); the target checks with
+`HaveTool` and fails with an install hint rather than silently no-opping if
+it's missing. It is **not** part of the default build (`build_main()`), so a
+fresh clone never needs doxygen installed. Output is gitignored
+(`build/docs/`) and never committed — regenerate it locally when you want to
+browse the API docs, or run it in CI to catch malformed doc comments. The
+public headers document with Doxygen tags (`@brief`/`@details`/`@param`/
+`@return`, either `/*!` or `/**` delimiters — both are equivalent to
+Doxygen); the older HeaderDoc-style tags (`@abstract`, `@discussion`,
+`@function`, `@define`) that used to appear alongside them were retired in
+favor of this.
 
 The full staged cross-platform workflow is also covered (#850):
 `macos_x86_64`/`macos_x86_64_smoke`/`macos_x86_64_test` (macOS x86_64

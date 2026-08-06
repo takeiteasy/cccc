@@ -23,6 +23,9 @@ profile/vm-opcodes/
 profile/perf/
 build/bench-*
 build/test_out/
+# Doxygen HTML API docs: generated on demand by
+# `./cccc --build build.c --build-target=docs`, never committed.
+build/docs/
 profile/bench-results/
 profile/bench-results/*.json
 tools/*.tar.gz

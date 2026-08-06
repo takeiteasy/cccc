@@ -40,52 +40,41 @@
 // Opaque build types (owned by the VM / host runner)
 // ============================================================================
 
-/*! @typedef Builder
- *  @abstract Opaque build context; passed to the entry and forwarded to macros. */
+/*! @brief Opaque build context; passed to the entry and forwarded to macros. */
 typedef struct Builder Builder;
 
-/*! @typedef BuildTarget
- *  @abstract Opaque handle to a declared build target. */
+/*! @brief Opaque handle to a declared build target. */
 typedef struct BuildTarget BuildTarget;
 
 // ============================================================================
 // Underlying FFI-callable functions
 // ============================================================================
 
-/*! @function __builtin_build_root
- *  @abstract Absolute path of the directory the build was launched from. */
+/*! @brief Absolute path of the directory the build was launched from. */
 const char *__builtin_build_root(Builder *ctx);
 
-/*! @function __builtin_build_out_dir
- *  @abstract Output directory for build artifacts (default @c build/). */
+/*! @brief Output directory for build artifacts (default @c build/). */
 const char *__builtin_build_out_dir(Builder *ctx);
 
-/*! @function __builtin_build_host
- *  @abstract Host platform name (@c "darwin", @c "linux", ...). */
+/*! @brief Host platform name (@c "darwin", @c "linux", ...). */
 const char *__builtin_build_host(Builder *ctx);
 
-/*! @function __builtin_build_verbose
- *  @abstract Non-zero when verbose output was requested. */
+/*! @brief Non-zero when verbose output was requested. */
 int __builtin_build_verbose(Builder *ctx);
 
-/*! @function __builtin_build_executable
- *  @abstract Create an executable target named @c name (output @c bin/<name>). */
+/*! @brief Create an executable target named @c name (output @c bin/\<name\>). */
 BuildTarget *__builtin_build_executable(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_static_lib
- *  @abstract Create a static-library target (output @c lib/lib<name>.a). */
+/*! @brief Create a static-library target (output @c lib/lib\<name\>.a). */
 BuildTarget *__builtin_build_static_lib(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_dynamic_lib
- *  @abstract Create a dynamic-library target (output @c lib/lib<name>.{so,dylib}). */
+/*! @brief Create a dynamic-library target (output @c lib/lib\<name\>.{so,dylib}). */
 BuildTarget *__builtin_build_dynamic_lib(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_set_output
- *  @abstract Override the target's output path (relative to the out dir). */
+/*! @brief Override the target's output path (relative to the out dir). */
 void __builtin_build_set_output(BuildTarget *t, const char *path);
 
-/*! @function __builtin_build_target_output
- *  @abstract On-disk output path for @c t, so a @c RunCustom command can
+/*! @brief On-disk output path for @c t, so a @c RunCustom command can
  *            reference the binary a dependency target just built instead of
  *            hardcoding a path. For EXE/STATIC/DYNAMIC/BYTECODE targets this
  *            is @c \<out_dir\>/\<path\> — the explicit @c SetOutput() path if
@@ -97,8 +86,7 @@ void __builtin_build_set_output(BuildTarget *t, const char *path);
  *            called. */
 const char *__builtin_build_target_output(BuildTarget *t);
 
-/*! @function __builtin_build_declare_output
- *  @abstract Record a file path a @c RunCustom target (only) produces —
+/*! @brief Record a file path a @c RunCustom target (only) produces —
  *            taken verbatim, not joined onto @c out_dir — so
  *            @c TargetOutput() can resolve it, the dependency is documented
  *            for downstream consumers, and (combined with @c AddInput)
@@ -111,8 +99,7 @@ const char *__builtin_build_target_output(BuildTarget *t);
  *            a diagnostic on non-@c RunCustom targets. */
 void __builtin_build_declare_output(BuildTarget *t, const char *path);
 
-/*! @function __builtin_build_add_input
- *  @abstract Record a file path a @c RunCustom target (only) reads.
+/*! @brief Record a file path a @c RunCustom target (only) reads.
  *            Combined with @c DeclareOutput, gives @c build_target() a real
  *            "up to date" skip check: if the target has at least one
  *            declared input and one declared output, and every output exists
@@ -121,111 +108,90 @@ void __builtin_build_declare_output(BuildTarget *t, const char *path);
  *            No-op with a diagnostic on non-@c RunCustom targets. */
 void __builtin_build_add_input(BuildTarget *t, const char *path);
 
-/*! @function __builtin_build_add_source
- *  @abstract Add a C source file to the target. */
+/*! @brief Add a C source file to the target. */
 void __builtin_build_add_source(BuildTarget *t, const char *path);
 
-/*! @function __builtin_build_add_sources_glob
- *  @abstract Expand a glob pattern relative to the build root and add each
+/*! @brief Expand a glob pattern relative to the build root and add each
  *            match as a source file, immediately.  Requires POSIX @c glob(3).
  *            Matches are returned in sorted order. */
 void __builtin_build_add_sources_glob(BuildTarget *t, const char *pattern);
 
-/*! @function __builtin_build_add_sources_glob_deferred
- *  @abstract Like @c AddSourcesGlob, but expansion happens at build time,
+/*! @brief Like @c AddSourcesGlob, but expansion happens at build time,
  *            after @c t's dependencies have already been built — so the
  *            pattern can match a file a @c RunCustom codegen dependency
  *            creates during this same build.  @c AddSourcesGlob expands
  *            immediately and cannot see such files. */
 void __builtin_build_add_sources_glob_deferred(BuildTarget *t, const char *pattern);
 
-/*! @function __builtin_build_add_source_str
- *  @abstract Write @c content to @c \<out_dir\>/gen/\<name\> and add it as a source.
+/*! @brief Write @c content to @c \<out_dir\>/gen/\<name\> and add it as a source.
  *            @c name must end in @c .c (or another compilable extension). */
 void __builtin_build_add_source_str(BuildTarget *t, const char *name,
                                     const char *content);
 
-/*! @function __builtin_build_exclude_source
- *  @abstract Exclude sources matching @c pattern (exact path or @c fnmatch glob)
+/*! @brief Exclude sources matching @c pattern (exact path or @c fnmatch glob)
  *            from compilation.  Applies after any @c AddSource / @c AddSourcesGlob
  *            calls, regardless of call order. */
 void __builtin_build_exclude_source(BuildTarget *t, const char *pattern);
 
-/*! @function __builtin_build_add_include
- *  @abstract Add an include search path (-I) to the target's compiles. */
+/*! @brief Add an include search path (-I) to the target's compiles. */
 void __builtin_build_add_include(BuildTarget *t, const char *path);
 
-/*! @function __builtin_build_add_define
- *  @abstract Add a preprocessor define (-D). Pass NULL value for a bare define. */
+/*! @brief Add a preprocessor define (-D). Pass NULL value for a bare define. */
 void __builtin_build_add_define(BuildTarget *t, const char *name, const char *value);
 
-/*! @function __builtin_build_add_undef
- *  @abstract Add a preprocessor undefine (-U). */
+/*! @brief Add a preprocessor undefine (-U). */
 void __builtin_build_add_undef(BuildTarget *t, const char *name);
 
-/*! @function __builtin_build_add_cflag
- *  @abstract Add a raw compiler flag (e.g. "-O2"). */
+/*! @brief Add a raw compiler flag (e.g. "-O2"). */
 void __builtin_build_add_cflag(BuildTarget *t, const char *flag);
 
-/*! @function __builtin_build_add_ldflag
- *  @abstract Add a raw linker flag. */
+/*! @brief Add a raw linker flag. */
 void __builtin_build_add_ldflag(BuildTarget *t, const char *flag);
 
-/*! @function __builtin_build_set_target_env
- *  @abstract Set an environment variable for @c t's compiler/linker child
+/*! @brief Set an environment variable for @c t's compiler/linker child
  *            process only (e.g. @c AFL_USE_ASAN=1 for an afl-asan target).
  *            Has no effect on a @c RunCustom target, whose command runs
  *            through the vendored build shell, not the host toolchain. */
 void __builtin_build_set_target_env(BuildTarget *t, const char *name, const char *value);
 
-/*! @function __builtin_build_link_with
- *  @abstract Declare that @c t links against (and is built after) @c dep.
+/*! @brief Declare that @c t links against (and is built after) @c dep.
  *            Adds a @c -l<dep> flag at link time. */
 void __builtin_build_link_with(BuildTarget *t, BuildTarget *dep);
 
-/*! @function __builtin_build_depends_on
- *  @abstract Ordering-only dependency: @c t is built after @c dep but does
+/*! @brief Ordering-only dependency: @c t is built after @c dep but does
  *            @b not add a @c -l<dep> linker flag.  Use this to order a
  *            @c RunCustom codegen step before its consumer. */
 void __builtin_build_depends_on(BuildTarget *t, BuildTarget *dep);
 
-/*! @function __builtin_build_add_lib
- *  @abstract Add a system library to link against (-l<name>). */
+/*! @brief Add a system library to link against (@c -l\<name\>). */
 void __builtin_build_add_lib(BuildTarget *t, const char *name);
 
-/*! @function __builtin_build_add_libpath
- *  @abstract Add a library search path (-L<path>). */
+/*! @brief Add a library search path (-L<path>). */
 void __builtin_build_add_libpath(BuildTarget *t, const char *path);
 
-/*! @function __builtin_build_get_env
- *  @abstract Return the value of environment variable @c name, or @c NULL if unset. */
+/*! @brief Return the value of environment variable @c name, or @c NULL if unset. */
 const char *__builtin_build_get_env(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_capture_command
- *  @abstract Run @c cmd via @c sh @c -c and return its stdout as a NUL-terminated
+/*! @brief Run @c cmd via @c sh @c -c and return its stdout as a NUL-terminated
  *            string with trailing whitespace stripped, or @c NULL on failure.
  *            The returned pointer is valid until the build entry returns.
  *            Returns @c NULL on non-POSIX platforms. */
 const char *__builtin_build_capture_command(Builder *ctx, const char *cmd);
 
-/*! @function __builtin_build_file_exists
- *  @abstract Returns 1 if @c path exists (file, directory, or any other
+/*! @brief Returns 1 if @c path exists (file, directory, or any other
  *            filesystem node), 0 otherwise. */
 int __builtin_build_file_exists(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_have_tool
- *  @abstract Returns 1 if the named tool is executable (found in @c PATH) and
+/*! @brief Returns 1 if the named tool is executable (found in @c PATH) and
  *            permitted by the current tool allowlist, 0 otherwise. */
 int __builtin_build_have_tool(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_pkg_config
- *  @abstract Run @c pkg-config to obtain compile and link flags for @c pkg and
+/*! @brief Run @c pkg-config to obtain compile and link flags for @c pkg and
  *            add them to @c t.  Returns 0 on success, non-zero if @c pkg-config
  *            is not found, not allowed, or reports an error. */
 int __builtin_build_pkg_config(BuildTarget *t, const char *pkg);
 
-/*! @function __builtin_build_run_custom
- *  @abstract Register a custom shell-command target named @c name that runs
+/*! @brief Register a custom shell-command target named @c name that runs
  *            @c cmd when the target is reached in the build graph.  Returns an
  *            opaque @c BuildTarget* so other targets may declare a dependency on
  *            it via @c DependsOn.  Fails (non-zero exit from @c BuildDefault)
@@ -233,8 +199,7 @@ int __builtin_build_pkg_config(BuildTarget *t, const char *pkg);
 BuildTarget *__builtin_build_run_custom(Builder *ctx, const char *name,
                                         const char *cmd);
 
-/*! @function __builtin_build_set_profile
- *  @abstract Set the build profile for target @c t, overriding any global
+/*! @brief Set the build profile for target @c t, overriding any global
  *            @c --build-profile default.  Valid names: @c "debug",
  *            @c "release", @c "relwithdebinfo", @c "minsizerel".
  *
@@ -249,108 +214,88 @@ BuildTarget *__builtin_build_run_custom(Builder *ctx, const char *name,
  *  | minsizerel    | -Os            | -DNDEBUG  | */
 void __builtin_build_set_profile(BuildTarget *t, const char *profile);
 
-/*! @function __builtin_build_profile
- *  @abstract Returns the global build profile name (from @c --build-profile),
+/*! @brief Returns the global build profile name (from @c --build-profile),
  *            or @c NULL if no global profile is set. */
 const char *__builtin_build_profile(Builder *ctx);
 
-/*! @function __builtin_build_set_toolchain
- *  @abstract Override the compiler binary for @c t (e.g. @c "aarch64-linux-gnu-gcc").
+/*! @brief Override the compiler binary for @c t (e.g. @c "aarch64-linux-gnu-gcc").
  *            Takes precedence over @c --build-cc and the system default.
  *            Use for GCC-style cross-compilers that are identified by a prefixed name. */
 void __builtin_build_set_toolchain(BuildTarget *t, const char *cc);
 
-/*! @function __builtin_build_set_target_triple
- *  @abstract Set a clang-style target triple for @c t
- *            (e.g. @c "aarch64-linux-gnu").  Appends @c --target=<triple>
+/*! @brief Set a clang-style target triple for @c t
+ *            (e.g. @c "aarch64-linux-gnu").  Appends @c --target=\<triple\>
  *            to both compile and link invocations. */
 void __builtin_build_set_target_triple(BuildTarget *t, const char *triple);
 
-/*! @function __builtin_build_target_triple
- *  @abstract Returns the global cross-compilation triple (from @c --build-triple),
+/*! @brief Returns the global cross-compilation triple (from @c --build-triple),
  *            or @c NULL if none is set. */
 const char *__builtin_build_target_triple(Builder *ctx);
 
-/*! @function __builtin_build_target_count
- *  @abstract Returns the number of @c [[cccc::build_target]] factory functions
+/*! @brief Returns the number of @c [[cccc::build_target]] factory functions
  *            declared in the current build script.  Useful for programmatic
  *            target enumeration from inside the build entry. */
 int __builtin_build_target_count(Builder *ctx);
 
-/*! @function __builtin_build_target_name
- *  @abstract Returns the name of the @c i -th (0-based) @c [[cccc::build_target]]
+/*! @brief Returns the name of the @c i -th (0-based) @c [[cccc::build_target]]
  *            factory, or @c NULL if @c i is out of range. */
 const char *__builtin_build_target_name(Builder *ctx, int i);
 
-/*! @function __builtin_build_find_tool
- *  @abstract Return the full path of the named tool if it is executable in
+/*! @brief Return the full path of the named tool if it is executable in
  *            @c PATH and permitted by the tool allowlist, or @c NULL otherwise.
  *            The returned pointer is valid until the build entry returns. */
 const char *__builtin_build_find_tool(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_get_build_option
- *  @abstract Return the value of a @c --build-option=key=value option
+/*! @brief Return the value of a @c --build-option=key=value option
  *            passed on the command line, or @c NULL if @c key was not given. */
 const char *__builtin_build_get_build_option(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_have_build_option
- *  @abstract Return 1 if @c --build-option=key (or @c --build-option=key=...) was
+/*! @brief Return 1 if @c --build-option=key (or @c --build-option=key=...) was
  *            passed on the command line, 0 otherwise. */
 int __builtin_build_have_build_option(Builder *ctx, const char *name);
 
-/*! @function __builtin_build_add_framework
- *  @abstract Add a macOS @c -framework @c Name linker flag.  Shorthand for
+/*! @brief Add a macOS @c -framework @c Name linker flag.  Shorthand for
  *            @c AddLdFlag(t, "-framework Name"). */
 void __builtin_build_add_framework(BuildTarget *t, const char *name);
 
-/*! @function __builtin_build_argc
- *  @abstract Number of positional arguments forwarded via @c -- on the CLI.
+/*! @brief Number of positional arguments forwarded via @c -- on the CLI.
  *            Returns 0 if no @c -- separator was given. */
 int __builtin_build_argc(Builder *ctx);
 
-/*! @function __builtin_build_argv
- *  @abstract Return the @c i -th (0-based) positional argument forwarded via
+/*! @brief Return the @c i -th (0-based) positional argument forwarded via
  *            @c -- on the CLI, or @c NULL if @c i is out of range. */
 const char *__builtin_build_argv(Builder *ctx, int i);
 
-/*! @function __builtin_build_set_install_prefix
- *  @abstract Override the install prefix for @c InstallArtifact
+/*! @brief Override the install prefix for @c InstallArtifact
  *            (default: @c PREFIX env var or @c /usr/local). */
 void __builtin_build_set_install_prefix(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_install_artifact
- *  @abstract Register @c t for installation when @c --build-install is active.
+/*! @brief Register @c t for installation when @c --build-install is active.
  *            A no-op if @c --build-install was not passed.  The copy happens
  *            after the build entry returns and the build succeeded. */
 void __builtin_build_install_artifact(Builder *ctx, BuildTarget *t);
 
-/*! @function __builtin_build_wants_install
- *  @abstract Returns 1 if @c --build-install was passed on the command line. */
+/*! @brief Returns 1 if @c --build-install was passed on the command line. */
 int __builtin_build_wants_install(Builder *ctx);
 
-/*! @function __builtin_build_dir_exists
- *  @abstract Returns 1 if @c path exists and is a directory, 0 otherwise. */
+/*! @brief Returns 1 if @c path exists and is a directory, 0 otherwise. */
 int __builtin_build_dir_exists(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_glob_files
- *  @abstract Expand @c pattern (POSIX @c glob(3)) and return a @c NULL-terminated
+/*! @brief Expand @c pattern (POSIX @c glob(3)) and return a @c NULL-terminated
  *            array of matching paths, or @c NULL on no match or non-POSIX platforms.
  *            The array and its strings are valid until the build entry returns. */
 const char **__builtin_build_glob_files(Builder *ctx, const char *pattern);
 
-/*! @function __builtin_build_read_file
- *  @abstract Read the file at @c path into a @c NUL-terminated string and return
+/*! @brief Read the file at @c path into a @c NUL-terminated string and return
  *            it, or @c NULL on error or if the file exceeds 4 MB.
  *            The returned pointer is valid until the build entry returns. */
 const char *__builtin_build_read_file(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_write_file
- *  @abstract Write @c content to @c path, creating parent directories as needed.
+/*! @brief Write @c content to @c path, creating parent directories as needed.
  *            Returns 0 on success, -1 on error. */
 int __builtin_build_write_file(Builder *ctx, const char *path, const char *content);
 
-/*! @function __builtin_build_set_cwd
- *  @abstract Change the process working directory to @c path.
+/*! @brief Change the process working directory to @c path.
  *            The original CWD is saved on the first call and automatically
  *            restored when the build entry returns.  Returns 0 on success, -1 on error.
  *
@@ -359,45 +304,36 @@ int __builtin_build_write_file(Builder *ctx, const char *path, const char *conte
  *        CWD and is visible to all subsequent build steps. */
 int __builtin_build_set_cwd(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_get_cwd
- *  @abstract Return the current process working directory as an interned string,
+/*! @brief Return the current process working directory as an interned string,
  *            or @c NULL on error.  The pointer is valid until the build entry returns. */
 const char *__builtin_build_get_cwd(Builder *ctx);
 
-/*! @function __builtin_build_copy_file
- *  @abstract Copy file @c src to @c dst.  Returns 0 on success, -1 on error. */
+/*! @brief Copy file @c src to @c dst.  Returns 0 on success, -1 on error. */
 int __builtin_build_copy_file(Builder *ctx, const char *src, const char *dst);
 
-/*! @function __builtin_build_move_file
- *  @abstract Move (rename) file @c src to @c dst.  Falls back to copy + delete
+/*! @brief Move (rename) file @c src to @c dst.  Falls back to copy + delete
  *            on cross-device moves.  Returns 0 on success, -1 on error. */
 int __builtin_build_move_file(Builder *ctx, const char *src, const char *dst);
 
-/*! @function __builtin_build_delete_file
- *  @abstract Delete the file at @c path (@c unlink).  Returns 0 on success, -1 on error. */
+/*! @brief Delete the file at @c path (@c unlink).  Returns 0 on success, -1 on error. */
 int __builtin_build_delete_file(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_mkdir
- *  @abstract Create @c path and all intermediate directories (@c mkdir @c -p semantics).
+/*! @brief Create @c path and all intermediate directories (@c mkdir @c -p semantics).
  *            Returns 0 on success, -1 on error. */
 int __builtin_build_mkdir(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_delete_dir
- *  @abstract Recursively delete @c path and all contents (@c rm @c -rf semantics).
+/*! @brief Recursively delete @c path and all contents (@c rm @c -rf semantics).
  *            Does not follow symlinks out of the tree.
  *            Returns 0 on success, -1 on error. */
 int __builtin_build_delete_dir(Builder *ctx, const char *path);
 
-/*! @function __builtin_build_run
- *  @abstract Build @c t and its transitive dependencies. Returns 0 on success. */
+/*! @brief Build @c t and its transitive dependencies. Returns 0 on success. */
 int __builtin_build_run(Builder *ctx, BuildTarget *t);
 
-/*! @function __builtin_build_run_all
- *  @abstract Build every declared target in topological order. */
+/*! @brief Build every declared target in topological order. */
 int __builtin_build_run_all(Builder *ctx);
 
-/*! @function __builtin_build_run_default
- *  @abstract Build every declared target and print a summary. */
+/*! @brief Build every declared target and print a summary. */
 int __builtin_build_run_default(Builder *ctx);
 
 // ============================================================================
