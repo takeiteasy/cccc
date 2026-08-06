@@ -468,9 +468,8 @@ typedef uint32_t Pc;
 #define CCCC_INVALID_PC UINT32_MAX
 
 /*!
- @enum CCCC_OP
- @abstract VM instruction opcodes for the CCCC bytecode.
- @discussion
+ @brief VM instruction opcodes for the CCCC bytecode.
+ @details
  The VM is stack-based with an accumulator `ax`. These opcodes are
  emitted by the code generator and interpreted by the VM executor.
 */
@@ -503,9 +502,8 @@ typedef struct TypeShadowSeg {
 } TypeShadowSeg;
 
 /*!
- @enum CCCCFlags
- @abstract Bitwise flags for CCCC runtime features and safety checks.
- @discussion
+ @brief Bitwise flags for CCCC runtime features and safety checks.
+ @details
  These flags control memory safety features, debugging, and runtime behavior.
  Flags can be combined with bitwise OR. Some flags are convenience constants
  that represent multiple underlying flags.
@@ -598,9 +596,8 @@ typedef enum {
 } CCCCFlags;
 
 /*!
- @enum CCCCWarning
- @abstract Bitwise flags for compiler warning categories.
- @discussion
+ @brief Bitwise flags for compiler warning categories.
+ @details
  These flags control suppressible compiler diagnostics. They are separate from
  CCCCFlags because the warning set can grow independently of runtime safety
  flags and uses a 64-bit mask.
@@ -726,58 +723,43 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
 } CCCCWarning;
 
 /*!
- @struct HashEntry
- @abstract Simple key/value bucket used by the project's HashMap.
- @field key Null-terminated string key.
- @field keylen Length of the key in bytes.
- @field val Pointer to the stored value.
+ @brief Simple key/value bucket used by the project's HashMap.
 */
 typedef struct HashEntry {
-    char *key;
-    int keylen;
-    void *val;
+    char *key;   /**< Null-terminated string key. */
+    int keylen;   /**< Length of the key in bytes. */
+    void *val;   /**< Pointer to the stored value. */
 } HashEntry;
 
 /*!
- @struct HashMap
- @abstract Lightweight open-addressing hashmap used for symbol tables,
+ @brief Lightweight open-addressing hashmap used for symbol tables,
            macros, and other small maps.
- @field buckets Pointer to an array of HashEntry buckets.
- @field capacity Number of buckets allocated.
- @field used Number of occupied buckets, including tombstones.
 */
 typedef struct HashMap {
-    HashEntry *buckets;
-    int capacity;
-    int used;
+    HashEntry *buckets;   /**< Pointer to an array of HashEntry buckets. */
+    int capacity;   /**< Number of buckets allocated. */
+    int used;   /**< Number of occupied buckets, including tombstones. */
 } HashMap;
 
 /*!
- @struct File
- @abstract Represents the contents and metadata of a source file.
- @field name Original filename string.
- @field file_no Unique numeric id for the file.
- @field contents File contents as a NUL-terminated buffer.
- @field display_name Optional name emitted by a `#line` directive.
- @field line_delta Line number delta applied for `#line` handling.
+ @brief Represents the contents and metadata of a source file.
 */
 typedef struct File {
-    char *name;
-    int file_no;
-    char *contents;
+    char *name;   /**< Original filename string. */
+    int file_no;   /**< Unique numeric id for the file. */
+    char *contents;   /**< File contents as a NUL-terminated buffer. */
 
     // For #line directive
-    char *display_name;
-    int line_delta;
+    char *display_name;   /**< Optional name emitted by a `#line` directive. */
+    int line_delta;   /**< Line number delta applied for `#line` handling. */
 
     bool is_system_header; // true when included via <...> from system search paths
 } File;
 
 /*!
- @struct Relocation
- @abstract A relocation record for a global variable initializer that
+ @brief A relocation record for a global variable initializer that
            references another global symbol.
- @discussion
+ @details
  Each relocation describes a pointer-sized slot within a global's
  initializer data that must be patched with the address of another
  global (or label) when codegen finalizes the data segment.
@@ -790,35 +772,26 @@ typedef struct Relocation {
 } Relocation;
 
 /*!
- @struct StringArray
- @abstract Dynamic array of strings used for include paths and similar
+ @brief Dynamic array of strings used for include paths and similar
            small lists.
- @field data Pointer to N entries of char* strings.
- @field capacity Allocated capacity of the array.
- @field len Current length (number of strings stored).
 */
 typedef struct StringArray {
-    char **data;
-    int capacity;
-    int len;
+    char **data;   /**< Pointer to N entries of char* strings. */
+    int capacity;   /**< Allocated capacity of the array. */
+    int len;   /**< Current length (number of strings stored). */
 } StringArray;
 
 /*!
- @struct EnumConstant
- @abstract Represents an enumerator constant within an enum type.
- @field name Name of the enumerator.
- @field value Integer value of the enumerator (int64_t to support C23 wide underlying types).
- @field next Pointer to the next enumerator in the linked list.
+ @brief Represents an enumerator constant within an enum type.
 */
 typedef struct EnumConstant {
-    char *name;
-    int64_t value;
-    struct EnumConstant *next;
+    char *name;   /**< Name of the enumerator. */
+    int64_t value;   /**< Integer value of the enumerator (int64_t to support C23 wide underlying types). */
+    struct EnumConstant *next;   /**< Pointer to the next enumerator in the linked list. */
 } EnumConstant;
 
 /*!
- @struct Hideset
- @abstract Represents a set of macro names that have been hidden to
+ @brief Represents a set of macro names that have been hidden to
            prevent recursive macro expansion.
 */
 typedef struct Hideset {
@@ -827,8 +800,7 @@ typedef struct Hideset {
 } Hideset;
 
 /*!
- @enum TokenKind
- @abstract Kinds of lexical tokens produced by the tokenizer and
+ @brief Kinds of lexical tokens produced by the tokenizer and
            used by the preprocessor and parser.
 */
 typedef enum {
@@ -847,22 +819,17 @@ typedef enum {
 typedef struct Type Type;
 
 /*!
- @struct Token
- @abstract Token produced by the lexer or by macro expansion.
- @field kind Token kind (see TokenKind).
- @field loc Pointer into the source buffer where the token text begins.
- @field len Number of characters in the token text.
- @field str For string literals: pointer to the unescaped contents.
+ @brief Token produced by the lexer or by macro expansion.
 */
 typedef struct Token {
-    TokenKind kind;     // Token kind
+    TokenKind kind;   /**< Token kind (see TokenKind). */
     struct Token *next; // Next token
     int64_t val;        // If kind is TK_NUM, its value
     long double fval;   // If kind is TK_NUM, its value
-    char *loc;          // Token location
-    int len;            // Token length
+    char *loc;   /**< Pointer into the source buffer where the token text begins. */
+    int len;   /**< Number of characters in the token text. */
     Type *ty;           // Used if TK_NUM or TK_STR
-    char *str;          // TK_STR contents, or TK_BACKTICK_STR fragment; NUL-terminated
+    char *str;   /**< For string literals: pointer to the unescaped contents. */
     char *wide_digits;  // wb/uwb _BitInt literal: full-precision digit text
                          // (no prefix/suffix/separators) when bit_width > 64
     int wide_base;      // base (2/8/10/16) for wide_digits, else unused
@@ -894,8 +861,7 @@ typedef struct Token {
 } Token;
 
 /*!
- @enum TypeKind
- @abstract Kind tag for the `Type` structure describing C types.
+ @brief Kind tag for the `Type` structure describing C types.
 */
 typedef enum {
     TY_VOID = 0,
@@ -952,17 +918,12 @@ typedef struct EmitEvent {
 } EmitEvent;
 
 /*!
- @struct Type
- @abstract Central representation of a C type in the compiler.
- @field kind One of TypeKind indicating the category of this type.
- @field size sizeof() value in bytes.
- @field align Alignment requirement in bytes.
- @field base For pointer/array types: the referenced element/base type.
+ @brief Central representation of a C type in the compiler.
 */
 struct Type {
-    TypeKind kind;
-    int size;            // sizeof() value
-    int align;           // alignment
+    TypeKind kind;   /**< One of TypeKind indicating the category of this type. */
+    int size;   /**< sizeof() value in bytes. */
+    int align;   /**< Alignment requirement in bytes. */
     bool is_unsigned;    // unsigned or signed
     bool is_atomic;      // true if _Atomic
     bool is_const;       // true if const-qualified
@@ -978,7 +939,7 @@ struct Type {
     // pointer or not. That means in many contexts "array of T" is
     // naturally handled as if it were "pointer to T", as required by
     // the C spec.
-    struct Type *base;
+    struct Type *base;   /**< For pointer/array types: the referenced element/base type. */
 
     // Declaration
     Token *name;
@@ -1073,20 +1034,16 @@ struct Type {
 #define CCCC_NO_INIT_PRIORITY (-1)
 
 /*!
- @struct Member
- @abstract Member (field) descriptor for struct and union types.
- @field ty Type of the member.
- @field name Token pointing to the member identifier.
- @field offset Byte offset of the member within its aggregate.
+ @brief Member (field) descriptor for struct and union types.
 */
 typedef struct Member {
     struct Member *next;
-    Type *ty;
+    Type *ty;   /**< Type of the member. */
     Token *tok; // for error message
-    Token *name;
+    Token *name;   /**< Token pointing to the member identifier. */
     int idx;
     int align;
-    int offset;
+    int offset;   /**< Byte offset of the member within its aggregate. */
 
     // Bitfield
     bool is_bitfield;
@@ -1095,8 +1052,7 @@ typedef struct Member {
 } Member;
 
 /*!
- @enum NodeKind
- @abstract Kinds of AST nodes produced by the parser.
+ @brief Kinds of AST nodes produced by the parser.
 */
 typedef enum {
     ND_NULL_EXPR = 0,      // Do nothing
@@ -1195,21 +1151,16 @@ typedef struct CleanupChainNode {
 } CleanupChainNode;
 
 /*!
- @struct Node
- @abstract Represents a node in the parser's abstract syntax tree.
- @field kind Node kind (see NodeKind).
- @field ty Resolved type of this node (after semantic analysis).
- @field lhs Left-hand side child (when applicable).
- @field rhs Right-hand side child (when applicable).
+ @brief Represents a node in the parser's abstract syntax tree.
 */
 struct Node {
-    NodeKind kind;     // Node kind
+    NodeKind kind;   /**< Node kind (see NodeKind). */
     struct Node *next; // Next node
-    Type *ty;          // Type, e.g. int or pointer to int
+    Type *ty;   /**< Resolved type of this node (after semantic analysis). */
     Token *tok;        // Representative token
 
-    struct Node *lhs; // Left-hand side
-    struct Node *rhs; // Right-hand side
+    struct Node *lhs;   /**< Left-hand side child (when applicable). */
+    struct Node *rhs;   /**< Right-hand side child (when applicable). */
 
     // "if" or "for" statement
     struct Node *cond;
@@ -1296,27 +1247,18 @@ struct Node {
 };
 
 /*!
- @struct Obj
- @abstract Represents a C object: either a variable (global/local) or a
+ @brief Represents a C object: either a variable (global/local) or a
            function. The parser and code generator use Obj for symbol
            and storage tracking.
- @field name Identifier name of the object.
- @field ty Type of the object.
- @field is_local True for local (stack) variables; false for globals.
- @field offset For local variables: stack offset. For globals/functions
-               some fields (like code_addr) are used instead.
- @field is_function True when this Obj represents a function.
- @field code_addr For functions compiled to VM bytecode: start address
-                 in the text segment.
 */
 struct Obj {
     struct Obj *next;
-    char *name;    // Variable name
+    char *name;   /**< Identifier name of the object. */
     char *display_name; // Source identifier when storage uses a synthetic name
     char *asm_label; // External symbol name from GNU asm("symbol") label
-    Type *ty;      // Type
+    Type *ty;   /**< Type of the object. */
     Token *tok;    // representative token
-    bool is_local; // local or global/function
+    bool is_local;   /**< True for local (stack) variables; false for globals. */
     int align;     // alignment
     bool is_used;
     bool is_maybe_unused;
@@ -1338,7 +1280,7 @@ struct Obj {
     bool fn_optimize_set;   // true if an optimize attribute was present
 
     // Local variable
-    int offset;
+    int offset;   /**< For local variables: stack offset. For globals/functions some fields (like code_addr) are used instead. */
     bool is_param;    // true if this is a function parameter
     bool is_captured; // true if accessed by a nested function (for optimization
                       // hints)
@@ -1384,7 +1326,7 @@ struct Obj {
     int   objsize_derived_offset; // byte offset from objsize_derived_from
 
     // Global variable or function
-    bool is_function;
+    bool is_function;   /**< True when this Obj represents a function. */
     bool is_definition;
     bool is_static;
     bool is_builtin_alloca; // the builtin alloca() used to lower VLAs (#588)
@@ -1439,7 +1381,7 @@ struct Obj {
     StringArray refs;
 
     // Code generation (for VM)
-    long long code_addr; // Address in text segment where function code starts
+    long long code_addr;   /**< For functions compiled to VM bytecode: start address in the text segment. */
     long long code_end_addr; // Address after function code in text segment
 
     // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
@@ -1455,8 +1397,7 @@ struct Obj {
 };
 
 /*!
- @struct CondIncl
- @abstract Stack entry used to track nested #if/#elif/#else processing
+ @brief Stack entry used to track nested #if/#elif/#else processing
            during preprocessing.
 */
 typedef struct CondIncl {
@@ -1484,31 +1425,23 @@ typedef struct AttrTarget {
 } AttrTarget;
 
 /*!
- @struct MacroFn
- @abstract Represents a compile-time macro function.
- @discussion Macro functions are functions marked with [[cccc::macro]] or
+ @brief Represents a compile-time macro function.
+ @details Macro functions are functions marked with [[cccc::macro]] or
              __attribute__((macro)) that execute during compilation to generate
              or transform AST nodes.
- @field name Function name.
- @field body_tokens Original token stream for function body (from preprocessor).
- @field compiled_fn Compiled function object (NULL until compiled).
- @field is_compiled True after successful compilation.
- @field is_macro_entry True if callable from user program macro call sites (always true for [[cccc::comptime]] functions).
- @field is_void_macro True if declared with void return type (definition-only).
- @field next Pointer to next macro in linked list.
 */
 typedef struct MacroFn {
-    char *name;               // Function name
-    Token *body_tokens;       // Original token stream for function body
-    Obj *compiled_fn;         // Compiled function object
-    bool is_compiled;         // True after successful compilation
-    bool is_macro_entry;      // True for all comptime functions (entry-callable from user code)
-    bool is_void_macro;       // True if declared void — definition-only, no splice node
+    char *name;   /**< Function name. */
+    Token *body_tokens;   /**< Original token stream for function body (from preprocessor). */
+    Obj *compiled_fn;   /**< Compiled function object (NULL until compiled). */
+    bool is_compiled;   /**< True after successful compilation. */
+    bool is_macro_entry;   /**< True if callable from user program macro call sites (always true for [[cccc::comptime]] functions). */
+    bool is_void_macro;   /**< True if declared with void return type (definition-only). */
     bool is_variadic;         // True if declaration has a trailing ...
     bool is_attribute_handler; // True for @macro(attribute("name")) handlers
     char *attribute_name;      // Registered custom attribute name
     int fixed_param_count;    // Number of named parameters before ...
-    struct MacroFn *next;     // Next macro in linked list
+    struct MacroFn *next;   /**< Pointer to next macro in linked list. */
 } MacroFn;
 
 // A struct member value captured from a comptime struct variable.
@@ -1705,50 +1638,35 @@ typedef struct ComptimeVar {
 } ComptimeVar;
 
 /*!
- @struct Scope
- @abstract Represents a parser block scope. Two kinds of block scopes are
+ @brief Represents a parser block scope. Two kinds of block scopes are
            used: one for variables/typedefs and another for tags.
 */
 /*!
- @struct VarScopeNode
- @abstract Linked list node for variable/typedef scope entries.
- @field var Pointer to variable object (if variable).
- @field type_def Pointer to typedef type (if typedef).
- @field enum_ty Pointer to enum type (if enum constant).
- @field enum_val Enum constant value (int64_t to support C23 wide underlying types).
- @field name Variable or typedef name.
- @field name_len Length of name.
- @field next Pointer to next node in list.
-
- @discussion The first 4 fields match VarScope layout for safe casting.
+ @brief Linked list node for variable/typedef scope entries.
+ @details The first 4 fields match VarScope layout for safe casting.
 */
 typedef struct VarScopeNode {
     // VarScope fields (must come first for casting)
-    Obj *var;
-    Type *type_def;
-    Type *enum_ty;
-    int64_t enum_val;
+    Obj *var;   /**< Pointer to variable object (if variable). */
+    Type *type_def;   /**< Pointer to typedef type (if typedef). */
+    Type *enum_ty;   /**< Pointer to enum type (if enum constant). */
+    int64_t enum_val;   /**< Enum constant value (int64_t to support C23 wide underlying types). */
     bool is_deprecated;
     char *deprecated_msg;
     // Additional fields for linked list
-    char *name;
-    int name_len;
-    struct VarScopeNode *next;
+    char *name;   /**< Variable or typedef name. */
+    int name_len;   /**< Length of name. */
+    struct VarScopeNode *next;   /**< Pointer to next node in list. */
 } VarScopeNode;
 
 /*!
- @struct TagScopeNode
- @abstract Linked list node for struct/union/enum tag scope entries.
- @field name Tag name.
- @field name_len Length of name.
- @field ty Pointer to tagged type.
- @field next Pointer to next node in list.
+ @brief Linked list node for struct/union/enum tag scope entries.
 */
 typedef struct TagScopeNode {
-    char *name;
-    int name_len;
-    Type *ty;
-    struct TagScopeNode *next;
+    char *name;   /**< Tag name. */
+    int name_len;   /**< Length of name. */
+    Type *ty;   /**< Pointer to tagged type. */
+    struct TagScopeNode *next;   /**< Pointer to next node in list. */
 } TagScopeNode;
 
 struct Scope {
@@ -1762,8 +1680,7 @@ struct Scope {
 };
 
 /*!
- @struct LabelEntry
- @abstract Tracks labels used for goto and labeled statements and their
+ @brief Tracks labels used for goto and labeled statements and their
            defined addresses in the generated text segment.
 */
 typedef struct LabelEntry {
@@ -1773,8 +1690,7 @@ typedef struct LabelEntry {
 } LabelEntry;
 
 /*!
- @struct GotoPatch
- @abstract Records a forward jump (JMP) that must be patched once the
+ @brief Records a forward jump (JMP) that must be patched once the
            destination label is defined.
 */
 typedef struct GotoPatch {
@@ -1890,42 +1806,29 @@ typedef struct {
 } AsyncRegSave;
 
 /*!
- @typedef AsmCallback
- @abstract Callback invoked when an `asm("...")` statement is encountered
+ @brief Callback invoked when an `asm("...")` statement is encountered
            during code generation.
  @param vm The VM/compiler instance.
  @param asm_str The asm string literal content.
  @param user_data User-provided context pointer (set via cc_set_asm_callback).
- @discussion The callback may emit custom bytecode into the VM's text
+ @details The callback may emit custom bytecode into the VM's text
              segment, perform logging, or otherwise handle the asm string.
 */
 typedef void (*AsmCallback)(VirtualMachine *vm, const char *asm_str, void *user_data);
 
 /*!
- @struct ForeignFunc
- @abstract Represents a registered foreign (native C) function callable from VM
+ @brief Represents a registered foreign (native C) function callable from VM
  code.
- @field name Function name (for lookup during compilation).
- @field func_ptr Pointer to the native C function.
- @field num_args Number of arguments the function expects (total for
- non-variadic, fixed args for variadic).
- @field returns_double True if function returns double, false if returns long
- long.
- @field returns_float True if function returns a single-precision float
- (mutually exclusive with returns_double).
- @field is_variadic True if function is variadic (accepts ... arguments).
- @field num_fixed_args For variadic functions: number of fixed args before ...
- (e.g., printf has 1: format string).
 */
 typedef struct ForeignFunc {
-    char *name;
+    char *name;   /**< Function name (for lookup during compilation). */
     size_t name_len;  // strlen(name), cached to avoid O(n) strlen per lookup (#164)
-    void *func_ptr;
-    int num_args;
-    int returns_double;
-    int returns_float; // 1 if function returns float (32-bit), 0 otherwise (#406)
-    int is_variadic;    // 1 if function is variadic (e.g., printf), 0 otherwise
-    int num_fixed_args; // For variadic functions, number of fixed args (rest
+    void *func_ptr;   /**< Pointer to the native C function. */
+    int num_args;   /**< Number of arguments the function expects (total for non-variadic, fixed args for variadic). */
+    int returns_double;   /**< True if function returns double, false if returns long long. */
+    int returns_float;   /**< True if function returns a single-precision float (mutually exclusive with returns_double). */
+    int is_variadic;   /**< True if function is variadic (accepts ... arguments). */
+    int num_fixed_args;   /**< For variadic functions: number of fixed args before ... (e.g., printf has 1: format string). */
                         // are variable)
     uint64_t double_arg_mask; // Bitmask indicating which args are doubles (bit
                               // N = arg N)
@@ -1951,27 +1854,18 @@ typedef struct DynamicSymbol {
 } DynamicSymbol;
 
 /*!
- @struct AllocHeader
- @abstract Metadata header stored before each heap allocation for tracking.
- @field size Size of allocation (excluding header), rounded up for alignment
- @field requested_size Original requested size (for bounds checking)
- @field magic Magic number (0xDEADBEEF) for detecting corruption.
- @field canary Front canary value for heap overflow detection (when enabled)
- @field freed Flag indicating if this block has been freed (for UAF detection)
- @field generation Generation counter incremented on each free (for UAF
- detection)
- @field alloc_pc Program counter at allocation site (for debugging)
+ @brief Metadata header stored before each heap allocation for tracking.
 */
 typedef struct AllocHeader {
-    size_t size;             // Allocated size (rounded, excluding header)
-    size_t requested_size;   // Original requested size (for bounds checking)
-    int magic;               // Magic number for debugging (0xDEADBEEF)
-    long long canary;        // Front canary (if heap canaries enabled)
-    int freed;               // 1 if freed (for UAF detection)
-    int generation;          // Generation counter (incremented on free)
+    size_t size;   /**< Size of allocation (excluding header), rounded up for alignment */
+    size_t requested_size;   /**< Original requested size (for bounds checking) */
+    int magic;   /**< Magic number (0xDEADBEEF) for detecting corruption. */
+    long long canary;   /**< Front canary value for heap overflow detection (when enabled) */
+    int freed;   /**< Flag indicating if this block has been freed (for UAF detection) */
+    int generation;   /**< Generation counter incremented on each free (for UAF detection) */
     int creation_generation; // Generation when pointer was created (for
                              // temporal safety)
-    long long alloc_pc;      // PC at allocation site (for leak detection)
+    long long alloc_pc;   /**< Program counter at allocation site (for debugging) */
     // Per-allocation type_kind was removed (#653): type tracking now lives
     // in a byte-granular shadow (vm->type_shadow_pages) so member/interior
     // accesses can be checked too, not just the base pointer. See CHKT3
@@ -1986,135 +1880,92 @@ _Static_assert(sizeof(AllocHeader) % 8 == 0,
                "malloc alignment path to introduce zero padding");
 
 /*!
- @struct FreeBlock
- @abstract Free list node for tracking freed memory blocks.
- @field next Pointer to next free block in the list.
- @field size Size of this free block (excluding header).
+ @brief Free list node for tracking freed memory blocks.
 */
 typedef struct FreeBlock {
-    struct FreeBlock *next;
-    size_t size;
+    struct FreeBlock *next;   /**< Pointer to next free block in the list. */
+    size_t size;   /**< Size of this free block (excluding header). */
 } FreeBlock;
 
 /*!
- @struct AllocRecord
- @abstract Tracks an active heap allocation for leak detection.
- @field next Pointer to next record in the list.
- @field address Address of the allocated memory (user pointer).
- @field size Size of the allocation in bytes.
- @field alloc_pc Program counter at allocation site.
+ @brief Tracks an active heap allocation for leak detection.
 */
 typedef struct AllocRecord {
-    struct AllocRecord *next;
-    void *address;
-    size_t size;
-    long long alloc_pc;
+    struct AllocRecord *next;   /**< Pointer to next record in the list. */
+    void *address;   /**< Address of the allocated memory (user pointer). */
+    size_t size;   /**< Size of the allocation in bytes. */
+    long long alloc_pc;   /**< Program counter at allocation site. */
 } AllocRecord;
 
 /*!
- @struct StackVarMeta
- @abstract Unified metadata for stack variable instrumentation.
- @field name Variable name (for debugging/reporting).
- @field bp Base pointer value when variable is active.
- @field offset Offset from BP (negative for locals, positive for params).
- @field ty Type information for the variable.
- @field scope_id Unique identifier for the scope where variable was declared.
- @field is_alive 1 if variable is in scope, 0 if out of scope.
- @field initialized 1 if variable has been initialized, 0 if uninitialized.
- @field read_count Number of read accesses to this variable.
- @field write_count Number of write accesses to this variable.
+ @brief Unified metadata for stack variable instrumentation.
 */
 typedef struct StackVarMeta {
-    char *name;
-    long long bp;
-    long long offset;
-    Type *ty;
-    int scope_id;
-    int is_alive;
-    int initialized;
-    long long read_count;
-    long long write_count;
+    char *name;   /**< Variable name (for debugging/reporting). */
+    long long bp;   /**< Base pointer value when variable is active. */
+    long long offset;   /**< Offset from BP (negative for locals, positive for params). */
+    Type *ty;   /**< Type information for the variable. */
+    int scope_id;   /**< Unique identifier for the scope where variable was declared. */
+    int is_alive;   /**< 1 if variable is in scope, 0 if out of scope. */
+    int initialized;   /**< 1 if variable has been initialized, 0 if uninitialized. */
+    long long read_count;   /**< Number of read accesses to this variable. */
+    long long write_count;   /**< Number of write accesses to this variable. */
 } StackVarMeta;
 
 /*!
- @struct ScopeVarNode
- @abstract Linked list node for tracking variables within a scope.
- @field meta Pointer to the variable's metadata.
- @field next Pointer to the next variable in the scope.
- */
+ @brief Linked list node for tracking variables within a scope.
+*/
 typedef struct ScopeVarNode {
-    StackVarMeta *meta;
-    struct ScopeVarNode *next;
+    StackVarMeta *meta;   /**< Pointer to the variable's metadata. */
+    struct ScopeVarNode *next;   /**< Pointer to the next variable in the scope. */
 } ScopeVarNode;
 
 /*!
- @struct ScopeVarList
- @abstract Linked list of variables belonging to a specific scope.
- @field head Head of the linked list.
- @field tail Tail for efficient O(1) append operations.
- */
+ @brief Linked list of variables belonging to a specific scope.
+*/
 typedef struct ScopeVarList {
-    ScopeVarNode *head;
-    ScopeVarNode *tail;
+    ScopeVarNode *head;   /**< Head of the linked list. */
+    ScopeVarNode *tail;   /**< Tail for efficient O(1) append operations. */
 } ScopeVarList;
 
 /*!
- @struct ProvenanceInfo
- @abstract Tracks pointer provenance (origin) for validation.
- @field origin_type Type of origin: 0=HEAP, 1=STACK, 2=GLOBAL.
- @field base Base address of the original object.
- @field size Size of the original object.
+ @brief Tracks pointer provenance (origin) for validation.
 */
 typedef struct ProvenanceInfo {
-    int origin_type; // 0=HEAP, 1=STACK, 2=GLOBAL
-    long long base;
-    size_t size;
+    int origin_type;   /**< Type of origin: 0=HEAP, 1=STACK, 2=GLOBAL. */
+    long long base;   /**< Base address of the original object. */
+    size_t size;   /**< Size of the original object. */
 } ProvenanceInfo;
 
 /*!
- @struct SourceMap
- @abstract Maps bytecode offsets to source file locations for debugger support.
- @field pc_offset Offset in text segment (bytecode) where this mapping applies.
- @field file Source file containing this code.
- @field line_no Line number in source file.
+ @brief Maps bytecode offsets to source file locations for debugger support.
 */
 typedef struct SourceMap {
-    long long pc_offset; // Offset in text segment
-    File *file;          // Source file
-    int line_no;         // Line number in source
+    long long pc_offset;   /**< Offset in text segment (bytecode) where this mapping applies. */
+    File *file;   /**< Source file containing this code. */
+    int line_no;   /**< Line number in source file. */
     int col_no;          // Column number (1-based)
     int end_col_no;      // End column number (1-based)
 } SourceMap;
 
 /*!
- @struct SourceIndex
- @abstract Secondary index keyed by (file, line_no) for O(log n) breakpoint lookups.
- @field file Source file.
- @field line_no Line number in source.
- @field first_pc First bytecode PC offset for this source location.
+ @brief Secondary index keyed by (file, line_no) for O(log n) breakpoint lookups.
 */
 typedef struct SourceIndex {
-    File *file;
-    int line_no;
-    Pc first_pc;
+    File *file;   /**< Source file. */
+    int line_no;   /**< Line number in source. */
+    Pc first_pc;   /**< First bytecode PC offset for this source location. */
 } SourceIndex;
 
 /*!
- @struct DebugSymbol
- @abstract Represents a variable's debug information for expression evaluation.
- @field name Variable name (for lookup).
- @field offset Offset from BP (negative for locals) or address in data segment
- (globals).
- @field ty Type of the variable.
- @field is_local True if local variable (BP-relative), false if global.
- @field scope_depth Scope depth (for handling shadowing).
+ @brief Represents a variable's debug information for expression evaluation.
 */
 typedef struct DebugSymbol {
-    char *name;       // Variable name
-    long long offset; // BP offset (locals) or data segment address (globals)
-    Type *ty;         // Variable type
-    int is_local;     // 1=local (BP-relative), 0=global (data segment)
-    int scope_depth;  // Scope depth for shadowing resolution
+    char *name;   /**< Variable name (for lookup). */
+    long long offset;   /**< Offset from BP (negative for locals) or address in data segment (globals). */
+    Type *ty;   /**< Type of the variable. */
+    int is_local;   /**< True if local variable (BP-relative), false if global. */
+    int scope_depth;   /**< Scope depth (for handling shadowing). */
     Obj *owner_fn;    // Owning function for locals, NULL for globals
 } DebugSymbol;
 
@@ -2140,15 +1991,7 @@ typedef struct TypeNameRecord {
 } TypeNameRecord;
 
 /*!
- @struct Watchpoint
- @abstract Represents a data breakpoint that triggers on memory access.
- @field address Memory address being watched.
- @field size Size of watched region in bytes.
- @field type Type flags: WATCH_READ | WATCH_WRITE | WATCH_CHANGE.
- @field old_value Last known value (for change detection).
- @field expr Original expression string (for display).
- @field enabled Whether this watchpoint is currently active.
- @field hit_count Number of times this watchpoint has been triggered.
+ @brief Represents a data breakpoint that triggers on memory access.
 */
 #ifndef MAX_WATCHPOINTS
 #define MAX_WATCHPOINTS 64
@@ -2160,102 +2003,73 @@ typedef struct TypeNameRecord {
 #define WATCH_CHANGE (1 << 2) // Only trigger if value actually changes
 
 typedef struct Watchpoint {
-    void *address;       // Address being watched
-    int size;            // Size in bytes
-    int type;            // WATCH_READ | WATCH_WRITE | WATCH_CHANGE
-    long long old_value; // Last value (for change detection)
-    char *expr;          // Original expression (for display)
-    int enabled;         // 1 if enabled, 0 if disabled
-    int hit_count;       // Number of times triggered
+    void *address;   /**< Memory address being watched. */
+    int size;   /**< Size of watched region in bytes. */
+    int type;   /**< Type flags: WATCH_READ | WATCH_WRITE | WATCH_CHANGE. */
+    long long old_value;   /**< Last known value (for change detection). */
+    char *expr;   /**< Original expression string (for display). */
+    int enabled;   /**< Whether this watchpoint is currently active. */
+    int hit_count;   /**< Number of times this watchpoint has been triggered. */
 } Watchpoint;
 
 /*!
- @struct Breakpoint
- @abstract Represents a debugger breakpoint at a specific program counter
+ @brief Represents a debugger breakpoint at a specific program counter
  location.
- @field pc Program counter address where the breakpoint is set.
- @field enabled Whether this breakpoint is currently active.
- @field hit_count Number of times this breakpoint has been hit.
- @field condition Optional condition expression source (NULL if unconditional).
- @field cond_fn Compiled condition wrapper function (NULL until the first hit
-        compiles it, or compilation fails -- see cond_compile_failed).
-        Compiled once per breakpoint (its pc fixes the enclosing function and
-        therefore every local's frame offset) and reused on every later hit;
-        only the live frame pointer varies between hits (ticket 113).
- @field cond_compile_failed Set when compiling `condition` failed, so later
-        hits don't retry and re-print the same diagnostic every time.
 */
 #ifndef MAX_BREAKPOINTS
 #define MAX_BREAKPOINTS 256
 #endif
 
 typedef struct Breakpoint {
-    Pc pc;        // Instruction index of breakpoint
-    int enabled;     // 1 if enabled, 0 if disabled
-    int hit_count;   // Number of times hit
-    char *condition; // Optional condition expression (NULL if unconditional)
-    struct Obj *cond_fn;      // Compiled condition wrapper (see doc above)
-    bool cond_compile_failed; // true if compiling `condition` failed once
+    Pc pc;   /**< Program counter address where the breakpoint is set. */
+    int enabled;   /**< Whether this breakpoint is currently active. */
+    int hit_count;   /**< Number of times this breakpoint has been hit. */
+    char *condition;   /**< Optional condition expression source (NULL if unconditional). */
+    struct Obj *cond_fn;   /**< Compiled condition wrapper function (NULL until the first hit compiles it, or compilation fails -- see cond_compile_failed). Compiled once per breakpoint (its pc fixes the enclosing function and therefore every local's frame offset) and reused on every later hit; only the live frame pointer varies between hits (ticket 113). */
+    bool cond_compile_failed;   /**< Set when compiling `condition` failed, so later hits don't retry and re-print the same diagnostic every time. */
 } Breakpoint;
 
 /*!
- @struct CompileError
- @abstract Represents a compilation error or warning collected during
+ @brief Represents a compilation error or warning collected during
  compilation.
- @field next Pointer to the next error in the linked list.
- @field message Formatted error message string.
- @field filename Source file name where the error occurred.
- @field line_no Line number in the source file.
- @field col_no Column number in the source file.
- @field severity 0 for error, 1 for warning.
 */
 typedef struct CompileError {
-    struct CompileError *next; // Next error in linked list
-    char *message;             // Formatted error message
-    char *filename;            // Source file name
-    int line_no;               // Line number
-    int col_no;                // Column number
-    int severity;              // 0 = error, 1 = warning
+    struct CompileError *next;   /**< Pointer to the next error in the linked list. */
+    char *message;   /**< Formatted error message string. */
+    char *filename;   /**< Source file name where the error occurred. */
+    int line_no;   /**< Line number in the source file. */
+    int col_no;   /**< Column number in the source file. */
+    int severity;   /**< 0 for error, 1 for warning. */
     const char *warn_name;     // Warning option name, or NULL for errors
 } CompileError;
 
 /*!
- @struct ArenaBlock
- @abstract Represents a single memory block in an arena allocator.
- @field base Pointer to the start of the memory block (from mmap/VirtualAlloc).
- @field ptr Current allocation pointer (bump pointer).
- @field size Total size of this block in bytes.
- @field next Pointer to the next block in the chain.
+ @brief Represents a single memory block in an arena allocator.
 */
 typedef struct ArenaBlock {
-    char *base;              // Start of memory block
-    char *ptr;               // Current allocation pointer (bump pointer)
-    size_t size;             // Total block size
-    struct ArenaBlock *next; // Next block in chain
+    char *base;   /**< Pointer to the start of the memory block (from mmap/VirtualAlloc). */
+    char *ptr;   /**< Current allocation pointer (bump pointer). */
+    size_t size;   /**< Total size of this block in bytes. */
+    struct ArenaBlock *next;   /**< Pointer to the next block in the chain. */
 } ArenaBlock;
 
 /*!
- @struct Arena
- @abstract Arena allocator for fast, bulk memory allocation with single
+ @brief Arena allocator for fast, bulk memory allocation with single
  deallocation.
- @field current Currently active block for allocations.
- @field blocks Linked list of all allocated blocks (for cleanup).
- @field default_block_size Default size for new blocks (typically 1MB).
- @discussion Arena allocators use bump-pointer allocation within large memory
+ @details Arena allocators use bump-pointer allocation within large memory
              blocks (allocated via mmap/VirtualAlloc). All allocations are
              freed together when the arena is destroyed. Used for parser
              frontend (tokens, AST nodes) which have fire-and-forget lifetime.
 */
 typedef struct Arena {
-    ArenaBlock *current;       // Current block for allocations
-    ArenaBlock *blocks;        // All blocks (for cleanup)
-    size_t default_block_size; // Default block size (1MB)
+    ArenaBlock *current;   /**< Currently active block for allocations. */
+    ArenaBlock *blocks;   /**< Linked list of all allocated blocks (for cleanup). */
+    size_t default_block_size;   /**< Default size for new blocks (typically 1MB). */
 } Arena;
 
 /*!
- @struct Debugger
- @abstract Encapsulates all debugger state for the CCCC VM.
- @discussion Contains breakpoints, stepping control, source mapping,
+ @brief Encapsulates all debugger state for the CCCC VM.
+ @details Contains breakpoints, stepping control, source mapping,
              debug symbols, and watchpoints. Enabled via CCCC_ENABLE_DEBUGGER
  flag.
 */
@@ -2322,18 +2136,16 @@ typedef struct Debugger {
 #define RETURN_BUFFER_POOL_SIZE 8
 
 /*!
- @struct Compiler
- @abstract Encapsulates all compiler frontend state: preprocessor, parser, and
+ @brief Encapsulates all compiler frontend state: preprocessor, parser, and
  code generator.
- @discussion Contains state for preprocessing (#include, #define, #if), parsing
+ @details Contains state for preprocessing (#include, #define, #if), parsing
  (AST construction, scope management), and code generation (labels, patches,
  FFI). Separated from VM runtime state to clarify the compilation/execution
  boundary.
 */
 /*!
- @enum CStdVersion
- @abstract Selected C language standard version.
- @discussion Used to drive __STDC_VERSION__ and other standard-dependent
+ @brief Selected C language standard version.
+ @details Used to drive __STDC_VERSION__ and other standard-dependent
  predefined macros. GNU variants (gnu99, gnu11, etc.) are stored separately
  in Compiler.c_std_gnu.
 */
@@ -2346,9 +2158,8 @@ typedef enum {
 } CStdVersion;
 
 /*!
- @enum CCCCAttrTarget
- @abstract Attribute spelling used when CCCC emits generated C source.
- @discussion Controls how non-CCCC attributes are printed for frontend output
+ @brief Attribute spelling used when CCCC emits generated C source.
+ @details Controls how non-CCCC attributes are printed for frontend output
  modes such as -E, -m, -G, and native compilation.
 */
 typedef enum {
@@ -2901,10 +2712,9 @@ typedef struct {
 } StackIntervals;
 
 /*!
- @struct CCCC
- @abstract Encapsulates all state for the CCCC compiler and virtual
+ @brief Encapsulates all state for the CCCC compiler and virtual
            machine. Instances are independent and support embedding.
- @discussion The structure contains registers, memory segments, frontend
+ @details The structure contains registers, memory segments, frontend
              state (preprocessor, tokenizer, parser) and codegen/VM
              bookkeeping. All public API functions accept an
              `CCCC *` as the first parameter.
@@ -3219,9 +3029,8 @@ struct VirtualMachine {
 };
 
 /*!
- @function cc_init
- @abstract Initialize an CCCC instance.
- @discussion The caller should allocate an `CCCC` struct (usually on the
+ @brief Initialize an CCCC instance.
+ @details The caller should allocate an `CCCC` struct (usually on the
              stack) and pass its pointer to this function. This sets up
              memory segments, default include paths, and other runtime
              defaults.
@@ -3231,9 +3040,8 @@ struct VirtualMachine {
 void cc_init(VirtualMachine *vm, uint32_t flags);
 
 /*!
- @function cc_destroy
- @abstract Free resources owned by an CCCC instance.
- @discussion Does not free the `CCCC` struct itself; the caller is
+ @brief Free resources owned by an CCCC instance.
+ @details Does not free the `CCCC` struct itself; the caller is
              responsible for the memory of the struct if it was
              dynamically allocated.
  @param vm The CCCC instance to destroy.
@@ -3241,48 +3049,42 @@ void cc_init(VirtualMachine *vm, uint32_t flags);
 void cc_destroy(VirtualMachine *vm);
 
 /*!
- @function cc_get_error_count
- @abstract Get the number of errors collected during compilation.
+ @brief Get the number of errors collected during compilation.
  @param vm The CCCC instance.
- @result The number of errors collected.
+ @return The number of errors collected.
 */
 int cc_get_error_count(VirtualMachine *vm);
 
 /*!
- @function cc_get_warning_count
- @abstract Get the number of warnings collected during compilation.
+ @brief Get the number of warnings collected during compilation.
  @param vm The CCCC instance.
- @result The number of warnings collected.
+ @return The number of warnings collected.
 */
 int cc_get_warning_count(VirtualMachine *vm);
 
 /*!
- @function cc_has_errors
- @abstract Check if any errors have been collected.
+ @brief Check if any errors have been collected.
  @param vm The CCCC instance.
- @result True if errors exist, false otherwise.
+ @return True if errors exist, false otherwise.
 */
 bool cc_has_errors(VirtualMachine *vm);
 
 /*!
- @function cc_clear_errors
- @abstract Clear all collected errors and warnings.
- @discussion Useful for reusing a VM instance across multiple compilations.
+ @brief Clear all collected errors and warnings.
+ @details Useful for reusing a VM instance across multiple compilations.
  @param vm The CCCC instance.
 */
 void cc_clear_errors(VirtualMachine *vm);
 
 /*!
- @function cc_print_all_errors
- @abstract Print all collected errors and warnings to stderr.
+ @brief Print all collected errors and warnings to stderr.
  @param vm The CCCC instance.
 */
 void cc_print_all_errors(VirtualMachine *vm);
 
 /*!
- @function cc_print_stack_report
- @abstract Print stack instrumentation statistics and report.
- @discussion Outputs stack usage statistics including high water mark,
+ @brief Print stack instrumentation statistics and report.
+ @details Outputs stack usage statistics including high water mark,
              variable access counts, and scope information. Only useful
              when stack instrumentation is enabled.
  @param vm The CCCC instance.
@@ -3290,9 +3092,8 @@ void cc_print_all_errors(VirtualMachine *vm);
 void cc_print_stack_report(VirtualMachine *vm);
 
 /*!
- @function cc_include
- @abstract Add a directory to the compiler's header search paths.
- @discussion This adds the path to the list of directories searched for
+ @brief Add a directory to the compiler's header search paths.
+ @details This adds the path to the list of directories searched for
              "..." includes (quote includes).
  @param vm The CCCC instance.
  @param path Filesystem path to add to include search.
@@ -3300,9 +3101,8 @@ void cc_print_stack_report(VirtualMachine *vm);
 void cc_include(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_system_include
- @abstract Add a directory to the compiler's system header search paths.
- @discussion This adds the path to the list of directories searched for
+ @brief Add a directory to the compiler's system header search paths.
+ @details This adds the path to the list of directories searched for
              <...> includes (angle bracket includes). System include paths
              are searched after regular include paths for "..." includes.
  @param vm The CCCC instance.
@@ -3311,8 +3111,7 @@ void cc_include(VirtualMachine *vm, const char *path);
 void cc_system_include(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_define
- @abstract Define or override a preprocessor macro for the given VM.
+ @brief Define or override a preprocessor macro for the given VM.
  @param vm The CCCC instance.
  @param name Macro identifier (NUL-terminated).
  @param buf Macro replacement text (NUL-terminated).
@@ -3320,16 +3119,14 @@ void cc_system_include(VirtualMachine *vm, const char *path);
 void cc_define(VirtualMachine *vm, char *name, char *buf);
 
 /*!
- @function cc_undef
- @abstract Remove a preprocessor macro definition from the VM.
+ @brief Remove a preprocessor macro definition from the VM.
  @param vm The CCCC instance.
  @param name Macro identifier to remove.
 */
 void cc_undef(VirtualMachine *vm, char *name);
 
 /*!
- @function cc_set_asm_callback
- @abstract Register a callback invoked for `asm("...")` statements.
+ @brief Register a callback invoked for `asm("...")` statements.
  @param vm The CCCC instance.
  @param callback Callback function pointer, or NULL to unregister.
  @param user_data Optional user context pointer passed to the callback.
@@ -3337,41 +3134,36 @@ void cc_undef(VirtualMachine *vm, char *name);
 void cc_set_asm_callback(VirtualMachine *vm, AsmCallback callback, void *user_data);
 
 /*!
- @function cc_ffi_allow
- @abstract Add a native function name to the FFI allow list.
- @discussion When the allow list is non-empty, only listed names may be called
+ @brief Add a native function name to the FFI allow list.
+ @details When the allow list is non-empty, only listed names may be called
              through registered FFI or runtime dynamic symbols.
 */
 void cc_ffi_allow(VirtualMachine *vm, const char *name);
 
 /*!
- @function cc_ffi_deny
- @abstract Add a native function name to the FFI deny list.
- @discussion The deny list is checked only when the allow list is empty.
+ @brief Add a native function name to the FFI deny list.
+ @details The deny list is checked only when the allow list is empty.
 */
 void cc_ffi_deny(VirtualMachine *vm, const char *name);
 
 /*!
- @function cc_ffi_clear_allow_list
- @abstract Remove all names from the FFI allow list.
+ @brief Remove all names from the FFI allow list.
 */
 void cc_ffi_clear_allow_list(VirtualMachine *vm);
 
 /*!
- @function cc_ffi_clear_deny_list
- @abstract Remove all names from the FFI deny list.
+ @brief Remove all names from the FFI deny list.
 */
 void cc_ffi_clear_deny_list(VirtualMachine *vm);
 
 /*!
- @function cc_register_cfunc
- @abstract Register a native C function to be callable from VM code via FFI.
+ @brief Register a native C function to be callable from VM code via FFI.
  @param vm The CCCC instance.
  @param name Function name (must match declarations in C source).
  @param func_ptr Pointer to the native C function.
  @param num_args Number of arguments the function expects.
  @param returns_double Return type: 0 = long long, 1 = double, 2 = float (#406).
- @discussion Registered functions can be called from C code compiled to VM
+ @details Registered functions can be called from C code compiled to VM
              bytecode. The CALLF instruction handles argument marshalling.
              All integer types are passed/returned as long long, doubles as
  double, and `float`-returning functions use returns_double=2.
@@ -3380,8 +3172,7 @@ void cc_register_cfunc(VirtualMachine *vm, const char *name, void *func_ptr, int
                        int returns_double);
 
 /*!
- @function cc_register_cfunc_ex
- @abstract Register a C function with detailed argument type information for
+ @brief Register a C function with detailed argument type information for
  correct FFI calling conventions.
  @param vm The CCCC instance.
  @param name Function name (must match declarations in C source).
@@ -3392,7 +3183,7 @@ void cc_register_cfunc(VirtualMachine *vm, const char *name, void *func_ptr, int
  corresponds to argument N (0-indexed). For example: 0b11 = both args 0 and 1
  are doubles (e.g., pow(double, double)). 0b01 = only arg 0 is double (e.g.,
  ldexp(double, int)).
- @discussion Use this function instead of cc_register_cfunc() for functions that
+ @details Use this function instead of cc_register_cfunc() for functions that
  take multiple double arguments or mix double and integer arguments. The bitmask
  ensures correct calling conventions on all platforms. For functions with only
  integer arguments or single double arguments, cc_register_cfunc() is
@@ -3405,8 +3196,7 @@ void cc_register_cfunc_ex(VirtualMachine *vm, const char *name, void *func_ptr,
                           uint64_t double_arg_mask);
 
 /*!
- @function cc_register_variadic_cfunc
- @abstract Register a variadic native C function to be callable from VM code via
+ @brief Register a variadic native C function to be callable from VM code via
  FFI.
  @param vm The CCCC instance.
  @param name Function name (must match declarations in C source).
@@ -3414,7 +3204,7 @@ void cc_register_cfunc_ex(VirtualMachine *vm, const char *name, void *func_ptr,
  @param num_fixed_args Number of fixed arguments before the ... (e.g., printf
  has 1: format string).
  @param returns_double Return type: 0 = long long, 1 = double, 2 = float (#406).
- @discussion Variadic functions accept a variable number of arguments after the
+ @details Variadic functions accept a variable number of arguments after the
  fixed arguments. CCCC uses platform native inline-assembly to call variadic
  functions. Example: printf has 1 fixed arg (format), fprintf has 2 (stream,
  format).
@@ -3423,10 +3213,9 @@ void cc_register_variadic_cfunc(VirtualMachine *vm, const char *name, void *func
                                 int num_fixed_args, int returns_double);
 
 /*!
- @function cc_load_stdlib
- @abstract Register all standard library functions available via FFI.
+ @brief Register all standard library functions available via FFI.
  @param vm The CCCC instance.
- @discussion Automatically registers 50+ standard library functions including:
+ @details Automatically registers 50+ standard library functions including:
              - Memory: malloc, free, calloc, realloc, memcpy, memmove, memset,
  memcmp
              - String: strlen, strcpy, strncpy, strcat, strcmp, strncmp, strchr,
@@ -3444,8 +3233,7 @@ void cc_register_variadic_cfunc(VirtualMachine *vm, const char *name, void *func
 void cc_load_stdlib(VirtualMachine *vm);
 
 /*!
- @function cc_dlsym
- @abstract Update an existing registered FFI function's pointer by name.
+ @brief Update an existing registered FFI function's pointer by name.
  @param vm The CCCC instance.
  @param name Function name to update.
  @param func_ptr New function pointer to assign.
@@ -3453,7 +3241,7 @@ void cc_load_stdlib(VirtualMachine *vm);
  @param returns_double Expected return type (must match registered function);
  0 = long long, 1 = double, 2 = float (#406).
  @return 0 on success, -1 on error (function not found or signature mismatch).
- @discussion This function is useful for updating function pointers after
+ @details This function is useful for updating function pointers after
  loading a dynamic library, or for redirecting calls to different
  implementations. The function must already be registered via cc_register_cfunc
  or cc_register_variadic_cfunc.
@@ -3462,13 +3250,12 @@ int cc_dlsym(VirtualMachine *vm, const char *name, void *func_ptr, int num_args,
              int returns_double);
 
 /*!
- @function cc_dlopen
- @abstract Load a dynamic library and resolve all registered FFI functions.
+ @brief Load a dynamic library and resolve all registered FFI functions.
  @param vm The CCCC instance.
  @param lib_path Path to the dynamic library (.so, .dylib, .dll) or NULL for
  default libraries.
  @return 0 on success, -1 on error.
- @discussion This function opens a dynamic library and attempts to resolve all
+ @details This function opens a dynamic library and attempts to resolve all
  currently registered FFI functions. Functions that cannot be resolved will
  print warnings but won't fail the entire operation. If lib_path is NULL, the
  function searches in default system libraries.
@@ -3483,11 +3270,10 @@ int cc_dlsym(VirtualMachine *vm, const char *name, void *func_ptr, int num_args,
 int cc_dlopen(VirtualMachine *vm, const char *lib_path);
 
 /*!
- @function cc_load_libc
- @abstract Load the platform's standard C library and resolve FFI functions.
+ @brief Load the platform's standard C library and resolve FFI functions.
  @param vm The CCCC instance.
  @return 0 on success, -1 on error.
- @discussion This function automatically detects and loads the correct C library
+ @details This function automatically detects and loads the correct C library
  for the current platform:
              - macOS: /usr/lib/libSystem.dylib
              - Linux: /lib64/libc.so.6 (or /lib/libc.so.6 on 32-bit)
@@ -3499,8 +3285,7 @@ int cc_dlopen(VirtualMachine *vm, const char *lib_path);
 int cc_load_libc(VirtualMachine *vm);
 
 /*!
- @function cc_preprocess
- @abstract Run the preprocessor on a C source file and return a token stream.
+ @brief Run the preprocessor on a C source file and return a token stream.
  @param vm The CCCC instance.
  @param path Path to the source file to preprocess.
  @return Head of the token stream (linked Token list). Caller owns tokens.
@@ -3508,8 +3293,7 @@ int cc_load_libc(VirtualMachine *vm);
 Token *cc_preprocess(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_parse
- @abstract Parse a preprocessed token stream into an AST and produce
+ @brief Parse a preprocessed token stream into an AST and produce
            a linked list of top-level Obj declarations.
  @param vm The CCCC instance.
  @param tok Head of the preprocessed token stream.
@@ -3518,8 +3302,7 @@ Token *cc_preprocess(VirtualMachine *vm, const char *path);
 Obj *cc_parse(VirtualMachine *vm, Token *tok);
 
 /*!
- @function cc_parse_expr
- @abstract Parse a single C expression from token stream.
+ @brief Parse a single C expression from token stream.
  @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse.
@@ -3528,9 +3311,8 @@ Obj *cc_parse(VirtualMachine *vm, Token *tok);
 Node *cc_parse_expr(VirtualMachine *vm, Token **rest, Token *tok);
 
 /*!
- @function cc_parse_assign
- @abstract Parse an assignment expression from token stream (stops at commas).
- @discussion Used for parsing function arguments and other contexts where commas
+ @brief Parse an assignment expression from token stream (stops at commas).
+ @details Used for parsing function arguments and other contexts where commas
              are separators rather than operators.
  @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
@@ -3540,8 +3322,7 @@ Node *cc_parse_expr(VirtualMachine *vm, Token **rest, Token *tok);
 Node *cc_parse_assign(VirtualMachine *vm, Token **rest, Token *tok);
 
 /*!
- @function cc_parse_stmt
- @abstract Parse a single C statement from token stream.
+ @brief Parse a single C statement from token stream.
  @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse.
@@ -3550,8 +3331,7 @@ Node *cc_parse_assign(VirtualMachine *vm, Token **rest, Token *tok);
 Node *cc_parse_stmt(VirtualMachine *vm, Token **rest, Token *tok);
 
 /*!
- @function cc_parse_compound_stmt
- @abstract Parse a compound statement (block) from token stream.
+ @brief Parse a compound statement (block) from token stream.
  @param vm The CCCC instance.
  @param rest Pointer to receive the remaining tokens after parsing.
  @param tok Head of the token stream to parse (should be opening brace).
@@ -3563,8 +3343,7 @@ double  cc_eval_double(VirtualMachine *vm, Node *node);
 void cc_init_parser(VirtualMachine *vm);
 
 /*!
- @enum ReplUnitKind
- @abstract Classification result from cc_parse_repl_unit (ticket #661).
+ @brief Classification result from cc_parse_repl_unit (ticket #661).
 */
 typedef enum {
     REPL_UNIT_EMPTY, // line was empty/whitespace-only after tokenizing
@@ -3573,8 +3352,7 @@ typedef enum {
 } ReplUnitKind;
 
 /*!
- @function cc_parse_repl_unit
- @abstract Parse and classify one top-level unit typed at the REPL prompt.
+ @brief Parse and classify one top-level unit typed at the REPL prompt.
  @param vm The CCCC instance. vm->compiler.scope must already hold a
            persistent global scope (see parse()) -- this function does not
            enter/leave scope or reset vm->compiler.globals; declarations
@@ -3584,7 +3362,7 @@ typedef enum {
  @param out_expr Receives the parsed expression Node when the return value is
            REPL_UNIT_EXPR; set to NULL otherwise.
  @return REPL_UNIT_EMPTY, REPL_UNIT_DECL, or REPL_UNIT_EXPR.
- @discussion Classification peeks the first token with the same predicate
+ @details Classification peeks the first token with the same predicate
              used to distinguish a block-scope declaration from a statement
              (is_decl_start, which consults the persistent typedef/keyword
              table) so `a * b;` parses as a declaration when `a` is a typedef
@@ -3597,9 +3375,8 @@ typedef enum {
 ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr);
 
 /*!
- @function cc_execute_inline_macros
- @abstract Execute all inline macros before parsing.
- @discussion Compiles and executes every [[cccc::macro(inline)]] (or
+ @brief Execute all inline macros before parsing.
+ @details Compiles and executes every [[cccc::macro(inline)]] (or
              __attribute__((macro(inline)))) macro. Each inline macro runs
              automatically at its declaration point (no explicit call needed).
              Generated functions are stored in vm->compiler.macro_globals and
@@ -3631,9 +3408,8 @@ bool cc_comptime_resolve_type_name(VirtualMachine *vm, const char *name, int len
 bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name, int len);
 
 /*!
- @function cc_expand_macros
- @abstract Expand all macro calls in the AST.
- @discussion Walks the AST and replaces ND_MACRO_CALL nodes with the
+ @brief Expand all macro calls in the AST.
+ @details Walks the AST and replaces ND_MACRO_CALL nodes with the
              generated AST from executing the corresponding macro function.
              Must be called after cc_parse and before cc_compile.
  @param vm The CCCC instance.
@@ -3642,21 +3418,19 @@ bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name, int le
 void cc_expand_macros(VirtualMachine *vm, Obj *prog);
 
 /*!
- @function cc_eager_expand_macro_call
- @abstract Expand a single ND_MACRO_CALL node using the already-compiled macros.
- @discussion Called from cc_finalize_macro_gvar_inits while in_macro_expansion is true.
+ @brief Expand a single ND_MACRO_CALL node using the already-compiled macros.
+ @details Called from cc_finalize_macro_gvar_inits while in_macro_expansion is true.
              Must only be called after compile_all_macros has run (i.e. from within
              cc_expand_macros or cc_finalize_macro_gvar_inits).
  @param vm The CCCC instance.
  @param node The node to expand; must be non-NULL.
- @returns The expanded (replacement) node, or the original node if not ND_MACRO_CALL.
+ @return The expanded (replacement) node, or the original node if not ND_MACRO_CALL.
 */
 Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node);
 
 /*!
- @function cc_finalize_macro_gvar_inits
- @abstract Finalize global variable initializers that were deferred due to macro calls.
- @discussion During cc_parse, gvar initializers containing ND_MACRO_CALL are deferred
+ @brief Finalize global variable initializers that were deferred due to macro calls.
+ @details During cc_parse, gvar initializers containing ND_MACRO_CALL are deferred
              (their has_pending_macro_init flag is set and the Initializer tree stored in
              constexpr_init). This function, called from cc_expand_macros after macros are
              compiled and expanded, processes those deferred initializers: it expands the
@@ -3667,9 +3441,8 @@ Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node);
 void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog);
 
 /*!
- @function cc_serialize_program
- @abstract Serialize a program AST back to C source code.
- @discussion Used with -m/--dump-expanded and -G flags to output
+ @brief Serialize a program AST back to C source code.
+ @details Used with -m/--dump-expanded and -G flags to output
              macro-expanded source that can be compiled with gcc or other
              C compilers.
  @param f Output file stream.
@@ -3681,9 +3454,8 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog);
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only);
 
 /*!
- @function cc_link_progs
- @abstract Link multiple parsed programs (Obj lists) into a single program.
- @discussion Takes an array of Obj* programs and combines them into one
+ @brief Link multiple parsed programs (Obj lists) into a single program.
+ @details Takes an array of Obj* programs and combines them into one
              linked list. This allows multiple source files to be compiled
              together into a single program. The function handles duplicate
              definitions by preferring definitions over declarations.
@@ -3695,23 +3467,21 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count);
 
 /*!
- @function cc_compile
- @abstract Compile the parsed program (Obj list) into VM bytecode.
+ @brief Compile the parsed program (Obj list) into VM bytecode.
  @param vm The CCCC instance.
  @param prog Linked list of top-level Obj returned by cc_parse.
 */
 void cc_compile(VirtualMachine *vm, Obj *prog);
 
 /*!
- @function cc_repl_compile_new
- @abstract Incrementally compile only the globals prepended to
+ @brief Incrementally compile only the globals prepended to
            vm->compiler.globals since `old_head` -- for the REPL (ticket #661).
  @param vm The CCCC instance. On first call this lazily allocates VM segments
            the same way cc_compile does.
  @param old_head The value of vm->compiler.globals captured *before* the new
            unit was parsed/synthesized. Everything from vm->compiler.globals
            up to (but not including) old_head is treated as new.
- @discussion Unlike cc_compile/gen(), this never resets or re-lays-out
+ @details Unlike cc_compile/gen(), this never resets or re-lays-out
              already-compiled globals or functions: their code_addr, data
              offsets, and current runtime contents are left untouched, so
              prior REPL evaluations' side effects (mutated globals, pointers
@@ -3721,8 +3491,7 @@ void cc_compile(VirtualMachine *vm, Obj *prog);
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head);
 
 /*!
- @struct CcExprSnapshot
- @abstract Captured compiler scope/globals/locals state, taken before parsing
+ @brief Captured compiler scope/globals/locals state, taken before parsing
            or synthesizing a one-off expression (REPL line or debugger
            condition) so a failed attempt can be rolled back without
            disturbing earlier, successful state. Implemented in src/repl.c;
@@ -3739,22 +3508,19 @@ typedef struct {
 } CcExprSnapshot;
 
 /*!
- @function cc_expr_snapshot
- @abstract Capture the current scope/globals/locals state.
+ @brief Capture the current scope/globals/locals state.
  @param vm The CCCC instance. vm->compiler.scope must be non-NULL.
 */
 CcExprSnapshot cc_expr_snapshot(VirtualMachine *vm);
 
 /*!
- @function cc_expr_snapshot_discard
- @abstract Free the bucket-array copies taken by cc_expr_snapshot, for a unit
+ @brief Free the bucket-array copies taken by cc_expr_snapshot, for a unit
            that succeeded and whose state should be kept as-is.
 */
 void cc_expr_snapshot_discard(CcExprSnapshot *snap);
 
 /*!
- @function cc_expr_snapshot_restore
- @abstract Roll vm->compiler.scope/globals/locals back to a prior
+ @brief Roll vm->compiler.scope/globals/locals back to a prior
            cc_expr_snapshot, discarding anything a failed unit added.
            Obj/Node/scope-entry memory the failed unit allocated is
            arena-allocated and simply becomes unreachable rather than freed.
@@ -3762,8 +3528,7 @@ void cc_expr_snapshot_discard(CcExprSnapshot *snap);
 void cc_expr_snapshot_restore(VirtualMachine *vm, CcExprSnapshot *snap);
 
 /*!
- @function cc_expr_exec_wrapper
- @abstract Run a compiled zero-argument wrapper function once on the
+ @brief Run a compiled zero-argument wrapper function once on the
            persistent VM and read its result, mirroring the save/reset/run/
            restore pattern execute_macro_fn (src/macros.c) uses for comptime
            macro bodies -- but reading the *runtime* return registers
@@ -3777,8 +3542,7 @@ void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
                           double *out_f);
 
 /*!
- @function cc_run
- @abstract Execute the compiled program within the VM.
+ @brief Execute the compiled program within the VM.
  @param vm The CCCC instance containing compiled bytecode.
  @param argc Argument count to pass to the program's main().
  @param argv Argument vector (NUL-terminated array of strings).
@@ -3787,8 +3551,7 @@ void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
 int cc_run(VirtualMachine *vm, int argc, char **argv);
 
 /*!
- @function cc_run_at
- @abstract Execute the compiled program starting at a specific bytecode address.
+ @brief Execute the compiled program starting at a specific bytecode address.
  @param vm The CCCC instance containing compiled bytecode.
  @param entry Program counter (instruction index) to start execution from.
  @param argc Argument count to pass to the program.
@@ -3798,24 +3561,21 @@ int cc_run(VirtualMachine *vm, int argc, char **argv);
 int cc_run_at(VirtualMachine *vm, Pc entry, int argc, char **argv);
 
 /*!
- @function cc_print_tokens
- @abstract Print a token stream to stdout (useful for debugging the
+ @brief Print a token stream to stdout (useful for debugging the
            preprocessor and tokenizer).
  @param tok Head of the token stream to print.
 */
 void cc_print_tokens(Token *tok);
 
 /*!
- @function cc_disassemble
- @abstract Disassemble the compiled bytecode to stdout.
+ @brief Disassemble the compiled bytecode to stdout.
  @param vm The CCCC instance containing compiled bytecode.
 */
 void cc_disassemble(VirtualMachine *vm);
 
 /*!
- @function cc_output_json
- @abstract Output C header declarations as JSON for FFI wrapper generation.
- @discussion Serializes function signatures, struct/union definitions, enum
+ @brief Output C header declarations as JSON for FFI wrapper generation.
+ @details Serializes function signatures, struct/union definitions, enum
              declarations, and global variables from the parsed AST to JSON
              format. The output includes full type information with recursive
              expansion of pointers, arrays, and aggregate types. Storage class
@@ -3836,9 +3596,8 @@ void cc_disassemble(VirtualMachine *vm);
 void cc_output_json(FILE *f, Obj *prog);
 
 /*!
- @function cc_output_source_map_json
- @abstract Output source map as JSON to a file for debugging tools.
- @discussion Outputs source maps in JSON format, mapping bytecode PC offsets
+ @brief Output source map as JSON to a file for debugging tools.
+ @details Outputs source maps in JSON format, mapping bytecode PC offsets
              to source locations with file, line, and column information.
  @param vm The CCCC instance with source map data.
  @param f Output file stream.
@@ -3846,9 +3605,8 @@ void cc_output_json(FILE *f, Obj *prog);
 void cc_output_source_map_json(VirtualMachine *vm, FILE *f);
 
 /*!
- @function cc_save_bytecode
- @abstract Save compiled bytecode to a file for later execution.
- @discussion Serializes the text segment, data segment, and necessary
+ @brief Save compiled bytecode to a file for later execution.
+ @details Serializes the text segment, data segment, and necessary
              metadata to a binary file. The file can be loaded and executed
              by cc_load_bytecode().
  @param vm The CCCC instance containing compiled bytecode.
@@ -3858,9 +3616,8 @@ void cc_output_source_map_json(VirtualMachine *vm, FILE *f);
 int cc_save_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_write_bytecode
- @abstract Write compiled bytecode to an open stdio stream.
- @discussion Serializes the text segment, data segment, and necessary
+ @brief Write compiled bytecode to an open stdio stream.
+ @details Serializes the text segment, data segment, and necessary
              metadata as a binary blob to @c f. The output is the same
              format as cc_save_bytecode(), so it can be loaded with
              cc_load_bytecode() after being written to a file.
@@ -3872,9 +3629,8 @@ int cc_save_bytecode(VirtualMachine *vm, const char *path);
 int cc_write_bytecode(VirtualMachine *vm, FILE *f);
 
 /*!
- @function cc_load_bytecode
- @abstract Load compiled bytecode from a file.
- @discussion Deserializes bytecode previously saved with cc_save_bytecode()
+ @brief Load compiled bytecode from a file.
+ @details Deserializes bytecode previously saved with cc_save_bytecode()
              and prepares the VM for execution with cc_run().
  @param vm The CCCC instance to load bytecode into.
  @param path Input file path.
@@ -3883,9 +3639,8 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f);
 int cc_load_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_load_module
- @abstract Append a compiled bytecode module (.c4d or .c4a) into a running VM.
- @discussion Merges the module's text and data segments onto the host VM.
+ @brief Append a compiled bytecode module (.c4d or .c4a) into a running VM.
+ @details Merges the module's text and data segments onto the host VM.
              All absolute-PC jump/call operands and text-relative (LTA3)
              immediates in the appended text are patched by the pre-append text
              size. Data pointer slots are re-anchored. FFI, TLS, and return-buffer
@@ -3900,9 +3655,8 @@ int cc_load_bytecode(VirtualMachine *vm, const char *path);
 int cc_load_module(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_link_bytecode
- @abstract Link a compiled bytecode library (.c4a) into a VM at compile time.
- @discussion Appends the library's text and data segments onto the VM (like
+ @brief Link a compiled bytecode library (.c4a) into a VM at compile time.
+ @details Appends the library's text and data segments onto the VM (like
              cc_load_module), then resolves the VM's pending text relocations
              using the library's exported symbol table. Used to implement the
              `--link` flag and the build-system bytecode linker pass (#565).
@@ -3913,9 +3667,8 @@ int cc_load_module(VirtualMachine *vm, const char *path);
 int cc_link_bytecode(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_collect_link_symbols
- @abstract Pre-scan a `.c4a` library's exported symbol names into vm->compiler.link_syms.
- @discussion Stages the module exactly as cc_load_module does (a throwaway VM,
+ @brief Pre-scan a `.c4a` library's exported symbol names into vm->compiler.link_syms.
+ @details Stages the module exactly as cc_load_module does (a throwaway VM,
              cc_load_bytecode, then cc_destroy) but only copies the exported
              *names*, not the code/data. Called once per `--link` path before
              gen() so codegen can tell a guest definition that will be
@@ -3926,13 +3679,12 @@ int cc_link_bytecode(VirtualMachine *vm, const char *path);
              place a bad --link path is reported.
  @param vm   The VM instance being compiled (vm->compiler.link_syms is populated).
  @param path Path to the .c4a bytecode library file.
- @return void; failures are silent (see @discussion).
+ @return void; failures are silent (see @details).
 */
 void cc_collect_link_symbols(VirtualMachine *vm, const char *path);
 
 /*!
- @function cc_add_breakpoint
- @abstract Add a breakpoint at a specific program counter.
+ @brief Add a breakpoint at a specific program counter.
  @param vm The CCCC instance.
  @param pc Instruction-word index where breakpoint should be set.
  @return Breakpoint index, or -1 if failed (too many breakpoints).
@@ -3940,18 +3692,16 @@ void cc_collect_link_symbols(VirtualMachine *vm, const char *path);
 int cc_add_breakpoint(VirtualMachine *vm, Pc pc);
 
 /*!
- @function cc_remove_breakpoint
- @abstract Remove a breakpoint by index.
+ @brief Remove a breakpoint by index.
  @param vm The CCCC instance.
  @param index Breakpoint index to remove.
 */
 void cc_remove_breakpoint(VirtualMachine *vm, int index);
 
 /*!
- @function cc_debug_repl
- @abstract Enter interactive debugger REPL (Read-Eval-Print Loop).
+ @brief Enter interactive debugger REPL (Read-Eval-Print Loop).
  @param vm The CCCC instance.
- @discussion Provides an interactive shell for debugging with commands like:
+ @details Provides an interactive shell for debugging with commands like:
              - break/b: Set breakpoint
              - continue/c: Continue execution
              - step/s: Single step
@@ -3964,12 +3714,11 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index);
 void cc_debug_repl(VirtualMachine *vm);
 
 /*!
- @function cc_run_repl
- @abstract Run an interactive top-level read-eval-print loop on a VM.
+ @brief Run an interactive top-level read-eval-print loop on a VM.
  @param vm The CCCC instance. Must already be initialized via cc_init and
             configured (flags, entry name, FFI policy, etc.) exactly as for
             a normal compile; cc_run_repl does not call cc_init itself.
- @discussion Distinct from cc_debug_repl (src/debugger.c), which is scoped to
+ @details Distinct from cc_debug_repl (src/debugger.c), which is scoped to
              breakpoint-time inspection of an already-running program.
              cc_run_repl instead drives a persistent top-level session: it
              reads C source a line (or multi-line block) at a time, classifies
@@ -3984,8 +3733,7 @@ void cc_debug_repl(VirtualMachine *vm);
 void cc_run_repl(VirtualMachine *vm);
 
 /*!
- @function cc_add_watchpoint
- @abstract Add a watchpoint at a specific memory address.
+ @brief Add a watchpoint at a specific memory address.
  @param vm The CCCC instance.
  @param address Memory address to watch.
  @param size Size of memory region to watch (in bytes).
@@ -3997,16 +3745,14 @@ int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type,
                       const char *expr);
 
 /*!
- @function cc_remove_watchpoint
- @abstract Remove a watchpoint by index.
+ @brief Remove a watchpoint by index.
  @param vm The CCCC instance.
  @param index Watchpoint index to remove.
 */
 void cc_remove_watchpoint(VirtualMachine *vm, int index);
 
 /*!
- @function cc_pc_to_name
- @abstract Map a program counter to the name of the enclosing function.
+ @brief Map a program counter to the name of the enclosing function.
  @param vm The CCCC instance.
  @param pc Instruction-word index (as returned by __builtin_return_address).
  @return The C function name string if the PC falls within a known function's
@@ -4017,8 +3763,7 @@ void cc_remove_watchpoint(VirtualMachine *vm, int index);
 const char *cc_pc_to_name(VirtualMachine *vm, Pc pc);
 
 /*!
- @function cc_pc_to_source
- @abstract Map a program counter to a source file name and line number.
+ @brief Map a program counter to a source file name and line number.
  @param vm The CCCC instance.
  @param pc Instruction-word index (as returned by __builtin_return_address).
  @param out_file On success, receives a pointer to the source file name string
@@ -4033,8 +3778,7 @@ int cc_pc_to_source(VirtualMachine *vm, Pc pc, const char **out_file,
                     int *out_line);
 
 /*!
- @function cc_get_source_location
- @abstract Get source file location for a given program counter.
+ @brief Get source file location for a given program counter.
  @param vm The CCCC instance.
  @param pc Instruction-word index.
  @param out_file Pointer to receive the source File pointer (can be NULL).
@@ -4045,8 +3789,7 @@ int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file,
                            int *out_line, int *out_col);
 
 /*!
- @function cc_find_pc_for_source
- @abstract Find program counter index for a given source location.
+ @brief Find program counter index for a given source location.
  @param vm The CCCC instance.
  @param file Source file (NULL to search in any file).
  @param line Line number to find.
@@ -4055,8 +3798,7 @@ int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file,
 Pc cc_find_pc_for_source(VirtualMachine *vm, File *file, int line);
 
 /*!
- @function cc_find_function_entry
- @abstract Find program counter index for a function entry point by name.
+ @brief Find program counter index for a function entry point by name.
  @param vm The CCCC instance.
  @param name Function name to find.
  @return Program counter index, or CCCC_INVALID_PC if not found.
@@ -4064,8 +3806,7 @@ Pc cc_find_pc_for_source(VirtualMachine *vm, File *file, int line);
 Pc cc_find_function_entry(VirtualMachine *vm, const char *name);
 
 /*!
- @function cc_lookup_symbol
- @abstract Look up a debug symbol by name in current scope.
+ @brief Look up a debug symbol by name in current scope.
  @param vm The CCCC instance.
  @param name Symbol name to look up.
  @return Pointer to DebugSymbol if found, NULL otherwise.
@@ -4109,20 +3850,18 @@ void cc_analyze_ngram_finish(CcNgramState *st, FILE *out);
 
 // host_backtrace.c
 /*!
- @function cc_host_backtrace_init
- @abstract Initialise libbacktrace state and warm up DWARF/Mach-O caches.
+ @brief Initialise libbacktrace state and warm up DWARF/Mach-O caches.
  @param argv0 Used to locate the running binary.
- @discussion Must be called once at process startup (not in a signal
+ @details Must be called once at process startup (not in a signal
  handler) before cc_host_backtrace_install_fatal().
 */
 void cc_host_backtrace_init(const char *argv0);
 
 /*!
- @function cc_host_backtrace_install_fatal
- @abstract Install top-level crash handlers (SIGSEGV/SIGBUS/SIGFPE/SIGILL)
+ @brief Install top-level crash handlers (SIGSEGV/SIGBUS/SIGFPE/SIGILL)
  that print a host C backtrace to stderr then re-raise the signal so the
  process dies with the original signal/exit code.
- @discussion No-op when CCCC_HAS_BACKTRACE is off or on Windows.
+ @details No-op when CCCC_HAS_BACKTRACE is off or on Windows.
 */
 void cc_host_backtrace_install_fatal(void);
 
@@ -4134,8 +3873,7 @@ void cc_dump_ast_json(FILE *f, Obj *prog, int verbose);
 void   cc_load_test_runtime(VirtualMachine *vm);
 void   cc_load_symbolize_runtime(VirtualMachine *vm);
 /*!
- @function cc_run_tests
- @abstract Run all [[cccc::test]] functions in a compiled program.
+ @brief Run all [[cccc::test]] functions in a compiled program.
  @param vm The CCCC instance.
  @param prog The compiled program (from cc_parse/cc_compile).
  @param opts Test selection/output options; see CcTestOptions.
@@ -4187,8 +3925,7 @@ typedef struct {
 
 void   cc_load_build_runtime(VirtualMachine *vm);
 /*!
- @function cc_run_build
- @abstract Run a [[cccc::build]] script's build graph.
+ @brief Run a [[cccc::build]] script's build graph.
  @param vm The CCCC instance.
  @param prog The compiled build script (from cc_parse/cc_compile).
  @param opts Build target/output options; see CcBuildOptions.
