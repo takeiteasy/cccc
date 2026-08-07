@@ -2609,6 +2609,14 @@ static bool checked_base_is_declared(CheckedBase base) {
 // hi, don't alias the same Node into two places in the tree, matching how
 // clone_bounds_node() already treats every other reused subtree). Returns
 // an already-typed node.
+//
+// Placeholder inefficiency (follow-up ticket): for a member root, `obj` is
+// a fresh clone every call, so a runtime-indexed object expression (e.g.
+// `k` in `arr[k].p[i]`) is re-evaluated 2-3x per checked access instead of
+// once. Harmless (node_has_side_effects() already declines the check
+// entirely if `obj` isn't side-effect-free) but wasteful; hoisting `obj`
+// into a single temp per access, mirroring #919's own snapshot-temp
+// pattern, is a pure performance cleanup with no behavioral change.
 static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base, Token *tok) {
     if (base.var) {
         Node *p = new_var_node(vm, base.var, tok);
@@ -2992,18 +3000,24 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
 // hypothetical token-interleaved pragma, there is no "must precede the
 // declaration" ordering caveat to document here.
 //
-// Three whole-function walks, no dataflow/join analysis (see the plan's
-// Decisions section for why this precision tier was chosen over a
-// path-sensitive one): poison every candidate touched by a non-checked-
-// rooted assignment, an escaping address-of, or (via Obj.is_captured,
-// already computed by mark_nested_captures()) an access from a nested
-// function's body; rewrite every surviving candidate's assignments into
-// snapshot-then-store; attach the snapshots to every deref reached through
-// a surviving candidate. A candidate that is itself only propagated (never
-// declared checked) can never be a valid propagation *source* for another
-// candidate -- checked_base_is_declared() returns false for a plain
-// unchecked local, so this is automatic, not a separate check: v1 has no
-// fixpoint over derived-from-derived pointers.
+// Three whole-function walks, no dataflow/join analysis (follow-up ticket
+// tracks a path-sensitive version, if the straight-line rule below proves
+// too conservative in practice): poison every candidate touched by a
+// non-checked-rooted assignment, an escaping address-of, or (via
+// Obj.is_captured, already computed by mark_nested_captures()) an access
+// from a nested function's body; rewrite every surviving candidate's
+// assignments into snapshot-then-store; attach the snapshots to every deref
+// reached through a surviving candidate. A candidate that is itself only
+// propagated (never declared checked) can never be a valid propagation
+// *source* for another candidate -- checked_base_is_declared() returns
+// false for a plain unchecked local, so this is automatic, not a separate
+// check: v1 has no fixpoint over derived-from-derived pointers (also a
+// follow-up ticket). checked_nt_terminator is never propagated either
+// (walk 3 leaves it false unconditionally) -- CHKNT's own follow-up ticket.
+// A fourth kind of follow-up, orthogonal to all of the above: this pass
+// never verifies an assignment INTO an already-declared-checked target
+// against the source's bounds (Checked C's _Assume_bounds_cast direction);
+// it only ever widens trust for a previously-unchecked target.
 static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS))
         return;
