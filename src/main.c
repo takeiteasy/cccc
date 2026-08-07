@@ -57,10 +57,24 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
                               int lib_paths_count, const char **libs,
                               int libs_count, const char **defines,
                               int defines_count, const char **undefs,
-                              int undefs_count, const char *std_arg) {
+                              int undefs_count, const char *std_arg,
+                              bool emit_cccc) {
     if (!out_file) {
         fprintf(stderr,
                 "error: -c=native requires -o <file> (no executable path given)\n");
+        return 1;
+    }
+
+    if (emit_cccc && !getenv("CCCC_NATIVE_CC")) {
+        // --emit-cccc's output carries CCCC-only dialect syntax (@-attrs,
+        // [[cccc::...]], etc.) that a plain cc/clang/gcc cannot parse, so
+        // the usual cc/clang/gcc PATH search is not offered as a silent
+        // default here -- the caller must name a compiler that understands
+        // the dialect explicitly via CCCC_NATIVE_CC.
+        fprintf(stderr,
+                "error: -c=native --emit-cccc requires CCCC_NATIVE_CC to be "
+                "set explicitly (no default compiler can consume CCCC "
+                "dialect output)\n");
         return 1;
     }
 
@@ -232,6 +246,15 @@ static void usage(const char *argv0, int exit_code) {
            "([[cccc::emit]], $publish)\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
            "auto, c23, gnu, msvc, strip\n");
+    printf("\t   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, "
+           "checked-pointer\n");
+    printf("\t                         qualifiers, cccc-only #includes) in -E/-G/-m/-c=native "
+           "output\n");
+    printf("\t                         instead of stripping it to portable C. With -c=native, "
+           "the usual\n");
+    printf("\t                         cc/clang/gcc PATH search is disabled -- CCCC_NATIVE_CC "
+           "must name a\n");
+    printf("\t                         compiler that understands the dialect explicitly\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
     printf("\t-J/--ffi-decls           Emit parsed function/struct/enum declarations "
@@ -906,6 +929,7 @@ int main(int argc, const char *argv[]) {
     int url_cache_clear = 0;    // --url-cache-clear
 #endif
     CCCCAttrTarget attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
+    int emit_cccc_mode = 0;     // --emit-cccc
     int compile_only = 0;      // -c (set whenever -c/--compile is given; semantics:
                                 //   "compile, do not execute". -c=bytecode writes bytecode,
                                 //   -c=native hands off to the system compiler.)
@@ -1005,6 +1029,7 @@ int main(int argc, const char *argv[]) {
         {"safety", required_argument, 0, 1012},
         {"bounds-checks", no_argument, 0, 'B'},
         {"checked-pointers", no_argument, 0, 1119},
+        {"emit-cccc", no_argument, 0, 1120},
         {"uaf-detection", no_argument, 0, 1078},
         {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
@@ -1577,6 +1602,9 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
             break;
+        case 1120: // --emit-cccc
+            emit_cccc_mode = 1;
+            break;
         case 1071: // --no-debug-on-crash
             flags |= CCCC_NO_DEBUG_ON_CRASH;
             break;
@@ -2005,6 +2033,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
     vm.compiler.emit_strict = emit_only;
     vm.compiler.attr_target = attr_target;
+    vm.compiler.emit_cccc = (bool)emit_cccc_mode;
     vm.compiler.entry_name = (char *)entry_name;
     vm.compiler.testing_mode = (bool)testing_mode;
     vm.compiler.build_mode = (bool)build_mode;
@@ -2729,7 +2758,7 @@ int main(int argc, const char *argv[]) {
             &vm, merged_prog, out_file, inc_paths, inc_paths_count,
             sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
             libs, libs_count, defines, defines_count, undefs, undefs_count,
-            std_arg);
+            std_arg, (bool)emit_cccc_mode);
         goto BAIL;
     }
 

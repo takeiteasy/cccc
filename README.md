@@ -38,6 +38,11 @@ Options:
 	-G/--emit-generated      Serialize runtime TU + macro-generated objects to C
 	   --emit-only           With -G: only emit explicitly tagged content ([[cccc::emit]], $publish)
 	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
+	   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, checked-pointer
+	                         qualifiers, cccc-only #includes) in -E/-G/-m/-c=native output
+	                         instead of stripping it to portable C. With -c=native, the usual
+	                         cc/clang/gcc PATH search is disabled -- CCCC_NATIVE_CC must name a
+	                         compiler that understands the dialect explicitly
 	-j/--json                Emit JSON for all eligible output (diagnostics, header declarations, --fusion-candidates, etc.)
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
@@ -249,6 +254,7 @@ Example:
 - **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [COVERAGE.md](man/COVERAGE.md))
   - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `macro`/`comptime`/`test`
   - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
+  - `-E`/`-G`/`-m`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
 - **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [TOOLING.md](man/TOOLING.md))
   - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
 - **JSON reflection output** — dump all function, struct, union, enum, and global definitions

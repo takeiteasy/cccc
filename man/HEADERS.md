@@ -140,6 +140,16 @@ code path: its output is meant to be compiled *alongside* normal headers,
 so it has never re-emitted header-sourced typedefs (see `generated_only` in
 `serialize.c`).
 
+`--emit-cccc` inverts the header-collision behaviour described above for
+cccc-only includes: instead of skipping their re-emission (`cc_file_is_cccc_only`
+in `preprocess.c`), the flag re-emits them verbatim, on the assumption that
+whatever consumes the output (another CCCC instance, a future dialect-aware
+tool) understands the routing syntax those files carry. Combined with
+`-c=native`, this also disables the plain `cc`/`clang`/`gcc` PATH search
+described above -- `CCCC_NATIVE_CC` must name a compiler explicitly, since a
+plain system compiler cannot parse `[[cccc::...]]` dialect syntax. See
+[COVERAGE.md](COVERAGE.md#attributes) for the full contract.
+
 ### Pointer arithmetic and global initializer reconstruction
 
 The serializer reconstructs C source text from the AST, not from the

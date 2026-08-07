@@ -1963,6 +1963,19 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
 
     char name[128] = "";
     copy_attr_name(name_tok, name, sizeof(name));
+    if (vm && vm->compiler.emit_cccc && (cccc_scoped || attr_name_is_cccc(name))) {
+        // --emit-cccc: preserve CCCC-scoped attrs verbatim as
+        // [[cccc::name(...)]] rather than stripping them. `payload` already
+        // starts at "cccc" for the explicitly-scoped form; a bare cccc-only
+        // name (e.g. [[comptime]]) needs the "cccc::" prefix added back.
+        fprintf(f, "[[");
+        if (!cccc_scoped)
+            fprintf(f, "cccc::");
+        print_attr_payload(f, payload, close);
+        fprintf(f, "]]");
+        *tok_ptr = end;
+        return true;
+    }
     if (cccc_scoped || attr_name_is_cccc(name) ||
         (vm && vm->compiler.attr_target == CCCC_ATTR_TARGET_STRIP)) {
         *tok_ptr = end;

@@ -2814,6 +2814,7 @@ typedef struct Compiler {
     CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
     CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
+    bool emit_cccc; // --emit-cccc: preserve CCCC dialect syntax in -E/-G/-m/-c=native output
 
     // Custom entry point name (NULL means "main")
     char *entry_name;

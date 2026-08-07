@@ -128,6 +128,7 @@ Cases:
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -802,6 +803,71 @@ def case_bare_c_bytecode_defaults_to_a_c4(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_emit_cccc_native_requires_explicit_cc(cccc: Path, tmp: str) -> bool:
+    print("  27: -c=native --emit-cccc with no CCCC_NATIVE_CC is rejected")
+    src = Path(tmp) / "emit_cccc_no_cc.c"
+    write(src, "void use(int * [[cccc::single]] p) { (void)p; }\n"
+               "int main(void) { int x = 5; use(&x); return 42; }\n")
+    out = Path(tmp) / "emit_cccc_no_cc_out"
+    env = dict(os.environ)
+    env.pop("CCCC_NATIVE_CC", None)
+    result = subprocess.run(
+        [str(cccc), "-c=native", "--emit-cccc", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode == 0:
+        print("    FAIL: compile unexpectedly succeeded with no CCCC_NATIVE_CC")
+        return False
+    if "CCCC_NATIVE_CC" not in result.stderr:
+        print(f"    FAIL: expected a CCCC_NATIVE_CC diagnostic\n    {result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_emit_cccc_native_with_explicit_cc(cccc: Path, tmp: str) -> bool:
+    print("  28: -c=native --emit-cccc with CCCC_NATIVE_CC=cc set compiles and runs "
+          "(checked-pointer qualifiers degrade to an ignorable unknown attribute)")
+    src = Path(tmp) / "emit_cccc_with_cc.c"
+    write(src, "void use(int * [[cccc::single]] p) { (void)p; }\n"
+               "int main(void) { int x = 5; use(&x); return 42; }\n")
+    out = Path(tmp) / "emit_cccc_with_cc_out"
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = "cc"
+    result = subprocess.run(
+        [str(cccc), "-c=native", "--emit-cccc", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_emit_cccc_m_output_round_trips(cccc: Path, tmp: str) -> bool:
+    print("  29: -m --emit-cccc output (with a checked-pointer qualifier) recompiles under cccc itself and runs")
+    src = Path(tmp) / "emit_cccc_roundtrip.c"
+    write(src, "void use(int * [[cccc::single]] p) { (void)p; }\n"
+               "int main(void) { int x = 5; use(&x); return 42; }\n")
+    dump = run([str(cccc), "-m", "--emit-cccc", src.name], cwd=tmp)
+    if dump.returncode != 0 or "[[cccc::single]]" not in dump.stdout:
+        print(f"    FAIL: -m --emit-cccc exited {dump.returncode} or dropped the qualifier\n    {dump.stderr}")
+        return False
+    roundtrip = Path(tmp) / "emit_cccc_roundtrip_gen.c"
+    write(roundtrip, dump.stdout)
+    run_result = run([str(cccc), roundtrip.name], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: recompiled output exited {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -840,6 +906,9 @@ def main() -> int:
             case_gvar_builders_generated_output,
             case_bare_c_defaults_to_native_a_out,
             case_bare_c_bytecode_defaults_to_a_c4,
+            case_emit_cccc_native_requires_explicit_cc,
+            case_emit_cccc_native_with_explicit_cc,
+            case_emit_cccc_m_output_round_trips,
         ]
         results = [case(cccc, tmp) for case in cases]
 

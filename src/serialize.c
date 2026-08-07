@@ -169,6 +169,7 @@ typedef struct {
     // and must still be serialized. Only skip has_include gates when this
     // is false.
     bool emit_strict;
+    bool emit_cccc; // --emit-cccc: serialize checked-pointer qualifiers instead of dropping them
     int anon_local_counter; // names compiler-synthesized temps (e.g. ++/-- desugaring)
     int anon_global_counter; // names non-string-literal `.L..N` globals (#925)
 } SerializeContext;
@@ -461,6 +462,43 @@ static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
 
 static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 
+// --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
+// (+ count()/byte_count()/bounds() bounds form, if any) qualifier for
+// re-emission in the post-'*' declarator position it was originally written
+// in. Returns "" for an unchecked pointer.
+static void format_checked_ptr_qualifier(char *buf, size_t cap, Type *ty) {
+    buf[0] = '\0';
+    if (!ty || ty->checked_kind == CHECKED_NONE)
+        return;
+    const char *kind_name = ty->checked_kind == CHECKED_SINGLE  ? "single"
+                           : ty->checked_kind == CHECKED_ARRAY   ? "array"
+                                                                  : "ntarray";
+    int n = snprintf(buf, cap, " [[cccc::%s]]", kind_name);
+    if (n < 0 || (size_t)n >= cap)
+        return;
+    switch (ty->checked_bounds_form) {
+    case CB_COUNT:
+    case CB_BYTE_COUNT:
+        if (ty->checked_bounds_arg1)
+            snprintf(buf + n, cap - (size_t)n, " [[cccc::%s(%.*s)]]",
+                     ty->checked_bounds_form == CB_COUNT ? "count" : "byte_count",
+                     ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc);
+        break;
+    case CB_RANGE:
+        if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
+            snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(%.*s, %.*s)]]",
+                     ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
+                     ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
+        break;
+    case CB_UNKNOWN:
+        snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(unknown)]]");
+        break;
+    case CB_NONE:
+    default:
+        break;
+    }
+}
+
 static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                 const char *name) {
     if (!ty) {
@@ -483,11 +521,15 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
 
     if (ty->kind == TY_PTR) {
         char buf[1024];
+        char qual[256] = "";
+        if (ctx->emit_cccc)
+            format_checked_ptr_qualifier(qual, sizeof(qual), ty);
+        const char *sep = qual[0] ? " " : "";
         if (ty->base &&
             (ty->base->kind == TY_ARRAY || ty->base->kind == TY_FUNC))
-            snprintf(buf, sizeof(buf), "(*%s)", name ? name : "");
+            snprintf(buf, sizeof(buf), "(*%s%s%s)", qual, sep, name ? name : "");
         else
-            snprintf(buf, sizeof(buf), "*%s", name ? name : "");
+            snprintf(buf, sizeof(buf), "*%s%s%s", qual, sep, name ? name : "");
         serialize_type_decl(f, ctx, ty->base, buf);
         return;
     }
@@ -1848,7 +1890,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         return;
 
     SerializeContext ctx = {.generated_only = generated_only,
-                           .emit_strict = vm->compiler.emit_strict != 0};
+                           .emit_strict = vm->compiler.emit_strict != 0,
+                           .emit_cccc = vm->compiler.emit_cccc};
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
     for (Obj *obj = prog; obj; obj = obj->next) {
@@ -1933,7 +1976,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
-        if (resolved && cc_file_is_cccc_only(vm, resolved))
+        // --emit-cccc: re-emit cccc-only includes too -- the caller has
+        // opted into dialect-fidelity output, so a downstream reader is
+        // expected to understand the routing syntax those files carry.
+        if (!vm->compiler.emit_cccc && resolved && cc_file_is_cccc_only(vm, resolved))
             continue;
         fprintf(f, "%s\n", line);
     }

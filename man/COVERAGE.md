@@ -1058,12 +1058,30 @@ CCCC-specific attributes also accept double-underscore keyword aliases:
 `__test_teardown__`. Plain names such as `comptime`, `macro`, and `test`
 remain ordinary identifiers.
 
-Generated and preprocessed output never includes CCCC-specific syntax. `-E`,
-`-M`, `-G`, and `-c=native` strip CCCC-only attributes and route markers before
-emitting C for another compiler. Use `--attr-target=auto|c23|gnu|msvc|strip`
-to select how remaining attributes are printed. `auto` emits standard C23
-attributes as `[[...]]` in C23 mode and uses GNU `__attribute__((...))`
-otherwise; GNU-only attributes such as `packed` stay GNU in `auto` mode.
+Generated and preprocessed output never includes CCCC-specific syntax by
+default. `-E`, `-M`, `-G`, `-m`, and `-c=native` strip CCCC-only attributes
+and route markers before emitting C for another compiler. Use
+`--attr-target=auto|c23|gnu|msvc|strip` to select how remaining attributes
+are printed. `auto` emits standard C23 attributes as `[[...]]` in C23 mode
+and uses GNU `__attribute__((...))` otherwise; GNU-only attributes such as
+`packed` stay GNU in `auto` mode.
+
+Pass `--emit-cccc` to invert this: `[[cccc::...]]` attributes and route
+markers are preserved verbatim, cccc-only `#include`d files are re-emitted
+instead of dropped, and checked-pointer qualifiers
+(`[[cccc::single/array/ntarray]]`, `count()`/`byte_count()`/`bounds()`) are
+serialized in their post-`*` declarator position instead of being omitted.
+`[[cccc::test]]`/`comptime`/`test_setup`/`test_teardown`/`build` are
+consumed structurally during preprocessing regardless of this flag (they
+trigger real compiler behaviour, not just cosmetic attribute spelling) --
+`--emit-cccc` only affects attributes that would otherwise be stripped
+cosmetically, such as `[[cccc::emit]]`. With `-c=native`, `--emit-cccc`
+still hands the (dialect) source to a real system compiler, but disables
+the usual `cc`/`clang`/`gcc` PATH search: `CCCC_NATIVE_CC` must name a
+compiler explicitly, since a plain `cc` cannot parse `[[cccc::...]]`
+syntax (it degrades gracefully to an ignored unknown-attribute warning
+under Clang/GCC's C23 attribute handling, but is not guaranteed to under
+every compiler).
 
 ```c
 @comptime

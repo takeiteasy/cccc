@@ -499,6 +499,14 @@ Multiple emit includes with the same emitted `#include` line are deduplicated.
 Other emitted directives keep source order and are not deduplicated, so they can
 wrap file-scope macro calls and the declarations those calls generate.
 
+`--emit-only`/`[[cccc::emit]]` (above) controls *which* directives are
+captured into `-G` output. A separate, similarly-named flag, `--emit-cccc`,
+controls a different axis entirely: *whether the captured/serialized output
+keeps CCCC dialect syntax* (`[[cccc::...]]` attributes, checked-pointer
+qualifiers, cccc-only `#include`s) or gets stripped to portable C, across
+`-E`/`-G`/`-m`/`-c=native`. See
+[COVERAGE.md](COVERAGE.md#attributes) for the full `--emit-cccc` contract.
+
 For several raw preprocessor directives, use an emit block. Emit blocks require
 an enclosing comptime context and act as a runtime escape hatch: ordinary C
 declarations in the block are compiled into the runtime translation unit and
