@@ -743,7 +743,7 @@ char * [[cccc::ntarray, cccc::count(n)]]   s;  // ~ _Nt_array_ptr<char>
 |---|---|
 | `single` | Points to exactly one object; all pointer arithmetic on it is a compile error; deref is implicitly range-checked against `[p, p + sizeof(T))`, which is also a NULL check |
 | `array` | Points into an array-like region; a bounds form (below) declares its extent |
-| `ntarray` | Like `array`, but `count(n)` widens the checked range by one element for a null-terminator slot, and writing that slot is permitted |
+| `ntarray` | Like `array`, but `count(n)` widens the checked range by one element for a null-terminator slot; writing that slot is permitted **only with a null value** (#923) |
 | `count(n)` | The pointer is valid for `n` elements from its own current value: `[p, p + n*sizeof(T))` |
 | `byte_count(n)` | Like `count(n)` but `n` is a byte count, not an element count: `[p, p + n)` |
 | `bounds(lo, hi)` | Explicit absolute range `[lo, hi)`, independent of the pointer's own value |
@@ -821,6 +821,50 @@ arrays that `--bounds-checks` structurally cannot. See
 int * [[cccc::array, cccc::count(n)]] a = some_stack_array;
 a[n]; // traps under --checked-pointers; CHKB cannot catch this at all
 ```
+
+**Terminator invariant** (#923). `ntarray`'s bounds widening
+(`man/SAFETY.md`'s `ntarray` row above) makes the one-past-`count(n)`
+terminator slot writable, but it says nothing about what may legally be
+written there. A new opcode, `CHKNT`, closes the one soundly-checkable part
+of that gap: it traps a store of a **non-zero** value into the widened
+terminator slot, keyed off the same `[lo, hi)` `CHKR` already computed for
+the access (`addr == hi - elem_size && val != 0`). It runs under the same
+`--checked-pointers` flag as `CHKR`, no separate opt-in.
+
+```c
+int n = 3;
+char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+s[3] = '\0'; // ok -- terminator slot, still null
+s[3] = 'x';  // traps under --checked-pointers -- non-null write to the slot
+```
+
+`CHKNT` deliberately does **not** attempt the other half of the invariant —
+verifying a null terminator is actually *present* somewhere in the declared
+range. That is not soundly checkable from the declaration alone: Checked C's
+`count(n)` on an `_Nt_array_ptr` is a **lower** bound on the valid extent, not
+an assertion that a terminator exists within it —
+`_Nt_array_ptr<char> s : count(0)` is a legal, terminator-free declaration,
+and `count(5) = "hello world"` (no null in the declared range at all) is
+conforming too. A check that scans `[lo, hi)` for a null and traps on absence
+would false-positive on both. Worse, actually *locating* the real terminator
+requires reading past `hi` — exactly the unbounded read the bounds
+declaration exists to prevent. So presence validation is not implemented;
+`CHKNT` only ever looks at the one slot the widening itself makes legal to
+write.
+
+Known coverage gaps, left as follow-up work rather than built into this pass:
+
+- **Read-modify-write on the terminator slot is unguarded.** `s[n] += 1` and
+  `s[n]++` desugar to `tmp = &s[n]; *tmp = *tmp + 1` — `CHKR` still fires on
+  computing `&s[n]`, but the actual store goes through the desugared `*tmp`,
+  a deref `CHKNT` never sees.
+- **`byte_count(n)`/`bounds(lo, hi)` on `ntarray` get no terminator-slot
+  widening at all** (unlike `count(n)`), so `CHKNT` has nothing to guard for
+  them — an existing asymmetry this ticket didn't introduce.
+- **Non-integer/non-pointer pointees are skipped** (a `float`-typed
+  `ntarray` has no meaningful "null terminator").
+- **Bounds are not narrowed/re-checked on assignment** — tracked separately
+  as bounds-propagation work, not a terminator-invariant gap.
 
 ## VM Heap Allocator
 
@@ -999,6 +1043,28 @@ Access size:   4 bytes
 Declared bounds: [0x14fffffc8, 0x14fffffdc)
 PC: 0xe5 (offset: 229)
 ================================================
+```
+
+```c
+// test_checked_nt.c - Checked-pointer terminator-invariant example (#923)
+int main(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[3] = 'x'; // Non-null write into the widened terminator slot
+    return 0;
+}
+```
+
+```bash
+$ ./cccc --checked-pointers test_checked_nt.c
+
+========== CHECKED TERMINATOR VIOLATION ==========
+Non-null store into a [[cccc::ntarray]] terminator slot
+Address:         0x157ffffeb
+Terminator slot: [0x157ffffeb, 0x157ffffec)
+Value stored:    120
+PC: 0xed (offset: 237)
+====================================================
 ```
 
 ### Type Checking

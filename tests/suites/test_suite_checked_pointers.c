@@ -237,6 +237,73 @@ void test_ntarray_past_terminator_traps(void) {
 }
 
 // ---------------------------------------------------------------------
+// #923 -- CHKNT: the terminator slot must stay null. Writing '\0' there is
+// the whole point of the widening (test_ntarray_terminator_write above
+// already covers that this doesn't over-trap); writing anything else
+// destroys the nt invariant within the pointer's own declared extent and
+// traps, even though the address itself is in-range for CHKR.
+// ---------------------------------------------------------------------
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_terminator_nonnull_traps(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[3] = 'x'; // terminator slot, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_terminator_nonnull_traps_runtime_index(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    volatile int i = 3; // same slot, but via a runtime (non-constant) index
+    s[i] = 'x';
+}
+
+[[cccc::test]]
+void test_ntarray_inside_count_nonnull_ok(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n - 1] = 'z'; // still inside count(n), not the terminator slot
+    AssertEq(s[n - 1], 'z');
+}
+
+[[cccc::test]]
+void test_ntarray_int_terminator_zero_ok(void) {
+    int n = 3;
+    int * [[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
+    a[n] = 0; // terminator slot, null -- proves hi - elem_size for sizeof > 1
+    AssertEq(a[n], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_int_terminator_nonzero_traps(void) {
+    int n = 3;
+    int * [[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
+    a[n] = 1; // terminator slot, non-null -- traps
+}
+
+// A plain [[cccc::array]] (no ntarray) gets no widening at all, so a write
+// one past count(n) is an ordinary CHKR out-of-bounds trap, unaffected by
+// the CHKNT guard added for ntarray.
+[[cccc::test(exit_code = 255)]]
+void test_array_no_widening_oob_write_traps(void) {
+    int n = 3;
+    char * [[cccc::array, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n] = 0; // one past count(n) -- CHKR OOB, no terminator slot exists
+}
+
+// byte_count()/bounds() forms on ntarray get no terminator-slot widening
+// (#923's documented follow-up gap) -- a write at the declared edge is an
+// ordinary CHKR OOB trap, not a CHKNT terminator trap.
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_byte_count_no_widening_traps(void) {
+    int nbytes = 3;
+    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+        (char[4]){'a', 'b', 'c', 0};
+    s[nbytes] = 0; // no widening for byte_count -- plain OOB
+}
+
+// ---------------------------------------------------------------------
 // Both the load path (x = p[i]) and the store path (p[i] = x) must trap.
 // ---------------------------------------------------------------------
 

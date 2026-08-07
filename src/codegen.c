@@ -3571,6 +3571,20 @@ static void emit_chkr(VirtualMachine *vm, int rs_addr, int rs_lo, int rs_hi,
     emit_rrrs_i(vm, CHKR, rs_addr, rs_lo, rs_hi, 0, access_size);
 }
 
+// Emit CHKNT (checked-pointer null-terminator guard, #923).
+// rs_addr/rs_hi/rs_val are caller-computed registers: the stored-to address,
+// the checked pointer's own already-widened upper bound (the same rs_hi CHKR
+// just range-checked addr against), and the value being stored. elem_size is
+// the pointee's size in bytes. Traps iff addr == hi - elem_size && val != 0
+// -- a non-null write into the terminator slot CHKR's +1 widening opened up.
+// No-op at runtime unless CCCC_CHECKED_BOUNDS is set, same as CHKR; callers
+// gate emission on that flag (and on node->checked_nt_terminator) so the
+// default build never emits this opcode.
+static void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
+                       long long elem_size) {
+    emit_rrrs_i(vm, CHKNT, rs_addr, rs_hi, rs_val, 0, elem_size);
+}
+
 // ========== Address Generation ==========
 
 // Generate address of an lvalue into dest_reg
@@ -5240,6 +5254,26 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_val);
             r_val = r_reload;
             need_free = true;
+        }
+
+        // #923: a store through a [[cccc::ntarray]] + count(n) pointer's
+        // widened terminator slot must stay null -- CHKR (emitted by gen_addr
+        // above, inside the r_addr computation) already range-checked r_addr;
+        // this only re-checks the stored *value*, which gen_addr has no
+        // access to. Runs on the ND_DEREF-lhs store path only: lhs_fused is
+        // ND_VAR-only and lhs_indexed's match_indexed_addr() already declines
+        // under CCCC_CHECKED_BOUNDS (CCCC_FUSION_UNSAFE_FLAGS,
+        // src/codegen.c's #770/#484 fusion-gate comment), so an ND_DEREF
+        // checked store always has r_addr >= 0 and reaches the standard
+        // emit_store_ex below -- verified by the -O2/-O3 tests, not assumed.
+        if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->lhs->kind == ND_DEREF &&
+            node->lhs->checked_nt_terminator && r_addr >= 0) {
+            mark_temp_reg_used(r_addr);
+            mark_temp_reg_used(r_val);
+            int r_hi = alloc_temp_reg();
+            gen_expr(vm, node->lhs->checked_bounds_hi, r_hi);
+            emit_chknt(vm, r_addr, r_hi, r_val, node->lhs->checked_access_size);
+            free_temp_reg(r_hi);
         }
 
         // #653: a store through a union member must clear (not stamp) the

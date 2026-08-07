@@ -967,7 +967,8 @@ declspec position would qualify the pointee, not the pointer:
 ```c
 int  * [[cccc::single]]                    p;  // exactly one object
 int  * [[cccc::array, cccc::count(n)]]     a;  // n elements from p's own value
-char * [[cccc::ntarray, cccc::count(n)]]   s;  // like array, +1 for a terminator slot
+char * [[cccc::ntarray, cccc::count(n)]]   s;  // like array, +1 for a terminator slot,
+                                                //   which must stay null (`CHKNT`, #923)
 int  * [[cccc::array, cccc::bounds(lo,hi)]] r; // explicit absolute range
 ```
 
@@ -983,12 +984,14 @@ global, but not a struct/union sibling field (compile error in v1), and must
 be side-effect-free (also a compile error otherwise — a bounds expression is
 re-evaluated at every checked access, not once).
 
-Runtime enforcement (the `CHKR` opcode) is gated behind `--checked-pointers`
-/ `#pragma cccc config(checked_pointers = true)` — opt-in, not part of any
-`-0`/`-1`/`-2`/`-3` preset. Full reference, including the bounds-carry-within-
-an-expression-but-not-across-assignment semantics and why this exists
-(`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
-array): [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
+Runtime enforcement (the `CHKR` opcode, plus `CHKNT` guarding a non-null
+write into `ntarray`'s widened terminator slot, #923) is gated behind
+`--checked-pointers` / `#pragma cccc config(checked_pointers = true)` —
+opt-in, not part of any `-0`/`-1`/`-2`/`-3` preset. Full reference, including
+the bounds-carry-within-an-expression-but-not-across-assignment semantics and
+why this exists (`--bounds-checks`/`CHKB` has no upper bound at all for a
+stack or global array): [SAFETY.md § Checked
+Pointers](SAFETY.md#checked-pointers).
 
 Enforcement is VM-only: `-c=native`/`-m`/`-c=generated` warn and drop
 `--checked-pointers` rather than enforcing it, but the six attributes are

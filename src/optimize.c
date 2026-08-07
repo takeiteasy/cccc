@@ -1190,6 +1190,11 @@ static bool op_byte0_is_int_src(int op) {
     // 1-2 need no separate listing since the generic decode already marks
     // rs1/rs2 as uses unconditionally for non-float-src opcodes.
     case CHKR:
+    // Checked-pointer null-terminator guard (#923): byte 0 (rs_addr), byte 1
+    // (rs_hi) and byte 2 (rs_val) are all pure sources -- same reasoning as
+    // CHKR immediately above, including the value register (rs_val), which
+    // only ever reads the just-computed store value, never defines it.
+    case CHKNT:
         return true;
     default:
         return false;

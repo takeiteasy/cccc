@@ -2526,6 +2526,13 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
             count_bytes = new_binary(vm, ND_MUL, n_plus_1,
                                      new_long(vm, elem_size, tok), tok);
             add_type(vm, count_bytes);
+            // #923: this access can land on the widened terminator slot --
+            // flag it for CHKNT's store-side null-terminator guard, but only
+            // for an integer/pointer pointee (a float ntarray has no
+            // sensible "null terminator" and CHKNT's value register is an
+            // integer register).
+            if (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR))
+                deref->checked_nt_terminator = true;
         } else {
             count_bytes = new_binary(vm, ND_MUL, n, new_long(vm, elem_size, tok), tok);
             add_type(vm, count_bytes);

@@ -4497,6 +4497,53 @@ static inline int op_CHKR_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_CHKNT_fn(VirtualMachine *vm) {
+    // Checked-pointer null-terminator guard (#923). Format:
+    // [CHKNT] [rs_addr:8|rs_hi:8|rs_val:8|unused:8] (RRR operand word)
+    //         [elem_size:i64]
+    // Enforces only the store half of the [[cccc::ntarray]] invariant: the
+    // widened terminator slot (the +1 element CHKR's bounds already cover)
+    // must stay null. addr is the address just stored to; hi is the checked
+    // pointer's own already-widened upper bound (the same hi CHKR just range-
+    // checked addr against, so no range check is repeated here); val is the
+    // value that was stored. This does NOT verify a null terminator is
+    // actually present anywhere -- that is unsound to check from the
+    // declaration alone (see man/SAFETY.md's Checked Pointers section and
+    // the CHKNT comment in src/cccc.h).
+    long long operands = cc_read_word(vm);
+    int rs_addr, rs_hi, rs_val;
+    DECODE_RRR(operands, rs_addr, rs_hi, rs_val);
+    long long elem_size = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return 0;
+
+    if (elem_size <= 0)
+        return 0;
+
+    long long addr = vm->regs[rs_addr];
+    long long hi   = vm->regs[rs_hi];
+    long long val  = vm->regs[rs_val];
+
+    if (hi < elem_size)
+        return 0; // no room for a terminator slot at all -- nothing to guard
+
+    long long term_slot = hi - elem_size;
+    if (addr == term_slot && val != 0) {
+        printf("\n========== CHECKED TERMINATOR VIOLATION ==========\n");
+        printf("Non-null store into a [[cccc::ntarray]] terminator slot\n");
+        printf("Address:         0x%llx\n", addr);
+        printf("Terminator slot: [0x%llx, 0x%llx)\n", term_slot, hi);
+        printf("Value stored:    %lld\n", val);
+        printf("PC: 0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)vm->pc);
+        printf("====================================================\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 static inline int op_CHKI_fn(VirtualMachine *vm) {
     // Check initialization: fail if variable at bp+offset has not been written.
     // Format: [CHKI] [offset:i64]

@@ -478,7 +478,27 @@ extern "C" {
                    and global storage, which CHKB cannot do (its bound is \
                    AllocHeader.size, so a non-heap base gets no upper bound \
                    at all). Gated on CCCC_CHECKED_BOUNDS, not on any \
-                   -S0..-S3 preset -- see that flag's comment above. */
+                   -S0..-S3 preset -- see that flag's comment above. */ \
+    X(CHKNT, 3) /* Checked-pointer null-terminator guard (#923): traps a \
+                   store of a non-zero value into a [[cccc::ntarray]] + \
+                   count(n) pointer's widened terminator slot -- the one \
+                   element CHKR's +1 widening (src/parse.c) makes writable. \
+                   Format: [CHKNT][rs_addr:8|rs_hi:8|rs_val:8|unused:8] \
+                   [elem_size:i64] (RRR operand word + i64 immediate). \
+                   Traps iff addr == hi - elem_size && val != 0, where hi is \
+                   the already-widened upper bound CHKR itself just checked \
+                   addr against -- CHKNT does no range check of its own. \
+                   This only enforces the store half of the nt invariant \
+                   (the terminator slot must stay null unless/until legally \
+                   overwritten); it does NOT scan for or require a null \
+                   terminator to be present anywhere, which is unsound to \
+                   check from the declaration alone (count(n) is a lower \
+                   bound in Checked C -- count(0) is a legal, terminator- \
+                   free declaration; scanning [lo,hi) would false-positive \
+                   on it, and finding the *real* terminator requires \
+                   reading past hi, the exact unbounded read this feature \
+                   exists to prevent). See man/SAFETY.md's Checked Pointers \
+                   section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -1363,6 +1383,14 @@ struct Node {
     struct Node *checked_bounds_lo;
     struct Node *checked_bounds_hi;
     int64_t checked_access_size; // sizeof of the value actually accessed
+    // #923: true when this ND_DEREF is a [[cccc::ntarray]] + count(n) access
+    // to the widened terminator slot (the +1 element set_checked_deref_bounds()
+    // adds in parse.c) through an integer/pointer pointee -- the only shape
+    // CHKNT's store-side null-terminator guard applies to. Independent of
+    // checked_bounds_lo/hi (which are populated for every checked deref);
+    // this flag narrows CHKNT emission to the one node kind that can actually
+    // destroy the nt invariant, a non-null store into that slot.
+    bool checked_nt_terminator;
 };
 
 /*!
