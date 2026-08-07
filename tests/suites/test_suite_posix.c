@@ -21,7 +21,8 @@
 //   test_fts_walk, test_fts_set_skip, test_sigevent_layout,
 //   test_aio_sigev_thread, test_aio_sigev_signal,
 //   test_aio_write_read_roundtrip,
-//   test_aio_cancel, test_lio_listio_wait, test_mqueue_roundtrip,
+//   test_aio_cancel, test_aio_slot_exhaustion (macOS only),
+//   test_lio_listio_wait, test_mqueue_roundtrip,
 //   test_mqueue_sigev_thread, test_ndbm_roundtrip
 
 #include <arpa/inet.h>
@@ -2895,6 +2896,52 @@ static int busy_spin_wait_checked(volatile int *flag, long long max_spins) {
     return checksum == expected;
 }
 
+// aio_write_retry (#929) -- macOS caps outstanding aio requests both
+// per-process (kern.aioprocmax, 16 on a stock host) and system-wide
+// (kern.aiomax, 90), and -- critically -- a request keeps its slot even
+// after it *completes*, until aio_return() reaps it. On a loaded shared
+// host (GitHub's hosted macOS runners, #929) that means aio_write() can
+// fail with EAGAIN through no fault of the guest or of CCCC: verified on
+// real macOS hardware with a host-native probe program that hit EAGAIN at
+// exactly request #16, all of them already complete. POSIX says retry on
+// EAGAIN, so this retries briefly (200ms total) before giving up; any
+// other errno is not retried. Returns 0 on success, -1 with errno intact
+// (from the final attempt) on exhaustion.
+static int aio_write_retry(struct aiocb *cb) {
+    for (int attempt = 0; attempt < 10; attempt++) {
+        if (aio_write(cb) == 0)
+            return 0;
+        int saved_errno = errno; /* usleep() below can clobber errno=ETIMEDOUT
+                                     on macOS even on success (verified with a
+                                     plain host C program) -- POSIX only
+                                     defines errno after a *failing* call, so
+                                     it must be captured right here, not read
+                                     after the sleep. */
+        if (saved_errno != EAGAIN) {
+            errno = saved_errno;
+            return -1;
+        }
+        usleep(20000);
+        errno = saved_errno;
+    }
+    return -1;
+}
+
+static int aio_read_retry(struct aiocb *cb) {
+    for (int attempt = 0; attempt < 10; attempt++) {
+        if (aio_read(cb) == 0)
+            return 0;
+        int saved_errno = errno; /* see aio_write_retry's comment */
+        if (saved_errno != EAGAIN) {
+            errno = saved_errno;
+            return -1;
+        }
+        usleep(20000);
+        errno = saved_errno;
+    }
+    return -1;
+}
+
 static volatile int g_aio_sigev_notified = 0;
 static volatile long long g_aio_sigev_val = -1;
 
@@ -2908,11 +2955,13 @@ static void aio_sigev_notify_fn(union sigval sv) {
 // the host's real notification thread fires the async-safe trampoline
 // (sigevent_prepare() in src/stdlib/posix.c, polled by src/vm.c) -- this
 // is deferred delivery on the VM thread, not concurrent execution on the
-// notification thread. Tolerates the host's own aio_write() rejecting
-// SIGEV_THREAD outright (EAGAIN observed on some hosts, independent of
-// CCCC -- verified with a plain host C program using the real system
-// libc): when that happens there is nothing left to verify, so the test
-// passes rather than failing on a host limitation outside CCCC's control.
+// notification thread. First retries transient EAGAIN via aio_write_retry
+// (#929, e.g. a loaded host temporarily out of aio slots); if it's still
+// EAGAIN after that, the host is rejecting SIGEV_THREAD outright (observed
+// on some hosts, independent of CCCC -- verified with a plain host C
+// program using the real system libc), and there is nothing left to
+// verify, so the test passes rather than failing on a host limitation
+// outside CCCC's control.
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_sigev_thread(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_XXXXXX";
@@ -2934,7 +2983,7 @@ int test_aio_sigev_thread(void) {
     cb.aio_sigevent.sigev_notify_attributes = NULL;
     cb.aio_sigevent.sigev_value.sival_int = 4242;
 
-    if (aio_write(&cb) != 0) {
+    if (aio_write_retry(&cb) != 0) {
         int saved_errno = errno;
         close(fd);
         unlink(tmpl);
@@ -2944,6 +2993,14 @@ int test_aio_sigev_thread(void) {
     /* #877 regression: a tight bytecode busy-spin with a live register
        value, not usleep() -- see busy_spin_wait_checked's comment above. */
     int reg_intact = busy_spin_wait_checked(&g_aio_sigev_notified, 2000000);
+
+    /* #929: reap so this request's aio slot is released rather than held
+       for the rest of the process's life (SIGEV_THREAD's own notification
+       already told us it completed; aio_suspend returns immediately). */
+    const struct aiocb *list[1] = { &cb };
+    aio_suspend(list, 1, NULL);
+    (void)aio_error(&cb);
+    (void)aio_return(&cb);
 
     close(fd);
     unlink(tmpl);
@@ -2964,11 +3021,21 @@ static void aio_sigev_signal_handler(int sig) {
 // test_aio_sigev_signal (#870) -- SIGEV_SIGNAL had no coverage at all
 // before this (every existing aio/lio test used SIGEV_NONE); this submits
 // an aio_write with SIGEV_SIGNAL and a guest signal(SIGUSR1) handler and
-// confirms the handler runs. Best-effort: some hosts don't reliably raise
-// the signal for a promptly-completing aio_write, so (like
-// test_aio_sigev_thread above) an unobserved signal is tolerated rather
-// than failed, since aio_error()/aio_return() below are what actually
-// prove the request completed.
+// confirms the handler runs. Best-effort on the *signal delivery*: some
+// hosts don't reliably raise the signal for a promptly-completing
+// aio_write, so (like test_aio_sigev_thread above) an unobserved signal is
+// tolerated rather than failed, since aio_error()/aio_return() below are
+// what actually prove the request completed.
+//
+// #929: the initial aio_write() submission itself failed on GitHub's
+// hosted macOS runners (a loaded shared host temporarily out of aio slots
+// -- see aio_write_retry's comment) -- a different failure than the
+// signal-delivery tolerance above, and NOT something to silently tolerate
+// here: sigevent_prepare() passes SIGEV_SIGNAL through to the real host
+// aio_write() untouched, so this is the only coverage SIGEV_SIGNAL has.
+// Retry transient EAGAIN; if it's still failing after that, fail loudly
+// with the errno folded into the return code (100 + errno, so the TAP
+// "got N" line names it) rather than a bare, undiagnosable "got 2".
 [[cccc::test(return = 42, timeout = 5000)]]
 int test_aio_sigev_signal(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_signal_XXXXXX";
@@ -2988,7 +3055,13 @@ int test_aio_sigev_signal(void) {
     cb.aio_sigevent.sigev_notify = SIGEV_SIGNAL;
     cb.aio_sigevent.sigev_signo = SIGUSR1;
 
-    if (aio_write(&cb) != 0) { close(fd); unlink(tmpl); return 2; }
+    if (aio_write_retry(&cb) != 0) {
+        int saved_errno = errno;
+        signal(SIGUSR1, SIG_DFL);
+        close(fd);
+        unlink(tmpl);
+        return 100 + saved_errno;
+    }
 
     const struct aiocb *list[1] = { &cb };
     aio_suspend(list, 1, NULL);
@@ -3026,11 +3099,11 @@ int test_aio_write_read_roundtrip(void) {
     wcb.aio_offset = 0;
     wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_write(&wcb) != 0) { unlink(tmpl); return 2; }
+    if (aio_write_retry(&wcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
     const struct aiocb *wlist[1] = { &wcb };
-    if (aio_suspend(wlist, 1, NULL) != 0) { unlink(tmpl); return 3; }
-    if (aio_error(&wcb) != 0) { unlink(tmpl); return 4; }
-    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { unlink(tmpl); return 5; }
+    if (aio_suspend(wlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 3; }
+    if (aio_error(&wcb) != 0) { close(fd); unlink(tmpl); return 4; }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 5; }
 
     char buf[64];
     memset(buf, 0, sizeof(buf));
@@ -3042,12 +3115,12 @@ int test_aio_write_read_roundtrip(void) {
     rcb.aio_offset = 0;
     rcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_read(&rcb) != 0) { unlink(tmpl); return 6; }
+    if (aio_read_retry(&rcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
     const struct aiocb *rlist[1] = { &rcb };
-    if (aio_suspend(rlist, 1, NULL) != 0) { unlink(tmpl); return 7; }
-    if (aio_error(&rcb) != 0) { unlink(tmpl); return 8; }
-    if (aio_return(&rcb) != (ssize_t)strlen(msg)) { unlink(tmpl); return 9; }
-    if (strcmp(buf, msg) != 0) { unlink(tmpl); return 10; }
+    if (aio_suspend(rlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 7; }
+    if (aio_error(&rcb) != 0) { close(fd); unlink(tmpl); return 8; }
+    if (aio_return(&rcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 9; }
+    if (strcmp(buf, msg) != 0) { close(fd); unlink(tmpl); return 10; }
 
     close(fd);
     unlink(tmpl);
@@ -3074,9 +3147,10 @@ int test_aio_cancel(void) {
     cb.aio_offset = 0;
     cb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_write(&cb) != 0) { unlink(tmpl); return 2; }
+    if (aio_write_retry(&cb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
     int r = aio_cancel(fd, &cb);
     if (r != AIO_ALLDONE && r != AIO_CANCELED && r != AIO_NOTCANCELED) {
+        close(fd);
         unlink(tmpl);
         return 3;
     }
@@ -3091,8 +3165,95 @@ int test_aio_cancel(void) {
     return 42;
 }
 
+#ifdef __APPLE__
+// test_aio_slot_exhaustion (#929) -- macOS-only. Deterministic coverage of
+// the EAGAIN-from-slot-exhaustion path exercised nondeterministically on
+// GitHub's hosted macOS runners (see aio_write_retry's comment): submits
+// (without the retry helper) into a static array of aiocbs until one
+// fails, asserts that failure is EAGAIN and that it happened within a
+// sane bound (kern.aioprocmax defaults to 16; 64 attempts gives headroom
+// on hosts with a higher limit while still fitting kern.aiomax's default
+// of 90), then reaps everything submitted and confirms a fresh aio_write()
+// succeeds again afterwards -- proving aio_return() actually frees the
+// slot, which is the assumption the EAGAIN-retry fix in this file depends
+// on.
+#define AIO_EXHAUSTION_MAX 64
+[[cccc::test(return = 42, timeout = 10000)]]
+int test_aio_slot_exhaustion(void) {
+    char tmpl[] = "/tmp/cccc_aio_exhaustion_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return 1;
+
+    static struct aiocb cbs[AIO_EXHAUSTION_MAX];
+    static char payload = 'z';
+    int submitted = 0;
+    int failed_with_eagain = 0;
+
+    for (; submitted < AIO_EXHAUSTION_MAX; submitted++) {
+        memset(&cbs[submitted], 0, sizeof(cbs[submitted]));
+        cbs[submitted].aio_fildes = fd;
+        cbs[submitted].aio_buf = &payload;
+        cbs[submitted].aio_nbytes = 1;
+        cbs[submitted].aio_offset = submitted;
+        cbs[submitted].aio_sigevent.sigev_notify = SIGEV_NONE;
+        if (aio_write(&cbs[submitted]) != 0) {
+            failed_with_eagain = (errno == EAGAIN);
+            break;
+        }
+    }
+
+    if (!failed_with_eagain) {
+        /* Host allowed all AIO_EXHAUSTION_MAX outstanding -- reap what was
+           submitted and treat as a pass; the limit is host-configurable
+           and a higher ceiling isn't a bug, just untestable at this size. */
+        for (int i = 0; i < submitted; i++) {
+            const struct aiocb *list[1] = { &cbs[i] };
+            aio_suspend(list, 1, NULL);
+            (void)aio_error(&cbs[i]);
+            (void)aio_return(&cbs[i]);
+        }
+        close(fd);
+        unlink(tmpl);
+        return 42;
+    }
+
+    /* Reap every request that did get submitted, freeing their slots. */
+    for (int i = 0; i < submitted; i++) {
+        const struct aiocb *list[1] = { &cbs[i] };
+        aio_suspend(list, 1, NULL);
+        (void)aio_error(&cbs[i]);
+        (void)aio_return(&cbs[i]);
+    }
+
+    /* Slots should be free again now -- a fresh submission must succeed. */
+    struct aiocb retry_cb;
+    memset(&retry_cb, 0, sizeof(retry_cb));
+    retry_cb.aio_fildes = fd;
+    retry_cb.aio_buf = &payload;
+    retry_cb.aio_nbytes = 1;
+    retry_cb.aio_offset = 0;
+    retry_cb.aio_sigevent.sigev_notify = SIGEV_NONE;
+    if (aio_write_retry(&retry_cb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
+    const struct aiocb *retry_list[1] = { &retry_cb };
+    aio_suspend(retry_list, 1, NULL);
+    int err = aio_error(&retry_cb);
+    ssize_t ret = aio_return(&retry_cb);
+
+    close(fd);
+    unlink(tmpl);
+
+    if (err != 0 || ret != 1) return 3;
+    return 42;
+}
+#undef AIO_EXHAUSTION_MAX
+#endif
+
 // test_lio_listio_wait (#804) -- submit two writes as a single
-// LIO_WAIT-mode lio_listio() call and confirm both landed.
+// LIO_WAIT-mode lio_listio() call and confirm both landed. #929: retries
+// transient host EAGAIN (see aio_write_retry's comment) since lio_listio()
+// submits both requests at once and is just as exposed to a loaded host's
+// aio-slot exhaustion; both requests are reaped with aio_return() at the
+// end so this test doesn't itself hold slots for the rest of the process.
 [[cccc::test(return = 42)]]
 int test_lio_listio_wait(void) {
     char tmpl[] = "/tmp/cccc_lio_XXXXXX";
@@ -3112,13 +3273,29 @@ int test_lio_listio_wait(void) {
     cb2.aio_lio_opcode = LIO_WRITE;
 
     struct aiocb *list[2] = { &cb1, &cb2 };
-    if (lio_listio(LIO_WAIT, list, 2, NULL) != 0) { unlink(tmpl); return 2; }
+    int rc = -1;
+    int saved_errno = 0;
+    for (int attempt = 0; attempt < 10; attempt++) {
+        rc = lio_listio(LIO_WAIT, list, 2, NULL);
+        if (rc == 0)
+            break;
+        saved_errno = errno; /* see aio_write_retry's comment: usleep() below
+                                 can clobber errno on success, must capture
+                                 before it runs */
+        if (saved_errno != EAGAIN)
+            break;
+        usleep(20000);
+    }
+    if (rc != 0) { close(fd); unlink(tmpl); return 100 + saved_errno; }
 
     char buf[9];
     memset(buf, 0, sizeof(buf));
     lseek(fd, 0, SEEK_SET);
-    if (read(fd, buf, 8) != 8) { unlink(tmpl); return 3; }
-    if (strcmp(buf, "AAAABBBB") != 0) { unlink(tmpl); return 4; }
+    if (read(fd, buf, 8) != 8) { close(fd); unlink(tmpl); return 3; }
+    if (strcmp(buf, "AAAABBBB") != 0) { close(fd); unlink(tmpl); return 4; }
+
+    (void)aio_error(&cb1); (void)aio_return(&cb1);
+    (void)aio_error(&cb2); (void)aio_return(&cb2);
 
     close(fd);
     unlink(tmpl);

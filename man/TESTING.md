@@ -611,6 +611,52 @@ tracked separately in #858. It does not fully guarantee zero-flakiness
 under arbitrarily severe contention, just removes the specific, confirmed
 contention source.
 
+### macOS aio slot exhaustion under host contention
+
+`tests/suites/test_suite_posix.c`'s `<aio.h>` tests
+(`test_aio_sigev_thread`, `test_aio_sigev_signal`,
+`test_aio_write_read_roundtrip`, `test_aio_cancel`, `test_lio_listio_wait`)
+failed on GitHub's hosted macOS runners the first time this file's aio
+coverage ran there — a release-time-only job, since macOS isn't in the
+regular CI matrix (see [RELEASING.md](RELEASING.md)). Root cause, confirmed
+on real macOS hardware with a host-native probe program: macOS caps
+outstanding aio requests both per-process (`kern.aioprocmax`, 16 on a stock
+host) and system-wide (`kern.aiomax`, 90), and a request keeps its slot even
+after it *completes* until `aio_return()` reaps it, so `aio_write()`/
+`lio_listio()` can fail synchronously with `EAGAIN` on a loaded shared host
+through no fault of the guest or of CCCC (see the `<aio.h>` row of
+[COVERAGE.md](COVERAGE.md) for the full writeup). This is not a CCCC bug and
+is not emulated around — it's a real host limit.
+
+**Convention used here, follow it for future host-limitation flakes:**
+retry transient failures a bounded number of times (`aio_write_retry`/
+`aio_read_retry`, 10 attempts at 20ms apart) rather than tolerating them
+outright — a blanket pass would silently stop testing the code path. If
+every retry is exhausted, fail loudly with the errno folded into the return
+code (`100 + errno`) so the TAP `got N` line names it, since a `printf`
+inside a test body is only shown in CI output for lines *at or after* the
+`not ok` marker (`tools/testing/suite.py`'s failure-output window) — it's
+invisible on both success and most failure formatting otherwise. One
+exception: `test_aio_sigev_thread`'s `SIGEV_THREAD` submission tolerates a
+*persistent* `EAGAIN` (after retries) as a pass, because some hosts reject
+`SIGEV_THREAD` outright and there is nothing left to verify at that point —
+that's a different, structural cause from transient slot contention, and
+predates #929.
+
+`test_aio_slot_exhaustion` (macOS-only, `#ifdef __APPLE__`) deterministically
+submits into slot exhaustion, asserts the failure is `EAGAIN`, reaps
+everything, and confirms a fresh submission succeeds afterwards — proving
+the reap-frees-slot property the retry logic above depends on, since the
+other tests only exercise it nondeterministically depending on host load.
+
+**Pitfall found while writing the retry helpers:** `usleep()` (used for the
+retry backoff) can leave `errno` set to a stale value even when it
+*succeeds* — confirmed with a plain host C program, `errno == ETIMEDOUT`
+after a successful `usleep()` on macOS. POSIX only defines `errno` after a
+call that indicates failure via its return value, so any retry loop must
+capture `errno` immediately after the failing call it's retrying, before any
+intervening successful call (`usleep()`, or anything else) can clobber it.
+
 ## Attribute syntax variants
 
 Three equivalent syntaxes are supported for all test attributes:
