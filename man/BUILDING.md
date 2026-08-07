@@ -1242,15 +1242,19 @@ source scan — no `cccc` binary is built — but it needs `doxygen` on `PATH`
 it's missing. It is **not** part of the default build (`build_main()`), so a
 fresh clone never needs doxygen installed. Output is gitignored
 (`build/docs/`) and never committed — regenerate it locally when you want to
-browse the API docs. **Not run in sr.ht CI** (`.builds/linux-amd64.yml`):
-that manifest carried a `docs` task through #909-#911, but sr.ht's
-`ubuntu/lts` image started shipping a doxygen version that hangs (not just
-warns) when `graphviz`'s `dot` binary is absent — `dot` was never a
-declared CI package — timing out every job's docs step regardless of what
-the commit touched (first seen ~2026-08-07). The task was dropped rather
-than chased further, since GitHub Pages is the intended docs-hosting path
-going forward; see man/TESTING.md's Continuous Integration section. The
-public headers document with Doxygen tags (`@brief`/`@details`/`@param`/
+browse the API docs, or see the published copy at
+<https://takeiteasy.github.io/cccc/>. **Not run in sr.ht CI**
+(`.builds/linux-amd64.yml`): that manifest carried a `docs` task through
+#909-#911, but sr.ht's `ubuntu/lts` image started shipping a doxygen
+version that hangs (not just warns) when `graphviz`'s `dot` binary is
+absent — `dot` was never a declared CI package — timing out every job's
+docs step regardless of what the commit touched (first seen ~2026-08-07).
+The task was dropped rather than chased further; docs generation now lives
+entirely on the GitHub side instead (`.github/workflows/ci.yml`, which
+installs `graphviz` alongside `doxygen`), built and published to GitHub
+Pages on every push to `trunk` — see man/TESTING.md's Continuous
+Integration section. The public headers document with Doxygen tags
+(`@brief`/`@details`/`@param`/
 `@return`, either `/*!` or `/**` delimiters — both are equivalent to
 Doxygen); the older HeaderDoc-style tags (`@abstract`, `@discussion`,
 `@function`, `@define`) that used to appear alongside them were retired in

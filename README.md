@@ -9,6 +9,8 @@ CCCC adds compile-time macro expansion and AST building capabilities on top of t
 
 Currently targets **MacOS** (aarch64/x86_64) and **Linux** (aarch64/x86_64). Windows support is planned but not started.
 
+Guides live in [`man/`](man/) (linked throughout below); generated API docs for the public headers (`building.h`, `reflection.h`, `testing.h`) are published at [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
+
 ## Usage
 
 ```text

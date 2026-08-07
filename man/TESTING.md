@@ -468,31 +468,43 @@ to mode-incompatible tests and include explicit reasons.
 
 ## Continuous Integration
 
-CI is split across two hosts because no single CI provider covers all four
-release-target quadrants:
+CI is split across two hosts, and by *when* it runs — on every push vs.
+only at release time — because no single CI provider covers all four
+release-target quadrants and per-push coverage of all four isn't the goal:
 
-| Quadrant | Host | Manifest |
-|---|---|---|
-| Linux amd64 | sr.ht (`builds.sr.ht`) | [`.builds/linux-amd64.yml`](../.builds/linux-amd64.yml) — **canonical**, gates `trunk` |
-| Linux aarch64 | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), `linux-aarch64` job |
-| macOS arm64 | GitHub Actions | same file, `macos-arm64` job |
-| macOS x86_64 | GitHub Actions | same file, `macos-x86_64` job (native Intel runner — not a Rosetta run) |
-
-Doxygen HTML docs (`docs` build target, man/BUILDING.md) are **not** part
-of either CI manifest. `.builds/linux-amd64.yml` carried a `docs` task
-through #909-#911; it was dropped after sr.ht's `ubuntu/lts` image started
-shipping a doxygen version that hangs (rather than warning) when
-`graphviz`'s `dot` binary is absent, timing out every job's docs step
-regardless of what the commit touched. GitHub Pages is the intended
-docs-hosting path going forward, not a CI completeness gate on every push;
-`./cccc --build build.c --build-target=docs` still works locally for
-anyone with doxygen+graphviz installed.
+| What | Host | Manifest | Trigger |
+|---|---|---|---|
+| Linux amd64 build+test | sr.ht (`builds.sr.ht`) | [`.builds/linux-amd64.yml`](../.builds/linux-amd64.yml) | every push to `trunk` — **canonical**, gates `trunk` |
+| Doxygen docs build, publish to GitHub Pages | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | every push to `trunk` (build-only, no deploy, on `pull_request`) |
+| Linux aarch64 / macOS arm64 / macOS x86_64 build+test+package | GitHub Actions | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | `v*` tag push only |
 
 `builds.sr.ht` cannot run arm64/aarch64 images at all (confirmed against the
 raw compatibility matrix — every arch: arm64/aarch64 cell is empty — and
 empirically, three different images all failed identically with "Image ..
-is not available for arch .arm64."), which is why the three arm64/aarch64
-quadrants live on GitHub Actions instead.
+is not available for arch .arm64."), which is why those three quadrants
+live on GitHub Actions. They're only built and tested when a release is
+tagged (`release.yml`'s `v*` trigger), not on every push — see
+[man/RELEASING.md](RELEASING.md) for the full release procedure. This is a
+deliberate tradeoff: `trunk` gets continuous Linux amd64 coverage from
+sr.ht, but a regression specific to aarch64/macOS is only caught when a
+release is cut, not on the commit that introduced it.
+
+Doxygen HTML docs (`docs` build target, man/BUILDING.md) used to be a
+`.builds/linux-amd64.yml` task (through #909-#911), dropped after sr.ht's
+`ubuntu/lts` image started shipping a doxygen version that hangs (rather
+than warning) when `graphviz`'s `dot` binary is absent, timing out every
+job's docs step regardless of what the commit touched. Docs generation now
+lives entirely on the GitHub side instead, published to
+<https://takeiteasy.github.io/cccc/> — `ci.yml`'s docs job installs
+`graphviz` explicitly alongside `doxygen` to avoid the same class of
+failure, and doesn't need a working `cccc` binary at all (Doxyfile's
+`INPUT` is just the three public headers, so `doxygen Doxyfile` runs
+standalone — no stage0 bootstrap step). `WARN_AS_ERROR` in the Doxyfile
+still makes this a real completeness gate on `pull_request` builds, just
+without a deploy step (a fork PR has no permission to publish Pages, and
+an unmerged PR's docs shouldn't go live). `./cccc --build build.c
+--build-target=docs` still works locally for anyone with
+doxygen+graphviz installed.
 
 The repo is mirrored to GitHub (`takeiteasy/cccc`) as a **manual second
 git remote** — no deploy key, PAT, or other credential is stored in either
@@ -501,17 +513,18 @@ CI system, so nothing here can push on its own:
 ```bash
 git remote add github git@github.com:takeiteasy/cccc.git   # one-time
 git push origin trunk     # sr.ht: fires .builds/linux-amd64.yml
-git push github trunk     # GitHub: fires .github/workflows/ci.yml
+git push github trunk     # GitHub: fires .github/workflows/ci.yml (docs)
 ```
 
-Only `trunk` triggers either CI system; `devel` is local-only (see
-[Branching](../CLAUDE.md) — never pushed to `origin`, and the GitHub
-workflow is scoped to `trunk`/`pull_request` so a `devel`-only push there
-wouldn't fire it either).
+`trunk` is the only long-lived branch and the only one pushed to either
+remote (see [Branching](../CLAUDE.md)) — both pushes are routine on every
+ordinary push, not just at release time, since GitHub needs to stay
+current for the docs it hosts.
 
-Every CI job — sr.ht or Actions, any platform — repeats the same
-stage0-bootstrap dance before building, because a fresh clone has no
-`src/std.c` (gitignored):
+Only sr.ht's `.builds/linux-amd64.yml` and GitHub's `release.yml` actually
+bootstrap/build/test `cccc`; `ci.yml`'s docs job doesn't. Every job that
+*does* build `cccc` repeats the same stage0-bootstrap dance, because a
+fresh clone has no `src/std.c` (gitignored):
 
 ```bash
 make bootstrap                  # stage0 (src/std_stub.c) -> regen the real
@@ -533,12 +546,12 @@ binary running comptime code against `src/std.c` from a stale prior build
 (or, on a genuinely fresh clone with the regen skipped, produces a build
 failure complaining that `cccc/reflection.h` can't be found — check that
 `./cccc` is being invoked with `-I./include` reachable from the current
-directory). The GitHub Actions jobs use `-j 4` rather than
+directory). GitHub's build+test jobs (`release.yml`) use `-j 4` rather than
 sr.ht's `-j 8` — hosted runners have fewer cores than the sr.ht builder, and
 parallel-load timing sensitivity is exactly what surfaced #853.
 
 `CC=clang` and `CCCC_NATIVE_CC=clang` must both be set explicitly for the
-`linux-aarch64` job (and are, in `.github/workflows/ci.yml`'s `env:`):
+`linux-aarch64` job (and are, in `.github/workflows/release.yml`'s `env:`):
 Ubuntu's plain `cc` resolves to gcc, which rejects `-std=c23`. These are two
 separate compiler-selection mechanisms — `CC` for `make bootstrap`'s
 recursive `make cccc` steps (plain `CC ?= cc` in the Makefile), `CCCC_NATIVE_CC` for `./cccc

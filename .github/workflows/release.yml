@@ -31,14 +31,16 @@ jobs:
     env:
       # Resolved per-job, used everywhere below instead of raw
       # GITHUB_REF_NAME -- on a workflow_dispatch run GITHUB_REF_NAME is
-      # the branch the workflow was dispatched against (e.g. "main"), not
+      # the branch the workflow was dispatched against (e.g. "trunk"), not
       # the tag being (re)released.
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       # ubuntu-24.04's preinstalled `cc` is gcc, which rejects -std=c23
-      # ("did you mean -std=c2x?") -- see ci.yml's linux-aarch64 job for
-      # the two separate compiler-selection mechanisms (CC for the stage0
-      # Makefile, CCCC_NATIVE_CC for build.c's own compiler probe) that
-      # both need overriding.
+      # ("did you mean -std=c2x?"). Two separate compiler-selection
+      # mechanisms need overriding, not one: CC for the stage0 Makefile's
+      # `CC ?= cc` (exported job env propagates through recursive $(MAKE)),
+      # and CCCC_NATIVE_CC for build.c's own internal compiler probe
+      # (cccc_find_native_cc(), src/vm.c), which ignores CC entirely and
+      # otherwise tries {cc, clang, gcc} on PATH in that order.
       CC: clang
       CCCC_NATIVE_CC: clang
     steps:

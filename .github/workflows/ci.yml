@@ -1,107 +1,66 @@
-name: CI
+name: Docs
 
-# Mirror CI (#849): builds.sr.ht (.builds/linux-amd64.yml) cannot run
-# arm64/aarch64 on any image -- confirmed against the raw compatibility
-# matrix (every arch: arm64/aarch64 cell is empty) and empirically (three
-# different images all failed identically with "Image .. is not available
-# for arch .arm64."). sr.ht stays the canonical Linux amd64 CI; this
-# workflow closes the three remaining release-target quadrants using
-# GitHub-hosted runners: Linux aarch64, macOS arm64, macOS x86_64.
+# GitHub-side "regular push" CI is docs-only (see man/TESTING.md's
+# Continuous Integration section and CLAUDE.md's Branching notes):
+# builds the Doxygen HTML for the three public headers under
+# include/cccc/ and publishes it to GitHub Pages
+# (https://takeiteasy.github.io/cccc/) on every push to `trunk`. `trunk` is
+# pushed to both `origin` (sr.ht) and `github` on every push to keep them
+# in sync -- sr.ht's .builds/linux-amd64.yml is what actually
+# bootstraps/builds/tests the compiler on every push (Linux amd64,
+# canonical); this workflow doesn't need a working `cccc` binary at all,
+# since Doxyfile's INPUT is just the three headers and `doxygen Doxyfile`
+# runs standalone.
 #
-# The mirror to this repo is a manual `git push github trunk` (see
-# man/TESTING.md's Continuous Integration section) -- no deploy key or PAT
-# is stored anywhere, so this workflow only ever runs against whatever was
-# last pushed here.
+# The full four-quadrant build+test+package (Linux amd64/aarch64, macOS
+# arm64/x86_64) only runs at release time, via .github/workflows/release.yml
+# (triggered by a `v*` tag push) -- not on every push. See
+# man/RELEASING.md.
 #
-# Only trunk (release/CI-gated branch) triggers -- devel is a local-only
-# working branch and is never pushed to either remote.
+# pull_request builds (WARN_AS_ERROR in Doxyfile makes this a real
+# completeness gate on @param/@return coverage) but never deploys -- a PR
+# from a fork has no permission to publish Pages, and an unmerged PR's docs
+# shouldn't go live anyway.
 on:
   push:
     branches: [trunk]
   pull_request:
     branches: [trunk]
 
+permissions:
+  contents: read
+
 jobs:
-  linux-aarch64:
-    runs-on: ubuntu-24.04-arm
-    env:
-      # Two separate compiler-selection mechanisms need overriding here,
-      # not one:
-      #  - CC: the stage0 `make bootstrap` target's recursive `make cccc`
-      #    invocations use plain `CC ?= cc` in the Makefile, which a `CC`
-      #    env var overrides per normal make semantics (exported job env
-      #    propagates through recursive $(MAKE) automatically).
-      #  - CCCC_NATIVE_CC: `./cccc --build build.c`'s own internal compiler
-      #    probe (cccc_find_native_cc(), src/vm.c) is a *different* lookup
-      #    that only honours CCCC_NATIVE_CC -- it ignores CC entirely and
-      #    otherwise tries {cc, clang, gcc} on PATH in that order. sr.ht's
-      #    minimal image only has clang installed (no cc/gcc), so that
-      #    fallback happens to land on clang there; GitHub's ubuntu-24.04-arm
-      #    runner ships a pre-installed `cc` (-> gcc), which wins first and
-      #    breaks on `-std=c23` ("did you mean -std=c2x?").
-      CC: clang
-      CCCC_NATIVE_CC: clang
+  build:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: |
-          set -e
-          # `make bootstrap` (#857) does the full stage0 dance -- including
-          # an unconditional relink after regen_stdlib.sh, so a fast CI
-          # runner can't hit the mtime race where make's dependency check
-          # sees src/std.c as not strictly newer than the just-linked
-          # binary and wrongly reports "cccc is up to date" (see the
-          # Makefile's `bootstrap` target for the full explanation).
-          make bootstrap
-      - name: Build
-        run: ./cccc --build build.c
-      - name: Test
-        run: python3 tools/run_tests.py --binary build/cccc -j 4
+      - name: Install doxygen + graphviz
+        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+      - name: Build Doxygen HTML
+        run: mkdir -p build/docs && doxygen Doxyfile
+      - name: Disable Jekyll processing
+        # Doxygen's output has underscore-prefixed files/dirs (e.g. search
+        # assets) that GitHub Pages' default Jekyll processing excludes,
+        # silently breaking the published site unless this is present.
+        run: touch build/docs/html/.nojekyll
+      - uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push'
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/trunk' && github.event_name == 'push'
+        with:
+          path: build/docs/html
 
-  macos-arm64:
-    runs-on: macos-15
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/trunk' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: brew install libffi pkg-config
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: |
-          set -e
-          # `make bootstrap` (#857) does the full stage0 dance -- including
-          # an unconditional relink after regen_stdlib.sh, so a fast CI
-          # runner can't hit the mtime race where make's dependency check
-          # sees src/std.c as not strictly newer than the just-linked
-          # binary and wrongly reports "cccc is up to date" (see the
-          # Makefile's `bootstrap` target for the full explanation).
-          make bootstrap
-      - name: Build
-        run: ./cccc --build build.c
-      - name: Test
-        run: python3 tools/run_tests.py --binary build/cccc -j 4
-
-  macos-x86_64:
-    # Native Intel build+test -- NOT build.c's macos_x86_64 target, which is
-    # a cross-compile-only target meant to run from an arm64 host (see its
-    # comment in build.c); on a real Intel runner the plain bootstrap+build
-    # path below already produces and runs a native x86_64 binary.
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: brew install libffi pkg-config
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: |
-          set -e
-          # `make bootstrap` (#857) does the full stage0 dance -- including
-          # an unconditional relink after regen_stdlib.sh, so a fast CI
-          # runner can't hit the mtime race where make's dependency check
-          # sees src/std.c as not strictly newer than the just-linked
-          # binary and wrongly reports "cccc is up to date" (see the
-          # Makefile's `bootstrap` target for the full explanation).
-          make bootstrap
-      - name: Build
-        run: ./cccc --build build.c
-      - name: Test
-        run: python3 tools/run_tests.py --binary build/cccc -j 4
+      - id: deployment
+        uses: actions/deploy-pages@v4
