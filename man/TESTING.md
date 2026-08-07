@@ -478,6 +478,16 @@ release-target quadrants:
 | macOS arm64 | GitHub Actions | same file, `macos-arm64` job |
 | macOS x86_64 | GitHub Actions | same file, `macos-x86_64` job (native Intel runner — not a Rosetta run) |
 
+Doxygen HTML docs (`docs` build target, man/BUILDING.md) are **not** part
+of either CI manifest. `.builds/linux-amd64.yml` carried a `docs` task
+through #909-#911; it was dropped after sr.ht's `ubuntu/lts` image started
+shipping a doxygen version that hangs (rather than warning) when
+`graphviz`'s `dot` binary is absent, timing out every job's docs step
+regardless of what the commit touched. GitHub Pages is the intended
+docs-hosting path going forward, not a CI completeness gate on every push;
+`./cccc --build build.c --build-target=docs` still works locally for
+anyone with doxygen+graphviz installed.
+
 `builds.sr.ht` cannot run arm64/aarch64 images at all (confirmed against the
 raw compatibility matrix — every arch: arm64/aarch64 cell is empty — and
 empirically, three different images all failed identically with "Image ..
