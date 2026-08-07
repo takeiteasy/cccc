@@ -1658,6 +1658,13 @@ The file-scope (static) case requires that initializer values are compile-time
 constants that can be folded by `cc_eval`. Passing a non-constant expression
 (e.g. a function call) in that context is a compile-time error.
 
+The file-scope anonymous global is given a real name and a full definition
+in `-m`/`-c=native`/`-G` output alike: the serializer renames it from its
+internal placeholder to a `static __cccc_<tag>_<N>` identifier and, under
+`-G`, forward-declares it ahead of any generated function body that
+references it (needed because a function created earlier in the same macro
+invocation can be emitted before the global it captures).
+
 ```c
 [[cccc::comptime]]
 void gen_lookup(void) {

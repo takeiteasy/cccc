@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -118,6 +118,12 @@ Cases:
   23. #925/#926 regression guard: `-m` output for the tickets' own repro,
       `tests/suites/test_suite_arrays.c`, contains neither a raw `.L..`
       name nor an `unsupported expr` placeholder.
+  24. #928 regression: `-G` output for a comptime macro that builds
+      file-scope anon globals via `CompoundLiteral`/`InitArray`/
+      `InitStruct` (`reflect_new_anon_gvar()`'s other two call sites,
+      besides `MakeStringLiteral` which #925 already covered) contains no
+      raw `.L..` name, has real forward-declared definitions, and -- the
+      only real proof -- compiles cleanly through the host `cc`.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -648,6 +654,90 @@ def case_anon_locals_m_output(cccc: Path, tmp: str) -> bool:
     return True
 
 
+GVAR_BUILDERS_G_PROGRAM = (
+    "struct FPt { int x; int y; };\n"
+    "\n"
+    "[[cccc::comptime]]\n"
+    "Node *gen_gvar_cl(void) {\n"
+    "    Type *pt_ty = GetType(\"FPt\");\n"
+    "    Type *int_ty = GetType(\"int\");\n"
+    "    Node *gpt = CompoundLiteral(pt_ty, MakeIntLiteral(7), MakeIntLiteral(13));\n"
+    "    Obj *fn = MakeFunction(\"gvar_cl_x\", int_ty);\n"
+    "    WithFn(fn) {\n"
+    "        FunctionSetBody(fn, MakeReturn(MakeMember(gpt, \"x\")));\n"
+    "    }\n"
+    "    return MakeIntLiteral(0);\n"
+    "}\n"
+    "gen_gvar_cl();\n"
+    "\n"
+    "[[cccc::comptime]]\n"
+    "Node *gen_gvar_arr(void) {\n"
+    "    Type *int_ty = GetType(\"int\");\n"
+    "    Node *garr = InitArray(int_ty,\n"
+    "        MakeIntLiteral(10), MakeIntLiteral(20), MakeIntLiteral(30));\n"
+    "    Obj *fn = MakeFunction(\"gvar_arr_elem2\", int_ty);\n"
+    "    WithFn(fn) {\n"
+    "        FunctionSetBody(fn, MakeReturn(MakeSubscript(garr, MakeIntLiteral(2))));\n"
+    "    }\n"
+    "    return MakeIntLiteral(0);\n"
+    "}\n"
+    "gen_gvar_arr();\n"
+    "\n"
+    "[[cccc::comptime]]\n"
+    "Node *gen_gvar_struct(void) {\n"
+    "    Type *pt_ty = GetType(\"FPt\");\n"
+    "    Type *int_ty = GetType(\"int\");\n"
+    "    const char *flds[] = {\"x\"};\n"
+    "    Node *vals[] = {MakeIntLiteral(99)};\n"
+    "    Node *gs = InitStruct(pt_ty, flds, vals, 1);\n"
+    "    Obj *fn_x = MakeFunction(\"gvar_struct_x\", int_ty);\n"
+    "    WithFn(fn_x) {\n"
+    "        FunctionSetBody(fn_x, MakeReturn(MakeMember(gs, \"x\")));\n"
+    "    }\n"
+    "    Obj *fn_y = MakeFunction(\"gvar_struct_y\", int_ty);\n"
+    "    WithFn(fn_y) {\n"
+    "        FunctionSetBody(fn_y, MakeReturn(MakeMember(gs, \"y\")));\n"
+    "    }\n"
+    "    return MakeIntLiteral(0);\n"
+    "}\n"
+    "gen_gvar_struct();\n"
+)
+
+
+def case_gvar_builders_generated_output(cccc: Path, tmp: str) -> bool:
+    print("  24: -G output for file-scope CompoundLiteral/InitArray/InitStruct anon globals is valid, compilable C (#928)")
+    src = Path(tmp) / "gvar_builders_928.c"
+    write(src, GVAR_BUILDERS_G_PROGRAM)
+    result = run([str(cccc), "-G", src.name], cwd=tmp)
+    out = result.stdout
+    # Same vacuous-pass trap as cases 22/23: a crashed/erroring -G invocation
+    # must not silently satisfy the "does not contain X" checks below.
+    if result.returncode != 0 or "gvar_cl_x" not in out:
+        print(f"    FAIL: -G exited {result.returncode} or produced unrecognisable output\n    {result.stderr}\n    {out}")
+        return False
+    if ".L.." in out:
+        print(f"    FAIL: -G output still contains a raw '.L..' synthesized name\n    {out}")
+        return False
+    if not re.search(r"static struct FPt __cccc_\w+;", out):
+        print(f"    FAIL: -G output missing a forward-declared static struct definition\n    {out}")
+        return False
+    if not re.search(r"static int __cccc_\w+\[3\];", out):
+        print(f"    FAIL: -G output missing a forward-declared static array definition\n    {out}")
+        return False
+    # The only real proof the output is valid C: hand it to the host
+    # compiler directly (#928's array-cast bug -- `(int [3])` instead of
+    # `(int *)` -- compiled as -m/-G text just fine; only a real `cc -c`
+    # rejects it).
+    obj = Path(tmp) / "gvar_builders_928.o"
+    cc_result = subprocess.run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
+                                input=out, capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -G output\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_arrays_suite_no_serializer_gaps(cccc: Path, tmp: str) -> bool:
     print("  23: -m output for tests/suites/test_suite_arrays.c (the #925/#926 repro) has no dotted names or unsupported-expr placeholders")
     suite = Path(__file__).parent.parent / "tests" / "suites" / "test_suite_arrays.c"
@@ -672,7 +762,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -703,6 +793,7 @@ def main() -> int:
             case_anon_locals_end_to_end,
             case_anon_locals_m_output,
             case_arrays_suite_no_serializer_gaps,
+            case_gvar_builders_generated_output,
         ]
         results = [case(cccc, tmp) for case in cases]
 

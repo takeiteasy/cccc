@@ -2960,8 +2960,15 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
     for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
         bool is_fn_def  = o->is_function  && o->body &&
                           o->is_macro_generated;
+        // #928: an anon gvar (dotted `.L..N` name -- reflect_new_anon_gvar,
+        // reflection.c) is referenced directly through the Obj pointer
+        // already embedded in its ND_VAR node, never by re-parsed textual
+        // reference, and doesn't get a real identifier until
+        // rename_anon_globals() renames it at serialization time (long
+        // after this pre-parse pass runs). Synthesizing `extern T .L..N;`
+        // here is both unnecessary and invalid C -- skip it.
         bool is_gvar_def = !o->is_function && o->is_definition &&
-                            o->is_macro_generated;
+                            o->is_macro_generated && o->name[0] != '.';
         if (!is_fn_def && !is_gvar_def)
             continue;
 

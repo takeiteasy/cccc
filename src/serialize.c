@@ -807,8 +807,19 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             // (pointer-typed) cast on an integer offset, and printing it
             // would produce the exact `ptr + (int *)offset` error this
             // fix exists to avoid.
+            //
+            // #928: node->ty can itself be an array type (e.g. a reflection
+            // MakeSubscript() on an array-typed anon global) -- serialize_type
+            // would print `(int [3])`, and a cast to array type is not valid
+            // C. Cast to pointer-to-element instead; the ND_DEREF this node
+            // is wrapped in still reads the right value through it.
             fprintf(f, "(");
-            serialize_type(f, ctx, node->ty);
+            if (node->ty && node->ty->kind == TY_ARRAY) {
+                serialize_type(f, ctx, node->ty->base);
+                fprintf(f, " *");
+            } else {
+                serialize_type(f, ctx, node->ty);
+            }
             fprintf(f, ")((char *)");
             serialize_expr(f, vm, ctx, node->lhs, 14);
             fprintf(f, " %s ", get_binary_op_str(node->kind));
@@ -822,8 +833,14 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             // set_checked_deref_bounds() builds ND_ADD via new_binary()
             // directly and does not canonicalize -- handle it defensively.
             // Print lhs_inner for the same reason as above.
+            // #928: same array-cast fix as the ptr+num arm above.
             fprintf(f, "(");
-            serialize_type(f, ctx, node->ty);
+            if (node->ty && node->ty->kind == TY_ARRAY) {
+                serialize_type(f, ctx, node->ty->base);
+                fprintf(f, " *");
+            } else {
+                serialize_type(f, ctx, node->ty);
+            }
             fprintf(f, ")((char *)");
             serialize_expr(f, vm, ctx, node->rhs, 14);
             fprintf(f, " + ");
@@ -1789,15 +1806,19 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
         fprintf(f, "\n");
 }
 
-// #925: new_anon_gvar() (parse.c) hands out the same `.L..N` name to string
-// literals, static locals, and compound literals alike -- a dot isn't a
-// valid C identifier character, so every non-string-literal use needs a
-// real name before anything below references it. Runs once, before any
+// #925/#928: new_anon_gvar() (parse.c) and reflect_new_anon_gvar()
+// (reflection.c) both hand out the same `.L..N` name to string literals,
+// static locals, and compound literals alike -- a dot isn't a valid C
+// identifier character, so every non-string-literal use needs a real name
+// before anything below references it. Runs once, before any
 // collection/emission pass, so every later `is_string_literal`/dotted-name
-// check sees the final state. Not run under generated_only (-G): that path
-// has its own emit-event walk and its own dotted-name skip (see the
-// `obj->name[0] != '.'` check further down), and renaming here would only
-// grow -G's blast radius for a case these tickets don't cover.
+// check sees the final state. Also runs under generated_only (-G): #928
+// found that reflection API compound-literal/init-struct globals built
+// while running under -G (e.g. a comptime macro calling CompoundLiteral()/
+// InitArray()/InitStruct() at file scope) hit this exact gap when renaming
+// was skipped here -- the emit-event walk's own dotted-name skip (see
+// `obj->name[0] != '.'` further down) only prevented emitting a bogus
+// reference, it never gave the global a real name or definition.
 static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext *ctx) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_function || obj->name[0] != '.' || obj->is_string_literal)
@@ -1829,8 +1850,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     SerializeContext ctx = {.generated_only = generated_only,
                            .emit_strict = vm->compiler.emit_strict != 0};
     collect_scope_names(&ctx, vm);
-    if (!generated_only)
-        rename_anon_globals(vm, prog, &ctx);
+    rename_anon_globals(vm, prog, &ctx);
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
@@ -1854,6 +1874,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 
     if (generated_only && vm->compiler.emit_events_head) {
         serialize_type_defs_for_owner(f, &ctx, NULL);
+        // #928: forward-declare every macro-generated global before any
+        // definition, mirroring the #918 pass below (serialize_global_var's
+        // sibling loop, further down this function) and for the same
+        // reason -- the drain that populates these emit events
+        // (macros.c:2775-2783) walks vm->compiler.globals newest-first, so
+        // objects created earlier in one macro invocation are recorded
+        // *later*. A file-scope CompoundLiteral()/InitStruct() call (whose
+        // anon gvar is created before the function that references it)
+        // would otherwise emit that function body ahead of the global's own
+        // definition -- a forward reference with nothing in scope yet.
+        for (EmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next) {
+            if (ev->kind != CCCC_EMIT_OBJECT)
+                continue;
+            Obj *obj = ev->obj;
+            if (!obj || !obj->is_macro_generated || obj->is_function || obj->name[0] == '.')
+                continue;
+            fprintf(f, obj->is_static ? "static " : "extern ");
+            serialize_type_decl(f, &ctx, obj->ty, obj->name);
+            fprintf(f, ";\n");
+        }
         for (EmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next) {
             if (ev->kind == CCCC_EMIT_SOURCE) {
                 fprintf(f, "%s\n", ev->source);

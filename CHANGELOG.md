@@ -3,6 +3,22 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `-G` serializer: reflection API file-scope anonymous globals built via
+  `CompoundLiteral`/`InitArray`/`InitStruct` (`reflect_new_anon_gvar()`'s
+  other two call sites, besides `MakeStringLiteral` which #925 already
+  covered) no longer fall through as an undefined `.L..N` reference —
+  `rename_anon_globals()` now runs under `-G` too, and the `-G` emit path
+  forward-declares macro-generated globals ahead of any generated function
+  body that references them
+- `-c=native`/`-m`/`-G` serializer: pointer arithmetic whose result type is
+  an array (e.g. a reflection `MakeSubscript` on an array-typed anon
+  global) no longer casts to the array type itself (`(int [3])...`, invalid
+  C) — casts to pointer-to-element instead
+
 ## [0.1.2] - 2026-08-07
 
 ### Fixed
