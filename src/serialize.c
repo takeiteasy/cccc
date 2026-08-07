@@ -1182,7 +1182,7 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
         // i;` declarations in the same top-level scope, a redefinition
         // error. Pre-existing, out of #918's scope (found while smoke-
         // testing that fix against tests/suites/test_suite_arrays.c);
-        // filed separately.
+        // filed separately as #926.
         for (Obj *var = fn->locals; var; var = var->next) {
             if (var->is_param)
                 continue;
@@ -1455,7 +1455,8 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
     // valid C identifier), and if it happens to have init_data it gets
     // wrongly treated as a string literal. Pre-existing, out of #918's
     // scope (found while smoke-testing that fix against tests/suites/
-    // test_suite_arrays.c's compound-literal cases); filed separately.
+    // test_suite_arrays.c's compound-literal cases); filed separately as
+    // #925.
     if (var->name[0] == '.')
         return;
 
