@@ -238,15 +238,15 @@ static void usage(const char *argv0, int exit_code) {
             "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
-    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native\n");
-    printf("\t                         bytecode: write .c4 (to -o file, or stdout if -o omitted\n");
-    printf("\t                                   and stdout is not a TTY)\n");
-    printf("\t                         native: require -o file; build a native executable via\n");
-    printf("\t                                 CCCC_NATIVE_CC (cc, clang, or gcc)\n");
-    printf("\t                         Use -cnative or --compile=native (short form must be\n");
+    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), bytecode\n");
+    printf("\t                         native: build a native executable via CCCC_NATIVE_CC\n");
+    printf("\t                                 (cc, clang, or gcc); writes to -o file, or ./a.out\n");
+    printf("\t                                 if -o omitted\n");
+    printf("\t                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted\n");
+    printf("\t                         Use -cbytecode or --compile=bytecode (short form must be\n");
     printf("\t                         attached; long form may use '=' or separate arg).\n");
-    printf("\t-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes\n");
-    printf("\t                         bytecode to <file>; if omitted, writes to stdout\n");
+    printf("\t-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.\n");
+    printf("\t                         For -c=bytecode, defaults to ./a.c4 if omitted.\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
@@ -1348,7 +1348,7 @@ int main(int argc, const char *argv[]) {
             output_json = 1;
             break;
         case 'c': { // -c[FMT]/--compile[=FMT]
-            // Bare -c / --compile defaults to bytecode. The optional
+            // Bare -c / --compile defaults to native. The optional
             // argument selects the format. Note: GNU getopt's `::` only
             // supports attached form for short options (e.g. `-cnative`),
             // not `-c=native`. The long form accepts `--compile=native`
@@ -1360,7 +1360,7 @@ int main(int argc, const char *argv[]) {
             if (fmt && fmt[0] == '=')
                 fmt++;
             if (!fmt || !*fmt) {
-                compile_format = COMPILE_BYTECODE;
+                compile_format = COMPILE_NATIVE;
             } else if (strcmp(fmt, "bytecode") == 0 || strcmp(fmt, "bc") == 0 ||
                        strcmp(fmt, "c4") == 0) {
                 compile_format = COMPILE_BYTECODE;
@@ -1905,10 +1905,10 @@ int main(int argc, const char *argv[]) {
                 usage(argv[0], 1);
             }
         }
-        if (!out_file && !testing_mode) {
-            fprintf(stderr,
-                    "error: -c=native requires -o <file>\n");
-            usage(argv[0], 1);
+        if (!out_file) {
+            // Match cc/clang/gcc's a.out convention: -c=native with no -o
+            // builds ./a.out instead of erroring.
+            out_file = strdup("a.out");
         }
         if (link_paths_count > 0) {
             // --link resolves against the CCCC bytecode linker (#565); the
@@ -2707,35 +2707,24 @@ int main(int argc, const char *argv[]) {
                     "warning: --link has no effect when combined with -c bytecode "
                     "(library output retains its text relocations)\n");
         }
-        if (out_file) {
-            if (cc_save_bytecode(&vm, out_file) != 0) {
-                fprintf(stderr, "error: failed to save bytecode to %s\n",
-                        out_file);
-                exit_code = 1;
-                goto BAIL;
-            }
-            fprintf(stderr, "Bytecode saved to %s\n", out_file);
-        } else {
-            if (CCCC_ISATTY(CCCC_FILENO(stdout))) {
-                fprintf(stderr,
-                        "error: refusing to write bytecode to a terminal; "
-                        "use -o <file> or redirect stdout\n");
-                exit_code = 1;
-                goto BAIL;
-            }
-            if (cc_write_bytecode(&vm, stdout) != 0) {
-                fprintf(stderr, "error: failed to write bytecode to stdout\n");
-                exit_code = 1;
-                goto BAIL;
-            }
-            fflush(stdout);
+        if (!out_file) {
+            // Match cc/clang/gcc's a.out convention: -c=bytecode with no -o
+            // writes ./a.c4 instead of falling back to stdout.
+            out_file = strdup("a.c4");
         }
+        if (cc_save_bytecode(&vm, out_file) != 0) {
+            fprintf(stderr, "error: failed to save bytecode to %s\n",
+                    out_file);
+            exit_code = 1;
+            goto BAIL;
+        }
+        fprintf(stderr, "Bytecode saved to %s\n", out_file);
         goto BAIL;
     }
 
     if (compile_format == COMPILE_NATIVE) {
-        // -c=native is rejected above if out_file is NULL, so exe_path is
-        // always a user-supplied path here.
+        // -c=native defaults out_file to "a.out" above, so exe_path is
+        // always a non-NULL path here.
         exit_code = run_native_backend(
             &vm, merged_prog, out_file, inc_paths, inc_paths_count,
             sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,

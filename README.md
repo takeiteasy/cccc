@@ -42,15 +42,15 @@ Options:
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
 	-S/--no-stdlib           Do not link standard library
-	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: bytecode (default), native
-	                         bytecode: write .c4 (to -o file, or stdout if -o omitted
-	                                   and stdout is not a TTY)
-	                         native: require -o file; build a native executable via
-	                                 CCCC_NATIVE_CC (cc, clang, or gcc)
-	                         Use -cnative or --compile=native (short form must be
+	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), bytecode
+	                         native: build a native executable via CCCC_NATIVE_CC
+	                                 (cc, clang, or gcc); writes to -o file, or ./a.out
+	                                 if -o omitted
+	                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted
+	                         Use -cbytecode or --compile=bytecode (short form must be
 	                         attached; long form may use '=' or separate arg).
-	-o/--out <file>          Output file. Required for -c=native. For -c=bytecode, writes
-	                         bytecode to <file>; if omitted, writes to stdout
+	-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.
+	                         For -c=bytecode, defaults to ./a.c4 if omitted.
 	-d/--disassemble         Disassemble bytecode to stdout
 	-v/--verbose             Enable debug logging
 	-g/--debug               Enable interactive debugger
@@ -115,6 +115,8 @@ Safety Levels (preset flag combinations):
 
 Memory Safety Options (can be combined with safety levels):
 	-B/--bounds-checks           Runtime array bounds checking
+	   --checked-pointers        Runtime range checks for checked-pointer
+	                             ([[cccc::single/array/ntarray]]) accesses
 	   --uaf-detection           Use-after-free detection
 	   --control-flow-integrity  Control-flow integrity (indirect call validation)
 	   --type-checks             Runtime type checking on pointer dereferences
@@ -220,7 +222,7 @@ Example:
   - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)` templates, hygienic type/symbol reflection, `__cccc_gensym`, and AST construction helpers
 - **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
   - This is the production path: full toolchain performance, system libraries, no VM overhead
-  - `-o <file>` is required to name the produced executable; the temporary C source is removed after the build
+  - `-o <file>` names the produced executable; defaults to `./a.out` if omitted. The temporary C source is removed after the build
   - `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
 - **Register-based bytecode VM** — compiles C to a portable instruction set with 32 integer and 32 floating-point registers, then executes it in a built-in interpreter (see [VM.md](man/VM.md))
   - Powers compile-time macro execution
@@ -304,10 +306,13 @@ forward.
 
 ### Compile Natively (production)
 
-`-c=native` is the production path: CCCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. `-o <file>` is **required** to name the output executable; the temporary C source is removed after the build.
+`-c=native` is the production path: CCCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. `-o <file>` names the output executable; if omitted it defaults to `./a.out` (matching `cc`/`clang`/`gcc`). The temporary C source is removed after the build.
 
 ```bash
-# Write a native executable (build only — does not run)
+# Bare -c defaults to native; no -o writes ./a.out (build only — does not run)
+./cccc -c program.c
+
+# Write a native executable to a named path
 ./cccc -c=native -o program program.c
 
 # Override compiler selection
@@ -321,7 +326,7 @@ Native mode runs CCCC's preprocessing and compile-time macro stages first, then 
 
 ### Run in the VM
 
-Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its built-in interpreter. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`.
+Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its built-in interpreter. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`. `-c=bytecode` (or `-cbc`/`-cc4`) is the explicit spelling for a compile-only `.c4` bytecode file, since bare `-c` defaults to native (see above); with no `-o`, it writes `./a.c4`.
 
 ```bash
 # Compile and run immediately on the VM
@@ -335,6 +340,9 @@ Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its bui
 
 # With preprocessor flags
 ./cccc -I./include -DDEBUG -o debug.bin main.c
+
+# Compile only, to a .c4 bytecode file (does not run)
+./cccc -c=bytecode -o program.c4 program.c
 ```
 
 A leading `#!` (shebang) line on the command-line input file is ignored, so a

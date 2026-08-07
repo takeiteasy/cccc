@@ -758,6 +758,50 @@ def case_arrays_suite_no_serializer_gaps(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_bare_c_defaults_to_native_a_out(cccc: Path, tmp: str) -> bool:
+    print("  25: bare -c (no FMT, no -o) defaults to native and writes ./a.out")
+    src = Path(tmp) / "bare_c_native.c"
+    write(src, "int main(void) { return 42; }\n")
+    a_out = Path(tmp) / "a.out"
+    if a_out.exists():
+        a_out.unlink()
+    result = run([str(cccc), "-c", src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    if not a_out.exists():
+        print(f"    FAIL: ./a.out was not written\n    {result.stderr}")
+        return False
+    run_result = run(["./a.out"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: ./a.out exited {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_bare_c_bytecode_defaults_to_a_c4(cccc: Path, tmp: str) -> bool:
+    print("  26: -c=bytecode with no -o writes ./a.c4")
+    src = Path(tmp) / "bare_c_bytecode.c"
+    write(src, "int main(void) { return 42; }\n")
+    a_c4 = Path(tmp) / "a.c4"
+    if a_c4.exists():
+        a_c4.unlink()
+    result = run([str(cccc), "-c=bytecode", src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    if not a_c4.exists():
+        print(f"    FAIL: ./a.c4 was not written\n    {result.stderr}")
+        return False
+    run_result = run([str(cccc), "a.c4"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: running a.c4 exited {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -794,6 +838,8 @@ def main() -> int:
             case_anon_locals_m_output,
             case_arrays_suite_no_serializer_gaps,
             case_gvar_builders_generated_output,
+            case_bare_c_defaults_to_native_a_out,
+            case_bare_c_bytecode_defaults_to_a_c4,
         ]
         results = [case(cccc, tmp) for case in cases]
 

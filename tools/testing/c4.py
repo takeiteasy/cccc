@@ -100,7 +100,7 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         c4_path = Path(tmp) / (test_file.stem + ".c4")
         save_cmd = [
             str(cccc), "-I./include", *cccc_args, *per_test_flags,
-            "-c", "-o", str(c4_path), str(test_file),
+            "-c=bytecode", "-o", str(c4_path), str(test_file),
         ]
         try:
             save = subprocess.run(

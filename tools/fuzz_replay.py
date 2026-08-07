@@ -37,7 +37,7 @@ def replay_one(cccc, src, timeout):
         out = Path(tmp) / "out.c4"
         try:
             r = subprocess.run(
-                [str(cccc), "-I", str(REPO_ROOT / "include"), "-c", "-o", str(out), str(src)],
+                [str(cccc), "-I", str(REPO_ROOT / "include"), "-c=bytecode", "-o", str(out), str(src)],
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
