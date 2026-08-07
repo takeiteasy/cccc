@@ -177,12 +177,34 @@ handling to come back out as valid, semantically faithful C:
   emitting a guess that would silently change the program's data. There is
   no equivalent gap for non-global (local/stack) initializers — those are
   codegen'd directly, not reconstructed as source text.
-- **Known gap:** anonymous compound literals of a non-`char`-array type
-  (`(int[]){1,2,3}`, `(struct S){...}`) reuse the same synthesized-name
-  mechanism as string literals (`.L..N`, `new_anon_gvar` in `src/parse.c`)
-  and are not yet handled specially by the serializer — referencing one by
-  name emits the raw synthesized name, which contains a `.` and is not a
-  valid C identifier.
+- **Anonymous globals.** `new_anon_gvar` (`src/parse.c`) hands out the same
+  synthesized `.L..N` name to string literals, static locals, and compound
+  literals (`(int[]){1,2,3}`, `&(struct S){...}`) alike — a dot isn't a
+  valid C identifier character. `rename_anon_globals` (`src/serialize.c`)
+  runs once before any other emission pass: every such Obj that isn't a
+  genuine string literal (`Obj.is_string_literal`, set only by
+  `new_string_literal`) is given a real, `static`-qualified name and
+  definition, same as any other file-scope global. String literals
+  themselves are still inlined at their point of use, never given their own
+  definition.
+- **Per-function local name collisions.** `serialize_function` hoists every
+  entry on a function's `->locals` to one flat declaration list at the top
+  of the serialized body. Since C source scoping lets sibling or nested
+  blocks reuse a name (two `for (int i = ...)` loops in the same function,
+  or an inner declaration shadowing an outer one — including a parameter's
+  own name), the hoisting loop renames a *non-parameter* local on collision
+  against every other local/param in the function, keeping the flattened
+  declaration list free of duplicate identifiers. Parameters themselves are
+  never renamed: `serialize_function_signature` has already printed the
+  function's signature by the time this runs, so renaming a param's `Obj`
+  this late would desync the signature from the body.
+- **`for`-loop declaration-form init.** A `for (int i = 0; ...)` init
+  clause parses as an `ND_BLOCK` of per-declarator `ND_EXPR_STMT` nodes
+  (`declaration()`, `src/parse.c`), not a plain expression — the `ND_FOR`
+  case in `serialize_stmt` emits each declarator's initializing assignment,
+  comma-joined for a multi-declarator init (`for (int i = 0, j = 1; ...)`),
+  and nothing for a declaration with no initializer (`for (int i; ...)`).
+  The declarations themselves are already hoisted by `serialize_function`.
 
 ### Included files that use cccc-only routing
 

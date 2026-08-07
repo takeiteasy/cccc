@@ -1091,6 +1091,7 @@ static Obj *new_anon_gvar(VirtualMachine *vm, Type *ty) {
 static Obj *new_string_literal(VirtualMachine *vm, char *p, Type *ty) {
     Obj *var = new_anon_gvar(vm, ty);
     var->init_data = p;
+    var->is_string_literal = true;
     return var;
 }
 

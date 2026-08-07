@@ -1466,6 +1466,15 @@ struct Obj {
                               // write_gvar_data's #720 splice-in path gates
                               // on this flag rather than merely having
                               // init_data.
+    bool is_string_literal; // Anonymous global synthesized by
+                            // new_string_literal() to hold a string
+                            // literal's bytes. new_anon_gvar()'s `.L..N`
+                            // name is shared by string literals, static
+                            // locals, and non-char-array compound literals
+                            // (#925) -- this flag is the only reliable way
+                            // to tell them apart; the serializer treats a
+                            // dotted name as "opaque string literal" only
+                            // when this is set (see src/serialize.c).
     char *init_data;
     Relocation *rel;
     Node *init_expr; // For constexpr: AST of initializer expression

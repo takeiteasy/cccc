@@ -170,6 +170,7 @@ typedef struct {
     // is false.
     bool emit_strict;
     int anon_local_counter; // names compiler-synthesized temps (e.g. ++/-- desugaring)
+    int anon_global_counter; // names non-string-literal `.L..N` globals (#925)
 } SerializeContext;
 
 // Forward declaration
@@ -745,14 +746,15 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 
     case ND_VAR:
         if (node->var) {
-            // Check if this is a string literal (anonymous global with
-            // init_data). NOTE: `.L..N` anonymous globals are also used for
-            // non-char-array compound literals -- this condition wrongly
-            // matches those too when they happen to have init_data (e.g.
-            // `(int[]){1,2,3}`), inlining raw bytes as if they were string
-            // text. Pre-existing gap, out of #918's scope; see the matching
-            // note on serialize_global_var's `name[0] == '.'` skip.
-            if (node->var->init_data && node->var->name[0] == '.') {
+            // A dotted `.L..N` name means "anonymous global" (new_anon_gvar,
+            // parse.c) -- shared by string literals, static locals, and
+            // compound literals (#925). Only a genuine string literal
+            // inlines as string text here; the other two are renamed to a
+            // valid identifier and given a real definition by
+            // rename_anon_globals() before this ever runs, so they hit the
+            // plain `fprintf(f, "%s", ...)` fallback below like any other
+            // named var.
+            if (node->var->is_string_literal) {
                 // #918: use the global's actual array length, not NUL
                 // termination -- an anonymous string-literal global can
                 // legitimately contain embedded NULs (wide/multi-part
@@ -1016,8 +1018,38 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
     case ND_FOR:
         print_indent_level(f, indent);
         fprintf(f, "for (");
-        if (node->init)
-            serialize_expr(f, vm, ctx, node->init, 0);
+        // #927: a declaration-form init (`for (int i = 0; ...)`) parses as
+        // an ND_BLOCK whose body is one ND_EXPR_STMT per declarator
+        // (declaration(), parse.c) -- not an expression, so handing it to
+        // serialize_expr fell through to its default case and silently
+        // dropped the initialization (`/* unsupported expr kind N */`,
+        // loop variable left uninitialized). The declarations themselves
+        // are already hoisted to the top of the function by
+        // serialize_function(); only the initializing assignment(s) belong
+        // in the init clause, comma-joined for a multi-declarator init
+        // (`for (int i = 0, j = 1; ...)`). A no-initializer declaration
+        // (`for (int i; ...)`) has an empty body -- emit nothing, matching
+        // a bare `for (;;)`-style empty init clause. A non-declaration init
+        // (`for (i = 0; ...)`) is a bare ND_EXPR_STMT (expr_stmt(),
+        // parse.c) and serializes the same way.
+        if (node->init) {
+            if (node->init->kind == ND_BLOCK) {
+                bool first_init = true;
+                for (Node *s = node->init->body; s; s = s->next) {
+                    if (s->kind != ND_EXPR_STMT || is_noop_expr(s->lhs))
+                        continue;
+                    if (!first_init)
+                        fprintf(f, ", ");
+                    first_init = false;
+                    serialize_expr(f, vm, ctx, s->lhs, 0);
+                }
+            } else if (node->init->kind == ND_EXPR_STMT) {
+                if (!is_noop_expr(node->init->lhs))
+                    serialize_expr(f, vm, ctx, node->init->lhs, 0);
+            } else {
+                serialize_expr(f, vm, ctx, node->init, 0);
+            }
+        }
         fprintf(f, "; ");
         if (node->cond)
             serialize_expr(f, vm, ctx, node->cond, 0);
@@ -1174,24 +1206,56 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
 
         // Local variable declarations
         //
-        // NOTE: hoisting every local to one flat top-of-function list
-        // assumes C block scoping never needs to distinguish two locals
-        // with the same name -- false when a name is reused in sibling (not
-        // nested) blocks, e.g. two `for (int i = ...)` loops in the same
-        // function each declaring their own `int i`. This emits two `int
-        // i;` declarations in the same top-level scope, a redefinition
-        // error. Pre-existing, out of #918's scope (found while smoke-
-        // testing that fix against tests/suites/test_suite_arrays.c);
-        // filed separately as #926.
+        // Hoisting every local to one flat top-of-function list assumes C
+        // block scoping never needs to distinguish two locals with the same
+        // name -- false when a name is reused in sibling (or nested) blocks,
+        // e.g. two `for (int i = ...)` loops in the same function each
+        // declaring their own `int i`. Renaming on collision (#926) below
+        // avoids two declarations of the same identifier in the same
+        // (flattened) scope; params occupy an identifier too (they are on
+        // fn->locals with is_param set, just not declared here) so they
+        // seed the collision check.
         for (Obj *var = fn->locals; var; var = var->next) {
+            // Params are never renamed here -- serialize_function_signature
+            // already printed the function's signature (with each param's
+            // current name) before this loop runs, so renaming a param's
+            // Obj this late would desync the signature from the body. C's
+            // own rules already guarantee distinct params never collide
+            // with each other; only a non-param can be renamed to resolve
+            // a collision against a param or another non-param.
             if (var->is_param)
                 continue;
-            // Compiler-synthesized temporaries (e.g. from ++/--/op=
-            // desugaring) have an empty name; give them one so they can
-            // be declared and referenced as valid C identifiers.
+
             if (var->name[0] == '\0')
+                // Compiler-synthesized temporaries (e.g. from ++/--/op=
+                // desugaring) have an empty name; give them one so they can
+                // be declared and referenced as valid C identifiers.
                 var->name = arena_format(vm, "__cccc_tmp%d",
                                           ctx->anon_local_counter++);
+
+            // #926: rename on collision against every *other* local/param
+            // in the function -- not just those before it in the raw list,
+            // since fn->locals is in reverse declaration order and a param
+            // can sit after the body local shadowing it. Comparing against
+            // the whole list (not only already-finalized entries) is still
+            // sound: a later non-param entry that shares var's pre-rename
+            // name simply detects the collision itself, against var's new
+            // name, when its own turn comes. Linear scan per local (O(n^2)
+            // in locals), matching this file's existing style; move to a
+            // hashmap if a function with enough locals to matter shows up.
+            bool renamed_again;
+            do {
+                renamed_again = false;
+                for (Obj *other = fn->locals; other; other = other->next) {
+                    if (other == var || strcmp(other->name, var->name) != 0)
+                        continue;
+                    var->name = arena_format(vm, "%s__cccc_%d", var->name,
+                                             ctx->anon_local_counter++);
+                    renamed_again = true;
+                    break;
+                }
+            } while (renamed_again);
+
             print_indent_level(f, 1);
             serialize_type_decl(f, ctx, var->ty, var->name);
             fprintf(f, ";\n");
@@ -1264,10 +1328,10 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm, SerializeContext *
               var->name, target_name);
 
     // Anonymous string-literal global -- serialize_global_var() never
-    // emits these on their own (see the `name[0] == '.'` skip below), so
+    // emits these on their own (see is_string_literal skip below), so
     // inline the literal here instead of naming a symbol that doesn't
     // exist in the output.
-    if (target->name[0] == '.' && !target->is_function && target->init_data) {
+    if (target->is_string_literal && target->init_data) {
         int len = (target->ty && target->ty->kind == TY_ARRAY)
                       ? target->ty->array_len
                       : (int)strlen(target->init_data);
@@ -1283,6 +1347,18 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm, SerializeContext *
             fprintf(f, " + %lld)", (long long)rel->addend);
         return;
     }
+
+    // #925: any other anonymous (`.L..N`) global -- a compound literal or
+    // static local -- is renamed to a valid identifier and given a real
+    // definition by rename_anon_globals() before serialization proceeds.
+    // If one still has a dotted name here, it was reachable through this
+    // Relocation but never renamed (not on the `prog` list the pre-pass
+    // walks) -- fail loudly rather than emit a reference to a symbol that
+    // was never defined (#918's fail-loudly policy).
+    if (target->name[0] == '.')
+        error("cccc: cannot serialize initializer for global '%s' in native "
+              "mode: relocation target '%s' was never assigned a valid name",
+              var->name, target_name);
 
     fprintf(f, "(");
     serialize_type(f, ctx, ty);
@@ -1447,17 +1523,13 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
     if (var->is_function)
         return;
 
-    // Skip string literals (anonymous). NOTE: `.L..N`-named globals
-    // (new_anon_gvar(), parse.c) are also used for non-char-array compound
-    // literals (`(int[]){1,2,3}`, `(struct S){...}`, ...), which this skip
-    // and the matching ND_VAR case in serialize_expr() both mis-handle --
-    // referencing one by name emits the raw dotted synthesized name (not a
-    // valid C identifier), and if it happens to have init_data it gets
-    // wrongly treated as a string literal. Pre-existing, out of #918's
-    // scope (found while smoke-testing that fix against tests/suites/
-    // test_suite_arrays.c's compound-literal cases); filed separately as
-    // #925.
-    if (var->name[0] == '.')
+    // String literals are inlined at their point of use (ND_VAR /
+    // serialize_reloc_init) instead of getting their own definition. Every
+    // other `.L..N`-named global (compound literal, static local) is
+    // renamed to a valid identifier by rename_anon_globals() before this
+    // runs, so it falls through and is serialized like any other global
+    // (#925).
+    if (var->is_string_literal)
         return;
 
     if (var->is_static)
@@ -1717,6 +1789,39 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
         fprintf(f, "\n");
 }
 
+// #925: new_anon_gvar() (parse.c) hands out the same `.L..N` name to string
+// literals, static locals, and compound literals alike -- a dot isn't a
+// valid C identifier character, so every non-string-literal use needs a
+// real name before anything below references it. Runs once, before any
+// collection/emission pass, so every later `is_string_literal`/dotted-name
+// check sees the final state. Not run under generated_only (-G): that path
+// has its own emit-event walk and its own dotted-name skip (see the
+// `obj->name[0] != '.'` check further down), and renaming here would only
+// grow -G's blast radius for a case these tickets don't cover.
+static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext *ctx) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_function || obj->name[0] != '.' || obj->is_string_literal)
+            continue;
+        // new_gvar() (parse.c) defaults display_name to the same dotted
+        // name it was created with; only a static local overrides it (to
+        // the real source identifier) after the fact. A still-dotted
+        // display_name means no such override happened (a compound
+        // literal) -- fall back to a plain "anon" tag rather than
+        // splicing the dot into the new name too.
+        const char *tag = (obj->display_name && obj->display_name[0] != '.')
+                              ? obj->display_name : "anon";
+        obj->name = arena_format(vm, "__cccc_%s_%d", tag,
+                                 ctx->anon_global_counter++);
+        // An anonymous global (compound literal or static local) can never
+        // be referenced from another translation unit -- internal linkage
+        // makes the #918 forward-declaration pass ahead of global
+        // definitions emit a valid `static T name;` + `static T name = ...;`
+        // tentative-definition pair instead of `extern` plus an external
+        // definition.
+        obj->is_static = true;
+    }
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -1724,6 +1829,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     SerializeContext ctx = {.generated_only = generated_only,
                            .emit_strict = vm->compiler.emit_strict != 0};
     collect_scope_names(&ctx, vm);
+    if (!generated_only)
+        rename_anon_globals(vm, prog, &ctx);
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;

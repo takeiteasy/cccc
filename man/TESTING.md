@@ -307,9 +307,20 @@ serializer bugs in general. Cases covered:
   reconstruct via its largest member (`-m` names that member, not the one
   actually written); and a union whose largest-by-size member doesn't span
   its full alignment-padded size must fail with a named `cannot serialize`
-  diagnostic rather than a placeholder or a silently-wrong guess. See
+  diagnostic rather than a placeholder or a silently-wrong guess;
+- #925/#926/#927: a static local array read back across two calls, a
+  file-scope pointer initialized from a non-char-array compound literal
+  (`(int[]){...}`), a file-scope struct pointer from `&(struct S){...}`,
+  two sibling `for (int i = 0; ...)` loops plus a nested one reusing `i`,
+  and a multi-declarator `for` init must all compile and run correctly
+  under `-c=native`, plus a direct `-m` assertion that the output contains
+  no raw `.L..` synthesized name, no `unsupported expr` placeholder, a
+  `static`-qualified definition for each renamed anonymous global, and no
+  function declaring the same local name twice; a regression guard also
+  runs the same two assertions directly against
+  `tests/suites/test_suite_arrays.c`, the tickets' own repro. See
   [HEADERS.md](HEADERS.md#pointer-arithmetic-and-global-initializer-reconstruction)
-  for the reconstruction approach and its known gaps.
+  for the reconstruction approach.
 
 ## Architecture build and test workflows
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -96,6 +96,28 @@ Cases:
       losslessly reconstruct it -- `-c=native` must fail with a named
       `cannot serialize` diagnostic, never a placeholder or a guessed
       initializer that silently changes the program's data.
+  21. #925/#926/#927 regression: a `-c=native` compile+run exercising all
+      three at once -- a static local array read back across two calls, a
+      file-scope pointer initialized from a non-char-array compound literal
+      (`(int[]){...}`), a file-scope struct pointer initialized from
+      `&(struct S){...}`, two sibling `for (int i = 0; ...)` loops plus a
+      nested one reusing `i`, a multi-declarator `for (int i = 0, j = 10;
+      ...)` init, and a nested block re-declaring a parameter's own name
+      (legal C -- shadows the parameter, must not rename it) -- with the
+      exit code depending on every one of those being semantically correct,
+      not just on the program compiling.
+  22. #925/#926/#927 regression, direct assertion: `-m` output for case 21's
+      program contains no raw `.L..` synthesized name, no `unsupported
+      expr` placeholder, a `static`-qualified definition for the renamed
+      static-local array and the renamed compound-literal struct global, no
+      function that declares the same local name twice, and the
+      parameter-shadowing function's prototype/definition signature still
+      reads `shadow_param(int x)` (the parameter itself must never be
+      renamed -- its signature is already printed by the time the
+      collision check runs).
+  23. #925/#926 regression guard: `-m` output for the tickets' own repro,
+      `tests/suites/test_suite_arrays.c`, contains neither a raw `.L..`
+      name nor an `unsupported expr` placeholder.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -115,6 +137,13 @@ SHARED_HEADER = (
     "int use_b(Beta *b);\n"
 )
 
+# The correct-match branch of OPAQUE_PROGRAM's main() is 1 + 2 + 0 == 3; the
+# "+ 39" keeps the exit code at the repo's usual 42-on-success (any mismatch
+# branch lands well away from 42, e.g. the all-mismatch 20 + 22 + 0 + 39 ==
+# 81). Before #925 fixed static-local serialization, mk_a()/mk_b() returned a
+# struct pointer aliased onto a bogus string-literal global -- reading ->tag
+# through it never matched, and the mismatch sum (20 + 22 + 0) happened to
+# equal 42 on its own, masking the very bug this case exists to catch.
 OPAQUE_PROGRAM = (
     '#include @shared "opaque_handles.h"\n'
     "struct Alpha { int tag; };\n"
@@ -127,7 +156,7 @@ OPAQUE_PROGRAM = (
     "Node *check(void) { return MakeIntLiteral(0); }\n"
     "int main(void) {\n"
     "    Alpha *a = mk_a(); Beta *b = mk_b();\n"
-    "    return use_a(a) + use_b(b) + check();\n"
+    "    return use_a(a) + use_b(b) + check() + 39;\n"
     "}\n"
 )
 
@@ -520,11 +549,130 @@ def case_unserializable_union_hard_errors(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# shadow_param(): a nested block re-declaring a parameter's own name (legal
+# C -- the inner `x` shadows the parameter for its block's extent). #926's
+# rename-on-collision must rename the *shadowing local*, never the
+# parameter -- serialize_function_signature has already printed the
+# parameter's name by the time the collision check runs, so renaming the
+# parameter instead would desync the signature from the body.
+ANON_LOCALS_PROGRAM = (
+    "struct S { int a; int b; };\n"
+    "\n"
+    "static int *get_static_array(void) {\n"
+    "    static int arr[3];\n"
+    "    arr[0] = 10; arr[1] = 20; arr[2] = 12;\n"
+    "    return arr;\n"
+    "}\n"
+    "\n"
+    "int *gp = (int[]){10, 20, 12};\n"
+    "struct S *gs = &(struct S){1, 2};\n"
+    "\n"
+    "static int shadow_param(int x) {\n"
+    "    { int x = 5; return x; }\n"
+    "}\n"
+    "\n"
+    "static int sum_loops(void) {\n"
+    "    int total = 0;\n"
+    "    for (int i = 0; i < 3; i++) { total += i; }\n"
+    "    for (int i = 0; i < 4; i++) { total += i * 10; }\n"
+    "    for (int i = 0, j = 10; i < 2; i++, j--) { total += j; }\n"
+    "    for (int i = 0; i < 2; i++) {\n"
+    "        for (int i = 0; i < 2; i++) { total += 1; }\n"
+    "    }\n"
+    "    return total;\n"
+    "}\n"
+    "\n"
+    "int main(void) {\n"
+    "    int *arr1 = get_static_array();\n"
+    "    if (arr1[0] != 10 || arr1[1] != 20 || arr1[2] != 12) return 1;\n"
+    "    int *arr2 = get_static_array();\n"
+    "    if (arr2[0] != 10) return 2;\n"
+    "    if (gp[0] != 10 || gp[1] != 20 || gp[2] != 12) return 3;\n"
+    "    if (gs->a != 1 || gs->b != 2) return 4;\n"
+    "    if (sum_loops() != 86) return 5;\n"
+    "    if (shadow_param(1) != 5) return 6;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_anon_locals_end_to_end(cccc: Path, tmp: str) -> bool:
+    print("  21: -c=native, static local + compound-literal globals + sibling/nested for-loop locals (#925/#926/#927)")
+    return _native_run_case(cccc, tmp, "anon_locals_925_926_927", ANON_LOCALS_PROGRAM)
+
+
+def case_anon_locals_m_output(cccc: Path, tmp: str) -> bool:
+    print("  22: -m output for #925/#926/#927's program has no dotted names, no unsupported-expr placeholder, no duplicate local declarations")
+    src = Path(tmp) / "anon_locals_dump_925_926_927.c"
+    write(src, ANON_LOCALS_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    # A crashed/erroring `-m` invocation can leave `out` empty (or truncated),
+    # which would vacuously satisfy every "does not contain X" check below --
+    # require a successful run with recognisable output first.
+    if result.returncode != 0 or "int main(void)" not in out:
+        print(f"    FAIL: -m exited {result.returncode} or produced unrecognisable output\n    {result.stderr}\n    {out}")
+        return False
+    if ".L.." in out:
+        print(f"    FAIL: -m output still contains a raw '.L..' synthesized name\n    {out}")
+        return False
+    if "unsupported expr" in out:
+        print(f"    FAIL: -m output still contains an 'unsupported expr' placeholder\n    {out}")
+        return False
+    if "static int __cccc_arr" not in out and not re.search(r"static int __cccc_\w*arr\w*\[3\]", out):
+        print(f"    FAIL: -m output missing a static, internally-linked definition for the renamed static local array\n    {out}")
+        return False
+    if not re.search(r"static struct S __cccc_\w+ = \{ \.a = 1, \.b = 2 \}", out):
+        print(f"    FAIL: -m output missing a static definition for the renamed compound-literal global\n    {out}")
+        return False
+    # Every declared local name in each function must be unique -- the
+    # collision this case exercises (#926) previously emitted the same
+    # `int i;` declaration twice in a row.
+    fn_bodies = re.findall(r"\bsum_loops\(void\) \{(.*?)\n\}", out, re.DOTALL)
+    if not fn_bodies:
+        print(f"    FAIL: could not locate sum_loops()'s body in -m output to check for duplicate declarations\n    {out}")
+        return False
+    for fn_body in fn_bodies:
+        decl_names = re.findall(r"^\s+int (\w+);$", fn_body, re.MULTILINE)
+        if len(decl_names) != len(set(decl_names)):
+            print(f"    FAIL: sum_loops() still declares a colliding local name twice: {decl_names}\n    {out}")
+            return False
+    # shadow_param()'s parameter must never be renamed -- both the
+    # prototype and the definition's signature must still read
+    # `shadow_param(int x)`, matching what serialize_function_signature
+    # already committed to output before the collision-renaming loop runs.
+    if len(re.findall(r"shadow_param\(int x\)", out)) != 2:
+        print(f"    FAIL: shadow_param()'s parameter was renamed out from under its own signature\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_arrays_suite_no_serializer_gaps(cccc: Path, tmp: str) -> bool:
+    print("  23: -m output for tests/suites/test_suite_arrays.c (the #925/#926 repro) has no dotted names or unsupported-expr placeholders")
+    suite = Path(__file__).parent.parent / "tests" / "suites" / "test_suite_arrays.c"
+    result = run([str(cccc), "-m", str(suite)], cwd=tmp)
+    out = result.stdout
+    # Same vacuous-pass trap as case 22: a crashed/erroring `-m` invocation
+    # must not silently satisfy the two "does not contain" checks below.
+    if result.returncode != 0 or "get_static_array" not in out:
+        print(f"    FAIL: -m exited {result.returncode} or produced unrecognisable output\n    {result.stderr}")
+        return False
+    if ".L.." in out:
+        print(f"    FAIL: -m output still contains a raw '.L..' synthesized name")
+        return False
+    if "unsupported expr" in out:
+        print(f"    FAIL: -m output still contains an 'unsupported expr' placeholder")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -552,6 +700,9 @@ def main() -> int:
             case_union_largest_member,
             case_union_largest_member_m_output,
             case_unserializable_union_hard_errors,
+            case_anon_locals_end_to_end,
+            case_anon_locals_m_output,
+            case_arrays_suite_no_serializer_gaps,
         ]
         results = [case(cccc, tmp) for case in cases]
 
