@@ -27,6 +27,7 @@
 #else
 #include <fnmatch.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #define CCCC_ISATTY isatty
 #define CCCC_FILENO fileno
 #endif
@@ -268,6 +269,13 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted\n");
     printf("\t                         Use -cbytecode or --compile=bytecode (short form must be\n");
     printf("\t                         attached; long form may use '=' or separate arg).\n");
+    printf("\t   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL\n");
+    printf("\t                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)\n");
+    printf("\t                         before compiling. Refuses to compile (nonzero exit, no\n");
+    printf("\t                         artifact written) if the run crashes, hits a VM-detected\n");
+    printf("\t                         safety violation, or hangs; the exit code itself is not\n");
+    printf("\t                         checked. Implies -c=native when no -c is given; an\n");
+    printf("\t                         explicit -c=FMT still picks the format\n");
     printf("\t-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.\n");
     printf("\t                         For -c=bytecode, defaults to ./a.c4 if omitted.\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
@@ -930,6 +938,8 @@ int main(int argc, const char *argv[]) {
 #endif
     CCCCAttrTarget attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
     int emit_cccc_mode = 0;     // --emit-cccc
+    int test_run_mode = 0;      // --test-run[=LEVEL]
+    uint64_t test_run_flags = 0; // safety preset bits for --test-run's VM smoke test
     int compile_only = 0;      // -c (set whenever -c/--compile is given; semantics:
                                 //   "compile, do not execute". -c=bytecode writes bytecode,
                                 //   -c=native hands off to the system compiler.)
@@ -1030,6 +1040,7 @@ int main(int argc, const char *argv[]) {
         {"bounds-checks", no_argument, 0, 'B'},
         {"checked-pointers", no_argument, 0, 1119},
         {"emit-cccc", no_argument, 0, 1120},
+        {"test-run", optional_argument, 0, 1121},
         {"uaf-detection", no_argument, 0, 1078},
         {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
@@ -1605,6 +1616,29 @@ int main(int argc, const char *argv[]) {
         case 1120: // --emit-cccc
             emit_cccc_mode = 1;
             break;
+        case 1121: { // --test-run[=LEVEL]
+            test_run_mode = 1;
+            const char *level = optarg;
+            if (level && level[0] == '=')
+                level++;
+            if (!level || !*level || strcmp(level, "max") == 0 ||
+                strcmp(level, "3") == 0) {
+                test_run_flags = CCCC_SAFETY_MAX;
+            } else if (strcmp(level, "none") == 0 || strcmp(level, "0") == 0) {
+                test_run_flags = CCCC_VM_HEAP;
+            } else if (strcmp(level, "basic") == 0 || strcmp(level, "1") == 0) {
+                test_run_flags = CCCC_SAFETY_BASIC;
+            } else if (strcmp(level, "standard") == 0 || strcmp(level, "2") == 0) {
+                test_run_flags = CCCC_SAFETY_STANDARD;
+            } else {
+                fprintf(stderr,
+                        "error: invalid --test-run level '%s' (use "
+                        "none/basic/standard/max or 0/1/2/3)\n",
+                        level);
+                usage(argv[0], 1);
+            }
+            break;
+        }
         case 1071: // --no-debug-on-crash
             flags |= CCCC_NO_DEBUG_ON_CRASH;
             break;
@@ -1859,6 +1893,37 @@ int main(int argc, const char *argv[]) {
         usage((char *)argv[0], 1);
     }
 
+    if (test_run_mode) {
+        // --test-run runs a VM smoke test before compiling, so it needs a
+        // real compile/run pipeline to slot into -- reject every mode that
+        // has no such pipeline (mirrors the --repl/--build validation
+        // blocks). --testing is its own compile-then-run-tests pipeline;
+        // combining the two is redundant, so it's rejected too rather than
+        // silently picking one.
+        if (repl_mode || build_mode || testing_mode || run_ngrams ||
+            run_fusion || disassemble || preprocess_only ||
+            dump_expanded_only || print_tokens || output_json ||
+            output_ffi_decls || dump_ast) {
+            fprintf(stderr,
+                    "error: --test-run cannot be combined with --repl, "
+                    "--build, --testing, --ngrams/--fusion-candidates, -d, "
+                    "-E, -M, --ast, -j, -J, or other output modes\n");
+            usage(argv[0], 1);
+        }
+        // Bare -c already means native; --test-run mirrors that default
+        // when no explicit -c=FMT was given.
+        if (compile_format == COMPILE_NONE)
+            compile_format = COMPILE_NATIVE;
+        compile_only = 1;
+        // These bits must survive into cc_init() below so the VM smoke-test
+        // phase actually runs with the requested safety instrumentation
+        // baked into codegen -- unlike a plain -c=native, whose serializer
+        // reconstructs C from the AST and never looks at vm.flags, so
+        // carrying these bits costs the eventual native/bytecode artifact
+        // nothing.
+        flags |= test_run_flags;
+    }
+
     if (repl_mode) {
         // --repl is an interactive VM-only mode: it takes no input files and
         // is mutually exclusive with every other frontend/output/execution
@@ -1915,8 +1980,14 @@ int main(int argc, const char *argv[]) {
         // enforce them (there is no equivalent of e.g. CHKR in the
         // serialized C), but that's true of every other mode that can't
         // honour a runtime-only flag too -- warn and drop the bits instead
-        // of refusing to compile, consistent with 1b/1c below.
-        flags = warn_ignored_vm_flags(flags, "-c=native");
+        // of refusing to compile, consistent with 1b/1c below. Skipped
+        // under --test-run: those bits are for the VM smoke-test phase, not
+        // the native compile, and the native serializer works from the AST
+        // (never looks at vm.flags), so carrying them costs nothing and the
+        // warning would be spurious noise about a flag that's genuinely in
+        // effect.
+        if (!test_run_mode)
+            flags = warn_ignored_vm_flags(flags, "-c=native");
         if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
             ffi_errors_fatal || enable_ffi_type_checking) {
             fprintf(stderr,
@@ -2603,6 +2674,87 @@ int main(int argc, const char *argv[]) {
             exit_code = 1;
             goto BAIL;
         }
+    }
+
+    // --test-run: smoke-test the compiled program in the VM before
+    // proceeding to the compile step below. Runs in a forked child so the
+    // parent's vm (text/data segments) and merged_prog stay pristine for
+    // the compile step that follows -- cc_run() below mutates guest globals
+    // in place, and cc_save_bytecode() serializes that same live vm state,
+    // so running in-process here would silently bake the test run's
+    // post-execution global values into a -c=bytecode artifact instead of
+    // the program's real initial state. The native path doesn't share this
+    // hazard (run_native_backend re-derives C from the untouched AST), but
+    // forking unconditionally keeps one code path for both.
+    if (test_run_mode) {
+#if defined(_WIN32)
+        fprintf(stderr, "error: --test-run is not supported on this platform\n");
+        exit_code = 1;
+        goto BAIL;
+#else
+        int prog_argc = 0;
+        char **prog_argv =
+            build_source_argv(&prog_argc, argc, argv, optind, dashdash);
+        pid_t pid = fork();
+        if (pid < 0) {
+            fprintf(stderr, "error: --test-run: fork failed: %s\n",
+                    strerror(errno));
+            exit_code = 1;
+            goto BAIL;
+        }
+        if (pid == 0) {
+            // Child: cap the smoke test so a hang can't wedge the build
+            // (reuses --test-timeout's default when the user didn't set
+            // one explicitly).
+            alarm(test_timeout > 0 ? (unsigned)test_timeout : 30);
+            int rc = cc_run(&vm, prog_argc, prog_argv);
+            // _exit() skips stdio flushing (unlike exit()/a normal return
+            // from main, which is how every other cc_run() call site in
+            // this file gets its diagnostics out) -- without this, a VM
+            // safety violation's printf() diagnostic (src/ops.c) is silently
+            // dropped. Pass rc through as-is: the OS truncates it to the low
+            // 8 bits on the way out, the same -1-becomes-255 conversion the
+            // normal `return exit_code;` path at the bottom of main() gets
+            // for free, so the 255 check below sees it identically.
+            fflush(NULL);
+            _exit(rc);
+        }
+        int status = 0;
+        waitpid(pid, &status, 0);
+        bool test_run_ok;
+        if (WIFSIGNALED(status)) {
+            fprintf(stderr,
+                    "error: --test-run: program terminated by signal %d "
+                    "(%s) under the VM smoke test -- refusing to compile\n",
+                    WTERMSIG(status), strsignal(WTERMSIG(status)));
+            test_run_ok = false;
+        } else if (WIFEXITED(status) && WEXITSTATUS(status) == 255) {
+            // 255 is CCCC's own runtime/safety-error exit convention (see
+            // man/TESTING.md's EXPECT_RUNTIME_ERROR), delivered as a normal
+            // process exit rather than a host signal -- a VM-detected
+            // safety violation (bounds/UAF/CFI/uninit/etc.) reaches here,
+            // not WIFSIGNALED above, so it needs its own check.
+            fprintf(stderr,
+                    "error: --test-run: safety violation detected under the "
+                    "VM smoke test -- refusing to compile\n");
+            test_run_ok = false;
+        } else {
+            // Otherwise success = "ran to completion without a crash/safety
+            // violation/hang" -- any other exit code is deliberately not
+            // checked, since a program that legitimately returns nonzero
+            // (e.g. a CLI reporting bad input) is not a --test-run failure.
+            test_run_ok = WIFEXITED(status);
+            if (!test_run_ok)
+                fprintf(stderr,
+                        "error: --test-run: program did not exit cleanly "
+                        "under the VM smoke test -- refusing to compile\n");
+        }
+        free(prog_argv);
+        if (!test_run_ok) {
+            exit_code = 1;
+            goto BAIL;
+        }
+#endif
     }
 
     // -c/--compile: write bytecode (or hand off to native) and exit. This

@@ -54,6 +54,13 @@ Options:
 	                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted
 	                         Use -cbytecode or --compile=bytecode (short form must be
 	                         attached; long form may use '=' or separate arg).
+	   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL
+	                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)
+	                         before compiling. Refuses to compile (nonzero exit, no
+	                         artifact written) if the run crashes, hits a VM-detected
+	                         safety violation, or hangs; the exit code itself is not
+	                         checked. Implies -c=native when no -c is given; an
+	                         explicit -c=FMT still picks the format
 	-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.
 	                         For -c=bytecode, defaults to ./a.c4 if omitted.
 	-d/--disassemble         Disassemble bytecode to stdout
@@ -237,6 +244,7 @@ Example:
 - **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](man/SAFETY.md))
   - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
   - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
+  - `--test-run[=LEVEL]` smoke-tests the program under the VM at a safety preset and refuses to compile on a crash/safety violation (see [TESTING.md](man/TESTING.md))
 - **Interactive debugger** — GDB-like source-level debugging (see [TOOLING.md](man/TOOLING.md))
   - Breakpoints (line, function, conditional), watchpoints, register and memory inspection
   - Source map export API for IDE integrations (`cc_output_source_map_json`)

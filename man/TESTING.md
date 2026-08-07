@@ -1493,6 +1493,22 @@ python3 tools/tests.py --suites --c4
 
 This is useful in build scripts that want to guard bytecode or native compilation behind a passing test run.
 
+### `--test-run[=LEVEL]`: smoke-test the program itself before compiling
+
+Where `--testing -c=...` guards compilation behind a passing `[[cccc::test]]` suite, `--test-run[=LEVEL]` guards it behind a single VM execution of the program's own `main()` under safety instrumentation -- a "does this crash under CCCC's safety checks" smoke test, with no test functions involved.
+
+```
+./cccc --test-run program.c                          # VM run at safety=max, then compile native
+./cccc --test-run=basic program.c                     # VM run at a lower safety preset
+./cccc --test-run -c=bytecode -o out.c4 program.c      # VM run, then write bytecode
+```
+
+- `LEVEL` accepts the same values as `--safety=`: `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`. Bare `--test-run` (no `=LEVEL`) is `max`.
+- The smoke-test run happens in a forked child process, so it never touches the compiled program's actual global/heap state -- the eventual `-c=bytecode` artifact still starts from the source's real compile-time initializers, not whatever the smoke test's `main()` left them as.
+- Success is "ran to completion without a VM-detected safety violation (bounds/UAF/CFI/uninitialized-read/etc.), a real crash (signal), or a hang" -- capped at `--test-timeout` seconds (default 30s when unset). The program's own exit code is **not** checked: a CLI that legitimately returns nonzero on bad input is not a `--test-run` failure. A safety violation alone (no accompanying crash) still refuses to compile; a bare memory leak with no other violation does not.
+- Implies `-c=native` when no `-c=FMT` is given (matching bare `-c`'s own default); an explicit `-c=bytecode`/`-c=native` still picks the format. `-o`'s default-filename behavior (`./a.out`/`./a.c4`) applies the same as plain `-c`.
+- Not compatible with `--repl`, `--build`, `--testing`, `--ngrams`/`--fusion-candidates`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
+
 ## Filtering Tests
 
 Run a subset of tests without modifying the source file.

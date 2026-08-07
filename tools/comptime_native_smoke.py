@@ -868,6 +868,108 @@ def case_emit_cccc_m_output_round_trips(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_test_run_clean_program_compiles(cccc: Path, tmp: str) -> bool:
+    print("  30: --test-run on a clean program compiles and the artifact runs (exit 42)")
+    src = Path(tmp) / "test_run_clean.c"
+    write(src, "int main(void) { return 42; }\n")
+    out = Path(tmp) / "test_run_clean_out"
+    if out.exists():
+        out.unlink()
+    result = run([str(cccc), "--test-run", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    if not out.exists():
+        print(f"    FAIL: artifact was not written\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: artifact exited {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_test_run_oob_write_refused(cccc: Path, tmp: str) -> bool:
+    print("  31: --test-run refuses to compile a program that OOB-writes under max safety")
+    src = Path(tmp) / "test_run_oob.c"
+    write(src, "#include <stdlib.h>\n"
+               "int main(void) {\n"
+               "    int *p = malloc(sizeof(int) * 4);\n"
+               "    p[10] = 5;\n"
+               "    free(p);\n"
+               "    return 42;\n"
+               "}\n")
+    out = Path(tmp) / "test_run_oob_out"
+    if out.exists():
+        out.unlink()
+    result = run([str(cccc), "--test-run", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode == 0:
+        print("    FAIL: compile unexpectedly succeeded for an OOB-writing program")
+        return False
+    if out.exists():
+        print("    FAIL: artifact was written despite the refusal")
+        return False
+    print("    ok")
+    return True
+
+
+def case_test_run_basic_level_compiles(cccc: Path, tmp: str) -> bool:
+    print("  32: --test-run=basic compiles a program only max-level bounds checks would catch "
+          "(proves level selection)")
+    src = Path(tmp) / "test_run_basic.c"
+    write(src, "#include <stdlib.h>\n"
+               "int main(void) {\n"
+               "    int *p = malloc(sizeof(int) * 4);\n"
+               "    p[10] = 5;\n"
+               "    free(p);\n"
+               "    return 42;\n"
+               "}\n")
+    out = Path(tmp) / "test_run_basic_out"
+    if out.exists():
+        out.unlink()
+    result = run([str(cccc), "--test-run=basic", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: artifact exited {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_test_run_bytecode_no_global_contamination(cccc: Path, tmp: str) -> bool:
+    print("  33: --test-run -c=bytecode's smoke-test execution doesn't contaminate the saved "
+          "bytecode's global initializers (fork isolation)")
+    src = Path(tmp) / "test_run_contam.c"
+    write(src, "int g = 5;\n"
+               "int main(void) {\n"
+               "    int was = g;\n"
+               "    g = 999;\n"
+               "    return was;\n"
+               "}\n")
+    out = Path(tmp) / "test_run_contam.c4"
+    if out.exists():
+        out.unlink()
+    result = run([str(cccc), "--test-run", "-c=bytecode", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    # A freshly-loaded run of the saved .c4 must see g's compile-time
+    # initializer (5), not the smoke-test run's post-execution value (999)
+    # -- if the smoke test had run in-process instead of in a forked child,
+    # cc_save_bytecode() would have serialized the mutated live vm state.
+    run_result = run([str(cccc), out.name], cwd=tmp)
+    if run_result.returncode != 5:
+        print(f"    FAIL: reloaded .c4 exited {run_result.returncode}, expected 5 "
+              f"(global contamination from the smoke-test run)\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -909,6 +1011,10 @@ def main() -> int:
             case_emit_cccc_native_requires_explicit_cc,
             case_emit_cccc_native_with_explicit_cc,
             case_emit_cccc_m_output_round_trips,
+            case_test_run_clean_program_compiles,
+            case_test_run_oob_write_refused,
+            case_test_run_basic_level_compiles,
+            case_test_run_bytecode_no_global_contamination,
         ]
         results = [case(cccc, tmp) for case in cases]
 
