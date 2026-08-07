@@ -276,6 +276,23 @@ void cc_vm_profile_reset(VirtualMachine *vm) {
     vm->vm_profile_trigram_started = false;
 }
 
+// #767: number of currently-allocated (non-NULL) CHKT3 shadow pages across
+// both segments -- derived on demand rather than tracked incrementally, so
+// it costs nothing on the hot alloc/stamp/clear paths. Counts pages
+// type_shadow_sweep hasn't (yet, or ever needed to) reclaim; a healthy
+// --type-checks run's live count tracks stamped footprint, not segment
+// reservation.
+static size_t type_shadow_pages_live(VirtualMachine *vm) {
+    size_t live = 0;
+    for (size_t i = 0; i < vm->heap_shadow.page_count; i++)
+        if (vm->heap_shadow.pages[i])
+            live++;
+    for (size_t i = 0; i < vm->data_shadow.page_count; i++)
+        if (vm->data_shadow.pages[i])
+            live++;
+    return live;
+}
+
 void cc_vm_profile_print(VirtualMachine *vm, FILE *f) {
     if (!vm || !f || !vm->vm_profile_enabled)
         return;
@@ -284,6 +301,12 @@ void cc_vm_profile_print(VirtualMachine *vm, FILE *f) {
     fprintf(f, "total_opcodes: %llu\n",
             (unsigned long long)vm->vm_profile_total);
     fprintf(f, "cycles:        %lld\n", vm->cycle);
+    fprintf(f, "shadow_sweeps: %llu\n",
+            (unsigned long long)vm->type_shadow_sweeps);
+    fprintf(f, "shadow_pages_swept: %llu\n",
+            (unsigned long long)vm->type_shadow_pages_swept);
+    fprintf(f, "shadow_pages_live: %llu\n",
+            (unsigned long long)type_shadow_pages_live(vm));
     if (vm->vm_profile_total == 0)
         return;
 
@@ -386,6 +409,12 @@ int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
     fprintf(f, "\",\n");
     fprintf(f, "  \"optimize_level\": %d,\n", vm->compiler.opt_level);
     fprintf(f, "  \"cycles\": %lld,\n", vm->cycle);
+    fprintf(f, "  \"shadow_sweeps\": %llu,\n",
+            (unsigned long long)vm->type_shadow_sweeps);
+    fprintf(f, "  \"shadow_pages_swept\": %llu,\n",
+            (unsigned long long)vm->type_shadow_pages_swept);
+    fprintf(f, "  \"shadow_pages_live\": %llu,\n",
+            (unsigned long long)type_shadow_pages_live(vm));
     fprintf(f, "  \"total_opcodes\": %llu,\n",
             (unsigned long long)vm->vm_profile_total);
     fprintf(f, "  \"opcodes\": [\n");

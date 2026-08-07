@@ -274,9 +274,11 @@ All features listed below can be enabled individually or through the safety leve
     the VM can't observe what such a call actually wrote and must
     conservatively **clear** shadow state before the call runs — this
     trades a false negative (a type-confusion bug that happens to route
-    through an unclassified host write) for zero false positives. Common
-    libc/POSIX functions are classified by name to recover coverage a
-    blanket clear would otherwise destroy, in three tiers, each of which
+    through an unclassified host write) for zero false positives. This
+    backstop covers indirect host calls too (through a function pointer or
+    a `dlsym`'d symbol), not just calls to a name resolved at compile time.
+    Common libc/POSIX functions are classified by name to recover coverage
+    a blanket clear would otherwise destroy, in four tiers, each of which
     can only ever reduce clearing relative to an unclassified name (never
     widen it, so classifying a function can't introduce a false positive):
     a **read-only** allowlist (`strlen`, `strcmp`, `memcmp`, `fwrite`, ...)
@@ -284,14 +286,26 @@ All features listed below can be enabled individually or through the safety leve
     `read`, `recv`, `strncpy`, `strtol`'s `*endptr`, ...) narrows the clear
     to the statically-known extent written through the one argument that
     receives it, while every *other* pointer-shaped argument to that same
-    call still gets the default whole-allocation clear (keeping a `%n`-
-    capable format string, for instance, unaffected); an unclassified name
-    keeps today's whole-allocation clear across every pointer-shaped
-    argument. `qsort`/`bsearch` and the `printf`/`scanf` family are
-    deliberately left unclassified: the former permute a buffer's bytes in
-    place and can run guest code back through the array (the callback
-    trampoline), and the latter can write through an arbitrary argument
-    via `%n`
+    call still gets the default whole-allocation clear; the **printf
+    family** (`printf`, `fprintf`, `dprintf`, `sprintf`, `snprintf`) is
+    read-only for every argument except its output buffer (if any) *unless*
+    the format string may contain a `%n` conversion — which can write
+    through any pointer-shaped argument, not just the output buffer — in
+    which case the call falls back to the whole-allocation-clear default for
+    every argument, exactly as an unclassified call would. The format string
+    is read directly from the guest pointer at the call site (CCCC has no
+    guest/host address-translation layer, so a guest pointer already *is* a
+    host pointer) and scanned conservatively: an unreadable pointer, a
+    non-literal or truncated format, or an actual `%n` all fall back to the
+    default, so this classification can only preserve or improve the
+    no-false-positive property, never regress it. `vprintf`/`vsprintf`/
+    `vsnprintf`/`vfprintf`, `scanf`/`sscanf`/`fscanf`, and `qsort`/`bsearch`
+    are deliberately left unclassified: the `va_list` variants' pointees
+    aren't reachable from the argument list, the scanf family writes through
+    every pointer argument by design, and `qsort`/`bsearch` permute a
+    buffer's bytes in place and can run guest code back through the array
+    (the callback trampoline). An unclassified name keeps the default
+    whole-allocation clear across every pointer-shaped argument.
   - `realloc` (always a fresh allocation in CCCC's bump-allocating VM
     heap, never grown in place) carries the old block's shadow across to
     the new address
@@ -322,11 +336,21 @@ All features listed below can be enabled individually or through the safety leve
     coverage as a real load (see OPTIMIZATION.md)
   - The shadow is a sparse page table (64 KiB pages), not one flat
     heap_committed-sized array: a page is allocated lazily on first stamp
-    and freed back the instant a clear zeroes it in full, so host memory
-    tracks the *live* stamped footprint rather than the heap's total
+    and freed back the instant a *single* clear zeroes it in full, so host
+    memory tracks the *live* stamped footprint rather than the heap's total
     reservation — a large allocate-then-free pattern reclaims its shadow
     pages once the allocation is freed, instead of paying for them for the
-    rest of the process
+    rest of the process. A page whose bytes only reach all-zero across
+    several separate *partial* clears (chiefly the edge pages of a
+    multi-page freed allocation) is queued as a sweep candidate instead of
+    staying allocated indefinitely; an amortized sweep, rate-limited against
+    the VM's instruction-cycle counter and charged proportional to pages
+    actually scanned, reclaims a candidate once it verifies every byte is
+    zero. Freeing a verified all-zero page is unobservable from the guest —
+    every shadow reader already treats a missing page as "no effective type
+    established" — so this only tightens the host memory bound, it cannot
+    change detection behavior. Sweep activity is visible via `--vm-profile`
+    (`shadow_sweeps`, `shadow_pages_swept`, `shadow_pages_live`)
 - `--uninitialized-detection` **Uninitialized variable detection**
   - Tracks initialization state of stack variables using HashMap
   - MARKI opcode marks variables as initialized after assignment

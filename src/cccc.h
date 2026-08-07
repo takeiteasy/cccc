@@ -496,9 +496,26 @@ typedef enum { CHKT3_MODE_CHECK = 0, CHKT3_MODE_STAMP = 1, CHKT3_MODE_CLEAR = 2 
 // (globals, #752) -- data_seg entries are never reused, so unlike the heap
 // this instance is only ever grown/stamped, never explicitly cleared aside
 // from the struct-return buffer pool (see op_RETBUF_fn).
+//
+// #767: a page is freed the instant a single clear zeroes it in full (see
+// type_shadow_fill in ops.c), but a page that only ever gets partially
+// zeroed across several separate clears -- the edge pages of a multi-page
+// freed allocation, chiefly -- stays allocated holding nothing. `cand` is a
+// small fixed-size list of page indices that were partially zeroed since
+// the last sweep (deliberately a bounded inline array, not a growable
+// vector: a free pushes at most ~2 edge pages, and dropping a candidate
+// when the list is full is sound, just a missed optimization -- the page
+// simply stays allocated as it does today). `next_sweep_cycle` rate-limits
+// type_shadow_sweep (ops.c) against vm->cycle, charged proportional to
+// pages actually scanned so the bound holds regardless of how often a
+// workload re-dirties the same pages.
+#define TYPE_SHADOW_CAND_MAX 32
 typedef struct TypeShadowSeg {
     unsigned char **pages;
     size_t page_count;
+    size_t cand[TYPE_SHADOW_CAND_MAX]; // page indices partially zeroed since last sweep
+    size_t cand_count;
+    long long next_sweep_cycle;        // deadline; 0-init => first sweep is free
 } TypeShadowSeg;
 
 /*!
@@ -2770,6 +2787,13 @@ struct VirtualMachine {
     // false-positive history behind frame_epochs/stack_intervals).
     TypeShadowSeg heap_shadow;
     TypeShadowSeg data_shadow;
+    // #767: sweep stats, incremented only inside type_shadow_sweep (ops.c)
+    // -- cold path, zero cost while --type-checks traffic never partially
+    // clears a page. Surfaced via --vm-profile (cc_vm_profile_print/
+    // cc_vm_profile_write_json, vm.c) as shadow_sweeps/shadow_pages_swept;
+    // shadow_pages_live is derived at print time, not tracked here.
+    uint64_t type_shadow_sweeps;
+    uint64_t type_shadow_pages_swept;
 
     // Segregated free lists for optimized allocation
     // Size classes: 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, LARGE

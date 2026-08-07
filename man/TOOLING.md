@@ -671,6 +671,14 @@ stdout. The JSON includes the execution mode (`source` or `c4`), selected
 `--optimize` level, total VM cycles, total profiled opcodes, and per-op counts
 and percentages.
 
+Alongside the opcode table, both the stderr report and the JSON output always
+include three CHKT3 type-shadow counters (see SAFETY.md's `--type-checks`
+section): `shadow_sweeps`/`shadow_pages_swept` count how many times, and how
+many 64 KiB shadow pages, the page-reclamation sweep has freed; `shadow_pages_live`
+is the number of currently-allocated shadow pages across the heap and globals
+segments, sampled at print time. All three are zero when `--type-checks` isn't
+enabled.
+
 ### Static Bytecode Analysis
 
 For understanding *static* instruction patterns in `.c4` files (independent of

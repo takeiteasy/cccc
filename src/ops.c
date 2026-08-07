@@ -2013,6 +2013,13 @@ static AllocHeader *heap_alloc_for_ptr(VirtualMachine *vm, long long ptr,
 #define TYPE_SHADOW_PAGE_SHIFT 16
 #define TYPE_SHADOW_PAGE_SIZE  (1u << TYPE_SHADOW_PAGE_SHIFT)
 
+// #767: a 64 KiB word-compare with early exit is ~1000 dispatch-steps' worth
+// of work, so charging this many cycles of silence per page actually
+// scanned bounds type_shadow_sweep's worst-case amortized cost at ~0.5
+// bytes scanned per VM cycle (well under 1% overhead), independent of how
+// productive any individual sweep turns out to be -- see type_shadow_sweep.
+#define TYPE_SHADOW_SWEEP_CYCLES_PER_PAGE (1 << 17)
+
 // Grows `seg`'s page *vector* (not the pages themselves) so it covers
 // `committed` bytes. Lazily called here (rather than in vm_heap_grow) so
 // it stays in sync even if --type-checks is toggled on mid-run by #pragma
@@ -2069,6 +2076,74 @@ static TypeShadowSeg *type_shadow_locate(VirtualMachine *vm, const void *p, size
 // -- interior pages of a large cleared range are freed exactly, edge pages
 // that only got partially zeroed stay allocated (harmless: at most two
 // stray pages per clear). val != 0 (stamp) allocates a page on demand.
+// #767: records that `idx` was partially zeroed (not fully reclaimed) so a
+// later sweep can check whether it has since gone all-zero. O(1): a linear
+// dedup scan over at most TYPE_SHADOW_CAND_MAX entries. Dropping a push
+// when the list is full is sound -- the page just stays allocated, exactly
+// today's behavior -- and stays rare in practice, since a free of an N-page
+// block pushes at most its two edge pages.
+static void type_shadow_cand_push(TypeShadowSeg *seg, size_t idx) {
+    for (size_t i = 0; i < seg->cand_count; i++)
+        if (seg->cand[i] == idx)
+            return;
+    if (seg->cand_count == TYPE_SHADOW_CAND_MAX)
+        return;
+    seg->cand[seg->cand_count++] = idx;
+}
+
+// #767: reclaims candidate pages (partially zeroed since the last sweep)
+// that have since gone all-zero, freeing host memory type_shadow_fill's
+// exact-full-page-clear reclaim rule alone would leave stranded. Freeing a
+// verified all-zero page is observationally identical to leaving it
+// allocated -- every reader already treats a NULL page as all TY_VOID -- so
+// this cannot change what any caller sees, only how much host memory is
+// held.
+//
+// Must only be called at a statement boundary in a wrapper (type_shadow_clear,
+// type_shadow_copy), never from inside type_shadow_fill/scatter/gather/
+// check_uniform: each of those holds a raw `page` pointer live across a
+// memset/memcpy, and a reentrant sweep freeing that exact page would be a
+// use-after-free. Must never free `seg->pages` itself or shrink
+// `seg->page_count` -- op_CALLF_fn/op_CALLN_fn's ffi_shadow_backstop gates
+// the entire FFI-clear backstop on `heap_shadow.pages || data_shadow.pages`
+// being non-NULL; nulling the vector here would silently disable that
+// backstop and let a later unshimmed host write leave a stale stamp behind
+// -- a false CHKT3 positive on correct guest code, not just a missed one.
+static void type_shadow_sweep(VirtualMachine *vm, TypeShadowSeg *seg) {
+    if (seg->cand_count == 0 || vm->cycle < seg->next_sweep_cycle)
+        return;
+    size_t scanned = 0;
+    for (size_t i = 0; i < seg->cand_count; i++) {
+        size_t idx = seg->cand[i];
+        if (idx >= seg->page_count)
+            continue;
+        unsigned char *page = seg->pages[idx];
+        if (!page)
+            continue;
+        scanned++;
+        const uint64_t *w = (const uint64_t *)page; // calloc'd: max-aligned
+        bool zero = true;
+        for (size_t j = 0; j < TYPE_SHADOW_PAGE_SIZE / sizeof(*w); j++) {
+            if (w[j]) {
+                zero = false;
+                break;
+            }
+        }
+        if (zero) {
+            free(page);
+            seg->pages[idx] = NULL;
+            vm->type_shadow_pages_swept++;
+        }
+    }
+    seg->cand_count = 0;
+    vm->type_shadow_sweeps++;
+    // Charged forward by pages actually scanned (not a flat threshold): a
+    // sweep that only checked 2 edge pages gets a much sooner deadline than
+    // one that checked all 32, so worst-case scan work stays bounded by
+    // construction regardless of how many pages a given sweep reclaims.
+    seg->next_sweep_cycle = vm->cycle + (long long)scanned * TYPE_SHADOW_SWEEP_CYCLES_PER_PAGE;
+}
+
 static void type_shadow_fill(TypeShadowSeg *seg, size_t off, size_t len, unsigned char val) {
     size_t end = off + len;
     while (off < end) {
@@ -2094,6 +2169,11 @@ static void type_shadow_fill(TypeShadowSeg *seg, size_t off, size_t len, unsigne
         if (val == 0 && page_off == 0 && chunk == TYPE_SHADOW_PAGE_SIZE) {
             free(page);
             seg->pages[page_idx] = NULL;
+        } else if (val == 0) {
+            // #767: zeroed part of an already-allocated page, but not the
+            // whole page in one call -- queue it as a sweep candidate
+            // rather than leaving it allocated indefinitely.
+            type_shadow_cand_push(seg, page_idx);
         }
         off += chunk;
     }
@@ -2121,8 +2201,14 @@ static void type_shadow_clear(VirtualMachine *vm, void *p, size_t len) {
     if (!seg)
         return;
     size_t committed = (seg == &vm->heap_shadow) ? vm->heap_committed : vm->data_committed;
-    if (type_shadow_ensure(vm, seg, committed))
+    if (type_shadow_ensure(vm, seg, committed)) {
         type_shadow_fill(seg, off, len, 0);
+        // #767: this is the single choke point every clear path runs
+        // through (MFRE, MSET, the CALLF/CALLN backstop, RETBUF, realloc),
+        // so hooking it here services every segment's candidate list
+        // without needing a separate hook at each individual clear site.
+        type_shadow_sweep(vm, seg);
+    }
 }
 
 // Returns true and writes the shared TypeKind to *out_kind iff every byte
@@ -2226,6 +2312,14 @@ static void type_shadow_scatter(TypeShadowSeg *seg, size_t off, size_t len, cons
         if (all_zero && page_off == 0 && chunk == TYPE_SHADOW_PAGE_SIZE) {
             free(page);
             seg->pages[page_idx] = NULL;
+        } else if (all_zero) {
+            // #767: this chunk was all-zero but didn't reclaim the whole
+            // page (either a partial chunk, or a full-page chunk into a
+            // page whose other bytes are nonzero) -- queue it, mirroring
+            // type_shadow_fill's candidate push. The `!page && all_zero`
+            // skip-alloc case above never reaches here (page stays NULL,
+            // nothing to reclaim).
+            type_shadow_cand_push(seg, page_idx);
         }
         off += chunk;
         pos += chunk;
@@ -2271,6 +2365,11 @@ static void type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, siz
     type_shadow_scatter(dst_seg, dst_off, len, buf);
     if (buf != stack_buf)
         free(buf);
+    // #767: service candidates type_shadow_scatter just queued. Placed
+    // after the buf free (not interleaved with gather/scatter above) --
+    // see type_shadow_sweep's doc comment for why it may never run
+    // reentrant with those.
+    type_shadow_sweep(vm, dst_seg);
 }
 
 // Non-static entry point for the memcpy/memmove shims in stdlib/string.c
@@ -2697,6 +2796,15 @@ static inline int op_CALLI_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// Forward declaration: full definition (and the #751/#768 classification
+// table it drives off) lives below, near op_CALLF_fn, its original and
+// still-primary call site. op_CALLN_fn (indirect calls through a function
+// pointer or dlsym'd symbol) shares it so it isn't a soundness gap relative
+// to CALLF -- see the call site below for why that mattered.
+static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
+                                const long long *args, int actual_nargs,
+                                uint64_t double_arg_mask, uint64_t float_arg_mask);
+
 static inline int op_CALLN_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int rs = (int)(operands & 0xFF);
@@ -2765,6 +2873,17 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
         // ABI (variadic-ness, fixed arg count for ffi_prep_cif_var) comes
         // from the registration when we have one; a dlsym'd symbol has no
         // registration, so it falls back to what the callsite declared.
+        // #768: CALLN previously had no FFI-clear backstop at all -- an
+        // unclassified/unshimmed host function reached through a function
+        // pointer or dlsym'd symbol could write heap bytes with no VM hook
+        // and leave a stale shadow stamp behind. Same backstop as CALLF
+        // (see its call site for the full rationale); classification is by
+        // name, so a `ff` (registered FFI symbol) with a known name gets
+        // real classification, and a bare `sym` (dlsym, name usually
+        // unrecognised) falls through to the sound default clear.
+        ffi_shadow_backstop(vm, ff ? ff->name : sym->name, args, actual_nargs,
+                            double_arg_mask, float_arg_mask);
+
         int rc;
         if (ff) {
             rc = cccc_call_native_function(vm, ff->func_ptr, ff->name, args,
@@ -4784,72 +4903,93 @@ typedef enum {
     FFI_SHADOW_HANDLED,     // memcpy/memmove: the shim already propagated; skip entirely
     FFI_SHADOW_READONLY,    // never writes through any pointer arg: no clear at all
     FFI_SHADOW_BOUNDED,     // writes only [args[out_arg], args[out_arg]+len): narrow the clear to that
+    FFI_SHADOW_PRINTF,      // printf family: writes only out_arg (if any), UNLESS the format
+                            // string (fmt_arg) contains %n -- then every pointer-shaped
+                            // argument is unknown-write and falls back to FFI_SHADOW_DEFAULT.
+                            // See #768.
 } FfiShadowClass;
 
 typedef struct FfiShadowRule {
     const char *name;
     FfiShadowClass class_;
-    int out_arg;      // BOUNDED: index of the pointer argument that gets narrowed
-    int len_arg;      // BOUNDED: index of the integer arg giving the length, or -1 for fixed_len
+    int out_arg;      // BOUNDED/PRINTF: index of the pointer arg written, or -1 if none
+    int len_arg;      // BOUNDED/PRINTF: index of the integer arg giving the length, or -1 for fixed_len
     int len_arg2;     // BOUNDED: second length arg to multiply in (fread's nmemb), or -1
     size_t fixed_len; // BOUNDED: used when len_arg == -1 (a statically-known length)
+    int fmt_arg;      // PRINTF: index of the format-string argument, else -1
 } FfiShadowRule;
 
 static const FfiShadowRule ffi_shadow_rules[] = {
     // Folds in what used to be two ad hoc strcmp(ff->name, ...) checks.
-    {"memcpy",  FFI_SHADOW_HANDLED, 0, -1, -1, 0},
-    {"memmove", FFI_SHADOW_HANDLED, 0, -1, -1, 0},
+    {"memcpy",  FFI_SHADOW_HANDLED, 0, -1, -1, 0, -1},
+    {"memmove", FFI_SHADOW_HANDLED, 0, -1, -1, 0, -1},
 
     // Never write through a pointer argument.
-    {"strlen",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"strnlen", FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"strcmp",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"strncmp", FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"memcmp",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"strchr",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"strrchr", FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"strstr",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"fwrite",  FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"puts",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"fputs",   FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"atoi",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"atol",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
-    {"atof",    FFI_SHADOW_READONLY, 0, -1, -1, 0},
+    {"strlen",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"strnlen", FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"strcmp",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"strncmp", FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"memcmp",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"strchr",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"strrchr", FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"strstr",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"fwrite",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"puts",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"fputs",   FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"atoi",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"atol",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    {"atof",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
 
     // Write only a statically-known extent through one designated arg.
-    // Every *other* pointer-shaped argument to these calls (e.g. snprintf's
-    // variadic %s arguments) still falls through to the default
-    // whole-allocation clear below -- narrowing is per-argument, not
-    // per-call, which is what keeps a %n-capable format string safe.
-    {"memset",   FFI_SHADOW_BOUNDED, 0, 2, -1, 0},
-    {"fread",    FFI_SHADOW_BOUNDED, 0, 1, 2, 0}, // len = size(arg1) * nmemb(arg2)
-    {"fgets",    FFI_SHADOW_BOUNDED, 0, 1, -1, 0},
-    {"snprintf", FFI_SHADOW_BOUNDED, 0, 1, -1, 0},
-    {"strncpy",  FFI_SHADOW_BOUNDED, 0, 2, -1, 0},
-    {"read",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0},
-    {"recv",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0},
-    {"recvfrom", FFI_SHADOW_BOUNDED, 1, 2, -1, 0},
+    // Every *other* pointer-shaped argument to these calls still falls
+    // through to the default whole-allocation clear below -- narrowing is
+    // per-argument, not per-call.
+    {"memset",   FFI_SHADOW_BOUNDED, 0, 2, -1, 0, -1},
+    {"fread",    FFI_SHADOW_BOUNDED, 0, 1, 2, 0, -1}, // len = size(arg1) * nmemb(arg2)
+    {"fgets",    FFI_SHADOW_BOUNDED, 0, 1, -1, 0, -1},
+    {"strncpy",  FFI_SHADOW_BOUNDED, 0, 2, -1, 0, -1},
+    {"read",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0, -1},
+    {"recv",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0, -1},
+    {"recvfrom", FFI_SHADOW_BOUNDED, 1, 2, -1, 0, -1},
     // strtol/strtod write a single pointer (*endptr) through arg 1, a
     // fixed sizeof(char*) bytes -- there's no argument to read a length
     // from.
-    {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *)},
-    {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *)},
+    {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
     // __cccc_dec_strtod(w, dst, s, endp) -- #832's strtod32/64/128 shim
     // (src/stdlib/stdlib.c). `endp` is arg index 3 here, not 1, since `dst`
     // (the decimal out-param) occupies index 1. `dst`'s own write still
     // falls through to the default whole-allocation clear below -- its
     // width varies with `w` (4/8/16 bytes), which this table has no way to
     // express, so it's conservative rather than unsafe.
-    {"__cccc_dec_strtod", FFI_SHADOW_BOUNDED, 3, -1, -1, sizeof(char *)},
+    {"__cccc_dec_strtod", FFI_SHADOW_BOUNDED, 3, -1, -1, sizeof(char *), -1},
+
+    // #768: printf family. Every argument other than the designated output
+    // buffer (if any) is read-only UNLESS the format string contains a %n
+    // conversion, which can write through any pointer-shaped argument
+    // (including a variadic one) -- ffi_shadow_backstop checks the format
+    // string at the call site and demotes to FFI_SHADOW_DEFAULT whenever it
+    // can't prove %n is absent (unreadable pointer, non-literal content it
+    // can't scan confidently, or an actual %n), so this can only preserve
+    // or improve the no-false-positive property, never regress it.
+    {"printf",   FFI_SHADOW_PRINTF, -1, -1, -1, 0, 0},
+    {"fprintf",  FFI_SHADOW_PRINTF, -1, -1, -1, 0, 1},
+    {"dprintf",  FFI_SHADOW_PRINTF, -1, -1, -1, 0, 1},
+    {"sprintf",  FFI_SHADOW_PRINTF,  0, -1, -1, 0, 1}, // unbounded write extent: out_arg still
+                                                        // falls through to the whole-allocation clear
+    {"snprintf", FFI_SHADOW_PRINTF,  0,  1, -1, 0, 2}, // bounded write: narrows like FFI_SHADOW_BOUNDED
 
     // Deliberately left unclassified (default whole-allocation clear):
-    // printf/sprintf/scanf family (a %n conversion writes through any
-    // pointer argument, including a variadic one, so no static extent is
-    // safe to assume); qsort/bsearch (permute the buffer's bytes in place,
-    // and -- via the #738 guest-callback trampoline -- run guest code that
-    // can store arbitrarily); struct out-params like stat/gettimeofday/
-    // localtime_r/getaddrinfo/sigaction (safe by omission, which is the
-    // point of this table: absence keeps today's sound-but-lossy default).
+    // scanf/sscanf/fscanf (write through *every* pointer argument by
+    // design, so the PRINTF tier doesn't apply); vprintf/vsprintf/
+    // vsnprintf/vfprintf (the va_list argument is itself written through as
+    // iteration state, and its pointees aren't reachable from args[] --
+    // possible follow-up); qsort/bsearch (permute the buffer's bytes in
+    // place, and -- via the #738 guest-callback trampoline -- run guest
+    // code that can store arbitrarily); struct out-params like stat/
+    // gettimeofday/localtime_r/getaddrinfo/sigaction (safe by omission,
+    // which is the point of this table: absence keeps today's
+    // sound-but-lossy default).
 };
 
 // Returns the classification rule for `name`, or NULL if unclassified
@@ -4860,6 +5000,163 @@ static const FfiShadowRule *ffi_shadow_classify(const char *name) {
             return &ffi_shadow_rules[i];
     }
     return NULL;
+}
+
+// #768: how many bytes are safe to read starting at `p`, or 0 if `p` isn't
+// inside any segment the VM knows the extent of. CCCC has no guest/host
+// address translation -- a guest pointer already *is* a host pointer (see
+// heap_alloc_for_ptr above) -- so this is a plain range check, mirroring
+// is_valid_vm_address (src/debugger.c) and type_shadow_bounds's segment
+// checks. Checked in likely-hit order: data segment (string literals),
+// heap, then stack (a %s/vararg buffer could technically be a local, though
+// a *format string* living on the stack is rare).
+static size_t fmt_readable_bound(VirtualMachine *vm, const char *p) {
+    if (p >= vm->data_seg && p < vm->data_ptr)
+        return (size_t)(vm->data_ptr - p);
+    if (p >= vm->heap_seg && p < vm->heap_ptr)
+        return (size_t)(vm->heap_ptr - p);
+    char *stack_lo = (char *)vm->stack_seg;
+    char *stack_hi = (char *)vm->stack_seg + vm->poolsize;
+    if (p >= stack_lo && p < stack_hi)
+        return (size_t)(stack_hi - p);
+    return 0;
+}
+
+// #768: conservative %n scan -- true if `fmt` may contain a %n conversion,
+// or if it can't be scanned with confidence at all (unreadable pointer, no
+// NUL within the readable bound, an unrecognised conversion character).
+// Only ever returns false when the format string is provably %n-free, which
+// is what lets ffi_shadow_backstop treat every non-%n argument as read-only
+// without risking a missed write. Deliberately not shared with parse.c's
+// validate_format_call -- that operates on compile-time AST nodes for
+// -Wformat diagnostics, this operates on a raw guest pointer at runtime.
+static bool fmt_may_write_via_percent_n(VirtualMachine *vm, const char *fmt) {
+    size_t bound = fmt_readable_bound(vm, fmt);
+    if (bound == 0)
+        return true; // can't even confirm the pointer is valid: bail conservatively
+    for (size_t i = 0; i < bound; i++) {
+        char c = fmt[i];
+        if (c == '\0')
+            return false; // scanned the whole string, no %n found
+        if (c != '%')
+            continue;
+        if (++i >= bound)
+            return true; // truncated conversion: bail conservatively
+        if (fmt[i] == '%')
+            continue; // %% literal
+        // Flags
+        while (i < bound && strchr("-+ #0'", fmt[i]))
+            i++;
+        // Width (digits or '*')
+        if (i < bound && fmt[i] == '*')
+            i++;
+        else
+            while (i < bound && fmt[i] >= '0' && fmt[i] <= '9')
+                i++;
+        // Precision
+        if (i < bound && fmt[i] == '.') {
+            i++;
+            if (i < bound && fmt[i] == '*')
+                i++;
+            else
+                while (i < bound && fmt[i] >= '0' && fmt[i] <= '9')
+                    i++;
+        }
+        // Length modifiers
+        while (i < bound && strchr("hlLqjzt", fmt[i]))
+            i++;
+        if (i >= bound)
+            return true; // truncated conversion: bail conservatively
+        char conv = fmt[i];
+        if (conv == 'n')
+            return true;
+        if (!strchr("diouxXeEfFgGaAcspm", conv))
+            return true; // unrecognised conversion: bail conservatively
+        // recognised, non-%n conversion: continue scanning
+    }
+    return true; // ran off the readable bound without a NUL: bail conservatively
+}
+
+// #768/#751: shared FFI shadow backstop, called from both op_CALLF_fn and
+// op_CALLN_fn (the latter previously had no backstop at all -- an
+// unclassified/unshimmed host function reached through a function pointer
+// or dlsym'd symbol could leave a stale shadow stamp with no clear at all).
+// See ffi_shadow_classify above for the per-name classification this drives.
+static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
+                                const long long *args, int actual_nargs,
+                                uint64_t double_arg_mask, uint64_t float_arg_mask) {
+    if (!(vm->flags & CCCC_TYPE_CHECKS) || !(vm->heap_shadow.pages || vm->data_shadow.pages))
+        return;
+
+    const FfiShadowRule *rule = ffi_shadow_classify(name);
+    FfiShadowClass cls = rule ? rule->class_ : FFI_SHADOW_DEFAULT;
+
+    if (cls == FFI_SHADOW_PRINTF) {
+        const char *fmt = (rule->fmt_arg >= 0 && rule->fmt_arg < actual_nargs)
+                               ? (const char *)args[rule->fmt_arg] : NULL;
+        if (!fmt || fmt_may_write_via_percent_n(vm, fmt))
+            cls = FFI_SHADOW_DEFAULT; // can't prove %n-free: today's whole-allocation clear
+    }
+
+    if (cls == FFI_SHADOW_HANDLED)
+        return;
+
+    for (int i = 0; i < actual_nargs && i < 64; i++) {
+        if ((float_arg_mask | double_arg_mask) & (1ULL << i))
+            continue; // not a pointer-shaped argument
+
+        if (cls == FFI_SHADOW_READONLY)
+            continue; // never writes: no clear needed for any arg
+
+        if ((cls == FFI_SHADOW_BOUNDED || cls == FFI_SHADOW_PRINTF) && i == rule->out_arg) {
+            // Narrow the clear to the statically-known extent this call
+            // writes through this specific argument (or fall through to the
+            // default whole-allocation clear below, for a PRINTF rule with
+            // no len_arg -- e.g. sprintf, whose write extent isn't
+            // statically bounded). Every *other* pointer-shaped argument
+            // (checked on the next loop iteration) still gets the default
+            // whole-allocation clear -- narrowing is per-argument.
+            if (rule->len_arg >= 0 || rule->fixed_len > 0) {
+                size_t len = rule->fixed_len;
+                if (rule->len_arg >= 0 && rule->len_arg < actual_nargs) {
+                    long long l = args[rule->len_arg];
+                    len = (l > 0) ? (size_t)l : 0;
+                    if (rule->len_arg2 >= 0 && rule->len_arg2 < actual_nargs) {
+                        long long l2 = args[rule->len_arg2]; // e.g. fread's nmemb
+                        if (l2 <= 0 || len == 0) {
+                            len = 0;
+                        } else if (len > SIZE_MAX / (size_t)l2) {
+                            len = SIZE_MAX; // overflow: clamp; the allocation-size clamp below still applies
+                        } else {
+                            len *= (size_t)l2;
+                        }
+                    }
+                }
+                size_t off;
+                AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
+                if (header && !header->freed) {
+                    size_t remaining = header->size - off;
+                    if (len > remaining)
+                        len = remaining; // a short/clamped read cleared a superset: still sound
+                    type_shadow_clear(vm, (void *)args[i], len);
+                }
+                continue;
+            }
+            // else: fall through to the default whole-allocation clear.
+        }
+
+        if (cls == FFI_SHADOW_PRINTF)
+            continue; // a %n-free printf-family call reads every argument
+                      // other than its designated out_arg (if any) -- e.g.
+                      // %d/%s/%p values -- never writes through them.
+
+        // Default: unclassified name, or a BOUNDED call's non-designated
+        // pointer argument -- whole-allocation clear.
+        size_t off;
+        AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
+        if (header && !header->freed)
+            type_shadow_clear(vm, (char *)args[i] - off, header->size);
+    }
 }
 
 static inline int op_CALLF_fn(VirtualMachine *vm) {
@@ -4914,8 +5211,8 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
                                                                 : "int");
     }
 
-    // FFI-clear backstop (#653), classified per host function (#751): guest
-    // memcpy/memmove get shadow-aware shims (cccc_shim_memcpy/
+    // FFI-clear backstop (#653), classified per host function (#751/#768):
+    // guest memcpy/memmove get shadow-aware shims (cccc_shim_memcpy/
     // cccc_shim_memmove in src/stdlib/string.c) that propagate effective
     // type from src to dst; every other host function may write heap bytes
     // with no VM hook at all (fread, read, recv, scanf, sprintf, any
@@ -4927,59 +5224,7 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
     // unclassified/unshimmed host function is missed (accepted for
     // unclassified names, tracked as a follow-up), but no host write can
     // ever leave a stale stamp that later false-positives.
-    if ((vm->flags & CCCC_TYPE_CHECKS) && (vm->heap_shadow.pages || vm->data_shadow.pages)) {
-        const FfiShadowRule *rule = ffi_shadow_classify(ff->name);
-        FfiShadowClass cls = rule ? rule->class_ : FFI_SHADOW_DEFAULT;
-
-        if (cls != FFI_SHADOW_HANDLED) {
-            for (int i = 0; i < actual_nargs && i < 64; i++) {
-                if ((float_arg_mask | double_arg_mask) & (1ULL << i))
-                    continue; // not a pointer-shaped argument
-
-                if (cls == FFI_SHADOW_READONLY)
-                    continue; // never writes: no clear needed for any arg
-
-                if (cls == FFI_SHADOW_BOUNDED && i == rule->out_arg) {
-                    // Narrow the clear to the statically-known extent this
-                    // call writes through this specific argument. Every
-                    // *other* pointer-shaped argument (checked below, on
-                    // the next loop iteration) still gets the default
-                    // whole-allocation clear -- narrowing is per-argument.
-                    size_t len = rule->fixed_len;
-                    if (rule->len_arg >= 0 && rule->len_arg < actual_nargs) {
-                        long long l = args[rule->len_arg];
-                        len = (l > 0) ? (size_t)l : 0;
-                        if (rule->len_arg2 >= 0 && rule->len_arg2 < actual_nargs) {
-                            long long l2 = args[rule->len_arg2]; // e.g. fread's nmemb
-                            if (l2 <= 0 || len == 0) {
-                                len = 0;
-                            } else if (len > SIZE_MAX / (size_t)l2) {
-                                len = SIZE_MAX; // overflow: clamp; the allocation-size clamp below still applies
-                            } else {
-                                len *= (size_t)l2;
-                            }
-                        }
-                    }
-                    size_t off;
-                    AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
-                    if (header && !header->freed) {
-                        size_t remaining = header->size - off;
-                        if (len > remaining)
-                            len = remaining; // a short/clamped read cleared a superset: still sound
-                        type_shadow_clear(vm, (void *)args[i], len);
-                    }
-                    continue;
-                }
-
-                // Default: unclassified name, or a BOUNDED call's
-                // non-designated pointer argument -- whole-allocation clear.
-                size_t off;
-                AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
-                if (header && !header->freed)
-                    type_shadow_clear(vm, (char *)args[i] - off, header->size);
-            }
-        }
-    }
+    ffi_shadow_backstop(vm, ff->name, args, actual_nargs, double_arg_mask, float_arg_mask);
 
     int rc = cccc_call_native_function(vm, ff->func_ptr, ff->name, args,
                                       actual_nargs, double_arg_mask,
