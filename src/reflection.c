@@ -671,6 +671,14 @@ Node *__builtin_ast_string_literal(const char *str) {
 
     // Create an anonymous global variable for the string
     Obj *var = reflect_new_anon_gvar(vm, ty);
+    // #925: the only other producer of an is_string_literal anon global is
+    // new_string_literal() (parse.c), for a literal written directly in
+    // source. This is the reflection API's programmatic equivalent -- same
+    // contract (raw string bytes in init_data), so it needs the same flag,
+    // or the serializer's `-G` path (which doesn't run the -m/-c=native-only
+    // rename_anon_globals pre-pass) treats it as an unrecognized dotted
+    // name instead of inlining it as string text.
+    var->is_string_literal = true;
 
     // Allocate space in the data segment and copy the string data
     // This is critical: we must place the data in the segment NOW,
