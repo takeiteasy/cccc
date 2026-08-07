@@ -4216,6 +4216,24 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
     }
 
+    // #916: REG_ZERO (a discarded-value expression -- `*p;`, `(void)*p`,
+    // a comma-operator LHS) is hardwired to 0 and discards writes. The
+    // ND_DEREF/ND_MEMBER cases below use dest_reg as scratch for the address
+    // before loading through it, so a REG_ZERO dest silently turns every such
+    // load into a read from address 0. Integer loads only look harmless
+    // because op_LDR_*_fn skips the load when rd == REG_ZERO; FLDR/FLDR_F32
+    // have no such guard and segfault. Routing through a real temp also
+    // makes the discarded-deref safety checks meaningful again -- they were
+    // being run against address 0 (see the matching note in
+    // restrict_cache_handle_deref above).
+    if (dest_reg == REG_ZERO &&
+        (node->kind == ND_DEREF || node->kind == ND_MEMBER)) {
+        int tmp = alloc_temp_reg();
+        gen_expr(vm, node, tmp);
+        free_temp_reg(tmp);
+        return;
+    }
+
     switch (node->kind) {
     case ND_NULL_EXPR:
         return;
@@ -5278,6 +5296,13 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_MEMBER: {
+        // NOTE (#917): dest_reg holds the member address here and then gets
+        // loaded through below -- for a float/double member that's dest_reg
+        // in its FREG_A0..A7 sense, which aliases REG_A0..A7 by raw index
+        // (see ND_VAR's flonum branch above for the pattern that avoids
+        // this via a separate r_addr temp). No observable bug today since
+        // the address is dead after the load, but don't add a second live
+        // use of the address here without switching to that pattern first.
         bool local_frame = addr_is_local_frame(vm, node);
         gen_addr(vm, node, dest_reg);
 

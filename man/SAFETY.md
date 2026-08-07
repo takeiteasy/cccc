@@ -1227,6 +1227,15 @@ dereferenced address is interior, not the tagged base), so it falls through
 to the interval-stabbing lookup, finds `arr`'s retained interval containing
 the address, and flags it — same as the plain-local case, one layer deeper.
 
+**Discarded-value dereferences are still checked (#916):** a dereference
+whose result is unused (`*p;`, `(void)*p`) is checked exactly like one whose
+result is kept — the result is discarded, not the access:
+
+```c
+int *p = get_local();
+*p;  // Still caught, even though nothing reads the loaded value.
+```
+
 ### Pointer Alignment
 ```c
 // test_alignment.c - Pointer alignment example

@@ -692,6 +692,72 @@ int test_optimizer_fp_promotion(void) {
     return 42;
 }
 
+// Ticket #916: a discarded-value load through a float/double pointer used to
+// segfault the VM (gen_expr's ND_DEREF/ND_MEMBER reused dest_reg==REG_ZERO as
+// scratch for the address, so the load read from address 0; FLDR/FLDR_F32
+// have no rd==REG_ZERO guard the way the integer LDR_* ops do). Each check
+// below discards the load result but still requires the *side effect* of
+// evaluating a live pointer/index to not crash -- if a discarded load reads
+// the wrong address, one of the earlier discards would already have faulted.
+struct discard_deref_s {
+    float f;
+};
+
+[[cccc::test(return = 42)]]
+int test_discarded_float_double_deref(void) {
+    float fx = 5.0f;
+    float *pf = &fx;
+    *pf;         // bare discarded float deref (the ticket's original repro)
+    (void)*pf;   // explicit (void)-discard
+
+    double dx = 5.0;
+    double *pd = &dx;
+    *pd;
+    (void)*pd;
+
+    long double lx = 5.0L;
+    long double *pl = &lx;
+    *pl;
+
+    struct discard_deref_s s = {1.0f};
+    struct discard_deref_s *ps = &s;
+    ps->f; // discarded member load through a pointer
+    s.f;   // discarded member load, no pointer indirection
+
+    float arr[3] = {1.0f, 2.0f, 3.0f};
+    int idx = 1;
+    arr[idx]; // discarded indexed load (emit_indexed_load_if_possible path)
+
+    int z = (*pf, 3); // discarded deref as a comma-operator LHS
+    if (z != 3)
+        return 1;
+
+    return 42;
+}
+
+// The fix redirects a REG_ZERO dest_reg to a fresh alloc_temp_reg() (11 slots,
+// see NUM_TEMP_REGS in src/codegen.c), so a discarded deref now costs one
+// temp register wherever it appears -- previously it cost none, since it
+// just reused REG_ZERO. Regression cover for that added pressure: a
+// discarded deref nested inside a many-argument call, with several other
+// live temps around it.
+static int discard_deref_pressure_sum(int a, int b, int c, int d, int e,
+                                       int f, int g, int h) {
+    return a + b + c + d + e + f + g + h;
+}
+
+[[cccc::test(return = 42)]]
+int test_discarded_deref_temp_pressure(void) {
+    float fx = 7.0f;
+    float *pf = &fx;
+    int r = discard_deref_pressure_sum(1 + 1, 2 + 2, 3 + 3, 4 + 4,
+                                        (*pf, 5) + 5, 6 + 6, 7 + 7, 8 + 8);
+    // (1+1)+(2+2)+(3+3)+(4+4)+(5+5)+(6+6)+(7+7)+(8+8) = 2*(1+..+8) = 72
+    if (r != 72)
+        return 1;
+    return 42;
+}
+
 #pragma cccc suite end
 
 // [from test_nexttoward.c]
