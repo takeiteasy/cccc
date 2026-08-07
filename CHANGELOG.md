@@ -3,6 +3,30 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-08-07
+
+### Fixed
+
+- `-c=native`/`-m` serializer: anonymous globals (`new_anon_gvar`'s `.L..N`
+  name) are no longer treated as opaque string literals across the board —
+  static locals and compound literals (`(int[]){...}`, `&(struct S){...}`)
+  now get a real, valid-C identifier and a proper `static` definition
+  instead of an unreferenceable dotted name. Previously such a reference
+  either emitted invalid C (a dotted identifier the host compiler rejects)
+  or, worse, silently aliased the wrong data — e.g. a `static struct S`
+  local compiled fine but read back as garbage bytes off a bogus
+  string-literal global, the same severity class as #918's defect C
+- `-c=native`/`-m` serializer: a function's hoisted local-variable
+  declarations no longer collide when the same name is reused in sibling or
+  nested blocks (e.g. two `for (int i = ...)` loops in one function, or an
+  inner block shadowing a parameter's own name) — renamed on collision
+  instead of emitting a duplicate declaration; a parameter itself is never
+  renamed, since its signature is already committed to output by the time
+  the collision check runs
+- `-c=native`/`-m` serializer: a declaration-form `for` loop init
+  (`for (int i = 0; ...)`) is no longer dropped as an unsupported
+  expression — the loop variable is now actually initialized
+
 ## [0.1.1] - 2026-08-07
 
 ### Added
