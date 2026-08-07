@@ -486,11 +486,17 @@ host cost.) Guest `memcpy`/`memmove` route through shadow-aware host shims
 `cc_type_shadow_copy` after the real libc call runs — this also covers a
 copy between the heap and a global, since `type_shadow_copy` resolves src
 and dst independently. Every *other* host function reachable through
-`CALLF` might write heap bytes with no VM-level hook at all (`fread`,
-`read`, `scanf`, any other FFI call) — `op_CALLF_fn` conservatively clears
-shadow state reachable through an integer argument register before such a
-call runs, so a write the VM can't observe can never leave a stale stamp
-that later false-positives. `RETBUF` clears its handed-out
+`CALLF` might write heap or global bytes with no VM-level hook at all
+(`fread`, `read`, `scanf`, any other FFI call) — `op_CALLF_fn` conservatively
+clears shadow state reachable through an integer argument register before
+such a call runs, so a write the VM can't observe can never leave a stale
+stamp that later false-positives. The clear resolves either tracked segment
+(`ffi_shadow_clear_extent`, `src/ops.c`): a heap address clears by its
+allocation's extent (base pointer to `header->size`, via
+`heap_alloc_for_ptr`, unaffected by which byte of the allocation the
+pointer argument actually points at); a data-segment (global) address has
+no allocation header to bound it, so it clears from the pointer to the end
+of the emitted data segment (`vm->data_ptr`). `RETBUF` clears its handed-out
 `return_buffer_pool` slot's shadow range before returning it: those slots
 live in `data_seg` and rotate between every struct-returning call, so
 without the clear a slot would carry a stale stamp from whichever struct
@@ -505,12 +511,12 @@ statically known:
 |---|---|---|
 | `FFI_SHADOW_HANDLED` | no clear — the shim already propagated | `memcpy`, `memmove`, `qsort` |
 | `FFI_SHADOW_READONLY` | no clear at all — never writes through any pointer arg | `strlen`, `strcmp`, `memcmp`, `fwrite`, `bsearch`, ... |
-| `FFI_SHADOW_BOUNDED` | clear narrowed to `[args[out_arg], args[out_arg]+len)`, where `len` comes from another argument (or a fixed size, for `strtol`/`strtod`'s `*endptr`), clamped against the allocation's actual remaining bytes | `fread`, `snprintf`, `read`, `recv`, `strncpy`, ... |
-| `FFI_SHADOW_DEFAULT` (unclassified) | today's whole-allocation clear, unchanged | everything else, including `printf`/`scanf` (`%n`) |
+| `FFI_SHADOW_BOUNDED` | clear narrowed to `[args[out_arg], args[out_arg]+len)`, where `len` comes from another argument (or a fixed size, for `strtol`/`strtod`'s `*endptr`), clamped against the remaining bytes in whichever segment resolves the pointer | `fread`, `snprintf`, `read`, `recv`, `strncpy`, ... |
+| `FFI_SHADOW_DEFAULT` (unclassified) | whole-object clear (heap allocation or, for a global, pointer-to-end-of-data-segment) | everything else, including `printf`/`scanf` (`%n`) |
 
 A `BOUNDED` entry only narrows the clear for its one designated argument;
 every *other* pointer-shaped argument to that same call (e.g. `snprintf`'s
-variadic `%s` arguments) still gets the default whole-allocation clear.
+variadic `%s` arguments) still gets the default whole-object clear.
 Since an unclassified name behaves exactly as before, adding or widening a
 rule can only ever reduce clearing relative to today's behavior, never
 introduce a false positive.

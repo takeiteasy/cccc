@@ -5157,6 +5157,37 @@ static bool fmt_may_write_via_percent_n(VirtualMachine *vm, const char *fmt) {
     return true; // ran off the readable bound without a NUL: bail conservatively
 }
 
+// #914: resolves the clear extent for a pointer-shaped FFI argument across
+// either tracked segment. Heap addresses go through heap_alloc_for_ptr as
+// before -- base = the allocation's own base (so an interior pointer still
+// clears the bytes before it, unchanged from pre-#914 behavior), len =
+// header->size, freed allocations excluded. A data-segment (global)
+// address carries no AllocHeader, so there is no exact object extent to
+// recover; the only sound bound is the rest of the emitted data segment --
+// [ptr, vm->data_ptr), not vm->data_committed, which is a coarse upfront
+// reservation (starts at a whole poolsize chunk) many times larger than
+// any real global. This is deliberately not extended to heap addresses
+// that resolve to no tracked allocation -- those still get no clear, same
+// as before #914.
+static bool ffi_shadow_clear_extent(VirtualMachine *vm, long long ptr,
+                                    void **out_base, size_t *out_len) {
+    size_t off;
+    AllocHeader *header = heap_alloc_for_ptr(vm, ptr, &off);
+    if (header) {
+        if (header->freed)
+            return false;
+        *out_base = (char *)ptr - off;
+        *out_len = header->size;
+        return true;
+    }
+    if ((char *)ptr >= vm->data_seg && (char *)ptr < vm->data_ptr) {
+        *out_base = (void *)ptr;
+        *out_len = (size_t)(vm->data_ptr - (char *)ptr);
+        return true;
+    }
+    return false;
+}
+
 // #768/#751: shared FFI shadow backstop, called from both op_CALLF_fn and
 // op_CALLN_fn (the latter previously had no backstop at all -- an
 // unclassified/unshimmed host function reached through a function pointer
@@ -5212,10 +5243,11 @@ static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
                         }
                     }
                 }
-                size_t off;
-                AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
-                if (header && !header->freed) {
-                    size_t remaining = header->size - off;
+                void *base;
+                size_t obj_len;
+                if (ffi_shadow_clear_extent(vm, args[i], &base, &obj_len)) {
+                    size_t off = (size_t)((char *)args[i] - (char *)base);
+                    size_t remaining = obj_len - off;
                     if (len > remaining)
                         len = remaining; // a short/clamped read cleared a superset: still sound
                     type_shadow_clear(vm, (void *)args[i], len);
@@ -5231,21 +5263,12 @@ static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
                       // %d/%s/%p values -- never writes through them.
 
         // Default: unclassified name, or a BOUNDED call's non-designated
-        // pointer argument -- whole-allocation clear.
-        //
-        // NOTE (found during #769, filed as a follow-up rather than fixed
-        // here -- out of that ticket's scope): heap_alloc_for_ptr only
-        // resolves heap addresses, so a data-segment (global) buffer
-        // passed to an unclassified host call gets no clear at all here,
-        // even though #752 extended the type shadow to globals. A stale
-        // stamp on a global can in principle survive an unobserved host
-        // write and later false-positive. type_shadow_locate (used
-        // elsewhere in this file, e.g. by cc_type_shadow_elements_uniform)
-        // already covers both segments and would be the natural fix.
-        size_t off;
-        AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
-        if (header && !header->freed)
-            type_shadow_clear(vm, (char *)args[i] - off, header->size);
+        // pointer argument -- whole-object clear, heap or global
+        // (ffi_shadow_clear_extent, #914).
+        void *base;
+        size_t obj_len;
+        if (ffi_shadow_clear_extent(vm, args[i], &base, &obj_len))
+            type_shadow_clear(vm, base, obj_len);
     }
 }
 

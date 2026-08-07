@@ -270,28 +270,34 @@ All features listed below can be enabled individually or through the safety leve
   - `memcpy`/`memmove` propagate the source range's effective type onto
     the destination, so an ordinary struct/array copy followed by typed
     member reads doesn't false-positive; every other host function that
-    might write into a tracked heap allocation has no VM-level hook, so
-    the VM can't observe what such a call actually wrote and must
+    might write into a tracked heap allocation or global has no VM-level
+    hook, so the VM can't observe what such a call actually wrote and must
     conservatively **clear** shadow state before the call runs — this
     trades a false negative (a type-confusion bug that happens to route
     through an unclassified host write) for zero false positives. This
     backstop covers indirect host calls too (through a function pointer or
-    a `dlsym`'d symbol), not just calls to a name resolved at compile time.
-    Common libc/POSIX functions are classified by name to recover coverage
-    a blanket clear would otherwise destroy, in four tiers, each of which
-    can only ever reduce clearing relative to an unclassified name (never
-    widen it, so classifying a function can't introduce a false positive):
-    a **read-only** allowlist (`strlen`, `strcmp`, `memcmp`, `fwrite`, ...)
-    gets no clear at all; a **bounded-write** list (`fread`, `snprintf`,
-    `read`, `recv`, `strncpy`, `strtol`'s `*endptr`, ...) narrows the clear
-    to the statically-known extent written through the one argument that
-    receives it, while every *other* pointer-shaped argument to that same
-    call still gets the default whole-allocation clear; the **printf
+    a `dlsym`'d symbol), not just calls to a name resolved at compile time,
+    and resolves either tracked segment for a pointer-shaped argument
+    (`ffi_shadow_clear_extent`, `src/ops.c`): a heap address clears by its
+    allocation's extent, exactly as before; a data-segment (global) address
+    carries no allocation header to bound it, so it clears from the pointer
+    to the end of the emitted data segment. Common libc/POSIX functions are
+    classified by name to recover coverage a blanket clear would otherwise
+    destroy, in four tiers, each of which can only ever reduce clearing
+    relative to an unclassified name (never widen it, so classifying a
+    function can't introduce a false positive): a **read-only** allowlist
+    (`strlen`, `strcmp`, `memcmp`, `fwrite`, ...) gets no clear at all; a
+    **bounded-write** list (`fread`, `snprintf`, `read`, `recv`, `strncpy`,
+    `strtol`'s `*endptr`, ...) narrows the clear to the statically-known
+    extent written through the one argument that receives it, clamped
+    against whichever segment resolves that argument, while every *other*
+    pointer-shaped argument to that same call still gets the default
+    whole-object clear; the **printf
     family** (`printf`, `fprintf`, `dprintf`, `sprintf`, `snprintf`) is
     read-only for every argument except its output buffer (if any) *unless*
     the format string may contain a `%n` conversion — which can write
     through any pointer-shaped argument, not just the output buffer — in
-    which case the call falls back to the whole-allocation-clear default for
+    which case the call falls back to the whole-object-clear default for
     every argument, exactly as an unclassified call would. The format string
     is read directly from the guest pointer at the call site (CCCC has no
     guest/host address-translation layer, so a guest pointer already *is* a
@@ -303,7 +309,7 @@ All features listed below can be enabled individually or through the safety leve
     left unclassified: the `va_list` variants' pointees aren't reachable
     from the argument list, and the scanf family writes through every
     pointer argument by design. An unclassified name keeps the default
-    whole-allocation clear across every pointer-shaped argument.
+    whole-object clear across every pointer-shaped argument.
   - `qsort`/`bsearch` preserve type-shadow coverage across the call instead
     of clearing it, for the common case of a uniformly-typed array: `qsort`
     only ever reorders whole elements, it never rewrites their bytes, so if
