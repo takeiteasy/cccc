@@ -178,6 +178,30 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int indent);
 
+// #918: usual_arith_conv() (src/type.c) casts BOTH operands of a pointer
+// +/- integer expression to the same pointer type before new_add()/
+// new_sub() (src/parse.c) return -- so by the time serialize_expr() sees an
+// ND_ADD/ND_SUB node, node->lhs->ty and node->rhs->ty are indistinguishable
+// (both TY_PTR). The scaled byte offset new_add()/new_sub() baked in
+// (`rhs *= sizeof(*ptr)`) is only recoverable by peeling back to the
+// *pre-cast* operand -- these three helpers do that peeling and classify
+// what's underneath. Do not rely on operand position (new_add() canonicalizes
+// pointer-to-lhs, but set_checked_deref_bounds() in parse.c builds ND_ADD via
+// new_binary() directly, which does not canonicalize).
+static Node *strip_casts(Node *n) {
+    while (n && n->kind == ND_CAST && n->lhs)
+        n = n->lhs;
+    return n;
+}
+
+static bool node_is_pointerish(Node *n) {
+    return n && n->ty && (n->ty->kind == TY_PTR || n->ty->kind == TY_ARRAY);
+}
+
+static bool node_is_integerish(Node *n) {
+    return n && n->ty && is_integer(n->ty);
+}
+
 // Returns true if the node produces no output (effectively a no-op expression).
 static bool is_noop_expr(Node *node) {
     if (!node) return true;
@@ -641,11 +665,20 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     }
 }
 
-// Print escaped string literal
-static void serialize_string(FILE *f, const char *str) {
+// Print an escaped string literal covering exactly `len` bytes of `str` --
+// NOT NUL-terminated iteration. #918: a NUL-terminated for-loop (the
+// previous implementation) truncates at the first embedded NUL, silently
+// dropping any bytes after it (e.g. `char a[4] = {1,0,2,0};`, legal C with
+// no string semantics at all). NUL bytes are always escaped as the 3-digit
+// octal form `\000` (never the 1-digit `\0`) -- `\0` immediately followed
+// by an ASCII digit in the emitted source (e.g. a NUL followed by the
+// character '1') would be misparsed by the host compiler as a 2-digit
+// octal escape `\01`; `\000` has no such ambiguity.
+static void serialize_string_n(FILE *f, const char *str, int len) {
     fprintf(f, "\"");
-    for (const char *p = str; *p; p++) {
-        switch (*p) {
+    for (int i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        switch (c) {
         case '\n':
             fprintf(f, "\\n");
             break;
@@ -661,14 +694,11 @@ static void serialize_string(FILE *f, const char *str) {
         case '"':
             fprintf(f, "\\\"");
             break;
-        case '\0':
-            fprintf(f, "\\0");
-            break;
         default:
-            if (*p >= 32 && *p < 127)
-                fputc(*p, f);
+            if (c >= 32 && c < 127)
+                fputc(c, f);
             else
-                fprintf(f, "\\%03o", (unsigned char)*p);
+                fprintf(f, "\\%03o", c);
             break;
         }
     }
@@ -716,9 +746,21 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
     case ND_VAR:
         if (node->var) {
             // Check if this is a string literal (anonymous global with
-            // init_data)
+            // init_data). NOTE: `.L..N` anonymous globals are also used for
+            // non-char-array compound literals -- this condition wrongly
+            // matches those too when they happen to have init_data (e.g.
+            // `(int[]){1,2,3}`), inlining raw bytes as if they were string
+            // text. Pre-existing gap, out of #918's scope; see the matching
+            // note on serialize_global_var's `name[0] == '.'` skip.
             if (node->var->init_data && node->var->name[0] == '.') {
-                serialize_string(f, node->var->init_data);
+                // #918: use the global's actual array length, not NUL
+                // termination -- an anonymous string-literal global can
+                // legitimately contain embedded NULs (wide/multi-part
+                // literals, __func__ splicing, etc).
+                int len = (node->var->ty && node->var->ty->kind == TY_ARRAY)
+                              ? node->var->ty->array_len
+                              : (int)strlen(node->var->init_data);
+                serialize_string_n(f, node->var->init_data, len);
             } else {
                 fprintf(f, "%s", node->var->name);
             }
@@ -728,7 +770,73 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     case ND_ADD:
-    case ND_SUB:
+    case ND_SUB: {
+        // #918: pointer arithmetic needs (char *)-based casts, not the
+        // naively-printed operand types -- see the strip_casts()/
+        // node_is_pointerish()/node_is_integerish() comment above.
+        Node *lhs_inner = strip_casts(node->lhs);
+        Node *rhs_inner = strip_casts(node->rhs);
+        bool lhs_ptr = node_is_pointerish(lhs_inner);
+        bool rhs_ptr = node_is_pointerish(rhs_inner);
+        bool lhs_int = node_is_integerish(lhs_inner);
+        bool rhs_int = node_is_integerish(rhs_inner);
+
+        if (node->kind == ND_SUB && lhs_ptr && rhs_ptr) {
+            // ptr - ptr: new_sub() already wraps this whole node in an
+            // outer `(hi - lo) / elemsize` ND_DIV (untouched here) -- only
+            // the pointer subtraction itself needs (char *) casts, so the
+            // host compiler doesn't scale by its own idea of the element
+            // size on top of that division.
+            fprintf(f, "((char *)");
+            serialize_expr(f, vm, ctx, node->lhs, 14);
+            fprintf(f, " - (char *)");
+            serialize_expr(f, vm, ctx, node->rhs, 14);
+            fprintf(f, ")");
+            break;
+        }
+
+        if (lhs_ptr && rhs_int) {
+            // ptr +/- num: rhs is already the byte-scaled offset new_add()/
+            // new_sub() computed (rhs *= sizeof(*ptr)) -- casting the
+            // pointer to (char *) before applying it, then casting the
+            // whole result back to node->ty, keeps the host from scaling
+            // the offset a second time. Print rhs_inner (not node->rhs):
+            // the outer cast usual_arith_conv() wrapped it in is a bogus
+            // (pointer-typed) cast on an integer offset, and printing it
+            // would produce the exact `ptr + (int *)offset` error this
+            // fix exists to avoid.
+            fprintf(f, "(");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, ")((char *)");
+            serialize_expr(f, vm, ctx, node->lhs, 14);
+            fprintf(f, " %s ", get_binary_op_str(node->kind));
+            serialize_expr(f, vm, ctx, rhs_inner, node_prec + 1);
+            fprintf(f, ")");
+            break;
+        }
+
+        if (node->kind == ND_ADD && rhs_ptr && lhs_int) {
+            // num + ptr: new_add() canonicalizes this to ptr + num, but
+            // set_checked_deref_bounds() builds ND_ADD via new_binary()
+            // directly and does not canonicalize -- handle it defensively.
+            // Print lhs_inner for the same reason as above.
+            fprintf(f, "(");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, ")((char *)");
+            serialize_expr(f, vm, ctx, node->rhs, 14);
+            fprintf(f, " + ");
+            serialize_expr(f, vm, ctx, lhs_inner, node_prec + 1);
+            fprintf(f, ")");
+            break;
+        }
+
+        // Plain arithmetic (int+int, float+float, ...).
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
+        fprintf(f, " %s ", get_binary_op_str(node->kind));
+        serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+        break;
+    }
+
     case ND_MUL:
     case ND_DIV:
     case ND_MOD:
@@ -1065,6 +1173,16 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
         serialize_type_defs_for_owner(f, ctx, fn);
 
         // Local variable declarations
+        //
+        // NOTE: hoisting every local to one flat top-of-function list
+        // assumes C block scoping never needs to distinguish two locals
+        // with the same name -- false when a name is reused in sibling (not
+        // nested) blocks, e.g. two `for (int i = ...)` loops in the same
+        // function each declaring their own `int i`. This emits two `int
+        // i;` declarations in the same top-level scope, a redefinition
+        // error. Pre-existing, out of #918's scope (found while smoke-
+        // testing that fix against tests/suites/test_suite_arrays.c);
+        // filed separately.
         for (Obj *var = fn->locals; var; var = var->next) {
             if (var->is_param)
                 continue;
@@ -1097,15 +1215,247 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
     }
 }
 
+// #918: resolve a Relocation's target symbol name to its Obj. Mirrors
+// codegen.c's find_global_obj (static there, not visible from this file) --
+// vm->compiler.globals is the full accumulated global+function list
+// (bytecode.c sets it once parsing completes), and rel->label points at the
+// target Obj's ->name field directly (see eval2()/eval_rval() in parse.c),
+// so a plain name match is exact. &&label targets (a computed-goto label
+// address stored in a static/global initializer) live in codegen.c's
+// text-segment label map instead of as an Obj and are not resolved here --
+// vanishingly rare in an initializer and not worth threading codegen state
+// into the serializer for; falls through to the "unresolved relocation"
+// hard error below.
+static Obj *serialize_find_global(VirtualMachine *vm, const char *name) {
+    for (Obj *g = vm->compiler.globals; g; g = g->next)
+        if (strcmp(g->name, name) == 0)
+            return g;
+    return NULL;
+}
+
+// Find the Relocation (if any) covering byte `offset` within `var`'s
+// init_data -- a pointer-sized initializer slot that names a symbol (`&x`,
+// a string literal, a function pointer, ...) has its raw bytes zeroed by
+// write_gvar_data() (parse.c) and the real target recorded here instead.
+static Relocation *serialize_find_reloc(Obj *var, int offset) {
+    for (Relocation *r = var->rel; r; r = r->next)
+        if (r->offset == offset)
+            return r;
+    return NULL;
+}
+
+static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                                 Obj *var, Type *ty, int offset);
+
+// A pointer-typed initializer slot backed by a Relocation (#918 defect C):
+// previously the zeroed init_data bytes were printed verbatim as a null
+// pointer -- silent miscompilation, valid C that runs wrong. `rel->label`
+// names the target Obj by its ->name field.
+static void serialize_reloc_init(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                                 Obj *var, Type *ty, Relocation *rel) {
+    if (!rel->label || !*rel->label)
+        error("cccc: invalid relocation in initializer for global '%s'", var->name);
+
+    const char *target_name = *rel->label;
+    Obj *target = serialize_find_global(vm, target_name);
+    if (!target)
+        error("cccc: cannot serialize initializer for global '%s' in native "
+              "mode: unresolved relocation target '%s'",
+              var->name, target_name);
+
+    // Anonymous string-literal global -- serialize_global_var() never
+    // emits these on their own (see the `name[0] == '.'` skip below), so
+    // inline the literal here instead of naming a symbol that doesn't
+    // exist in the output.
+    if (target->name[0] == '.' && !target->is_function && target->init_data) {
+        int len = (target->ty && target->ty->kind == TY_ARRAY)
+                      ? target->ty->array_len
+                      : (int)strlen(target->init_data);
+        bool plain_char_ptr = ty->kind == TY_PTR && ty->base &&
+                              ty->base->kind == TY_CHAR && rel->addend == 0;
+        if (!plain_char_ptr) {
+            fprintf(f, "(");
+            serialize_type(f, ctx, ty);
+            fprintf(f, ")((char *)");
+        }
+        serialize_string_n(f, target->init_data, len);
+        if (!plain_char_ptr)
+            fprintf(f, " + %lld)", (long long)rel->addend);
+        return;
+    }
+
+    fprintf(f, "(");
+    serialize_type(f, ctx, ty);
+    fprintf(f, ")((char *)&%s + %lld)", target->name, (long long)rel->addend);
+}
+
+// Reconstruct a global variable's initializer from its raw `init_data`
+// bytes (plus any Relocations) as C source text, recursing through
+// arrays/vectors/structs/unions. Replaces the old scalar-only dispatch that
+// fell back to the placeholder comment `/* init data */` for every
+// aggregate shape -- text a host compiler rejects outright (#918 defect B).
+static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                                 Obj *var, Type *ty, int offset) {
+    if (!ty)
+        error("cccc: cannot serialize initializer for global '%s' in native "
+              "mode: unknown type", var->name);
+
+    if (ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T) {
+        Relocation *rel = serialize_find_reloc(var, offset);
+        if (rel) {
+            serialize_reloc_init(f, vm, ctx, var, ty, rel);
+            return;
+        }
+    }
+
+    switch (ty->kind) {
+    case TY_ARRAY:
+        if (ty->base->kind == TY_CHAR && !serialize_find_reloc(var, offset)) {
+            serialize_string_n(f, var->init_data + offset, ty->array_len);
+            return;
+        }
+        fprintf(f, "{ ");
+        for (int i = 0; i < ty->array_len; i++) {
+            if (i > 0)
+                fprintf(f, ", ");
+            serialize_init_bytes(f, vm, ctx, var, ty->base,
+                                 offset + i * ty->base->size);
+        }
+        fprintf(f, " }");
+        return;
+
+    case TY_VECTOR:
+        fprintf(f, "{ ");
+        for (int i = 0; i < ty->vec_len; i++) {
+            if (i > 0)
+                fprintf(f, ", ");
+            serialize_init_bytes(f, vm, ctx, var, ty->base,
+                                 offset + i * ty->base->size);
+        }
+        fprintf(f, " }");
+        return;
+
+    case TY_STRUCT: {
+        fprintf(f, "{ ");
+        bool first = true;
+        for (Member *m = ty->members; m; m = m->next) {
+            if (m->is_bitfield && !m->name)
+                continue; // anonymous bitfield: padding, nothing to designate
+            if (!first)
+                fprintf(f, ", ");
+            first = false;
+            if (m->name)
+                fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
+            if (m->is_bitfield) {
+                int64_t container = 0;
+                int sz = m->ty->size < 8 ? m->ty->size : 8;
+                memcpy(&container, var->init_data + offset + m->offset, sz);
+                uint64_t mask = (m->bit_width >= 64)
+                                    ? ~0ULL
+                                    : ((1ULL << m->bit_width) - 1);
+                uint64_t bits = ((uint64_t)container >> m->bit_offset) & mask;
+                fprintf(f, "%lluu", (unsigned long long)bits);
+            } else {
+                serialize_init_bytes(f, vm, ctx, var, m->ty, offset + m->offset);
+            }
+        }
+        fprintf(f, " }");
+        return;
+    }
+
+    case TY_UNION: {
+        // Reconstruct via the largest member (first on a tie) -- byte-exact
+        // whenever some member spans the whole object, which is the normal
+        // case; a union with no full-size member falls through to the
+        // "cannot serialize" error below via the recursive call, since no
+        // member type here can losslessly represent the other members'
+        // bytes either.
+        Member *largest = NULL;
+        for (Member *m = ty->members; m; m = m->next)
+            if (!largest || m->ty->size > largest->ty->size)
+                largest = m;
+        if (!largest || largest->ty->size < ty->size)
+            error("cccc: cannot serialize initializer for global '%s' in "
+                  "native mode: union has no member spanning the full "
+                  "%d-byte object", var->name, ty->size);
+        fprintf(f, "{ .%.*s = ", largest->name->len, largest->name->loc);
+        serialize_init_bytes(f, vm, ctx, var, largest->ty, offset);
+        fprintf(f, " }");
+        return;
+    }
+
+    case TY_FLOAT: {
+        float fv; memcpy(&fv, var->init_data + offset, 4);
+        fprintf(f, "%.9gf", (double)fv);
+        return;
+    }
+
+    case TY_DOUBLE:
+    case TY_LDOUBLE: {
+        // TY_LDOUBLE shares TY_DOUBLE's 8-byte read and unsuffixed %g here,
+        // matching this function's pre-#918 behavior exactly -- a latent
+        // long-double-precision/suffix gap, but pre-existing and unrelated
+        // to #918's scope.
+        double dv; memcpy(&dv, var->init_data + offset, 8);
+        fprintf(f, "%.17g", dv);
+        return;
+    }
+
+    default:
+        break;
+    }
+
+    if (is_decimal(ty)) {
+        // #402: raw BID bytes in init_data -> C source text. Requires
+        // CCCC_HAS_DECIMAL=1 (the same build that could have produced
+        // these bytes in the first place); cccc_dec_format returns -1
+        // in the off build, which can't happen here.
+        char buf[80];
+        int w = dec_width_code(ty);
+        const char *suffix = w == 0 ? "df" : w == 1 ? "dd" : "dl";
+        if (cccc_dec_format(buf, sizeof buf, var->init_data + offset, w) >= 0)
+            fprintf(f, "%s%s", buf, suffix);
+        else
+            fprintf(f, "0%s", suffix);
+        return;
+    }
+
+    if (ty->kind == TY_BOOL || ty->kind == TY_CHAR || ty->kind == TY_SHORT ||
+        ty->kind == TY_INT || ty->kind == TY_LONG || ty->kind == TY_ENUM ||
+        ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T) {
+        int64_t iv = 0;
+        int sz = ty->size < 8 ? ty->size : 8;
+        memcpy(&iv, var->init_data + offset, sz);
+        if (sz < 8 && ty->kind != TY_PTR && ty->kind != TY_NULLPTR_T &&
+            (iv >> (sz * 8 - 1)) & 1)
+            iv |= (-1LL << (sz * 8));
+        fprintf(f, "%lld", (long long)iv);
+        return;
+    }
+
+    // TY_COMPLEX and anything else with no verified byte layout here: fail
+    // loudly rather than guess (#918's whole point -- emitting a plausible-
+    // but-wrong initializer is the bug class being fixed, not a shape to
+    // reproduce for cases this function doesn't yet handle).
+    error("cccc: cannot serialize initializer for global '%s' in native "
+          "mode: unsupported initializer type (kind %d)", var->name, ty->kind);
+}
+
 // Serialize global variable
 static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *var) {
-    (void)vm;
-
     if (var->is_function)
         return;
 
-    // Skip string literals (anonymous)
+    // Skip string literals (anonymous). NOTE: `.L..N`-named globals
+    // (new_anon_gvar(), parse.c) are also used for non-char-array compound
+    // literals (`(int[]){1,2,3}`, `(struct S){...}`, ...), which this skip
+    // and the matching ND_VAR case in serialize_expr() both mis-handle --
+    // referencing one by name emits the raw dotted synthesized name (not a
+    // valid C identifier), and if it happens to have init_data it gets
+    // wrongly treated as a string literal. Pre-existing, out of #918's
+    // scope (found while smoke-testing that fix against tests/suites/
+    // test_suite_arrays.c's compound-literal cases); filed separately.
     if (var->name[0] == '.')
         return;
 
@@ -1123,39 +1473,7 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
 
     if (var->init_data) {
         fprintf(f, " = ");
-        if (var->ty->kind == TY_ARRAY && var->ty->base->kind == TY_CHAR) {
-            serialize_string(f, var->init_data);
-        } else if (var->ty->kind == TY_FLOAT) {
-            float fv; memcpy(&fv, var->init_data, 4);
-            fprintf(f, "%.9gf", (double)fv);
-        } else if (var->ty->kind == TY_DOUBLE || var->ty->kind == TY_LDOUBLE) {
-            double dv; memcpy(&dv, var->init_data, 8);
-            fprintf(f, "%.17g", dv);
-        } else if (is_decimal(var->ty)) {
-            // #402: raw BID bytes in init_data -> C source text. Requires
-            // CCCC_HAS_DECIMAL=1 (the same build that could have produced
-            // these bytes in the first place); cccc_dec_format returns -1
-            // in the off build, which can't happen here.
-            char buf[80];
-            int w = dec_width_code(var->ty);
-            const char *suffix = w == 0 ? "df" : w == 1 ? "dd" : "dl";
-            if (cccc_dec_format(buf, sizeof buf, var->init_data, w) >= 0)
-                fprintf(f, "%s%s", buf, suffix);
-            else
-                fprintf(f, "0%s", suffix);
-        } else if (var->ty->kind == TY_BOOL || var->ty->kind == TY_CHAR ||
-                   var->ty->kind == TY_SHORT || var->ty->kind == TY_INT ||
-                   var->ty->kind == TY_LONG || var->ty->kind == TY_ENUM ||
-                   var->ty->kind == TY_PTR || var->ty->kind == TY_NULLPTR_T) {
-            int64_t iv = 0;
-            int sz = var->ty->size < 8 ? var->ty->size : 8;
-            memcpy(&iv, var->init_data, sz);
-            if (sz < 8 && (iv >> (sz * 8 - 1)) & 1)
-                iv |= (-1LL << (sz * 8));
-            fprintf(f, "%lld", (long long)iv);
-        } else {
-            fprintf(f, "/* init data */");
-        }
+        serialize_init_bytes(f, vm, ctx, var, var->ty, 0);
     }
 
     fprintf(f, ";\n");
@@ -1483,6 +1801,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 
     // Serialize file-scope type definitions before declarations that reference them.
     serialize_type_defs_for_owner(f, &ctx, NULL);
+
+    // #918: forward-declare every global before any definition, mirroring
+    // the function-prototype pass below and for the same reason -- a
+    // global's initializer can take the address of another global that
+    // appears later in `prog` (e.g. `int *p = &g;` parsed/emitted before
+    // `g`'s own definition), which used to compile "successfully" only
+    // because that address was silently serialized as a null pointer
+    // (defect C) rather than the real `&g` reference. Once the real
+    // reference is emitted, the forward case needs a declaration in scope.
+    // Redundant for the (common) non-forward-referencing case, but a
+    // duplicate `extern`/tentative-`static` declaration is always valid C.
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (generated_only && !obj->is_macro_generated)
+            continue;
+        if (obj->is_function || obj->name[0] == '.')
+            continue;
+        fprintf(f, obj->is_static ? "static " : "extern ");
+        serialize_type_decl(f, &ctx, obj->ty, obj->name);
+        fprintf(f, ";\n");
+    }
 
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {

@@ -295,7 +295,21 @@ serializer bugs in general. Cases covered:
   expand, at preprocessing time, into a call to an internal accessor shim
   like `__cccc_stdout()`) must compile and run under `-c=native`, with the
   used shims defined in terms of the real re-emitted symbol rather than
-  left as calls to an undeclared function.
+  left as calls to an undeclared function;
+- #918: plain pointer arithmetic (subscripting, `p + n`, `q - p`,
+  multi-dimensional indexing) and every global initializer shape it
+  exercises (scalar, struct, string, and address-of-another-global via a
+  `Relocation`) must compile and run under `-c=native`, with the exit code
+  depending on the arithmetic being correct — not just on the program
+  compiling — plus a direct `-m` assertion that the output contains no
+  `/* init data */` placeholder and no pointer-typed cast on a scaled byte
+  offset; a union global initialized through a non-largest member must
+  reconstruct via its largest member (`-m` names that member, not the one
+  actually written); and a union whose largest-by-size member doesn't span
+  its full alignment-padded size must fail with a named `cannot serialize`
+  diagnostic rather than a placeholder or a silently-wrong guess. See
+  [HEADERS.md](HEADERS.md#pointer-arithmetic-and-global-initializer-reconstruction)
+  for the reconstruction approach and its known gaps.
 
 ## Architecture build and test workflows
 

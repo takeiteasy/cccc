@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -74,10 +74,33 @@ Cases:
       used in terms of the real re-emitted symbol.
   15. #904 regression, direct assertion: `-m` output for case 14's program
       must contain `return stdout;` and `return &errno;` shim bodies.
+  16. #918 regression: pointer arithmetic (subscripting, `p + n`, `q - p`,
+      multi-dimensional array indexing) and every global initializer shape
+      it exercises (scalar, struct, string, address-of-another-global via a
+      Relocation) must compile and run under `-c=native`, with the exit
+      code depending on the arithmetic being correct (`q - p == 3`), not
+      just on the program compiling.
+  17. #918 regression, direct assertion: `-m` output for case 16's program
+      must contain no `/* init data */` placeholder and no pointer-typed
+      cast on a scaled byte offset (the two `-c=native`-rejects-plain-C
+      defects #918 reported), and must use `(char *)`-based pointer
+      arithmetic.
+  18. #918 regression: a union global initialized through a non-largest
+      member (`union { char c; long l; } u = {.c = 3};`) must compile and
+      run under `-c=native`, reconstructed via its largest member.
+  19. #918 regression, direct assertion: `-m` output for case 18's program
+      names the largest member (`.l =`), not the one actually written
+      (`.c`).
+  20. #918 regression: a union whose largest-by-size member doesn't span
+      the union's full (alignment-padded) size has no member that can
+      losslessly reconstruct it -- `-c=native` must fail with a named
+      `cannot serialize` diagnostic, never a placeholder or a guessed
+      initializer that silently changes the program's data.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -397,11 +420,111 @@ def case_accessor_shim_m_output(cccc: Path, tmp: str) -> bool:
     return True
 
 
+PTR_ARITH_INIT_PROGRAM = (
+    "int arr[5] = {1,2,3,4,5};\n"
+    "struct S { int a; short b; };\n"
+    "struct S gs = {7, 9};\n"
+    "int *gptr = &arr[2];\n"
+    "const char *gp = \"lit\";\n"
+    "int mat[2][3] = {{1,2,3},{4,5,6}};\n"
+    "int main(void) {\n"
+    "    int *a = arr, *q = arr + 3;\n"
+    "    if (a[0] != 1 || q[-1] != 3) return 1;\n"
+    "    if (q - a != 3) return 2;\n"
+    "    if (gs.a != 7 || gs.b != 9) return 3;\n"
+    "    if (*gptr != 3) return 4;\n"
+    "    if (gp[0] != 'l') return 5;\n"
+    "    if (mat[1][2] != 6) return 6;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+UNION_LARGEST_MEMBER_PROGRAM = (
+    "union U { char c; long l; };\n"
+    "union U u = {.c = 3};\n"
+    "int main(void) { return (u.l & 0xff) == 3 ? 42 : 1; }\n"
+)
+
+
+def case_ptr_arith_and_init_end_to_end(cccc: Path, tmp: str) -> bool:
+    print("  16: -c=native, pointer arithmetic + global initializer reconstruction (#918)")
+    return _native_run_case(cccc, tmp, "ptr_arith_init_918", PTR_ARITH_INIT_PROGRAM)
+
+
+def case_ptr_arith_and_init_m_output(cccc: Path, tmp: str) -> bool:
+    print("  17: -m output for #918's program has no bogus pointer-cast offset or placeholder initializer")
+    src = Path(tmp) / "ptr_arith_init_dump_918.c"
+    write(src, PTR_ARITH_INIT_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if "/* init data */" in out:
+        print(f"    FAIL: -m output still contains the '/* init data */' placeholder\n    {out}")
+        return False
+    # The reported bug's exact shape: a `+`/`-` operator directly followed
+    # by a pointer-typed cast wrapping a parenthesized offset expression,
+    # e.g. `+ (int *)(0 * 4)` -- `ptr + int` re-cast to a pointer type,
+    # which real gcc/clang reject as "invalid operands". A cast further out
+    # (e.g. `(int *)((char *)a + 0 * 4)`, this fix's own output) doesn't
+    # match: there the `+` is followed by a bare integer expression, not a
+    # cast.
+    if re.search(r"[+-]\s*\([A-Za-z_][\w ]*\*\)\(", out):
+        print(f"    FAIL: -m output still casts a scaled offset to a pointer type\n    {out}")
+        return False
+    if "(char *)" not in out:
+        print(f"    FAIL: -m output missing the expected (char *) pointer-arithmetic base\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_union_largest_member(cccc: Path, tmp: str) -> bool:
+    print("  18: -c=native, union global initializer reconstructs via its largest member (#918)")
+    return _native_run_case(cccc, tmp, "union_largest_918", UNION_LARGEST_MEMBER_PROGRAM)
+
+
+def case_union_largest_member_m_output(cccc: Path, tmp: str) -> bool:
+    print("  19: -m output for a union global names the largest member ('.l', not '.c') (#918)")
+    src = Path(tmp) / "union_largest_dump_918.c"
+    write(src, UNION_LARGEST_MEMBER_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if ".l =" not in out:
+        print(f"    FAIL: -m output missing the largest-member designator '.l ='\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_unserializable_union_hard_errors(cccc: Path, tmp: str) -> bool:
+    print("  20: -c=native, a union whose largest member doesn't span alignment padding fails loudly (#918)")
+    src = Path(tmp) / "union_no_full_member_918.c"
+    # union { char c[5]; int x; }: by raw size char[5] (5 bytes) is the
+    # largest member, but int's 4-byte alignment pads the union itself to
+    # 8 bytes -- char[5] does not span the full object, so no member here
+    # can losslessly reconstruct it. Must fail loudly (a named diagnostic),
+    # not emit a plausible-but-wrong initializer or a placeholder the host
+    # compiler chokes on.
+    write(src, (
+        "union U { char c[5]; int x; };\n"
+        "union U u = {.c = {1,2,3,4,5}};\n"
+        "int main(void) { return 42; }\n"
+    ))
+    result = run([str(cccc), "-c=native", "-o", "union_no_full_member_918_out", src.name], cwd=tmp)
+    if result.returncode == 0:
+        print("    FAIL: compile succeeded; expected a hard 'cannot serialize' diagnostic")
+        return False
+    if "cannot serialize" not in result.stderr:
+        print(f"    FAIL: expected a 'cannot serialize' diagnostic on stderr, got:\n    {result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -424,6 +547,11 @@ def main() -> int:
             case_extern_global_m_output,
             case_accessor_shim_end_to_end,
             case_accessor_shim_m_output,
+            case_ptr_arith_and_init_end_to_end,
+            case_ptr_arith_and_init_m_output,
+            case_union_largest_member,
+            case_union_largest_member_m_output,
+            case_unserializable_union_hard_errors,
         ]
         results = [case(cccc, tmp) for case in cases]
 

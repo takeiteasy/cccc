@@ -140,6 +140,50 @@ code path: its output is meant to be compiled *alongside* normal headers,
 so it has never re-emitted header-sourced typedefs (see `generated_only` in
 `serialize.c`).
 
+### Pointer arithmetic and global initializer reconstruction
+
+The serializer reconstructs C source text from the AST, not from the
+original source — pointer arithmetic and global initializers are printed
+from a lower-level, already-scaled representation, so both need dedicated
+handling to come back out as valid, semantically faithful C:
+
+- **Pointer arithmetic.** By the time `p + i`/`p - i`/`q - p` reach the
+  serializer, the offset has already been scaled to bytes and both operands
+  cast to a common pointer type (`usual_arith_conv` in `src/type.c`) — so
+  the naive `lhs OP rhs` printing that works for every other binary
+  operator produces either invalid C (casting the byte offset to a pointer
+  type: `ptr + (int *)offset`) or, if that cast were simply dropped, C that
+  compiles but is silently 4×/8× wrong (the host would re-scale an
+  already-scaled offset). `serialize_expr`'s `ND_ADD`/`ND_SUB` case
+  recovers the original shape by peeling back to the pre-conversion operand
+  (`strip_casts`) and re-casting through `(char *)` instead, so the offset
+  is applied exactly once: `(T *)((char *)ptr + offset)`, and
+  `((char *)q - (char *)p)` for pointer subtraction.
+- **Global initializers.** `serialize_init_bytes` (`src/serialize.c`)
+  reconstructs a global's initializer from its raw `init_data` bytes,
+  recursing through arrays/vectors/structs/unions. A pointer-typed
+  initializer slot backed by a `Relocation` (address of another global, a
+  string literal, a function) resolves the real symbol reference instead of
+  printing the placeholder-zeroed bytes. A union initializes through its
+  **largest** member (recursing if that member is itself an aggregate) —
+  byte-exact whenever some member spans the union's full (alignment-padded)
+  size, which is the normal case.
+- **Unsupported shapes fail loudly.** A union with no member spanning its
+  full size (alignment padding can make the largest-*by-size* member still
+  fall short — e.g. `union { char c[5]; int x; }` pads to 8 bytes but no
+  member is 8 bytes wide) and `_Complex` global initializers have no
+  verified byte-exact reconstruction and are refused with a `cannot
+  serialize initializer` diagnostic naming the variable, rather than
+  emitting a guess that would silently change the program's data. There is
+  no equivalent gap for non-global (local/stack) initializers — those are
+  codegen'd directly, not reconstructed as source text.
+- **Known gap:** anonymous compound literals of a non-`char`-array type
+  (`(int[]){1,2,3}`, `(struct S){...}`) reuse the same synthesized-name
+  mechanism as string literals (`.L..N`, `new_anon_gvar` in `src/parse.c`)
+  and are not yet handled specially by the serializer — referencing one by
+  name emits the raw synthesized name, which contains a `.` and is not a
+  valid C identifier.
+
 ### Included files that use cccc-only routing
 
 A file reached via a plain `#include` can itself use CCCC-only

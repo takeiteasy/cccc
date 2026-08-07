@@ -12,7 +12,7 @@ Sub-suites:
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
-  comptime_native_smoke — comptime/native serializer opaque-struct regression (ticket #892)
+  comptime_native_smoke — native (-m/-G/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
