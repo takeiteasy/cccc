@@ -49,7 +49,7 @@
 // independently. CCCC_RELEASE_VERSION is stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.1.2"
+#define CCCC_RELEASE_VERSION "0.1.3"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...

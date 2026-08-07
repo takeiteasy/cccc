@@ -4016,6 +4016,19 @@ static void pragma_config_set_opt_pass(VirtualMachine *vm, uint32_t bit, bool en
 // `value` is NULL for a bare key. Unknown keys and invalid values are hard
 // errors, matching existing #pragma cccc diagnostic style.
 static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
+    // #924: every key this function handles (safety/optimisation/individual
+    // flag/opt-pass) only ever touches VM bytecode generation or runtime
+    // behavior -- pragma_config_set_flag/_safety/_optimisation/_opt_pass
+    // all early-return under native_mode already (see their own comments),
+    // so the pragma is silently a no-op there. Surface that instead of
+    // staying quiet about it, matching -c=native/-m/-G's CLI-flag warning
+    // for the same reason (main.c's warn_ignored_vm_flags). Fires before
+    // key validation below: even a malformed value is still a no-op here.
+    if (vm->compiler.native_mode)
+        warn_tok(vm, key, CCCC_WARN_IGNORED_FEATURES,
+                 "#pragma cccc config(%.*s) has no effect in -c=native mode "
+                 "-- it configures VM bytecode generation/runtime behavior only",
+                 (int)key->len, key->loc);
     if (equal(key, "safety")) {
         long level = 0;
         if (!value || !pragma_config_read_int(value, &level) || level < 0 || level > 3)

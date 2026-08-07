@@ -990,6 +990,13 @@ an-expression-but-not-across-assignment semantics and why this exists
 (`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
 array): [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 
+Enforcement is VM-only: `-c=native`/`-m`/`-G` warn and drop
+`--checked-pointers` rather than enforcing it, but the six attributes are
+always parsed, type-checked, and stripped from that output regardless (ABI-
+transparent, #482/#488) — see [SAFETY.md § Checked
+Pointers](SAFETY.md#checked-pointers) for the full native/serialized-output
+note.
+
 ---
 
 ### Parsed but Ignored

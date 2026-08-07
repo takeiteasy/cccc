@@ -5,6 +5,20 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-07
+
+### Changed
+
+- `-c=native`/`-m`/`-G`: a VM-only safety/debug flag (`--checked-pointers`,
+  `--bounds-checks`, `-g`/`--debug`, etc.) used to be a hard compile-time
+  error under `-c=native` and a silent no-op under `-m`/`-G`. Both now warn
+  and continue instead — these flags are genuinely inert in modes that hand
+  off to the host `cc` or serialize plain C, not a real conflict — naming
+  every ignored flag in the message. `#pragma cccc config(...)` keys are
+  likewise silently dropped under `-c=native`; that now emits a
+  `-Wignored-features` diagnostic (`-Wall`) at the pragma site instead of
+  staying quiet (#924)
+
 ### Fixed
 
 - `-G` serializer: reflection API file-scope anonymous globals built via
@@ -18,6 +32,11 @@ All notable changes to CCCC are documented here. Format loosely follows
   an array (e.g. a reflection `MakeSubscript` on an array-typed anon
   global) no longer casts to the array type itself (`(int [3])...`, invalid
   C) — casts to pointer-to-element instead
+- `tools/testing/c4.py`: the c4 round-trip skip check tested for `-M`
+  (`--memory-leak-detection`) instead of `-m` (`--dump-expanded`) when
+  deciding whether a test's output mode was round-trip-incompatible — a test
+  combining `-m` with the c4 suite silently mis-saved serialized C source as
+  a `.c4` bytecode file instead of being skipped, then failed to reload
 
 ## [0.1.2] - 2026-08-07
 

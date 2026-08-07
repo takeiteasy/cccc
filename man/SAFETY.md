@@ -167,8 +167,11 @@ appear multiple times in a file — later pragmas win for the same key
   silently has no effect on that setting — the CLI value is kept.
 - **Ignored in native mode.** When compiling with `-c=native`, `config(...)`
   has no effect on `vm->flags`/optimisation level (native output is handed
-  to the system `cc`, which has its own optimisation/sanitizer flags).
-  Unknown keys and invalid values are still hard errors in native mode.
+  to the system `cc`, which has its own optimisation/sanitizer flags). This
+  prints a `-Wignored-features` warning (on by default under `-Wall`) naming
+  the pragma; it is otherwise silent by default, the same as every other
+  `-Wignored-features` diagnostic (`_Atomic`, etc.). Unknown keys and invalid
+  values are still hard errors in native mode.
 - **Unknown keys and out-of-range values are hard compile errors**, e.g.
   `config(frobnicate = 1)` or `config(safety = 9)`.
 
@@ -785,6 +788,22 @@ pointer, no ABI change). Concretely:
 `-0`/`-1`/`-2`/`-3` preset. The compile-time rules (attribute parsing, type
 checking, the arithmetic-rejection diagnostic on `single`) are always on
 regardless of this flag — only the `CHKR` runtime check itself is gated.
+
+**Native and serialized output.** `CHKR` enforcement is VM-only, by design —
+the same as every other runtime safety flag in this document; there is no
+equivalent check emitted into `-c=native`, `-m`/`--dump-expanded`, or
+`-G`/`--emit-generated` output. `--checked-pointers` is accepted in those
+modes but has no effect there — a `-c=native`/`-m`/`-G ignores VM runtime
+safety/debug options` warning is printed and the flag is dropped, it does
+not error. The `[[cccc::single/array/ntarray]]`/`count`/`byte_count`/`bounds`
+attributes themselves are always stripped from `-E`/`-m`/`-G`/`-c=native`
+output regardless of the flag (ABI-transparent, no change to unchecked
+callers — see #482/#488), so native builds compile and run declarations
+carrying checked-pointer attributes, they just get zero bounds enforcement
+from them. The compile-time contract checks — `single`-pointer arithmetic
+rejection, bounds side-effect rejection, struct-member bounds rejection —
+are frontend checks independent of `--checked-pointers` and still apply in
+every mode, including native.
 
 **Why this exists**: `CHKB` (`--bounds-checks`) derives its bound from
 `AllocHeader.size`, which only exists for VM-heap allocations — it has no

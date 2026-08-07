@@ -431,7 +431,9 @@ only reject a negative offset there. `CHKR` (#770/#482-484) closes this: its
 `vm->sorted_allocs` — so it is uniform across heap, stack and global storage,
 unlike every other opcode in this table. See
 [SAFETY.md](SAFETY.md#checked-pointers) for the full attribute/lowering
-reference.
+reference. Like every opcode in this table, `CHKR` has no equivalent in
+`-c=native`/`-m`/`-G` output — VM-only by design (#924); those modes warn
+and ignore `--checked-pointers` rather than emitting an inline check.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
 

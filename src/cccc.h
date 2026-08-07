@@ -597,7 +597,7 @@ typedef enum {
     CCCC_CHECKED_BOUNDS =
         (1 << 27), // 0x08000000 - Enable runtime enforcement (CHKR) of
                     // Checked C-style checked-pointer declared bounds
-                    // (--checked-bounds). Deliberately outside
+                    // (--checked-pointers). Deliberately outside
                     // CCCC_ALL_SAFETY/bits 0-19 and not included in any
                     // -S0..-S3 tier: writing a checked-pointer annotation is
                     // itself the opt-in, and this flag only gates whether

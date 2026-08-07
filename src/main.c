@@ -796,6 +796,69 @@ static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
     return prog_argv;
 }
 
+// VM-only runtime flags (safety instrumentation + debug support) and their
+// CLI spelling, for the "-c=native"/"-m"/"-G ignores these" warning below
+// (#924). Deliberately excludes CCCC_VM_HEAP (forcing the VM-managed heap
+// allocator is meaningless outside the VM -- it was never one of these
+// bits) and CCCC_FFI_ERRORS_FATAL (already has its own dedicated hard error
+// in the "-c=native cannot be combined with CCCC FFI policy options" check,
+// keyed off the ffi_errors_fatal bool rather than this flags word -- listing
+// it here too would claim it's merely "ignored" when it actually still
+// errors).
+static const struct { uint32_t bit; const char *name; } ignored_vm_flag_names[] = {
+    {CCCC_BOUNDS_CHECKS, "--bounds-checks"},
+    {CCCC_CHECKED_BOUNDS, "--checked-pointers"},
+    {CCCC_UAF_DETECTION, "--uaf-detection"},
+    {CCCC_TYPE_CHECKS, "--type-checks"},
+    {CCCC_UNINIT_DETECTION, "--uninitialized-detection"},
+    {CCCC_OVERFLOW_CHECKS, "--overflow-checks"},
+    {CCCC_STACK_CANARIES, "--stack-canaries"},
+    {CCCC_HEAP_CANARIES, "--heap-canaries"},
+    {CCCC_MEMORY_LEAK_DETECT, "--memory-leak-detection"},
+    {CCCC_STACK_INSTR, "--stack-instrumentation"},
+    {CCCC_DANGLING_DETECT, "--dangling-pointers"},
+    {CCCC_ALIGNMENT_CHECKS, "--alignment-checks"},
+    {CCCC_PROVENANCE_TRACK, "--provenance-tracking"},
+    {CCCC_INVALID_ARITH, "--invalid-arithmetic"},
+    {CCCC_STACK_INSTR_ERRORS, "--stack-errors"},
+    {CCCC_FORMAT_STR_CHECKS, "--format-string-checks"},
+    {CCCC_RANDOM_CANARIES, "--random-canaries"},
+    {CCCC_MEMORY_POISONING, "--memory-poisoning"},
+    {CCCC_MEMORY_TAGGING, "--memory-tagging"},
+    {CCCC_CFI, "--control-flow-integrity"},
+    {CCCC_ENABLE_DEBUGGER, "--debug"},
+    {CCCC_THREAD_SAFETY, "--thread-safety"},
+    {CCCC_NO_DEBUG_ON_CRASH, "--no-debug-on-crash"},
+    {CCCC_FMA, "--fma"},
+    {CCCC_TRAP_FP_DIVZERO, "--trap-fp-divzero"},
+    {CCCC_POSIX_EMULATION, "--posix-emulation"},
+};
+
+// Prints "warning: <context> ignores VM runtime safety/debug options
+// (--a, --b, ...): they are enforced by the CCCC VM only" for every bit of
+// `flags` that names a VM-only feature, then returns `flags` with those
+// bits cleared -- the caller passes the result on instead of the flags
+// enforcement can't actually apply to (#924: -c=native/-m/-G used to hard
+// error here; now they warn and continue, matching how a real C compiler
+// treats an option it can't honour).
+static uint32_t warn_ignored_vm_flags(uint32_t flags, const char *context) {
+    uint32_t relevant = 0;
+    for (size_t i = 0; i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]); i++)
+        relevant |= ignored_vm_flag_names[i].bit;
+    if (!(flags & relevant))
+        return flags;
+    fprintf(stderr, "warning: %s ignores VM runtime safety/debug options (", context);
+    bool first = true;
+    for (size_t i = 0; i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]); i++) {
+        if (!(flags & ignored_vm_flag_names[i].bit))
+            continue;
+        fprintf(stderr, "%s%s", first ? "" : ", ", ignored_vm_flag_names[i].name);
+        first = false;
+    }
+    fprintf(stderr, "): they are enforced by the CCCC VM only\n");
+    return flags & ~relevant;
+}
+
 int main(int argc, const char *argv[]) {
     /* Initialise and install libbacktrace crash handler as early as possible
      * so that any fault during parse/codegen/VM produces a symbolic host
@@ -831,7 +894,7 @@ int main(int argc, const char *argv[]) {
     bool cli_opt_level_set = false; // True if -O/--optimize was passed on the CLI (#357)
     int print_tokens = 0;      // -P
     int preprocess_only = 0;   // -E
-    int dump_expanded_only = 0; // -M
+    int dump_expanded_only = 0; // -m
     int emit_generated_only = 0; // -G
     int emit_only = 0;           // --emit-only
     int skip_preprocess = 0;   // -X
@@ -1819,11 +1882,13 @@ int main(int argc, const char *argv[]) {
                     "error: -c=native cannot be combined with VM bytecode options\n");
             usage(argv[0], 1);
         }
-        if (flags & ~(uint32_t)CCCC_VM_HEAP) {
-            fprintf(stderr,
-                    "error: -c=native cannot be combined with VM runtime safety/debug options\n");
-            usage(argv[0], 1);
-        }
+        // #924: VM-only safety/debug flags used to be a hard error here.
+        // -c=native hands off to the host toolchain and genuinely cannot
+        // enforce them (there is no equivalent of e.g. CHKR in the
+        // serialized C), but that's true of every other mode that can't
+        // honour a runtime-only flag too -- warn and drop the bits instead
+        // of refusing to compile, consistent with 1b/1c below.
+        flags = warn_ignored_vm_flags(flags, "-c=native");
         if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
             ffi_errors_fatal || enable_ffi_type_checking) {
             fprintf(stderr,
@@ -2430,13 +2495,22 @@ int main(int argc, const char *argv[]) {
         cc_clear_errors(&vm);
     }
 
-    // If -M/--dump-expanded flag is set, output macro-expanded source and exit
+    // If -m/--dump-expanded (or -G/--emit-generated) is set, output
+    // macro-expanded/serialized source and exit.
     if (dump_expanded_only) {
         FILE *f = out_file ? fopen(out_file, "w") : stdout;
         if (!f) {
             fprintf(stderr, "error: failed to open output file %s\n", out_file);
             goto BAIL;
         }
+        // #924: checked here (post-preprocess) rather than in the CLI-only
+        // validation block above so a flag set via `#pragma cccc
+        // config(...)` -- not just the CLI spelling -- is caught too;
+        // vm.flags reflects both by this point. Warn, don't error: the
+        // attributes these flags gate are already unconditionally stripped
+        // from serialized output (#482/#488 ABI transparency), so the flag
+        // is genuinely a no-op here, not a conflict.
+        vm.flags = warn_ignored_vm_flags(vm.flags, emit_generated_only ? "-G" : "-m");
         cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
         if (f != stdout)
             fclose(f);
