@@ -28,7 +28,11 @@ features: backtrace
 
 Bump `CCCC_RELEASE_VERSION` in `src/internal.h` and commit it before
 tagging — `tools/release.sh` refuses to tag if the source constant doesn't
-match the version you're releasing.
+match the version you're releasing. The bump and the tag are one operation,
+not two: a version bumped on `trunk` with no matching `v*` tag leaves
+GitHub's Releases page on the previous version and never triggers the
+release workflow below, so don't commit the bump and stop there — finish
+by tagging and pushing the tag (see Tagging, below) in the same sitting.
 
 ## Release build mode
 
@@ -78,8 +82,17 @@ Verifies: clean working tree, `CCCC_RELEASE_VERSION` matches the requested
 version, `CHANGELOG.md` has a matching `## [0.1.0]` section, then runs the
 full `test` build target. On success it creates an annotated `v0.1.0` tag
 locally (message = the matching `CHANGELOG.md` section) and prints the push
-commands — it does **not** push anything itself. Review the tag, then push
-deliberately:
+commands — it does **not** push anything itself.
+
+The clean-tree check is `git status --porcelain`, which flags *untracked*
+files too, not just uncommitted changes — a stray scratch file left in the
+repo root (nothing unusual, since `CLAUDE.md`/`AGENTS.md` and other
+gitignored working files live there) blocks tagging even though nothing is
+actually pending. Move such files outside the repo temporarily rather than
+`git clean -f`, which can just as easily eat something someone meant to
+keep; move them back once the tag exists.
+
+Review the tag, then push deliberately:
 
 ```
 git push origin trunk
