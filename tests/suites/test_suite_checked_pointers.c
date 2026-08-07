@@ -363,3 +363,277 @@ void test_arrow_null_deref_traps(void) {
     int x = p->x;
     (void)x;
 }
+
+// ---------------------------------------------------------------------
+// #921 -- checked-pointer bounds on struct/union members. A bounds
+// expression may name a sibling field (count(n) resolving to `self->n`
+// relative to whatever struct instance is accessed, not a fixed scope --
+// see resolve_member_checked_bounds()/compute_checked_bounds() in
+// src/parse.c) or a global; compile-error cases (an enclosing local, a
+// bit-field sibling, side effects) live in standalone
+// tests/test_checked_pointers_member_*_error.c instead, matching the
+// existing split for Obj-rooted bounds errors.
+// ---------------------------------------------------------------------
+
+struct mem_count_s {
+    int n;
+    int * [[cccc::array, cccc::count(n)]] p;
+};
+
+[[cccc::test]]
+void test_member_count_sibling_after_ptr_in_bounds(void) {
+    struct mem_count_s s = {4, (int[4]){10, 20, 30, 40}};
+    AssertEq(s.p[0], 10);
+    AssertEq(s.p[3], 40);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_count_sibling_after_ptr_oob(void) {
+    struct mem_count_s s = {4, (int[4]){10, 20, 30, 40}};
+    volatile int i = 4;
+    int x = s.p[i];
+    (void)x;
+}
+
+// Sibling field declared BEFORE the pointer member this time -- proves
+// resolve_member_checked_bounds() doesn't depend on textual order any more
+// than parameter bounds do (a bound may name a LATER field/param).
+struct mem_count_before_s {
+    int * [[cccc::array, cccc::count(n)]] p;
+    int n;
+};
+
+[[cccc::test]]
+void test_member_count_sibling_before_ptr_in_bounds(void) {
+    struct mem_count_before_s s = {(int[3]){1, 2, 3}, 3};
+    AssertEq(s.p[2], 3);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_count_sibling_before_ptr_oob(void) {
+    struct mem_count_before_s s = {(int[3]){1, 2, 3}, 3};
+    volatile int i = 3;
+    int x = s.p[i];
+    (void)x;
+}
+
+struct mem_byte_count_s {
+    int nbytes;
+    char * [[cccc::array, cccc::byte_count(nbytes)]] b;
+};
+
+[[cccc::test]]
+void test_member_byte_count_in_bounds(void) {
+    struct mem_byte_count_s s = {4 * (int)sizeof(int), (char *)(int[4]){1, 2, 3, 4}};
+    AssertEq(s.b[0], 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_byte_count_oob(void) {
+    struct mem_byte_count_s s = {4 * (int)sizeof(int), (char *)(int[4]){1, 2, 3, 4}};
+    volatile int i = s.nbytes;
+    char x = s.b[i];
+    (void)x;
+}
+
+struct mem_range_s {
+    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p;
+    int arr[4];
+};
+
+[[cccc::test]]
+void test_member_bounds_range_in_bounds(void) {
+    struct mem_range_s s;
+    s.arr[0] = 1; s.arr[1] = 2; s.arr[2] = 3; s.arr[3] = 4;
+    s.p = s.arr;
+    AssertEq(s.p[0], 1);
+    AssertEq(s.p[3], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_bounds_range_oob(void) {
+    struct mem_range_s s;
+    s.arr[0] = 1; s.arr[1] = 2; s.arr[2] = 3; s.arr[3] = 4;
+    s.p = s.arr;
+    volatile int i = 4;
+    int x = s.p[i];
+    (void)x;
+}
+
+struct mem_single_s {
+    int * [[cccc::single]] p;
+};
+
+[[cccc::test]]
+void test_member_single_deref_ok(void) {
+    int x = 99;
+    struct mem_single_s s = {&x};
+    AssertEq(*s.p, 99);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_single_null_deref_traps(void) {
+    struct mem_single_s s = {0};
+    int x = *s.p;
+    (void)x;
+}
+
+// s.p[i], sp->p[i], (&s)->p[i], (*sp).p[i], *s.p -- all reach the same
+// member-relative base through find_checked_base()'s ND_ADD/ND_SUB/ND_CAST
+// descent, same as the existing Obj-rooted interior-pointer coverage above.
+[[cccc::test]]
+void test_member_access_spellings_agree(void) {
+    struct mem_count_s s = {2, (int[2]){11, 22}};
+    struct mem_count_s *sp = &s;
+    AssertEq(s.p[1], 22);
+    AssertEq(sp->p[1], 22);
+    AssertEq((&s)->p[1], 22);
+    AssertEq((*sp).p[1], 22);
+    AssertEq(*s.p, 11);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_arrow_spelling_oob(void) {
+    struct mem_count_s s = {2, (int[2]){11, 22}};
+    struct mem_count_s *sp = &s;
+    volatile int i = 2;
+    int x = sp->p[i];
+    (void)x;
+}
+
+// Nested struct: outer.inner.p[i] -- base.obj is the direct object
+// expression the member belongs to (`outer.inner`, not `outer`), so this
+// exercises find_checked_base() through a real ND_MEMBER chain rather than
+// a bare ND_VAR.
+struct mem_nested_outer_s {
+    struct mem_count_s inner;
+};
+
+[[cccc::test]]
+void test_member_nested_struct_in_bounds(void) {
+    struct mem_nested_outer_s outer = {{3, (int[3]){5, 6, 7}}};
+    AssertEq(outer.inner.p[2], 7);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_nested_struct_oob(void) {
+    struct mem_nested_outer_s outer = {{3, (int[3]){5, 6, 7}}};
+    volatile int i = 3;
+    int x = outer.inner.p[i];
+    (void)x;
+}
+
+// Array of structs: arr[k].p[i] -- the object expression carries a runtime
+// index, so it must be evaluated (and checked against) the same struct
+// instance both times it's cloned into lo/hi.
+[[cccc::test]]
+void test_member_array_of_structs_in_bounds(void) {
+    struct mem_count_s arr[2] = {
+        {2, (int[2]){1, 2}},
+        {2, (int[2]){3, 4}},
+    };
+    volatile int k = 1;
+    AssertEq(arr[k].p[1], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_array_of_structs_oob(void) {
+    struct mem_count_s arr[2] = {
+        {2, (int[2]){1, 2}},
+        {2, (int[2]){3, 4}},
+    };
+    volatile int k = 1, i = 2;
+    int x = arr[k].p[i];
+    (void)x;
+}
+
+// sp is itself [[cccc::single]] AND sp->p carries its own member bounds --
+// two independent checks fire: the `->` deref itself (NULL/range-of-one
+// checked against sp), and the member access's own count(n).
+[[cccc::test]]
+void test_member_via_single_ptr_in_bounds(void) {
+    struct mem_count_s s = {2, (int[2]){7, 8}};
+    struct mem_count_s * [[cccc::single]] sp = &s;
+    AssertEq(sp->p[1], 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_via_single_ptr_null_traps(void) {
+    struct mem_count_s * [[cccc::single]] sp = 0;
+    int x = sp->p[0]; // the `sp` deref itself traps before the member bound
+                       // would even be evaluated
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_via_single_ptr_member_oob(void) {
+    struct mem_count_s s = {2, (int[2]){7, 8}};
+    struct mem_count_s * [[cccc::single]] sp = &s;
+    volatile int i = 2;
+    int x = sp->p[i]; // sp itself is in range; the member's own count(n) traps
+    (void)x;
+}
+
+// A bound naming a global (not a sibling) still resolves -- the same
+// "any in-scope global" rule Obj-rooted bounds already have.
+static int g_mem_n = 3;
+struct mem_global_bound_s {
+    int * [[cccc::array, cccc::count(g_mem_n)]] p;
+};
+
+[[cccc::test]]
+void test_member_bounds_global_in_bounds(void) {
+    struct mem_global_bound_s s = {(int[3]){1, 2, 3}};
+    AssertEq(s.p[2], 3);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_bounds_global_oob(void) {
+    struct mem_global_bound_s s = {(int[3]){1, 2, 3}};
+    volatile int i = 3;
+    int x = s.p[i];
+    (void)x;
+}
+
+// Union member bounds: the general struct_members() path is shared between
+// struct and union, so a checked-pointer member with a bounds form is legal
+// on a union too. A union's members alias the same storage, so this
+// deliberately binds against a GLOBAL rather than a sibling field -- a
+// sibling-field bound would read back whatever bytes the pointer member
+// itself last wrote, which is well-defined C type-punning but not a useful
+// bounds value and would make the test's pass/fail depend on the host's
+// memory layout.
+static int g_mem_union_n = 2;
+union mem_union_s {
+    int * [[cccc::array, cccc::count(g_mem_union_n)]] p;
+    long raw;
+};
+
+[[cccc::test]]
+void test_member_union_bounds_in_bounds(void) {
+    union mem_union_s u;
+    u.p = (int[2]){21, 22};
+    AssertEq(u.p[1], 22);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_union_bounds_oob(void) {
+    union mem_union_s u;
+    u.p = (int[2]){21, 22};
+    volatile int i = 2;
+    int x = u.p[i];
+    (void)x;
+}
+
+// Opt-out proof: bounds(unknown) on a member is the same trust escape hatch
+// as an Obj-rooted bounds(unknown) -- checked-array type, zero runtime check.
+struct mem_unknown_s {
+    int * [[cccc::array, cccc::bounds(unknown)]] p;
+};
+
+[[cccc::test]]
+void test_member_bounds_unknown_no_check(void) {
+    struct mem_unknown_s s = {(int[3]){1, 2, 3}};
+    AssertEq(s.p[0], 1);
+    AssertEq(s.p[2], 3);
+}

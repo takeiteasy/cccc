@@ -1170,6 +1170,25 @@ typedef struct Member {
     bool is_bitfield;
     int bit_offset;
     int bit_width;
+
+    // Checked C-style checked-pointer bounds on a struct/union member
+    // (#770/#483/#921). Resolved once, at struct-definition time, by
+    // resolve_member_checked_bounds() (src/parse.c) into a *template* AST:
+    // a sibling-field reference inside the bounds expression survives as an
+    // ND_VAR node pointing at a throwaway placeholder Obj (see
+    // Obj.checked_self_member below), not as a real member access -- there
+    // is no struct instance yet at resolution time. At each access site,
+    // compute_checked_bounds() clones the template and substitutes each
+    // placeholder with a real ND_MEMBER over a clone of that access's own
+    // object expression (`s`, `*sp`, ...). Same stored-meaning split as
+    // Obj.checked_bounds_lo/hi: for CB_COUNT/CB_BYTE_COUNT, checked_bounds_hi
+    // holds the resolved count/byte-count expression and checked_bounds_lo
+    // stays NULL (the base address is the member's own live value at each
+    // access, not fixed here); CB_RANGE stores genuine absolute lo/hi
+    // templates. NULL/NULL for CB_NONE/CB_UNKNOWN -- checked_kind/
+    // checked_bounds_form live on mem->ty, not duplicated here.
+    Node *checked_bounds_lo;
+    Node *checked_bounds_hi;
 } Member;
 
 /*!
@@ -1391,6 +1410,18 @@ struct Node {
     // this flag narrows CHKNT emission to the one node kind that can actually
     // destroy the nt invariant, a non-null store into that slot.
     bool checked_nt_terminator;
+
+    // #919: marks the `&A` node to_assign() synthesizes for its *generic*
+    // compound-assign/++/-- desugar (`tmp = &A, *tmp = *tmp op B`), src/
+    // parse.c. propagate_checked_bounds()'s poison scan treats an ND_ADDR
+    // whose lhs is a propagation candidate as escaping (poisons it) UNLESS
+    // this flag is set -- the desugared address never leaves the comma
+    // expression it was created in, so `q++`/`q += k` must not poison `q`'s
+    // propagated bounds the way a real `&q` would. Deliberately NOT set on
+    // to_assign()'s ND_MEMBER desugar path, whose `&A` targets the member's
+    // *object* expression, not the assigned variable -- unrelated to this
+    // flag's purpose.
+    bool is_rmw_temp_addr;
 };
 
 /*!
@@ -1565,6 +1596,32 @@ struct Obj {
     CheckedBoundsForm checked_bounds_form;
     Node *checked_bounds_lo; // resolved expression, or NULL if unresolved/unneeded
     Node *checked_bounds_hi; // resolved expression, or NULL if unresolved/unneeded
+
+    // #921: non-NULL marks this Obj as a throwaway placeholder standing in
+    // for a struct/union member during resolve_member_checked_bounds()'s
+    // scope-based re-parse of a member's bounds expression -- see
+    // Member.checked_bounds_lo/hi's comment. A placeholder is arena-
+    // allocated like new_private_func_obj(), never joins vm->compiler.locals
+    // or ->globals, and must never survive into a real access site's AST:
+    // compute_checked_bounds() substitutes every ND_VAR referencing one with
+    // a real ND_MEMBER before returning.
+    Member *checked_self_member;
+
+    // #919: bounds propagation across assignment for an *unchecked* pointer
+    // local (checked_kind == CHECKED_NONE) whose value is snapshotted from a
+    // checked-rooted source at every assignment -- see the design note at
+    // propagate_checked_bounds() (src/parse.c). Mirrors the
+    // objsize_init_assign/objsize_unsafe pair above: a candidate is trusted
+    // only if every assignment reached in the whole function body is
+    // checked-rooted and the variable is never address-taken outside the
+    // to_assign() RMW desugar (Node.is_rmw_temp_addr). checked_prop_lo/hi are
+    // compiler-generated pointer_to(char)-typed locals holding the absolute
+    // snapshotted [lo, hi) range, prepended to fn->locals by the propagation
+    // pass; NULL until/unless the pass decides this candidate propagates.
+    Node *checked_prop_init_assign; // the initializer ND_ASSIGN node
+    bool  checked_prop_unsafe;      // true once any non-checked-rooted store or escape is seen
+    Obj  *checked_prop_lo;
+    Obj  *checked_prop_hi;
 };
 
 /*!

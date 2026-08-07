@@ -980,9 +980,12 @@ this compile-time rule is always on, independent of the runtime flag below.
 A bounds form (`count`/`byte_count`/`bounds`) requires `array` or `ntarray`;
 it is a compile error on `single` or with no checked kind. Bounds may
 reference any other in-scope parameter (including a later one), local, or
-global, but not a struct/union sibling field (compile error in v1), and must
-be side-effect-free (also a compile error otherwise — a bounds expression is
-re-evaluated at every checked access, not once).
+global; on a struct/union member (#921), a bounds expression may also
+reference a sibling field, resolved relative to whichever instance is
+actually accessed — but not an enclosing local or a bit-field sibling
+(compile errors). A bounds expression must be side-effect-free (also a
+compile error otherwise — it is re-evaluated at every checked access, not
+once).
 
 Runtime enforcement (the `CHKR` opcode, plus `CHKNT` guarding a non-null
 write into `ntarray`'s widened terminator slot, #923) is gated behind

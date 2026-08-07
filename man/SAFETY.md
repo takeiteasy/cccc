@@ -756,9 +756,7 @@ legal but unchecked — nothing to enforce, same effect as `bounds(unknown)`.
 
 **Bounds declarations** (#483) can reference any other in-scope
 parameter, local, or global — including a *later* parameter of the same
-function (`count(n)` before `int n` in the parameter list) — but **not** a
-sibling struct/union field; bounds on a struct member are rejected at
-compile time in v1 (follow-up: member-relative resolution). A bounds
+function (`count(n)` before `int n` in the parameter list). A bounds
 expression must be side-effect-free (`count(i++)` is a compile error): it is
 **re-evaluated at every checked access**, not just once at the declaration,
 so a side effect would run once per access instead of once. A
@@ -766,6 +764,37 @@ prototype-only declaration (`void f(int * [[cccc::array, cccc::count(n)]]
 p, int n);`, no body) leaves its bounds unresolved — there is nothing to
 check at the declaration site, and caller-side checking is future work
 (#488) — this is correct, not an error.
+
+**Struct/union member bounds** (#921). A bounds expression on a member may
+reference a *sibling* member — in either textual order, the same "may name a
+later declaration" rule bounds on a parameter already have — or a global
+declared before the struct:
+
+```c
+struct S {
+    int n;
+    int * [[cccc::array, cccc::count(n)]] p;  // count(n) -- a sibling field
+};
+```
+
+`n` in `count(n)` resolves relative to whichever struct/union *instance* is
+actually being accessed (`s.p[i]` checks against `s.n`; `t.p[i]` against
+`t.n`) — not to a single fixed scope the way a local's or parameter's bounds
+are. Every access spelling reaches the same member-relative base:
+`s.p[i]`, `sp->p[i]`, `(&s)->p[i]`, `(*sp).p[i]`. An object expression with
+side effects (`f()->p[i]`) is declined — no check is emitted rather than
+evaluating `f()` more than once. Two restrictions specific to member bounds:
+
+- An identifier resolving to a **local** of whatever scope the struct
+  happens to be *defined* in (as opposed to a sibling member or a global) is
+  a compile error — the struct type can outlive that local, so trusting it
+  would be unsound.
+- A sibling that is itself a **bit-field** is a compile error — nothing
+  extracts a bit-field's value through the member substitution this
+  performs.
+
+`[[cccc::single]]` and `bounds(unknown)` on a member work exactly as they do
+on a variable, with no member-specific restriction.
 
 **Bounds do not propagate through assignment or interior pointers across a
 variable boundary.** This is the load-bearing simplification that keeps v1
@@ -805,9 +834,9 @@ output regardless of the flag (ABI-transparent, no change to unchecked
 callers — see #482/#488), so native builds compile and run declarations
 carrying checked-pointer attributes, they just get zero bounds enforcement
 from them. The compile-time contract checks — `single`-pointer arithmetic
-rejection, bounds side-effect rejection, struct-member bounds rejection —
-are frontend checks independent of `--checked-pointers` and still apply in
-every mode, including native.
+rejection, bounds side-effect rejection, a member bounds expression naming
+an enclosing local or a bit-field sibling — are frontend checks independent
+of `--checked-pointers` and still apply in every mode, including native.
 
 **Why this exists**: `CHKB` (`--bounds-checks`) derives its bound from
 `AllocHeader.size`, which only exists for VM-heap allocations — it has no

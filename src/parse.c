@@ -1007,15 +1007,27 @@ static bool node_has_side_effects(Node *n) {
 //                            (CB_UNKNOWN is the bounds(unknown) escape
 //                            hatch: the checked type is recorded, but
 //                            trusted rather than enforced).
-static void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
-    if (var->checked_bounds_form == CB_NONE ||
-        var->checked_bounds_form == CB_UNKNOWN)
+//
+// Shared by resolve_checked_bounds() (Obj: locals/params/globals) and
+// resolve_member_checked_bounds() (#921: struct/union members) -- the only
+// difference between the two callers is *which scope* is active when this
+// runs (a real variable scope vs. the synthetic placeholder scope
+// resolve_member_checked_bounds() sets up), which is entirely the caller's
+// concern; this function just re-parses token spans with assign() in
+// whatever scope happens to be current. `form`/`arg1`/`arg2` are read
+// straight off `ty` rather than requiring an Obj, so a member can call this
+// with `mem->ty` directly. Returns immediately (leaving *out_lo/*out_hi
+// untouched) for CB_NONE/CB_UNKNOWN -- callers are expected to have already
+// skipped those forms via their own cheaper check, this is just a second
+// line of defense.
+static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty,
+                                  Node **out_lo, Node **out_hi) {
+    if (ty->checked_bounds_form == CB_NONE || ty->checked_bounds_form == CB_UNKNOWN)
         return;
 
-    Type *ty = var->ty;
     Token *tok;
 
-    if (var->checked_bounds_form == CB_RANGE) {
+    if (ty->checked_bounds_form == CB_RANGE) {
         tok = ty->checked_bounds_arg1;
         Node *lo = assign(vm, &tok, tok);
         add_type(vm, lo);
@@ -1032,8 +1044,8 @@ static void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
                       "checked-pointer bounds expression must not have side "
                       "effects -- it is re-evaluated at every access");
 
-        var->checked_bounds_lo = lo;
-        var->checked_bounds_hi = hi;
+        *out_lo = lo;
+        *out_hi = hi;
         return;
     }
 
@@ -1045,7 +1057,94 @@ static void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
         error_tok(vm, ty->checked_bounds_arg1,
                   "checked-pointer bounds expression must not have side "
                   "effects -- it is re-evaluated at every access");
-    var->checked_bounds_hi = n;
+    *out_hi = n;
+}
+
+static void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
+    resolve_bounds_tokens(vm, var->ty, &var->checked_bounds_lo, &var->checked_bounds_hi);
+}
+
+// Walks a resolved member-bounds template (see Member.checked_bounds_lo/hi's
+// comment) validating every ND_VAR it contains. Called once per member
+// bounds expression, right after resolve_bounds_tokens() -- separate from
+// that function because this check is member-bounds-specific (an ordinary
+// Obj-rooted bounds expression can reference any in-scope local/param/
+// global, so this validation would be wrong there). A sibling field
+// reference resolves to a checked_self_member placeholder (legal); a global
+// resolves to a non-local Obj (legal, same as today's Obj-rooted bounds); a
+// LOCAL leaking in from whatever scope struct_members() happens to be
+// nested in (e.g. a local struct definition) is rejected -- the struct type
+// can outlive that local, so trusting it would be unsound. A bit-field
+// sibling is rejected outright rather than supported: nothing downstream
+// (compute_checked_bounds's ND_MEMBER substitution) extracts a bit-field's
+// value, and doing so would need to duplicate the bit-extraction codegen
+// path for no real benefit -- v1 chooses to reject, not to add that.
+static void check_member_bounds_template(VirtualMachine *vm, Node *n, Token *tok) {
+    if (!n)
+        return;
+    if (n->kind == ND_VAR) {
+        Obj *v = n->var;
+        if (v->checked_self_member) {
+            if (v->checked_self_member->is_bitfield)
+                error_tok(vm, tok,
+                          "a checked-pointer bounds expression cannot reference "
+                          "a bit-field member");
+        } else if (v->is_local) {
+            error_tok(vm, tok,
+                      "checked-pointer bounds on a struct member may only "
+                      "reference sibling members or globals");
+        }
+    }
+    check_member_bounds_template(vm, n->lhs, tok);
+    check_member_bounds_template(vm, n->rhs, tok);
+    check_member_bounds_template(vm, n->cond, tok);
+    check_member_bounds_template(vm, n->then, tok);
+    check_member_bounds_template(vm, n->els, tok);
+}
+
+// Resolves checked-pointer bounds expressions on struct/union members
+// (#770/#483/#921) once the full member list of a struct/union is known --
+// a bound may name a LATER sibling field, e.g. `count(n)` on a member that
+// textually precedes `int n`, the same reason parameter bounds are resolved
+// only after create_param_lvars() finishes all params (see
+// resolve_checked_bounds()'s call site for parameters). Builds a synthetic
+// scope populated with one throwaway placeholder Obj per named member (see
+// Obj.checked_self_member's comment) so resolve_bounds_tokens()'s ordinary
+// assign()-based re-parse resolves sibling-field identifiers to those
+// placeholders instead of erroring "undeclared identifier" -- struct scope
+// isn't a variable scope, so this manufactures one just for the resolve.
+static void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
+    bool any = false;
+    for (Member *mem = members; mem; mem = mem->next)
+        if (mem->name && mem->ty->checked_bounds_form != CB_NONE &&
+            mem->ty->checked_bounds_form != CB_UNKNOWN) {
+            any = true;
+            break;
+        }
+    if (!any)
+        return;
+
+    enter_scope(vm);
+    for (Member *mem = members; mem; mem = mem->next) {
+        if (!mem->name)
+            continue;
+        Obj *placeholder = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+        memset(placeholder, 0, sizeof(Obj));
+        placeholder->name = arena_strndup(vm, mem->name->loc, mem->name->len);
+        placeholder->display_name = placeholder->name;
+        placeholder->ty = mem->ty;
+        placeholder->checked_self_member = mem;
+        push_scope(vm, mem->name->loc, mem->name->len)->var = placeholder;
+    }
+    for (Member *mem = members; mem; mem = mem->next) {
+        if (!mem->name || mem->ty->checked_bounds_form == CB_NONE ||
+            mem->ty->checked_bounds_form == CB_UNKNOWN)
+            continue;
+        resolve_bounds_tokens(vm, mem->ty, &mem->checked_bounds_lo, &mem->checked_bounds_hi);
+        check_member_bounds_template(vm, mem->checked_bounds_lo, mem->name);
+        check_member_bounds_template(vm, mem->checked_bounds_hi, mem->name);
+    }
+    leave_scope(vm);
 }
 
 // Create a function Obj that is NOT in the global scope or globals list.
@@ -2412,60 +2511,152 @@ static Node *clone_bounds_node(VirtualMachine *vm, Node *n) {
     return c;
 }
 
-// Finds the checked-pointer Obj underlying an address expression, looking
-// through pointer arithmetic (#770/#484: "bounds carry within a single
-// expression" -- `(p+k)[i]` checks against `p`'s declared range, not `p+k`'s
-// non-existent one). new_add()/new_sub() always canonicalize a pointer +/-
-// integer so the pointer operand is `lhs` (see their "Canonicalize `num +
-// ptr`" step), so descending into ->lhs through ND_ADD/ND_SUB is sufficient.
-// Also descends through ND_CAST: reading a checked-pointer variable turns
-// out to insert an implicit cast node even with no source-level cast
-// present (confirmed empirically -- `(p+k)[i]` for a plain checked `p`
-// yields ND_ADD(ND_CAST(ND_VAR p), ...) already at the innermost `p+k`),
-// so skipping casts is required for the common case, not just explicit
-// `(int*)p + k`. Anything else (a function call returning a pointer, a
-// ternary, ...) is not a checked-pointer access in the v1 model and returns
-// NULL, meaning no check is emitted -- consistent with bounds not
-// propagating across assignment.
-static Obj *find_checked_base_var(Node *n) {
+// Like clone_bounds_node(), but for a struct/union *member's* resolved
+// bounds template (Member.checked_bounds_lo/hi, #921): every ND_VAR that
+// references a sibling-field placeholder (Obj.checked_self_member, set up
+// by resolve_member_checked_bounds()) is rewritten into a real ND_MEMBER
+// over a fresh clone of `obj` -- the direct object expression of the access
+// actually being checked (`s` in `s.p[i]`, `*sp` in `sp->p[i]`). A plain
+// variable-rooted bounds expression is resolved directly in a real scope
+// and can never contain a placeholder, so clone_bounds_node() (no
+// substitution) is correct there; this function is only ever called with a
+// member-rooted template.
+static Node *clone_member_bounds_node(VirtualMachine *vm, Node *n, Node *obj) {
+    if (!n)
+        return NULL;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_member) {
+        Node *member_node = new_unary(vm, ND_MEMBER, clone_bounds_node(vm, obj), n->tok);
+        member_node->member = n->var->checked_self_member;
+        add_type(vm, member_node);
+        return member_node;
+    }
+    Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *c = *n;
+    c->next = NULL;
+    c->lhs = clone_member_bounds_node(vm, n->lhs, obj);
+    c->rhs = clone_member_bounds_node(vm, n->rhs, obj);
+    c->cond = clone_member_bounds_node(vm, n->cond, obj);
+    c->then = clone_member_bounds_node(vm, n->then, obj);
+    c->els = clone_member_bounds_node(vm, n->els, obj);
+    return c;
+}
+
+// Identifies the checked-pointer "root" underlying an address expression,
+// looking through pointer arithmetic (#770/#484: "bounds carry within a
+// single expression" -- `(p+k)[i]` checks against `p`'s declared range, not
+// `p+k`'s non-existent one). new_add()/new_sub() always canonicalize a
+// pointer +/- integer so the pointer operand is `lhs` (see their
+// "Canonicalize `num + ptr`" step), so descending into ->lhs through
+// ND_ADD/ND_SUB is sufficient. Also descends through ND_CAST: reading a
+// checked-pointer variable turns out to insert an implicit cast node even
+// with no source-level cast present (confirmed empirically -- `(p+k)[i]`
+// for a plain checked `p` yields ND_ADD(ND_CAST(ND_VAR p), ...) already at
+// the innermost `p+k`), so skipping casts is required for the common case,
+// not just explicit `(int*)p + k`.
+//
+// Two roots are recognised (#921 added the second): a plain variable
+// (`.var` set, `.mem`/`.obj` NULL), or a struct/union member access
+// (`.mem`/`.obj` set to the member and its *direct* object expression --
+// `s` in `s.p`, `*sp` in `sp->p` -- `.var` NULL). Anything else (a function
+// call returning a pointer, a ternary, ...) is not a checked-pointer access
+// in the v1 model and returns an all-NULL CheckedBase, meaning no check is
+// emitted -- consistent with bounds not propagating across an assignment
+// this function's caller doesn't itself resolve (see #919's
+// propagate_checked_bounds() for the assignment-propagation case, which is
+// a separate mechanism layered on top, not part of this lookup).
+typedef struct {
+    Obj *var;
+    Member *mem;
+    Node *obj; // member root's own object expression; NULL unless .mem is set
+} CheckedBase;
+
+static CheckedBase find_checked_base(Node *n) {
     while (n) {
         switch (n->kind) {
         case ND_VAR:
-            return n->var;
+            return (CheckedBase){.var = n->var};
+        case ND_MEMBER:
+            return (CheckedBase){.mem = n->member, .obj = n->lhs};
         case ND_ADD:
         case ND_SUB:
         case ND_CAST:
             n = n->lhs;
             continue;
         default:
-            return NULL;
+            return (CheckedBase){0};
         }
     }
-    return NULL;
+    return (CheckedBase){0};
 }
 
-// Populates `deref` (an ND_DEREF built at a `*p` or `p[i]` site) with the
-// checked-pointer bounds range to enforce, if `addr` (the address
-// expression, i.e. deref->lhs) is rooted at a checked pointer with
-// resolvable bounds (#770/#484). No-op (leaves both NULL) for an unchecked
-// pointer, or a checked pointer with no bounds to enforce (CB_NONE --
-// `[[cccc::array]]` with no count/byte_count/bounds attribute at all --
-// or CB_UNKNOWN, the `bounds(unknown)` trust escape hatch).
+// True if `base` names a declared checked pointer (variable or member) --
+// i.e. find_checked_base() found a recognised root at all. Doesn't imply a
+// bounds *form* is present (CB_NONE/CB_UNKNOWN roots still count as
+// "declared checked" here; compute_checked_bounds() is what decides whether
+// there's anything to enforce).
+static bool checked_base_is_declared(CheckedBase base) {
+    if (base.var)
+        return base.var->checked_kind != CHECKED_NONE;
+    if (base.mem)
+        return base.mem->ty->checked_kind != CHECKED_NONE;
+    return false;
+}
+
+// Builds the self-referencing expression a checked base's own bounds
+// formulas are written in terms of -- `p` itself for a variable root, or
+// `obj.mem`/`(*obj).mem` for a member root (obj cloned fresh each call so
+// multiple uses in the same formula, e.g. CB_COUNT's lo and the p-in-p+n*sz
+// hi, don't alias the same Node into two places in the tree, matching how
+// clone_bounds_node() already treats every other reused subtree). Returns
+// an already-typed node.
+static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base, Token *tok) {
+    if (base.var) {
+        Node *p = new_var_node(vm, base.var, tok);
+        add_type(vm, p);
+        return p;
+    }
+    Node *member_node = new_unary(vm, ND_MEMBER, clone_bounds_node(vm, base.obj), tok);
+    member_node->member = base.mem;
+    add_type(vm, member_node);
+    return member_node;
+}
+
+// Computes the checked-pointer bounds range to enforce for an access rooted
+// at `base` (#770/#484, generalised for #921's member roots and split out
+// of set_checked_deref_bounds() so #919's propagate_checked_bounds() can
+// call it too, to build assignment-time snapshot bounds rather than
+// per-deref bounds). Leaves *out_lo/*out_hi NULL and *out_nt false for an
+// unchecked base, or a checked base with no bounds to enforce (CB_NONE --
+// `[[cccc::array]]` with no count/byte_count/bounds attribute at all -- or
+// CB_UNKNOWN, the `bounds(unknown)` trust escape hatch).
 //
 // The actual CHKR emission is gated on --checked-pointers at codegen time
 // (src/codegen.c); these fields are populated unconditionally so the
 // compile-time type rules (arithmetic rejection etc.) and the runtime gate
 // stay independent, per the plan's Decisions section.
-static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token *tok) {
-    Obj *var = find_checked_base_var(addr);
-    if (!var || var->checked_kind == CHECKED_NONE)
+static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *access_ty,
+                                   Token *tok, Node **out_lo, Node **out_hi, bool *out_nt) {
+    *out_lo = NULL;
+    *out_hi = NULL;
+    *out_nt = false;
+    if (!base.var && !base.mem)
         return;
 
-    Type *base_ty = var->ty->base;
-    int64_t elem_size = base_ty ? get_vm_size(base_ty) : 1;
-    deref->checked_access_size = elem_size;
+    // #921: an object expression with side effects (e.g. `f()->p[i]`) would
+    // be duplicated 2-3x by checked_base_self_expr()'s clones -- decline
+    // rather than run it more than once.
+    if (base.mem && node_has_side_effects(base.obj))
+        return;
 
-    if (var->checked_kind == CHECKED_SINGLE) {
+    CheckedKind kind = base.var ? base.var->checked_kind : base.mem->ty->checked_kind;
+    CheckedBoundsForm form =
+        base.var ? base.var->checked_bounds_form : base.mem->ty->checked_bounds_form;
+    Node *resolved_lo = base.var ? base.var->checked_bounds_lo : base.mem->checked_bounds_lo;
+    Node *resolved_hi = base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
+    Type *base_ty = access_ty->base;
+    int64_t elem_size = base_ty ? get_vm_size(base_ty) : 1;
+
+    if (kind == CHECKED_SINGLE) {
         // ~ Checked C _Ptr<T>: implicit range [p, p + sizeof(T)). Built
         // directly with new_binary rather than new_add() -- new_add()
         // itself rejects arithmetic on a CHECKED_SINGLE pointer, which
@@ -2476,51 +2667,50 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
         // whose ->ty is already non-NULL without visiting its children, so
         // pre-setting ->ty on a binary node would leave its operands
         // untyped and crash codegen.
-        Node *p = new_var_node(vm, var, tok);
-        add_type(vm, p);
-        deref->checked_bounds_lo = p;
-        Node *hi = new_binary(vm, ND_ADD, new_var_node(vm, var, tok),
+        *out_lo = checked_base_self_expr(vm, base, tok);
+        Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok),
                               new_long(vm, elem_size, tok), tok);
         add_type(vm, hi);
-        deref->checked_bounds_hi = hi;
+        *out_hi = hi;
         return;
     }
 
     // CHECKED_ARRAY / CHECKED_NTARRAY
-    switch (var->checked_bounds_form) {
+    switch (form) {
     case CB_NONE:
     case CB_UNKNOWN:
         return; // nothing declared/trusted -- no runtime check
     case CB_RANGE:
         // Absolute [lo, hi) -- already resolved (and typed) at declaration
         // time; clone_bounds_node() copies ->ty along with everything else.
-        // A checked var whose declaration path never called
-        // resolve_checked_bounds() (e.g. a block-scope `static` local, or
-        // any future declaration shape that copies checked_kind/
-        // checked_bounds_form via new_var() without also being wired to
-        // call it) has these left NULL -- treat that exactly like
-        // CB_NONE/CB_UNKNOWN rather than feeding a NULL Node* into
-        // clone_bounds_node()/add_type() below and crashing the compiler.
-        if (!var->checked_bounds_lo || !var->checked_bounds_hi)
+        // A checked base whose declaration path never resolved its bounds
+        // (e.g. a block-scope `static` local, or any future declaration
+        // shape that copies checked_kind/checked_bounds_form without also
+        // being wired to resolve them) has these left NULL -- treat that
+        // exactly like CB_NONE/CB_UNKNOWN rather than feeding a NULL Node*
+        // into clone_bounds_node()/add_type() below and crashing the
+        // compiler.
+        if (!resolved_lo || !resolved_hi)
             return;
-        deref->checked_bounds_lo = clone_bounds_node(vm, var->checked_bounds_lo);
-        deref->checked_bounds_hi = clone_bounds_node(vm, var->checked_bounds_hi);
+        *out_lo = base.mem ? clone_member_bounds_node(vm, resolved_lo, base.obj)
+                            : clone_bounds_node(vm, resolved_lo);
+        *out_hi = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
+                            : clone_bounds_node(vm, resolved_hi);
         return;
     case CB_COUNT:
     case CB_BYTE_COUNT: {
-        if (!var->checked_bounds_hi)
+        if (!resolved_hi)
             return; // see the CB_RANGE comment above
-        // lo = p's own live value at this access; hi = p + n[*elem_size].
-        // ntarray widens by one element for the terminator slot (#483's
-        // documented widening; see man/SAFETY.md).
-        Node *lo = new_var_node(vm, var, tok);
-        add_type(vm, lo);
-        deref->checked_bounds_lo = lo;
-        Node *n = clone_bounds_node(vm, var->checked_bounds_hi); // already typed
+        // lo = the base's own live value at this access; hi = base +
+        // n[*elem_size]. ntarray widens by one element for the terminator
+        // slot (#483's documented widening; see man/SAFETY.md).
+        *out_lo = checked_base_self_expr(vm, base, tok);
+        Node *n = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
+                            : clone_bounds_node(vm, resolved_hi); // already typed
         Node *count_bytes;
-        if (var->checked_bounds_form == CB_BYTE_COUNT) {
+        if (form == CB_BYTE_COUNT) {
             count_bytes = n;
-        } else if (var->checked_kind == CHECKED_NTARRAY) {
+        } else if (kind == CHECKED_NTARRAY) {
             Node *n_plus_1 = new_binary(vm, ND_ADD, n, new_long(vm, 1, tok), tok);
             add_type(vm, n_plus_1);
             count_bytes = new_binary(vm, ND_MUL, n_plus_1,
@@ -2532,17 +2722,33 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
             // sensible "null terminator" and CHKNT's value register is an
             // integer register).
             if (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR))
-                deref->checked_nt_terminator = true;
+                *out_nt = true;
         } else {
             count_bytes = new_binary(vm, ND_MUL, n, new_long(vm, elem_size, tok), tok);
             add_type(vm, count_bytes);
         }
-        Node *hi = new_binary(vm, ND_ADD, new_var_node(vm, var, tok), count_bytes, tok);
+        Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok), count_bytes, tok);
         add_type(vm, hi);
-        deref->checked_bounds_hi = hi;
+        *out_hi = hi;
         return;
     }
     }
+}
+
+// Populates `deref` (an ND_DEREF built at a `*p` or `p[i]`/`p->x` site) with
+// the checked-pointer bounds range to enforce, if `addr` (the address
+// expression, i.e. deref->lhs) is rooted at a checked pointer or member with
+// resolvable bounds (#770/#484/#921). Thin wrapper around
+// find_checked_base()/compute_checked_bounds() -- see #919's
+// propagate_checked_bounds() for the other caller of compute_checked_bounds().
+static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token *tok) {
+    CheckedBase base = find_checked_base(addr);
+    if (!checked_base_is_declared(base))
+        return;
+    Type *pty = base.var ? base.var->ty : base.mem->ty;
+    deref->checked_access_size = pty->base ? get_vm_size(pty->base) : 1;
+    compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
+                           &deref->checked_bounds_hi, &deref->checked_nt_terminator);
 }
 
 // Generate code for computing a VLA size.
@@ -7458,21 +7664,6 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok, Type *t
             mem->idx = idx++;
             mem->align = attr.align ? attr.align : mem->ty->align;
 
-            // Checked-pointer bounds on a struct/union member are rejected in
-            // v1 (#770/#483): a bounds expression naming a sibling field
-            // needs member-relative resolution (`self->field`-style lookup)
-            // that resolve_checked_bounds()'s scope-based re-parse can't do
-            // -- struct scope isn't a variable scope. Plain `checked_kind`
-            // (single/array/ntarray with no bounds attribute, or
-            // bounds(unknown)) is still allowed on a member; only an
-            // unresolved bounds form is rejected. Follow-up ticket tracks
-            // adding member-relative resolution.
-            if (mem->ty->checked_bounds_form != CB_NONE &&
-                mem->ty->checked_bounds_form != CB_UNKNOWN)
-                error_tok(vm, mem->name ? mem->name : tok,
-                          "checked-pointer bounds expressions are not yet "
-                          "supported on struct/union members");
-
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
                 mem->bit_width = const_expr(vm, &tok, tok);
@@ -7499,6 +7690,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok, Type *t
 
     *rest = tok->next;
     ty->members = head.next;
+    resolve_member_checked_bounds(vm, ty->members);
 }
 
 static bool is_attr_name(Token *tok, char *name) {
