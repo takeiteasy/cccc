@@ -4021,7 +4021,7 @@ static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
     // behavior -- pragma_config_set_flag/_safety/_optimisation/_opt_pass
     // all early-return under native_mode already (see their own comments),
     // so the pragma is silently a no-op there. Surface that instead of
-    // staying quiet about it, matching -c=native/-m/-G's CLI-flag warning
+    // staying quiet about it, matching -c=native/-m/-c=generated's CLI-flag warning
     // for the same reason (main.c's warn_ignored_vm_flags). Fires before
     // key validation below: even a malformed value is still a no-op here.
     if (vm->compiler.native_mode)
@@ -4553,7 +4553,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 
         // Auto-capture: when not using --emit-only, record directives from the
         // primary source file that are outside comptime blocks verbatim, so
-        // they appear in -G output without needing [[cccc::emit]] annotations.
+        // they appear in -c=generated output without needing [[cccc::emit]] annotations.
         // Skip during the macro-compilation preprocessing pass (in_macro_mode)
         // since those token streams re-use primary_file pointers but are not
         // part of the user-visible source.

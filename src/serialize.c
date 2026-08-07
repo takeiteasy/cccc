@@ -146,8 +146,8 @@ typedef struct {
     int name_len;
     Obj *owner_fn;
     // #891: mirrors TypeNameRecord.from_include/always_emit (cccc.h) -- used
-    // in !generated_only mode (-c=native, -M without -G) to avoid re-emitting
-    // a definition the consumer's own #include already provides.
+    // in !generated_only mode (-c=native, -m without -c=generated) to avoid
+    // re-emitting a definition the consumer's own #include already provides.
     bool from_include;
     bool always_emit;
 } TypeName;
@@ -598,8 +598,8 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // Deliberately no output for ty->checked_kind (#770/#482-484): a
     // checked pointer's [[cccc::single/array/ntarray]] qualifier is a
     // cccc-internal VM-side check, not a real C construct -- gcc/clang would
-    // reject the attribute names outright, and #488 requires -E/-G native
-    // output to be unchanged for a checked declaration ("no change to ABI or
+    // reject the attribute names outright, and #488 requires -E/-c=generated
+    // native output to be unchanged for a checked declaration ("no change to ABI or
     // to unchecked callers"). Falls out for free today since this function
     // only ever emits is_const anyway (is_volatile/is_restrict are likewise
     // never serialized), but noted explicitly so it isn't "fixed" by a
@@ -1728,7 +1728,7 @@ static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
                                     TypeName *alias) {
     if (!alias || aggregate_typedef_is_definition(ctx, alias))
         return;
-    // #891: in !generated_only mode (-c=native, -M without -G), a
+    // #891: in !generated_only mode (-c=native, -m without -c=generated), a
     // header-sourced typedef would collide with the consumer's own
     // #include of the same header (auto-capture re-emits that #include
     // verbatim) -- e.g. `typedef void FILE;` from CCCC's own stdio.h
@@ -1854,9 +1854,9 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
 // identifier character, so every non-string-literal use needs a real name
 // before anything below references it. Runs once, before any
 // collection/emission pass, so every later `is_string_literal`/dotted-name
-// check sees the final state. Also runs under generated_only (-G): #928
-// found that reflection API compound-literal/init-struct globals built
-// while running under -G (e.g. a comptime macro calling CompoundLiteral()/
+// check sees the final state. Also runs under generated_only (-c=generated):
+// #928 found that reflection API compound-literal/init-struct globals built
+// while running under -c=generated (e.g. a comptime macro calling CompoundLiteral()/
 // InitArray()/InitStruct() at file scope) hit this exact gap when renaming
 // was skipped here -- the emit-event walk's own dotted-name skip (see
 // `obj->name[0] != '.'` further down) only prevented emitting a bogus
@@ -1988,8 +1988,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 
     // #904: real symbols for internal host-accessor shims (stdout/errno/
     // etc) -- only meaningful once the real headers above are visible, and
-    // only outside generated_only (-G), matching the from_include filter's
-    // gating for the same reason (see the comment on this function).
+    // only outside generated_only (-c=generated), matching the from_include
+    // filter's gating for the same reason (see the comment on this function).
     if (!generated_only)
         serialize_native_accessor_shims(f, prog);
 

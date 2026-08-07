@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -m -G
+// CCCC_FLAGS: -c=generated -o /dev/stdout
 // CCCC_EXPECT_STDOUT: #ifdef _WIN32.*int macro_body_emit\(void\);.*#endif
 [[cccc::comptime]]
 void gen(void) {

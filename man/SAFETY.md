@@ -796,11 +796,11 @@ regardless of this flag — only the `CHKR` runtime check itself is gated.
 **Native and serialized output.** `CHKR` enforcement is VM-only, by design —
 the same as every other runtime safety flag in this document; there is no
 equivalent check emitted into `-c=native`, `-m`/`--dump-expanded`, or
-`-G`/`--emit-generated` output. `--checked-pointers` is accepted in those
-modes but has no effect there — a `-c=native`/`-m`/`-G ignores VM runtime
+`-c=generated` output. `--checked-pointers` is accepted in those
+modes but has no effect there — a `-c=native`/`-m`/`-c=generated ignores VM runtime
 safety/debug options` warning is printed and the flag is dropped, it does
 not error. The `[[cccc::single/array/ntarray]]`/`count`/`byte_count`/`bounds`
-attributes themselves are always stripped from `-E`/`-m`/`-G`/`-c=native`
+attributes themselves are always stripped from `-E`/`-m`/`-c=generated`/`-c=native`
 output regardless of the flag (ABI-transparent, no change to unchecked
 callers — see #482/#488), so native builds compile and run declarations
 carrying checked-pointer attributes, they just get zero bounds enforcement

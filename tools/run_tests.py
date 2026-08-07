@@ -12,7 +12,7 @@ Sub-suites:
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
-  comptime_native_smoke — native (-m/-G/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
+  comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
@@ -251,7 +251,7 @@ def _run_comptime_native_suite():
     """Run the comptime/native serializer smoke tests (#892).
 
     The serializer that reconstructs a runtime translation unit only runs
-    under -m/-G/-c=native, none of which the VM-only source suite exercises,
+    under -m/-c=generated/-c=native, none of which the VM-only source suite exercises,
     so a serializer regression like #892 (two distinct opaque struct types
     collapsing into "the same type") needs its own smoke test. Returns
     (status_str, ok).

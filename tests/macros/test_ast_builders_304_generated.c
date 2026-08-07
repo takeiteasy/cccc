@@ -1,16 +1,16 @@
-// CCCC_FLAGS: -m -G
+// CCCC_FLAGS: -c=generated -o /dev/stdout
 // CCCC_REJECT_STDOUT: \.L\.\.
 // CCCC_EXPECT_STDOUT: static struct FPt __cccc_
 // CCCC_EXPECT_STDOUT: static int __cccc_
 // Ticket #928: file-scope CompoundLiteral/InitArray/InitStruct anon globals
 // (ticket #304, test_ast_builders_304.c) must also serialize cleanly under
-// -G, not just -m/-c=native. reflect_new_anon_gvar()'s `.L..N` name must be
-// renamed to a real identifier and given a real definition even on the -G
-// emit-event path, and the definition must come before any macro-generated
-// function that references it (the drain into macro_globals reverses
-// creation order within one macro invocation, so the anon gvar here is
-// created before the functions in gen_gvar_struct() -- forward-declaring it
-// is what keeps the -G output valid C).
+// -c=generated, not just -m/-c=native. reflect_new_anon_gvar()'s `.L..N`
+// name must be renamed to a real identifier and given a real definition
+// even on the -c=generated emit-event path, and the definition must come
+// before any macro-generated function that references it (the drain into
+// macro_globals reverses creation order within one macro invocation, so
+// the anon gvar here is created before the functions in gen_gvar_struct()
+// -- forward-declaring it is what keeps the -c=generated output valid C).
 
 struct FPt { int x; int y; };
 

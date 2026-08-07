@@ -675,8 +675,8 @@ Node *__builtin_ast_string_literal(const char *str) {
     // new_string_literal() (parse.c), for a literal written directly in
     // source. This is the reflection API's programmatic equivalent -- same
     // contract (raw string bytes in init_data), so it needs the same flag,
-    // or the serializer's `-G` path (which doesn't run the -m/-c=native-only
-    // rename_anon_globals pre-pass) treats it as an unrecognized dotted
+    // or the serializer's `-c=generated` path (which doesn't run the
+    // -m/-c=native-only rename_anon_globals pre-pass) treats it as an unrecognized dotted
     // name instead of inlining it as string text.
     var->is_string_literal = true;
 
@@ -1326,9 +1326,10 @@ static void reflect_write_constexpr(VirtualMachine *vm, char *buf, Type *ty, Nod
 static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n) {
     Obj *var = reflect_new_anon_gvar(vm, ty);
     var->is_static = true;
-    // #928: mark this reachable via the -G emit-event walk (cc_record_emit_object,
-    // macros.c) the same way MakeFunction/MakeGlobalVar are -- without this,
-    // -G never emits a definition for the anon gvar this node references.
+    // #928: mark this reachable via the -c=generated emit-event walk
+    // (cc_record_emit_object, macros.c) the same way MakeFunction/MakeGlobalVar
+    // are -- without this, -c=generated never emits a definition for the anon
+    // gvar this node references.
     var->is_macro_generated = true;
 
     char *buf = arena_alloc(&vm->compiler.parser_arena, ty->size);
@@ -1439,7 +1440,7 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
         Obj *var = reflect_new_anon_gvar(vm, ty);
         var->is_static = true;
         // #928: see make_gvar_compound_literal()'s identical comment --
-        // needed so the -G emit-event walk ever emits a definition for this.
+        // needed so the -c=generated emit-event walk ever emits a definition for this.
         var->is_macro_generated = true;
         char *buf = arena_alloc(&vm->compiler.parser_arena, ty->size);
         memset(buf, 0, ty->size);

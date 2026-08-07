@@ -135,7 +135,7 @@ by default). Two things follow from that:
   `static FILE *__cccc_stdout(void) { return stdout; }` — rather than
   leaving the call to an undeclared function in the generated C.
 
-`-G`/`--emit-generated` (without `-c=native`) is a separate, unaffected
+`-c=generated` (without `-c=native`) is a separate, unaffected
 code path: its output is meant to be compiled *alongside* normal headers,
 so it has never re-emitted header-sourced typedefs (see `generated_only` in
 `serialize.c`).

@@ -25,7 +25,12 @@ RE_REJECT_STDOUT  = re.compile(r'\bCCCC_REJECT_STDOUT\s*:')
 RE_FLAGS          = re.compile(r'\bCCCC_FLAGS\s*:\s*(.+)')
 RE_TESTING_FLAG   = re.compile(r'--testing\b')
 RE_BUILD_FLAG     = re.compile(r'--build\b')
-RE_OUTPUT_FLAG    = re.compile(r'\s(-E|-M|-G)\b')
+# -M (--memory-leak-detection) and -m (--dump-expanded) were previously
+# conflated here; -M is a safety flag, not an output mode, so it's dropped.
+# -G folded into -c=generated/-c=gen/-c=g (#936) -- only the generated
+# spelling, not -c=native/-c=bytecode, which aren't "dump text" output modes.
+RE_OUTPUT_FLAG    = re.compile(
+    r'\s(-E|-m|-c=(generated|gen|g)\b|-c(generated|gen|g)\b|--compile=(generated|gen|g)\b)')
 
 # ── body heuristics (whole file)
 RE_PRINTF         = re.compile(r'\bprintf\s*\(')
@@ -175,7 +180,7 @@ CATEGORY_LABEL = {
     'must_stay_stderr':        'Must stay external — stderr/stdout matching (regex)',
     'must_stay_stdout':        'Must stay external — stdout matching',
     'must_stay_build':         'Must stay external — --build mode',
-    'must_stay_output':        'Must stay external — -E/-M/-G mode',
+    'must_stay_output':        'Must stay external — -E/-m/-c=generated mode',
     'already_framework':       'Already in [[cccc::test]] framework',
 }
 

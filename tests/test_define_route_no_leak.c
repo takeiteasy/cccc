@@ -1,7 +1,7 @@
-// Ticket #611: @test route attribute must not leak into -G generated output.
+// Ticket #611: @test route attribute must not leak into -c=generated output.
 // In testing mode (active), a #define @test is processed as a plain #define and
 // the @test route token must not appear in the serialized generated output.
-// CCCC_FLAGS: --testing -G
+// CCCC_FLAGS: --testing -c=generated -o /dev/stdout
 // CCCC_EXPECT_STDOUT: #define TEST_ROUTE_CANARY 99
 // CCCC_REJECT_STDOUT: @test
 

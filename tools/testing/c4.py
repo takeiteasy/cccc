@@ -69,15 +69,22 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         }
     elif not is_negative_test and "-E" in per_test_flags:
         skip_reason = "c4-incompatible: preprocess-only output"
-    elif not is_negative_test and ("-m" in per_test_flags or "-G" in per_test_flags):
-        # #924: this checked "-M" (--memory-leak-detection) instead of "-m"
-        # (--dump-expanded) -- a real safety flag, not the serialize-and-exit
-        # mode this skip exists for. A test combining "-m" with the c4
+    elif not is_negative_test and (
+        "-m" in per_test_flags or
+        any(f in ("-c=generated", "-c=gen", "-c=g", "-cgenerated", "-cgen",
+                   "-cg", "--compile=generated", "--compile=gen",
+                   "--compile=g")
+            for f in per_test_flags)
+    ):
+        # #924/#936: this checked "-M" (--memory-leak-detection) instead of
+        # "-m" (--dump-expanded) -- a real safety flag, not the
+        # serialize-and-exit mode this skip exists for. A test combining
+        # "-m" (or the folded-in "-c=generated", formerly "-G") with the c4
         # round-trip used to slip through: -c/-o here still saves to
-        # c4_path, but -m's early exit in main.c serializes C source into
-        # that path instead of bytecode, so the reload step below failed
-        # with "failed to load bytecode" -- a harness bug, not a real
-        # regression in the test under round-trip.
+        # c4_path, but -m's/-c=generated's early exit in main.c serializes C
+        # source into that path instead of bytecode, so the reload step
+        # below failed with "failed to load bytecode" -- a harness bug, not
+        # a real regression in the test under round-trip.
         skip_reason = "c4-incompatible: macro/emit generated source"
     elif not is_negative_test and (expect_stderr is not None or reject_stderr is not None):
         skip_reason = "c4-incompatible: compile-time diagnostic"

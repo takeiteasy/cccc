@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -m -G
+// CCCC_FLAGS: -c=generated -o /dev/stdout
 // CCCC_EXPECT_STDOUT: #include <stddef.h>
 // CCCC_EXPECT_STDOUT: int generated_attr_target\(void\);
 // CCCC_REJECT_STDOUT: @emit

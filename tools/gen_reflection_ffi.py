@@ -3,8 +3,8 @@
 include/cccc/reflection.h.
 
 reflection.h is the canonical signature for every comptime builtin -- it's
-injected verbatim into user comptime code, and is already parsed by `-G`/
-tools/generate_stdlib.c for that purpose. Before this generator, src/macros.c
+injected verbatim into user comptime code, and is already parsed by
+`-c=generated`/tools/generate_stdlib.c for that purpose. Before this generator, src/macros.c
 hand-duplicated every one of its ~157 prototypes as a matching `extern`
 (so register_reflection_ffi() could take function addresses) and hand-typed
 the cc_register_cfunc()/cc_register_variadic_cfunc() arity for each one --

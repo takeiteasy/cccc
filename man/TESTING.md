@@ -261,7 +261,7 @@ The `test` build.c target's `run_tests.py` also runs
 `tools/comptime_native_smoke.py` (also available standalone as
 `./cccc --build build.c --build-target=comptime_native_smoke`, or directly
 via `python3 tools/comptime_native_smoke.py`). The serializer that
-reconstructs a runtime translation unit only runs under `-m`/`-G`/
+reconstructs a runtime translation unit only runs under `-m`/`-c=generated`/
 `-c=native` — the main VM-only source suite never touches it, so a
 serializer regression is invisible there and needs its own smoke test.
 Despite the module's name (kept for history — it started as a

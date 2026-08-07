@@ -1,4 +1,4 @@
-// CCCC_FLAGS: -m -G
+// CCCC_FLAGS: -c=generated -o /dev/stdout
 // CCCC_EXPECT_STDOUT: #ifdef _WIN32.*int generated_answer\(void\);.*#endif
 // CCCC_REJECT_STDOUT: #endif.*int generated_answer\(void\);
 #include @emit <stddef.h>

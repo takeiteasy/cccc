@@ -456,13 +456,13 @@ This approach complements the side-effect style (calling `MakeFunction` etc.):
 
 ### Emit directives and includes in generated output
 
-When using `-G` to serialize a file, any preprocessor directives in the
-**runtime translation unit** (outside comptime blocks) are automatically
+When using `-c=generated` to serialize a file, any preprocessor directives in
+the **runtime translation unit** (outside comptime blocks) are automatically
 captured verbatim and appear at the top of the generated output. This means
 the common case requires no special annotation:
 
 ```c
-#include <string.h>   // outside comptime — auto-captured into -G output
+#include <string.h>   // outside comptime — auto-captured into -c=generated output
 
 #pragma cccc comptime
 // ... generated functions that use strcmp ...
@@ -473,7 +473,7 @@ is not inside a `#pragma cccc comptime` block: `#include`, `#define`,
 `#ifdef`/`#endif`, and others.
 
 If you need the old behavior (emit only explicitly tagged content), pass
-`--emit-only` alongside `-G`. In that mode you must annotate each directive
+`--emit-only` alongside `-c=generated`. In that mode you must annotate each directive
 with `[[cccc::emit]]`, `@emit`, or `__attribute__((emit))` to include it:
 
 ```c
@@ -500,11 +500,11 @@ Other emitted directives keep source order and are not deduplicated, so they can
 wrap file-scope macro calls and the declarations those calls generate.
 
 `--emit-only`/`[[cccc::emit]]` (above) controls *which* directives are
-captured into `-G` output. A separate, similarly-named flag, `--emit-cccc`,
+captured into `-c=generated` output. A separate, similarly-named flag, `--emit-cccc`,
 controls a different axis entirely: *whether the captured/serialized output
 keeps CCCC dialect syntax* (`[[cccc::...]]` attributes, checked-pointer
 qualifiers, cccc-only `#include`s) or gets stripped to portable C, across
-`-E`/`-G`/`-m`/`-c=native`. See
+`-E`/`-m`/`-c=generated`/`-c=native`. See
 [COVERAGE.md](COVERAGE.md#attributes) for the full `--emit-cccc` contract.
 
 For several raw preprocessor directives, use an emit block. Emit blocks require
@@ -1667,11 +1667,11 @@ constants that can be folded by `cc_eval`. Passing a non-constant expression
 (e.g. a function call) in that context is a compile-time error.
 
 The file-scope anonymous global is given a real name and a full definition
-in `-m`/`-c=native`/`-G` output alike: the serializer renames it from its
-internal placeholder to a `static __cccc_<tag>_<N>` identifier and, under
-`-G`, forward-declares it ahead of any generated function body that
-references it (needed because a function created earlier in the same macro
-invocation can be emitted before the global it captures).
+in `-m`/`-c=native`/`-c=generated` output alike: the serializer renames it
+from its internal placeholder to a `static __cccc_<tag>_<N>` identifier and,
+under `-c=generated`, forward-declares it ahead of any generated function
+body that references it (needed because a function created earlier in the
+same macro invocation can be emitted before the global it captures).
 
 ```c
 [[cccc::comptime]]

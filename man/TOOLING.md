@@ -530,7 +530,7 @@ the matching `pop` restores it. Unmatched `pop` emits a `-Wcpp` diagnostic.
 `#pragma GCC diagnostic` and `#pragma clang diagnostic` are also accepted and
 act identically — this allows headers that already use GCC-style pragmas to
 suppress warnings without modification. Unlike `#pragma cccc diagnostic`, the
-GCC/clang forms are passed through to `-G` output so downstream compilers also
+GCC/clang forms are passed through to `-c=generated` output so downstream compilers also
 see them.
 
 Pragma state is per-token and takes effect immediately at the pragma's source

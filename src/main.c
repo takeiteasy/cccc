@@ -222,7 +222,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("Options:\n");
     printf("\t-h/--help                Show this message\n");
     printf("\t   --version             Print version, git describe, host triple, and enabled features\n");
-    printf("\t-I <path>                Add <path> to include search paths\n");
+    printf("\t-I/--include <path>      Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
     printf("\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
@@ -234,23 +234,27 @@ static void usage(const char *argv0, int exit_code) {
            "system include paths and implies --use-system-headers\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
-    printf("\t-D <macro>[=def]         Define a macro\n");
-    printf("\t-U <macro>               Undefine a macro\n");
+    printf("\t   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) built with -c=bytecode\n");
+#ifdef CCCC_HAS_CURL
+    printf("\t   --url-cache-dir <path> Directory for caching #include <https://...> fetches\n");
+    printf("\t   --url-cache-clear     Clear the URL include cache and exit\n");
+#endif
+    printf("\t-D/--define <macro>[=def] Define a macro\n");
+    printf("\t-U/--undef <macro>       Undefine a macro\n");
     printf("\t-a/--ast                 Dump AST\n");
     printf("\t-p/--print-tokens        Print preprocessed tokens to stdout\n");
     printf("\t-E/--preprocess          Output preprocessed source code (traditional "
            "C -E)\n");
     printf("\t-m/--dump-expanded       Output macro-expanded source code (for gcc "
            "compatibility)\n");
-    printf("\t-G/--emit-generated      Serialize runtime TU + macro-generated objects to C\n");
-    printf("\t   --emit-only           With -G: only emit explicitly tagged content "
-           "([[cccc::emit]], $publish)\n");
+    printf("\t   --emit-only           With -c=generated: only emit explicitly tagged "
+           "content ([[cccc::emit]])\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
            "auto, c23, gnu, msvc, strip\n");
     printf("\t   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, "
            "checked-pointer\n");
-    printf("\t                         qualifiers, cccc-only #includes) in -E/-G/-m/-c=native "
-           "output\n");
+    printf("\t                         qualifiers, cccc-only #includes) in -E/-m/-c=native/"
+           "-c=generated output\n");
     printf("\t                         instead of stripping it to portable C. With -c=native, "
            "the usual\n");
     printf("\t                         cc/clang/gcc PATH search is disabled -- CCCC_NATIVE_CC "
@@ -262,12 +266,17 @@ static void usage(const char *argv0, int exit_code) {
             "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
-    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), bytecode\n");
+    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), "
+           "bytecode, generated\n");
     printf("\t                         native: build a native executable via CCCC_NATIVE_CC\n");
     printf("\t                                 (cc, clang, or gcc); writes to -o file, or ./a.out\n");
     printf("\t                                 if -o omitted\n");
     printf("\t                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted\n");
-    printf("\t                         Use -cbytecode or --compile=bytecode (short form must be\n");
+    printf("\t                         generated: serialize the runtime TU + macro-generated\n");
+    printf("\t                                    objects to C; writes to -o file, or ./a.gen.c\n");
+    printf("\t                                    if -o omitted\n");
+    printf("\t                         Aliases: bytecode=bc=c4, native=n, generated=gen=g. Use\n");
+    printf("\t                         -cbytecode or --compile=bytecode (short form must be\n");
     printf("\t                         attached; long form may use '=' or separate arg).\n");
     printf("\t   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL\n");
     printf("\t                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)\n");
@@ -277,7 +286,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         checked. Implies -c=native when no -c is given; an\n");
     printf("\t                         explicit -c=FMT still picks the format\n");
     printf("\t-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.\n");
-    printf("\t                         For -c=bytecode, defaults to ./a.c4 if omitted.\n");
+    printf("\t                         For -c=bytecode, defaults to ./a.c4 if omitted. For\n");
+    printf("\t                         -c=generated, defaults to ./a.gen.c if omitted.\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
@@ -372,13 +382,14 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
     printf("\t-F/--disable-ffi          Block all registered and dynamic native calls\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy violations\n");
-    printf("\t   --trap-fp-divzero      Abort on float division by zero instead of IEEE +-Inf/NaN\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at runtime\n");
     printf("\nLanguage Standard:\n");
-    printf("\t-s/--std=<std>       Select C language standard (default: gnu17)\n");
-    printf("\t                     Supported: c99, c11, c17/c18, c23/c2x\n");
-    printf("\t                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
-    printf("\t                     Note: -s/--std currently affects predefined macros only\n");
+    printf("\t-s/--std=<std>       Select C language standard (default: gnu23)\n");
+    printf("\t                     Supported: c89/c90, c99, c11, c17/c18, c23/c2x\n");
+    printf("\t                     GNU variants: gnu89/gnu90, gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
+    printf("\t                     Gates predefined macros, tokenizer syntax (e.g. C23 "
+           "attributes/\n");
+    printf("\t                     digit separators), and preprocessor features per standard\n");
     printf("\nPreprocessor Options:\n");
     printf("\t   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)\n");
     printf("\t   --embed-hard-limit         Make #embed limit a hard error instead of warning\n");
@@ -407,14 +418,19 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                             Passes: fold, peephole, copy-prop, dce, cse, fuse, elim-ext\n");
     printf("\t                             Examples: -O3 -fno-cse, -O0 -fpeephole, "
            "-ffold -fdce\n");
+    printf("\t                             Long-form aliases also accepted: --ffold, --fpeephole, "
+           "--fcopy-prop,\n");
+    printf("\t                             --fdce, --fcse, --ffuse, --felim-ext, and their "
+           "--fno-* counterparts\n");
     printf("\t--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)\n");
+    printf("\t--trap-fp-divzero            Abort on float division by zero instead of IEEE +-Inf/NaN\n");
     printf("\t--posix-emulation            Enable lossy/approximate emulation of POSIX functions the\n");
     printf("\t                             host doesn't natively support (e.g. ppoll() on macOS). Off\n");
     printf("\t                             by default: such functions are undeclared/unregistered,\n");
     printf("\t                             matching a native compiler on the same host. Also restores\n");
     printf("\t                             raw ioctl() passthrough for request codes outside the\n");
     printf("\t                             layout-verified allowlist (off by default there too). VM-only.\n");
-    printf("\t--inline-limit=N             Limit inlining to N AST nodes (default: 256)\n");
+    printf("\t--inline-limit=N             Limit inlining to N AST nodes (default: 20, 0=disable)\n");
     printf("\nStatic Bytecode Analysis (compile or load input, walk text segment, exit):\n");
     printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)\n");
     printf("\t--ngrams-top=N          Show top N sequences (default 25)\n");
@@ -828,8 +844,8 @@ static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
 }
 
 // VM-only runtime flags (safety instrumentation + debug support) and their
-// CLI spelling, for the "-c=native"/"-m"/"-G ignores these" warning below
-// (#924). Deliberately excludes CCCC_VM_HEAP (forcing the VM-managed heap
+// CLI spelling, for the "-c=native"/"-m"/"-c=generated ignores these" warning
+// below (#924). Deliberately excludes CCCC_VM_HEAP (forcing the VM-managed heap
 // allocator is meaningless outside the VM -- it was never one of these
 // bits) and CCCC_FFI_ERRORS_FATAL (already has its own dedicated hard error
 // in the "-c=native cannot be combined with CCCC FFI policy options" check,
@@ -869,8 +885,8 @@ static const struct { uint32_t bit; const char *name; } ignored_vm_flag_names[] 
 // (--a, --b, ...): they are enforced by the CCCC VM only" for every bit of
 // `flags` that names a VM-only feature, then returns `flags` with those
 // bits cleared -- the caller passes the result on instead of the flags
-// enforcement can't actually apply to (#924: -c=native/-m/-G used to hard
-// error here; now they warn and continue, matching how a real C compiler
+// enforcement can't actually apply to (#924: -c=native/-m/-c=generated used
+// to hard error here; now they warn and continue, matching how a real C compiler
 // treats an option it can't honour).
 static uint32_t warn_ignored_vm_flags(uint32_t flags, const char *context) {
     uint32_t relevant = 0;
@@ -923,10 +939,10 @@ int main(int argc, const char *argv[]) {
     bool safety_level_gt0 = false; // True if -1/-2/-3 or --safety=basic/standard/max was requested (#665)
     bool vm_heap_disable_requested = false; // True if -V/--no-vm-heap was passed (now toggles the heap off) (#665)
     bool cli_opt_level_set = false; // True if -O/--optimize was passed on the CLI (#357)
-    int print_tokens = 0;      // -P
+    int print_tokens = 0;      // -p
     int preprocess_only = 0;   // -E
     int dump_expanded_only = 0; // -m
-    int emit_generated_only = 0; // -G
+    int emit_generated_only = 0; // -c=generated
     int emit_only = 0;           // --emit-only
     int skip_preprocess = 0;   // -X
     int skip_stdlib = 0;       // -S
@@ -974,7 +990,7 @@ int main(int argc, const char *argv[]) {
     const char *vm_profile_input = NULL;
     int vm_profile_ran = 0;
     const char *entry_name = NULL; // -e / --entry
-    enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE } compile_format = COMPILE_NONE;
+    enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE, COMPILE_GENERATED } compile_format = COMPILE_NONE;
     int no_comptime = 0;           // --no-comptime / -C
     int comptime_include_all = 0; // --comptime-include-all
     int allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
@@ -1029,7 +1045,6 @@ int main(int argc, const char *argv[]) {
         {"print-tokens", no_argument, 0, 'p'},
         {"preprocess", no_argument, 0, 'E'},
         {"dump-expanded", no_argument, 0, 'm'},
-        {"emit-generated", no_argument, 0, 'G'},
         {"no-preprocess", no_argument, 0, 'X'},
         {"no-stdlib", no_argument, 0, 'S'},
         {"json", no_argument, 0, 'j'},
@@ -1154,7 +1169,7 @@ int main(int argc, const char *argv[]) {
         if (strcmp(argv[i], "--") == 0) { dashdash = i; break; }
     }
     int getopt_argc = (dashdash >= 0) ? dashdash : argc;
-    const char *optstring = "0123haI:L:D:U:o:c::dvgi:PEMGXSjJVCl:W:e:O::FbTmptn:rs:ABf:w";
+    const char *optstring = "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::FbTmptn:rs:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1370,10 +1385,6 @@ int main(int argc, const char *argv[]) {
         case 'm':
             dump_expanded_only = 1;
             break;
-        case 'G':
-            emit_generated_only = 1;
-            dump_expanded_only = 1; // -G implies serialization mode
-            break;
         case 'X':
             skip_preprocess = 1;
             break;
@@ -1391,21 +1402,40 @@ int main(int argc, const char *argv[]) {
             // and `--compile native` (the latter as a separate arg). Strip
             // a leading `=` to be friendly to BSD getopt / `-c=native`
             // callers even though GNU's getopt rejects that form outright.
-            compile_only = 1;
             const char *fmt = optarg;
             if (fmt && fmt[0] == '=')
                 fmt++;
             if (!fmt || !*fmt) {
                 compile_format = COMPILE_NATIVE;
+                compile_only = 1;
             } else if (strcmp(fmt, "bytecode") == 0 || strcmp(fmt, "bc") == 0 ||
                        strcmp(fmt, "c4") == 0) {
                 compile_format = COMPILE_BYTECODE;
+                compile_only = 1;
             } else if (strcmp(fmt, "native") == 0 || strcmp(fmt, "n") == 0) {
                 compile_format = COMPILE_NATIVE;
+                compile_only = 1;
+            } else if (strcmp(fmt, "generated") == 0 || strcmp(fmt, "gen") == 0 ||
+                       strcmp(fmt, "g") == 0) {
+                // -c=generated (#936): folds the old standalone -G/
+                // --emit-generated into the -c namespace. Unlike native/
+                // bytecode this does NOT set compile_only -- it reuses the
+                // dump_expanded_only/emit_generated_only serialization path
+                // below (same as -m), which historically has never been
+                // gated by compile_only. Flipping compile_only here would
+                // change behavior at every site that branches on it (the
+                // --repl/--build/--ngrams validation blocks, deferred_link,
+                // etc.) for no reason -- -c=generated is a serialize-and-exit
+                // mode, not a "hand off to another backend" mode like
+                // native/bytecode are. compile_format is only consulted here
+                // to pick -c=generated's default output filename.
+                compile_format = COMPILE_GENERATED;
+                dump_expanded_only = 1;
+                emit_generated_only = 1;
             } else {
                 fprintf(stderr,
                         "error: invalid --compile format '%s' "
-                        "(use 'bytecode' or 'native')\n",
+                        "(use 'bytecode', 'native', or 'generated')\n",
                         fmt);
                 usage(argv[0], 1);
             }
@@ -1907,7 +1937,7 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr,
                     "error: --test-run cannot be combined with --repl, "
                     "--build, --testing, --ngrams/--fusion-candidates, -d, "
-                    "-E, -M, --ast, -j, -J, or other output modes\n");
+                    "-E, -m, --ast, -j, -J, or other output modes\n");
             usage(argv[0], 1);
         }
         // Bare -c already means native; --test-run mirrors that default
@@ -1939,7 +1969,7 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr,
                     "error: --repl cannot be combined with --build, --testing, "
                     "--ngrams/--fusion-candidates, -c (incl. -c=native), -d, "
-                    "-E, -M, --ast, --vm-profile, or other output modes\n");
+                    "-E, -m, --ast, --vm-profile, or other output modes\n");
             usage(argv[0], 1);
         }
     }
@@ -1953,7 +1983,7 @@ int main(int argc, const char *argv[]) {
             output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --build cannot be combined with VM/output options "
-                    "(-c, -d, -O<n>, -f<pass>, --vm-profile, -o, -E, -M, --ast, ...)\n");
+                    "(-c, -d, -O<n>, -f<pass>, --vm-profile, -o, -E, -m, --ast, ...)\n");
             usage(argv[0], 1);
         }
         if (flags & CCCC_ENABLE_DEBUGGER) {
@@ -2595,9 +2625,14 @@ int main(int argc, const char *argv[]) {
         cc_clear_errors(&vm);
     }
 
-    // If -m/--dump-expanded (or -G/--emit-generated) is set, output
+    // If -m/--dump-expanded (or -c=generated) is set, output
     // macro-expanded/serialized source and exit.
     if (dump_expanded_only) {
+        // -c=generated defaults its output file the same way -c=native/
+        // -c=bytecode do (a.out/a.c4), unlike plain -m which still falls
+        // back to stdout when -o is omitted (#936).
+        if (compile_format == COMPILE_GENERATED && !out_file)
+            out_file = strdup("a.gen.c");
         FILE *f = out_file ? fopen(out_file, "w") : stdout;
         if (!f) {
             fprintf(stderr, "error: failed to open output file %s\n", out_file);
@@ -2610,10 +2645,13 @@ int main(int argc, const char *argv[]) {
         // attributes these flags gate are already unconditionally stripped
         // from serialized output (#482/#488 ABI transparency), so the flag
         // is genuinely a no-op here, not a conflict.
-        vm.flags = warn_ignored_vm_flags(vm.flags, emit_generated_only ? "-G" : "-m");
+        vm.flags = warn_ignored_vm_flags(vm.flags, emit_generated_only ? "-c=generated" : "-m");
         cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
-        if (f != stdout)
+        if (f != stdout) {
             fclose(f);
+            if (compile_format == COMPILE_GENERATED)
+                fprintf(stderr, "Generated C written to %s\n", out_file);
+        }
         goto BAIL;
     }
 

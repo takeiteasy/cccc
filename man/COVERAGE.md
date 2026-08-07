@@ -990,7 +990,7 @@ an-expression-but-not-across-assignment semantics and why this exists
 (`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
 array): [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 
-Enforcement is VM-only: `-c=native`/`-m`/`-G` warn and drop
+Enforcement is VM-only: `-c=native`/`-m`/`-c=generated` warn and drop
 `--checked-pointers` rather than enforcing it, but the six attributes are
 always parsed, type-checked, and stripped from that output regardless (ABI-
 transparent, #482/#488) — see [SAFETY.md § Checked
@@ -1059,8 +1059,8 @@ CCCC-specific attributes also accept double-underscore keyword aliases:
 remain ordinary identifiers.
 
 Generated and preprocessed output never includes CCCC-specific syntax by
-default. `-E`, `-M`, `-G`, `-m`, and `-c=native` strip CCCC-only attributes
-and route markers before emitting C for another compiler. Use
+default. `-E`, `-m`, `-c=generated`, and `-c=native` strip CCCC-only
+attributes and route markers before emitting C for another compiler. Use
 `--attr-target=auto|c23|gnu|msvc|strip` to select how remaining attributes
 are printed. `auto` emits standard C23 attributes as `[[...]]` in C23 mode
 and uses GNU `__attribute__((...))` otherwise; GNU-only attributes such as

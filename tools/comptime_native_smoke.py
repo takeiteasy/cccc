@@ -3,7 +3,7 @@
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
-unit only runs under `-m`/`-G`/`-c=native`. Despite the module name (kept
+unit only runs under `-m`/`-c=generated`/`-c=native`. Despite the module name (kept
 for history: it started as a comptime-specific regression test), this
 script now covers native-backend serializer bugs in general -- anything a
 VM-only test structurally cannot catch -- in the same spirit as
@@ -118,7 +118,7 @@ Cases:
   23. #925/#926 regression guard: `-m` output for the tickets' own repro,
       `tests/suites/test_suite_arrays.c`, contains neither a raw `.L..`
       name nor an `unsupported expr` placeholder.
-  24. #928 regression: `-G` output for a comptime macro that builds
+  24. #928 regression: `-c=generated` output for a comptime macro that builds
       file-scope anon globals via `CompoundLiteral`/`InitArray`/
       `InitStruct` (`reflect_new_anon_gvar()`'s other two call sites,
       besides `MakeStringLiteral` which #925 already covered) contains no
@@ -706,34 +706,36 @@ GVAR_BUILDERS_G_PROGRAM = (
 
 
 def case_gvar_builders_generated_output(cccc: Path, tmp: str) -> bool:
-    print("  24: -G output for file-scope CompoundLiteral/InitArray/InitStruct anon globals is valid, compilable C (#928)")
+    print("  24: -c=generated output for file-scope CompoundLiteral/InitArray/InitStruct anon globals is valid, compilable C (#928)")
     src = Path(tmp) / "gvar_builders_928.c"
     write(src, GVAR_BUILDERS_G_PROGRAM)
-    result = run([str(cccc), "-G", src.name], cwd=tmp)
-    out = result.stdout
-    # Same vacuous-pass trap as cases 22/23: a crashed/erroring -G invocation
-    # must not silently satisfy the "does not contain X" checks below.
+    result = run([str(cccc), "-c=generated", src.name], cwd=tmp)
+    gen = Path(tmp) / "a.gen.c"
+    # Same vacuous-pass trap as cases 22/23: a crashed/erroring -c=generated
+    # invocation must not silently satisfy the "does not contain X" checks
+    # below.
+    out = gen.read_text() if result.returncode == 0 and gen.exists() else ""
     if result.returncode != 0 or "gvar_cl_x" not in out:
-        print(f"    FAIL: -G exited {result.returncode} or produced unrecognisable output\n    {result.stderr}\n    {out}")
+        print(f"    FAIL: -c=generated exited {result.returncode} or produced unrecognisable output\n    {result.stderr}\n    {out}")
         return False
     if ".L.." in out:
-        print(f"    FAIL: -G output still contains a raw '.L..' synthesized name\n    {out}")
+        print(f"    FAIL: -c=generated output still contains a raw '.L..' synthesized name\n    {out}")
         return False
     if not re.search(r"static struct FPt __cccc_\w+;", out):
-        print(f"    FAIL: -G output missing a forward-declared static struct definition\n    {out}")
+        print(f"    FAIL: -c=generated output missing a forward-declared static struct definition\n    {out}")
         return False
     if not re.search(r"static int __cccc_\w+\[3\];", out):
-        print(f"    FAIL: -G output missing a forward-declared static array definition\n    {out}")
+        print(f"    FAIL: -c=generated output missing a forward-declared static array definition\n    {out}")
         return False
     # The only real proof the output is valid C: hand it to the host
     # compiler directly (#928's array-cast bug -- `(int [3])` instead of
-    # `(int *)` -- compiled as -m/-G text just fine; only a real `cc -c`
-    # rejects it).
+    # `(int *)` -- compiled as -m/-c=generated text just fine; only a real
+    # `cc -c` rejects it).
     obj = Path(tmp) / "gvar_builders_928.o"
     cc_result = subprocess.run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
                                 input=out, capture_output=True, text=True, cwd=tmp)
     if cc_result.returncode != 0:
-        print(f"    FAIL: host cc rejected the -G output\n    {cc_result.stderr}\n    {out}")
+        print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
         return False
     print("    ok")
     return True
@@ -970,6 +972,75 @@ def case_test_run_bytecode_no_global_contamination(cccc: Path, tmp: str) -> bool
     return True
 
 
+def case_c_generated_defaults_and_aliases(cccc: Path, tmp: str) -> bool:
+    print("  34: -c=generated with no -o writes ./a.gen.c; -cgen/-cg/--compile=generated "
+          "alias to the same target; -G is now rejected (#936)")
+    src = Path(tmp) / "c_generated_936.c"
+    # -c=generated only serializes macro-generated content (generated_only=true
+    # in cc_serialize_program) plus auto-captured directives, not ordinary
+    # functions -- a plain `int main(){}` alone would produce near-empty
+    # output, so this needs an actual [[cccc::comptime]] generator.
+    write(src, "[[cccc::comptime]]\n"
+               "void gen(void) {\n"
+               "    Obj *fn = MakeFunction(\"c_generated_936_answer\", GetType(\"int\"));\n"
+               "    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));\n"
+               "    PublishNode(fn);\n"
+               "}\n"
+               "gen();\n"
+               "int main(void) { return c_generated_936_answer(); }\n")
+
+    # Default filename, no -o.
+    a_gen_c = Path(tmp) / "a.gen.c"
+    if a_gen_c.exists():
+        a_gen_c.unlink()
+    result = run([str(cccc), "-c=generated", src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    if not a_gen_c.exists():
+        print(f"    FAIL: ./a.gen.c was not written\n    {result.stderr}")
+        return False
+    baseline = a_gen_c.read_text()
+    if "c_generated_936_answer" not in baseline:
+        print(f"    FAIL: a.gen.c missing expected content\n    {baseline}")
+        return False
+
+    # Aliases must produce byte-identical output to the canonical spelling.
+    for alias_args, label in (
+        (["-cgen"], "-cgen"),
+        (["-cg"], "-cg"),
+        (["--compile=generated"], "--compile=generated"),
+    ):
+        out = Path(tmp) / f"alias_{label.strip('-=')}.c"
+        r = run([str(cccc), *alias_args, "-o", out.name, src.name], cwd=tmp)
+        if r.returncode != 0:
+            print(f"    FAIL: {label} exited {r.returncode}\n    {r.stderr}")
+            return False
+        if out.read_text() != baseline:
+            print(f"    FAIL: {label} output differs from -c=generated's")
+            return False
+
+    # -G is no longer a recognized option.
+    g_result = run([str(cccc), "-G", src.name], cwd=tmp)
+    if g_result.returncode == 0:
+        print(f"    FAIL: -G was accepted; it should have been removed by #936")
+        return False
+
+    # --emit-only and --attr-target still apply under -c=generated (accepted,
+    # no error) -- test_emit_only_suppresses_auto_capture.c and
+    # test_attr_target_msvc.c cover their precise effects elsewhere.
+    et_out = Path(tmp) / "attr_target.c"
+    et_result = run([str(cccc), "-c=generated", "--attr-target=gnu",
+                      "--emit-only", "-o", et_out.name, src.name], cwd=tmp)
+    if et_result.returncode != 0:
+        print(f"    FAIL: -c=generated --attr-target=gnu --emit-only exited "
+              f"{et_result.returncode}\n    {et_result.stderr}")
+        return False
+
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -1015,6 +1086,7 @@ def main() -> int:
             case_test_run_oob_write_refused,
             case_test_run_basic_level_compiles,
             case_test_run_bytecode_no_global_contamination,
+            case_c_generated_defaults_and_aliases,
         ]
         results = [case(cccc, tmp) for case in cases]
 

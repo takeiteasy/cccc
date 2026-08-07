@@ -5,6 +5,55 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-07
+
+### Changed
+
+- **`-G`/`--emit-generated` folded into `-c=generated`** — "serialize the
+  runtime TU + macro-generated objects to C" is now a third `-c=FMT` target
+  alongside `native` and `bytecode` (aliases: `gen`, `g`), instead of a
+  standalone flag with its own `-o` semantics. `-G` is removed outright, no
+  deprecated alias. `-c=generated` follows the same default-filename
+  convention as the other two targets: `./a.gen.c` when `-o` is omitted
+  (previously `-G` fell back to stdout). `--emit-only` and `--attr-target`
+  are unchanged in name and semantics; they now apply to `-c=generated`
+  (#936)
+- **Bare `-c`/`--compile` now defaults to `native`** (was `bytecode`);
+  `-c=bytecode`/`bc`/`c4` is the explicit spelling for the old default. Both
+  `native` and `bytecode` now match `cc`/`clang`/`gcc`'s `a.out` convention:
+  no `-o` writes `./a.out`/`./a.c4` respectively (previously `bytecode` fell
+  back to stdout and `native` hard-errored without `-o`) (#932)
+
+### Added
+
+- **`--emit-cccc`** — preserves CCCC dialect syntax (`[[cccc::...]]`
+  attributes, cccc-only `#include`s, checked-pointer qualifiers) in
+  `-E`/`-m`/`-c=generated`/`-c=native` output instead of stripping it to
+  portable C. With `-c=native`, disables the `cc`/`clang`/`gcc` PATH search
+  in favor of an explicit `CCCC_NATIVE_CC` that understands the dialect
+  (#933)
+- **`--test-run[=LEVEL]`** — runs the program once under CCCC's VM safety
+  instrumentation (`max` by default, or `none`/`basic`/`standard`/`max` /
+  `0`/`1`/`2`/`3` like `--safety=`) and only proceeds to compile if that run
+  succeeds (no crash, VM-detected safety violation, or hang; exit code is
+  not checked). Implies `-c=native` when no `-c` is given. Runs in a forked
+  child so the smoke test's post-execution VM state never leaks into a
+  saved `-c=bytecode` artifact (#934)
+
+### Fixed
+
+- `usage()` (`src/main.c`) audit: dropped the long-dead `$publish`
+  reference; `--inline-limit`'s documented default corrected (20, not 256);
+  `-s`/`--std`'s documented default corrected (`gnu23`, not `gnu17`), added
+  the already-supported `c89`/`c90`/`gnu89`/`gnu90` spellings, and replaced
+  the stale "affects predefined macros only" note (`--std` now also gates
+  tokenizer/preprocessor features); three CLI error messages that named
+  `-M` (`--memory-leak-detection`) as an output mode instead of `-m`
+  (`--dump-expanded`) corrected; `--trap-fp-divzero` moved out of "FFI
+  Safety Options" (it has nothing to do with FFI) into "Optimization";
+  documented the previously-missing `--link`, `--url-cache-dir`/
+  `--url-cache-clear`, and `-I`/`-D`/`-U`'s long-form aliases
+
 ## [0.1.3] - 2026-08-07
 
 ### Changed

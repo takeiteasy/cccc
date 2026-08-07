@@ -949,7 +949,7 @@ typedef enum {
         same footing as `is_const`/`is_volatile`/`is_restrict` -- not a
         distinct `TypeKind`, so a checked pointer stays ABI-identical to a
         plain pointer (single machine word, unchanged struct layout,
-        unchanged `-E`/`-G` native output).
+        unchanged `-E`/`-c=generated` native output).
 */
 typedef enum {
     CHECKED_NONE = 0,    // plain, unchecked pointer (default)
@@ -2119,7 +2119,7 @@ typedef struct TypeNameRecord {
     Obj *owner_fn;
     bool is_tag;
     // #891: provenance, used by cc_serialize_program's !generated_only path
-    // (-c=native, -M without -G) to avoid re-emitting a definition the
+    // (-c=native, -m without -c=generated) to avoid re-emitting a definition the
     // consumer's own #include already provides -- e.g. `typedef void FILE;`
     // alongside an auto-captured `#include <stdio.h>` colliding with the
     // real system stdio.h's `struct __sFILE`. from_include is true when the
@@ -2303,7 +2303,7 @@ typedef enum {
 /*!
  @brief Attribute spelling used when CCCC emits generated C source.
  @details Controls how non-CCCC attributes are printed for frontend output
- modes such as -E, -m, -G, and native compilation.
+ modes such as -E, -m, -c=generated, and native compilation.
 */
 typedef enum {
     CCCC_ATTR_TARGET_AUTO,
@@ -2550,7 +2550,7 @@ typedef struct Compiler {
     char *url_cache_dir; // Directory for caching downloaded headers
     HashMap url_to_path; // Maps URLs to cached file paths
     StringArray emit_directives; // Preprocessor directives to prepend to serialized output
-    int emit_strict;             // --emit-only: suppress auto-capture; only explicitly tagged content appears in -G output
+    int emit_strict;             // --emit-only: suppress auto-capture; only explicitly tagged content appears in -c=generated output
     StringArray comptime_pending_includes; // #include [[cccc::comptime]] filenames queued for comptime pass
     StringArray pragma_link_libs; // Library names queued by #pragma cccc link(...) /
                                    // #pragma comment(lib, ...) (#357), merged into
@@ -2814,7 +2814,7 @@ typedef struct Compiler {
     CStdVersion c_std;  // Selected standard version (default: CCCC_STD_C23)
     bool c_std_gnu;     // True for gnuXX variants (gnu17, gnu11, …)
     CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
-    bool emit_cccc; // --emit-cccc: preserve CCCC dialect syntax in -E/-G/-m/-c=native output
+    bool emit_cccc; // --emit-cccc: preserve CCCC dialect syntax in -E/-m/-c=generated/-c=native output
 
     // Custom entry point name (NULL means "main")
     char *entry_name;
@@ -3593,14 +3593,14 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog);
 
 /*!
  @brief Serialize a program AST back to C source code.
- @details Used with -m/--dump-expanded and -G flags to output
+ @details Used with -m/--dump-expanded and -c=generated to output
              macro-expanded source that can be compiled with gcc or other
              C compilers.
  @param f Output file stream.
  @param vm The CCCC instance.
  @param prog Program AST to serialize.
  @param generated_only If true, only serialize objects created by pragma macros
-                       (those with is_macro_generated set). Used with -G flag.
+                       (those with is_macro_generated set). Used with -c=generated.
 */
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only);
 

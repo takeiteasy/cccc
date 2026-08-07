@@ -432,7 +432,7 @@ only reject a negative offset there. `CHKR` (#770/#482-484) closes this: its
 unlike every other opcode in this table. See
 [SAFETY.md](SAFETY.md#checked-pointers) for the full attribute/lowering
 reference. Like every opcode in this table, `CHKR` has no equivalent in
-`-c=native`/`-m`/`-G` output — VM-only by design (#924); those modes warn
+`-c=native`/`-m`/`-c=generated` output — VM-only by design (#924); those modes warn
 and ignore `--checked-pointers` rather than emitting an inline check.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
@@ -622,7 +622,7 @@ and goes through the same `find_requested_library` / `cc_dlopen` /
 `register_dynamic_externs` path as `-l`, so the requested libraries are also
 passed to the system linker when compiling with `-c=native`.
 
-When using `-E` (preprocessed output) or `-G` (serialized C output), any
+When using `-E` (preprocessed output) or `-c=generated` (serialized C output), any
 queued libraries are re-emitted at the top of the output as
 `#pragma comment(lib, "name")` — the most portable spelling — so downstream
 compilers can honour them.

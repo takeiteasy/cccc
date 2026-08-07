@@ -22,24 +22,24 @@ Usage: ./build/cccc [options] file...
 Options:
 	-h/--help                Show this message
 	   --version             Print version, git describe, host triple, and enabled features
-	-I <path>                Add <path> to include search paths
+	-I/--include <path>      Add <path> to include search paths
 	-i/--isystem <path>      Add <path> to system include paths (for non-standard headers)
 	   --use-system-headers  Prefer SDK headers over CCCC polyfills for non-owned standard headers
 	   --no-builtin-includes Do not fall back to CCCC's own bundled headers for non-owned standard headers (requires --use-system-headers)
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
-	-D <macro>[=def]         Define a macro
-	-U <macro>               Undefine a macro
+	   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) built with -c=bytecode
+	-D/--define <macro>[=def] Define a macro
+	-U/--undef <macro>       Undefine a macro
 	-a/--ast                 Dump AST
 	-p/--print-tokens        Print preprocessed tokens to stdout
 	-E/--preprocess          Output preprocessed source code (traditional C -E)
 	-m/--dump-expanded       Output macro-expanded source code (for gcc compatibility)
-	-G/--emit-generated      Serialize runtime TU + macro-generated objects to C
-	   --emit-only           With -G: only emit explicitly tagged content ([[cccc::emit]], $publish)
+	   --emit-only           With -c=generated: only emit explicitly tagged content ([[cccc::emit]])
 	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
 	   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, checked-pointer
-	                         qualifiers, cccc-only #includes) in -E/-G/-m/-c=native output
+	                         qualifiers, cccc-only #includes) in -E/-m/-c=native/-c=generated output
 	                         instead of stripping it to portable C. With -c=native, the usual
 	                         cc/clang/gcc PATH search is disabled -- CCCC_NATIVE_CC must name a
 	                         compiler that understands the dialect explicitly
@@ -47,12 +47,16 @@ Options:
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
 	-S/--no-stdlib           Do not link standard library
-	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), bytecode
+	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), bytecode, generated
 	                         native: build a native executable via CCCC_NATIVE_CC
 	                                 (cc, clang, or gcc); writes to -o file, or ./a.out
 	                                 if -o omitted
 	                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted
-	                         Use -cbytecode or --compile=bytecode (short form must be
+	                         generated: serialize the runtime TU + macro-generated
+	                                    objects to C; writes to -o file, or ./a.gen.c
+	                                    if -o omitted
+	                         Aliases: bytecode=bc=c4, native=n, generated=gen=g. Use
+	                         -cbytecode or --compile=bytecode (short form must be
 	                         attached; long form may use '=' or separate arg).
 	   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL
 	                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)
@@ -62,7 +66,8 @@ Options:
 	                         checked. Implies -c=native when no -c is given; an
 	                         explicit -c=FMT still picks the format
 	-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.
-	                         For -c=bytecode, defaults to ./a.c4 if omitted.
+	                         For -c=bytecode, defaults to ./a.c4 if omitted. For
+	                         -c=generated, defaults to ./a.gen.c if omitted.
 	-d/--disassemble         Disassemble bytecode to stdout
 	-v/--verbose             Enable debug logging
 	-g/--debug               Enable interactive debugger
@@ -162,14 +167,14 @@ FFI Safety Options:
 	   --ffi-deny=list        Deny comma-separated native function names
 	-F/--disable-ffi          Block all registered and dynamic native calls
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
-	   --trap-fp-divzero      Abort on float division by zero instead of IEEE +-Inf/NaN
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 
 Language Standard:
-	-s/--std=<std>       Select C language standard (default: gnu17)
-	                     Supported: c99, c11, c17/c18, c23/c2x
-	                     GNU variants: gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x
-	                     Note: -s/--std currently affects predefined macros only
+	-s/--std=<std>       Select C language standard (default: gnu23)
+	                     Supported: c89/c90, c99, c11, c17/c18, c23/c2x
+	                     GNU variants: gnu89/gnu90, gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x
+	                     Gates predefined macros, tokenizer syntax (e.g. C23 attributes/
+	                     digit separators), and preprocessor features per standard
 
 Preprocessor Options:
 	   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
@@ -199,14 +204,17 @@ Optimization:
 	-fno-<pass>                  Disable a pass even if enabled by -O.
 	                             Passes: fold, peephole, copy-prop, dce, cse, fuse, elim-ext
 	                             Examples: -O3 -fno-cse, -O0 -fpeephole, -ffold -fdce
+	                             Long-form aliases also accepted: --ffold, --fpeephole, --fcopy-prop,
+	                             --fdce, --fcse, --ffuse, --felim-ext, and their --fno-* counterparts
 	--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)
+	--trap-fp-divzero            Abort on float division by zero instead of IEEE +-Inf/NaN
 	--posix-emulation            Enable lossy/approximate emulation of POSIX functions the
 	                             host doesn't natively support (e.g. ppoll() on macOS). Off
 	                             by default: such functions are undeclared/unregistered,
 	                             matching a native compiler on the same host. Also restores
 	                             raw ioctl() passthrough for request codes outside the
 	                             layout-verified allowlist (off by default there too). VM-only.
-	--inline-limit=N             Limit inlining to N AST nodes (default: 256)
+	--inline-limit=N             Limit inlining to N AST nodes (default: 20, 0=disable)
 
 Static Bytecode Analysis (compile or load input, walk text segment, exit):
 	--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)
@@ -262,7 +270,7 @@ Example:
 - **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [COVERAGE.md](man/COVERAGE.md))
   - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `macro`/`comptime`/`test`
   - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
-  - `-E`/`-G`/`-m`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
+  - `-E`/`-m`/`-c=generated`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
 - **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [TOOLING.md](man/TOOLING.md))
   - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
 - **JSON reflection output** — dump all function, struct, union, enum, and global definitions

@@ -397,7 +397,7 @@ stdlib: $(EXE_OUT)
 	@set -e; \
 	tmp=$$(mktemp src/std.c.tmp.XXXXXX); \
 	trap 'rm -f "$$tmp"' EXIT; \
-	./$(EXE_OUT) -G -I./include $(STD_TEMPLATE) > "$$tmp"; \
+	./$(EXE_OUT) -c=generated -o "$$tmp" -I./include $(STD_TEMPLATE); \
 	if cmp -s "$$tmp" src/std.c; then \
 		rm -f "$$tmp"; \
 	else \
