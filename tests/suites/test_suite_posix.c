@@ -20,7 +20,7 @@
 //   test_sysv_linux_info, test_wordexp_basic, test_wordexp_header,
 //   test_fts_walk, test_fts_set_skip, test_sigevent_layout,
 //   test_aio_sigev_thread, test_aio_sigev_signal,
-//   test_aio_write_read_roundtrip, test_aio_fsync,
+//   test_aio_write_read_roundtrip, test_aio_fsync, test_aio_fsync_sigev_thread,
 //   test_aio_cancel, test_aio_slot_exhaustion (macOS only),
 //   test_lio_listio_wait, test_mqueue_roundtrip,
 //   test_mqueue_sigev_thread, test_ndbm_roundtrip
@@ -3220,6 +3220,85 @@ int test_aio_fsync(void) {
 
     close(fd);
     unlink(tmpl);
+    return 42;
+}
+
+static volatile int g_aio_fsync_sigev_notified = 0;
+static volatile long long g_aio_fsync_sigev_val = -1;
+
+static void aio_fsync_sigev_notify_fn(union sigval sv) {
+    g_aio_fsync_sigev_notified = 1;
+    g_aio_fsync_sigev_val = sv.sival_int;
+}
+
+// test_aio_fsync_sigev_thread (#931 follow-up) -- sigevent_prepare() (see
+// src/stdlib/posix.c) is exercised for aio_read/aio_write/lio_listio by the
+// tests above but was untested on the aio_fsync() path specifically. Same
+// deferred-delivery mechanism as test_aio_sigev_thread: the guest
+// sigev_notify_function runs from the VM dispatch loop's safe point once the
+// host's real notification thread fires the async-safe trampoline, not
+// concurrently on that host thread. Writes the file with SIGEV_NONE first
+// (not itself under test here), then submits aio_fsync() with SIGEV_THREAD.
+// Like test_aio_sigev_thread, a persistent EAGAIN after retries is treated
+// as a host limitation (some hosts reject SIGEV_THREAD outright) rather than
+// a failure, since there is nothing left to verify at that point.
+[[cccc::test(return = 42, timeout = 10000)]]
+int test_aio_fsync_sigev_thread(void) {
+    char tmpl[] = "/tmp/cccc_aio_fsync_sigev_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return 1;
+
+    const char *msg = "fsync-sigev-thread";
+    struct aiocb wcb;
+    memset(&wcb, 0, sizeof(wcb));
+    wcb.aio_fildes = fd;
+    wcb.aio_buf = (void *)msg;
+    wcb.aio_nbytes = strlen(msg);
+    wcb.aio_offset = 0;
+    wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
+
+    if (aio_write_retry(&wcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
+    const struct aiocb *wlist[1] = { &wcb };
+    if (aio_suspend(wlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 3; }
+    if (aio_error(&wcb) != 0) { close(fd); unlink(tmpl); return 4; }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 5; }
+
+    g_aio_fsync_sigev_notified = 0;
+    g_aio_fsync_sigev_val = -1;
+
+    struct aiocb fcb;
+    memset(&fcb, 0, sizeof(fcb));
+    fcb.aio_fildes = fd;
+    fcb.aio_sigevent.sigev_notify = SIGEV_THREAD;
+    fcb.aio_sigevent.sigev_notify_function = aio_fsync_sigev_notify_fn;
+    fcb.aio_sigevent.sigev_notify_attributes = NULL;
+    fcb.aio_sigevent.sigev_value.sival_int = 5353;
+
+    if (aio_fsync_retry(O_SYNC, &fcb) != 0) {
+        int saved_errno = errno;
+        close(fd);
+        unlink(tmpl);
+        return (saved_errno == EAGAIN) ? 42 : 6; /* host limitation, not ours */
+    }
+
+    /* #877 regression: tight bytecode busy-spin, not usleep() -- see
+       busy_spin_wait_checked's comment near test_aio_sigev_thread. */
+    int reg_intact = busy_spin_wait_checked(&g_aio_fsync_sigev_notified, 2000000);
+
+    /* #929: reap so this request's aio slot is released rather than held
+       for the rest of the process's life (SIGEV_THREAD's own notification
+       already told us it completed; aio_suspend returns immediately). */
+    const struct aiocb *flist[1] = { &fcb };
+    aio_suspend(flist, 1, NULL);
+    (void)aio_error(&fcb);
+    (void)aio_return(&fcb);
+
+    close(fd);
+    unlink(tmpl);
+
+    if (!g_aio_fsync_sigev_notified) return 7;
+    if (g_aio_fsync_sigev_val != 5353) return 8;
+    if (!reg_intact) return 9; // async delivery corrupted a live register (#877)
     return 42;
 }
 

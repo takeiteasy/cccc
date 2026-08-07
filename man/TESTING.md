@@ -615,8 +615,8 @@ contention source.
 
 `tests/suites/test_suite_posix.c`'s `<aio.h>` tests
 (`test_aio_sigev_thread`, `test_aio_sigev_signal`,
-`test_aio_write_read_roundtrip`, `test_aio_fsync`, `test_aio_cancel`,
-`test_lio_listio_wait`)
+`test_aio_write_read_roundtrip`, `test_aio_fsync`, `test_aio_fsync_sigev_thread`,
+`test_aio_cancel`, `test_lio_listio_wait`)
 failed on GitHub's hosted macOS runners the first time this file's aio
 coverage ran there — a release-time-only job, since macOS isn't in the
 regular CI matrix (see [RELEASING.md](RELEASING.md)). Root cause, confirmed
