@@ -796,25 +796,98 @@ evaluating `f()` more than once. Two restrictions specific to member bounds:
 `[[cccc::single]]` and `bounds(unknown)` on a member work exactly as they do
 on a variable, with no member-specific restriction.
 
-**Bounds do not propagate through assignment or interior pointers across a
-variable boundary.** This is the load-bearing simplification that keeps v1
-tractable without a dataflow engine: a checked pointer's bounds are
-per-declaration, recomputed from the declaration at each access, never
-carried at runtime (a checked pointer stays a single machine word — no fat
-pointer, no ABI change). Concretely:
-
 - `(p + k)[i]` checks against `p`'s own declared bounds — arithmetic
   *within a single expression* still resolves back to the declared pointer.
-- `q = p + k; q[i]` checks against `q`'s **own** declared bounds, not `p`'s —
-  once the value is stored into a different variable, that variable's own
-  declaration (or lack of one) governs. This is the same trust model as
-  Checked C's `_Assume_bounds_cast`; real dataflow-based propagation is a
-  follow-up.
 - For `count(n)`/`byte_count(n)` (but not `bounds(lo, hi)`, which is already
   absolute), the *lower* bound at each access is the pointer's own live
   value at that point in the program — so reassigning `p` itself (not a
   different variable) and then accessing through it uses the new value, both
   as the base address and as the lower bound.
+
+**Bounds propagation across assignment** (#919). `q = p + k;` on its own
+still checks against `q`'s own declared bounds, not `p`'s — a plain
+unchecked `q` has none, so by itself this would mean no check at all. But
+when `q`'s *declaration* is one specific, statically-provable-safe shape, its
+bounds are propagated: `q[i]` is checked against a **snapshot** of `p`'s own
+absolute `[lo, hi)` range, taken at the moment of assignment — not against
+`p`'s live declaration re-evaluated at the access (the way a direct access
+through `p` itself works). This is deliberately a *simpler*, cheaper
+guarantee than real dataflow analysis: no kill-set tracking over `p` or the
+variables its bounds formula references, because the range is captured as
+two absolute addresses (in a pair of compiler-generated hidden locals) the
+instant the assignment runs, and later mutation of `p`/`n` is irrelevant to
+an already-taken snapshot.
+
+A local `q` propagates iff **all** of:
+
+- `q` is declared with an initializer, and that initializer is
+  *checked-rooted* — its own address expression resolves (through
+  `+`/`-`/casts) to a declared checked pointer variable or a #921 member
+  access with an enforceable bounds form (`bounds(unknown)` and a bare
+  `[[cccc::array]]` with no bounds form at all don't count: there is nothing
+  to snapshot);
+- **every** assignment to `q` anywhere in the function is also
+  checked-rooted (a single non-checked-rooted store, anywhere, disqualifies
+  `q` for the whole function — no per-path/per-branch tracking);
+- `q` is never address-taken, except through the hidden temporary
+  `to_assign()` builds for `q += k`/`q++`/`q--`, which never escapes.
+
+Because every qualifying store also refreshes the snapshot, this holds under
+arbitrary control flow (`if`/`while`/`for`/`switch`/`goto`) with no
+dataflow/join analysis at all — there is nothing to merge at a branch, since
+whichever assignment actually ran is the one whose snapshot is live.
+Concretely:
+
+```c
+int * [[cccc::array, cccc::count(n)]] p = ...;
+int *q = p + 2;   // propagates: snapshot taken here, [p, p + n*4)
+q[i];             // checked against the snapshot
+q++; q[0];        // still checked -- q++ doesn't re-assign q's snapshot,
+                  // and doesn't need to: the range is absolute, not
+                  // relative to q's current value
+q = p + 5;        // re-snapshots -- a later access uses the NEW range
+
+int *r;    // no initializer at all -- r never becomes a candidate
+r = p;     // r[i] is never checked
+
+int *s = malloc(...);
+s = p;     // s's OWN initializer wasn't checked-rooted -- s never
+           // propagates, even though this later assignment is
+```
+
+A #921 member is a valid propagation *source* too, so the two features
+compose: `int *q = obj.p;` propagates from `obj.p`'s own member bounds.
+
+Residual gaps, deliberately out of scope for this pass and left as
+follow-up work rather than a fixpoint/dataflow rewrite:
+
+- **Propagation does not chain.** A local that is itself only propagated
+  (never itself declared checked) can never be a valid source for a
+  *further* candidate: `int *r = q + 1;` does not propagate from `q`, even
+  if `q` itself propagates from a real checked pointer.
+- **No path-sensitive joins.** The whole-function rule above is
+  straight-line: *every* assignment to `q` anywhere in the function must be
+  checked-rooted, or `q` never propagates at all — there is no notion of
+  "propagates on some paths, not others" (`q = malloc(...); if (c) q = p;`
+  never propagates, even on the path where `q` does hold `p`'s value).
+- **`CHKNT` does not propagate** — see the terminator-invariant gap list
+  below.
+- **No assignment-time bounds-implication check.** This pass only ever
+  *widens* trust (an unchecked `q` borrows a checked source's bounds); it
+  never *narrows* it — assigning into a `q` that is itself declared checked
+  does not verify the source's bounds imply `q`'s own declared bounds
+  (Checked C's `_Assume_bounds_cast` direction). `q` keeps its own declared
+  bounds in that case, unaffected by propagation either way.
+
+Gated on `--checked-pointers` at **parse time**, unlike the rest of the
+checked-pointer machinery (which populates its fields unconditionally and
+gates only `CHKR`'s *emission* at codegen) — the snapshot temps cost real
+stack slots and stores per propagating assignment, only worth paying when
+something might enforce them. This has no pragma-ordering caveat: `#pragma
+cccc config(checked_pointers = true)` is resolved during preprocessing, a
+pass that runs to completion for the whole file before parsing begins, so
+the flag is already set by the time any declaration is parsed regardless of
+where in the file the pragma appears.
 
 **Runtime enforcement is opt-in, off by default**: `--checked-pointers` /
 `#pragma cccc config(checked_pointers = true)`. Not part of any
@@ -892,8 +965,13 @@ Known coverage gaps, left as follow-up work rather than built into this pass:
   them — an existing asymmetry this ticket didn't introduce.
 - **Non-integer/non-pointer pointees are skipped** (a `float`-typed
   `ntarray` has no meaningful "null terminator").
-- **Bounds are not narrowed/re-checked on assignment** — tracked separately
-  as bounds-propagation work, not a terminator-invariant gap.
+- **`CHKNT` does not propagate across assignment.** #919 added `CHKR` bounds
+  propagation (see "Bounds propagation across assignment" above), but
+  `Node.checked_nt_terminator` is deliberately left false for a propagated
+  deref — `q[n] = 'x'` through a propagated `q` snapshotted from an
+  `ntarray` source is an ordinary in-range `CHKR`-checked write, not a
+  `CHKNT`-guarded one, even though the direct-access equivalent through the
+  source itself would trap.
 
 ## VM Heap Allocator
 

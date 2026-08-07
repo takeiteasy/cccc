@@ -637,3 +637,229 @@ void test_member_bounds_unknown_no_check(void) {
     AssertEq(s.p[0], 1);
     AssertEq(s.p[2], 3);
 }
+
+// ---------------------------------------------------------------------
+// #919 -- bounds propagation across assignment. `q = p + k;` (or a plain
+// `q = p;`) checks against a SNAPSHOT of `p`'s own absolute bounds taken at
+// the assignment, not `q`'s own (nonexistent) declared bounds -- see
+// propagate_checked_bounds() in src/parse.c and man/SAFETY.md's "Bounds
+// propagation across assignment" section for the whole-function
+// "propagatable" rule this implements: a local `q` propagates iff it is
+// unchecked, its declaration itself has a checked-rooted initializer, and
+// EVERY assignment to it in the function is also checked-rooted (no
+// dataflow/join analysis -- straight-line rule, sound under arbitrary
+// control flow because the snapshot is refreshed at every qualifying
+// store). This is layered on top of, and composes with, #921's member
+// bounds: a member is a valid propagation source too.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_prop_interior_assignment_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;
+    AssertEq(q[0], 1);
+    AssertEq(q[3], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_interior_assignment_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;
+    volatile int i = 4;
+    int x = q[i];
+    (void)x;
+}
+
+// q++/q += k preserve the propagated fact: the snapshot is an absolute
+// [lo, hi) range, independent of q's current value, so walking q forward
+// with plain pointer arithmetic (not a fresh assignment) still checks
+// against the same range.
+[[cccc::test]]
+void test_prop_increment_preserves_fact_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q = p;
+    int total = 0;
+    for (int i = 0; i < 4; i++) {
+        total += *q;
+        q++;
+    }
+    AssertEq(total, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_increment_preserves_fact_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q = p;
+    for (int i = 0; i < 4; i++)
+        q++;
+    int x = *q; // one past the end -- must still trap after 4 plain q++'s
+    (void)x;
+}
+
+// A cast doesn't lose the propagated fact; checked_access_size comes from
+// the ACCESS site's own type (char, here), not the source's (int).
+[[cccc::test]]
+void test_prop_cast_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    char *q = (char *)p;
+    AssertEq(q[0], 1); // little/big-endian-agnostic: byte 0 of int 1 on any
+                        // platform this test matrix runs on is non-zero iff
+                        // the low byte is; just check it doesn't trap here.
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_cast_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    char *q = (char *)p;
+    volatile int i = 4 * (int)sizeof(int);
+    char x = q[i]; // one byte past the declared count(n)*sizeof(int) range
+    (void)x;
+}
+
+// Propagation from a bounds(lo, hi) source.
+[[cccc::test]]
+void test_prop_from_bounds_range_in_bounds(void) {
+    int arr[4] = {1, 2, 3, 4};
+    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
+    int *q = p;
+    AssertEq(q[3], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_from_bounds_range_oob(void) {
+    int arr[4] = {1, 2, 3, 4};
+    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
+    int *q = p;
+    volatile int i = 4;
+    int x = q[i];
+    (void)x;
+}
+
+// Propagation from a byte_count() source.
+[[cccc::test]]
+void test_prop_from_byte_count_in_bounds(void) {
+    int nbytes = 4 * (int)sizeof(int);
+    char * [[cccc::array, cccc::byte_count(nbytes)]] p =
+        (char *)(int[4]){1, 2, 3, 4};
+    char *q = p;
+    AssertEq(q[0], 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_from_byte_count_oob(void) {
+    int nbytes = 4 * (int)sizeof(int);
+    char * [[cccc::array, cccc::byte_count(nbytes)]] p =
+        (char *)(int[4]){1, 2, 3, 4};
+    char *q = p;
+    volatile int i = nbytes;
+    char x = q[i];
+    (void)x;
+}
+
+// Propagation from a #921 struct-member source -- the two features compose.
+struct prop_member_s {
+    int n;
+    int * [[cccc::array, cccc::count(n)]] p;
+};
+
+[[cccc::test]]
+void test_prop_from_member_source_in_bounds(void) {
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    int *q = s.p;
+    AssertEq(q[3], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_from_member_source_oob(void) {
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    int *q = s.p;
+    volatile int i = 4;
+    int x = q[i];
+    (void)x;
+}
+
+// Reassignment mid-function re-snapshots: a later access uses the NEW
+// range, not the one captured at declaration.
+[[cccc::test]]
+void test_prop_reassignment_uses_new_range_in_bounds(void) {
+    int n1 = 2, n2 = 4;
+    int * [[cccc::array, cccc::count(n1)]] p1 = (int[2]){1, 2};
+    int * [[cccc::array, cccc::count(n2)]] p2 = (int[4]){9, 8, 7, 6};
+    int *q = p1;
+    q = p2 + 1; // re-snapshot: now [p2+1, p2+4)
+    AssertEq(q[2], 6); // p2[3], last valid element through the new range
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_reassignment_uses_new_range_oob(void) {
+    int n1 = 2, n2 = 4;
+    int * [[cccc::array, cccc::count(n1)]] p1 = (int[2]){1, 2};
+    int * [[cccc::array, cccc::count(n2)]] p2 = (int[4]){9, 8, 7, 6};
+    int *q = p1;
+    q = p2 + 1;
+    volatile int i = 3; // p2[4] -- one past the re-snapshotted range
+    int x = q[i];
+    (void)x;
+}
+
+// Negative-coverage: proves no false positives. Paired in this same file
+// with the positive OOB-traps tests above for the same shape -- if
+// propagation were entirely dead, these three would also (wrongly) "pass",
+// so the positive traps are what actually prove the feature works.
+[[cccc::test]]
+void test_prop_no_init_not_propagated(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *r; // no checked-rooted initializer -- not a candidate
+    r = p;
+    volatile int i = 10; // past count(n), but r is never checked
+    int x = r[i];
+    (void)x;
+}
+
+[[cccc::test]]
+void test_prop_non_checked_rooted_reassign_not_propagated(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int local[4] = {0, 0, 0, 0};
+    int *q = local; // checked-rooted?  local is a plain array, not a
+                     // checked pointer -- NOT checked-rooted, so q is never
+                     // a candidate at all (poisoned right at its own
+                     // declaration, see checked_prop_poison_scan()).
+    q = p;
+    volatile int i = 10;
+    int x = q[i];
+    (void)x;
+}
+
+[[cccc::test]]
+void test_prop_address_taken_not_propagated(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int other[2] = {9, 9};
+    int *q = p;
+    int **pp = &q; // escapes -- poisons q
+    *pp = other;
+    volatile int i = 10;
+    int x = q[i];
+    (void)x;
+}
+
+// #923's CHKNT does not propagate (documented gap) -- a non-null write to
+// the widened terminator slot through a propagated ntarray pointer does not
+// trap, unlike the direct-access case (test_ntarray_terminator_nonnull_traps
+// above).
+[[cccc::test]]
+void test_prop_chknt_does_not_propagate(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q = s;
+    q[3] = 'x'; // would trap via CHKNT through `s` directly; not through `q`
+    AssertEq(q[3], 'x');
+}

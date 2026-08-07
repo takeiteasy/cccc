@@ -991,10 +991,11 @@ Runtime enforcement (the `CHKR` opcode, plus `CHKNT` guarding a non-null
 write into `ntarray`'s widened terminator slot, #923) is gated behind
 `--checked-pointers` / `#pragma cccc config(checked_pointers = true)` —
 opt-in, not part of any `-0`/`-1`/`-2`/`-3` preset. Full reference, including
-the bounds-carry-within-an-expression-but-not-across-assignment semantics and
-why this exists (`--bounds-checks`/`CHKB` has no upper bound at all for a
-stack or global array): [SAFETY.md § Checked
-Pointers](SAFETY.md#checked-pointers).
+the bounds-carry-within-an-expression semantics, the whole-function
+propagation rule that lets an interior pointer assigned into a plain local
+(`int *q = p + k;`) stay checked too (#919), and why this exists
+(`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
+array): [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 
 Enforcement is VM-only: `-c=native`/`-m`/`-c=generated` warn and drop
 `--checked-pointers` rather than enforcing it, but the six attributes are

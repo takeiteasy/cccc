@@ -7,6 +7,22 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Added
 
+- **Checked-pointer bounds propagation across assignment** — `int *q = p +
+  k;` now checks `q[i]` against a snapshot of `p`'s own absolute bounds
+  taken at the assignment, instead of `q` (an ordinary unchecked pointer)
+  getting no check at all. Sound under arbitrary control flow with no
+  dataflow/join analysis: a local propagates only if its declaration and
+  every subsequent assignment to it are checked-rooted, and `q++`/`q += k`
+  preserve the snapshot since it's an absolute range. Composes with
+  struct-member bounds below. See [SAFETY.md § Checked
+  Pointers](man/SAFETY.md#checked-pointers) (#919)
+- **Checked-pointer bounds on struct/union members** — a member's `count()`/
+  `byte_count()`/`bounds()` may now name a sibling member (`struct S { int
+  n; int * [[cccc::array, cccc::count(n)]] p; };`), resolved relative to
+  whichever instance is actually accessed (`s.p[i]`, `sp->p[i]`, `(&s)->p[i]`,
+  `(*sp).p[i]` all reach the same member-relative base). Previously a
+  compile error. See [SAFETY.md § Checked
+  Pointers](man/SAFETY.md#checked-pointers) (#921)
 - **`CHKNT`: null-terminator guard for `[[cccc::ntarray]]`** — under
   `--checked-pointers`, a store of a non-zero value into an `ntarray` +
   `count(n)` pointer's widened terminator slot now traps. The presence half

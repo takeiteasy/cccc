@@ -2751,6 +2751,279 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
                            &deref->checked_bounds_hi, &deref->checked_nt_terminator);
 }
 
+// #919: bounds propagation across assignment for an unchecked pointer local
+// whose value is snapshotted from a checked-rooted source. See the design
+// note at propagate_checked_bounds() below for the whole-function
+// "propagatable" rule this implements, and man/SAFETY.md's "Bounds
+// propagation across assignment" section for the user-facing writeup.
+//
+// True if `base` (the result of find_checked_base() on an assignment's rhs
+// or a deref's address) is a source a propagation candidate may snapshot
+// from: declared checked (variable or member, #921), side-effect-free if a
+// member, AND actually has an enforceable bounds form -- CB_NONE/CB_UNKNOWN
+// sources (a bare `[[cccc::array]]` with nothing declared, or the
+// bounds(unknown) trust escape hatch) are deliberately excluded here even
+// though they ARE "declared checked": propagating "no check" itself would
+// require every assignment along every path to agree on that, which this
+// per-assignment, no-fixpoint design can't guarantee, so such a source
+// poisons the candidate instead (conservative: no propagation, not a false
+// trap). Building `*out_lo`/`*out_hi` as a side effect is intentional --
+// the caller either discards them (the walk-1 usability probe) or keeps
+// them (the walk-2 rewrite); recomputing per call is cheap, compile-time-
+// only work.
+static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok,
+                                       Node **out_lo, Node **out_hi) {
+    *out_lo = NULL;
+    *out_hi = NULL;
+    CheckedBase base = find_checked_base(rhs);
+    if (!checked_base_is_declared(base))
+        return false;
+    if (base.mem && node_has_side_effects(base.obj))
+        return false;
+    Type *pty = base.var ? base.var->ty : base.mem->ty;
+    bool nt;
+    compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, &nt);
+    return *out_lo && *out_hi;
+}
+
+// Walk 1 of propagate_checked_bounds(): marks Obj.checked_prop_unsafe on
+// every registered candidate (Obj.checked_prop_init_assign != NULL) that
+// either receives a non-checked-rooted assignment anywhere in the function,
+// or has its address taken outside the to_assign() RMW desugar. Mirrors
+// objsize_poison_scan()'s shape and its host-stack-safety rationale
+// (iterate ->next, recurse everywhere else) but NOT its "exempt the
+// recorded init assignment" step: objsize's init_assign is inherently
+// trusted (it's the very alloc-family call establishing the tracked size),
+// whereas checked_prop_init_assign is only a *candidate* initializer whose
+// own checked-rootedness still has to be proven here like any other
+// assignment -- `int *q = malloc(...);` must poison `q` right at its
+// declaration, not skip straight to trusting it.
+static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
+    for (; node; node = node->next) {
+        switch (node->kind) {
+        case ND_ASSIGN:
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                node->lhs->var->checked_prop_init_assign) {
+                Node *lo, *hi;
+                if (!checked_prop_source_bounds(vm, node->rhs, node->tok, &lo, &hi))
+                    node->lhs->var->checked_prop_unsafe = true;
+            }
+            break;
+        case ND_ADDR:
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                node->lhs->var->checked_prop_init_assign && !node->is_rmw_temp_addr)
+                node->lhs->var->checked_prop_unsafe = true;
+            break;
+        default:
+            break;
+        }
+        checked_prop_poison_scan(vm, node->lhs);
+        checked_prop_poison_scan(vm, node->rhs);
+        checked_prop_poison_scan(vm, node->cond);
+        checked_prop_poison_scan(vm, node->then);
+        checked_prop_poison_scan(vm, node->els);
+        checked_prop_poison_scan(vm, node->init);
+        checked_prop_poison_scan(vm, node->inc);
+        checked_prop_poison_scan(vm, node->body);
+        for (Node *a = node->args; a; a = a->next)
+            checked_prop_poison_scan(vm, a);
+    }
+}
+
+// #919: allocates a compiler-generated local for a checked-pointer
+// propagation snapshot temp, linking it directly into `fn->locals` rather
+// than going through new_lvar(). propagate_checked_bounds() runs well after
+// the function's own leave_scope()/`fn->locals = vm->compiler.locals`
+// snapshot, so by then vm->compiler.locals and fn->locals are no longer
+// necessarily the same list head -- new_lvar() prepends to
+// vm->compiler.locals, which assign_stack_offsets() (codegen.c) never
+// reads; a temp allocated that way gets no stack slot at all (offset stays
+// 0), the same class of bug as the documented $with_fn-locals hazard
+// elsewhere in this codebase. No scope entry needed either: these temps are
+// never looked up by name, only ever referenced directly through the Obj*
+// stored on Obj.checked_prop_lo/hi.
+static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty) {
+    Obj *var = new_var(vm, "", 0, ty);
+    var->is_local = true;
+    var->next = fn->locals;
+    fn->locals = var;
+    return var;
+}
+
+// Walk 2's per-assignment rewrite: `q = E` (an ND_ASSIGN whose lhs is a
+// surviving candidate) becomes `(__q_lo = (char*)LO, __q_hi = (char*)HI),
+// (q = E)` -- two compiler-generated pointer_to(char) locals snapshotting
+// LO/HI (the source's own absolute bounds, computed exactly as a direct
+// access through the source would be) BEFORE `q` itself is overwritten, so
+// reading `p`/`n` for the snapshot always sees their pre-assignment values.
+// The snapshot temps are lazily allocated on first use per candidate (not
+// at registration time) so a candidate walk 1 poisons never pays for them.
+//
+// Mutates `assign_node` in place (copies its old contents into a fresh
+// node, then overwrites the original with the wrapping ND_COMMA) so every
+// existing parent pointer into it stays valid; ->next is preserved on the
+// copy, not on the wrapper, so the statement chain is unaffected.
+static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assign_node) {
+    Obj *var = assign_node->lhs->var;
+    Node *lo, *hi;
+    if (!checked_prop_source_bounds(vm, assign_node->rhs, assign_node->tok, &lo, &hi))
+        return; // walk 1 already proved every surviving candidate's
+                // assignments are checked-rooted; this is a defensive
+                // fallback, not expected to trigger.
+
+    if (!var->checked_prop_lo) {
+        var->checked_prop_lo = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+        var->checked_prop_hi = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+    }
+
+    Token *tok = assign_node->tok;
+    Node *store_lo = new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_lo, tok),
+                                new_cast(vm, lo, pointer_to(vm, ty_char)), tok);
+    add_type(vm, store_lo);
+    Node *store_hi = new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_hi, tok),
+                                new_cast(vm, hi, pointer_to(vm, ty_char)), tok);
+    add_type(vm, store_hi);
+    Node *snapshot = new_binary(vm, ND_COMMA, store_lo, store_hi, tok);
+    add_type(vm, snapshot);
+
+    Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *orig = *assign_node;
+    orig->next = NULL;
+
+    Node *comma = new_binary(vm, ND_COMMA, snapshot, orig, tok);
+    add_type(vm, comma);
+    Node *saved_next = assign_node->next;
+    *assign_node = *comma;
+    assign_node->next = saved_next;
+}
+
+// Walk 2: finds every ND_ASSIGN targeting a surviving candidate
+// (checked_prop_init_assign set, checked_prop_unsafe still false after walk
+// 1) and rewrites it via checked_prop_rewrite_assign(). Structurally
+// identical to checked_prop_poison_scan() -- separate function rather than
+// folded into walk 1 because walk 1 must finish deciding EVERY candidate's
+// fate (a later assignment in the same function can still poison a
+// candidate whose earlier assignment already looked fine) before walk 2
+// commits to rewriting any of them.
+static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR &&
+            node->lhs->var && node->lhs->var->checked_prop_init_assign &&
+            !node->lhs->var->checked_prop_unsafe) {
+            // Recurse into the rhs FIRST (catches a nested candidate
+            // assignment inside E, e.g. a comma or call argument) before
+            // rewriting `node` in place -- checked_prop_rewrite_assign()
+            // turns `node` into an ND_COMMA wrapper whose ->rhs is a COPY of
+            // this same ND_ASSIGN (see its comment), which would otherwise
+            // still match this branch on the generic descent below and
+            // rewrite forever.
+            checked_prop_rewrite_scan(vm, fn, node->rhs);
+            checked_prop_rewrite_assign(vm, fn, node);
+            continue; // node is now the wrapper; its parts are already scanned
+        }
+
+        checked_prop_rewrite_scan(vm, fn, node->lhs);
+        checked_prop_rewrite_scan(vm, fn, node->rhs);
+        checked_prop_rewrite_scan(vm, fn, node->cond);
+        checked_prop_rewrite_scan(vm, fn, node->then);
+        checked_prop_rewrite_scan(vm, fn, node->els);
+        checked_prop_rewrite_scan(vm, fn, node->init);
+        checked_prop_rewrite_scan(vm, fn, node->inc);
+        checked_prop_rewrite_scan(vm, fn, node->body);
+        for (Node *a = node->args; a; a = a->next)
+            checked_prop_rewrite_scan(vm, fn, a);
+    }
+}
+
+// Walk 3: attaches the snapshot temps to every still-unchecked ND_DEREF
+// rooted at a surviving candidate. Runs after walk 2 so it doesn't matter
+// that walk 2 already rewrote this candidate's assignments into comma
+// expressions elsewhere in the same tree -- a deref's own address
+// expression is untouched by that rewrite. checked_access_size/pointee type
+// come from the access site's own address expression (`node->lhs->ty`), NOT
+// from the propagation source -- a cast (`char *q = (char*)p;`) legitimately
+// changes what a later `q[i]` accesses. checked_nt_terminator is
+// deliberately left false: CHKNT does not propagate (documented gap, see
+// man/SAFETY.md).
+static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_DEREF && !node->checked_bounds_lo) {
+            CheckedBase base = find_checked_base(node->lhs);
+            if (base.var && base.var->checked_prop_init_assign &&
+                !base.var->checked_prop_unsafe && base.var->checked_prop_lo) {
+                Node *lo = new_var_node(vm, base.var->checked_prop_lo, node->tok);
+                add_type(vm, lo);
+                Node *hi = new_var_node(vm, base.var->checked_prop_hi, node->tok);
+                add_type(vm, hi);
+                node->checked_bounds_lo = lo;
+                node->checked_bounds_hi = hi;
+                Type *access_ty = node->lhs->ty;
+                node->checked_access_size =
+                    access_ty && access_ty->base ? get_vm_size(access_ty->base) : 1;
+            }
+        }
+        checked_prop_attach_scan(vm, node->lhs);
+        checked_prop_attach_scan(vm, node->rhs);
+        checked_prop_attach_scan(vm, node->cond);
+        checked_prop_attach_scan(vm, node->then);
+        checked_prop_attach_scan(vm, node->els);
+        checked_prop_attach_scan(vm, node->init);
+        checked_prop_attach_scan(vm, node->inc);
+        checked_prop_attach_scan(vm, node->body);
+        for (Node *a = node->args; a; a = a->next)
+            checked_prop_attach_scan(vm, a);
+    }
+}
+
+// Entry point (#919), called from the same three function()/block-literal
+// tail sites as resolve_objsize_queries()/mark_addr_escapes(), immediately
+// after mark_addr_escapes(). Gated on --checked-pointers at PARSE time
+// (unlike the rest of the checked-pointer machinery, which populates its
+// fields unconditionally and gates only CHKR's emission at codegen) -- the
+// snapshot temps cost real stack slots and stores per propagating
+// assignment, which is only worth paying when something might actually
+// enforce them. This gate reads `vm->flags` at every registration/pass
+// call site, not a value frozen once at the start of the file: verified
+// empirically that a `#pragma cccc config(checked_pointers = true)`
+// anywhere in the translation unit -- even textually after every
+// declaration it affects -- still takes effect, because #pragma cccc
+// config() is resolved during preprocessing (src/preprocess.c), a pass
+// that runs to completion before parse() ever sees a token. So, unlike a
+// hypothetical token-interleaved pragma, there is no "must precede the
+// declaration" ordering caveat to document here.
+//
+// Three whole-function walks, no dataflow/join analysis (see the plan's
+// Decisions section for why this precision tier was chosen over a
+// path-sensitive one): poison every candidate touched by a non-checked-
+// rooted assignment, an escaping address-of, or (via Obj.is_captured,
+// already computed by mark_nested_captures()) an access from a nested
+// function's body; rewrite every surviving candidate's assignments into
+// snapshot-then-store; attach the snapshots to every deref reached through
+// a surviving candidate. A candidate that is itself only propagated (never
+// declared checked) can never be a valid propagation *source* for another
+// candidate -- checked_base_is_declared() returns false for a plain
+// unchecked local, so this is automatic, not a separate check: v1 has no
+// fixpoint over derived-from-derived pointers.
+static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return;
+    checked_prop_poison_scan(vm, fn->body);
+    // is_captured is set by mark_nested_captures(), which -- for every
+    // nested function textually inside this one -- always finishes running
+    // before this function's own tail (and therefore this call) runs; see
+    // propagate_checked_bounds()'s call sites. Reads fn->locals rather than
+    // vm->compiler.locals: both hold the same list at every call site today
+    // (fn->locals is snapshotted from it just before leave_scope(), and
+    // nothing between there and here touches vm->compiler.locals), but
+    // taking `fn` as a parameter and reading its own field is not hostage
+    // to that ordering staying true after some future refactor.
+    for (Obj *v = fn->locals; v; v = v->next)
+        if (v->checked_prop_init_assign && v->is_captured)
+            v->checked_prop_unsafe = true;
+    checked_prop_rewrite_scan(vm, fn, fn->body);
+    checked_prop_attach_scan(vm, fn->body);
+}
+
 // Generate code for computing a VLA size.
 static Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
     Node *node = new_node(vm, ND_NULL_EXPR, tok);
@@ -3027,6 +3300,26 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
                     var->objsize_decl_fn = vm->compiler.current_fn;
                 }
             }
+
+            // #919: candidate registration for checked-pointer bounds
+            // propagation across assignment. Same shape-check as the objsize
+            // tracking just above (plain `var = init_expr`, not the
+            // ND_COMMA-wrapped aggregate-initializer shape) -- an unchecked
+            // pointer local (a checked_kind != CHECKED_NONE pointer already
+            // has its own declared bounds and never needs propagation) whose
+            // declaration itself has an initializer becomes a candidate;
+            // whether that initializer is actually checked-rooted is decided
+            // later, by propagate_checked_bounds()'s poison scan, which is
+            // also what actually reads this field. Gating registration
+            // itself on CCCC_CHECKED_BOUNDS (rather than registering
+            // unconditionally and gating only the pass) keeps the cost
+            // symmetric with the rest of this parse-time-gated mechanism --
+            // see propagate_checked_bounds()'s comment for why this has no
+            // pragma-ordering caveat despite being a parse-time check.
+            if ((vm->flags & CCCC_CHECKED_BOUNDS) && var->ty->kind == TY_PTR &&
+                var->checked_kind == CHECKED_NONE && expr->kind == ND_ASSIGN &&
+                expr->lhs->kind == ND_VAR && expr->lhs->var == var)
+                var->checked_prop_init_assign = expr;
         } else if (var->is_constexpr) {
             error_tok(vm, ty->name, "constexpr object requires an initializer");
         }
@@ -6504,8 +6797,14 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
     // Convert `A op= B` to ``tmp = &A, *tmp = *tmp op B`.
     Obj *var = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->ty));
 
-    Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
-                             new_unary(vm, ND_ADDR, binary->lhs, tok), tok);
+    // #919: if `A` is itself a checked-pointer-propagation candidate (`q +=
+    // k`/`q++`/`q--`), this `&A` must not be treated as an address-escape by
+    // propagate_checked_bounds()'s poison scan -- it never leaves the comma
+    // expression built below, so it can't actually alias `q` anywhere. See
+    // Node.is_rmw_temp_addr's comment.
+    Node *addr_of_lhs = new_unary(vm, ND_ADDR, binary->lhs, tok);
+    addr_of_lhs->is_rmw_temp_addr = true;
+    Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), addr_of_lhs, tok);
 
     Node *expr2 = new_binary(
         vm, ND_ASSIGN, new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok),
@@ -7490,6 +7789,7 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     leave_scope(vm);
     resolve_objsize_queries(vm, block_fn->body);
     mark_addr_escapes(block_fn->body);
+    propagate_checked_bounds(vm, block_fn);
 
     // Collect captured variables from the parsed body.
     // Walk all ancestor scopes so that variables from grandparent+ scopes are
@@ -13481,6 +13781,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             resolve_goto_labels(vm);
             resolve_objsize_queries(vm, fn->body);
             mark_addr_escapes(fn->body);
+            propagate_checked_bounds(vm, fn);
             // check_nonnull_flow() runs post-parse now (#688) -- see the
             // loop in parse() -- so a forward-referenced callee's summary
             // is available. This negative-test path nulls fn->body below
@@ -13570,6 +13871,11 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         resolve_goto_labels(vm);
         resolve_objsize_queries(vm, fn->body);
         mark_addr_escapes(fn->body);
+        // #919: any nested function textually inside `fn` has already run
+        // its own mark_nested_captures() call (inside the compound_stmt()
+        // above) and set is_captured on whichever of `fn`'s own locals it
+        // touches, so propagate_checked_bounds() sees a complete picture.
+        propagate_checked_bounds(vm, fn);
         // #836: mark this nested function's captures on whichever enclosing
         // function(s) they belong to, before that/those function(s)'s own
         // codegen runs prepare_local_promotion / prepare_fp_local_promotion.
