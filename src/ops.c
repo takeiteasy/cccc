@@ -2381,6 +2381,68 @@ void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t 
     type_shadow_copy(vm, dst, src, len);
 }
 
+// #769: true iff every element in [base, base + nmemb*size) carries the
+// same shadow *byte pattern* as element 0 -- i.e. the shadow is invariant
+// under any permutation of whole elements. Strictly more general than
+// type_shadow_check_uniform (which demands one uniform non-TY_VOID byte
+// across the *whole* range): this is element-pattern uniformity, so a
+// struct array (mixed member types, TY_VOID padding between members) still
+// qualifies as long as every element matches element 0 byte-for-byte,
+// including any TY_VOID bytes. An all-TY_VOID range is trivially uniform
+// (nothing to lose by skipping the clear).
+//
+// This is what lets wrap_qsort (src/stdlib/stdlib.c) skip clearing the
+// shadow across a host qsort() call: qsort only reorders whole elements, it
+// never rewrites their bytes, so if the shadow pattern repeats identically
+// per element going in, it still does coming out, regardless of which
+// permutation qsort's host C implementation happened to apply.
+//
+// Bails to false (caller falls back to the whole-range clear) whenever the
+// range can't be proven uniform cheaply and safely: size == 0 or too large
+// to fit the stack scratch buffer, nmemb*size overflow, or the range isn't
+// wholly inside one tracked segment (type_shadow_locate). nmemb <= 1 is
+// vacuously true (qsort/bsearch are no-ops on 0 or 1 elements). Never
+// allocates a shadow page -- type_shadow_gather reads absent pages back as
+// all TY_VOID.
+bool cc_type_shadow_elements_uniform(VirtualMachine *vm, const void *base,
+                                     size_t nmemb, size_t size) {
+    if (!vm || !(vm->flags & CCCC_TYPE_CHECKS))
+        return false;
+    if (nmemb <= 1)
+        return true;
+    if (size == 0 || size > 4096)
+        return false;
+    if (nmemb > SIZE_MAX / size)
+        return false; // overflow
+    size_t len = nmemb * size;
+
+    size_t off;
+    TypeShadowSeg *seg = type_shadow_locate(vm, base, len, &off);
+    if (!seg)
+        return false;
+
+    unsigned char elem0[4096];
+    type_shadow_gather(seg, off, size, elem0);
+
+    unsigned char elem[4096];
+    for (size_t i = 1; i < nmemb; i++) {
+        type_shadow_gather(seg, off + i * size, size, elem);
+        if (memcmp(elem, elem0, size) != 0)
+            return false;
+    }
+    return true;
+}
+
+// #769: non-static wrapper over type_shadow_clear for wrap_qsort (separate
+// translation unit, same rationale as cc_type_shadow_copy above).
+// Segment-agnostic (goes through type_shadow_locate inside
+// type_shadow_clear), so it covers a global array too, not just heap.
+void cc_type_shadow_clear_range(VirtualMachine *vm, void *p, size_t len) {
+    if (!vm)
+        return;
+    type_shadow_clear(vm, p, len);
+}
+
 static inline int op_CHKP3_fn(VirtualMachine *vm) {
     // Check pointer validity (register-based version of CHKP)
     // Format: [CHKP3] [rs:8|unused:56]
@@ -4923,6 +4985,16 @@ static const FfiShadowRule ffi_shadow_rules[] = {
     // Folds in what used to be two ad hoc strcmp(ff->name, ...) checks.
     {"memcpy",  FFI_SHADOW_HANDLED, 0, -1, -1, 0, -1},
     {"memmove", FFI_SHADOW_HANDLED, 0, -1, -1, 0, -1},
+    // #769: wrap_qsort (src/stdlib/stdlib.c) does its own shadow bookkeeping
+    // around the host qsort() call -- preserves the shadow across the sort
+    // when the array's elements carry a uniform shadow pattern (checked
+    // both before and after, to catch a comparator that writes through its
+    // arguments), otherwise clears [base, base+nmemb*size) -- narrower than
+    // this backstop's whole-allocation default, since that's the exact
+    // range a host qsort() call can touch. Nothing left for this backstop
+    // to do for qsort's other arguments (nmemb, size, the comparator's
+    // code address) since none of them are heap pointers.
+    {"qsort",   FFI_SHADOW_HANDLED, 0, -1, -1, 0, -1},
 
     // Never write through a pointer argument.
     {"strlen",  FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
@@ -4939,6 +5011,12 @@ static const FfiShadowRule ffi_shadow_rules[] = {
     {"atoi",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
     {"atol",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
     {"atof",    FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
+    // #769: the host bsearch() writes through no argument at all -- only
+    // reads the array to find a match. Its comparator runs guest code via
+    // the same #738 trampoline as qsort's, and that code is fully
+    // shadow-tracked like any other guest execution, so there's no
+    // unobserved write to account for here.
+    {"bsearch", FFI_SHADOW_READONLY, 0, -1, -1, 0, -1},
 
     // Write only a statically-known extent through one designated arg.
     // Every *other* pointer-shaped argument to these calls still falls
@@ -4984,12 +5062,14 @@ static const FfiShadowRule ffi_shadow_rules[] = {
     // design, so the PRINTF tier doesn't apply); vprintf/vsprintf/
     // vsnprintf/vfprintf (the va_list argument is itself written through as
     // iteration state, and its pointees aren't reachable from args[] --
-    // possible follow-up); qsort/bsearch (permute the buffer's bytes in
-    // place, and -- via the #738 guest-callback trampoline -- run guest
-    // code that can store arbitrarily); struct out-params like stat/
-    // gettimeofday/localtime_r/getaddrinfo/sigaction (safe by omission,
-    // which is the point of this table: absence keeps today's
-    // sound-but-lossy default).
+    // possible follow-up); struct out-params like stat/gettimeofday/
+    // localtime_r/getaddrinfo/sigaction (safe by omission, which is the
+    // point of this table: absence keeps today's sound-but-lossy default).
+    // qsort/bsearch (#769) are handled/classified above instead of falling
+    // here: qsort restores shadow coverage across the sort in the common
+    // uniform-element case via wrap_qsort's own bookkeeping rather than
+    // this table's generic per-argument narrowing, and bsearch's host half
+    // never writes at all.
 };
 
 // Returns the classification rule for `name`, or NULL if unclassified
@@ -5152,6 +5232,16 @@ static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
 
         // Default: unclassified name, or a BOUNDED call's non-designated
         // pointer argument -- whole-allocation clear.
+        //
+        // NOTE (found during #769, filed as a follow-up rather than fixed
+        // here -- out of that ticket's scope): heap_alloc_for_ptr only
+        // resolves heap addresses, so a data-segment (global) buffer
+        // passed to an unclassified host call gets no clear at all here,
+        // even though #752 extended the type shadow to globals. A stale
+        // stamp on a global can in principle survive an unobserved host
+        // write and later false-positive. type_shadow_locate (used
+        // elsewhere in this file, e.g. by cc_type_shadow_elements_uniform)
+        // already covers both segments and would be the natural fix.
         size_t off;
         AllocHeader *header = heap_alloc_for_ptr(vm, args[i], &off);
         if (header && !header->freed)

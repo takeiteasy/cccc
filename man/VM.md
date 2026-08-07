@@ -503,10 +503,10 @@ statically known:
 
 | `FfiShadowClass` | Effect | Examples |
 |---|---|---|
-| `FFI_SHADOW_HANDLED` | no clear — the shim already propagated | `memcpy`, `memmove` |
-| `FFI_SHADOW_READONLY` | no clear at all — never writes through any pointer arg | `strlen`, `strcmp`, `memcmp`, `fwrite`, ... |
+| `FFI_SHADOW_HANDLED` | no clear — the shim already propagated | `memcpy`, `memmove`, `qsort` |
+| `FFI_SHADOW_READONLY` | no clear at all — never writes through any pointer arg | `strlen`, `strcmp`, `memcmp`, `fwrite`, `bsearch`, ... |
 | `FFI_SHADOW_BOUNDED` | clear narrowed to `[args[out_arg], args[out_arg]+len)`, where `len` comes from another argument (or a fixed size, for `strtol`/`strtod`'s `*endptr`), clamped against the allocation's actual remaining bytes | `fread`, `snprintf`, `read`, `recv`, `strncpy`, ... |
-| `FFI_SHADOW_DEFAULT` (unclassified) | today's whole-allocation clear, unchanged | everything else, including `printf`/`scanf` (`%n`) and `qsort`/`bsearch` (permute bytes, run guest callbacks) |
+| `FFI_SHADOW_DEFAULT` (unclassified) | today's whole-allocation clear, unchanged | everything else, including `printf`/`scanf` (`%n`) |
 
 A `BOUNDED` entry only narrows the clear for its one designated argument;
 every *other* pointer-shaped argument to that same call (e.g. `snprintf`'s
@@ -514,6 +514,28 @@ variadic `%s` arguments) still gets the default whole-allocation clear.
 Since an unclassified name behaves exactly as before, adding or widening a
 rule can only ever reduce clearing relative to today's behavior, never
 introduce a false positive.
+
+`qsort` (#769) is `HANDLED` by `wrap_qsort` (`src/stdlib/stdlib.c`) rather
+than by a table entry, since narrowing its clear needs runtime information
+(the actual pre/post shadow contents) a static rule can't express: `qsort`
+only reorders whole `size`-byte elements, never rewrites their bytes, so if
+every element's shadow pattern already matches element 0's before the host
+`qsort()` call, that pattern is invariant under any permutation and the
+shadow needs no clear at all — checked via
+`cc_type_shadow_elements_uniform` (`src/ops.c`), unconditionally both
+before the call and again immediately after. The post-check runs even when
+the pre-check found a uniform range (e.g. an already-cleared, all-`TY_VOID`
+range, itself trivially uniform): the comparator is guest code, reentered
+through the callback trampoline, and its own loads/stores run through
+ordinary CHKT3 checks, so a comparator that writes through its arguments
+mid-sort stamps the shadow at that element's pre-move position, which the
+post-check must still catch before `qsort` relocates the bytes elsewhere.
+Either check finding a non-uniform range clears exactly
+`[base, base+nmemb*size)` via `cc_type_shadow_clear_range` -- the range a
+host `qsort()` call can touch, not the whole allocation. `bsearch`'s host
+half writes through no argument at all, so it needs no runtime check and is
+a plain `READONLY` table entry; its comparator is shadow-tracked the same
+way `qsort`'s is.
 
 Reusing a heap buffer as a different type — legal C — never false-positives,
 since the next store simply re-stamps the effective type for the bytes it

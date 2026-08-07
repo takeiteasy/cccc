@@ -74,13 +74,48 @@ static int qsort_compar_trampoline(const void *a, const void *b) {
     return (int)result;
 }
 
+// #769: preserve the #653 type shadow across a host qsort() call instead of
+// unconditionally clearing it (the pre-#769 default via ffi_shadow_backstop,
+// still what happens for any array that doesn't qualify below). qsort only
+// reorders whole `size`-byte elements -- it never rewrites their bytes -- so
+// if every element's shadow byte pattern already matches element 0's before
+// the call, any permutation the host applies leaves that property intact
+// and the shadow needs no clear at all; a range that isn't uniform going in
+// instead gets a pre-clear narrowed to [base, base+nmemb*size) (the exact
+// range a host qsort() can touch -- everything the comparator itself might
+// write is guest-tracked separately, see below).
+//
+// The post-call check runs *unconditionally*, not just when the pre-check
+// found a uniform range: the comparator runs guest code via
+// qsort_compar_trampoline/cccc_call_guest_callback above, and a comparator
+// that writes through its `const void *` arguments mid-sort stamps the
+// shadow at that element's *pre-move* position -- including on the
+// pre-cleared (all-TY_VOID, and therefore trivially "uniform") path, where
+// skipping the post-check would let that stray stamp survive at a stale
+// position after qsort relocates the bytes. Checking unconditionally costs
+// nothing extra in the common well-behaved-comparator case: a pre-cleared,
+// untouched range reads back all-TY_VOID, which is itself uniform, so the
+// post-check finds nothing to clear.
+//
+// Residual (accepted, LOWPRI ticket): a comparator that writes a
+// differently-typed value through its arguments and is then itself called
+// again before the sort completes could see a stale shadow for the
+// remainder of that sort -- the clear only happens once, after wrap_qsort
+// returns. Not worth a CHKT3 suppression range on the hot path for this.
 static long long wrap_qsort(long long base, long long nmemb, long long size, long long compar) {
     long long saved_compar = g_qsort_compar_value;
     int saved_faulted = g_qsort_compar_faulted;
     g_qsort_compar_value = compar;
     g_qsort_compar_faulted = 0;
 
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb, (size_t)size))
+        cc_type_shadow_clear_range(vm, (void *)base, (size_t)nmemb * (size_t)size);
+
     qsort((void *)base, (size_t)nmemb, (size_t)size, qsort_compar_trampoline);
+
+    if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb, (size_t)size))
+        cc_type_shadow_clear_range(vm, (void *)base, (size_t)nmemb * (size_t)size);
 
     int faulted = g_qsort_compar_faulted;
     g_qsort_compar_value = saved_compar;

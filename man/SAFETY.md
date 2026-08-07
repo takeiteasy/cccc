@@ -299,13 +299,33 @@ All features listed below can be enabled individually or through the safety leve
     non-literal or truncated format, or an actual `%n` all fall back to the
     default, so this classification can only preserve or improve the
     no-false-positive property, never regress it. `vprintf`/`vsprintf`/
-    `vsnprintf`/`vfprintf`, `scanf`/`sscanf`/`fscanf`, and `qsort`/`bsearch`
-    are deliberately left unclassified: the `va_list` variants' pointees
-    aren't reachable from the argument list, the scanf family writes through
-    every pointer argument by design, and `qsort`/`bsearch` permute a
-    buffer's bytes in place and can run guest code back through the array
-    (the callback trampoline). An unclassified name keeps the default
+    `vsnprintf`/`vfprintf` and `scanf`/`sscanf`/`fscanf` are deliberately
+    left unclassified: the `va_list` variants' pointees aren't reachable
+    from the argument list, and the scanf family writes through every
+    pointer argument by design. An unclassified name keeps the default
     whole-allocation clear across every pointer-shaped argument.
+  - `qsort`/`bsearch` preserve type-shadow coverage across the call instead
+    of clearing it, for the common case of a uniformly-typed array: `qsort`
+    only ever reorders whole elements, it never rewrites their bytes, so if
+    every element already carries the same shadow byte pattern as element 0
+    going in (a plain scalar array, or a struct array where every element
+    was stamped the same way — mixed member types and padding included),
+    that pattern survives any permutation the sort applies and the shadow
+    needs no clear at all. This is checked again immediately after the host
+    `qsort()` call returns, unconditionally — not just when the pre-check
+    found a uniform range: `qsort`'s comparator is guest code, reentered
+    synchronously through the guest callback trampoline, and its
+    loads/stores run through ordinary CHKT3 checks like any other guest
+    code, so a comparator that writes through its arguments mid-sort stamps
+    the shadow at that element's pre-move position — including on an
+    already-cleared (and therefore trivially uniform) range, where skipping
+    the post-check would let that stray stamp survive at a stale position
+    once `qsort` relocates the bytes. Either check finding a non-uniform
+    range clears exactly `[base, base+nmemb*size)` (the range a host
+    `qsort()` call can touch) rather than the whole allocation. `bsearch`'s
+    host half writes through no argument at all — only reads — so it is
+    classified read-only outright; its comparator is shadow-tracked the
+    same way `qsort`'s is.
   - `realloc` (always a fresh allocation in CCCC's bump-allocating VM
     heap, never grown in place) carries the old block's shadow across to
     the new address

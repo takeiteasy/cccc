@@ -1063,6 +1063,19 @@ extern VirtualMachine *__builtin_current_vm;
 // heap; see type_shadow_copy's doc comment in ops.c for full semantics.
 void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len);
 
+// ops.c (included into vm.c) -- #769: exposed for wrap_qsort's shim in
+// stdlib/stdlib.c, so a host qsort() call can preserve the #653 type shadow
+// across the sort instead of clearing it. cc_type_shadow_elements_uniform
+// returns true iff every `size`-byte element in [base, base+nmemb*size)
+// carries the same shadow byte pattern as element 0 (see its doc comment in
+// ops.c) -- a permutation of such an array can't change what's caught, so
+// wrap_qsort skips the clear when this holds both before and after the
+// underlying host qsort() runs. cc_type_shadow_clear_range is a plain
+// segment-agnostic clear (heap or globals) for when it doesn't.
+bool cc_type_shadow_elements_uniform(VirtualMachine *vm, const void *base,
+                                     size_t nmemb, size_t size);
+void cc_type_shadow_clear_range(VirtualMachine *vm, void *p, size_t len);
+
 // Preprocess include/cccc/testing.h and register CCCC_ASSERT* macros; see
 // cc_inject_test_header's definition (src/testing.c) for the full contract.
 Token *cc_inject_test_header(VirtualMachine *vm);
