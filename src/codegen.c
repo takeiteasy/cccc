@@ -834,9 +834,15 @@ static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
 // (#654). The restrict-value cache (below) is the exception: rather than
 // disabling it wholesale, its cache-hit path re-derives the address and
 // emits the same checks itself via emit_load_safety_checks (#750).
+// CCCC_CHECKED_BOUNDS (#770/#484) joins this set for the same reason: the
+// indexed load/store fusion below elides the address computation entirely,
+// so it would bypass CHKR the same way it would CHKP3/CHKT3 -- there is no
+// separate re-derivation path for it the way the restrict-value cache gets
+// (that cache instead declines checked-bounds derefs outright, see
+// restrict_cache_handle_deref()).
 #define CCCC_FUSION_UNSAFE_FLAGS \
     (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK | \
-     CCCC_TYPE_CHECKS)
+     CCCC_TYPE_CHECKS | CCCC_CHECKED_BOUNDS)
 
 // Forward-declared: the restrict-cache hit path (below) needs this before its
 // real definition, which sits next to emit_load_ex for locality.
@@ -1076,6 +1082,18 @@ static Obj *restrict_root_param_of_ptr(VirtualMachine *vm, Node *ptr) {
 static bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
                                         int dest_reg) {
     if (vm->compiler.restrict_cache_capacity == 0)
+        return false;
+
+    // A checked-pointer access (#770/#484) must run gen_addr's CHKR check on
+    // every hit, not just the address re-derivation both the cache-hit and
+    // cache-miss branches below already do for CHKP3/CHKT3 -- rather than
+    // teach both branches a second, differently-shaped safety check, decline
+    // the cache for this access and let the ordinary gen_addr(vm, node, ...)
+    // path (which already emits CHKR) handle it. Narrow: only checked-bounds
+    // derefs are affected, so the restrict cache still applies to every
+    // other access.
+    if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_bounds_lo &&
+        node->checked_bounds_hi)
         return false;
 
     Obj *param;
@@ -3541,6 +3559,18 @@ static void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_t
     emit_i64(vm, (long long)size);
 }
 
+// Emit CHKR (checked-pointer range check, #770/#482-484).
+// rs_addr/rs_lo/rs_hi are caller-computed registers: the accessed address and
+// the checked pointer's declared bounds (from its count()/byte_count()/
+// bounds() attribute, desugared to [lo, hi) by the caller). access_size is
+// the size in bytes of the access being checked (sizeof of the pointee for a
+// scalar deref). No-op at runtime unless CCCC_CHECKED_BOUNDS is set -- callers
+// gate emission on that flag so the default build never emits this opcode.
+static void emit_chkr(VirtualMachine *vm, int rs_addr, int rs_lo, int rs_hi,
+                      long long access_size) {
+    emit_rrrs_i(vm, CHKR, rs_addr, rs_lo, rs_hi, 0, access_size);
+}
+
 // ========== Address Generation ==========
 
 // Generate address of an lvalue into dest_reg
@@ -3665,6 +3695,28 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
     case ND_DEREF:
         // Address of *ptr is just ptr
         gen_expr(vm, node->lhs, dest_reg);
+        // Checked-pointer bounds check (#770/#484). Runs on both the load
+        // and the store path -- both reach the accessed address through
+        // this single site (x = p[i] via gen_expr's ND_DEREF load case
+        // calling gen_addr, p[i] = x via the store path doing the same) --
+        // and even when dest_reg == REG_ZERO (a discarded-value deref must
+        // still trap, matching emit_load_safety_checks's convention above).
+        // Gated on CCCC_CHECKED_BOUNDS so the default build emits nothing;
+        // node->checked_bounds_lo/hi are only non-NULL when
+        // set_checked_deref_bounds() (parse.c) found a checked pointer with
+        // resolvable bounds at this access site, so no per-access flag
+        // check is needed beyond the one on CCCC_CHECKED_BOUNDS itself.
+        if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_bounds_lo &&
+            node->checked_bounds_hi) {
+            mark_temp_reg_used(dest_reg); // protect the just-computed address
+            int r_lo = alloc_temp_reg();
+            int r_hi = alloc_temp_reg();
+            gen_expr(vm, node->checked_bounds_lo, r_lo);
+            gen_expr(vm, node->checked_bounds_hi, r_hi);
+            emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size);
+            free_temp_reg(r_hi);
+            free_temp_reg(r_lo);
+        }
         return;
 
     case ND_MEMBER:
@@ -4447,13 +4499,25 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     case ND_DEREF:
         if (restrict_cache_handle_deref(vm, node, dest_reg))
             return;
-        if (promoted_deref_target(vm, node)) {
+        // Scalar-promotion alias reads bypass the address entirely (the
+        // pointer is proven to always equal &target, see
+        // promotion_alias_add()), so a checked-bounds deref (#770/#484)
+        // must not take this path -- fall through to gen_addr below so its
+        // CHKR check still runs, same reasoning as restrict_cache_handle_deref
+        // declining above.
+        if (!((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_bounds_lo &&
+              node->checked_bounds_hi) &&
+            promoted_deref_target(vm, node)) {
             emit_promoted_read(vm, promoted_deref_target(vm, node), dest_reg);
             return;
         }
         if (emit_indexed_load_if_possible(vm, node, dest_reg))
             return;
-        gen_expr(vm, node->lhs, dest_reg);
+        // Routed through gen_addr() (rather than gen_expr(node->lhs, ...)
+        // directly, which computes the identical address) so the checked-
+        // pointer bounds check (#770/#484) in gen_addr's own ND_DEREF case
+        // runs on this load path too, not just the store/address-of paths.
+        gen_addr(vm, node, dest_reg);
         // TY_FUNC: dereferencing a function pointer is a no-op in C — *f and f
         // are interchangeable when f has pointer-to-function type.  Do not emit
         // a data load; the register already holds the callable address.
@@ -5027,7 +5091,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     }
 
     case ND_ASSIGN: {
-        Obj *lhs_promoted_deref = promoted_deref_target(vm, node->lhs);
+        // See the matching guard in gen_expr's ND_DEREF case: a checked-
+        // bounds store must not take the promotion-alias fast path either,
+        // for the same CHKR-bypass reason.
+        Obj *lhs_promoted_deref =
+            ((vm->flags & CCCC_CHECKED_BOUNDS) && node->lhs->checked_bounds_lo &&
+             node->lhs->checked_bounds_hi)
+                ? NULL
+                : promoted_deref_target(vm, node->lhs);
         if (lhs_promoted_deref) {
             int r_val = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
             bool need_free = dest_reg == REG_ZERO;

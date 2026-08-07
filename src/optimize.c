@@ -1184,6 +1184,12 @@ static bool op_byte0_is_int_src(int op) {
     // Provenance marker: byte 0 (rs_ptr) and byte 1 (rs_base) are both pure
     // sources, same class as CHKB above.
     case MARKP:
+    // Checked-pointer range check (#770/#482-484): byte 0 (rs_addr), byte 1
+    // (rs_lo) and byte 2 (rs_hi) are all pure sources -- no destination.
+    // Byte 0 must be listed here for the same reason as CHKB (#755); bytes
+    // 1-2 need no separate listing since the generic decode already marks
+    // rs1/rs2 as uses unconditionally for non-float-src opcodes.
+    case CHKR:
         return true;
     default:
         return false;

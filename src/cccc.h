@@ -461,7 +461,24 @@ extern "C" {
                         -> A0 = raw f32/f64 bit pattern (caller does R2FR) */ \
     X(DCVT, 0)  /* dst(A0)=addr, src(A1)=addr, dst_width(A2), src_width(A3) */ \
     X(DFMT, 0)  /* buf(A0), n(A1), val(A2)=addr, width(A3) \
-                    -> A0 = bytes that would have been written (snprintf contract) */
+                    -> A0 = bytes that would have been written (snprintf contract) */ \
+    /* Checked-pointer bounds enforcement (Checked C-style spatial safety). \
+       Appended at the end of OPS_X per the same rule as everything above -- \
+       the opcode's enum value is baked into .c4 files, never interleave. */ \
+    X(CHKR, 3) /* Checked-pointer range check: traps unless \
+                   addr != 0 && lo <= addr && addr + size <= hi. \
+                   Format: [CHKR][rs_addr:8|rs_lo:8|rs_hi:8|unused:8] \
+                   [access_size:i64] (RRR operand word + i64 immediate). \
+                   Bounds are caller-supplied registers, computed from the \
+                   checked pointer's declared count/byte_count/bounds \
+                   expression at the AST level (src/parse.c) and passed in \
+                   fresh at every checked access -- never derived from \
+                   sorted_allocs/heap_alloc_for_ptr the way CHKB/CHKP3 are. \
+                   That is what makes it work uniformly across heap, stack \
+                   and global storage, which CHKB cannot do (its bound is \
+                   AllocHeader.size, so a non-heap base gets no upper bound \
+                   at all). Gated on CCCC_CHECKED_BOUNDS, not on any \
+                   -S0..-S3 preset -- see that flag's comment above. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -577,6 +594,17 @@ typedef enum {
                     // src/stdlib/posix.c) -- off by default there too, for
                     // the same "don't risk an unverified host ABI without
                     // being asked" reason. VM-only; rejected under -c=native.
+    CCCC_CHECKED_BOUNDS =
+        (1 << 27), // 0x08000000 - Enable runtime enforcement (CHKR) of
+                    // Checked C-style checked-pointer declared bounds
+                    // (--checked-bounds). Deliberately outside
+                    // CCCC_ALL_SAFETY/bits 0-19 and not included in any
+                    // -S0..-S3 tier: writing a checked-pointer annotation is
+                    // itself the opt-in, and this flag only gates whether
+                    // that annotation's bound is enforced at runtime -- the
+                    // type-level rules (e.g. no arithmetic on a
+                    // [[cccc::single]] pointer) are a parse/type-check
+                    // diagnostic and stay on unconditionally.
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =
@@ -915,6 +943,41 @@ typedef enum {
     TY_DECIMAL128 = 25,
 } TypeKind;
 
+/*!
+ @brief Checked C-style checked-pointer kind (Checked C spatial-safety
+        series). Attached to a `TY_PTR` `Type` as a qualifier -- exactly the
+        same footing as `is_const`/`is_volatile`/`is_restrict` -- not a
+        distinct `TypeKind`, so a checked pointer stays ABI-identical to a
+        plain pointer (single machine word, unchanged struct layout,
+        unchanged `-E`/`-G` native output).
+*/
+typedef enum {
+    CHECKED_NONE = 0,    // plain, unchecked pointer (default)
+    CHECKED_SINGLE,      // [[cccc::single]]  -- ~ Checked C _Ptr<T>: no
+                         // pointer arithmetic, null-checked on deref
+    CHECKED_ARRAY,       // [[cccc::array]]   -- ~ Checked C _Array_ptr<T>:
+                         // arithmetic allowed, every access bounds-checked
+                         // against a declared count()/byte_count()/bounds()
+    CHECKED_NTARRAY,     // [[cccc::ntarray]] -- ~ Checked C _Nt_array_ptr<T>:
+                         // like CHECKED_ARRAY, bounds implicitly widened by
+                         // one element for the null terminator
+} CheckedKind;
+
+// Which bounds form a CHECKED_ARRAY/CHECKED_NTARRAY pointer's declaration
+// used, all desugared to a single [lo, hi) range at the checked-access site
+// (src/parse.c) -- see man/SAFETY.md for the desugaring table. CB_UNKNOWN is
+// the bounds(unknown) escape hatch: the checked kind is recorded but no
+// runtime check is ever emitted for it.
+typedef enum {
+    CB_NONE = 0,     // no bounds declared yet (still CHECKED_NONE, or the
+                      // bounds token span hasn't been resolved -- see
+                      // Obj.checked_bounds_start)
+    CB_COUNT,         // count(n): hi = p + n * sizeof(T)
+    CB_BYTE_COUNT,    // byte_count(n): hi = p + n
+    CB_RANGE,         // bounds(lo, hi): explicit [lo, hi)
+    CB_UNKNOWN,       // bounds(unknown): checked type, no runtime check
+} CheckedBoundsForm;
+
 typedef struct Node Node;
 typedef struct Obj Obj;
 typedef struct Scope Scope;
@@ -1043,6 +1106,27 @@ struct Type {
     bool is_constructor; // run before main(), ordered by init_priority
     bool is_destructor;  // run after main() returns normally, reverse order
     int  init_priority;  // CCCC_NO_INIT_PRIORITY unless an explicit priority was given
+
+    // Checked C-style checked-pointer qualifier (#770/#482-484). A qualifier
+    // on this TY_PTR type, exactly like is_const/is_volatile/is_restrict --
+    // not a distinct TypeKind -- so a checked pointer is ABI-identical to a
+    // plain one. Set by the post-'*' attribute loop in pointers()
+    // (src/parse.c), which is where [[cccc::single]] etc. attach, mirroring
+    // how const/volatile/restrict attach there today.
+    CheckedKind checked_kind;
+
+    // Bounds declaration for CHECKED_ARRAY/CHECKED_NTARRAY (count()/
+    // byte_count()/bounds()/bounds(unknown)). The bounds expression can
+    // reference sibling parameters not yet in scope when the attribute is
+    // parsed (e.g. `count(n)` where `n` is a later parameter), so the raw
+    // token span is captured here and re-parsed later, once the right scope
+    // exists -- see resolve_checked_bounds() in src/parse.c and
+    // Obj.checked_bounds_start below. checked_bounds_form records which of
+    // the three syntactic forms was written; checked_bounds_arg1/arg2 are the
+    // *unresolved* token spans (arg2 unused except for CB_RANGE's hi).
+    CheckedBoundsForm checked_bounds_form;
+    Token *checked_bounds_arg1; // count(n) / byte_count(n) / bounds(lo, .)
+    Token *checked_bounds_arg2; // bounds(., hi) only; NULL otherwise
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
@@ -1261,6 +1345,24 @@ struct Node {
     char *macro_name;    // Name of pragma macro to invoke
     int macro_arg_count; // Number of arguments
     Scope *macro_scope;  // Parser scope active at the macro call site
+
+    // Checked-pointer bounds check (#770/#484). Set on an ND_DEREF built at
+    // a `*p` or `p[i]` site (src/parse.c) whose address expression's base
+    // variable is a checked pointer with resolvable bounds -- deliberately
+    // NOT a wrapper node kind, see the design note in the implementation
+    // plan for why (codegen.c's addr_is_local_frame/#740 and the restrict
+    // deref cache both pattern-match on the address node's own kind).
+    // checked_bounds_lo/hi are absolute address expressions, freshly cloned
+    // per deref site off the declaration's resolved Obj.checked_bounds_lo/hi
+    // (or synthesized from the pointer's own live value for CB_COUNT/
+    // CB_BYTE_COUNT/CHECKED_SINGLE, see set_checked_deref_bounds() in
+    // parse.c) so each access re-evaluates them independently, per the
+    // per-declaration (not propagated) bounds model. NULL/NULL means no
+    // check is emitted for this dereference (unchecked pointer, or a
+    // checked pointer with no resolvable bounds -- CB_NONE/CB_UNKNOWN).
+    struct Node *checked_bounds_lo;
+    struct Node *checked_bounds_hi;
+    int64_t checked_access_size; // sizeof of the value actually accessed
 };
 
 /*!
@@ -1411,6 +1513,21 @@ struct Obj {
     // Free with hashmap_deinit_borrowed after codegen completes.
     HashMap local_set;
     bool local_set_built;
+
+    // Checked C-style checked-pointer bounds (#770/#482-484). checked_kind/
+    // checked_bounds_form are copied straight off ty->checked_kind/
+    // checked_bounds_form by new_var(), same transport pattern as
+    // ty->cleanup_fn above. The bounds expression itself needs deferred
+    // resolution (see Type.checked_bounds_arg1/arg2's comment: a count(n)
+    // naming a not-yet-in-scope sibling parameter can't be parsed inline),
+    // so resolve_checked_bounds() (src/parse.c) fills checked_bounds_lo/hi in
+    // once the right scope exists. Left NULL (not an error) for a
+    // prototype-only declaration, which has no body scope to resolve into
+    // and no accesses to check.
+    CheckedKind checked_kind;
+    CheckedBoundsForm checked_bounds_form;
+    Node *checked_bounds_lo; // resolved expression, or NULL if unresolved/unneeded
+    Node *checked_bounds_hi; // resolved expression, or NULL if unresolved/unneeded
 };
 
 /*!

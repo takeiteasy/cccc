@@ -152,6 +152,7 @@ specific safety/optimisation profile regardless of how they're invoked.
 | `memory_leak_detection` | `true`/`false` | `--memory-leak-detection` |
 | `pointer_sanitizer` | `true`/`false` | `--pointer-sanitizer` |
 | `memory_tagging` | `true`/`false` | `--memory-tagging` |
+| `checked_pointers` | `true`/`false` | `--checked-pointers` |
 
 A bare key with no `= value` (e.g. `config(bounds_checks)`) is shorthand for
 `= true`. Multiple keys can be set in one `config(...)`, and the pragma can
@@ -245,6 +246,18 @@ All features listed below can be enabled individually or through the safety leve
     negative index is only rejected once it steps before the *resolved
     allocation's* start, so `p[-1]` on an interior pointer that stays
     within the allocation is valid (#650)
+- `--checked-pointers` **Checked-pointer bounds checking (Checked C-style)**
+  - Enforces the `[[cccc::single/array/ntarray]]` + `count()`/`byte_count()`/
+    `bounds()` attributes declared on a pointer type (always parsed and
+    type-checked regardless of this flag; see
+    [Checked Pointers](#checked-pointers) below for the full reference)
+  - Unlike `--bounds-checks` above, the bound comes from the pointer's own
+    **declaration**, not from heap allocation metadata — so it works
+    uniformly on heap, stack, and global-array pointers, not just the heap
+  - CHKR opcode validates `addr != 0 && lo <= addr && addr + size <= hi` on
+    every checked dereference, where `[lo, hi)` is recomputed from the
+    declaration at each access
+  - Not part of any `-0`/`-1`/`-2`/`-3` safety preset; opt in explicitly
 - `--type-checks` **Runtime type checking on pointer dereferences**
   - Tracks type information per heap byte in a byte-granular **type
     shadow** (mirroring C11 §6.5p6's effective-type model): every heap
@@ -700,6 +713,92 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   never firing (it segfaults on the exact out-of-bounds write it was supposed to trap, instead
   of trapping it).
 
+### Checked Pointers
+
+A Checked C-inspired spatial-safety layer (#770/#482/#483/#484): a pointer's
+declaration carries a *bounds* obligation, and every dereference through it
+is checked at runtime against that declaration.
+
+**Attribute syntax.** The attributes attach in post-`*` qualifier position,
+the same grammar slot as `const`/`volatile`/`restrict` — not in declspec
+position, which would qualify the pointee rather than the pointer:
+
+```c
+int  * [[cccc::single]]                    p;  // ~ Checked C _Ptr<int>
+int  * [[cccc::array, cccc::count(n)]]     a;  // ~ _Array_ptr<int> : count(n)
+char * [[cccc::ntarray, cccc::count(n)]]   s;  // ~ _Nt_array_ptr<char>
+```
+
+`__attribute__((...))` and the `@`-prefix spellings work too
+(`@array`/`@count(n)`/etc.).
+
+| Attribute | Meaning |
+|---|---|
+| `single` | Points to exactly one object; all pointer arithmetic on it is a compile error; deref is implicitly range-checked against `[p, p + sizeof(T))`, which is also a NULL check |
+| `array` | Points into an array-like region; a bounds form (below) declares its extent |
+| `ntarray` | Like `array`, but `count(n)` widens the checked range by one element for a null-terminator slot, and writing that slot is permitted |
+| `count(n)` | The pointer is valid for `n` elements from its own current value: `[p, p + n*sizeof(T))` |
+| `byte_count(n)` | Like `count(n)` but `n` is a byte count, not an element count: `[p, p + n)` |
+| `bounds(lo, hi)` | Explicit absolute range `[lo, hi)`, independent of the pointer's own value |
+| `bounds(unknown)` | Trust escape hatch: the type is checked, but no runtime range check is ever emitted for it |
+
+A bounds form (`count`/`byte_count`/`bounds`) requires `array` or `ntarray`;
+it is a compile error on `single` (which has its own implicit range) or with
+no checked kind at all. `array`/`ntarray` with no bounds form at all is
+legal but unchecked — nothing to enforce, same effect as `bounds(unknown)`.
+
+**Bounds declarations** (#483) can reference any other in-scope
+parameter, local, or global — including a *later* parameter of the same
+function (`count(n)` before `int n` in the parameter list) — but **not** a
+sibling struct/union field; bounds on a struct member are rejected at
+compile time in v1 (follow-up: member-relative resolution). A bounds
+expression must be side-effect-free (`count(i++)` is a compile error): it is
+**re-evaluated at every checked access**, not just once at the declaration,
+so a side effect would run once per access instead of once. A
+prototype-only declaration (`void f(int * [[cccc::array, cccc::count(n)]]
+p, int n);`, no body) leaves its bounds unresolved — there is nothing to
+check at the declaration site, and caller-side checking is future work
+(#488) — this is correct, not an error.
+
+**Bounds do not propagate through assignment or interior pointers across a
+variable boundary.** This is the load-bearing simplification that keeps v1
+tractable without a dataflow engine: a checked pointer's bounds are
+per-declaration, recomputed from the declaration at each access, never
+carried at runtime (a checked pointer stays a single machine word — no fat
+pointer, no ABI change). Concretely:
+
+- `(p + k)[i]` checks against `p`'s own declared bounds — arithmetic
+  *within a single expression* still resolves back to the declared pointer.
+- `q = p + k; q[i]` checks against `q`'s **own** declared bounds, not `p`'s —
+  once the value is stored into a different variable, that variable's own
+  declaration (or lack of one) governs. This is the same trust model as
+  Checked C's `_Assume_bounds_cast`; real dataflow-based propagation is a
+  follow-up.
+- For `count(n)`/`byte_count(n)` (but not `bounds(lo, hi)`, which is already
+  absolute), the *lower* bound at each access is the pointer's own live
+  value at that point in the program — so reassigning `p` itself (not a
+  different variable) and then accessing through it uses the new value, both
+  as the base address and as the lower bound.
+
+**Runtime enforcement is opt-in, off by default**: `--checked-pointers` /
+`#pragma cccc config(checked_pointers = true)`. Not part of any
+`-0`/`-1`/`-2`/`-3` preset. The compile-time rules (attribute parsing, type
+checking, the arithmetic-rejection diagnostic on `single`) are always on
+regardless of this flag — only the `CHKR` runtime check itself is gated.
+
+**Why this exists**: `CHKB` (`--bounds-checks`) derives its bound from
+`AllocHeader.size`, which only exists for VM-heap allocations — it has no
+upper bound at all for a stack or global array. Checked pointers close that
+gap: their bound comes from the declaration, not allocation metadata, so
+`--checked-pointers` catches out-of-bounds accesses on stack and global
+arrays that `--bounds-checks` structurally cannot. See
+[VM.md](VM.md#safety-opcodes) for the `CHKR` opcode itself.
+
+```c
+int * [[cccc::array, cccc::count(n)]] a = some_stack_array;
+a[n]; // traps under --checked-pointers; CHKB cannot catch this at all
+```
+
 ## VM Heap Allocator
 
 `malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`posix_memalign` route through the VM heap
@@ -852,6 +951,31 @@ Allocated size: 16 bytes (rounded)
 Allocated at PC offset: 11
 Current PC:    0x8c5400140 (offset: 40)
 =========================================
+```
+
+### Checked Pointers
+```c
+// test_checked_bounds.c - Checked-pointer bounds checking example
+int main(void) {
+    int n = 5;
+    int stack_arr[5] = {1, 2, 3, 4, 5};
+    int * [[cccc::array, cccc::count(n)]] a = stack_arr;
+    int x = a[5]; // Out of bounds -- and CHKB cannot catch this at all,
+                  // since stack_arr has no AllocHeader to derive a bound from.
+    return x;
+}
+```
+
+```bash
+$ ./cccc --checked-pointers test_checked_bounds.c
+
+========== CHECKED BOUNDS VIOLATION ==========
+Checked-pointer access out of declared bounds
+Address:       0x14fffffdc
+Access size:   4 bytes
+Declared bounds: [0x14fffffc8, 0x14fffffdc)
+PC: 0xe5 (offset: 229)
+================================================
 ```
 
 ### Type Checking

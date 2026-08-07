@@ -528,6 +528,16 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     if (ty->is_const)
         fprintf(f, "const ");
 
+    // Deliberately no output for ty->checked_kind (#770/#482-484): a
+    // checked pointer's [[cccc::single/array/ntarray]] qualifier is a
+    // cccc-internal VM-side check, not a real C construct -- gcc/clang would
+    // reject the attribute names outright, and #488 requires -E/-G native
+    // output to be unchanged for a checked declaration ("no change to ABI or
+    // to unchecked callers"). Falls out for free today since this function
+    // only ever emits is_const anyway (is_volatile/is_restrict are likewise
+    // never serialized), but noted explicitly so it isn't "fixed" by a
+    // future generalization of the qualifier-printing above.
+
     switch (ty->kind) {
     case TY_VOID:
         fprintf(f, "void");

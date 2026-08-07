@@ -4456,6 +4456,47 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_CHKR_fn(VirtualMachine *vm) {
+    // Checked-pointer range check (Checked C-style spatial safety, #770/#482-484).
+    // Format: [CHKR] [rs_addr:8|rs_lo:8|rs_hi:8|unused:8] (RRR operand word)
+    //         [access_size:i64]
+    // Unlike CHKB/CHKP3, lo/hi are NOT derived from sorted_allocs or any
+    // other allocation-time side table -- they are the caller-computed
+    // declared bounds of a checked pointer (from its count()/byte_count()/
+    // bounds() attribute), passed in fresh at every checked access by
+    // codegen. That is what lets this opcode work uniformly across heap,
+    // stack and global storage, which CHKB cannot do for non-heap bases.
+    long long operands = cc_read_word(vm);
+    int rs_addr, rs_lo, rs_hi;
+    DECODE_RRR(operands, rs_addr, rs_lo, rs_hi);
+    long long access_size = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return 0;
+
+    long long addr = vm->regs[rs_addr];
+    long long lo   = vm->regs[rs_lo];
+    long long hi   = vm->regs[rs_hi];
+
+    // NULL is always out of range for any declared bound: this is what gives
+    // a [[cccc::single]] pointer its "null-checked on deref" semantics for
+    // free, since its lowering is lo=p, hi=p+sizeof(T) and a NULL p would
+    // otherwise need a separate check.
+    if (addr == 0 || addr < lo || addr + access_size > hi) {
+        printf("\n========== CHECKED BOUNDS VIOLATION ==========\n");
+        printf("Checked-pointer access out of declared bounds\n");
+        printf("Address:       0x%llx\n", addr);
+        printf("Access size:   %lld bytes\n", access_size);
+        printf("Declared bounds: [0x%llx, 0x%llx)\n", lo, hi);
+        printf("PC: 0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)vm->pc);
+        printf("================================================\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 static inline int op_CHKI_fn(VirtualMachine *vm) {
     // Check initialization: fail if variable at bp+offset has not been written.
     // Format: [CHKI] [offset:i64]

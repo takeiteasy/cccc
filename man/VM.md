@@ -411,6 +411,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKP3` | Pointer validity (NULL, UAF, heap range, dangling stack deref), resolving the pointer (exact or interior) via `vm->sorted_allocs` | `CCCC_POINTER_CHECKS` |
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
 | `CHKT3` | Heap type-tag check on dereference (effective-type model), resolving the base pointer via `vm->sorted_allocs` | `CCCC_TYPE_CHECKS` |
+| `CHKR` | Checked-pointer range check (`[[cccc::single/array/ntarray]]`): traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
 
 `CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
 `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the largest
@@ -421,6 +422,16 @@ an interior pointer is now caught (#650). `CHKB`'s bound is
 `AllocHeader.size` (the aligned/usable size); a negative scaled offset is
 only rejected once it steps before the *resolved allocation's* start, so
 `p[-1]` on an interior pointer that stays within the allocation is valid.
+Note the gap this leaves: `AllocHeader` only exists for VM-heap allocations,
+so **`CHKB` has no upper bound at all for a stack or global array** — it can
+only reject a negative offset there. `CHKR` (#770/#482-484) closes this: its
+`[lo, hi)` bounds come from the checked pointer's declaration
+(`count()`/`byte_count()`/`bounds()`, or the implicit `[p, p+sizeof(T))` for
+`[[cccc::single]]`), recomputed at each checked access, never from
+`vm->sorted_allocs` — so it is uniform across heap, stack and global storage,
+unlike every other opcode in this table. See
+[SAFETY.md](SAFETY.md#checked-pointers) for the full attribute/lowering
+reference.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
 

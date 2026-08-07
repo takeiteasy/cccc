@@ -307,6 +307,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-3/--safety=max      All safety features for deep debugging (~60-100%%+ overhead)\n");
     printf("\nMemory Safety Options (can be combined with safety levels):\n");
     printf("\t-B/--bounds-checks           Runtime array bounds checking\n");
+    printf("\t   --checked-pointers        Runtime range checks for checked-pointer\n"
+           "\t                             ([[cccc::single/array/ntarray]]) accesses\n");
     printf("\t   --uaf-detection           Use-after-free detection\n");
     printf("\t   --control-flow-integrity  Control-flow integrity (indirect call validation)\n");
     printf("\t   --type-checks             Runtime type checking on pointer dereferences\n");
@@ -939,6 +941,7 @@ int main(int argc, const char *argv[]) {
         {"debug", no_argument, 0, 'g'},
         {"safety", required_argument, 0, 1012},
         {"bounds-checks", no_argument, 0, 'B'},
+        {"checked-pointers", no_argument, 0, 1119},
         {"uaf-detection", no_argument, 0, 1078},
         {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
@@ -1169,6 +1172,16 @@ int main(int argc, const char *argv[]) {
         case 'B': // --bounds-checks
             flags |= CCCC_BOUNDS_CHECKS;
             cli_flags_mask |= CCCC_BOUNDS_CHECKS;
+            break;
+        case 1119: // --checked-pointers (#770/#482-484)
+            // Deliberately not "--checked-bounds" -- too easily confused
+            // with -B/--bounds-checks above, which is a different,
+            // allocation-size-derived check (CHKB). Deliberately not in
+            // CCCC_ALL_SAFETY/any -0.._3 preset either (see CCCC_CHECKED_BOUNDS's
+            // comment in cccc.h): checked-pointer types and their compile-time
+            // arithmetic rules are always on, but CHKR is opt-in only.
+            flags |= CCCC_CHECKED_BOUNDS;
+            cli_flags_mask |= CCCC_CHECKED_BOUNDS;
             break;
         case 1078: // --uaf-detection
             flags |= CCCC_UAF_DETECTION;

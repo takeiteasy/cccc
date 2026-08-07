@@ -325,6 +325,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
 | `alloc_size(n)` / `alloc_size(n,m)` | GNU (C23: `[[gnu::alloc_size]]`) | ✓ | Marks a function as an allocator whose return value has a compile-time-computable byte size: argument `n` (1-based) for the single-index form, or the product of arguments `n` and `m` for the two-index (calloc-style) form. Consulted by `__builtin_object_size`/`__builtin_dynamic_object_size` heap-allocation sizing (see below) — the sole recognition mechanism, superseding earlier hardcoded name matching |
 | `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
+| `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](#checked-pointers-single--array--ntarray--count--byte_count--bounds) below |
+| `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [SAFETY.md](SAFETY.md#checked-pointers)) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -954,6 +956,40 @@ is not part of `-Wall`/`-Wextra`, since CCCC otherwise enables no warnings by
 default; pass `-Wdesignated-init` explicitly (or promote it with
 `-Werror=designated-init`).
 
+#### `single` / `array` / `ntarray` / `count` / `byte_count` / `bounds` (CCCC-specific)
+
+A Checked C-inspired checked-pointer type and bounds-declaration layer
+(#770/#482/#483). Unlike every other attribute in this file, these attach in
+**post-`*` qualifier position** — the same grammar slot as `const`/
+`volatile`/`restrict` — not declspec position, since a C23 attribute in
+declspec position would qualify the pointee, not the pointer:
+
+```c
+int  * [[cccc::single]]                    p;  // exactly one object
+int  * [[cccc::array, cccc::count(n)]]     a;  // n elements from p's own value
+char * [[cccc::ntarray, cccc::count(n)]]   s;  // like array, +1 for a terminator slot
+int  * [[cccc::array, cccc::bounds(lo,hi)]] r; // explicit absolute range
+```
+
+`__attribute__((...))` and `@single`/`@array`/`@ntarray`/`@count(n)`/
+`@byte_count(n)`/`@bounds(lo,hi)` all work too.
+
+`single` rejects all pointer arithmetic on that pointer as a compile error —
+this compile-time rule is always on, independent of the runtime flag below.
+A bounds form (`count`/`byte_count`/`bounds`) requires `array` or `ntarray`;
+it is a compile error on `single` or with no checked kind. Bounds may
+reference any other in-scope parameter (including a later one), local, or
+global, but not a struct/union sibling field (compile error in v1), and must
+be side-effect-free (also a compile error otherwise — a bounds expression is
+re-evaluated at every checked access, not once).
+
+Runtime enforcement (the `CHKR` opcode) is gated behind `--checked-pointers`
+/ `#pragma cccc config(checked_pointers = true)` — opt-in, not part of any
+`-0`/`-1`/`-2`/`-3` preset. Full reference, including the bounds-carry-within-
+an-expression-but-not-across-assignment semantics and why this exists
+(`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
+array): [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
+
 ---
 
 ### Parsed but Ignored
@@ -998,7 +1034,7 @@ the canonical attribute form before parsing:
 
 | Usage | Rewrites to | Example |
 |-------|-------------|---------|
-| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup` |
+| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)` |
 | `@name` (standard C23) | `[[name]]` | `@nodiscard`, `@maybe_unused` |
 | `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
 | `@name` (custom comptime) | handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |

@@ -278,6 +278,7 @@ static bool is_function(VirtualMachine *vm, Token *tok, Type *basety);
 static bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety);
 static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
+static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token *tok);
 
 static int align_to(int n, int align) {
     return (int)(((long long)n + align - 1) / align * align);
@@ -918,6 +919,13 @@ static Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
         ty->cleanup_fn->is_live = true;
         ty->cleanup_fn->is_root = true;
     }
+    // Checked C-style checked-pointer transport (#770/#482-484), same
+    // pattern as cleanup_fn above. The bounds expression itself (if any) is
+    // resolved later by resolve_checked_bounds() -- it reads the still-
+    // unresolved token spans straight off var->ty->checked_bounds_arg1/arg2
+    // rather than needing its own copy here.
+    var->checked_kind = ty->checked_kind;
+    var->checked_bounds_form = ty->checked_bounds_form;
     push_scope(vm, name, name_len)->var = var;
     return var;
 }
@@ -939,6 +947,105 @@ static Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->is_definition = true;
     vm->compiler.globals = var;
     return var;
+}
+
+// Side-effect check for a checked-pointer bounds expression (#770/#483):
+// bounds are re-evaluated at every checked access a checked pointer
+// participates in (see the design note in man/SAFETY.md), so an expression
+// with side effects would run once per access rather than once -- e.g.
+// count(i++) would increment i on every dereference, not once. Recurses
+// through every expression-level node kind reachable from assign()'s
+// grammar (bounds expressions are parsed with assign(), never a full
+// statement); flags assignment (compound assignment and ++/-- both lower to
+// ND_ASSIGN, see to_assign()), function calls, and the atomic op kinds.
+static bool node_has_side_effects(Node *n) {
+    if (!n)
+        return false;
+    switch (n->kind) {
+    case ND_ASSIGN:
+    case ND_FUNCALL:
+    case ND_CAS:
+    case ND_EXCH:
+    case ND_ALOAD:
+    case ND_ASTORE:
+    case ND_STMT_EXPR: // GNU statement expression; may contain anything
+        return true;
+    default:
+        break;
+    }
+    if (node_has_side_effects(n->lhs) || node_has_side_effects(n->rhs) ||
+        node_has_side_effects(n->cond))
+        return true;
+    for (Node *a = n->args; a; a = a->next)
+        if (node_has_side_effects(a))
+            return true;
+    return false;
+}
+
+// Resolves a checked pointer's bounds expression(s) from the raw token
+// span(s) captured at attribute-parse time (Type.checked_bounds_arg1/arg2 --
+// see its comment for why resolution is deferred) into real Node* ASTs, once
+// `var` sits in a scope where anything its bounds reference is visible.
+// Call sites: for parameters, once after create_param_lvars() finishes ALL
+// params of the function (a bound may reference a LATER parameter, e.g.
+// `count(n)` before `int n`); for locals/globals, immediately after
+// new_lvar()/new_gvar() (anything a bound references must already be
+// declared, same as ordinary C). Never called at all for a prototype-only
+// declaration -- function() returns before opening a body scope, and a
+// prototype has no accesses to check -- so its bounds token span is left
+// permanently unresolved, which is correct, not an error (see #488 for the
+// caller-side checking that would eventually consume it).
+//
+// checked_bounds_lo/checked_bounds_hi's stored meaning depends on the form:
+//   CB_COUNT/CB_BYTE_COUNT: hi = resolved element/byte count `n`; lo is left
+//                            NULL -- the base address is the checked
+//                            pointer's own live value at each checked
+//                            access, recomputed fresh by codegen (#484's
+//                            per-access re-evaluation), not fixed here.
+//   CB_RANGE:                lo/hi = resolved absolute bound expressions.
+//   CB_UNKNOWN/CB_NONE:      neither set; no runtime check is ever emitted
+//                            (CB_UNKNOWN is the bounds(unknown) escape
+//                            hatch: the checked type is recorded, but
+//                            trusted rather than enforced).
+static void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
+    if (var->checked_bounds_form == CB_NONE ||
+        var->checked_bounds_form == CB_UNKNOWN)
+        return;
+
+    Type *ty = var->ty;
+    Token *tok;
+
+    if (var->checked_bounds_form == CB_RANGE) {
+        tok = ty->checked_bounds_arg1;
+        Node *lo = assign(vm, &tok, tok);
+        add_type(vm, lo);
+        if (node_has_side_effects(lo))
+            error_tok(vm, ty->checked_bounds_arg1,
+                      "checked-pointer bounds expression must not have side "
+                      "effects -- it is re-evaluated at every access");
+
+        tok = ty->checked_bounds_arg2;
+        Node *hi = assign(vm, &tok, tok);
+        add_type(vm, hi);
+        if (node_has_side_effects(hi))
+            error_tok(vm, ty->checked_bounds_arg2,
+                      "checked-pointer bounds expression must not have side "
+                      "effects -- it is re-evaluated at every access");
+
+        var->checked_bounds_lo = lo;
+        var->checked_bounds_hi = hi;
+        return;
+    }
+
+    // CB_COUNT / CB_BYTE_COUNT
+    tok = ty->checked_bounds_arg1;
+    Node *n = assign(vm, &tok, tok);
+    add_type(vm, n);
+    if (node_has_side_effects(n))
+        error_tok(vm, ty->checked_bounds_arg1,
+                  "checked-pointer bounds expression must not have side "
+                  "effects -- it is re-evaluated at every access");
+    var->checked_bounds_hi = n;
 }
 
 // Create a function Obj that is NOT in the global scope or globals list.
@@ -1708,10 +1815,42 @@ static Token *asm_label(VirtualMachine *vm, Token *tok, char **label) {
     return skip(vm, tok->next, ")");
 }
 
-// pointers = ("*" ("const" | "volatile" | "restrict")*)*
+// pointers = ("*" ("const" | "volatile" | "restrict" |
+//                   checked-pointer-attribute)*)*
 static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     while (consume(vm, &tok, tok, "*")) {
         ty = pointer_to(vm, ty);
+
+        // Checked-pointer attributes (#770/#482-484) attach here, in the
+        // same grammar position as const/volatile/restrict below -- the only
+        // spelling that unambiguously qualifies the pointer just built
+        // rather than its pointee (see the CheckedKind comment in cccc.h).
+        // Both dispatchers no-op (return tok unchanged) when nothing of
+        // theirs is present, so calling them unconditionally is cheap; the
+        // recognized names are only handled here since this is the only
+        // call site that passes a TY_PTR ty, and apply_checked_ptr_attr()
+        // errors on any other position.
+        tok = attribute_list(vm, tok, ty, NULL);
+        tok = c23_attribute_list(vm, tok, ty, NULL);
+
+        // A bounds form (count/byte_count/bounds) only makes sense paired
+        // with a checked kind (array/ntarray); checked here rather than in
+        // apply_checked_ptr_attr() itself so attribute order within the
+        // bracket list doesn't matter (`[[cccc::count(n), cccc::array]]` is
+        // as valid as the more natural `[[cccc::array, cccc::count(n)]]`).
+        if (ty->checked_bounds_form != CB_NONE) {
+            if (ty->checked_kind == CHECKED_NONE)
+                error_tok(vm, tok,
+                          "a bounds declaration (count/byte_count/bounds) "
+                          "requires the pointer to also be declared "
+                          "[[cccc::array]] or [[cccc::ntarray]]");
+            if (ty->checked_kind == CHECKED_SINGLE)
+                error_tok(vm, tok,
+                          "a [[cccc::single]] pointer cannot have a bounds "
+                          "declaration -- it always refers to exactly one "
+                          "object");
+        }
+
         // Handle const/volatile qualification on the pointer itself
         // Example: "int *const p" makes the pointer const, not the pointee
         // Example: "int *volatile p" makes the pointer volatile
@@ -1896,7 +2035,8 @@ static bool same_type_exact(Type *a, Type *b) {
         a->is_atomic != b->is_atomic ||
         a->is_const != b->is_const ||
         a->is_volatile != b->is_volatile ||
-        a->is_restrict != b->is_restrict)
+        a->is_restrict != b->is_restrict ||
+        a->checked_kind != b->checked_kind)
         return false;
 
     switch (a->kind) {
@@ -2245,6 +2385,158 @@ static int count_ptr_depth(Type *ty) {
 // Get size for a type (no adjustment needed - types are already correct)
 static int get_vm_size(Type *ty) { return ty->size; }
 
+// Deep-clones an expression subtree for a checked-pointer bounds check
+// (#770/#484). Obj.checked_bounds_lo/hi (resolved once, at the pointer's
+// declaration by resolve_checked_bounds()) get reused at every checked
+// access the pointer participates in; cloning gives each access site its
+// own Node objects rather than aliasing the same ones into multiple
+// positions in the AST, which is the shape codegen otherwise always sees
+// (one Node, one place in the tree). Safe as a shallow-copy-and-recurse
+// over the generic child pointers because bounds expressions are
+// restricted to side-effect-free assign()-grammar subtrees (checked by
+// node_has_side_effects() at resolution time) with no funcall/statement-
+// expression nodes, so ->args/->body are always NULL here and need no
+// list-cloning.
+static Node *clone_bounds_node(VirtualMachine *vm, Node *n) {
+    if (!n)
+        return NULL;
+    Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *c = *n;
+    c->next = NULL;
+    c->lhs = clone_bounds_node(vm, n->lhs);
+    c->rhs = clone_bounds_node(vm, n->rhs);
+    c->cond = clone_bounds_node(vm, n->cond);
+    c->then = clone_bounds_node(vm, n->then);
+    c->els = clone_bounds_node(vm, n->els);
+    return c;
+}
+
+// Finds the checked-pointer Obj underlying an address expression, looking
+// through pointer arithmetic (#770/#484: "bounds carry within a single
+// expression" -- `(p+k)[i]` checks against `p`'s declared range, not `p+k`'s
+// non-existent one). new_add()/new_sub() always canonicalize a pointer +/-
+// integer so the pointer operand is `lhs` (see their "Canonicalize `num +
+// ptr`" step), so descending into ->lhs through ND_ADD/ND_SUB is sufficient.
+// Also descends through ND_CAST: reading a checked-pointer variable turns
+// out to insert an implicit cast node even with no source-level cast
+// present (confirmed empirically -- `(p+k)[i]` for a plain checked `p`
+// yields ND_ADD(ND_CAST(ND_VAR p), ...) already at the innermost `p+k`),
+// so skipping casts is required for the common case, not just explicit
+// `(int*)p + k`. Anything else (a function call returning a pointer, a
+// ternary, ...) is not a checked-pointer access in the v1 model and returns
+// NULL, meaning no check is emitted -- consistent with bounds not
+// propagating across assignment.
+static Obj *find_checked_base_var(Node *n) {
+    while (n) {
+        switch (n->kind) {
+        case ND_VAR:
+            return n->var;
+        case ND_ADD:
+        case ND_SUB:
+        case ND_CAST:
+            n = n->lhs;
+            continue;
+        default:
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+// Populates `deref` (an ND_DEREF built at a `*p` or `p[i]` site) with the
+// checked-pointer bounds range to enforce, if `addr` (the address
+// expression, i.e. deref->lhs) is rooted at a checked pointer with
+// resolvable bounds (#770/#484). No-op (leaves both NULL) for an unchecked
+// pointer, or a checked pointer with no bounds to enforce (CB_NONE --
+// `[[cccc::array]]` with no count/byte_count/bounds attribute at all --
+// or CB_UNKNOWN, the `bounds(unknown)` trust escape hatch).
+//
+// The actual CHKR emission is gated on --checked-pointers at codegen time
+// (src/codegen.c); these fields are populated unconditionally so the
+// compile-time type rules (arithmetic rejection etc.) and the runtime gate
+// stay independent, per the plan's Decisions section.
+static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token *tok) {
+    Obj *var = find_checked_base_var(addr);
+    if (!var || var->checked_kind == CHECKED_NONE)
+        return;
+
+    Type *base_ty = var->ty->base;
+    int64_t elem_size = base_ty ? get_vm_size(base_ty) : 1;
+    deref->checked_access_size = elem_size;
+
+    if (var->checked_kind == CHECKED_SINGLE) {
+        // ~ Checked C _Ptr<T>: implicit range [p, p + sizeof(T)). Built
+        // directly with new_binary rather than new_add() -- new_add()
+        // itself rejects arithmetic on a CHECKED_SINGLE pointer, which
+        // would reject this synthesized bound too. add_type() is called on
+        // each node explicitly (rather than hand-setting ->ty) so it
+        // recurses into and types every child the way it would for the
+        // equivalent user-written expression -- add_type() no-ops on a node
+        // whose ->ty is already non-NULL without visiting its children, so
+        // pre-setting ->ty on a binary node would leave its operands
+        // untyped and crash codegen.
+        Node *p = new_var_node(vm, var, tok);
+        add_type(vm, p);
+        deref->checked_bounds_lo = p;
+        Node *hi = new_binary(vm, ND_ADD, new_var_node(vm, var, tok),
+                              new_long(vm, elem_size, tok), tok);
+        add_type(vm, hi);
+        deref->checked_bounds_hi = hi;
+        return;
+    }
+
+    // CHECKED_ARRAY / CHECKED_NTARRAY
+    switch (var->checked_bounds_form) {
+    case CB_NONE:
+    case CB_UNKNOWN:
+        return; // nothing declared/trusted -- no runtime check
+    case CB_RANGE:
+        // Absolute [lo, hi) -- already resolved (and typed) at declaration
+        // time; clone_bounds_node() copies ->ty along with everything else.
+        // A checked var whose declaration path never called
+        // resolve_checked_bounds() (e.g. a block-scope `static` local, or
+        // any future declaration shape that copies checked_kind/
+        // checked_bounds_form via new_var() without also being wired to
+        // call it) has these left NULL -- treat that exactly like
+        // CB_NONE/CB_UNKNOWN rather than feeding a NULL Node* into
+        // clone_bounds_node()/add_type() below and crashing the compiler.
+        if (!var->checked_bounds_lo || !var->checked_bounds_hi)
+            return;
+        deref->checked_bounds_lo = clone_bounds_node(vm, var->checked_bounds_lo);
+        deref->checked_bounds_hi = clone_bounds_node(vm, var->checked_bounds_hi);
+        return;
+    case CB_COUNT:
+    case CB_BYTE_COUNT: {
+        if (!var->checked_bounds_hi)
+            return; // see the CB_RANGE comment above
+        // lo = p's own live value at this access; hi = p + n[*elem_size].
+        // ntarray widens by one element for the terminator slot (#483's
+        // documented widening; see man/SAFETY.md).
+        Node *lo = new_var_node(vm, var, tok);
+        add_type(vm, lo);
+        deref->checked_bounds_lo = lo;
+        Node *n = clone_bounds_node(vm, var->checked_bounds_hi); // already typed
+        Node *count_bytes;
+        if (var->checked_bounds_form == CB_BYTE_COUNT) {
+            count_bytes = n;
+        } else if (var->checked_kind == CHECKED_NTARRAY) {
+            Node *n_plus_1 = new_binary(vm, ND_ADD, n, new_long(vm, 1, tok), tok);
+            add_type(vm, n_plus_1);
+            count_bytes = new_binary(vm, ND_MUL, n_plus_1,
+                                     new_long(vm, elem_size, tok), tok);
+            add_type(vm, count_bytes);
+        } else {
+            count_bytes = new_binary(vm, ND_MUL, n, new_long(vm, elem_size, tok), tok);
+            add_type(vm, count_bytes);
+        }
+        Node *hi = new_binary(vm, ND_ADD, new_var_node(vm, var, tok), count_bytes, tok);
+        add_type(vm, hi);
+        deref->checked_bounds_hi = hi;
+        return;
+    }
+    }
+}
+
 // Generate code for computing a VLA size.
 static Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
     Node *node = new_node(vm, ND_NULL_EXPR, tok);
@@ -2402,6 +2694,8 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
             var->is_deprecated = ty->is_deprecated;
             var->deprecated_msg = ty->deprecated_msg;
             push_scope(vm, get_ident(vm, ty->name), ty->name->len)->var = var;
+            if (var->checked_kind != CHECKED_NONE)
+                resolve_checked_bounds(vm, var);
             if (equal(tok, "="))
                 gvar_initializer(vm, &tok, tok->next, var);
             else if (attr->is_constexpr)
@@ -2452,6 +2746,10 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
             var->is_block_var = true;
         // Note: cleanup_fn is transferred from attr → Type → Obj via
         // apply_var_attrs_to_type() + new_var(), no manual copy needed here.
+        // Resolve checked-pointer bounds (#770/#483) now that this local is
+        // itself in scope, so a bound may reference any prior sibling local.
+        if (var->checked_kind != CHECKED_NONE)
+            resolve_checked_bounds(vm, var);
 
         if (equal(tok, "=")) {
             // Mark this variable as being initialized (allows const
@@ -6471,6 +6769,19 @@ static Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         return node;
     }
 
+    // Checked C-style checked-pointer arithmetic rule (#770/#482-484): a
+    // [[cccc::single]] pointer represents exactly one object and rejects all
+    // pointer arithmetic (matches Checked C's _Ptr<T>); [[cccc::array]]/
+    // [[cccc::ntarray]] pointers allow it, same as a plain pointer. This is
+    // a parse/type-check diagnostic, always on regardless of
+    // --checked-pointers (the flag only gates runtime CHKR emission) -- see
+    // CheckedKind's comment in cccc.h.
+    if ((lhs->ty->kind == TY_PTR && lhs->ty->checked_kind == CHECKED_SINGLE) ||
+        (rhs->ty->kind == TY_PTR && rhs->ty->checked_kind == CHECKED_SINGLE))
+        error_tok(vm, tok,
+                  "pointer arithmetic on a [[cccc::single]] pointer is not "
+                  "allowed -- it refers to exactly one object");
+
     // num + num
     if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
         return new_binary(vm, ND_ADD, lhs, rhs, tok);
@@ -6533,6 +6844,14 @@ static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty = ty_error;
         return node;
     }
+
+    // Checked-pointer arithmetic rule -- see the matching comment in
+    // new_add() above.
+    if ((lhs->ty->kind == TY_PTR && lhs->ty->checked_kind == CHECKED_SINGLE) ||
+        (rhs->ty->kind == TY_PTR && rhs->ty->checked_kind == CHECKED_SINGLE))
+        error_tok(vm, tok,
+                  "pointer arithmetic on a [[cccc::single]] pointer is not "
+                  "allowed -- it refers to exactly one object");
 
     // num - num
     if (is_numeric(lhs->ty) && is_numeric(rhs->ty))
@@ -7049,7 +7368,9 @@ static Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         add_type(vm, node);
         if (node->ty->kind == TY_FUNC)
             return node;
-        return new_unary(vm, ND_DEREF, node, tok);
+        Node *deref = new_unary(vm, ND_DEREF, node, tok);
+        set_checked_deref_bounds(vm, deref, node, tok);
+        return deref;
     }
 
     if (equal(tok, "!"))
@@ -7129,6 +7450,21 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok, Type *t
             mem->idx = idx++;
             mem->align = attr.align ? attr.align : mem->ty->align;
 
+            // Checked-pointer bounds on a struct/union member are rejected in
+            // v1 (#770/#483): a bounds expression naming a sibling field
+            // needs member-relative resolution (`self->field`-style lookup)
+            // that resolve_checked_bounds()'s scope-based re-parse can't do
+            // -- struct scope isn't a variable scope. Plain `checked_kind`
+            // (single/array/ntarray with no bounds attribute, or
+            // bounds(unknown)) is still allowed on a member; only an
+            // unresolved bounds form is rejected. Follow-up ticket tracks
+            // adding member-relative resolution.
+            if (mem->ty->checked_bounds_form != CB_NONE &&
+                mem->ty->checked_bounds_form != CB_UNKNOWN)
+                error_tok(vm, mem->name ? mem->name : tok,
+                          "checked-pointer bounds expressions are not yet "
+                          "supported on struct/union members");
+
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
                 mem->bit_width = const_expr(vm, &tok, tok);
@@ -7164,6 +7500,102 @@ static bool is_attr_name(Token *tok, char *name) {
     return tok->len == len + 4 && !memcmp(tok->loc, "__", 2) &&
            !memcmp(tok->loc + 2, name, len) &&
            !memcmp(tok->loc + 2 + len, "__", 2);
+}
+
+// Captures the raw token span(s) inside a checked-pointer bounds attribute's
+// argument list -- count(n), byte_count(n), bounds(lo, hi), bounds(unknown)
+// -- WITHOUT evaluating them. A bounds expression may reference a sibling
+// parameter not yet in scope at attribute-parse time (e.g. `count(n)` where
+// `n` is a later parameter of the same function), so resolution is deferred
+// to resolve_checked_bounds() (#483) once the right scope exists; see
+// Type.checked_bounds_arg1/arg2's comment in cccc.h. `tok` must point at the
+// opening '('. *arg1 is always set to the first argument's start token;
+// *arg2 is set to the second argument's start token only if a top-level
+// comma was found (bounds(lo, hi)), else left NULL. Returns the token past
+// the matching ')'.
+static Token *capture_checked_bounds_args(VirtualMachine *vm, Token *tok,
+                                          Token **arg1, Token **arg2) {
+    Token *paren_tok = tok;
+    tok = skip(vm, tok, "(");
+    *arg1 = tok;
+    *arg2 = NULL;
+    int depth = 0;
+    while (tok && tok->kind != TK_EOF) {
+        if (equal(tok, "(")) {
+            depth++;
+        } else if (equal(tok, ")")) {
+            if (depth == 0)
+                return tok->next;
+            depth--;
+        } else if (equal(tok, ",") && depth == 0 && !*arg2) {
+            *arg2 = tok->next;
+        }
+        tok = tok->next;
+    }
+    error_tok(vm, paren_tok, "unterminated argument list");
+    return tok; // unreachable
+}
+
+// Shared body for the six checked-pointer attributes (#770/#482-484):
+// [[cccc::single]] / [[cccc::array]] / [[cccc::ntarray]] and their bounds
+// forms [[cccc::count(n)]] / [[cccc::byte_count(n)]] / [[cccc::bounds(lo,
+// hi)]] / [[cccc::bounds(unknown)]]. Used by both the GNU __attribute__ and
+// C23 [[...]] parsers, and only meaningful in one grammar position: attached
+// to `pointers()`'s just-built TY_PTR, right after the '*' it qualifies --
+// the same position const/volatile/restrict attach in today (see the
+// CheckedKind comment in cccc.h for why this position was chosen over the
+// ticket's original declspec-position sketch, which appertains to the
+// pointee, not the pointer). `name_tok` is the attribute name token (for
+// diagnostics); `tok` points just past the name. Returns the token past any
+// argument list. Consistency between the kind attributes and the bounds
+// attributes (e.g. a bounds form without array/ntarray, or on a `single`
+// pointer) is checked once per '*', after all of this level's attributes
+// have been parsed -- see the checked-pointer post-check in pointers().
+static Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok,
+                                     Token *tok, Type *ty, const char *name) {
+    if (!ty || ty->kind != TY_PTR)
+        error_tok(vm, name_tok,
+                  "'%s' must be written immediately after '*' "
+                  "(e.g. int * [[cccc::%s]] p;), not in this position",
+                  name, name);
+
+    if (!strcmp(name, "single") || !strcmp(name, "array") ||
+        !strcmp(name, "ntarray")) {
+        if (equal(tok, "("))
+            error_tok(vm, name_tok, "'%s' takes no arguments", name);
+        ty->checked_kind = !strcmp(name, "single")  ? CHECKED_SINGLE
+                          : !strcmp(name, "array")   ? CHECKED_ARRAY
+                                                      : CHECKED_NTARRAY;
+        return tok;
+    }
+
+    // count / byte_count / bounds
+    if (!equal(tok, "("))
+        error_tok(vm, name_tok, "'%s' requires an argument list", name);
+    Token *arg1, *arg2;
+    Token *after = capture_checked_bounds_args(vm, tok, &arg1, &arg2);
+
+    if (!strcmp(name, "count")) {
+        ty->checked_bounds_form = CB_COUNT;
+        ty->checked_bounds_arg1 = arg1;
+    } else if (!strcmp(name, "byte_count")) {
+        ty->checked_bounds_form = CB_BYTE_COUNT;
+        ty->checked_bounds_arg1 = arg1;
+    } else { // bounds
+        if (arg2) {
+            ty->checked_bounds_form = CB_RANGE;
+            ty->checked_bounds_arg1 = arg1;
+            ty->checked_bounds_arg2 = arg2;
+        } else if (arg1 && arg1->kind == TK_IDENT && arg1->len == 7 &&
+                   !memcmp(arg1->loc, "unknown", 7)) {
+            ty->checked_bounds_form = CB_UNKNOWN;
+        } else {
+            error_tok(vm, name_tok,
+                      "'bounds' requires two arguments (lo, hi), or the "
+                      "single argument 'unknown'");
+        }
+    }
+    return after;
 }
 
 static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
@@ -7404,6 +7836,25 @@ static Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *
             first = false;
 
             Token *attr_tok = tok;
+
+            // Checked-pointer attributes (#770/#482-484): __attribute__((
+            // single/array/ntarray/count(n)/byte_count(n)/bounds(lo,hi)));
+            // only meaningful right after '*' in pointers(), which is the
+            // only call site that passes a TY_PTR ty -- see
+            // apply_checked_ptr_attr()'s comment.
+            if (is_attr_name(tok, "single") || is_attr_name(tok, "array") ||
+                is_attr_name(tok, "ntarray") || is_attr_name(tok, "count") ||
+                is_attr_name(tok, "byte_count") ||
+                is_attr_name(tok, "bounds")) {
+                const char *name = is_attr_name(tok, "single")     ? "single"
+                                  : is_attr_name(tok, "array")      ? "array"
+                                  : is_attr_name(tok, "ntarray")    ? "ntarray"
+                                  : is_attr_name(tok, "count")      ? "count"
+                                  : is_attr_name(tok, "byte_count") ? "byte_count"
+                                                                    : "bounds";
+                tok = apply_checked_ptr_attr(vm, attr_tok, tok->next, ty, name);
+                continue;
+            }
 
             // Handle packed attribute
             if (consume(vm, &tok, tok, "packed")) {
@@ -7863,7 +8314,27 @@ static Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_func_const_attr = equal(name_tok, "const");
             bool is_optimize_attr = equal(name_tok, "optimize");
             bool is_designated_init_attr = equal(name_tok, "designated_init");
+            bool is_checked_ptr_attr =
+                equal(name_tok, "single") || equal(name_tok, "array") ||
+                equal(name_tok, "ntarray") || equal(name_tok, "count") ||
+                equal(name_tok, "byte_count") || equal(name_tok, "bounds");
             tok = tok->next;
+
+            // Checked-pointer attributes (#770/#482-484): [[cccc::single]] /
+            // [[cccc::array]] / [[cccc::ntarray]] / [[cccc::count(n)]] /
+            // [[cccc::byte_count(n)]] / [[cccc::bounds(lo, hi)]]; only
+            // meaningful right after '*' in pointers() -- see
+            // apply_checked_ptr_attr()'s comment.
+            if (is_checked_ptr_attr) {
+                const char *name = equal(name_tok, "single")     ? "single"
+                                  : equal(name_tok, "array")      ? "array"
+                                  : equal(name_tok, "ntarray")    ? "ntarray"
+                                  : equal(name_tok, "count")      ? "count"
+                                  : equal(name_tok, "byte_count") ? "byte_count"
+                                                                  : "bounds";
+                tok = apply_checked_ptr_attr(vm, attr_tok, tok, ty, name);
+                continue;
+            }
 
             // Optimize attribute has mandatory args: [[cccc::optimize(2)]] or ("O2")
             if (is_optimize_attr) {
@@ -8520,8 +8991,13 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                 continue;
             }
 
-            node =
-                new_unary(vm, ND_DEREF, new_add(vm, node, idx, start), start);
+            {
+                Node *base_addr = node;
+                Node *deref =
+                    new_unary(vm, ND_DEREF, new_add(vm, node, idx, start), start);
+                set_checked_deref_bounds(vm, deref, base_addr, start);
+                node = deref;
+            }
             continue;
         }
 
@@ -8533,8 +9009,10 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (equal(tok, "->")) {
             // x->y is short for (*x).y
-            node = new_unary(vm, ND_DEREF, node, tok);
-            node = struct_ref(vm, node, tok->next);
+            Node *base_addr = node;
+            Node *deref = new_unary(vm, ND_DEREF, node, tok);
+            set_checked_deref_bounds(vm, deref, base_addr, tok);
+            node = struct_ref(vm, deref, tok->next);
             tok = tok->next->next;
             continue;
         }
@@ -12720,6 +13198,16 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
     validate_main_signature(vm, fn);
     create_param_lvars(vm, ty->params);
 
+    // Resolve checked-pointer bounds expressions for every checked param
+    // (#770/#483) now that ALL params are in scope -- a bound may reference
+    // a later parameter, e.g. `count(n)` before `int n`. vm->compiler.locals
+    // was reset to NULL immediately before create_param_lvars() above (see
+    // the assignment a few lines up), so at this point it holds exactly the
+    // params just installed and nothing else.
+    for (Obj *p = vm->compiler.locals; p; p = p->next)
+        if (p->checked_kind != CHECKED_NONE)
+            resolve_checked_bounds(vm, p);
+
     // For nested functions, create a hidden __static_link parameter
     // This holds a pointer to the parent function's stack frame (bp)
     // IMPORTANT: This must be added AFTER create_param_lvars because new_lvar
@@ -12964,6 +13452,8 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             var->is_static = attr->is_static;
             if (attr->align)
                 var->align = attr->align;
+            if (var->checked_kind != CHECKED_NONE)
+                resolve_checked_bounds(vm, var);
 
             // Re-parse from eq_tok to write init_data correctly
             gvar_initializer(vm, &tok, eq_tok->next, var);
@@ -13023,6 +13513,8 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         var->is_constexpr = attr->is_constexpr;
         if (attr->align)
             var->align = attr->align;
+        if (var->checked_kind != CHECKED_NONE)
+            resolve_checked_bounds(vm, var);
 
         if (var->is_constexpr) {
             if (attr->is_extern || attr->is_tls)

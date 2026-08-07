@@ -1145,6 +1145,16 @@ static const AttrInfo known_attrs[] = {
     {"test",          ATTR_CCCC, true,  1},
     {"test_setup",    ATTR_CCCC, true,  1},
     {"test_teardown", ATTR_CCCC, true,  1},
+    // Checked C-style checked-pointer attributes (#770/#482-484). Only
+    // meaningful in post-'*' qualifier position (see pointers() in parse.c);
+    // listed here so @single/@array/... route to [[cccc::...]] instead of
+    // __attribute__((...)) and __has_c_attribute(cccc::array) etc. work.
+    {"single",     ATTR_CCCC, true, 1},
+    {"array",      ATTR_CCCC, true, 1},
+    {"ntarray",    ATTR_CCCC, true, 1},
+    {"count",      ATTR_CCCC, true, 1},
+    {"byte_count", ATTR_CCCC, true, 1},
+    {"bounds",     ATTR_CCCC, true, 1},
     // Macro standard library attribute handlers (ticket #235)
     {"serialize",            ATTR_CCCC, true,  1},
     {"deserialize",          ATTR_CCCC, true,  1},
@@ -3900,6 +3910,7 @@ static const PragmaConfigFlag pragma_config_flags[] = {
     {"memory_leak_detection", CCCC_MEMORY_LEAK_DETECT},
     {"pointer_sanitizer",     CCCC_POINTER_SANITIZER},
     {"memory_tagging",        CCCC_MEMORY_TAGGING},
+    {"checked_pointers",      CCCC_CHECKED_BOUNDS}, // #770/#482-484
 };
 
 // Reads an integer literal token's text into *out. Returns false if tok is
