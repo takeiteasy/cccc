@@ -190,8 +190,24 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
             failed_tests.append(f"{test_name} (C4 RUNTIME FAILED, exit {exit_code})")
             if not quiet:
                 print(f"✗ {test_name} (C4 RUNTIME FAILED, exit {exit_code}){timing_str}")
-                for line in output.splitlines()[:3]:
-                    print(f"  {line}")
+                lines = output.splitlines()
+                shown = 0
+                for i, line in enumerate(lines):
+                    if line.startswith("not ok"):
+                        for follow in lines[i:i + 6]:
+                            print(f"  {follow}")
+                            shown += 1
+                        if shown >= 18:
+                            break
+                if shown == 0:
+                    # No TAP "not ok" markers found (e.g. crashed before
+                    # emitting one, or died mid-run with the crash past the
+                    # last flushed line) — fall back to the tail of the
+                    # output instead of always showing just the first 3
+                    # lines, which on a crash mid-suite hid the actual
+                    # failure behind the TAP header/plan.
+                    for line in lines[-10:]:
+                        print(f"  {line}")
 
     def flush_results():
         nonlocal next_to_print
