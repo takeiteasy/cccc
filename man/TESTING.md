@@ -615,7 +615,8 @@ contention source.
 
 `tests/suites/test_suite_posix.c`'s `<aio.h>` tests
 (`test_aio_sigev_thread`, `test_aio_sigev_signal`,
-`test_aio_write_read_roundtrip`, `test_aio_cancel`, `test_lio_listio_wait`)
+`test_aio_write_read_roundtrip`, `test_aio_fsync`, `test_aio_cancel`,
+`test_lio_listio_wait`)
 failed on GitHub's hosted macOS runners the first time this file's aio
 coverage ran there — a release-time-only job, since macOS isn't in the
 regular CI matrix (see [RELEASING.md](RELEASING.md)). Root cause, confirmed
@@ -630,7 +631,7 @@ is not emulated around — it's a real host limit.
 
 **Convention used here, follow it for future host-limitation flakes:**
 retry transient failures a bounded number of times (`aio_write_retry`/
-`aio_read_retry`, 10 attempts at 20ms apart) rather than tolerating them
+`aio_read_retry`/`aio_fsync_retry`, 10 attempts at 20ms apart) rather than tolerating them
 outright — a blanket pass would silently stop testing the code path. If
 every retry is exhausted, fail loudly with the errno folded into the return
 code (`100 + errno`) so the TAP `got N` line names it, since a `printf`

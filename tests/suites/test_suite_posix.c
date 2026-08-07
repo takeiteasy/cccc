@@ -20,7 +20,7 @@
 //   test_sysv_linux_info, test_wordexp_basic, test_wordexp_header,
 //   test_fts_walk, test_fts_set_skip, test_sigevent_layout,
 //   test_aio_sigev_thread, test_aio_sigev_signal,
-//   test_aio_write_read_roundtrip,
+//   test_aio_write_read_roundtrip, test_aio_fsync,
 //   test_aio_cancel, test_aio_slot_exhaustion (macOS only),
 //   test_lio_listio_wait, test_mqueue_roundtrip,
 //   test_mqueue_sigev_thread, test_ndbm_roundtrip
@@ -2942,6 +2942,24 @@ static int aio_read_retry(struct aiocb *cb) {
     return -1;
 }
 
+// aio_fsync() is a submission just like aio_write()/aio_read() -- it takes an
+// aio slot on macOS -- so it is equally exposed to transient EAGAIN under
+// host contention (#929). Same retry discipline as aio_write_retry above.
+static int aio_fsync_retry(int op, struct aiocb *cb) {
+    for (int attempt = 0; attempt < 10; attempt++) {
+        if (aio_fsync(op, cb) == 0)
+            return 0;
+        int saved_errno = errno; /* see aio_write_retry's comment */
+        if (saved_errno != EAGAIN) {
+            errno = saved_errno;
+            return -1;
+        }
+        usleep(20000);
+        errno = saved_errno;
+    }
+    return -1;
+}
+
 static volatile int g_aio_sigev_notified = 0;
 static volatile long long g_aio_sigev_val = -1;
 
@@ -3120,6 +3138,84 @@ int test_aio_write_read_roundtrip(void) {
     if (aio_suspend(rlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 7; }
     if (aio_error(&rcb) != 0) { close(fd); unlink(tmpl); return 8; }
     if (aio_return(&rcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 9; }
+    if (strcmp(buf, msg) != 0) { close(fd); unlink(tmpl); return 10; }
+
+    close(fd);
+    unlink(tmpl);
+    return 42;
+}
+
+// test_aio_fsync (#931) -- aio_fsync() had zero test coverage even though it
+// is documented as supported (COVERAGE.md's <aio.h> row, #804) and wrapped in
+// src/stdlib/posix.c (wrap_aio_fsync). Submits an aio_write, reaps it, then
+// submits an aio_fsync(O_SYNC, ...) and an aio_fsync(O_DSYNC, ...) against the
+// same fd, verifying each reaches a terminal state with aio_error() == 0 and
+// aio_return() == 0 (fsync returns 0 on success, not a byte count, unlike
+// aio_write/aio_read), and that the written content survives the fsync.
+// O_SYNC and O_DSYNC were verified accepted on both macOS arm64 and Linux
+// amd64 with a plain host C program before writing this test (the same
+// verification discipline as the round-trip test above), so both are
+// asserted rather than tolerated.
+[[cccc::test(return = 42, timeout = 10000)]]
+int test_aio_fsync(void) {
+    char tmpl[] = "/tmp/cccc_aio_fsync_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return 1;
+
+    // wrap_aio_fsync()'s own NULL guard (src/stdlib/posix.c) -- this is CCCC
+    // wrapper behaviour, not a POSIX guarantee (POSIX leaves a NULL aiocbp
+    // undefined), but it's cheap and worth pinning.
+    errno = 0;
+    if (aio_fsync(O_SYNC, NULL) != -1) { close(fd); unlink(tmpl); return 1000; }
+
+    // A bogus op value must fail; the specific errno isn't asserted since
+    // that would pin a detail POSIX doesn't guarantee across platforms.
+    struct aiocb bad;
+    memset(&bad, 0, sizeof(bad));
+    bad.aio_fildes = fd;
+    bad.aio_sigevent.sigev_notify = SIGEV_NONE;
+    if (aio_fsync(-1, &bad) != -1) { close(fd); unlink(tmpl); return 1001; }
+
+    const char *msg = "fsync me please";
+    struct aiocb wcb;
+    memset(&wcb, 0, sizeof(wcb));
+    wcb.aio_fildes = fd;
+    wcb.aio_buf = (void *)msg;
+    wcb.aio_nbytes = strlen(msg);
+    wcb.aio_offset = 0;
+    wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
+
+    if (aio_write_retry(&wcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
+    const struct aiocb *wlist[1] = { &wcb };
+    if (aio_suspend(wlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 3; }
+    if (aio_error(&wcb) != 0) { close(fd); unlink(tmpl); return 4; }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 5; }
+
+    int ops[2] = { O_SYNC, O_DSYNC };
+    for (int i = 0; i < 2; i++) {
+        struct aiocb fcb;
+        memset(&fcb, 0, sizeof(fcb));
+        fcb.aio_fildes = fd;
+        fcb.aio_sigevent.sigev_notify = SIGEV_NONE;
+
+        if (aio_fsync_retry(ops[i], &fcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
+        const struct aiocb *flist[1] = { &fcb };
+        aio_suspend(flist, 1, NULL);
+        /* aio_suspend() can return early on EINTR -- poll to a terminal
+           state rather than trusting its return value alone (aio's history
+           on this project, see #929/#870). */
+        int n = 0;
+        int err;
+        while ((err = aio_error(&fcb)) == EINPROGRESS && n++ < 500)
+            usleep(1000);
+        if (err != 0) { close(fd); unlink(tmpl); return 200 + i; }
+        if (aio_return(&fcb) != 0) { close(fd); unlink(tmpl); return 300 + i; }
+    }
+
+    char buf[64];
+    memset(buf, 0, sizeof(buf));
+    lseek(fd, 0, SEEK_SET);
+    if (read(fd, buf, strlen(msg)) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 9; }
     if (strcmp(buf, msg) != 0) { close(fd); unlink(tmpl); return 10; }
 
     close(fd);
