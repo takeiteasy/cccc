@@ -2688,7 +2688,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
     case CB_NONE:
     case CB_UNKNOWN:
         return; // nothing declared/trusted -- no runtime check
-    case CB_RANGE:
+    case CB_RANGE: {
         // Absolute [lo, hi) -- already resolved (and typed) at declaration
         // time; clone_bounds_node() copies ->ty along with everything else.
         // A checked base whose declaration path never resolved its bounds
@@ -2702,39 +2702,59 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
             return;
         *out_lo = base.mem ? clone_member_bounds_node(vm, resolved_lo, base.obj)
                             : clone_bounds_node(vm, resolved_lo);
-        *out_hi = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
-                            : clone_bounds_node(vm, resolved_hi);
+        Node *hi = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
+                             : clone_bounds_node(vm, resolved_hi);
+        // #938: the terminator slot is the elem_size bytes beginning at the
+        // declared end of the range -- for bounds(lo,hi) that end is `hi`
+        // itself, so widen it by one element exactly as CB_COUNT/
+        // CB_BYTE_COUNT do below.
+        if (kind == CHECKED_NTARRAY) {
+            hi = new_binary(vm, ND_ADD, hi, new_long(vm, elem_size, tok), tok);
+            add_type(vm, hi);
+            if (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR))
+                *out_nt = true;
+        }
+        *out_hi = hi;
         return;
+    }
     case CB_COUNT:
     case CB_BYTE_COUNT: {
         if (!resolved_hi)
             return; // see the CB_RANGE comment above
         // lo = the base's own live value at this access; hi = base +
-        // n[*elem_size]. ntarray widens by one element for the terminator
-        // slot (#483's documented widening; see man/SAFETY.md).
+        // n[*elem_size]. #938: ntarray widens by one element for the
+        // terminator slot -- the elem_size bytes beginning at the declared
+        // end of the range -- under all three bounds forms (#483 originally
+        // shipped this for count(n) only; man/SAFETY.md documents the
+        // unified rule).
         *out_lo = checked_base_self_expr(vm, base, tok);
         Node *n = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
                             : clone_bounds_node(vm, resolved_hi); // already typed
         Node *count_bytes;
         if (form == CB_BYTE_COUNT) {
             count_bytes = n;
+            if (kind == CHECKED_NTARRAY) {
+                count_bytes = new_binary(vm, ND_ADD, count_bytes,
+                                         new_long(vm, elem_size, tok), tok);
+                add_type(vm, count_bytes);
+            }
         } else if (kind == CHECKED_NTARRAY) {
             Node *n_plus_1 = new_binary(vm, ND_ADD, n, new_long(vm, 1, tok), tok);
             add_type(vm, n_plus_1);
             count_bytes = new_binary(vm, ND_MUL, n_plus_1,
                                      new_long(vm, elem_size, tok), tok);
             add_type(vm, count_bytes);
-            // #923: this access can land on the widened terminator slot --
-            // flag it for CHKNT's store-side null-terminator guard, but only
-            // for an integer/pointer pointee (a float ntarray has no
-            // sensible "null terminator" and CHKNT's value register is an
-            // integer register).
-            if (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR))
-                *out_nt = true;
         } else {
             count_bytes = new_binary(vm, ND_MUL, n, new_long(vm, elem_size, tok), tok);
             add_type(vm, count_bytes);
         }
+        // #923/#938: this access can land on the widened terminator slot --
+        // flag it for CHKNT's store-side null-terminator guard, but only for
+        // an integer/pointer pointee (a float ntarray has no sensible "null
+        // terminator" and CHKNT's value register is an integer register).
+        if (kind == CHECKED_NTARRAY &&
+            (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR)))
+            *out_nt = true;
         Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok), count_bytes, tok);
         add_type(vm, hi);
         *out_hi = hi;

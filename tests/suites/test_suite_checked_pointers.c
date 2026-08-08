@@ -292,15 +292,132 @@ void test_array_no_widening_oob_write_traps(void) {
     s[n] = 0; // one past count(n) -- CHKR OOB, no terminator slot exists
 }
 
-// byte_count()/bounds() forms on ntarray get no terminator-slot widening
-// (#923's documented follow-up gap) -- a write at the declared edge is an
-// ordinary CHKR OOB trap, not a CHKNT terminator trap.
-[[cccc::test(exit_code = 255)]]
-void test_ntarray_byte_count_no_widening_traps(void) {
+// ---------------------------------------------------------------------
+// #938 -- byte_count(n)/bounds(lo, hi) on ntarray now get the same
+// terminator-slot widening as count(n): the slot is the elem_size bytes
+// beginning at the declared end of the range (byte_count's end is `base +
+// n`, bounds' end is `hi`), and CHKNT enforces it identically.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_ntarray_byte_count_terminator_write(void) {
     int nbytes = 3;
     char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
         (char[4]){'a', 'b', 'c', 0};
-    s[nbytes] = 0; // no widening for byte_count -- plain OOB
+    s[nbytes] = '\0'; // the terminator slot -- one past byte_count(n), still in range
+    AssertEq(s[nbytes], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_byte_count_terminator_nonnull_traps(void) {
+    int nbytes = 3;
+    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+        (char[4]){'a', 'b', 'c', 0};
+    s[nbytes] = 'x'; // terminator slot, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_byte_count_terminator_nonnull_traps_runtime_index(void) {
+    int nbytes = 3;
+    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+        (char[4]){'a', 'b', 'c', 0};
+    volatile int i = nbytes;
+    s[i] = 'x';
+}
+
+[[cccc::test]]
+void test_ntarray_byte_count_inside_range_nonnull_ok(void) {
+    int nbytes = 3;
+    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+        (char[4]){'a', 'b', 'c', 0};
+    s[nbytes - 1] = 'z'; // still inside byte_count(n), not the terminator slot
+    AssertEq(s[nbytes - 1], 'z');
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_byte_count_past_terminator_traps(void) {
+    int nbytes = 3;
+    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+        (char[4]){'a', 'b', 'c', 0};
+    volatile int i = nbytes + 1; // one past the terminator slot
+    char x = s[i];
+    (void)x;
+}
+
+// int pointee (elem_size > 1) -- byte_count is a byte offset, so the
+// terminator slot lands at byte offset nbytes / element index nbytes/4,
+// proving the widening is byte-granular, not element-granular.
+[[cccc::test]]
+void test_ntarray_byte_count_int_terminator_zero_ok(void) {
+    int nbytes = 3 * (int)sizeof(int);
+    int * [[cccc::ntarray, cccc::byte_count(nbytes)]] a =
+        (int[4]){1, 2, 3, 0};
+    a[3] = 0; // byte offset 12 == element index 3, terminator slot, null
+    AssertEq(a[3], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_byte_count_int_terminator_nonzero_traps(void) {
+    int nbytes = 3 * (int)sizeof(int);
+    int * [[cccc::ntarray, cccc::byte_count(nbytes)]] a =
+        (int[4]){1, 2, 3, 0};
+    a[3] = 1; // terminator slot, non-null -- traps
+}
+
+[[cccc::test]]
+void test_ntarray_bounds_terminator_write(void) {
+    char buf[4] = {'a', 'b', 'c', 0};
+    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    s[3] = '\0'; // the terminator slot -- one past declared hi, still in range
+    AssertEq(s[3], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_bounds_terminator_nonnull_traps(void) {
+    char buf[4] = {'a', 'b', 'c', 0};
+    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    s[3] = 'x'; // terminator slot, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_bounds_terminator_nonnull_traps_runtime_index(void) {
+    char buf[4] = {'a', 'b', 'c', 0};
+    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    volatile int i = 3;
+    s[i] = 'x';
+}
+
+[[cccc::test]]
+void test_ntarray_bounds_inside_range_nonnull_ok(void) {
+    char buf[4] = {'a', 'b', 'c', 0};
+    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    s[2] = 'z'; // still inside [buf, buf+3), not the terminator slot
+    AssertEq(s[2], 'z');
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_bounds_past_terminator_traps(void) {
+    char buf[4] = {'a', 'b', 'c', 0};
+    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    volatile int i = 4; // one past the terminator slot
+    char x = s[i];
+    (void)x;
+}
+
+// int pointee (elem_size > 1) via bounds(lo, hi).
+[[cccc::test]]
+void test_ntarray_bounds_int_terminator_zero_ok(void) {
+    int arr[4] = {1, 2, 3, 0};
+    int * [[cccc::ntarray, cccc::bounds(arr, arr + 3)]] a = arr;
+    a[3] = 0; // terminator slot, null -- proves hi - elem_size for sizeof > 1
+    AssertEq(a[3], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_bounds_int_terminator_nonzero_traps(void) {
+    int arr[4] = {1, 2, 3, 0};
+    int * [[cccc::ntarray, cccc::bounds(arr, arr + 3)]] a = arr;
+    a[3] = 1; // terminator slot, non-null -- traps
 }
 
 // ---------------------------------------------------------------------

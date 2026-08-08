@@ -1410,10 +1410,12 @@ struct Node {
     struct Node *checked_bounds_lo;
     struct Node *checked_bounds_hi;
     int64_t checked_access_size; // sizeof of the value actually accessed
-    // #923: true when this ND_DEREF is a [[cccc::ntarray]] + count(n) access
-    // to the widened terminator slot (the +1 element set_checked_deref_bounds()
-    // adds in parse.c) through an integer/pointer pointee -- the only shape
-    // CHKNT's store-side null-terminator guard applies to. Independent of
+    // #923/#938: true when this ND_DEREF is a [[cccc::ntarray]] access (any
+    // of count(n)/byte_count(n)/bounds(lo,hi)) to the widened terminator
+    // slot -- the elem_size bytes beginning at the declared end of the
+    // range, which set_checked_deref_bounds() widens by one element for --
+    // through an integer/pointer pointee -- the only shape CHKNT's
+    // store-side null-terminator guard applies to. Independent of
     // checked_bounds_lo/hi (which are populated for every checked deref);
     // this flag narrows CHKNT emission to the one node kind that can actually
     // destroy the nt invariant, a non-null store into that slot. #937: also

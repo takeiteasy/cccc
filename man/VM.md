@@ -412,7 +412,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
 | `CHKT3` | Heap type-tag check on dereference (effective-type model), resolving the base pointer via `vm->sorted_allocs` | `CCCC_TYPE_CHECKS` |
 | `CHKR` | Checked-pointer range check (`[[cccc::single/array/ntarray]]`): traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
-| `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]] + count(n)`: traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
+| `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
 
 `CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
 `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the largest
@@ -438,9 +438,10 @@ and ignore `--checked-pointers` rather than emitting an inline check.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
 
-`CHKNT` (#923) covers the one gap `CHKR`'s bounds widening for
-`[[cccc::ntarray]]` opens: `count(n)` widens the checked range by one element
-so the terminator slot (`p[n]`) is a legal write target (`CHKR` already
+`CHKNT` (#923/#938) covers the one gap `CHKR`'s bounds widening for
+`[[cccc::ntarray]]` opens: `count()`/`byte_count()`/`bounds()` all widen the
+checked range by one element (`sizeof(T)` bytes at the declared end of the
+range) so the terminator slot is a legal write target (`CHKR` already
 enforces this), but nothing stopped that write from putting a non-null value
 there and silently destroying the invariant the widening exists to serve.
 `CHKNT` is emitted from the store path (`src/codegen.c`'s `ND_ASSIGN` case),

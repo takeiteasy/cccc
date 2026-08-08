@@ -743,7 +743,7 @@ char * [[cccc::ntarray, cccc::count(n)]]   s;  // ~ _Nt_array_ptr<char>
 |---|---|
 | `single` | Points to exactly one object; all pointer arithmetic on it is a compile error; deref is implicitly range-checked against `[p, p + sizeof(T))`, which is also a NULL check |
 | `array` | Points into an array-like region; a bounds form (below) declares its extent |
-| `ntarray` | Like `array`, but `count(n)` widens the checked range by one element for a null-terminator slot; writing that slot is permitted **only with a null value** (#923) |
+| `ntarray` | Like `array`, but widens the checked range by one element (`sizeof(T)` bytes at the declared end of the range) for a null-terminator slot, under all three bounds forms; writing that slot is permitted **only with a null value** (#923/#938) |
 | `count(n)` | The pointer is valid for `n` elements from its own current value: `[p, p + n*sizeof(T))` |
 | `byte_count(n)` | Like `count(n)` but `n` is a byte count, not an element count: `[p, p + n)` |
 | `bounds(lo, hi)` | Explicit absolute range `[lo, hi)`, independent of the pointer's own value |
@@ -924,14 +924,32 @@ int * [[cccc::array, cccc::count(n)]] a = some_stack_array;
 a[n]; // traps under --checked-pointers; CHKB cannot catch this at all
 ```
 
-**Terminator invariant** (#923). `ntarray`'s bounds widening
-(`man/SAFETY.md`'s `ntarray` row above) makes the one-past-`count(n)`
-terminator slot writable, but it says nothing about what may legally be
-written there. A new opcode, `CHKNT`, closes the one soundly-checkable part
-of that gap: it traps a store of a **non-zero** value into the widened
-terminator slot, keyed off the same `[lo, hi)` `CHKR` already computed for
-the access (`addr == hi - elem_size && val != 0`). It runs under the same
-`--checked-pointers` flag as `CHKR`, no separate opt-in.
+**Terminator invariant** (#923/#938). `ntarray`'s bounds widening
+(`man/SAFETY.md`'s `ntarray` row above) makes a one-element terminator slot
+writable at the end of the declared range, but it says nothing about what
+may legally be written there. A new opcode, `CHKNT`, closes the one
+soundly-checkable part of that gap: it traps a store of a **non-zero** value
+into the widened terminator slot, keyed off the same `[lo, hi)` `CHKR`
+already computed for the access (`addr == hi - elem_size && val != 0`). It
+runs under the same `--checked-pointers` flag as `CHKR`, no separate opt-in.
+
+The widening rule is the same regardless of which bounds form declared the
+range: **the terminator slot is the `elem_size` bytes beginning at the
+declared end of the range.**
+
+| Bounds form | Declared end | Terminator slot |
+|---|---|---|
+| `count(n)` | `p + n*sizeof(T)` | `[p + n*sizeof(T), p + (n+1)*sizeof(T))` |
+| `byte_count(n)` | `p + n` | `[p + n, p + n + sizeof(T))` |
+| `bounds(lo, hi)` | `hi` | `[hi, hi + sizeof(T))` |
+
+`byte_count`'s widening is byte-granular, not element-granular: a
+`byte_count(n)` whose `n` is not a multiple of `sizeof(T)` still widens by
+exactly `sizeof(T)` bytes, so the resulting slot is not aligned to an
+element boundary and no element-indexed access (`s[i]`) can ever land on it
+— `CHKR` still admits the extra bytes, but `CHKNT` has nothing reachable to
+guard there. This is a pre-existing property of declaring a `byte_count`
+that doesn't divide evenly by the element size, not a new gap.
 
 ```c
 int n = 3;
@@ -967,9 +985,6 @@ still traps even on a CAS iteration that would have failed the compare.
 
 Known coverage gaps, left as follow-up work rather than built into this pass:
 
-- **`byte_count(n)`/`bounds(lo, hi)` on `ntarray` get no terminator-slot
-  widening at all** (unlike `count(n)`), so `CHKNT` has nothing to guard for
-  them — an existing asymmetry this ticket didn't introduce.
 - **Non-integer/non-pointer pointees are skipped** (a `float`-typed
   `ntarray` has no meaningful "null terminator").
 - **`CHKNT` does not propagate across assignment.** #919 added `CHKR` bounds
