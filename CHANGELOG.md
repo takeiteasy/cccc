@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-08
+
 ### Added
 
 - **Path-sensitive checked-pointer bounds propagation** — a propagation
