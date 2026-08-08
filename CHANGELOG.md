@@ -5,6 +5,19 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Chained checked-pointer bounds propagation** — a local that is itself
+  only propagated (never declared checked) can now act as a propagation
+  source for a further candidate: `int *q = p + 2; int *r = q + 1; int *s =
+  r + 1;` now enforces `s[i]` too, not just `q[i]`, chaining to arbitrary
+  depth. Decided by iterating #919's whole-function eligibility rule to a
+  fixpoint, seeded from declared-checked sources only and growing round over
+  round, so an unrooted cycle (`q = r + 1; r = q + 1;`) never self-validates.
+  A self-rooted reassignment (`q = q + 1;`) is now treated as neutral rather
+  than poisoning `q`, matching the existing `q++`/`q += k` behavior. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#941)
+
 ### Fixed
 
 - **`CHKNT` now covers read-modify-write through an `[[cccc::ntarray]]`

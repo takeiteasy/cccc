@@ -1064,3 +1064,173 @@ void test_prop_chknt_does_not_propagate(void) {
     q[3] = 'x'; // would trap via CHKNT through `s` directly; not through `q`
     AssertEq(q[3], 'x');
 }
+
+// ---------------------------------------------------------------------
+// #941 -- fixpoint over derived-from-derived checked pointers. #919 only
+// let a DECLARED checked pointer/member act as a propagation source; a
+// local that was itself only propagated (never declared checked) could
+// never be a further source, so enforcement stopped after one hop:
+// `int *r = q + 1;` never propagated even when `q` itself propagated from a
+// real checked pointer `p`. propagate_checked_bounds() now iterates the
+// #919 poison scan to a fixpoint (Obj.checked_prop_chain_src), seeded from
+// declared-checked sources only and growing round over round, so trust
+// flows down an arbitrarily long derivation chain -- see
+// man/SAFETY.md's "Bounds propagation across assignment" section.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_prop_chain_three_deep_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;
+    int *r = q + 1;
+    int *s = r + 1;
+    AssertEq(s[1], 4); // p[3], last valid element through the 3-hop chain
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_chain_three_deep_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;
+    int *r = q + 1;
+    int *s = r + 1;
+    volatile int i = 2; // p[4] -- one past the end, through the 3-hop chain
+    int x = s[i];
+    (void)x;
+}
+
+// A chain may root at a #921 member source instead of a declared local --
+// the two features compose transitively, not just at the first hop.
+[[cccc::test]]
+void test_prop_chain_from_member_source_in_bounds(void) {
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    int *q = s.p;
+    int *r = q + 1;
+    AssertEq(r[2], 4); // s.p[3]
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_chain_from_member_source_oob(void) {
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    int *q = s.p;
+    int *r = q + 1;
+    volatile int i = 3; // s.p[4] -- one past the end
+    int x = r[i];
+    (void)x;
+}
+
+// A broken mid-chain link poisons everything downstream of it -- proves the
+// fixpoint isn't over-eager (a naive "assume everyone propagates" pass
+// would wrongly let `s` inherit `p`'s range here).
+[[cccc::test]]
+void test_prop_chain_broken_link_not_propagated(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int local[4] = {0, 0, 0, 0};
+    int *q = p + 0;
+    q = local; // non-checked-rooted reassignment -- poisons q
+    int *r = q + 1; // must NOT propagate: q is poisoned, not a chain source
+    volatile int i = 10;
+    int x = r[i];
+    (void)x;
+}
+
+// A cycle with no declared root anywhere in it never validates itself, no
+// matter how many fixpoint rounds run -- proves the fixpoint is seeded from
+// below (declared sources only) rather than optimistically from above
+// (assume everything propagates, then remove failures), which is what
+// would let this pair mutually "prove" each other.
+[[cccc::test]]
+void test_prop_chain_cycle_not_propagated(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0; // q's OWN declaration is checked-rooted (from p) --
+                     // but the reassignment below poisons q for the whole
+                     // function (straight-line rule: EVERY assignment to q
+                     // must be checked-rooted, not just the declaration),
+                     // so q never actually becomes a chain source at all.
+    int *r = q + 1; // r's declaration would need q as a chain source to
+                     // propagate -- q never qualifies (see above), so r is
+                     // poisoned right at its own declaration, same as any
+                     // other candidate whose init isn't checked-rooted.
+    q = r + 1;      // NOT checked-rooted (r never propagates, see above) --
+                     // this is what actually poisons q; included to show
+                     // the mutual, no-declared-root shape the comment above
+                     // describes, not because q was ever otherwise safe.
+    volatile int i = 10;
+    int x = q[i]; // never checked once q is poisoned
+    (void)x;
+}
+
+// #941: a self-rooted reassignment (`q = q + 1;`) is neutral -- it can
+// neither poison nor re-root `q`, since the snapshotted range is absolute
+// and a self-store can't change it (the same fact that already lets plain
+// `q++`/`q += k` preserve propagation).
+[[cccc::test]]
+void test_prop_self_assign_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;
+    q = q + 1; // self-rooted -- neutral, not a poison
+    AssertEq(q[2], 4); // p[3], through the still-live snapshot
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_self_assign_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;
+    q = q + 1; // self-rooted -- neutral
+    volatile int i = 3; // p[4] -- one past the end
+    int x = q[i];
+    (void)x;
+}
+
+// The neutral rule is strictly about REASSIGNMENT, not the declaration
+// itself: `int *q = q;` has no prior value of `q` to have been rooted in
+// anything, so the declaration's own init-assignment must still poison
+// rather than being treated as a no-op self-reference (see
+// checked_prop_poison_scan()'s `node != checked_prop_init_assign` carve-out
+// in src/parse.c). `q`'s value is indeterminate here (self-referential
+// initializer, syntactically legal but the read value is UB to dereference)
+// -- this test only proves the pass itself handles the shape without
+// mis-propagating or crashing the compiler; it never dereferences `q`.
+[[cccc::test]]
+void test_prop_self_assign_init_not_propagated(void) {
+    int *q = q;
+    AssertEq(1, 1); // reaches here without a false CHKR trap or a compiler crash
+}
+
+// Chained store on a loop back edge: the fixpoint's straight-line,
+// no-path-sensitivity rule (inherited from #919) still requires the
+// assignment to be checked-rooted on every textual occurrence, so a chain
+// re-snapshotted every iteration keeps enforcing.
+[[cccc::test]]
+void test_prop_chain_in_loop_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q = p;
+    int total = 0;
+    for (int i = 0; i < 4; i++) {
+        int *r = q; // re-snapshots each iteration
+        total += *r;
+        q++;
+    }
+    AssertEq(total, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_chain_in_loop_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q = p;
+    for (int i = 0; i < 4; i++) {
+        int *r = q;
+        (void)r;
+        q++;
+    }
+    int *r = q; // one past the end after 4 plain q++'s
+    int x = *r;
+    (void)x;
+}

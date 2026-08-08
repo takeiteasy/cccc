@@ -858,20 +858,65 @@ s = p;     // s's OWN initializer wasn't checked-rooted -- s never
 A #921 member is a valid propagation *source* too, so the two features
 compose: `int *q = obj.p;` propagates from `obj.p`'s own member bounds.
 
-Residual gaps, deliberately out of scope for this pass and left as
-follow-up work rather than a fixpoint/dataflow rewrite:
+A self-rooted reassignment is **neutral**: `q = q + 1;` (or any store whose
+rhs resolves, via `find_checked_base()`, straight back to `q` itself) neither
+poisons `q` nor gets rewritten — the snapshot is an absolute `[lo, hi)` range,
+so a self-store cannot invalidate it, the same fact that already lets a plain
+`q++`/`q += k` preserve propagation. This is narrowly about the *left-hand
+side's own descent*: `q = 1 + q;` is not recognised (`find_checked_base()`
+only ever descends `->lhs`, consistent with how `q = 1 + p;` isn't recognised
+as checked-rooted either) and still poisons `q`, conservatively. The
+carve-out excludes `q`'s own declaration: `int *q = q;` has no prior value of
+`q` to have been rooted in anything, so the initializer itself still poisons.
 
-- **Propagation does not chain.** A local that is itself only propagated
-  (never itself declared checked) can never be a valid source for a
-  *further* candidate: `int *r = q + 1;` does not propagate from `q`, even
-  if `q` itself propagates from a real checked pointer.
+**Chained propagation** (#941). A local that is itself only propagated (never
+declared checked) *can* act as a source for a further candidate:
+
+```c
+int * [[cccc::array, cccc::count(n)]] p = ...;
+int *q = p + 2;   // propagates from p (a declared source)
+int *r = q + 1;   // propagates from q (a chained source)
+int *s = r + 1;   // propagates from r -- chains to arbitrary depth
+```
+
+This is decided by iterating the whole-function eligibility rule above to a
+fixpoint: round 0 accepts only declared-checked sources (today's #919 rule);
+each later round additionally trusts whichever candidates survived the
+*previous* round as sources too, so the accepted-source set grows
+monotonically and the pass always terminates (bounded by the number of
+candidates in the function, with a defensive round cap on top — stopping
+early is sound, it just leaves any chain longer than the cap unpropagated).
+Seeding from the bottom (declared sources only, then growing) rather than
+optimistically from the top (assume everything propagates, then remove
+failures) is what keeps an unrooted cycle from ever self-validating: `q = r +
+1; r = q + 1;` with no declared root anywhere in the cycle never propagates,
+no matter how many rounds run, because neither `q` nor `r` is ever a member
+of any round's *frozen* accepted-source set.
+
+Chaining needs one more soundness argument beyond #919's own: a chained
+source's bounds are runtime values living in its own snapshot temps, not a
+recomputable expression, so `q`'s temps must be written before `r`'s
+snapshot reads them. That holds because candidacy still requires `q`'s own
+**declaration initializer** to be checked-rooted — unchanged from #919 — so
+`q`'s temps are stored at `q`'s declaration, which precedes every use of `q`,
+including `r`'s. One residual: `goto` past a declaration (`{ goto L; int *q
+= p; L: int *r = q + 1; }`) skips `q`'s initializer, leaving its temps
+unwritten — but `q` itself is equally indeterminate at that point, so the
+program is already undefined behavior before any check runs; not treated as
+a gap worth paying for (e.g. trap-initializing every temp) on its own.
+
+Residual gaps, deliberately out of scope for this pass and left as
+follow-up work rather than a full dataflow rewrite:
+
 - **No path-sensitive joins.** The whole-function rule above is
   straight-line: *every* assignment to `q` anywhere in the function must be
   checked-rooted, or `q` never propagates at all — there is no notion of
   "propagates on some paths, not others" (`q = malloc(...); if (c) q = p;`
-  never propagates, even on the path where `q` does hold `p`'s value).
-- **`CHKNT` does not propagate** — see the terminator-invariant gap list
-  below.
+  never propagates, even on the path where `q` does hold `p`'s value). This
+  bounds the chained case too: a chain candidate whose source itself only
+  propagates on some paths still never propagates at all.
+- **`CHKNT` does not propagate**, chained or not — see the terminator-invariant
+  gap list below.
 - **No assignment-time bounds-implication check.** This pass only ever
   *widens* trust (an unchecked `q` borrows a checked source's bounds); it
   never *narrows* it — assigning into a `q` that is itself declared checked

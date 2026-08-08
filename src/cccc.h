@@ -1636,6 +1636,18 @@ struct Obj {
     bool  checked_prop_unsafe;      // true once any non-checked-rooted store or escape is seen
     Obj  *checked_prop_lo;
     Obj  *checked_prop_hi;
+
+    // #941: chained propagation ("q propagates from p; r propagates from
+    // q") is decided by a fixpoint iterated over the whole-function poison
+    // scan -- see propagate_checked_bounds()'s round loop. checked_prop_unsafe
+    // is mutated live within a single round's scan, so it can't double as
+    // "was this a valid chained source" without making the result depend on
+    // AST visit order. checked_prop_chain_src is a frozen snapshot, taken
+    // once at the end of each round (init_assign set && !unsafe), that the
+    // *next* round's checked_prop_source_bounds() is allowed to trust as a
+    // third CheckedBase kind alongside a declared variable/member. Seeded
+    // false, so round 0 only accepts today's declared-checked sources.
+    bool checked_prop_chain_src;
 };
 
 /*!

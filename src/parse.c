@@ -2779,39 +2779,85 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
                            &deref->checked_bounds_hi, &deref->checked_nt_terminator);
 }
 
-// #919: bounds propagation across assignment for an unchecked pointer local
-// whose value is snapshotted from a checked-rooted source. See the design
-// note at propagate_checked_bounds() below for the whole-function
-// "propagatable" rule this implements, and man/SAFETY.md's "Bounds
-// propagation across assignment" section for the user-facing writeup.
+// #919/#941: bounds propagation across assignment for an unchecked pointer
+// local whose value is snapshotted from a checked-rooted source. See the
+// design note at propagate_checked_bounds() below for the whole-function
+// fixpoint this implements, and man/SAFETY.md's "Bounds propagation across
+// assignment" section for the user-facing writeup.
 //
 // True if `base` (the result of find_checked_base() on an assignment's rhs
 // or a deref's address) is a source a propagation candidate may snapshot
-// from: declared checked (variable or member, #921), side-effect-free if a
-// member, AND actually has an enforceable bounds form -- CB_NONE/CB_UNKNOWN
-// sources (a bare `[[cccc::array]]` with nothing declared, or the
-// bounds(unknown) trust escape hatch) are deliberately excluded here even
-// though they ARE "declared checked": propagating "no check" itself would
-// require every assignment along every path to agree on that, which this
-// per-assignment, no-fixpoint design can't guarantee, so such a source
-// poisons the candidate instead (conservative: no propagation, not a false
-// trap). Building `*out_lo`/`*out_hi` as a side effect is intentional --
-// the caller either discards them (the walk-1 usability probe) or keeps
-// them (the walk-2 rewrite); recomputing per call is cheap, compile-time-
-// only work.
+// from. Three kinds of source are recognised:
+//
+//  1. A declared checked variable or member (#921), side-effect-free if a
+//     member, AND actually has an enforceable bounds form -- CB_NONE/
+//     CB_UNKNOWN sources (a bare `[[cccc::array]]` with nothing declared, or
+//     the bounds(unknown) trust escape hatch) are deliberately excluded here
+//     even though they ARE "declared checked": propagating "no check" itself
+//     would require every assignment along every path to agree on that,
+//     which this per-assignment design can't guarantee, so such a source
+//     poisons the candidate instead (conservative: no propagation, not a
+//     false trap).
+//  2. #941: a plain variable that is itself a *chained* propagation source
+//     as of the previous fixpoint round (Obj.checked_prop_chain_src) --
+//     i.e. `q` in `int *r = q + 1;` where `q` itself propagates from `p`.
+//     The source range is then `q`'s own snapshot temps
+//     (checked_prop_lo/hi), read as plain variables rather than recomputed
+//     -- there is no bounds *expression* to rebuild for a propagated
+//     source, only the runtime range already snapshotted into `q`'s temps.
+//     Returns lo/hi as NULL (source recognised but not yet usable) if the
+//     temps haven't been allocated yet -- true only during phase A's
+//     probing, before phase B allocates every survivor's temps; callers
+//     that need a definite yes/no from a chained source should only be
+//     invoked after phase B for the walk-2/3 rewrite/attach purposes, which
+//     is how propagate_checked_bounds() already sequences its phases.
+//
+// Building `*out_lo`/`*out_hi` as a side effect is intentional -- the caller
+// either discards them (the phase-A usability probe) or keeps them (the
+// phase-C rewrite); recomputing per call is cheap, compile-time-only work
+// for kind 1 (a fresh expression tree) and a single Obj lookup for kind 2.
 static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok,
                                        Node **out_lo, Node **out_hi) {
     *out_lo = NULL;
     *out_hi = NULL;
     CheckedBase base = find_checked_base(rhs);
-    if (!checked_base_is_declared(base))
-        return false;
-    if (base.mem && node_has_side_effects(base.obj))
-        return false;
-    Type *pty = base.var ? base.var->ty : base.mem->ty;
-    bool nt;
-    compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, &nt);
-    return *out_lo && *out_hi;
+    if (checked_base_is_declared(base)) {
+        if (base.mem && node_has_side_effects(base.obj))
+            return false;
+        Type *pty = base.var ? base.var->ty : base.mem->ty;
+        bool nt;
+        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, &nt);
+        return *out_lo && *out_hi;
+    }
+    // #941: kind 2 -- a chained propagation source. base.var is non-NULL
+    // here (find_checked_base() never sets .mem for a plain unchecked
+    // variable read, and checked_base_is_declared() already ruled out the
+    // "declared checked" case above, so this is the "unchecked plain
+    // variable" fallthrough).
+    if (base.var && base.var->checked_prop_chain_src) {
+        // The source is recognised regardless of whether its temps exist
+        // yet: during phase A's probing (before phase B has run),
+        // checked_prop_lo is still NULL for every candidate, including a
+        // chain source that will go on to survive to the final round --
+        // the poison scan only consults the boolean return here, never
+        // *out_lo/*out_hi, so leaving them NULL is correct, not a failure.
+        // Requiring temps up front would make phase A's own fixpoint unable
+        // to ever accept a second-order chain, since round 1 always sees
+        // the first round's newly-chain_src sources with no temps
+        // allocated yet. By phase C (after phase B has run), any base.var
+        // that is itself a final survivor -- which it must be, since a
+        // chain source's checked_prop_chain_src can only be true if it
+        // stabilised as non-unsafe by the round the fixpoint stopped at --
+        // has real temps, so *out_lo/*out_hi come back non-NULL there.
+        if (base.var->checked_prop_lo) {
+            *out_lo = new_var_node(vm, base.var->checked_prop_lo, tok);
+            add_type(vm, *out_lo);
+            *out_hi = new_var_node(vm, base.var->checked_prop_hi, tok);
+            add_type(vm, *out_hi);
+        }
+        return true;
+    }
+    return false;
 }
 
 // Walk 1 of propagate_checked_bounds(): marks Obj.checked_prop_unsafe on
@@ -2826,12 +2872,34 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
 // own checked-rootedness still has to be proven here like any other
 // assignment -- `int *q = malloc(...);` must poison `q` right at its
 // declaration, not skip straight to trusting it.
+//
+// #941: a *self-rooted* reassignment (`q = q + 1;`, rhs resolves back to `q`
+// itself via find_checked_base()) is treated as neutral -- neither a poison
+// nor a rewrite target -- rather than requiring `q` to also be its own
+// declared/chained source. Sound because the snapshotted range is absolute:
+// the same fact that already lets `q++`/`q += k` (the to_assign() RMW
+// desugar, which never even reaches this switch since it hides behind a
+// temp) preserve the snapshot applies equally to an explicit self-store.
+// Deliberately narrow: only `find_checked_base(rhs).var == node->lhs->var`
+// (strictly the *lhs's own descent*, e.g. `q = q + 1` or `q = (int*)q`, not
+// `q = 1 + q` -- find_checked_base() only descends ->lhs, so the commuted
+// form isn't recognised here either, consistent with how it already isn't
+// for a declared source) counts; this can never be exploited as a mutual
+// cycle (`q = r + 1; r = q + 1;` with no declared root) because neutrality
+// only excuses `q`'s *own* self-referencing store, not a store rooted at a
+// different candidate -- that still goes through checked_prop_source_bounds()
+// and is decided by the fixpoint below. The node that IS
+// checked_prop_init_assign is explicitly excluded: `int *q = q;` must still
+// poison (there is no prior value of `q` to have been rooted in anything).
 static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         switch (node->kind) {
         case ND_ASSIGN:
             if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
                 node->lhs->var->checked_prop_init_assign) {
+                if (node != node->lhs->var->checked_prop_init_assign &&
+                    find_checked_base(node->rhs).var == node->lhs->var)
+                    break; // self-rooted -- neutral, see comment above
                 Node *lo, *hi;
                 if (!checked_prop_source_bounds(vm, node->rhs, node->tok, &lo, &hi))
                     node->lhs->var->checked_prop_unsafe = true;
@@ -2878,30 +2946,67 @@ static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty) {
     return var;
 }
 
-// Walk 2's per-assignment rewrite: `q = E` (an ND_ASSIGN whose lhs is a
+// #941 phase B: allocates checked_prop_lo/hi for every candidate that
+// survived the phase-A fixpoint (checked_prop_init_assign set,
+// checked_prop_unsafe still false). Must run to completion for the WHOLE
+// candidate set before any rewriting (phase C) starts: a chained rewrite
+// (`r = q + 1;`) reads `q`'s temps via checked_prop_source_bounds(), so `q`'s
+// temps have to exist before `r`'s assignment is visited, and phase C's
+// rewrite order is plain AST order with no dependency sort. Replaces #919's
+// original lazy per-candidate allocation inside checked_prop_rewrite_assign()
+// -- no longer viable once a later candidate's rewrite can need an earlier
+// candidate's temps to already be there regardless of which one phase C's
+// walk reaches first.
+//
+// Iterates fn->locals while new_checked_prop_temp() (called from inside
+// this loop) prepends freshly allocated temps onto that same list -- safe
+// here only because a prepend lands BEHIND the loop's current cursor `v`,
+// so the walk never revisits or sees its own new temps (which have no
+// checked_prop_init_assign set anyway, so they'd be skipped even if it
+// did). Would need re-deriving if this ever switched to appending instead.
+static void checked_prop_alloc_temps(VirtualMachine *vm, Obj *fn) {
+    for (Obj *v = fn->locals; v; v = v->next)
+        if (v->checked_prop_init_assign && !v->checked_prop_unsafe && !v->checked_prop_lo) {
+            v->checked_prop_lo = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+            v->checked_prop_hi = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+        }
+}
+
+// Phase C's per-assignment rewrite: `q = E` (an ND_ASSIGN whose lhs is a
 // surviving candidate) becomes `(__q_lo = (char*)LO, __q_hi = (char*)HI),
 // (q = E)` -- two compiler-generated pointer_to(char) locals snapshotting
 // LO/HI (the source's own absolute bounds, computed exactly as a direct
 // access through the source would be) BEFORE `q` itself is overwritten, so
 // reading `p`/`n` for the snapshot always sees their pre-assignment values.
-// The snapshot temps are lazily allocated on first use per candidate (not
-// at registration time) so a candidate walk 1 poisons never pays for them.
+// The snapshot temps are allocated up front for every survivor by
+// checked_prop_alloc_temps() (phase B), not lazily here.
 //
 // Mutates `assign_node` in place (copies its old contents into a fresh
 // node, then overwrites the original with the wrapping ND_COMMA) so every
 // existing parent pointer into it stays valid; ->next is preserved on the
 // copy, not on the wrapper, so the statement chain is unaffected.
-static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assign_node) {
+static void checked_prop_rewrite_assign(VirtualMachine *vm, Node *assign_node) {
     Obj *var = assign_node->lhs->var;
     Node *lo, *hi;
-    if (!checked_prop_source_bounds(vm, assign_node->rhs, assign_node->tok, &lo, &hi))
-        return; // walk 1 already proved every surviving candidate's
-                // assignments are checked-rooted; this is a defensive
-                // fallback, not expected to trigger.
-
-    if (!var->checked_prop_lo) {
-        var->checked_prop_lo = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
-        var->checked_prop_hi = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+    // `!lo || !hi` covers the theoretical case where checked_prop_source_bounds()
+    // recognises a #941 chain source (kind 2) whose own temps somehow still
+    // aren't allocated by the time phase C runs -- shouldn't happen (phase B
+    // allocates temps for every final survivor, and a chain source referenced
+    // by a surviving candidate is itself provably a survivor, see
+    // checked_prop_source_bounds()'s comment), but this keeps the failure
+    // mode "don't propagate" rather than a NULL-deref in new_cast() below.
+    if (!checked_prop_source_bounds(vm, assign_node->rhs, assign_node->tok, &lo, &hi) ||
+        !lo || !hi) {
+        // #941: phase A already proved every surviving candidate's
+        // assignments are checked-rooted, so this is a defensive fallback,
+        // not expected to trigger -- EXCEPT that phase B now pre-allocates
+        // `var`'s temps for every survivor before phase C runs, so walk 3
+        // (checked_prop_attach_scan()) would otherwise still attach those
+        // (never-stored) temps to every deref through `var` even though this
+        // particular store didn't refresh them. Poison here so that
+        // fails closed instead of feeding CHKR a garbage range.
+        var->checked_prop_unsafe = true;
+        return;
     }
 
     Token *tok = assign_node->tok;
@@ -2926,18 +3031,29 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assig
 }
 
 // Walk 2: finds every ND_ASSIGN targeting a surviving candidate
-// (checked_prop_init_assign set, checked_prop_unsafe still false after walk
-// 1) and rewrites it via checked_prop_rewrite_assign(). Structurally
-// identical to checked_prop_poison_scan() -- separate function rather than
-// folded into walk 1 because walk 1 must finish deciding EVERY candidate's
-// fate (a later assignment in the same function can still poison a
-// candidate whose earlier assignment already looked fine) before walk 2
-// commits to rewriting any of them.
-static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
+// (checked_prop_init_assign set, checked_prop_unsafe still false after the
+// phase-A fixpoint) and rewrites it via checked_prop_rewrite_assign().
+// Structurally identical to checked_prop_poison_scan() -- separate function
+// rather than folded into phase A because phase A must finish deciding
+// EVERY candidate's fate (a later assignment in the same function can still
+// poison a candidate whose earlier assignment already looked fine) before
+// this phase commits to rewriting any of them.
+static void checked_prop_rewrite_scan(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR &&
             node->lhs->var && node->lhs->var->checked_prop_init_assign &&
             !node->lhs->var->checked_prop_unsafe) {
+            // #941: mirror checked_prop_poison_scan()'s self-rooted-neutral
+            // rule -- `q = q + 1;` was never poisoned nor proven by phase A,
+            // so it must not be rewritten into `q_lo = q_lo, q_hi = q_hi`
+            // here either (checked_prop_source_bounds() wouldn't even find a
+            // source for it: `q` is unchecked and, until proven otherwise,
+            // not yet a chain source of itself).
+            if (node != node->lhs->var->checked_prop_init_assign &&
+                find_checked_base(node->rhs).var == node->lhs->var) {
+                checked_prop_rewrite_scan(vm, node->rhs);
+                continue;
+            }
             // Recurse into the rhs FIRST (catches a nested candidate
             // assignment inside E, e.g. a comma or call argument) before
             // rewriting `node` in place -- checked_prop_rewrite_assign()
@@ -2945,21 +3061,21 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             // this same ND_ASSIGN (see its comment), which would otherwise
             // still match this branch on the generic descent below and
             // rewrite forever.
-            checked_prop_rewrite_scan(vm, fn, node->rhs);
-            checked_prop_rewrite_assign(vm, fn, node);
+            checked_prop_rewrite_scan(vm, node->rhs);
+            checked_prop_rewrite_assign(vm, node);
             continue; // node is now the wrapper; its parts are already scanned
         }
 
-        checked_prop_rewrite_scan(vm, fn, node->lhs);
-        checked_prop_rewrite_scan(vm, fn, node->rhs);
-        checked_prop_rewrite_scan(vm, fn, node->cond);
-        checked_prop_rewrite_scan(vm, fn, node->then);
-        checked_prop_rewrite_scan(vm, fn, node->els);
-        checked_prop_rewrite_scan(vm, fn, node->init);
-        checked_prop_rewrite_scan(vm, fn, node->inc);
-        checked_prop_rewrite_scan(vm, fn, node->body);
+        checked_prop_rewrite_scan(vm, node->lhs);
+        checked_prop_rewrite_scan(vm, node->rhs);
+        checked_prop_rewrite_scan(vm, node->cond);
+        checked_prop_rewrite_scan(vm, node->then);
+        checked_prop_rewrite_scan(vm, node->els);
+        checked_prop_rewrite_scan(vm, node->init);
+        checked_prop_rewrite_scan(vm, node->inc);
+        checked_prop_rewrite_scan(vm, node->body);
         for (Node *a = node->args; a; a = a->next)
-            checked_prop_rewrite_scan(vm, fn, a);
+            checked_prop_rewrite_scan(vm, a);
     }
 }
 
@@ -3023,43 +3139,109 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
 // hypothetical token-interleaved pragma, there is no "must precede the
 // declaration" ordering caveat to document here.
 //
-// Three whole-function walks, no dataflow/join analysis (follow-up ticket
-// tracks a path-sensitive version, if the straight-line rule below proves
-// too conservative in practice): poison every candidate touched by a
-// non-checked-rooted assignment, an escaping address-of, or (via
-// Obj.is_captured, already computed by mark_nested_captures()) an access
-// from a nested function's body; rewrite every surviving candidate's
-// assignments into snapshot-then-store; attach the snapshots to every deref
-// reached through a surviving candidate. A candidate that is itself only
-// propagated (never declared checked) can never be a valid propagation
-// *source* for another candidate -- checked_base_is_declared() returns
-// false for a plain unchecked local, so this is automatic, not a separate
-// check: v1 has no fixpoint over derived-from-derived pointers (also a
-// follow-up ticket). checked_nt_terminator is never propagated across an
-// assignment either (walk 3 leaves it false unconditionally) -- CHKNT's own
-// follow-up ticket, distinct from to_assign()'s own-expression RMW copy
-// (#937, see checked_prop_attach_scan()'s comment above).
-// A fourth kind of follow-up, orthogonal to all of the above: this pass
-// never verifies an assignment INTO an already-declared-checked target
-// against the source's bounds (Checked C's _Assume_bounds_cast direction);
-// it only ever widens trust for a previously-unchecked target.
+// No dataflow/join analysis (follow-up ticket tracks a path-sensitive
+// version, if the straight-line rule below proves too conservative in
+// practice): poison every candidate touched by a non-checked-rooted
+// assignment, an escaping address-of, or (via Obj.is_captured, already
+// computed by mark_nested_captures()) an access from a nested function's
+// body; rewrite every surviving candidate's assignments into
+// snapshot-then-store; attach the snapshots to every deref reached through a
+// surviving candidate.
+//
+// #941: a candidate that is itself only propagated (never declared checked)
+// CAN be a valid propagation source for another candidate, as of a chained
+// source's own most recent round (Obj.checked_prop_chain_src) -- this is the
+// phase-A fixpoint loop below. checked_nt_terminator is never propagated
+// across an assignment, chained or not (the attach phase leaves it false
+// unconditionally) -- CHKNT's own follow-up ticket, distinct from
+// to_assign()'s own-expression RMW copy (#937, see
+// checked_prop_attach_scan()'s comment above). A further kind of follow-up,
+// orthogonal to all of the above: this pass never verifies an assignment
+// INTO an already-declared-checked target against the source's bounds
+// (Checked C's _Assume_bounds_cast direction); it only ever widens trust for
+// a previously-unchecked target.
+#define CHECKED_PROP_MAX_ROUNDS 32
+
 static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS))
         return;
-    checked_prop_poison_scan(vm, fn->body);
-    // is_captured is set by mark_nested_captures(), which -- for every
-    // nested function textually inside this one -- always finishes running
-    // before this function's own tail (and therefore this call) runs; see
-    // propagate_checked_bounds()'s call sites. Reads fn->locals rather than
-    // vm->compiler.locals: both hold the same list at every call site today
-    // (fn->locals is snapshotted from it just before leave_scope(), and
-    // nothing between there and here touches vm->compiler.locals), but
-    // taking `fn` as a parameter and reading its own field is not hostage
-    // to that ordering staying true after some future refactor.
-    for (Obj *v = fn->locals; v; v = v->next)
-        if (v->checked_prop_init_assign && v->is_captured)
-            v->checked_prop_unsafe = true;
-    checked_prop_rewrite_scan(vm, fn, fn->body);
+
+    // #941 phase A: iterate checked_prop_poison_scan() to a fixpoint over
+    // Obj.checked_prop_chain_src, seeded false for every candidate -- so
+    // round 0 reproduces #919's original single-pass behaviour exactly, only
+    // declared-checked sources (checked_base_is_declared()) are accepted.
+    // Each later round additionally trusts whichever candidates survived as
+    // chained sources as of the END of the PREVIOUS round only --
+    // checked_prop_chain_src is a frozen snapshot, never mutated mid-round
+    // (see its comment in cccc.h), so within one round's scan the accepted-
+    // source set is fixed and the round's result depends only on that
+    // snapshot, not on AST visit order. Seeding from below (declared sources
+    // only, then growing) rather than from above (assume everything
+    // propagates, then remove failures) is what makes an unrooted cycle like
+    // `q = r + 1; r = q + 1;` never validate itself: neither `q` nor `r` is
+    // ever a member of any round's frozen source set, so neither can ever
+    // poison-clear the other.
+    //
+    // The accepted set is monotone non-decreasing round over round (a
+    // superset of trusted sources can only poison-clear an equal-or-larger
+    // set of candidates), so comparing survivor *counts* between consecutive
+    // rounds is a valid, cheap fixpoint test -- equal count with a monotone
+    // superset relation implies the sets are actually equal, not just the
+    // same size. Bounded by the number of candidates in the function in the
+    // worst case (one additional chain link closes per round);
+    // CHECKED_PROP_MAX_ROUNDS is a defensive cap on top of that --
+    // stopping early is sound, it only leaves some very long chains
+    // unpropagated past the cap, the same outcome as any other poisoning.
+    //
+    // Placeholder inefficiency (follow-up ticket, same class as
+    // checked_base_self_expr()'s documented one): every round re-runs
+    // checked_prop_poison_scan() over the WHOLE function body, so a
+    // declared source's bound expression tree (compute_checked_bounds())
+    // gets rebuilt and discarded from scratch each round even though a
+    // declared source's own bounds never change round to round -- only
+    // whether a chained candidate's source is trusted yet does. Harmless in
+    // practice (arena-allocated, and the loop normally exits within a
+    // couple of rounds for realistic chain depths), but a boolean-only
+    // probe path (skip building *out_lo/*out_hi entirely when the caller is
+    // checked_prop_poison_scan(), which only reads the return value) would
+    // avoid the rebuild.
+    int prev_survivors = -1;
+    for (int round = 0; round < CHECKED_PROP_MAX_ROUNDS; round++) {
+        for (Obj *v = fn->locals; v; v = v->next)
+            if (v->checked_prop_init_assign)
+                v->checked_prop_unsafe = false;
+        checked_prop_poison_scan(vm, fn->body);
+        // is_captured is set by mark_nested_captures(), which -- for every
+        // nested function textually inside this one -- always finishes
+        // running before this function's own tail (and therefore this call)
+        // runs; see propagate_checked_bounds()'s call sites. Reads
+        // fn->locals rather than vm->compiler.locals: both hold the same
+        // list at every call site today (fn->locals is snapshotted from it
+        // just before leave_scope(), and nothing between there and here
+        // touches vm->compiler.locals), but taking `fn` as a parameter and
+        // reading its own field is not hostage to that ordering staying
+        // true after some future refactor.
+        int survivors = 0;
+        for (Obj *v = fn->locals; v; v = v->next)
+            if (v->checked_prop_init_assign) {
+                if (v->is_captured)
+                    v->checked_prop_unsafe = true;
+                v->checked_prop_chain_src = !v->checked_prop_unsafe;
+                if (!v->checked_prop_unsafe)
+                    survivors++;
+            }
+        if (survivors == prev_survivors)
+            break;
+        prev_survivors = survivors;
+    }
+
+    // #941 phase B: allocate every survivor's snapshot temps up front (see
+    // checked_prop_alloc_temps()'s comment for why this can no longer be
+    // lazy once chaining exists).
+    checked_prop_alloc_temps(vm, fn);
+    // Phase C: rewrite every surviving candidate's assignments, then attach
+    // the resulting snapshots to every deref reached through one.
+    checked_prop_rewrite_scan(vm, fn->body);
     checked_prop_attach_scan(vm, fn->body);
 }
 
