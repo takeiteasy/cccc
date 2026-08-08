@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-08
+
 ### Added
 
 - **Checked-pointer bounds propagation across assignment** — `int *q = p +

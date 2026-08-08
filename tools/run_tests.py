@@ -26,7 +26,7 @@ Usage:
   python3 tools/run_tests.py [-j N] [--binary PATH] [--quiet] [--process-timeout N]
   python3 tools/run_tests.py --bench               # also run bench.py after tests
   python3 tools/run_tests.py --perf                # also run the perf sub-suite
-  make test                                         # calls this script
+  ./cccc --build build.c --build-target=test       # build + run everything (calls this script)
 """
 
 import argparse
