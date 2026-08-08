@@ -958,6 +958,15 @@ static Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
 // grammar (bounds expressions are parsed with assign(), never a full
 // statement); flags assignment (compound assignment and ++/-- both lower to
 // ND_ASSIGN, see to_assign()), function calls, and the atomic op kinds.
+// Also recurses into ->then/->els (#949): ND_COND (the ternary `cond ? then
+// : els`) stores its two branches there, separately from ->lhs/->rhs, so
+// `c ? f() : g()` was missed entirely before this and reported
+// side-effect-free even though evaluating it can call f() or g(). Every
+// other child-bearing field reachable from this grammar (->body, ->init,
+// ->inc, cas_*, atomic_expr) belongs to a node kind the switch above
+// already returns true for, or to a statement kind only reachable via
+// ND_STMT_EXPR, which also returns true -- so lhs/rhs/cond/then/els/args is
+// the complete set.
 static bool node_has_side_effects(Node *n) {
     if (!n)
         return false;
@@ -974,7 +983,8 @@ static bool node_has_side_effects(Node *n) {
         break;
     }
     if (node_has_side_effects(n->lhs) || node_has_side_effects(n->rhs) ||
-        node_has_side_effects(n->cond))
+        node_has_side_effects(n->cond) || node_has_side_effects(n->then) ||
+        node_has_side_effects(n->els))
         return true;
     for (Node *a = n->args; a; a = a->next)
         if (node_has_side_effects(a))
@@ -7806,19 +7816,47 @@ static Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok->next, ":")) {
-        // [GNU] Compile `a ?: b` as `tmp = a, tmp ? tmp : b`.
         add_type(vm, cond);
+
+        // DCE-aware suppression: 1 ?: chk() — `b` is dead when `a` is
+        // statically truthy (a ?: b == a ? a : b, so b is only reached when
+        // a is falsy).  Matches standard-ternary els_dead direction (#645).
+        bool elvis_els_dead = vm->compiler.saw_diag_attr &&
+                              static_branch_value(vm, cond) == 1;
+
+        // [GNU] `a ?: b` normally compiles as `tmp = a, tmp ? tmp : b` so
+        // `a` is evaluated exactly once even when it has side effects or is
+        // expensive to recompute. #949: when `a` is a plain, cheaply
+        // re-readable operand -- ND_VAR/ND_NUM, and not volatile/_Atomic
+        // (where two reads could legitimately observe different values) --
+        // skip the temp and build `cond ? clone(cond) : b` directly instead.
+        // This keeps a *pure* elvis expression, e.g. a checked-pointer
+        // bounds declaration `count(n ?: 8)`, side-effect-free per
+        // node_has_side_effects(): the temp form's ND_ASSIGN would
+        // otherwise always trip that check, and is also unsound at file
+        // scope, where a bounds expression may be resolved with no current
+        // function to host the temp local (see resolve_bounds_tokens()).
+        // Anything else keeps the temp desugar unchanged.
+        bool cheap_reread = (cond->kind == ND_VAR || cond->kind == ND_NUM) &&
+                            !(cond->ty && (cond->ty->is_volatile || cond->ty->is_atomic));
+
+        if (cheap_reread) {
+            Node *rhs = new_node(vm, ND_COND, tok);
+            rhs->cond = cond;
+            rhs->then = clone_bounds_node(vm, cond);
+            if (elvis_els_dead) vm->compiler.dead_code_depth++;
+            rhs->els = conditional(vm, rest, tok->next->next);
+            if (elvis_els_dead) vm->compiler.dead_code_depth--;
+            return rhs;
+        }
+
+        // Compile `a ?: b` as `tmp = a, tmp ? tmp : b`.
         Obj *var = new_lvar(vm, "", 0, cond->ty);
         Node *lhs =
             new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), cond, tok);
         Node *rhs = new_node(vm, ND_COND, tok);
         rhs->cond = new_var_node(vm, var, tok);
         rhs->then = new_var_node(vm, var, tok);
-        // DCE-aware suppression: 1 ?: chk() — `b` is dead when `a` is
-        // statically truthy (a ?: b == a ? a : b, so b is only reached when
-        // a is falsy).  Matches standard-ternary els_dead direction (#645).
-        bool elvis_els_dead = vm->compiler.saw_diag_attr &&
-                              static_branch_value(vm, cond) == 1;
         if (elvis_els_dead) vm->compiler.dead_code_depth++;
         rhs->els = conditional(vm, rest, tok->next->next);
         if (elvis_els_dead) vm->compiler.dead_code_depth--;

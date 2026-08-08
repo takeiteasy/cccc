@@ -618,6 +618,73 @@ void test_member_count_sibling_before_ptr_oob(void) {
     (void)x;
 }
 
+// #949: a *pure* ternary bounds expression is accepted (only a
+// side-effecting branch is rejected -- see
+// tests/test_checked_pointers_member_ternary_side_effect_error.c).
+struct mem_count_ternary_s {
+    int c;
+    int n;
+    int * [[cccc::array, cccc::count(c ? n : 0)]] p;
+};
+
+[[cccc::test]]
+void test_member_count_ternary_in_bounds(void) {
+    struct mem_count_ternary_s s = {1, 3, (int[3]){1, 2, 3}};
+    AssertEq(s.p[0], 1);
+    AssertEq(s.p[2], 3);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_count_ternary_oob(void) {
+    struct mem_count_ternary_s s = {1, 3, (int[3]){1, 2, 3}};
+    volatile int i = 3;
+    int x = s.p[i];
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_count_ternary_false_branch_oob(void) {
+    struct mem_count_ternary_s s = {0, 3, (int[3]){1, 2, 3}};
+    volatile int i = 0;
+    int x = s.p[i]; // c is false -> count(c ? n : 0) resolves to 0
+    (void)x;
+}
+
+// #949: GNU elvis `n ?: 8` is a pure ternary too (once conditional()'s
+// side-effect-free-condition fast path applies) and must be accepted.
+struct mem_count_elvis_s {
+    int n;
+    int * [[cccc::array, cccc::count(n ?: 8)]] p;
+};
+
+[[cccc::test]]
+void test_member_count_elvis_nonzero_in_bounds(void) {
+    struct mem_count_elvis_s s = {3, (int[3]){1, 2, 3}};
+    AssertEq(s.p[2], 3);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_count_elvis_nonzero_oob(void) {
+    struct mem_count_elvis_s s = {3, (int[3]){1, 2, 3}};
+    volatile int i = 3;
+    int x = s.p[i];
+    (void)x;
+}
+
+[[cccc::test]]
+void test_member_count_elvis_zero_falls_back_in_bounds(void) {
+    struct mem_count_elvis_s s = {0, (int[8]){1, 2, 3, 4, 5, 6, 7, 8}};
+    AssertEq(s.p[7], 8); // n is 0 -> count(n ?: 8) resolves to the fallback, 8
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_count_elvis_zero_falls_back_oob(void) {
+    struct mem_count_elvis_s s = {0, (int[8]){1, 2, 3, 4, 5, 6, 7, 8}};
+    volatile int i = 8;
+    int x = s.p[i];
+    (void)x;
+}
+
 struct mem_byte_count_s {
     int nbytes;
     char * [[cccc::array, cccc::byte_count(nbytes)]] b;

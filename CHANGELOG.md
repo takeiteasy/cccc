@@ -5,6 +5,28 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`node_has_side_effects()` now sees through a ternary's branches** —
+  `ND_COND` (the `cond ? then : els` ternary) stores its two branches in
+  `->then`/`->els`, separately from `->lhs`/`->rhs`, and the side-effect
+  check that gates checked-pointer bounds declarations
+  (`resolve_bounds_tokens()`) and member object-expression instrumentation
+  (`compute_checked_bounds()`, #921/#945/#947) never recursed into them —
+  so `count(c ? i++ : 3)` was wrongly accepted, and `i++` would have run on
+  every checked access instead of never. Now rejected at the declaration,
+  same as `count(i++)`. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#949)
+- **GNU elvis (`a ?: b`) no longer forces a compiler temp when the
+  condition is a plain, cheaply re-readable operand** — `a ?: b` always
+  desugared to `tmp = a, tmp ? tmp : b`, whose `ND_ASSIGN` made a *pure*
+  elvis bounds expression like `count(n ?: 8)` fail the check above even
+  though it has no side effects. When `a` is an `ND_VAR`/`ND_NUM` and not
+  `volatile`/`_Atomic`, the desugar now builds `a ? clone(a) : b` directly
+  instead, which reads as side-effect-free; every other condition shape
+  keeps the original temp-based desugar. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#949)
+
 ### Changed
 
 - **Checked-pointer bounds propagation and assignment-time bounds

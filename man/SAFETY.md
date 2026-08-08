@@ -759,7 +759,11 @@ parameter, local, or global — including a *later* parameter of the same
 function (`count(n)` before `int n` in the parameter list). A bounds
 expression must be side-effect-free (`count(i++)` is a compile error): it is
 **re-evaluated at every checked access**, not just once at the declaration,
-so a side effect would run once per access instead of once. A
+so a side effect would run once per access instead of once. The check
+applies inside a ternary's branches too — `count(c ? i++ : 3)` is rejected
+just like `count(i++)` — but a *pure* ternary is accepted, including GNU
+elvis (`count(n ?: 8)`, which desugars without a compiler temp specifically
+so a pure elvis bounds expression stays side-effect-free). A
 prototype-only declaration (`void f(int * [[cccc::array, cccc::count(n)]]
 p, int n);`, no body) leaves its bounds unresolved — there is nothing to
 check at the declaration site, and caller-side checking is future work

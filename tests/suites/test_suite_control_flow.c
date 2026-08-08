@@ -864,4 +864,44 @@ void test_logicop_void_context(void) {
     argc ? _logicop_t("C") : _logicop_t("Y");  // truthy -> then branch -> C
 }
 
+// #949: GNU elvis `a ?: b`. conditional() has two desugar paths: a plain
+// ND_VAR/ND_NUM, non-volatile/non-_Atomic condition skips the compiler temp
+// and builds `cond ? clone(cond) : b` directly (needed so a pure elvis
+// bounds expression like `count(n ?: 8)` stays side-effect-free); anything
+// else -- a side-effecting or non-trivial condition, or a volatile/_Atomic
+// operand -- still goes through the original `tmp = a, tmp ? tmp : b`
+// desugar. Both paths must evaluate the condition exactly once and produce
+// the right value.
+static int _elvis_calls = 0;
+static int _elvis_side_effect(void) { _elvis_calls++; return 0; }
+
+[[cccc::test(return = 42)]]
+int test_elvis_plain_var_fast_path(void) {
+    int truthy = 7;
+    if ((truthy ?: 99) != 7) return 1;
+    int falsy = 0;
+    if ((falsy ?: 99) != 99) return 2;
+    // Fast path re-reads `truthy` for the `then` branch -- must still be 7.
+    if (truthy != 7) return 3;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_elvis_side_effecting_cond_evaluated_once(void) {
+    _elvis_calls = 0;
+    int x = _elvis_side_effect() ?: 5;
+    if (_elvis_calls != 1) return 1;  // must run exactly once, not twice
+    if (x != 5) return 2;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_elvis_volatile_cond_uses_temp_path(void) {
+    volatile int v = 3;
+    if ((v ?: 99) != 3) return 1;
+    volatile int z = 0;
+    if ((z ?: 99) != 99) return 2;
+    return 42;
+}
+
 #pragma cccc suite end
