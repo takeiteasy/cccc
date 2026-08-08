@@ -5,6 +5,30 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **`CHKNT`'s null-terminator guard now covers `float`/`double`, `struct`/
+  `union`, and wide `_BitInt`/`_Decimal` `ntarray` pointees** — previously
+  only integer and pointer pointees were guarded (a deliberate v1
+  exclusion, #923). Investigating the exclusion for a decision pass turned
+  up an actual hole: `_BitInt(128)` passed the old `is_integer()` gate and
+  set the guard flag, but its store lowers through codegen's memcpy branch,
+  which returned before the old `CHKNT`-only emission site — so the flag
+  was set and nothing was ever checked. `float`/`double` now reuse `CHKNT`
+  itself (their value's raw bits are transferred into an integer register
+  first). A new opcode, `CHKNTZ`, guards the memcpy-lowered pointees
+  (struct/union, wide `_BitInt`, `_Decimal`) that never pass through a
+  single value register: it scans the source bytes for any non-zero byte
+  before the underlying `memcpy` runs, so the terminator slot is never
+  actually clobbered when it traps. `long double` stays unguarded on
+  purpose — its widened terminator slot is 16 bytes but the actual store is
+  an 8-byte flat-double `FSTR`, so no opcode inspects its full stored
+  representation. `CHKNTZ` only guards a whole-object store through the
+  pointer itself; a member-wise write into the same slot (`tbl[n].a = 1;`)
+  is a known, separately-tracked gap (#950). See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) and
+  [VM.md § Safety Opcodes](man/VM.md#safety-opcodes) (#939)
+
 ### Fixed
 
 - **`node_has_side_effects()` now sees through a ternary's branches** —

@@ -499,6 +499,30 @@ extern "C" {
                    reading past hi, the exact unbounded read this feature \
                    exists to prevent). See man/SAFETY.md's Checked Pointers \
                    section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */ \
+    X(CHKNTZ, 3) /* Checked-pointer null-terminator guard for the \
+                   memcpy-lowered [[cccc::ntarray]] pointees CHKNT cannot \
+                   reach -- struct/union and wide _BitInt/_Decimal (#939), \
+                   which store via MCPY rather than through an integer or \
+                   flat-double register. Same terminator-slot semantics as \
+                   CHKNT, but scans elem_size bytes at a source ADDRESS \
+                   (rs_src) instead of reading one value register, and runs \
+                   before the MCPY it guards -- the slot is never actually \
+                   clobbered when this traps. \
+                   Format: [CHKNTZ][rs_addr:8|rs_hi:8|rs_src:8|unused:8] \
+                   [elem_size:i64] (RRR operand word + i64 immediate). \
+                   Traps iff addr == hi - elem_size && any of the \
+                   elem_size bytes at rs_src is non-zero -- the aggregate \
+                   analogue of CHKNT's "all zero bytes" rule, satisfied by \
+                   `= {0}`/compound-literal sources (which zero the whole \
+                   object including padding, src/parse.c's \
+                   lvar_initializer()) but not by a struct assembled \
+                   field-by-field with stale padding. float/double ntarray \
+                   pointees are still guarded by CHKNT itself (their bits \
+                   are transferred into an int reg first, src/codegen.c); \
+                   TY_LDOUBLE and vector/_Complex pointees remain \
+                   unguarded (see checked_nt_pointee_supported(), \
+                   src/parse.c). Gated on CCCC_CHECKED_BOUNDS, same as \
+                   CHKNT. */ \
     X(CHKRO, 3) /* Optional checked-pointer range check (#942): identical to \
                    CHKR except a sentinel range (lo == (char*)-1 && \
                    hi == (char*)0) is a no-op instead of a violation. Used \
@@ -1477,19 +1501,23 @@ struct Node {
     // enforced.
     struct Node *checked_bounds_obj_init;
     int64_t checked_access_size; // sizeof of the value actually accessed
-    // #923/#938: true when this ND_DEREF is a [[cccc::ntarray]] access (any
-    // of count(n)/byte_count(n)/bounds(lo,hi)) to the widened terminator
-    // slot -- the elem_size bytes beginning at the declared end of the
-    // range, which set_checked_deref_bounds() widens by one element for --
-    // through an integer/pointer pointee -- the only shape CHKNT's
-    // store-side null-terminator guard applies to. Independent of
-    // checked_bounds_lo/hi (which are populated for every checked deref);
-    // this flag narrows CHKNT emission to the one node kind that can actually
-    // destroy the nt invariant, a non-null store into that slot. #937: also
-    // copied onto the synthesized RMW store deref/ND_CAS node described
-    // above -- still never propagated across an ordinary assignment by
-    // #919's propagate_checked_bounds() (checked_prop_attach_scan() leaves
-    // it false), which is a separate, still-open gap (man/SAFETY.md).
+    // #923/#938/#939: true when this ND_DEREF is a [[cccc::ntarray]] access
+    // (any of count(n)/byte_count(n)/bounds(lo,hi)) to the widened
+    // terminator slot -- the elem_size bytes beginning at the declared end
+    // of the range, which set_checked_deref_bounds() widens by one element
+    // for -- through a pointee checked_nt_pointee_supported() (src/parse.c)
+    // accepts: integer/pointer (CHKNT), float/double (CHKNT via a
+    // bit-pattern transfer), or struct/union/wide _BitInt/_Decimal (CHKNTZ,
+    // #939). TY_LDOUBLE/vector/_Complex pointees still leave this false --
+    // no opcode can soundly guard them, see checked_nt_pointee_supported()'s
+    // comment. Independent of checked_bounds_lo/hi (which are populated for
+    // every checked deref); this flag narrows CHKNT/CHKNTZ emission to the
+    // one node kind that can actually destroy the nt invariant, a non-null
+    // store into that slot. #937: also copied onto the synthesized RMW
+    // store deref/ND_CAS node described above -- still never propagated
+    // across an ordinary assignment by #919's propagate_checked_bounds()
+    // (checked_prop_attach_scan() leaves it false), which is a separate,
+    // still-open gap (man/SAFETY.md).
     bool checked_nt_terminator;
 
     // #942: true when checked_bounds_lo/hi were attached by

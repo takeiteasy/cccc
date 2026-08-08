@@ -293,6 +293,138 @@ void test_array_no_widening_oob_write_traps(void) {
 }
 
 // ---------------------------------------------------------------------
+// #939 -- CHKNT extended to float/double pointees (bit-pattern transfer
+// into an int reg, no new opcode) and CHKNTZ (a new opcode) covers the
+// memcpy-lowered pointees CHKNT itself cannot reach: struct/union and wide
+// _BitInt/_Decimal. long double stays unguarded (see
+// checked_nt_pointee_supported()'s comment, src/parse.c) -- pinned by
+// test_ntarray_long_double_terminator_not_guarded below.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_ntarray_double_terminator_zero_ok(void) {
+    int n = 2;
+    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    a[n] = 0.0;
+    AssertDoubleEq(a[n], 0.0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_double_terminator_nonzero_traps(void) {
+    int n = 2;
+    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    a[n] = 1.0; // terminator slot, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_double_terminator_negative_zero_traps(void) {
+    int n = 2;
+    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    a[n] = -0.0; // -0.0 has a non-zero bit pattern -- traps, same rule as
+                 // the all-bytes-zero aggregate case below
+}
+
+[[cccc::test]]
+void test_ntarray_float_terminator_zero_ok(void) {
+    int n = 2;
+    float * [[cccc::ntarray, cccc::count(n)]] a = (float[3]){1.0f, 2.0f, 0.0f};
+    a[n] = 0.0f;
+    AssertFloatEq(a[n], 0.0f);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_float_terminator_nonzero_traps(void) {
+    int n = 2;
+    float * [[cccc::ntarray, cccc::count(n)]] a = (float[3]){1.0f, 2.0f, 0.0f};
+    a[n] = 1.0f; // terminator slot, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_double_terminator_rmw_traps(void) {
+    int n = 2;
+    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    a[n] += 1.0; // proves to_assign()'s copy reaches the new float path too
+}
+
+typedef struct { int a; char b; } CHKNTZOption;
+
+[[cccc::test]]
+void test_ntarray_struct_terminator_zero_ok(void) {
+    int n = 2;
+    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+        (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
+    tbl[n] = (CHKNTZOption){0, 0}; // terminator slot, all-zero-bytes -- ok
+    AssertEq(tbl[n].a, 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_struct_terminator_nonzero_member_traps(void) {
+    int n = 2;
+    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+        (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
+    tbl[n] = (CHKNTZOption){1, 0}; // terminator slot, a[0].a != 0 -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_struct_terminator_nonzero_padding_traps(void) {
+    int n = 2;
+    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+        (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
+    // Members are all zero, but 'b' is non-zero -- still traps: the rule is
+    // all bytes zero, not "every member individually reads as its zero
+    // value", so a stray non-zero byte anywhere in the object traps.
+    tbl[n] = (CHKNTZOption){0, 'x'};
+}
+
+[[cccc::test]]
+void test_ntarray_bitint_terminator_zero_ok(void) {
+    int n = 2;
+    _BitInt(128) * [[cccc::ntarray, cccc::count(n)]] a =
+        (_BitInt(128)[3]){1, 2, 0};
+    a[n] = 0;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_bitint_terminator_nonzero_traps(void) {
+    // #939: this is the previously-unguarded hole -- is_integer() returned
+    // true for TY_BITINT so checked_nt_terminator was set, but a wide
+    // _BitInt store took codegen's memcpy branch and returned before the
+    // old CHKNT-only emission site, so nothing ever guarded it.
+    int n = 2;
+    _BitInt(128) * [[cccc::ntarray, cccc::count(n)]] a =
+        (_BitInt(128)[3]){1, 2, 0};
+    a[n] = 1; // terminator slot, non-null -- now traps via CHKNTZ
+}
+
+// long double's widened terminator slot is 16 bytes (get_vm_size), but the
+// actual store is an 8-byte flat-double FSTR -- checked_nt_pointee_supported()
+// (src/parse.c) deliberately excludes it rather than assert bytes it never
+// inspected. Pin that: a non-zero write to the terminator slot must NOT trap.
+[[cccc::test]]
+void test_ntarray_long_double_terminator_not_guarded(void) {
+    int n = 2;
+    long double * [[cccc::ntarray, cccc::count(n)]] a =
+        (long double[3]){1.0L, 2.0L, 0.0L};
+    a[n] = 1.0L; // would trap under CHKNT/CHKNTZ if guarded -- it isn't
+    AssertTrue(a[n] == 1.0L);
+}
+
+// CHKNTZ only ever sees a whole-object store through the pointer itself
+// (an ND_DEREF lvalue); a member-wise write into the same slot stores
+// through an ND_MEMBER lvalue instead, which checked_nt_terminator is never
+// attached to -- so this does NOT trap. Known gap, see man/SAFETY.md's
+// "Known coverage gaps" -- pinned here rather than left implicit so a
+// future fix updates this test deliberately instead of silently.
+[[cccc::test]]
+void test_ntarray_struct_terminator_member_write_not_guarded(void) {
+    int n = 2;
+    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+        (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
+    tbl[n].a = 1; // member-wise write into the terminator slot -- unguarded
+    AssertEq(tbl[n].a, 1);
+}
+
+// ---------------------------------------------------------------------
 // #938 -- byte_count(n)/bounds(lo, hi) on ntarray now get the same
 // terminator-slot widening as count(n): the slot is the elem_size bytes
 // beginning at the declared end of the range (byte_count's end is `base +

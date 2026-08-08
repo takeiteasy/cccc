@@ -968,7 +968,8 @@ declspec position would qualify the pointee, not the pointer:
 int  * [[cccc::single]]                    p;  // exactly one object
 int  * [[cccc::array, cccc::count(n)]]     a;  // n elements from p's own value
 char * [[cccc::ntarray, cccc::count(n)]]   s;  // like array, +1 for a terminator slot,
-                                                //   which must stay null (`CHKNT`, #923)
+                                                //   which must stay null/all-zero-bytes
+                                                //   (`CHKNT`/`CHKNTZ`, #923/#939)
 int  * [[cccc::array, cccc::bounds(lo,hi)]] r; // explicit absolute range
 ```
 
@@ -987,12 +988,13 @@ actually accessed — but not an enclosing local or a bit-field sibling
 compile error otherwise — it is re-evaluated at every checked access, not
 once).
 
-Runtime enforcement (the `CHKR` opcode, plus `CHKNT` guarding a non-null
-write into `ntarray`'s widened terminator slot, #923 — including through a
-propagated pointer, #943 — and `CHKAB` verifying a checked-rooted
-assignment's source bounds imply an already-declared-checked target's own
-bounds, #944, Checked C's `_Assume_bounds_cast` direction) is gated behind
-`--checked-pointers` / `#pragma cccc config(checked_pointers = true)` —
+Runtime enforcement (the `CHKR` opcode, plus `CHKNT`/`CHKNTZ` guarding a
+non-null/non-all-zero-bytes write into `ntarray`'s widened terminator slot,
+#923/#939 — including through a propagated pointer, #943 — and `CHKAB`
+verifying a checked-rooted assignment's source bounds imply an
+already-declared-checked target's own bounds, #944, Checked C's
+`_Assume_bounds_cast` direction) is gated behind `--checked-pointers` /
+`#pragma cccc config(checked_pointers = true)` —
 opt-in, not part of any `-0`/`-1`/`-2`/`-3` preset. Full reference, including
 the bounds-carry-within-an-expression semantics, the whole-function
 propagation rule that lets an interior pointer assigned into a plain local

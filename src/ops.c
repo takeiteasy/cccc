@@ -4573,6 +4573,61 @@ static inline int op_CHKNT_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_CHKNTZ_fn(VirtualMachine *vm) {
+    // Checked-pointer null-terminator guard for memcpy-lowered ntarray
+    // pointees (#939): struct/union and wide _BitInt/_Decimal, which CHKNT
+    // cannot reach because they never pass through a single value register.
+    // Format:
+    // [CHKNTZ] [rs_addr:8|rs_hi:8|rs_src:8|unused:8] (RRR operand word)
+    //          [elem_size:i64]
+    // Same terminator-slot semantics as CHKNT, but the "value" is
+    // elem_size bytes at a source ADDRESS (rs_src) rather than one
+    // register, scanned for any non-zero byte. Runs before the MCPY it
+    // guards, so the slot is never actually clobbered when this traps.
+    // Guest addresses are flat host pointers here, same as op_MCPY_fn.
+    long long operands = cc_read_word(vm);
+    int rs_addr, rs_hi, rs_src;
+    DECODE_RRR(operands, rs_addr, rs_hi, rs_src);
+    long long elem_size = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return 0;
+
+    if (elem_size <= 0)
+        return 0;
+
+    long long addr = vm->regs[rs_addr];
+    long long hi   = vm->regs[rs_hi];
+
+    if (hi < elem_size)
+        return 0; // no room for a terminator slot at all -- nothing to guard
+
+    long long term_slot = hi - elem_size;
+    if (addr != term_slot)
+        return 0;
+
+    const unsigned char *src = (const unsigned char *)vm->regs[rs_src];
+    bool nonzero = false;
+    for (long long i = 0; i < elem_size; i++) {
+        if (src[i] != 0) {
+            nonzero = true;
+            break;
+        }
+    }
+    if (nonzero) {
+        printf("\n========== CHECKED TERMINATOR VIOLATION ==========\n");
+        printf("Non-zero store into a [[cccc::ntarray]] terminator slot\n");
+        printf("Address:         0x%llx\n", addr);
+        printf("Terminator slot: [0x%llx, 0x%llx)\n", term_slot, hi);
+        printf("PC: 0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)vm->pc);
+        printf("====================================================\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 static inline int op_CHKAB_fn(VirtualMachine *vm) {
     // Checked-pointer assignment-time bounds implication (#944, Checked C's
     // _Assume_bounds_cast direction). Format:

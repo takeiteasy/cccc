@@ -2722,6 +2722,24 @@ static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty);
 // class). #947 folded that per-assignment-site hoist in; the only
 // remaining NULL-out_obj_init callers are phase-A-style usability probes
 // that discard lo/hi and must not allocate a temp per probe.
+// #939: pointee types whose terminator-slot store CHKNT/CHKNTZ can actually
+// guard. Integer/pointer (the original #923 set) and now also float/double
+// (via a bit-pattern transfer into an int reg -- see codegen.c's ND_ASSIGN
+// case) and struct/union/wide _BitInt/_Decimal (the memcpy-lowered types,
+// via CHKNTZ's source byte-scan). TY_LDOUBLE is deliberately excluded: its
+// widened terminator slot is 16 bytes (get_vm_size) but the actual store is
+// an 8-byte flat-double FSTR -- a guard would assert bytes it never
+// inspected, a false assurance rather than an honest gap. Vectors,
+// _Complex, and anything else not listed here stay excluded too.
+static bool checked_nt_pointee_supported(Type *base_ty) {
+    if (!base_ty)
+        return false;
+    return is_integer(base_ty) || base_ty->kind == TY_PTR ||
+           base_ty->kind == TY_FLOAT || base_ty->kind == TY_DOUBLE ||
+           base_ty->kind == TY_STRUCT || base_ty->kind == TY_UNION ||
+           is_decimal(base_ty);
+}
+
 static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *access_ty,
                                    Token *tok, Node **out_lo, Node **out_hi, bool *out_nt,
                                    Node **out_obj_init, Obj *hoist_fn) {
@@ -2831,7 +2849,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
         if (kind == CHECKED_NTARRAY) {
             hi = new_binary(vm, ND_ADD, hi, new_long(vm, elem_size, tok), tok);
             add_type(vm, hi);
-            if (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR))
+            if (checked_nt_pointee_supported(base_ty))
                 *out_nt = true;
         }
         *out_hi = hi;
@@ -2868,12 +2886,11 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
             count_bytes = new_binary(vm, ND_MUL, n, new_long(vm, elem_size, tok), tok);
             add_type(vm, count_bytes);
         }
-        // #923/#938: this access can land on the widened terminator slot --
-        // flag it for CHKNT's store-side null-terminator guard, but only for
-        // an integer/pointer pointee (a float ntarray has no sensible "null
-        // terminator" and CHKNT's value register is an integer register).
-        if (kind == CHECKED_NTARRAY &&
-            (is_integer(base_ty) || (base_ty && base_ty->kind == TY_PTR)))
+        // #923/#938/#939: this access can land on the widened terminator
+        // slot -- flag it for CHKNT/CHKNTZ's store-side null-terminator
+        // guard, for any pointee checked_nt_pointee_supported() can
+        // actually guard (see its comment for the excluded types and why).
+        if (kind == CHECKED_NTARRAY && checked_nt_pointee_supported(base_ty))
             *out_nt = true;
         Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok), count_bytes, tok);
         add_type(vm, hi);
@@ -3361,7 +3378,7 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 // ntarray source, changes what's actually accessed at hi - elem_size, so a
 // size mismatch must not attach the guard -- see compute_checked_bounds()'s
 // own identical size-derived guard for the direct-access case). Also gated
-// on an integer/pointer pointee, matching compute_checked_bounds().
+// on checked_nt_pointee_supported(), matching compute_checked_bounds() (#939).
 static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_DEREF && !node->checked_bounds_lo) {
@@ -3385,7 +3402,7 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
                 node->checked_access_size = pointee_ty ? get_vm_size(pointee_ty) : 1;
                 if (base.var->checked_prop_nt_elem != 0 &&
                     node->checked_access_size == base.var->checked_prop_nt_elem &&
-                    (is_integer(pointee_ty) || (pointee_ty && pointee_ty->kind == TY_PTR)))
+                    checked_nt_pointee_supported(pointee_ty))
                     node->checked_nt_terminator = true;
 
                 // #943: to_assign()'s RMW desugar builds a synthesized store

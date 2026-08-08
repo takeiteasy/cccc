@@ -414,6 +414,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKR` | Checked-pointer range check (`[[cccc::single/array/ntarray]]`): traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
 | `CHKRO` | Optional checked-pointer range check (#942): identical to `CHKR`, except the sentinel `lo == (char*)-1 && hi == (char*)0` is a no-op instead of a violation | `CCCC_CHECKED_BOUNDS` |
 | `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
+| `CHKNTZ` | Checked-pointer null-terminator guard (#939) for the memcpy-lowered `ntarray` pointees `CHKNT` cannot reach (struct/union, wide `_BitInt`/`_Decimal`): traps unless every byte at the source address is zero, checked before the `MCPY` it guards | `CCCC_CHECKED_BOUNDS` |
 | `CHKAB` | Checked-pointer assignment-time bounds implication (#944, Checked C's `_Assume_bounds_cast` direction): traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
 
 `CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
@@ -494,6 +495,36 @@ read-modify-write and `_Atomic` desugars are covered too, via a
 at parse time (before propagation has resolved anything) so the propagation
 pass's attach walk can find and stamp the synthesized RMW store node once
 its bounds are known.
+
+`CHKNTZ` (#939) covers the pointee types `CHKNT` structurally cannot: a
+struct/union or wide `_BitInt`/`_Decimal` assignment never puts its value in
+a single register at all — `ND_ASSIGN`'s codegen routes these through a
+dedicated memcpy branch (`src/codegen.c`, ahead of the generic scalar-store
+path `CHKNT` is emitted from) that stages a source address and a
+destination address for `MCPY`. `CHKNTZ` is emitted in that branch, right
+before the `MCPY`, scanning `checked_access_size` bytes at the *source*
+address for any non-zero byte — the aggregate analogue of `CHKNT`'s
+value-register comparison. Running before the copy (rather than scanning
+the destination afterward) means the terminator slot is never actually
+clobbered by a write that turns out to violate the invariant, matching
+every other `CHK*` opcode's before-the-effect timing. `float`/`double`
+pointees stay on `CHKNT` itself: their value is transferred out of the
+`FReg` file into an integer register first (`FR2R`/`FR2R_F32`, the same
+bit-pattern-transfer idiom used elsewhere to move a flat-double value into
+an integer register), then compared to 0 exactly like an integer store —
+`FR2R_F32`'s payload is the raw `float` bits, so `-0.0f` (non-zero bits,
+even though it compares equal to `0.0f`) correctly traps. `long double`
+pointees are excluded from both opcodes: its widened terminator slot is
+16 bytes but the actual store is an 8-byte flat-double `FSTR`, so no
+existing opcode inspects the full stored representation.
+`checked_nt_pointee_supported()` (`src/parse.c`) is the single gate deciding
+which pointee types set `checked_nt_terminator` at all — both the
+direct-access site (`compute_checked_bounds()`) and the propagation
+attach site (`checked_prop_attach_scan()`) call it, so `CHKNT`/`CHKNTZ`
+selection and propagation agree on exactly the same supported-pointee set.
+`op_byte0_is_int_src()` (`src/optimize.c`) lists `CHKNTZ` alongside `CHKNT`
+(all three operand bytes are pure sources), so it gets the same
+copy-propagation and reordering-barrier treatment.
 
 `CHKAB` (#944) is `CHKR`'s counterpart for the *opposite* trust direction —
 Checked C's `_Assume_bounds_cast`. Where propagation only ever widens trust

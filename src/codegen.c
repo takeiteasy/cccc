@@ -3593,6 +3593,35 @@ static void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
     emit_rrrs_i(vm, CHKNT, rs_addr, rs_hi, rs_val, 0, elem_size);
 }
 
+// Emit CHKNTZ (checked-pointer null-terminator guard for memcpy-lowered
+// pointees, #939). Same shape as emit_chknt() above, but rs_src is the
+// SOURCE ADDRESS being memcpy'd from (not a value register) -- struct/union
+// and wide _BitInt/_Decimal ntarray stores never hold their value in a
+// single register, so CHKNT itself cannot check them. Emitted before the
+// MCPY it guards. No-op at runtime unless CCCC_CHECKED_BOUNDS is set, same
+// as CHKNT; callers gate emission on that flag (and on
+// node->checked_nt_terminator) so the default build never emits this
+// opcode.
+static void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
+                        long long elem_size) {
+    emit_rrrs_i(vm, CHKNTZ, rs_addr, rs_hi, rs_src, 0, elem_size);
+}
+
+// #945/#939: every CHKNT/CHKNTZ emission site needs `deref`'s own
+// already-widened upper bound in a fresh register, re-running the
+// object-expression hoist init first (idempotent even if some other site
+// already ran it for this same access -- see the #945 comments at each call
+// site). Shared here so the three sites (ND_ASSIGN's scalar CHKNT guard,
+// ND_ASSIGN's memcpy-path CHKNTZ guard, and ND_CAS's CHKNT guard) don't each
+// carry their own copy. Caller owns freeing the returned register.
+static int gen_checked_nt_hi(VirtualMachine *vm, Node *deref) {
+    int r_hi = alloc_temp_reg();
+    if (deref->checked_bounds_obj_init)
+        gen_expr(vm, deref->checked_bounds_obj_init, r_hi);
+    gen_expr(vm, deref->checked_bounds_hi, r_hi);
+    return r_hi;
+}
+
 // Emit CHKAB (checked-pointer assignment-time bounds implication, #944).
 // rs_val is the target's own declared bound being checked (lo when
 // `is_hi` is false, hi when true); rs_slo/rs_shi are the source's snapshot
@@ -5196,6 +5225,27 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 r_src = r_reload;
             }
 
+            // #939: a store through a [[cccc::ntarray]] + count(n) pointer's
+            // widened terminator slot must stay all-zero-bytes for the
+            // struct/union/wide-_BitInt/_Decimal pointees that lower to this
+            // memcpy path -- CHKNT (the scalar guard below) can't check
+            // these, since their value never passes through a single
+            // register. CHKNTZ scans r_src (the RHS address, already
+            // computed above) BEFORE the MCPY runs, so the slot is never
+            // actually clobbered when this traps. node->ty->size (MCPY's
+            // count) and node->lhs->checked_access_size are structurally
+            // the same number here -- both are get_vm_size() of the same
+            // pointee type (src/parse.c's get_vm_size() is just ty->size) --
+            // so no CHKR/CHKNT-widened-hi vs. MCPY-size mismatch is possible.
+            if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->lhs->kind == ND_DEREF &&
+                node->lhs->checked_nt_terminator) {
+                mark_temp_reg_used(r_dest);
+                mark_temp_reg_used(r_src);
+                int r_hi = gen_checked_nt_hi(vm, node->lhs);
+                emit_chkntz(vm, r_dest, r_hi, r_src, node->lhs->checked_access_size);
+                free_temp_reg(r_hi);
+            }
+
             // MCPY: REG_A0=dest, REG_A1=src, REG_A2=size
             emit_mov3(vm, REG_A0, r_dest);
             emit_mov3(vm, REG_A1, r_src);
@@ -5296,19 +5346,33 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             node->lhs->checked_nt_terminator && r_addr >= 0) {
             mark_temp_reg_used(r_addr);
             mark_temp_reg_used(r_val);
-            int r_hi = alloc_temp_reg();
-            // #945: re-run the object-expression hoist init before reading
-            // `hi` -- see the gen_addr ND_DEREF CHKR site's identical
-            // comment above. r_addr's own CHKR (emitted by gen_addr while
-            // computing it) already ran this same init once; re-running it
-            // here is idempotent, not redundant work that could be skipped
-            // -- this site must not assume gen_addr's CHKR always fires
-            // first.
-            if (node->lhs->checked_bounds_obj_init)
-                gen_expr(vm, node->lhs->checked_bounds_obj_init, r_hi);
-            gen_expr(vm, node->lhs->checked_bounds_hi, r_hi);
-            emit_chknt(vm, r_addr, r_hi, r_val, node->lhs->checked_access_size);
+            // #939: a float/double r_val is a FReg index, not an int one --
+            // CHKNT's value operand is read as an integer register, so
+            // transfer the raw bits into a fresh int temp first (same
+            // FR2R/FR2R_F32 idiom used elsewhere for a flat-double value
+            // that needs to cross into an int register). TY_LDOUBLE never
+            // reaches here with checked_nt_terminator set (the parse-time
+            // gate excludes it, src/parse.c's checked_nt_pointee_supported())
+            // -- an 8-byte FR2R read would silently ignore its other 8 bytes.
+            int r_ntval = r_val;
+            bool free_ntval = false;
+            if (is_flonum(node->lhs->ty)) {
+                r_ntval = alloc_temp_reg();
+                emit_rr(vm, fop_for_type(node->lhs->ty, FR2R), r_ntval, r_val);
+                free_ntval = true;
+            }
+            // #945: gen_checked_nt_hi() re-runs the object-expression hoist
+            // init before reading `hi` -- see the gen_addr ND_DEREF CHKR
+            // site's identical comment. r_addr's own CHKR (emitted by
+            // gen_addr while computing it) already ran this same init once;
+            // re-running it here is idempotent, not redundant work that
+            // could be skipped -- this site must not assume gen_addr's CHKR
+            // always fires first.
+            int r_hi = gen_checked_nt_hi(vm, node->lhs);
+            emit_chknt(vm, r_addr, r_hi, r_ntval, node->lhs->checked_access_size);
             free_temp_reg(r_hi);
+            if (free_ntval)
+                free_temp_reg(r_ntval);
         }
 
         // #653: a store through a union member must clear (not stamp) the
@@ -7129,17 +7193,19 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // evaluating it here cannot clobber the just-staged REG_A0/A2 this
         // check (and the ACAS call right after) both still need.
         if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_nt_terminator) {
-            int r_hi = alloc_temp_reg();
-            // #945: same object-expression hoist re-init as the other two
-            // CHKR/CHKNT sites (gen_addr's ND_DEREF case and the ND_ASSIGN
-            // store guard above) -- also call-free by the same reasoning as
-            // checked_bounds_hi itself (node_has_side_effects() already
-            // declined the hoist candidate otherwise), so it's just as safe
-            // to evaluate here without disturbing the just-staged
-            // REG_A0-A2 this check and the ACAS call right after both need.
-            if (node->checked_bounds_obj_init)
-                gen_expr(vm, node->checked_bounds_obj_init, r_hi);
-            gen_expr(vm, node->checked_bounds_hi, r_hi);
+            // #939: no float/aggregate handling needed here -- the
+            // unsupported-type check above (is_flonum(base_ty) / sz not in
+            // {1,2,4,8}) already rejects every pointee CHKNT can't guard
+            // before this point is ever reached.
+            // #945: gen_checked_nt_hi() is the same object-expression hoist
+            // re-init as the other two CHKR/CHKNT sites (gen_addr's
+            // ND_DEREF case and the ND_ASSIGN store guard above) -- also
+            // call-free by the same reasoning as checked_bounds_hi itself
+            // (node_has_side_effects() already declined the hoist candidate
+            // otherwise), so it's just as safe to evaluate here without
+            // disturbing the just-staged REG_A0-A2 this check and the ACAS
+            // call right after both need.
+            int r_hi = gen_checked_nt_hi(vm, node);
             emit_chknt(vm, REG_A0, r_hi, REG_A2, node->checked_access_size);
             free_temp_reg(r_hi);
         }

@@ -1199,6 +1199,12 @@ static bool op_byte0_is_int_src(int op) {
     // CHKR immediately above, including the value register (rs_val), which
     // only ever reads the just-computed store value, never defines it.
     case CHKNT:
+    // Checked-pointer null-terminator guard for memcpy-lowered pointees
+    // (#939): byte 0 (rs_addr), byte 1 (rs_hi) and byte 2 (rs_src) are all
+    // pure sources -- same reasoning as CHKNT immediately above, including
+    // rs_src, which only ever reads bytes at the source address, never
+    // defines it.
+    case CHKNTZ:
     // Checked-pointer assignment-time bounds implication (#944): byte 0
     // (rs_val), byte 1 (rs_slo) and byte 2 (rs_shi) are all pure sources --
     // same reasoning as CHKR/CHKNT immediately above.

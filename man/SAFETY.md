@@ -1111,14 +1111,41 @@ int * [[cccc::array, cccc::count(n)]] a = some_stack_array;
 a[n]; // traps under --checked-pointers; CHKB cannot catch this at all
 ```
 
-**Terminator invariant** (#923/#938). `ntarray`'s bounds widening
+**Terminator invariant** (#923/#938/#939). `ntarray`'s bounds widening
 (`man/SAFETY.md`'s `ntarray` row above) makes a one-element terminator slot
 writable at the end of the declared range, but it says nothing about what
-may legally be written there. A new opcode, `CHKNT`, closes the one
-soundly-checkable part of that gap: it traps a store of a **non-zero** value
-into the widened terminator slot, keyed off the same `[lo, hi)` `CHKR`
-already computed for the access (`addr == hi - elem_size && val != 0`). It
-runs under the same `--checked-pointers` flag as `CHKR`, no separate opt-in.
+may legally be written there. Two opcodes close the soundly-checkable part
+of that gap: `CHKNT` traps a store of a **non-zero** value into the widened
+terminator slot, keyed off the same `[lo, hi)` `CHKR` already computed for
+the access (`addr == hi - elem_size && val != 0`); `CHKNTZ` (#939) traps a
+store of a **non-all-zero-bytes** value for pointees whose store never
+passes through a single value register. Both run under the same
+`--checked-pointers` flag as `CHKR`, no separate opt-in.
+
+**Which pointee types are guarded** (#939):
+
+| Pointee | Opcode | How |
+|---|---|---|
+| Integer (`char`/`int`/.../`_BitInt`), pointer | `CHKNT` | value register, compared to 0 |
+| `float`, `double` | `CHKNT` | value's raw bits transferred into an integer register first (`FR2R`/`FR2R_F32`), then compared to 0 -- so `-0.0`/`-0.0f` (a non-zero bit pattern) traps, even though it compares equal to `0.0` |
+| `struct`, `union`, wide `_BitInt`, `_Decimal32/64/128` | `CHKNTZ` | source bytes scanned for any non-zero byte, **before** the underlying `memcpy` runs -- the slot is never actually clobbered when this traps. All bytes of the object must be zero, including padding: `= {0}` and compound-literal initializers zero the whole object first (`ND_MEMZERO`), so those patterns are safe, but a struct assembled member-by-member with stale/uninitialized padding can trap even when every named member reads as its own zero value |
+| `long double`, vector, `_Complex`, anything else | *(unguarded)* | `long double`'s widened terminator slot is 16 bytes (`sizeof`), but the actual store is an 8-byte flat-double `FSTR` -- a guard would assert bytes it never inspected, a false assurance rather than an honest gap. Vectors and `_Complex` are excluded for the same reason: no opcode reads their full stored representation into a scannable register or byte range today |
+
+`CHKNTZ` only guards a **whole-object** store through the pointer itself
+(`tbl[n] = (Option){...}`); writing a single field of the terminator slot in
+place (`tbl[n].a = 1;`) is not guarded at all -- see "Known coverage gaps"
+below.
+
+```c
+struct Option { int a; char b; };
+struct Option * [[cccc::ntarray, cccc::count(n)]] tbl = ...;
+tbl[n] = (struct Option){0, 0}; // ok -- all-zero-bytes terminator
+tbl[n] = (struct Option){1, 0}; // traps under --checked-pointers -- CHKNTZ
+
+double * [[cccc::ntarray, cccc::count(n)]] a = ...;
+a[n] = 0.0;  // ok
+a[n] = -0.0; // traps -- non-zero bit pattern, even though -0.0 == 0.0
+```
 
 The widening rule is the same regardless of which bounds form declared the
 range: **the terminator slot is the `elem_size` bytes beginning at the
@@ -1164,26 +1191,49 @@ plain assignment. `s[n] += 1` and `s[n]++` desugar (`to_assign()`,
 `src/parse.c`) to `tmp = &s[n]; *tmp = *tmp + 1` — the synthesized `*tmp`
 store deref now carries the same `checked_bounds_lo/hi`/
 `checked_nt_terminator` as `s[n]` itself, so `CHKNT` traps it exactly like a
-direct `s[n] = 1`. An `_Atomic`-qualified `ntarray` element's RMW takes a
+direct `s[n] = 1` (this includes the float/double bit-pattern-transfer path,
+e.g. `a[n] += 1.0`). An `_Atomic`-qualified `ntarray` element's RMW takes a
 separate CAS-loop desugar (`compare_and_swap` under the hood) instead of a
 plain store; that path gets its own `CHKNT` emission ahead of the `ACAS`
 opcode, checking the CAS's *desired* value — so an attempted non-null write
 still traps even on a CAS iteration that would have failed the compare.
+`CHKNTZ` has no CAS-loop counterpart: C has no `+=`/`++`/`--` operator on a
+struct/union/wide-`_BitInt` value, so `to_assign()`'s CAS-loop desugar never
+applies to those pointees — only plain assignment (`tbl[n] = ...`) or the
+non-atomic RMW desugar (`tmp = &A; *tmp = *tmp op B`, which lowers to an
+ordinary `CHKNTZ`-guarded store, same as any other) can reach one. `_Decimal`
+does support `+=`/`++`/`--`; its `_Atomic` CAS-loop path is unaffected by
+this ticket either way — `ND_CAS`'s own type check
+(`src/codegen.c`, `sz` must be 1/2/4/8 and not `is_flonum`) governs whether
+an `_Atomic _Decimal` RMW is accepted at all, independent of `CHKNTZ`.
 
-**`CHKNT` propagates across assignment** (#943). `q = s;` where `s` is an
-`[[cccc::ntarray]]` source makes `q[n] = 'x'` trap through `q` exactly the
-same way `s[n] = 'x'` traps directly — FULL, OPT, and chained (#941)
-propagation candidates alike, and through the read-modify-write and
-`_Atomic` compare-exchange desugars too. See "Bounds propagation across
-assignment" above for the full mechanism (element-size matching, the
-mixed-source conflict rule, and the RMW back-link).
+**`CHKNT`/`CHKNTZ` propagate across assignment** (#943, extended #939). `q =
+s;` where `s` is an `[[cccc::ntarray]]` source makes `q[n] = 'x'` trap
+through `q` exactly the same way `s[n] = 'x'` traps directly — FULL, OPT,
+and chained (#941) propagation candidates alike, through the
+read-modify-write and `_Atomic` compare-exchange desugars, and (#939) for
+struct-typed sources too. See "Bounds propagation across assignment" above
+for the full mechanism (element-size matching, the mixed-source conflict
+rule, and the RMW back-link) — propagation keys off element size only, so
+the same size-match rule now also decides `CHKNTZ` attachment for a
+propagated aggregate access.
 
 Known coverage gaps, left as follow-up work rather than built into this pass:
 
-- **Non-integer/non-pointer pointees are skipped** (a `float`-typed
-  `ntarray` has no meaningful "null terminator").
-
-## VM Heap Allocator
+- **`CHKNT`/`CHKNTZ` do not attempt the presence half of the invariant** —
+  see above.
+- **A member-wise write into a `struct`/`union` terminator slot is
+  unguarded** (#950). `CHKNTZ` only ever sees a whole-object store
+  through the pointer itself (`tbl[n] = (Option){...}`, an `ND_DEREF`
+  lvalue) — the same shape `CHKNT` has always required. Writing a single
+  field of the terminator slot in place (`tbl[n].a = 1;`) stores through an
+  `ND_MEMBER` lvalue instead, which `checked_nt_terminator` is never
+  attached to (`set_checked_deref_bounds()`/`checked_prop_attach_scan()`
+  only stamp it on the outer `ND_DEREF`), so neither `CHKNT` nor `CHKNTZ`
+  fires — only `CHKR`'s ordinary range check runs. This gap has no scalar
+  analogue: an integer/pointer/float pointee has no members, so this access
+  shape doesn't exist for `CHKNT`. It is new specifically because `CHKNTZ`
+  extends the guard to pointee types that *do* have members.
 
 `malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`posix_memalign` route through the VM heap
 (`MALC`/`MFRE`/`CALC`/`REALC`/`MALCA`/`PMEMA` opcodes) by default at every safety level, including
