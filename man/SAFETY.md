@@ -954,12 +954,19 @@ declaration exists to prevent. So presence validation is not implemented;
 `CHKNT` only ever looks at the one slot the widening itself makes legal to
 write.
 
+Read-modify-write on the terminator slot (#937) is covered as directly as
+plain assignment. `s[n] += 1` and `s[n]++` desugar (`to_assign()`,
+`src/parse.c`) to `tmp = &s[n]; *tmp = *tmp + 1` — the synthesized `*tmp`
+store deref now carries the same `checked_bounds_lo/hi`/
+`checked_nt_terminator` as `s[n]` itself, so `CHKNT` traps it exactly like a
+direct `s[n] = 1`. An `_Atomic`-qualified `ntarray` element's RMW takes a
+separate CAS-loop desugar (`compare_and_swap` under the hood) instead of a
+plain store; that path gets its own `CHKNT` emission ahead of the `ACAS`
+opcode, checking the CAS's *desired* value — so an attempted non-null write
+still traps even on a CAS iteration that would have failed the compare.
+
 Known coverage gaps, left as follow-up work rather than built into this pass:
 
-- **Read-modify-write on the terminator slot is unguarded.** `s[n] += 1` and
-  `s[n]++` desugar to `tmp = &s[n]; *tmp = *tmp + 1` — `CHKR` still fires on
-  computing `&s[n]`, but the actual store goes through the desugared `*tmp`,
-  a deref `CHKNT` never sees.
 - **`byte_count(n)`/`bounds(lo, hi)` on `ntarray` get no terminator-slot
   widening at all** (unlike `count(n)`), so `CHKNT` has nothing to guard for
   them — an existing asymmetry this ticket didn't introduce.

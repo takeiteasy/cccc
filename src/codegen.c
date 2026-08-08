@@ -7034,6 +7034,25 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         gen_expr(vm, node->cas_addr, REG_A0); // T* — pointer to atomic variable
         gen_expr(vm, node->cas_old,  REG_A1); // T* — pointer to expected value
         gen_expr(vm, node->cas_new,  REG_A2); // T  — desired value
+
+        // #937: an `_Atomic` [[cccc::ntarray]] element's `+=`/`++`/`--`
+        // desugars (to_assign(), src/parse.c) into this ND_CAS rather than
+        // an ND_ASSIGN, so it needs its own CHKNT emission -- the ND_ASSIGN
+        // site below never sees this store. checked_nt_terminator/
+        // checked_bounds_hi/checked_access_size are populated on `node`
+        // itself by to_assign()'s atomic branch when the original lvalue
+        // deref (`s[n]` in `s[n] += 1`) had them set. r_hi is a fresh T-reg
+        // (alloc_temp_reg(), disjoint from REG_A0-A2), and checked_bounds_hi
+        // is guaranteed call-free (side-effect-free bounds expression), so
+        // evaluating it here cannot clobber the just-staged REG_A0/A2 this
+        // check (and the ACAS call right after) both still need.
+        if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_nt_terminator) {
+            int r_hi = alloc_temp_reg();
+            gen_expr(vm, node->checked_bounds_hi, r_hi);
+            emit_chknt(vm, REG_A0, r_hi, REG_A2, node->checked_access_size);
+            free_temp_reg(r_hi);
+        }
+
         emit_with_arg(vm, ACAS, width_enc);
         // bool result in REG_A0
         if (dest_reg != REG_A0)

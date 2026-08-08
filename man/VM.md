@@ -445,7 +445,14 @@ enforces this), but nothing stopped that write from putting a non-null value
 there and silently destroying the invariant the widening exists to serve.
 `CHKNT` is emitted from the store path (`src/codegen.c`'s `ND_ASSIGN` case),
 not from `gen_addr` alongside `CHKR`, because it needs the value being
-stored, which `gen_addr` never sees. It deliberately does **not** attempt to
+stored, which `gen_addr` never sees. A second emission site (#937) sits in
+the `ND_CAS` case: `to_assign()` (`src/parse.c`) desugars a read-modify-write
+(`s[n] += 1`, `s[n]++`) into a synthesized store deref that now carries the
+same checked-pointer fields as the original access, so it reaches the
+`ND_ASSIGN` site like any other checked store; an `_Atomic`-qualified
+`ntarray` element's RMW desugars into a CAS loop instead, so its `ND_CAS`
+node carries the fields and gets its own `CHKNT` emission, checking the
+CAS's *desired* value ahead of the `ACAS` opcode. It deliberately does **not** attempt to
 verify a null terminator is present anywhere in the declared range: in
 Checked C, `count(n)` on an `_Nt_array_ptr` is a *lower* bound on the valid
 extent (`count(0)` is a legal, terminator-free declaration), so a presence

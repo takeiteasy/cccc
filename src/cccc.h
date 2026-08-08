@@ -1399,6 +1399,14 @@ struct Node {
     // per-declaration (not propagated) bounds model. NULL/NULL means no
     // check is emitted for this dereference (unchecked pointer, or a
     // checked pointer with no resolvable bounds -- CB_NONE/CB_UNKNOWN).
+    //
+    // #937: also copied (cloned, not aliased) onto two node kinds that are
+    // NOT built at an original parse site: the synthesized `*tmp` store
+    // ND_DEREF and the ND_CAS `cas` node to_assign() (src/parse.c) builds
+    // when desugaring `A op= B`/`A++`/`A--` -- so CHKNT still sees the RMW
+    // store, not just the CHKR check on `&A`. The ND_CAS reuse only ever
+    // populates checked_bounds_hi (not lo): its own codegen case has no
+    // gen_addr-driven CHKR path to feed lo into.
     struct Node *checked_bounds_lo;
     struct Node *checked_bounds_hi;
     int64_t checked_access_size; // sizeof of the value actually accessed
@@ -1408,7 +1416,11 @@ struct Node {
     // CHKNT's store-side null-terminator guard applies to. Independent of
     // checked_bounds_lo/hi (which are populated for every checked deref);
     // this flag narrows CHKNT emission to the one node kind that can actually
-    // destroy the nt invariant, a non-null store into that slot.
+    // destroy the nt invariant, a non-null store into that slot. #937: also
+    // copied onto the synthesized RMW store deref/ND_CAS node described
+    // above -- still never propagated across an ordinary assignment by
+    // #919's propagate_checked_bounds() (checked_prop_attach_scan() leaves
+    // it false), which is a separate, still-open gap (man/SAFETY.md).
     bool checked_nt_terminator;
 
     // #919: marks the `&A` node to_assign() synthesizes for its *generic*

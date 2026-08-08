@@ -5,6 +5,17 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`CHKNT` now covers read-modify-write through an `[[cccc::ntarray]]`
+  terminator slot** — `s[n] += 1`, `s[n]++`, `s[n]--` (and the `_Atomic`
+  compare-and-swap RMW form) previously bypassed #923's null-terminator
+  guard: the read-modify-write desugar's synthesized store never carried the
+  checked-pointer bounds `CHKNT` keys off, so a non-null RMW into the
+  terminator slot silently corrupted the invariant even though the
+  equivalent direct assignment already trapped. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#937)
+
 ## [0.2.1] - 2026-08-08
 
 ### Added

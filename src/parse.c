@@ -2951,8 +2951,11 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 // come from the access site's own address expression (`node->lhs->ty`), NOT
 // from the propagation source -- a cast (`char *q = (char*)p;`) legitimately
 // changes what a later `q[i]` accesses. checked_nt_terminator is
-// deliberately left false: CHKNT does not propagate (documented gap, see
-// man/SAFETY.md).
+// deliberately left false: CHKNT does not propagate across an *assignment*
+// (this pass -- documented gap, see man/SAFETY.md). #937 separately made
+// to_assign() copy checked_nt_terminator onto its own synthesized RMW store
+// node when the source deref already has it set; that is a same-expression
+// desugar, not assignment propagation, so it doesn't touch this gap.
 static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_DEREF && !node->checked_bounds_lo) {
@@ -3012,8 +3015,10 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
 // *source* for another candidate -- checked_base_is_declared() returns
 // false for a plain unchecked local, so this is automatic, not a separate
 // check: v1 has no fixpoint over derived-from-derived pointers (also a
-// follow-up ticket). checked_nt_terminator is never propagated either
-// (walk 3 leaves it false unconditionally) -- CHKNT's own follow-up ticket.
+// follow-up ticket). checked_nt_terminator is never propagated across an
+// assignment either (walk 3 leaves it false unconditionally) -- CHKNT's own
+// follow-up ticket, distinct from to_assign()'s own-expression RMW copy
+// (#937, see checked_prop_attach_scan()'s comment above).
 // A fourth kind of follow-up, orthogonal to all of the above: this pass
 // never verifies an assignment INTO an already-declared-checked target
 // against the source's bounds (Checked C's _Assume_bounds_cast direction);
@@ -6799,6 +6804,29 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
         cas->cas_new = new_var_node(vm, new, tok);
         loop->cond = new_unary(vm, ND_NOT, cas, tok);
 
+        // #937: an `_Atomic` ntarray element's `+=`/`++`/`--` takes this
+        // CAS-loop desugar rather than the plain ND_ASSIGN one above -- the
+        // actual store is `cas`, an ND_CAS the ND_ASSIGN-only CHKNT emission
+        // site (src/codegen.c) never sees. Copy hi/access-size/nt-terminator
+        // from the original `binary->lhs` deref (e.g. `s[n]` in
+        // `s[n] += 1`) onto `cas` itself so its own codegen case can emit
+        // CHKNT against `desired` (cas_new, staged into REG_A2) the same way
+        // ND_ASSIGN does. checked_bounds_lo is deliberately NOT copied here:
+        // ND_CAS has no gen_addr-driven CHKR path to feed it, and cas_addr
+        // (`&A`, via the `addr` local above) was already range-checked by
+        // CHKR when `&binary->lhs` was evaluated -- the lo/hi-must-be-paired
+        // invariant documented on Node.checked_bounds_lo/hi only applies to
+        // an ND_DEREF's own CHKR check, not to this reuse. The guard fires
+        // on the *attempted* desired value, so a CAS iteration that would
+        // have failed the compare still traps -- correct, since the program
+        // is still trying to write a non-null byte into the terminator slot.
+        if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_hi &&
+            binary->lhs->checked_nt_terminator) {
+            cas->checked_bounds_hi = clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
+            cas->checked_access_size = binary->lhs->checked_access_size;
+            cas->checked_nt_terminator = true;
+        }
+
         cur = cur->next = loop;
         cur = cur->next =
             new_unary(vm, ND_EXPR_STMT, new_var_node(vm, new, tok), tok);
@@ -6820,8 +6848,41 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
     addr_of_lhs->is_rmw_temp_addr = true;
     Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), addr_of_lhs, tok);
 
+    Node *store_deref = new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
+
+    // #937: `binary->lhs` (the original `*p`/`p[i]`/`p->x` deref, e.g. `s[n]`
+    // in `s[n] += 1`) already carries checked-pointer bounds if
+    // set_checked_deref_bounds() populated them at its own parse site, but
+    // `store_deref` (`*tmp` above) is a synthesized ND_DEREF over an unnamed
+    // compiler temp -- find_checked_base() sees only the temp, which is
+    // never itself declared checked, so it would get no bounds of its own.
+    // Without this, CHKNT (#923's terminator guard) never sees the actual
+    // store, only CHKR on `&binary->lhs` (via addr_of_lhs above) -- the exact
+    // bypass #937 reports. Copy lo/hi/access-size/nt-terminator across so the
+    // store is checked exactly as if it had been written `s[n] = *tmp op B`
+    // directly. Clone (not alias) the bounds expressions, same reasoning as
+    // every other per-deref-site copy in this file (clone_bounds_node()'s
+    // comment above): each access site owns its own Node objects. Both lo
+    // and hi must be copied together, never just the nt flag alone -- the
+    // ND_ASSIGN codegen guard (src/codegen.c) only routes a store off the
+    // promoted-local fast path (which never reaches CHKNT) when both are
+    // non-NULL, so a hi-only copy would silently reintroduce the bypass.
+    // Gated on ND_DEREF: `p += k`/`p++` (lhs is ND_VAR, #919's
+    // is_rmw_temp_addr path) is untouched, matching checked_prop_attach_scan's
+    // own propagation model, which only ever attaches bounds to ND_DEREF.
+    // One redundant CHKR results per checked RMW (`&s[n]` and this `*tmp`
+    // store both range-check the same address) -- acceptable at this
+    // magnitude, not worth deduping.
+    if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_lo &&
+        binary->lhs->checked_bounds_hi) {
+        store_deref->checked_bounds_lo = clone_bounds_node(vm, binary->lhs->checked_bounds_lo);
+        store_deref->checked_bounds_hi = clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
+        store_deref->checked_access_size = binary->lhs->checked_access_size;
+        store_deref->checked_nt_terminator = binary->lhs->checked_nt_terminator;
+    }
+
     Node *expr2 = new_binary(
-        vm, ND_ASSIGN, new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok),
+        vm, ND_ASSIGN, store_deref,
         new_binary(vm, binary->kind,
                    new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok),
                    binary->rhs, tok),

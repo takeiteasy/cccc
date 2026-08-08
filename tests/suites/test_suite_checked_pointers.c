@@ -327,7 +327,11 @@ void test_store_path_traps(void) {
 // Read-modify-write (`a[i] += 1`, `a[i]++`) desugars through to_assign()
 // into ND_DEREF(ND_VAR tmp) for the actual load/store, where `tmp = &a[i]`
 // -- the address-of builds an ND_ADDR over the original postfix ND_DEREF,
-// so gen_addr's CHKR check still fires there. Verified, not assumed.
+// so gen_addr's CHKR check still fires there. Verified, not assumed. This
+// only proves out-of-bounds CHKR coverage on the RMW path -- it says
+// nothing about CHKNT's terminator-slot guard, which (until #937) the RMW
+// desugar's synthesized store deref never carried; see the CHKNT RMW block
+// below for that coverage.
 [[cccc::test(exit_code = 255)]]
 void test_compound_assign_traps(void) {
     int n = 4;
@@ -342,6 +346,86 @@ void test_increment_traps(void) {
     int * [[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
     volatile int i = 4;
     a[i]++;
+}
+
+// ---------------------------------------------------------------------
+// #937 -- CHKNT on read-modify-write through the terminator slot. `s[n] +=
+// 1`/`s[n]++`/`s[n]--` desugar via to_assign() into `tmp = &s[n]; *tmp =
+// *tmp op B`; the synthesized `*tmp` store now carries the same
+// checked_bounds_lo/hi/checked_nt_terminator as `s[n]` itself, so CHKNT
+// covers it exactly as it covers a direct `s[n] = x`.
+// ---------------------------------------------------------------------
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_terminator_rmw_traps(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n] += 1; // null terminator slot -> 1, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_terminator_increment_traps(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n]++; // same slot, postfix increment
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_terminator_decrement_traps(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n]--; // null -> -1, non-null -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_terminator_rmw_runtime_index_traps(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    volatile int i = 3; // same slot, but via a runtime (non-constant) index
+    s[i] += 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_int_terminator_rmw_traps(void) {
+    int n = 3;
+    int * [[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
+    a[n] += 1; // proves hi - elem_size for sizeof > 1 on the RMW path
+}
+
+[[cccc::test]]
+void test_ntarray_terminator_rmw_zero_ok(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n] += 0; // stays null -- no trap
+    AssertEq(s[n], 0);
+}
+
+[[cccc::test]]
+void test_ntarray_inside_count_rmw_ok(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    s[n - 1] += 1; // still inside count(n), not the terminator slot
+    AssertEq(s[n - 1], 'd');
+}
+
+// _Atomic ntarray RMW takes to_assign()'s CAS-loop desugar instead of the
+// plain ND_ASSIGN one -- a separate code path (ND_CAS in codegen.c) that
+// needed its own CHKNT emission.
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_atomic_terminator_rmw_traps(void) {
+    int n = 3;
+    _Atomic char backing[4] = {'a', 'b', 'c', 0};
+    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s = backing;
+    s[n] += 1; // terminator slot, non-null via the CAS-loop store -- traps
+}
+
+[[cccc::test]]
+void test_ntarray_atomic_terminator_rmw_zero_ok(void) {
+    int n = 3;
+    _Atomic char backing[4] = {'a', 'b', 'c', 0};
+    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s = backing;
+    s[n] += 0; // stays null -- no trap
+    AssertEq(s[n], 0);
 }
 
 // ---------------------------------------------------------------------
