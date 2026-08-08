@@ -988,7 +988,8 @@ compile error otherwise — it is re-evaluated at every checked access, not
 once).
 
 Runtime enforcement (the `CHKR` opcode, plus `CHKNT` guarding a non-null
-write into `ntarray`'s widened terminator slot, #923) is gated behind
+write into `ntarray`'s widened terminator slot, #923 — including through a
+propagated pointer, #943) is gated behind
 `--checked-pointers` / `#pragma cccc config(checked_pointers = true)` —
 opt-in, not part of any `-0`/`-1`/`-2`/`-3` preset. Full reference, including
 the bounds-carry-within-an-expression semantics, the whole-function

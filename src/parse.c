@@ -2827,9 +2827,19 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
 // optional source too, even though the store itself is unconditionally
 // checked-rooted. Left unset (caller must not read it) when this returns
 // false -- there is no source to be optional about.
+//
+// #943: `*out_nt`/`*out_nt_elem` report whether this source's `hi` is
+// specifically a widened [[cccc::ntarray]] upper bound (the terminator-slot
+// fact), and its pointee element size if so -- 0 means no NT fact. Kind 1
+// forwards compute_checked_bounds()'s own `nt` output (previously discarded)
+// and the source's own pointee size; kind 2 forwards the chained source's
+// frozen Obj.checked_prop_nt_elem, composing transitively through a #941
+// chain exactly like *out_optional does. Also left unset when this returns
+// false.
 static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok,
                                        Node **out_lo, Node **out_hi,
-                                       bool *out_optional) {
+                                       bool *out_optional, bool *out_nt,
+                                       int64_t *out_nt_elem) {
     *out_lo = NULL;
     *out_hi = NULL;
     CheckedBase base = find_checked_base(rhs);
@@ -2837,11 +2847,12 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
         if (base.mem && node_has_side_effects(base.obj))
             return false;
         Type *pty = base.var ? base.var->ty : base.mem->ty;
-        bool nt;
-        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, &nt);
+        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt);
         if (!(*out_lo && *out_hi))
             return false;
         *out_optional = false;
+        Type *base_ty = pty->base;
+        *out_nt_elem = *out_nt ? (base_ty ? get_vm_size(base_ty) : 1) : 0;
         return true;
     }
     // #941: kind 2 -- a chained propagation source. base.var is non-NULL
@@ -2871,6 +2882,8 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
             add_type(vm, *out_hi);
         }
         *out_optional = base.var->checked_prop_optional;
+        *out_nt_elem = base.var->checked_prop_nt_elem;
+        *out_nt = *out_nt_elem != 0;
         return true;
     }
     return false;
@@ -2927,11 +2940,33 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
                     find_checked_base(node->rhs).var == var)
                     break; // self-rooted -- neutral, see comment above
                 Node *lo, *hi;
-                bool src_optional;
+                bool src_optional, src_nt;
+                int64_t src_nt_elem;
                 if (checked_prop_source_bounds(vm, node->rhs, node->tok, &lo, &hi,
-                                               &src_optional)) {
+                                               &src_optional, &src_nt, &src_nt_elem)) {
                     var->checked_prop_scan_saw_rooted = true;
                     var->checked_prop_scan_src_optional |= src_optional;
+                    // #943: fold this store's NT fact into the round's
+                    // running element size, order-independently within the
+                    // round -- see checked_prop_scan_saw_non_nt's comment in
+                    // cccc.h for why both directions need their own seen-flag
+                    // rather than just comparing against `elem == 0`. A
+                    // non-checked-rooted store never reaches this branch at
+                    // all (see the `else` below), so it can't contradict an
+                    // NT fact already seen -- it just isn't live on that
+                    // path.
+                    if (src_nt) {
+                        if (var->checked_prop_scan_nt_elem == 0)
+                            var->checked_prop_scan_nt_elem = src_nt_elem;
+                        else if (var->checked_prop_scan_nt_elem != src_nt_elem)
+                            var->checked_prop_scan_nt_conflict = true;
+                        if (var->checked_prop_scan_saw_non_nt)
+                            var->checked_prop_scan_nt_conflict = true;
+                    } else {
+                        var->checked_prop_scan_saw_non_nt = true;
+                        if (var->checked_prop_scan_nt_elem != 0)
+                            var->checked_prop_scan_nt_conflict = true;
+                    }
                 } else {
                     var->checked_prop_scan_saw_unrooted = true;
                 }
@@ -3044,9 +3079,15 @@ static Node *checked_prop_sentinel_node(VirtualMachine *vm, bool is_hi, Token *t
 static void checked_prop_rewrite_assign(VirtualMachine *vm, Node *assign_node) {
     Obj *var = assign_node->lhs->var;
     Node *lo, *hi;
-    bool src_optional;
+    bool src_optional, src_nt;
+    int64_t src_nt_elem;
+    // NT-ness isn't needed here -- walk 3 (checked_prop_attach_scan())
+    // consults the candidate's own frozen checked_prop_nt_elem directly,
+    // rather than recomputing per-store like lo/hi -- so src_nt/src_nt_elem
+    // are discarded.
     bool is_source = checked_prop_source_bounds(vm, assign_node->rhs, assign_node->tok,
-                                                &lo, &hi, &src_optional);
+                                                &lo, &hi, &src_optional, &src_nt,
+                                                &src_nt_elem);
     Token *tok = assign_node->tok;
     if (is_source && lo && hi) {
         // Rooted store -- unchanged #919/#941 behavior below; lo/hi are
@@ -3153,12 +3194,17 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Node *node) {
 // expression is untouched by that rewrite. checked_access_size/pointee type
 // come from the access site's own address expression (`node->lhs->ty`), NOT
 // from the propagation source -- a cast (`char *q = (char*)p;`) legitimately
-// changes what a later `q[i]` accesses. checked_nt_terminator is
-// deliberately left false: CHKNT does not propagate across an *assignment*
-// (this pass -- documented gap, see man/SAFETY.md). #937 separately made
-// to_assign() copy checked_nt_terminator onto its own synthesized RMW store
-// node when the source deref already has it set; that is a same-expression
-// desugar, not assignment propagation, so it doesn't touch this gap.
+// changes what a later `q[i]` accesses.
+//
+// #943: checked_nt_terminator IS now propagated, when the candidate's own
+// frozen checked_prop_nt_elem says every rooted store this candidate ever
+// saw was ntarray-rooted with the SAME pointee element size, AND this
+// particular access's own checked_access_size matches that size too (a cast
+// through the propagated pointer, e.g. `int *q = (int*)s;` off a `char`
+// ntarray source, changes what's actually accessed at hi - elem_size, so a
+// size mismatch must not attach the guard -- see compute_checked_bounds()'s
+// own identical size-derived guard for the direct-access case). Also gated
+// on an integer/pointer pointee, matching compute_checked_bounds().
 static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_DEREF && !node->checked_bounds_lo) {
@@ -3178,8 +3224,36 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
                 // comment in codegen.c.
                 node->checked_bounds_optional = base.var->checked_prop_optional;
                 Type *access_ty = node->lhs->ty;
-                node->checked_access_size =
-                    access_ty && access_ty->base ? get_vm_size(access_ty->base) : 1;
+                Type *pointee_ty = access_ty ? access_ty->base : NULL;
+                node->checked_access_size = pointee_ty ? get_vm_size(pointee_ty) : 1;
+                if (base.var->checked_prop_nt_elem != 0 &&
+                    node->checked_access_size == base.var->checked_prop_nt_elem &&
+                    (is_integer(pointee_ty) || (pointee_ty && pointee_ty->kind == TY_PTR)))
+                    node->checked_nt_terminator = true;
+
+                // #943: to_assign()'s RMW desugar builds a synthesized store
+                // node (checked_rmw_mirror) BEFORE this pass runs, so it
+                // never got a chance to see these just-attached bounds --
+                // mirror them across now, the same fields #937 already
+                // copies for the direct-access case.
+                if (node->checked_rmw_mirror) {
+                    Node *mirror = node->checked_rmw_mirror;
+                    if (mirror->kind == ND_DEREF) {
+                        mirror->checked_bounds_lo = clone_bounds_node(vm, node->checked_bounds_lo);
+                        mirror->checked_bounds_hi = clone_bounds_node(vm, node->checked_bounds_hi);
+                        mirror->checked_bounds_optional = node->checked_bounds_optional;
+                        mirror->checked_access_size = node->checked_access_size;
+                        mirror->checked_nt_terminator = node->checked_nt_terminator;
+                    } else {
+                        // ND_CAS (the `_Atomic` desugar) -- lo is deliberately
+                        // omitted, matching to_assign()'s own direct-access
+                        // ND_CAS copy (it has no gen_addr-driven CHKR path to
+                        // feed lo into).
+                        mirror->checked_bounds_hi = clone_bounds_node(vm, node->checked_bounds_hi);
+                        mirror->checked_access_size = node->checked_access_size;
+                        mirror->checked_nt_terminator = node->checked_nt_terminator;
+                    }
+                }
             }
         }
         checked_prop_attach_scan(vm, node->lhs);
@@ -3350,7 +3424,7 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     // probe path (skip building *out_lo/*out_hi entirely when the caller is
     // checked_prop_poison_scan(), which only reads the return value) would
     // avoid the rebuild.
-    int prev_survivors = -1, prev_optional = -1;
+    int prev_survivors = -1, prev_optional = -1, prev_nt = -1;
     bool converged = false;
     for (int round = 0; round < CHECKED_PROP_MAX_ROUNDS; round++) {
         for (Obj *v = fn->locals; v; v = v->next)
@@ -3359,6 +3433,11 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
                 v->checked_prop_scan_saw_rooted = false;
                 v->checked_prop_scan_saw_unrooted = false;
                 v->checked_prop_scan_src_optional = false;
+                // #943: reset alongside the other per-round scratch fields
+                // -- see their comments in cccc.h.
+                v->checked_prop_scan_nt_elem = 0;
+                v->checked_prop_scan_saw_non_nt = false;
+                v->checked_prop_scan_nt_conflict = false;
             }
         checked_prop_poison_scan(vm, fn->body);
         // is_captured is set by mark_nested_captures(), which -- for every
@@ -3371,7 +3450,7 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
         // touches vm->compiler.locals), but taking `fn` as a parameter and
         // reading its own field is not hostage to that ordering staying
         // true after some future refactor.
-        int survivors = 0, optional_survivors = 0;
+        int survivors = 0, optional_survivors = 0, nt_survivors = 0;
         for (Obj *v = fn->locals; v; v = v->next)
             if (v->checked_prop_candidate) {
                 // #942: a candidate with no checked-rooted store at all
@@ -3392,23 +3471,45 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
                     survivors++;
                     if (v->checked_prop_optional)
                         optional_survivors++;
+                    // #943: this round's terminator-slot fact -- 0 unless
+                    // every rooted store this round agreed on the same
+                    // ntarray element size (checked_prop_scan_nt_conflict
+                    // clear). Recomputed every round exactly like
+                    // checked_prop_optional, since a chained source's own
+                    // NT-ness (kind 2 of checked_prop_source_bounds()) can
+                    // only be trusted once IT stabilised as of the previous
+                    // round -- same reasoning as checked_prop_chain_src.
+                    v->checked_prop_nt_elem =
+                        v->checked_prop_scan_nt_conflict ? 0 : v->checked_prop_scan_nt_elem;
+                    if (v->checked_prop_nt_elem != 0)
+                        nt_survivors++;
+                } else {
+                    v->checked_prop_nt_elem = 0;
                 }
             }
-        if (survivors == prev_survivors && optional_survivors == prev_optional) {
+        if (survivors == prev_survivors && optional_survivors == prev_optional &&
+            nt_survivors == prev_nt) {
             converged = true;
             break;
         }
         prev_survivors = survivors;
         prev_optional = optional_survivors;
+        prev_nt = nt_survivors;
     }
     // Defensive: if the cap was hit before convergence, force every
     // remaining survivor to OPT rather than trusting a possibly-incomplete
     // FULL classification -- see the comment above for why this direction
-    // (never the reverse) is the only sound choice.
+    // (never the reverse) is the only sound choice. #943: also clear
+    // checked_prop_nt_elem for the same reason -- an incompletely-discovered
+    // NT fact could otherwise attach CHKNT to a store that, with one more
+    // round, would have turned out to conflict; losing the NT guard only
+    // costs precision (falls back to plain CHKR/CHKRO), never soundness.
     if (!converged)
         for (Obj *v = fn->locals; v; v = v->next)
-            if (v->checked_prop_candidate && !v->checked_prop_unsafe)
+            if (v->checked_prop_candidate && !v->checked_prop_unsafe) {
                 v->checked_prop_optional = true;
+                v->checked_prop_nt_elem = 0;
+            }
 
     // #941 phase B: allocate every survivor's snapshot temps up front (see
     // checked_prop_alloc_temps()'s comment for why this can no longer be
@@ -3424,6 +3525,7 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     checked_prop_rewrite_scan(vm, fn->body);
     checked_prop_attach_scan(vm, fn->body);
 }
+
 
 // Generate code for computing a VLA size.
 static Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
@@ -7221,6 +7323,17 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
             cas->checked_access_size = binary->lhs->checked_access_size;
             cas->checked_nt_terminator = true;
         }
+        // #943: back-link so propagate_checked_bounds()'s walk 3
+        // (checked_prop_attach_scan(), which runs after to_assign() has
+        // already desugared and discarded any other way to reach `cas`) can
+        // mirror a PROPAGATED terminator-slot fact onto `cas` too -- the
+        // copy immediately above only ever sees a DIRECT-access
+        // checked_nt_terminator, already resolved at this parse-time point.
+        // Unconditional (not gated on checked_bounds_hi/checked_nt_terminator
+        // being set yet): binary->lhs may be an as-yet-unresolved propagated
+        // deref at this point in parsing.
+        if (binary->lhs->kind == ND_DEREF)
+            binary->lhs->checked_rmw_mirror = cas;
 
         cur = cur->next = loop;
         cur = cur->next =
@@ -7275,6 +7388,14 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
         store_deref->checked_access_size = binary->lhs->checked_access_size;
         store_deref->checked_nt_terminator = binary->lhs->checked_nt_terminator;
     }
+    // #943: back-link so propagate_checked_bounds()'s walk 3
+    // (checked_prop_attach_scan()) can mirror a PROPAGATED terminator-slot
+    // fact -- not yet resolved at this parse-time point -- onto
+    // `store_deref` too, the same way the direct-access copy immediately
+    // above already does for an already-resolved one. Unconditional, same
+    // reasoning as the ND_CAS branch above.
+    if (binary->lhs->kind == ND_DEREF)
+        binary->lhs->checked_rmw_mirror = store_deref;
 
     Node *expr2 = new_binary(
         vm, ND_ASSIGN, store_deref,

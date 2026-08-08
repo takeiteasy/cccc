@@ -481,6 +481,19 @@ terminator would require reading past `hi` — exactly the unbounded read this
 feature exists to prevent. See [SAFETY.md](SAFETY.md#checked-pointers)'s
 "Terminator invariant" section for the full reasoning and its known gaps.
 
+`CHKNT` also propagates (#943) across a `CHKR`/`CHKRO` bounds-propagation
+candidate (`src/parse.c`'s `propagate_checked_bounds()`): `Obj.checked_prop_
+nt_elem` carries the terminator-slot fact (non-zero iff every checked-rooted
+store into the candidate was `ntarray`-rooted at the same pointee element
+size) alongside the already-propagated `[lo, hi)` snapshot, so a store
+through a *propagated* pointer into an `ntarray` source's widened terminator
+slot emits `CHKNT` exactly like a direct-access store does. The
+read-modify-write and `_Atomic` desugars are covered too, via a
+`Node.checked_rmw_mirror` back-link `to_assign()` sets on the original deref
+at parse time (before propagation has resolved anything) so the propagation
+pass's attach walk can find and stamp the synthesized RMW store node once
+its bounds are known.
+
 `CHKT3` is live (#651, extended to byte granularity by #653). It is emitted
 by `emit_load_ex`/`emit_store_ex` (`src/codegen.c`) right after `CHKP3`,
 carrying the pointee's static `TypeKind` and size, and a 3-way mode:

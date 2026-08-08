@@ -967,11 +967,45 @@ converges, every remaining survivor is conservatively forced to OPT rather
 than trusted as FULL — OPT only ever costs precision, so this is the only
 sound direction to err in when the cap cuts a chain short.
 
-Residual gaps, deliberately out of scope for this pass and left as
-follow-up work rather than a full dataflow rewrite:
+**`CHKNT` propagation** (#943). The terminator-slot fact travels alongside
+the snapshotted `[lo, hi)` range, FULL, OPT, and chained alike: a candidate's
+`Obj.checked_prop_nt_elem` is non-zero iff *every* checked-rooted store into
+it — declared source directly, or transitively through a #941 chain — is
+rooted at an `[[cccc::ntarray]]` source, and every one of those sources
+agrees on the same pointee element size. A mix (one `ntarray`-rooted store
+and one plain-`array`-rooted store to the same candidate, or two
+`ntarray`-rooted stores with different element sizes) disables the guard for
+the whole candidate — on the plain-`array` path `hi` is never widened, so
+`hi - elem_size` would be the *last real element*, not a terminator slot;
+guarding it would falsely trap a legitimate write there:
 
-- **`CHKNT` does not propagate**, FULL, OPT, or chained — see the
-  terminator-invariant gap list below.
+```c
+char * [[cccc::ntarray, cccc::count(n)]] s = ...;
+char *q = s;
+q[3] = 'x';        // traps: q's hi is a widened ntarray hi (element size 1)
+
+int *r = (int *)s; // cast changes the pointee size -- CHKNT declines here:
+r[0] = 1;          // access_size (4) != the source's element size (1)
+```
+
+An OPT candidate's own sentinel range (`[(char*)-1, (char*)0)`) no-ops the
+same way it already does for `CHKRO` — `CHKNT` already declines whenever
+`hi < elem_size`, and the sentinel's `hi == 0` satisfies that unconditionally
+for any real element size, so no sentinel-aware variant of `CHKNT` was
+needed. Read-modify-write through a propagated pointer (`q[n] += 1`,
+`q[n]++`) and the `_Atomic` compare-exchange desugar are both covered too:
+`to_assign()` (src/parse.c) desugars an RMW at **parse time**, before this
+pass has resolved `q`'s bounds, so it leaves a back-link
+(`Node.checked_rmw_mirror`) from the original deref to the synthesized store
+node it built; the propagation pass's attach walk follows that link and
+mirrors the just-resolved bounds — lo/hi/access-size/nt-terminator/optional
+for the non-atomic desugar, hi/access-size/nt-terminator only for the atomic
+one (matching #937's own direct-access split, which has no `lo` to give the
+CAS-loop's `ND_CAS` node) — onto the mirror once they're known.
+
+Residual gap, deliberately out of scope for this pass and left as follow-up
+work rather than a full dataflow rewrite:
+
 - **No assignment-time bounds-implication check.** This pass only ever
   *widens* trust (an unchecked `q` borrows a checked source's bounds); it
   never *narrows* it — assigning into a `q` that is itself declared checked
@@ -1083,17 +1117,18 @@ plain store; that path gets its own `CHKNT` emission ahead of the `ACAS`
 opcode, checking the CAS's *desired* value — so an attempted non-null write
 still traps even on a CAS iteration that would have failed the compare.
 
+**`CHKNT` propagates across assignment** (#943). `q = s;` where `s` is an
+`[[cccc::ntarray]]` source makes `q[n] = 'x'` trap through `q` exactly the
+same way `s[n] = 'x'` traps directly — FULL, OPT, and chained (#941)
+propagation candidates alike, and through the read-modify-write and
+`_Atomic` compare-exchange desugars too. See "Bounds propagation across
+assignment" above for the full mechanism (element-size matching, the
+mixed-source conflict rule, and the RMW back-link).
+
 Known coverage gaps, left as follow-up work rather than built into this pass:
 
 - **Non-integer/non-pointer pointees are skipped** (a `float`-typed
   `ntarray` has no meaningful "null terminator").
-- **`CHKNT` does not propagate across assignment.** #919/#942 added `CHKR`/
-  `CHKRO` bounds propagation (see "Bounds propagation across assignment"
-  above), but `Node.checked_nt_terminator` is deliberately left false for a
-  propagated deref, FULL or OPT alike — `q[n] = 'x'` through a propagated
-  `q` snapshotted from an `ntarray` source is an ordinary in-range
-  `CHKR`/`CHKRO`-checked write, not a `CHKNT`-guarded one, even though the
-  direct-access equivalent through the source itself would trap.
 
 ## VM Heap Allocator
 

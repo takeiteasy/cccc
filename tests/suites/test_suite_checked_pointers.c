@@ -1052,17 +1052,107 @@ void test_prop_address_taken_not_propagated(void) {
     (void)x;
 }
 
-// #923's CHKNT does not propagate (documented gap) -- a non-null write to
-// the widened terminator slot through a propagated ntarray pointer does not
-// trap, unlike the direct-access case (test_ntarray_terminator_nonnull_traps
-// above).
-[[cccc::test]]
-void test_prop_chknt_does_not_propagate(void) {
+// #943: CHKNT now propagates -- a non-null write to the widened terminator
+// slot through a propagated ntarray pointer traps exactly like the
+// direct-access case (test_ntarray_terminator_nonnull_traps above), because
+// propagate_checked_bounds() carries the terminator-slot fact
+// (Obj.checked_prop_nt_elem) alongside the snapshot lo/hi it already
+// propagated since #919.
+[[cccc::test(exit_code = 255)]]
+void test_prop_chknt_propagates(void) {
     int n = 3;
     char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     char *q = s;
-    q[3] = 'x'; // would trap via CHKNT through `s` directly; not through `q`
+    q[3] = 'x'; // now traps via CHKNT through `q`, same as through `s` directly
+}
+
+// #943: the null write that legally occupies the terminator slot must still
+// be allowed through a propagated pointer, exactly as it is directly.
+[[cccc::test]]
+void test_prop_chknt_null_write_ok(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q = s;
+    q[3] = 0; // still null -- must not trap
+    AssertEq(q[3], 0);
+}
+
+// #943: a cast that changes the pointee's element size must not misapply the
+// ntarray source's terminator-slot fact -- CHKNT's hi - elem_size math would
+// no longer point at the real terminator slot for a wider/narrower access
+// size than the source's own pointee.
+[[cccc::test]]
+void test_prop_chknt_elem_size_mismatch_no_guard(void) {
+    int n = 7; // char ntarray, widened hi = s + 8
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[8]){1, 2, 3, 4, 5, 6, 7, 0};
+    short *q = (short *)s;
+    volatile int i = 3;
+    // addr = s + 6 = hi - 2 (the short access size, NOT the source's own
+    // char element size 1) -- if the element-size guard were missing or
+    // wrong, this would be misidentified as the terminator slot and
+    // falsely trap; the REAL terminator slot is the single byte at s + 7,
+    // which this short-sized store doesn't even touch.
+    q[i] = 0x0101;
+    AssertEq(q[i], 0x0101);
+}
+
+// #943: a candidate with one ntarray-rooted store and one plain-array-rooted
+// store must not attach CHKNT at all -- on the array-rooted path, `hi` is
+// not widened, so `hi - elem_size` is the LAST REAL ELEMENT, not a
+// terminator slot; guarding it would falsely trap a legitimate write there.
+[[cccc::test]]
+void test_prop_chknt_mixed_source_no_guard(void) {
+    int n = 3;
+    volatile int c = 0;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char * [[cccc::array, cccc::count(8)]] a = (char[8]){0};
+    char *q;
+    if (c)
+        q = s;
+    else
+        q = a;
+    q[3] = 'x'; // reached only via the array-rooted path -- must not trap
     AssertEq(q[3], 'x');
+}
+
+// #943: same mixed-source conflict as above, but with the NON-ntarray-rooted
+// store textually BEFORE the ntarray-rooted one -- checked_prop_poison_scan()
+// visits both branches of an `if` every round regardless of which one a
+// given run actually takes, so both stores are seen. Without
+// Obj.checked_prop_scan_saw_non_nt tracking this direction explicitly, a
+// non-ntarray store seen before any ntarray-rooted one would leave
+// checked_prop_scan_nt_elem at 0 and be silently overwritten by the LATER
+// ntarray store's element size instead of flagging a conflict. This test
+// takes the array-rooted branch (declared textually first, taken at
+// runtime) and writes to the array's own last valid byte -- under that
+// ordering bug, `a`'s hi minus the wrongly-inherited element size (1, from
+// `s`) would misidentify this legitimate write as landing on a nonexistent
+// terminator slot and falsely trap.
+[[cccc::test]]
+void test_prop_chknt_mixed_source_reverse_order_no_guard(void) {
+    int n = 3;
+    volatile int c = 1;
+    char * [[cccc::array, cccc::count(8)]] a = (char[8]){0};
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q;
+    if (c)
+        q = a; // array-rooted store, visited FIRST by the poison scan
+    else
+        q = s; // ntarray-rooted store, visited SECOND
+    q[7] = 'x'; // c is true -- q holds `a`; a's own last valid byte
+    AssertEq(q[7], 'x');
+}
+
+// #943: NT-ness composes through a #941 chain, same as lo/hi -- a two-hop
+// derivation from an ntarray source still traps on a non-null terminator
+// write through the final hop.
+[[cccc::test(exit_code = 255)]]
+void test_prop_chknt_chain_propagates(void) {
+    int n = 3;
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q = s + 0;
+    char *r = q + 0;
+    r[3] = 'x'; // traps via the chained NT fact
 }
 
 // ---------------------------------------------------------------------
@@ -1460,10 +1550,11 @@ skip:
     free(buf);
 }
 
-// #943's gap (CHKNT does not propagate) must still hold for an OPT
-// candidate, not just a FULL one.
-[[cccc::test]]
-void test_opt_chknt_does_not_propagate(void) {
+// #943: CHKNT propagation must also hold for an OPT candidate, not just a
+// FULL one -- on the path that actually rooted `q` in `s`, the store into
+// the terminator slot traps exactly like the FULL case above.
+[[cccc::test(exit_code = 255)]]
+void test_opt_chknt_propagates_on_rooted_path(void) {
     int n = 3;
     volatile int c = 1;
     void *buf = malloc(8);
@@ -1471,6 +1562,42 @@ void test_opt_chknt_does_not_propagate(void) {
     char *q = buf;
     if (c)
         q = s;
-    q[3] = 'x'; // would trap via CHKNT through `s` directly; not through `q`
-    AssertEq(q[3], 'x');
+    q[3] = 'x'; // c is true this run -- q holds s, traps via CHKNT
 }
+
+// #943: RMW through an OPT candidate on its rooted path must also trap --
+// walk 2 (checked_prop_rewrite_scan()) has already wrapped this candidate's
+// stores into ND_COMMA expressions by the time walk 3
+// (checked_prop_attach_scan()) runs the mirror-stamping this depends on;
+// this proves that rewrite doesn't disturb the checked_rmw_mirror back-link
+// to_assign() set at parse time.
+[[cccc::test(exit_code = 255)]]
+void test_opt_chknt_rmw_propagates_on_rooted_path(void) {
+    int n = 3;
+    volatile int c = 1;
+    void *buf = malloc(8);
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q = buf;
+    if (c)
+        q = s;
+    q[3] += 1; // c is true this run -- q holds s, RMW traps via CHKNT
+}
+
+// #943: the OPT candidate's UNROOTED path must not false-trap -- CHKRO's own
+// sentinel handling already makes the range check a no-op there, and CHKNT
+// must follow suit (compute_checked_bounds()/op_CHKNT_fn's `hi < elem_size`
+// early-out covers the sentinel hi == 0 case).
+[[cccc::test]]
+void test_opt_chknt_unrooted_path_no_trap(void) {
+    int n = 3;
+    volatile int c = 0;
+    void *buf = malloc(8);
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q = buf;
+    if (c)
+        q = s;
+    q[3] = 'x'; // c is false this run -- q holds buf, not checked, no trap
+    AssertEq(q[3], 'x');
+    free(buf);
+}
+

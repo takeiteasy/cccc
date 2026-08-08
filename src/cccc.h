@@ -1453,6 +1453,22 @@ struct Node {
     // plain CHKR, unchanged from before #942.
     bool checked_bounds_optional;
 
+    // #943: set by to_assign() (src/parse.c) on the *original* deref
+    // (`s[n]` in `s[n] += 1`/`s[n]++`/`s[n]--`) to point at the synthesized
+    // node that actually performs the RMW store -- `store_deref` (the plain
+    // `*tmp = *tmp op B` ND_DEREF) for a non-atomic desugar, or `cas` (the
+    // `_Atomic` CAS-loop's ND_CAS) for an atomic one. #937 already copies
+    // checked_bounds_lo/hi/checked_access_size/checked_nt_terminator across
+    // for the *direct-access* case at to_assign()'s own call time, but
+    // propagate_checked_bounds() (which populates a propagated candidate's
+    // bounds) runs well after to_assign() has already desugared and
+    // discarded any way to reach the mirror node -- this back-link is what
+    // lets propagate_checked_bounds()'s walk 3 (checked_prop_attach_scan())
+    // find and stamp the mirror too, once it knows `s[n]`'s own propagated
+    // bounds. NULL for every ordinary deref (to_assign() only sets this on
+    // the two RMW desugar paths).
+    struct Node *checked_rmw_mirror;
+
     // #919: marks the `&A` node to_assign() synthesizes for its *generic*
     // compound-assign/++/-- desugar (`tmp = &A, *tmp = *tmp op B`), src/
     // parse.c. propagate_checked_bounds()'s poison scan treats an ND_ADDR
@@ -1719,6 +1735,43 @@ struct Obj {
     // third CheckedBase kind alongside a declared variable/member. Seeded
     // false, so round 0 only accepts today's declared-checked sources.
     bool checked_prop_chain_src;
+
+    // #943: non-zero iff every checked-rooted store into this candidate
+    // (declared source directly, or transitively through a #941 chain) is
+    // rooted at an [[cccc::ntarray]] source's widened terminator slot with
+    // this same pointee element size -- i.e. checked_prop_hi is not just an
+    // absolute upper bound but specifically a widened ntarray hi, usable to
+    // guard the terminator slot the same way a direct access's
+    // checked_nt_terminator/checked_bounds_hi pair does. Zero means "no NT
+    // fact to propagate": either no rooted store was ntarray-rooted at all,
+    // or two rooted stores disagreed (different source element size, or one
+    // ntarray-rooted and one plain-array-rooted) -- see
+    // checked_prop_scan_nt_conflict below. Frozen per round exactly like
+    // checked_prop_chain_src/checked_prop_optional, for the same
+    // AST-visit-order-independence reason; forced to 0 for every survivor if
+    // the round cap is hit, matching how the cap already forces OPT (only
+    // ever costs precision, never unsoundness).
+    int64_t checked_prop_nt_elem;
+    // #943 round-local scratch, mutated live within a single round's scan
+    // and reset at the top of every round by propagate_checked_bounds():
+    // the ntarray element size seen so far this round (0 until the first
+    // ntarray-rooted store is seen), whether a checked-rooted-but-NOT-
+    // ntarray store has been seen this round (checked_prop_scan_saw_non_nt),
+    // and whether two disagreeing rooted stores were seen
+    // (checked_prop_scan_nt_conflict -- an ntarray-rooted store after a
+    // non-ntarray one, a non-ntarray-rooted store after an ntarray one
+    // regardless of visit order, or two ntarray-rooted stores with
+    // different element sizes). checked_prop_scan_saw_non_nt is what makes
+    // this order-independent within a round: without it, a non-ntarray
+    // rooted store seen BEFORE the first ntarray-rooted one would leave
+    // checked_prop_scan_nt_elem at 0 and be silently overwritten by the
+    // later ntarray store instead of flagging a conflict. A
+    // non-checked-rooted store (the OPT sentinel-refresh case) never touches
+    // any of these three -- writing the sentinel doesn't contradict a prior
+    // NT fact, it just isn't live on that path.
+    int64_t checked_prop_scan_nt_elem;
+    bool checked_prop_scan_saw_non_nt;
+    bool checked_prop_scan_nt_conflict;
 };
 
 /*!
