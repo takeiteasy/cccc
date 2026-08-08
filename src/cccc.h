@@ -1450,6 +1450,22 @@ struct Node {
     // gen_addr-driven CHKR path to feed lo into.
     struct Node *checked_bounds_lo;
     struct Node *checked_bounds_hi;
+    // #945: an ND_ASSIGN (`t = &obj`) hoisting a struct/union member
+    // access's object expression (`s` in `s.p[i]`, `arr[k]` in
+    // `arr[k].p[i]`) into a single compiler-generated temp, when that
+    // expression is non-trivial (see checked_obj_is_trivial(), src/parse.c)
+    // -- checked_bounds_lo/hi then read the object back through the temp
+    // (`*t`) instead of each re-cloning and re-evaluating it. NULL for a
+    // variable-rooted access or a trivial member-access chain (no hoist
+    // needed). Must be evaluated at EVERY site that evaluates
+    // checked_bounds_lo/hi, immediately before them -- codegen.c's CHKR site
+    // (gen_addr) and both CHKNT sites (the plain store guard and the
+    // ND_CAS/_Atomic RMW guard) each independently emit it. Emitting it more
+    // than once per access is by design and harmless: `obj` is
+    // side-effect-free by construction (node_has_side_effects() already
+    // declines the check otherwise), so `t = &obj` is idempotent, and
+    // re-emitting at each consuming site means `t` can never be stale.
+    struct Node *checked_bounds_obj_init;
     int64_t checked_access_size; // sizeof of the value actually accessed
     // #923/#938: true when this ND_DEREF is a [[cccc::ntarray]] access (any
     // of count(n)/byte_count(n)/bounds(lo,hi)) to the widened terminator

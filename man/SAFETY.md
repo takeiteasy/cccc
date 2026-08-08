@@ -783,7 +783,12 @@ actually being accessed (`s.p[i]` checks against `s.n`; `t.p[i]` against
 are. Every access spelling reaches the same member-relative base:
 `s.p[i]`, `sp->p[i]`, `(&s)->p[i]`, `(*sp).p[i]`. An object expression with
 side effects (`f()->p[i]`) is declined — no check is emitted rather than
-evaluating `f()` more than once. Two restrictions specific to member bounds:
+evaluating `f()` more than once. A non-trivial, side-effect-free object
+expression (a runtime index, e.g. `k` in `arr[k].p[i]`) is evaluated exactly
+once per checked access, into a compiler-generated temp shared by every
+bound it feeds — not once per bound the way a bare local's re-cloned
+expression is (free either way, since that folds to a stack-frame offset).
+Two restrictions specific to member bounds:
 
 - An identifier resolving to a **local** of whatever scope the struct
   happens to be *defined* in (as opposed to a sibling member or a global) is

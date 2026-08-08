@@ -48,6 +48,20 @@ All notable changes to CCCC are documented here. Format loosely follows
   equivalent direct assignment already trapped. See
   [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#937)
 
+### Changed
+
+- **Struct/union member checked-pointer bounds evaluate their object
+  expression once per access, not once per bound** — `arr[k].p[i]` used to
+  re-evaluate `k`'s indexing arithmetic 2-4 times per checked access (once
+  for `lo`, once or twice for `hi` depending on the bounds form), since
+  building each bound re-cloned the member access's object expression
+  (`arr[k]`) from scratch. A non-trivial object expression (a runtime
+  index; not a bare local or plain member chain, which already cost
+  nothing to re-clone) is now hoisted into a single compiler-generated
+  temp shared by every bound of that access. Pure performance cleanup —
+  same checks, same traps, no user-visible behavior change. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#945)
+
 ## [0.2.1] - 2026-08-08
 
 ### Added

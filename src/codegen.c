@@ -3744,6 +3744,12 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             mark_temp_reg_used(dest_reg); // protect the just-computed address
             int r_lo = alloc_temp_reg();
             int r_hi = alloc_temp_reg();
+            // #945: re-run the member-access object-expression hoist init
+            // (if any) before reading lo/hi -- they may read it back through
+            // `*t`. Result discarded (r_lo is free scratch); only the store
+            // to `t` matters.
+            if (node->checked_bounds_obj_init)
+                gen_expr(vm, node->checked_bounds_obj_init, r_lo);
             gen_expr(vm, node->checked_bounds_lo, r_lo);
             gen_expr(vm, node->checked_bounds_hi, r_hi);
             emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size,
@@ -5291,6 +5297,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             mark_temp_reg_used(r_addr);
             mark_temp_reg_used(r_val);
             int r_hi = alloc_temp_reg();
+            // #945: re-run the object-expression hoist init before reading
+            // `hi` -- see the gen_addr ND_DEREF CHKR site's identical
+            // comment above. r_addr's own CHKR (emitted by gen_addr while
+            // computing it) already ran this same init once; re-running it
+            // here is idempotent, not redundant work that could be skipped
+            // -- this site must not assume gen_addr's CHKR always fires
+            // first.
+            if (node->lhs->checked_bounds_obj_init)
+                gen_expr(vm, node->lhs->checked_bounds_obj_init, r_hi);
             gen_expr(vm, node->lhs->checked_bounds_hi, r_hi);
             emit_chknt(vm, r_addr, r_hi, r_val, node->lhs->checked_access_size);
             free_temp_reg(r_hi);
@@ -7107,6 +7122,15 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // check (and the ACAS call right after) both still need.
         if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_nt_terminator) {
             int r_hi = alloc_temp_reg();
+            // #945: same object-expression hoist re-init as the other two
+            // CHKR/CHKNT sites (gen_addr's ND_DEREF case and the ND_ASSIGN
+            // store guard above) -- also call-free by the same reasoning as
+            // checked_bounds_hi itself (node_has_side_effects() already
+            // declined the hoist candidate otherwise), so it's just as safe
+            // to evaluate here without disturbing the just-staged
+            // REG_A0-A2 this check and the ACAS call right after both need.
+            if (node->checked_bounds_obj_init)
+                gen_expr(vm, node->checked_bounds_obj_init, r_hi);
             gen_expr(vm, node->checked_bounds_hi, r_hi);
             emit_chknt(vm, REG_A0, r_hi, REG_A2, node->checked_access_size);
             free_temp_reg(r_hi);

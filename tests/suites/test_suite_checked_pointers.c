@@ -748,6 +748,177 @@ void test_member_array_of_structs_oob(void) {
     (void)x;
 }
 
+// #945: arr[k].p[i] under bounds(lo, hi) referencing TWO DISTINCT sibling
+// fields (rather than count(n)'s single `n`) -- clone_member_bounds_node()
+// substitutes the object expression once per placeholder it finds in the
+// resolved template, so this is the form that clones (and, pre-#945,
+// re-evaluated `k`'s indexing arithmetic) the most per access.
+struct mem_range_two_sib_s {
+    int *lo;
+    int *hi;
+    int * [[cccc::array, cccc::bounds(lo, hi)]] p;
+};
+
+[[cccc::test]]
+void test_member_array_of_structs_bounds_range_in_bounds(void) {
+    static int backing0[3] = {1, 2, 3};
+    static int backing1[3] = {4, 5, 6};
+    struct mem_range_two_sib_s arr[2];
+    arr[0].lo = backing0; arr[0].hi = backing0 + 3; arr[0].p = backing0;
+    arr[1].lo = backing1; arr[1].hi = backing1 + 3; arr[1].p = backing1;
+    volatile int k = 1;
+    AssertEq(arr[k].p[2], 6);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_array_of_structs_bounds_range_oob(void) {
+    static int backing0[3] = {1, 2, 3};
+    static int backing1[3] = {4, 5, 6};
+    struct mem_range_two_sib_s arr[2];
+    arr[0].lo = backing0; arr[0].hi = backing0 + 3; arr[0].p = backing0;
+    arr[1].lo = backing1; arr[1].hi = backing1 + 3; arr[1].p = backing1;
+    volatile int k = 1, i = 3;
+    int x = arr[k].p[i];
+    (void)x;
+}
+
+// #945: arr[k].b[i] under byte_count(n) -- the CB_BYTE_COUNT arm of
+// compute_checked_bounds(), which also calls checked_base_self_expr() twice
+// per access.
+[[cccc::test]]
+void test_member_array_of_structs_byte_count_in_bounds(void) {
+    struct mem_byte_count_s arr[2] = {
+        {2 * (int)sizeof(int), (char *)(int[2]){1, 2}},
+        {2 * (int)sizeof(int), (char *)(int[2]){3, 4}},
+    };
+    volatile int k = 1;
+    AssertEq(((int *)arr[k].b)[1], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_array_of_structs_byte_count_oob(void) {
+    struct mem_byte_count_s arr[2] = {
+        {2 * (int)sizeof(int), (char *)(int[2]){1, 2}},
+        {2 * (int)sizeof(int), (char *)(int[2]){3, 4}},
+    };
+    volatile int k = 1;
+    volatile int i = arr[k].nbytes;
+    char x = arr[k].b[i];
+    (void)x;
+}
+
+// #945: a runtime-indexed object expression through an [[cccc::ntarray]]
+// member -- exercises the CHKNT store-side null-terminator guard
+// (src/codegen.c's ND_ASSIGN site) with a hoisted, non-trivial `obj`.
+struct mem_nt_count_s {
+    int n;
+    char * [[cccc::ntarray, cccc::count(n)]] s;
+};
+
+[[cccc::test]]
+void test_member_array_of_structs_ntarray_terminator_write(void) {
+    struct mem_nt_count_s arr[2] = {
+        {3, (char[4]){'a', 'b', 'c', 0}},
+        {3, (char[4]){'d', 'e', 'f', 0}},
+    };
+    volatile int k = 1;
+    arr[k].s[3] = 0; // writing null into the widened terminator slot is fine
+    AssertEq(arr[k].s[3], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_array_of_structs_ntarray_terminator_nonnull_traps(void) {
+    struct mem_nt_count_s arr[2] = {
+        {3, (char[4]){'a', 'b', 'c', 0}},
+        {3, (char[4]){'d', 'e', 'f', 0}},
+    };
+    volatile int k = 1;
+    arr[k].s[3] = 'x'; // non-null write to the terminator slot traps
+}
+
+// #945: the `_Atomic` RMW desugar (to_assign()'s CAS-loop path,
+// src/codegen.c's ND_CAS case) through a runtime-indexed ntarray member --
+// this is the register-staging-sensitive site (REG_A0-A2 already loaded
+// when the hoist init and CHKNT's `hi` are evaluated).
+struct mem_nt_atomic_s {
+    int n;
+    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s;
+};
+
+[[cccc::test]]
+void test_member_array_of_structs_ntarray_atomic_rmw_ok(void) {
+    static char backing0[4] = {'a', 'b', 'c', 0};
+    static char backing1[4] = {'d', 'e', 'f', 0};
+    struct mem_nt_atomic_s arr[2] = {{3, backing0}, {3, backing1}};
+    volatile int k = 1;
+    arr[k].s[2] = 'z'; // inside the declared range -- ordinary RMW, no trap
+    arr[k].s[2] += 1;
+    AssertEq(arr[k].s[2], 'z' + 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_array_of_structs_ntarray_atomic_rmw_traps(void) {
+    static char backing0[4] = {'a', 'b', 'c', 0};
+    static char backing1[4] = {'d', 'e', 'f', 0};
+    struct mem_nt_atomic_s arr[2] = {{3, backing0}, {3, backing1}};
+    volatile int k = 1;
+    arr[k].s[3] += 1; // writing a non-null desired value into the
+                       // terminator slot traps
+}
+
+// #945: a nested member chain reached through a runtime-indexed array --
+// arr[k].inner.p[i] -- combines #945's hoist with the pre-existing nested
+// ND_MEMBER traversal (test_member_nested_struct_*).
+struct mem_nested_array_s {
+    struct mem_count_s inner;
+};
+
+[[cccc::test]]
+void test_member_array_of_nested_structs_in_bounds(void) {
+    struct mem_nested_array_s arr[2] = {
+        {{3, (int[3]){1, 2, 3}}},
+        {{3, (int[3]){4, 5, 6}}},
+    };
+    volatile int k = 1;
+    AssertEq(arr[k].inner.p[2], 6);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_array_of_nested_structs_oob(void) {
+    struct mem_nested_array_s arr[2] = {
+        {{3, (int[3]){1, 2, 3}}},
+        {{3, (int[3]){4, 5, 6}}},
+    };
+    volatile int k = 1, i = 3;
+    int x = arr[k].inner.p[i];
+    (void)x;
+}
+
+// #945: a non-trivial object expression reached through `->` rather than
+// `.` -- `(c ? sp0 : sp1)->p[i]` parses to ND_DEREF over an ND_COND, still
+// addressable (checked_obj_is_addressable() accepts any ND_DEREF top node,
+// since `&*ptr_expr` is always well-formed regardless of what `ptr_expr`
+// is), so this exercises the hoist through a shape other than array
+// indexing.
+[[cccc::test]]
+void test_member_via_ternary_ptr_in_bounds(void) {
+    struct mem_count_s s0 = {2, (int[2]){1, 2}};
+    struct mem_count_s s1 = {2, (int[2]){3, 4}};
+    struct mem_count_s *sp0 = &s0, *sp1 = &s1;
+    volatile int c = 1;
+    AssertEq((c ? sp0 : sp1)->p[1], 2);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_member_via_ternary_ptr_oob(void) {
+    struct mem_count_s s0 = {2, (int[2]){1, 2}};
+    struct mem_count_s s1 = {2, (int[2]){3, 4}};
+    struct mem_count_s *sp0 = &s0, *sp1 = &s1;
+    volatile int c = 1, i = 2;
+    int x = (c ? sp0 : sp1)->p[i];
+    (void)x;
+}
+
 // sp is itself [[cccc::single]] AND sp->p carries its own member bounds --
 // two independent checks fire: the `->` deref itself (NULL/range-of-one
 // checked against sp), and the member access's own count(n).

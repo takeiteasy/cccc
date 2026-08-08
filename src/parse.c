@@ -2610,13 +2610,15 @@ static bool checked_base_is_declared(CheckedBase base) {
 // clone_bounds_node() already treats every other reused subtree). Returns
 // an already-typed node.
 //
-// Placeholder inefficiency (follow-up ticket): for a member root, `obj` is
-// a fresh clone every call, so a runtime-indexed object expression (e.g.
-// `k` in `arr[k].p[i]`) is re-evaluated 2-3x per checked access instead of
-// once. Harmless (node_has_side_effects() already declines the check
-// entirely if `obj` isn't side-effect-free) but wasteful; hoisting `obj`
-// into a single temp per access, mirroring #919's own snapshot-temp
-// pattern, is a pure performance cleanup with no behavioral change.
+// #945: for a member root with a non-trivial object expression (a runtime
+// index, e.g. `k` in `arr[k].p[i]`), `base.obj` arrives here already
+// rewritten by compute_checked_bounds()'s hoist into `*t` for a
+// compiler-generated temp `t` -- so the "fresh clone every call" above is
+// still correct (it clones the cheap `*t` dereference, not the original
+// expensive expression) and `k` itself is evaluated only once per access,
+// by Node.checked_bounds_obj_init. A trivial object expression (a bare
+// local, `s.a.b`) is left untouched and cloned directly, since re-cloning
+// it costs nothing (see checked_obj_is_trivial()).
 static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base, Token *tok) {
     if (base.var) {
         Node *p = new_var_node(vm, base.var, tok);
@@ -2627,6 +2629,51 @@ static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base, Token 
     member_node->member = base.mem;
     add_type(vm, member_node);
     return member_node;
+}
+
+// #945: true if `n` (a member access's object expression, base.obj) is
+// cheap enough to re-clone as many times as compute_checked_bounds() needs
+// -- a chain of plain variable reads and member selections, which folds to
+// a stack-frame offset with no runtime work. Anything else (a runtime
+// index buried in an ND_ADD, a function call, ...) is worth hoisting into a
+// single temp instead of re-evaluating per bound. Deliberately does NOT
+// special-case ND_DEREF: a checked-pointer chain like `sp->p` is a deref
+// over a plain variable read (`*sp`), covered by the ND_VAR base case
+// through recursion into ->lhs, so no separate arm is needed for it here.
+static bool checked_obj_is_trivial(Node *n) {
+    if (!n)
+        return true;
+    switch (n->kind) {
+    case ND_VAR:
+        return true;
+    case ND_MEMBER:
+    case ND_DEREF:
+    case ND_CAST:
+        return checked_obj_is_trivial(n->lhs);
+    default:
+        return false;
+    }
+}
+
+// #945: true if `&n` is a well-formed address expression -- i.e. `n` is
+// guaranteed to be an lvalue gen_addr() knows how to take the address of.
+// ND_VAR/ND_MEMBER/ND_DEREF cover every shape find_checked_base()'s `.obj`
+// can actually take: a plain variable, a nested member chain (`s.a.b`), and
+// -- critically -- array/pointer indexing (`arr[k]` parses to
+// ND_DEREF(ND_ADD(arr, k)), so this is what makes the ticket's motivating
+// case, `arr[k].p[i]`, addressable). struct_ref() (the `.`/`->` parser) in
+// this compiler already rejects any non-lvalue operand ("not an lvalue")
+// before an ND_MEMBER can even exist over it -- e.g. `(c ? s1 : s2).p[i]`
+// for two same-type struct locals is a compile error independent of
+// checked-pointers -- so in practice every `base.obj` this function ever
+// sees already satisfies this check. Kept anyway as a hard safety
+// invariant rather than an assumption: if a future lvalue-producing node
+// kind is ever added to struct_ref()'s accepted set without a matching arm
+// here, this function's default (false) makes compute_checked_bounds()
+// safely skip the hoist and fall back to the original re-clone-in-place
+// behavior, rather than building an invalid ND_ADDR over it.
+static bool checked_obj_is_addressable(Node *n) {
+    return n && (n->kind == ND_VAR || n->kind == ND_MEMBER || n->kind == ND_DEREF);
 }
 
 // Computes the checked-pointer bounds range to enforce for an access rooted
@@ -2642,19 +2689,63 @@ static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base, Token 
 // (src/codegen.c); these fields are populated unconditionally so the
 // compile-time type rules (arithmetic rejection etc.) and the runtime gate
 // stay independent, per the plan's Decisions section.
+//
+// #945: `out_obj_init` (may be NULL) receives a `t = &obj` hoist for a
+// non-trivial member-access object expression -- see
+// Node.checked_bounds_obj_init's comment (src/cccc.h) for why it must be
+// re-evaluated at every codegen site that reads *out_lo/*out_hi, and why
+// #919's propagate_checked_bounds()/#944's verify_checked_assign_scan()
+// deliberately pass NULL here instead (their per-assignment-site
+// duplication is already O(1), not the per-access cost this hoists).
 static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *access_ty,
-                                   Token *tok, Node **out_lo, Node **out_hi, bool *out_nt) {
+                                   Token *tok, Node **out_lo, Node **out_hi, bool *out_nt,
+                                   Node **out_obj_init) {
     *out_lo = NULL;
     *out_hi = NULL;
     *out_nt = false;
+    if (out_obj_init)
+        *out_obj_init = NULL;
     if (!base.var && !base.mem)
         return;
 
-    // #921: an object expression with side effects (e.g. `f()->p[i]`) would
-    // be duplicated 2-3x by checked_base_self_expr()'s clones -- decline
-    // rather than run it more than once.
+    // #921: an object expression with side effects (e.g. `f()->p[i]`) is
+    // declined rather than run more than once by checked_base_self_expr()'s
+    // clones -- still true after #945's hoist, which only changes HOW MANY
+    // times a side-effect-free object expression is evaluated (many times
+    // down to once), not whether a side-effecting one is ever run twice.
+    // Relaxing this now that a hoisted `obj` is evaluated exactly once would
+    // be a behavioral change (checking `f()->p[i]` instead of declining it)
+    // and is out of scope here -- tracked as a follow-up.
     if (base.mem && node_has_side_effects(base.obj))
         return;
+
+    // #945: hoist a non-trivial object expression into a single
+    // compiler-generated temp for this access, so every downstream
+    // checked_base_self_expr()/clone_member_bounds_node() call below clones
+    // the cheap `*t` dereference instead of re-evaluating `obj` itself.
+    // Gated on CCCC_CHECKED_BOUNDS (this function otherwise runs
+    // unconditionally at parse time -- only CHKR *emission* is
+    // flag-gated -- so without this a default build would grow a stack slot
+    // for every checked-member access), on a live function context
+    // (new_lvar() prepends to vm->compiler.locals, which is only meaningful
+    // while a function body is being parsed -- see the $with_fn-locals
+    // hazard class this mirrors), and on `obj` being addressable
+    // (checked_obj_is_addressable() -- taking `&obj` is only well-formed
+    // for an lvalue; anything else falls back to the original re-clone
+    // behavior, unchanged).
+    if (out_obj_init && base.mem && (vm->flags & CCCC_CHECKED_BOUNDS) &&
+        vm->compiler.current_fn && !checked_obj_is_trivial(base.obj) &&
+        checked_obj_is_addressable(base.obj)) {
+        Obj *t = new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
+        Node *addr = new_unary(vm, ND_ADDR, clone_bounds_node(vm, base.obj), tok);
+        add_type(vm, addr);
+        Node *init = new_binary(vm, ND_ASSIGN, new_var_node(vm, t, tok), addr, tok);
+        add_type(vm, init);
+        *out_obj_init = init;
+        Node *obj_temp = new_unary(vm, ND_DEREF, new_var_node(vm, t, tok), tok);
+        add_type(vm, obj_temp);
+        base.obj = obj_temp;
+    }
 
     CheckedKind kind = base.var ? base.var->checked_kind : base.mem->ty->checked_kind;
     CheckedBoundsForm form =
@@ -2776,7 +2867,8 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
     Type *pty = base.var ? base.var->ty : base.mem->ty;
     deref->checked_access_size = pty->base ? get_vm_size(pty->base) : 1;
     compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
-                           &deref->checked_bounds_hi, &deref->checked_nt_terminator);
+                           &deref->checked_bounds_hi, &deref->checked_nt_terminator,
+                           &deref->checked_bounds_obj_init);
 }
 
 // #919/#941: bounds propagation across assignment for an unchecked pointer
@@ -2847,7 +2939,10 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
         if (base.mem && node_has_side_effects(base.obj))
             return false;
         Type *pty = base.var ? base.var->ty : base.mem->ty;
-        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt);
+        // #945: NULL -- this is a single per-assignment evaluation, not a
+        // per-access one, so the hoist's saving doesn't apply here (see
+        // compute_checked_bounds()'s doc comment).
+        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt, NULL);
         if (!(*out_lo && *out_hi))
             return false;
         *out_optional = false;
@@ -3591,8 +3686,10 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn, Node *node) 
                 Type *dst_pty = dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
                 Node *dst_lo, *dst_hi;
                 bool dst_nt;
+                // #945: NULL -- same single-per-assignment reasoning as
+                // checked_prop_source_bounds() above.
                 compute_checked_bounds(vm, dst_base, dst_pty, node->tok, &dst_lo, &dst_hi,
-                                      &dst_nt);
+                                      &dst_nt, NULL);
                 if (dst_lo && dst_hi) {
                     Node *src_lo, *src_hi;
                     bool src_optional, src_nt;
@@ -7465,6 +7562,13 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
             cas->checked_bounds_hi = clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
             cas->checked_access_size = binary->lhs->checked_access_size;
             cas->checked_nt_terminator = true;
+            // #945: carry the object-expression hoist init across too (if
+            // any) -- `hi` above may read `*t`, so codegen's CHKNT site for
+            // `cas` must re-run the same `t = &obj` init immediately before
+            // it, exactly like every other checked_bounds_hi consumer.
+            if (binary->lhs->checked_bounds_obj_init)
+                cas->checked_bounds_obj_init =
+                    clone_bounds_node(vm, binary->lhs->checked_bounds_obj_init);
         }
         // #943: back-link so propagate_checked_bounds()'s walk 3
         // (checked_prop_attach_scan(), which runs after to_assign() has
@@ -7530,6 +7634,11 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
         store_deref->checked_bounds_hi = clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
         store_deref->checked_access_size = binary->lhs->checked_access_size;
         store_deref->checked_nt_terminator = binary->lhs->checked_nt_terminator;
+        // #945: see the ND_CAS branch above -- same reasoning, this is the
+        // non-atomic RMW desugar's synthesized store.
+        if (binary->lhs->checked_bounds_obj_init)
+            store_deref->checked_bounds_obj_init =
+                clone_bounds_node(vm, binary->lhs->checked_bounds_obj_init);
     }
     // #943: back-link so propagate_checked_bounds()'s walk 3
     // (checked_prop_attach_scan()) can mirror a PROPAGATED terminator-slot
