@@ -5400,6 +5400,14 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             mark_temp_reg_used(r_shi);
 
             int r_dlo = alloc_temp_reg();
+            // #947: re-run the target's object-expression hoist init (if
+            // any) before reading dst_lo/hi -- they may read it back
+            // through `*t`. Result discarded (r_dlo is free scratch); only
+            // the store to `t` matters. Must happen here, after the store
+            // above, not folded into the pre-store src snapshot -- see
+            // Node.checked_assign_dst_obj_init's comment (src/cccc.h).
+            if (node->checked_assign_dst_obj_init)
+                gen_expr(vm, node->checked_assign_dst_obj_init, r_dlo);
             gen_expr(vm, node->checked_assign_dst_lo, r_dlo);
             emit_chkab(vm, r_dlo, r_slo, r_shi, false);
             free_temp_reg(r_dlo);

@@ -1465,6 +1465,16 @@ struct Node {
     // side-effect-free by construction (node_has_side_effects() already
     // declines the check otherwise), so `t = &obj` is idempotent, and
     // re-emitting at each consuming site means `t` can never be stale.
+    // #948: that side-effect-free-ness is load-bearing, not incidental --
+    // this whole multi-site re-emission contract only works because `obj`
+    // can never itself do anything observable. A side-effecting object
+    // expression (`f()->p[i]`) therefore can't just get the same treatment
+    // with a single-evaluation guarantee bolted on: `f()` would still have
+    // to run once for the real access AND once (or more, under this
+    // contract) to build `t`, an extra evaluation a `--checked-pointers`
+    // build must never introduce over a default build. See
+    // compute_checked_bounds()'s decline (src/parse.c) for where that's
+    // enforced.
     struct Node *checked_bounds_obj_init;
     int64_t checked_access_size; // sizeof of the value actually accessed
     // #923/#938: true when this ND_DEREF is a [[cccc::ntarray]] access (any
@@ -1524,6 +1534,18 @@ struct Node {
     // a non-declared-checked rhs, or a CB_NONE/CB_UNKNOWN target.
     struct Node *checked_assign_dst_lo;
     struct Node *checked_assign_dst_hi;
+    // #947: an ND_ASSIGN (`t = &obj`) hoisting the TARGET's member-access
+    // object expression (e.g. `k` in `arr[k].p = src;`) into a single
+    // compiler-generated temp, when non-trivial -- same shape as
+    // Node.checked_bounds_obj_init, but tracked as its own field rather
+    // than reused, because it must run at a different program point:
+    // checked_assign_dst_lo/hi are deliberately read AFTER the store (see
+    // above), so this init cannot be folded into the pre-store snapshot
+    // comma the way checked_assign_src_lo/hi's own hoist is -- it has to be
+    // re-run immediately before dst_lo/hi at codegen's post-store CHKAB
+    // site instead. NULL when the target's object expression is trivial or
+    // there is no target hoist to do.
+    struct Node *checked_assign_dst_obj_init;
     struct Node *checked_assign_src_lo;
     struct Node *checked_assign_src_hi;
 

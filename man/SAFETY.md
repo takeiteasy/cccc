@@ -782,13 +782,24 @@ actually being accessed (`s.p[i]` checks against `s.n`; `t.p[i]` against
 `t.n`) — not to a single fixed scope the way a local's or parameter's bounds
 are. Every access spelling reaches the same member-relative base:
 `s.p[i]`, `sp->p[i]`, `(&s)->p[i]`, `(*sp).p[i]`. An object expression with
-side effects (`f()->p[i]`) is declined — no check is emitted rather than
-evaluating `f()` more than once. A non-trivial, side-effect-free object
+side effects (`f()->p[i]`) is declined — no check is emitted — permanently,
+not merely because of an evaluation-count concern that a smarter
+implementation could remove: the hoist (below) rewrites the *bounds
+expressions* a check reads, not the access itself, so `f()->p[i]`'s own
+access still calls `f()` once regardless of whether a check is emitted.
+Instrumenting it would therefore call `f()` an extra time just to build the
+hoisted temp, and a `--checked-pointers` build introducing an extra
+evaluation of a side-effecting expression over a default build is not an
+acceptable trade for the check. A non-trivial, side-effect-free object
 expression (a runtime index, e.g. `k` in `arr[k].p[i]`) is evaluated exactly
 once per checked access, into a compiler-generated temp shared by every
 bound it feeds — not once per bound the way a bare local's re-cloned
 expression is (free either way, since that folds to a stack-frame offset).
-Two restrictions specific to member bounds:
+The same once-per-access-site treatment also applies to bounds propagation
+across assignment and assignment-time bounds implication (below): a
+non-trivial object expression in `q = arr[k].p;` or `arr[k].p = src;` is
+evaluated once for that whole assignment's bounds, not once for propagation
+alone. Two restrictions specific to member bounds:
 
 - An identifier resolving to a **local** of whatever scope the struct
   happens to be *defined* in (as opposed to a sibling member or a global) is

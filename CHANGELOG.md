@@ -5,6 +5,32 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Checked-pointer bounds propagation and assignment-time bounds
+  implication also evaluate a member object expression once per
+  assignment** — `q = arr[k].p;` (bounds propagation) and `arr[k].p = src;`
+  (assignment-time bounds implication) used to re-evaluate `k`'s indexing
+  arithmetic 2-3 times while building that one assignment's bounds, the
+  same duplication #945 already fixed for a direct per-access check. Both
+  passes now share #945's hoist-into-a-temp treatment via a second temp
+  allocator, needed because they run after their function's own local-list
+  snapshot. Pure performance cleanup — same checks, same traps, no
+  user-visible behavior change. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#947)
+
+### Documented
+
+- **Why a side-effecting member object expression stays uninstrumented** —
+  `f()->p[i]` is declined by checked-pointer bounds checking (no check
+  emitted) because the hoist introduced by #945/#947 rewrites the *bounds
+  expressions*, not the access itself: `f()->p[i]`'s own access still calls
+  `f()` once regardless, so emitting a check would call it again just to
+  build the hoisted object-expression temp — an extra evaluation of a
+  side-effecting expression that a `--checked-pointers` build must never
+  introduce over a default build. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#948)
+
 ## [0.2.2] - 2026-08-08
 
 ### Added

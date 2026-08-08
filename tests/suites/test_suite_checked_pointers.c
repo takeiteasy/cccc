@@ -1156,6 +1156,36 @@ void test_prop_from_member_source_oob(void) {
     (void)x;
 }
 
+// #947: propagation source through a runtime-indexed member object
+// expression -- `arr[k].p` (checked_prop_source_bounds()'s kind 1) hoists
+// `arr[k]` into a single compiler-generated temp shared by the propagation
+// snapshot's lo and hi stores, rather than re-evaluating `k`'s indexing
+// arithmetic once per store. Pure perf follow-up to #945/test_member_
+// array_of_structs_in_bounds above -- same checks, same traps.
+[[cccc::test]]
+void test_prop_from_member_source_runtime_index_in_bounds(void) {
+    struct prop_member_s arr[2] = {
+        {4, (int[4]){1, 2, 3, 4}},
+        {3, (int[3]){5, 6, 7}},
+    };
+    volatile int k = 1;
+    int *q = arr[k].p;
+    AssertEq(q[2], 7);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_prop_from_member_source_runtime_index_oob(void) {
+    struct prop_member_s arr[2] = {
+        {4, (int[4]){1, 2, 3, 4}},
+        {3, (int[3]){5, 6, 7}},
+    };
+    volatile int k = 1;
+    int *q = arr[k].p;
+    volatile int i = 3;
+    int x = q[i];
+    (void)x;
+}
+
 // Reassignment mid-function re-snapshots: a later access uses the NEW
 // range, not the one captured at declaration.
 [[cccc::test]]
@@ -1853,6 +1883,47 @@ void test_assume_bounds_member_target_ok(void) {
     struct prop_member_s t = {4, 0};
     t.p = s.p; // member LHS -- narrower-or-equal, must not trap
     AssertEq(t.p[3], 4);
+}
+
+// #947: assignment-time bounds implication with a runtime-indexed TARGET
+// object expression -- `arr[k].p = s.p;` hoists `arr[k]` into a single
+// temp for the post-store dst_lo/dst_hi read (deliberately evaluated
+// AFTER the store, see Node.checked_assign_dst_obj_init's comment,
+// src/cccc.h), rather than re-evaluating `k` once for dst_lo and again for
+// dst_hi.
+[[cccc::test]]
+void test_assume_bounds_runtime_index_target_ok(void) {
+    struct prop_member_s arr[2] = {{4, 0}, {2, 0}};
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    volatile int k = 1;
+    arr[k].p = s.p; // arr[1].n == 2, narrower-or-equal to s's count(4)
+    AssertEq(arr[k].p[1], 2);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_assume_bounds_runtime_index_target_error(void) {
+    struct prop_member_s arr[2] = {{4, 0}, {10, 0}};
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    volatile int k = 1;
+    arr[k].p = s.p; // arr[1].n == 10 -- WIDER than s's own count(4), not
+                     // implied, traps
+}
+
+// #947: both the TARGET and SOURCE object expressions are runtime-indexed
+// (different index variables), exercising the dst hoist and the src hoist
+// (checked_prop_source_bounds()'s `hoist_fn`) together in the same
+// rewrite.
+[[cccc::test]]
+void test_assume_bounds_runtime_index_both_ok(void) {
+    struct prop_member_s dst_arr[2] = {{4, 0}, {2, 0}};
+    struct prop_member_s src_arr[2] = {
+        {4, (int[4]){1, 2, 3, 4}},
+        {4, (int[4]){5, 6, 7, 8}},
+    };
+    volatile int k = 1, j = 0;
+    dst_arr[k].p = src_arr[j].p; // dst_arr[1].n == 2, subset of src_arr[0]'s
+                                  // count(4) -- must not trap
+    AssertEq(dst_arr[k].p[1], 2);
 }
 
 [[cccc::test]]

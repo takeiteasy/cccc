@@ -2676,6 +2676,12 @@ static bool checked_obj_is_addressable(Node *n) {
     return n && (n->kind == ND_VAR || n->kind == ND_MEMBER || n->kind == ND_DEREF);
 }
 
+// #947: forward-declared here so compute_checked_bounds() below can use it
+// for its `hoist_fn`-non-NULL path -- full definition (and the
+// $with_fn-locals hazard it works around) is with #919's other propagation
+// helpers, further down this file.
+static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty);
+
 // Computes the checked-pointer bounds range to enforce for an access rooted
 // at `base` (#770/#484, generalised for #921's member roots and split out
 // of set_checked_deref_bounds() so #919's propagate_checked_bounds() can
@@ -2690,16 +2696,25 @@ static bool checked_obj_is_addressable(Node *n) {
 // compile-time type rules (arithmetic rejection etc.) and the runtime gate
 // stay independent, per the plan's Decisions section.
 //
-// #945: `out_obj_init` (may be NULL) receives a `t = &obj` hoist for a
+// #945/#947: `out_obj_init` (may be NULL) receives a `t = &obj` hoist for a
 // non-trivial member-access object expression -- see
 // Node.checked_bounds_obj_init's comment (src/cccc.h) for why it must be
-// re-evaluated at every codegen site that reads *out_lo/*out_hi, and why
-// #919's propagate_checked_bounds()/#944's verify_checked_assign_scan()
-// deliberately pass NULL here instead (their per-assignment-site
-// duplication is already O(1), not the per-access cost this hoists).
+// re-evaluated at every codegen site that reads *out_lo/*out_hi. `hoist_fn`
+// selects which temp allocator builds `t`: NULL uses new_lvar() (the #945
+// original, valid only while a function body is being parsed -- see
+// vm->compiler.current_fn below), non-NULL uses new_checked_prop_temp()
+// (src/parse.c) to link `t` straight into `hoist_fn->locals` instead --
+// required by #919's propagate_checked_bounds() and #944's
+// verify_checked_assign_scan(), both of which call this function AFTER
+// their function's own leave_scope()/`fn->locals = vm->compiler.locals`
+// snapshot, where new_lvar()'s prepend-to-vm->compiler.locals would
+// silently produce a temp with no stack slot (the $with_fn-locals hazard
+// class). #947 folded that per-assignment-site hoist in; the only
+// remaining NULL-out_obj_init callers are phase-A-style usability probes
+// that discard lo/hi and must not allocate a temp per probe.
 static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *access_ty,
                                    Token *tok, Node **out_lo, Node **out_hi, bool *out_nt,
-                                   Node **out_obj_init) {
+                                   Node **out_obj_init, Obj *hoist_fn) {
     *out_lo = NULL;
     *out_hi = NULL;
     *out_nt = false;
@@ -2708,35 +2723,39 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
     if (!base.var && !base.mem)
         return;
 
-    // #921: an object expression with side effects (e.g. `f()->p[i]`) is
-    // declined rather than run more than once by checked_base_self_expr()'s
-    // clones -- still true after #945's hoist, which only changes HOW MANY
-    // times a side-effect-free object expression is evaluated (many times
-    // down to once), not whether a side-effecting one is ever run twice.
-    // Relaxing this now that a hoisted `obj` is evaluated exactly once would
-    // be a behavioral change (checking `f()->p[i]` instead of declining it)
-    // and is out of scope here -- tracked as a follow-up.
+    // #921/#948: an object expression with side effects (e.g. `f()->p[i]`)
+    // is declined -- permanently, not a temporary scope limitation. #945's
+    // hoist only changes how many times a side-effect-free object
+    // expression is evaluated (many times down to once); it does not make
+    // instrumenting a side-effecting one safe, because the hoist rewrites
+    // the BOUNDS expressions, not the access itself -- `f()->p[i]`'s actual
+    // access still calls `f()` once on its own, so emitting a check would
+    // call it again just to build `t = &obj`, an extra evaluation of a
+    // side-effecting expression that a --checked-pointers build must not
+    // introduce over a default build. The multi-site re-emission contract
+    // (Node.checked_bounds_obj_init, src/cccc.h) also relies on `obj` being
+    // side-effect-free/idempotent by construction, not incidentally.
     if (base.mem && node_has_side_effects(base.obj))
         return;
 
-    // #945: hoist a non-trivial object expression into a single
+    // #945/#947: hoist a non-trivial object expression into a single
     // compiler-generated temp for this access, so every downstream
     // checked_base_self_expr()/clone_member_bounds_node() call below clones
     // the cheap `*t` dereference instead of re-evaluating `obj` itself.
     // Gated on CCCC_CHECKED_BOUNDS (this function otherwise runs
     // unconditionally at parse time -- only CHKR *emission* is
     // flag-gated -- so without this a default build would grow a stack slot
-    // for every checked-member access), on a live function context
-    // (new_lvar() prepends to vm->compiler.locals, which is only meaningful
-    // while a function body is being parsed -- see the $with_fn-locals
-    // hazard class this mirrors), and on `obj` being addressable
-    // (checked_obj_is_addressable() -- taking `&obj` is only well-formed
-    // for an lvalue; anything else falls back to the original re-clone
-    // behavior, unchanged).
+    // for every checked-member access), on a live allocation context
+    // (either `hoist_fn` non-NULL, or new_lvar()'s own requirement that
+    // vm->compiler.current_fn be live -- see this function's doc comment),
+    // and on `obj` being addressable (checked_obj_is_addressable() --
+    // taking `&obj` is only well-formed for an lvalue; anything else falls
+    // back to the original re-clone behavior, unchanged).
     if (out_obj_init && base.mem && (vm->flags & CCCC_CHECKED_BOUNDS) &&
-        vm->compiler.current_fn && !checked_obj_is_trivial(base.obj) &&
+        (hoist_fn || vm->compiler.current_fn) && !checked_obj_is_trivial(base.obj) &&
         checked_obj_is_addressable(base.obj)) {
-        Obj *t = new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
+        Obj *t = hoist_fn ? new_checked_prop_temp(vm, hoist_fn, pointer_to(vm, base.obj->ty))
+                          : new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
         Node *addr = new_unary(vm, ND_ADDR, clone_bounds_node(vm, base.obj), tok);
         add_type(vm, addr);
         Node *init = new_binary(vm, ND_ASSIGN, new_var_node(vm, t, tok), addr, tok);
@@ -2868,7 +2887,7 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
     deref->checked_access_size = pty->base ? get_vm_size(pty->base) : 1;
     compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
                            &deref->checked_bounds_hi, &deref->checked_nt_terminator,
-                           &deref->checked_bounds_obj_init);
+                           &deref->checked_bounds_obj_init, NULL);
 }
 
 // #919/#941: bounds propagation across assignment for an unchecked pointer
@@ -2928,21 +2947,32 @@ static void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr
 // frozen Obj.checked_prop_nt_elem, composing transitively through a #941
 // chain exactly like *out_optional does. Also left unset when this returns
 // false.
+//
+// #947: `hoist_fn`/`out_obj_init` (both NULL-able, forwarded straight to
+// compute_checked_bounds()) let a kind-1 (directly-declared) source hoist a
+// non-trivial member object expression into a single per-assignment temp,
+// same rationale as #945's per-access hoist. Pass NULL/NULL from a probing
+// call (phase A's usability scan, which discards lo/hi every round and must
+// not allocate a temp per probe) and a real `fn`/non-NULL out param only
+// once a rewrite is actually being committed. Kind 2 (a chained source) can
+// never produce an init -- it reads back already-snapshotted temp vars, not
+// a member expression -- so *out_obj_init is left NULL on that path.
 static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok,
                                        Node **out_lo, Node **out_hi,
                                        bool *out_optional, bool *out_nt,
-                                       int64_t *out_nt_elem) {
+                                       int64_t *out_nt_elem, Obj *hoist_fn,
+                                       Node **out_obj_init) {
     *out_lo = NULL;
     *out_hi = NULL;
+    if (out_obj_init)
+        *out_obj_init = NULL;
     CheckedBase base = find_checked_base(rhs);
     if (checked_base_is_declared(base)) {
         if (base.mem && node_has_side_effects(base.obj))
             return false;
         Type *pty = base.var ? base.var->ty : base.mem->ty;
-        // #945: NULL -- this is a single per-assignment evaluation, not a
-        // per-access one, so the hoist's saving doesn't apply here (see
-        // compute_checked_bounds()'s doc comment).
-        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt, NULL);
+        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt, out_obj_init,
+                               hoist_fn);
         if (!(*out_lo && *out_hi))
             return false;
         *out_optional = false;
@@ -3038,7 +3068,8 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
                 bool src_optional, src_nt;
                 int64_t src_nt_elem;
                 if (checked_prop_source_bounds(vm, node->rhs, node->tok, &lo, &hi,
-                                               &src_optional, &src_nt, &src_nt_elem)) {
+                                               &src_optional, &src_nt, &src_nt_elem,
+                                               NULL, NULL)) {
                     var->checked_prop_scan_saw_rooted = true;
                     var->checked_prop_scan_src_optional |= src_optional;
                     // #943: fold this store's NT fact into the round's
@@ -3171,9 +3202,16 @@ static Node *checked_prop_sentinel_node(VirtualMachine *vm, bool is_hi, Token *t
 // node, then overwrites the original with the wrapping ND_COMMA) so every
 // existing parent pointer into it stays valid; ->next is preserved on the
 // copy, not on the wrapper, so the statement chain is unaffected.
-static void checked_prop_rewrite_assign(VirtualMachine *vm, Node *assign_node) {
+//
+// #947: `fn` is the enclosing function, passed through to
+// checked_prop_source_bounds() so a kind-1 source with a non-trivial member
+// object expression (e.g. `q = arr[k].p;`) hoists `arr[k]` into a single
+// new_checked_prop_temp() temp rather than re-evaluating `k` once for `lo`
+// and again for `hi`. This is the actual rewrite (not a probe), so the
+// hoist is requested unconditionally here.
+static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assign_node) {
     Obj *var = assign_node->lhs->var;
-    Node *lo, *hi;
+    Node *lo, *hi, *src_obj_init;
     bool src_optional, src_nt;
     int64_t src_nt_elem;
     // NT-ness isn't needed here -- walk 3 (checked_prop_attach_scan())
@@ -3182,7 +3220,7 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Node *assign_node) {
     // are discarded.
     bool is_source = checked_prop_source_bounds(vm, assign_node->rhs, assign_node->tok,
                                                 &lo, &hi, &src_optional, &src_nt,
-                                                &src_nt_elem);
+                                                &src_nt_elem, fn, &src_obj_init);
     Token *tok = assign_node->tok;
     if (is_source && lo && hi) {
         // Rooted store -- unchanged #919/#941 behavior below; lo/hi are
@@ -3218,6 +3256,14 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Node *assign_node) {
     add_type(vm, store_hi);
     Node *snapshot = new_binary(vm, ND_COMMA, store_lo, store_hi, tok);
     add_type(vm, snapshot);
+    // #947: if the source needed a hoisted object-expression temp, its init
+    // has to run before BOTH store_lo and store_hi read it -- splice it in
+    // ahead of the existing pair rather than appending, same program point
+    // the un-hoisted lo/hi expressions were already evaluated at.
+    if (src_obj_init) {
+        snapshot = new_binary(vm, ND_COMMA, src_obj_init, snapshot, tok);
+        add_type(vm, snapshot);
+    }
 
     Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     *orig = *assign_node;
@@ -3241,7 +3287,13 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Node *assign_node) {
 // deciding EVERY candidate's fate (a later assignment in the same function
 // can still affect a candidate whose earlier assignment already looked
 // fine) before this phase commits to rewriting any of them.
-static void checked_prop_rewrite_scan(VirtualMachine *vm, Node *node) {
+// #947: `fn` is threaded down to checked_prop_rewrite_assign() (and from
+// there to checked_prop_source_bounds()'s hoist temp allocator) -- needed
+// because this whole walk runs after the function's own
+// leave_scope()/`fn->locals = vm->compiler.locals` snapshot, so a hoist
+// temp must be linked directly into `fn->locals` via
+// new_checked_prop_temp(), same as checked_prop_lo/hi themselves.
+static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_ASSIGN && node->lhs && node->lhs->kind == ND_VAR &&
             node->lhs->var && node->lhs->var->checked_prop_candidate &&
@@ -3254,7 +3306,7 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Node *node) {
             // not yet a chain source of itself).
             if (node != node->lhs->var->checked_prop_init_assign &&
                 find_checked_base(node->rhs).var == node->lhs->var) {
-                checked_prop_rewrite_scan(vm, node->rhs);
+                checked_prop_rewrite_scan(vm, fn, node->rhs);
                 continue;
             }
             // Recurse into the rhs FIRST (catches a nested candidate
@@ -3264,21 +3316,21 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Node *node) {
             // this same ND_ASSIGN (see its comment), which would otherwise
             // still match this branch on the generic descent below and
             // rewrite forever.
-            checked_prop_rewrite_scan(vm, node->rhs);
-            checked_prop_rewrite_assign(vm, node);
+            checked_prop_rewrite_scan(vm, fn, node->rhs);
+            checked_prop_rewrite_assign(vm, fn, node);
             continue; // node is now the wrapper; its parts are already scanned
         }
 
-        checked_prop_rewrite_scan(vm, node->lhs);
-        checked_prop_rewrite_scan(vm, node->rhs);
-        checked_prop_rewrite_scan(vm, node->cond);
-        checked_prop_rewrite_scan(vm, node->then);
-        checked_prop_rewrite_scan(vm, node->els);
-        checked_prop_rewrite_scan(vm, node->init);
-        checked_prop_rewrite_scan(vm, node->inc);
-        checked_prop_rewrite_scan(vm, node->body);
+        checked_prop_rewrite_scan(vm, fn, node->lhs);
+        checked_prop_rewrite_scan(vm, fn, node->rhs);
+        checked_prop_rewrite_scan(vm, fn, node->cond);
+        checked_prop_rewrite_scan(vm, fn, node->then);
+        checked_prop_rewrite_scan(vm, fn, node->els);
+        checked_prop_rewrite_scan(vm, fn, node->init);
+        checked_prop_rewrite_scan(vm, fn, node->inc);
+        checked_prop_rewrite_scan(vm, fn, node->body);
         for (Node *a = node->args; a; a = a->next)
-            checked_prop_rewrite_scan(vm, a);
+            checked_prop_rewrite_scan(vm, fn, a);
     }
 }
 
@@ -3617,7 +3669,7 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     // into a real snapshot, non-rooted OPT ones into a sentinel refresh),
     // then attach the resulting snapshots to every deref reached through a
     // survivor.
-    checked_prop_rewrite_scan(vm, fn->body);
+    checked_prop_rewrite_scan(vm, fn, fn->body);
     checked_prop_attach_scan(vm, fn->body);
 }
 
@@ -3634,9 +3686,20 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
 // evaluate AFTER the store (see the ordering note above
 // verify_checked_assign_bounds()). Mutates `assign_node` in place, same
 // parent-pointer-preserving technique as checked_prop_rewrite_assign().
+//
+// #947: `src_obj_init`/`dst_obj_init` (both NULL-able) are the two possible
+// member-object-expression hoists -- `src_obj_init` splices into the
+// pre-store snapshot comma below, the same program point src_lo/src_hi are
+// already evaluated at. `dst_obj_init` CANNOT go there: dst_lo/dst_hi are
+// deliberately evaluated AFTER the store (see the comment above), so a
+// pre-store `t = &obj` would snapshot the target's object expression before
+// an rhs that might still change it (e.g. `arr[k].p = f_that_bumps_k();`).
+// Instead it's carried on Node.checked_assign_dst_obj_init (src/cccc.h) for
+// codegen's post-store CHKAB site to re-run immediately before dst_lo/hi.
 static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn, Node *assign_node,
                                           Node *dst_lo, Node *dst_hi,
-                                          Node *src_lo, Node *src_hi) {
+                                          Node *src_lo, Node *src_hi,
+                                          Node *src_obj_init, Node *dst_obj_init) {
     Token *tok = assign_node->tok;
     Obj *slo_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
     Obj *shi_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
@@ -3649,12 +3712,17 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn, Node *ass
     add_type(vm, store_shi);
     Node *snapshot = new_binary(vm, ND_COMMA, store_slo, store_shi, tok);
     add_type(vm, snapshot);
+    if (src_obj_init) {
+        snapshot = new_binary(vm, ND_COMMA, src_obj_init, snapshot, tok);
+        add_type(vm, snapshot);
+    }
 
     Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     *orig = *assign_node;
     orig->next = NULL;
     orig->checked_assign_dst_lo = dst_lo;
     orig->checked_assign_dst_hi = dst_hi;
+    orig->checked_assign_dst_obj_init = dst_obj_init;
     orig->checked_assign_src_lo = new_var_node(vm, slo_var, tok);
     add_type(vm, orig->checked_assign_src_lo);
     orig->checked_assign_src_hi = new_var_node(vm, shi_var, tok);
@@ -3686,10 +3754,12 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn, Node *node) 
                 Type *dst_pty = dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
                 Node *dst_lo, *dst_hi;
                 bool dst_nt;
-                // #945: NULL -- same single-per-assignment reasoning as
-                // checked_prop_source_bounds() above.
+                // #947: probe with NULL first -- a failed test below (no
+                // usable dst/src bounds) must not allocate a hoist temp for
+                // a rewrite that never happens. Only recomputed with the
+                // hoist enabled once the rewrite is actually committed.
                 compute_checked_bounds(vm, dst_base, dst_pty, node->tok, &dst_lo, &dst_hi,
-                                      &dst_nt, NULL);
+                                      &dst_nt, NULL, NULL);
                 if (dst_lo && dst_hi) {
                     Node *src_lo, *src_hi;
                     bool src_optional, src_nt;
@@ -3697,11 +3767,24 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn, Node *node) 
                     CheckedBase src_base = find_checked_base(node->rhs);
                     bool is_source = checked_base_is_declared(src_base) &&
                         checked_prop_source_bounds(vm, node->rhs, node->tok, &src_lo, &src_hi,
-                                                   &src_optional, &src_nt, &src_nt_elem);
+                                                   &src_optional, &src_nt, &src_nt_elem,
+                                                   NULL, NULL);
                     if (is_source && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
+                        // #947: recompute both sides now with the hoist
+                        // allocator live -- the probe above only proved
+                        // this rewrite is going to happen.
+                        Node *dst_obj_init, *src_obj_init;
+                        bool dst_nt2, src_nt2;
+                        int64_t src_nt_elem2;
+                        compute_checked_bounds(vm, dst_base, dst_pty, node->tok, &dst_lo,
+                                              &dst_hi, &dst_nt2, &dst_obj_init, fn);
+                        checked_prop_source_bounds(vm, node->rhs, node->tok, &src_lo, &src_hi,
+                                                   &src_optional, &src_nt2, &src_nt_elem2,
+                                                   fn, &src_obj_init);
                         verify_checked_assign_rewrite(vm, fn, node, dst_lo, dst_hi,
-                                                      src_lo, src_hi);
+                                                      src_lo, src_hi, src_obj_init,
+                                                      dst_obj_init);
                         continue; // node is now the wrapper; parts already scanned
                     }
                 }
