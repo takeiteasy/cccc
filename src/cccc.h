@@ -498,7 +498,24 @@ extern "C" {
                    on it, and finding the *real* terminator requires \
                    reading past hi, the exact unbounded read this feature \
                    exists to prevent). See man/SAFETY.md's Checked Pointers \
-                   section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */
+                   section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */ \
+    X(CHKRO, 3) /* Optional checked-pointer range check (#942): identical to \
+                   CHKR except a sentinel range (lo == (char*)-1 && \
+                   hi == (char*)0) is a no-op instead of a violation. Used \
+                   for a checked-bounds-propagation candidate (src/parse.c's \
+                   propagate_checked_bounds()) that is only rooted in a \
+                   checked source on SOME paths -- the sentinel is stored \
+                   into the snapshot temps at function entry and at every \
+                   non-checked-rooted store, so at runtime the check is live \
+                   exactly on the paths where the snapshot is actually a \
+                   real range, deciding path-sensitivity as a runtime value \
+                   instead of a static join. Format identical to CHKR: \
+                   [CHKRO][rs_addr:8|rs_lo:8|rs_hi:8|unused:8] \
+                   [access_size:i64]. A fully checked-rooted candidate (every \
+                   assignment checked-rooted, #919/#941's original rule) \
+                   still emits plain CHKR, unchanged -- CHKRO only appears \
+                   for a partially-rooted candidate. Gated on \
+                   CCCC_CHECKED_BOUNDS, same as CHKR. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -1425,6 +1442,17 @@ struct Node {
     // it false), which is a separate, still-open gap (man/SAFETY.md).
     bool checked_nt_terminator;
 
+    // #942: true when checked_bounds_lo/hi were attached by
+    // propagate_checked_bounds()'s walk 3 (checked_prop_attach_scan(),
+    // src/parse.c) for a candidate that is only checked-rooted on SOME
+    // paths (Obj.checked_prop_optional) -- codegen must emit CHKRO instead
+    // of plain CHKR for this deref, since checked_bounds_lo/hi may hold the
+    // sentinel [(char*)-1, (char*)0) range at runtime rather than a real
+    // bound. False for a direct declared-checked access and for a fully
+    // checked-rooted (#919/#941) propagation candidate -- both always emit
+    // plain CHKR, unchanged from before #942.
+    bool checked_bounds_optional;
+
     // #919: marks the `&A` node to_assign() synthesizes for its *generic*
     // compound-assign/++/-- desugar (`tmp = &A, *tmp = *tmp op B`), src/
     // parse.c. propagate_checked_bounds()'s poison scan treats an ND_ADDR
@@ -1632,10 +1660,53 @@ struct Obj {
     // compiler-generated pointer_to(char)-typed locals holding the absolute
     // snapshotted [lo, hi) range, prepended to fn->locals by the propagation
     // pass; NULL until/unless the pass decides this candidate propagates.
-    Node *checked_prop_init_assign; // the initializer ND_ASSIGN node
+    Node *checked_prop_init_assign; // the initializer ND_ASSIGN node, or NULL for an
+                                     // uninitialized #942 candidate (see checked_prop_candidate)
     bool  checked_prop_unsafe;      // true once any non-checked-rooted store or escape is seen
     Obj  *checked_prop_lo;
     Obj  *checked_prop_hi;
+
+    // #942: true for any TY_PTR, CHECKED_NONE local registered as a
+    // propagation candidate, whether or not it has an initializer --
+    // supersedes `checked_prop_init_assign != NULL` as the candidacy test
+    // (every such test in propagate_checked_bounds() and its helpers now
+    // reads this flag instead) so an uninitialized `int *q;` can still be
+    // tracked: its snapshot starts at the sentinel via the phase-B' entry
+    // init and only becomes a real range once some path stores into it.
+    bool checked_prop_candidate;
+    // #942: true once this round's checked_prop_poison_scan() has seen BOTH
+    // a checked-rooted store (any candidate needs at least one, or it's
+    // fully unsafe/NONE, same as before #942) AND a non-checked-rooted
+    // store reached somewhere in the function, OR any rooted store's own
+    // source is itself optional (propagates transitively through a #941
+    // chain) -- i.e. this candidate is only trustworthy on SOME paths, not
+    // every path. A survivor with this false is "FULL": #919/#941's
+    // original all-rooted case, unchanged codegen (plain CHKR). A survivor
+    // with this true is "OPT": every deref through it emits CHKRO instead,
+    // and every non-rooted store into it (plus function entry) stores the
+    // sentinel range into checked_prop_lo/hi rather than skipping the
+    // store. Meaningless when checked_prop_unsafe is true (NONE candidates
+    // get no temps at all). Frozen per round exactly like
+    // checked_prop_chain_src, for the same AST-visit-order-independence
+    // reason.
+    bool checked_prop_optional;
+    // #942 round-local scratch, mutated live within a single round's scan
+    // (like checked_prop_unsafe, not frozen like checked_prop_chain_src/
+    // checked_prop_optional) and reset to false at the top of every round by
+    // propagate_checked_bounds(): whether checked_prop_poison_scan() has, so
+    // far this round, seen at least one checked-rooted store to this
+    // candidate (checked_prop_scan_saw_rooted), at least one
+    // non-checked-rooted store (checked_prop_scan_saw_unrooted), or a
+    // checked-rooted store whose OWN source was itself optional as of the
+    // previous round (checked_prop_scan_src_optional, #941-chain
+    // transitivity). A self-rooted store (`q = q + 1;`) touches none of
+    // these three, matching its existing neutral treatment. End of round:
+    // no rooted store at all -> unsafe (NONE, same as before #942, just
+    // phrased as "unsafe" instead of "poisoned"); otherwise a survivor, with
+    // checked_prop_optional = saw_unrooted || src_optional.
+    bool checked_prop_scan_saw_rooted;
+    bool checked_prop_scan_saw_unrooted;
+    bool checked_prop_scan_src_optional;
 
     // #941: chained propagation ("q propagates from p; r propagates from
     // q") is decided by a fixpoint iterated over the whole-function poison

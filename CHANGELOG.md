@@ -7,6 +7,25 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Added
 
+- **Path-sensitive checked-pointer bounds propagation** — a propagation
+  candidate that mixes checked-rooted and non-checked-rooted assignments
+  (`int *q = malloc(...); if (c) q = p; q[i];`) is no longer poisoned to
+  "never checked" for the whole function; it's classified "OPT" and its
+  snapshot temps are refreshed at *every* assignment, rooted or not (a
+  non-rooted store writes an explicit invalid sentinel instead of skipping
+  the refresh), plus seeded with the sentinel at function entry. A new
+  opcode, `CHKRO`, checks the snapshot but no-ops on the sentinel, so `q[i]`
+  is enforced exactly on the paths where `q` actually holds a checked-rooted
+  value at runtime — decided per executed path with no CFG/join/fixpoint
+  analysis at all. Candidate registration also now covers an uninitialized
+  declaration (`int *q;`), which previously never became a candidate.
+  `checked_prop_optional` propagates transitively through a #941 chain, so a
+  candidate chained from an OPT source is itself OPT even when its own
+  single store is unconditionally rooted. A candidate whose every assignment
+  is checked-rooted ("FULL") is completely unaffected — same `CHKR`, same
+  codegen as before. See
+  [SAFETY.md § Checked Pointers](man/SAFETY.md#checked-pointers) (#942)
+
 - **Chained checked-pointer bounds propagation** — a local that is itself
   only propagated (never declared checked) can now act as a propagation
   source for a further candidate: `int *q = p + 2; int *r = q + 1; int *s =

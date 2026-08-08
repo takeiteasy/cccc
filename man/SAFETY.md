@@ -818,25 +818,29 @@ two absolute addresses (in a pair of compiler-generated hidden locals) the
 instant the assignment runs, and later mutation of `p`/`n` is irrelevant to
 an already-taken snapshot.
 
-A local `q` propagates iff **all** of:
+A pointer local `q` (declared with or without an initializer) is a
+propagation *candidate* iff it is unchecked (`checked_kind == CHECKED_NONE`
+— a pointer with its own declared bounds never needs propagation). Every
+candidate is classified into exactly one of three outcomes:
 
-- `q` is declared with an initializer, and that initializer is
-  *checked-rooted* — its own address expression resolves (through
-  `+`/`-`/casts) to a declared checked pointer variable or a #921 member
-  access with an enforceable bounds form (`bounds(unknown)` and a bare
-  `[[cccc::array]]` with no bounds form at all don't count: there is nothing
-  to snapshot);
-- **every** assignment to `q` anywhere in the function is also
-  checked-rooted (a single non-checked-rooted store, anywhere, disqualifies
-  `q` for the whole function — no per-path/per-branch tracking);
-- `q` is never address-taken, except through the hidden temporary
-  `to_assign()` builds for `q += k`/`q++`/`q--`, which never escapes.
+- **NONE** — never assigned a checked-rooted value anywhere in the
+  function, or address-taken outside the hidden temporary `to_assign()`
+  builds for `q += k`/`q++`/`q--`. No propagation at all; `q[i]` is never
+  checked, same as an ordinary unchecked pointer.
+- **FULL** — **every** assignment to `q` reached in the function is
+  checked-rooted (its address expression resolves, through `+`/`-`/casts,
+  to a declared checked pointer variable or a #921 member access with an
+  enforceable bounds form). `q[i]` is checked against a snapshot taken at
+  the most recent assignment, unconditionally — the original #919/#941
+  rule, unchanged.
+- **OPT** (#942) — a *mix* of checked-rooted and non-checked-rooted
+  assignments (or a checked-rooted assignment whose own source is itself
+  OPT, see "Chained propagation" below). `q[i]` is still checked, but only
+  on the paths where the value `q` actually holds at that point came from a
+  rooted assignment — see below for how this is decided without any
+  control-flow analysis.
 
-Because every qualifying store also refreshes the snapshot, this holds under
-arbitrary control flow (`if`/`while`/`for`/`switch`/`goto`) with no
-dataflow/join analysis at all — there is nothing to merge at a branch, since
-whichever assignment actually ran is the one whose snapshot is live.
-Concretely:
+Concretely, for the FULL case:
 
 ```c
 int * [[cccc::array, cccc::count(n)]] p = ...;
@@ -847,13 +851,52 @@ q++; q[0];        // still checked -- q++ doesn't re-assign q's snapshot,
                   // relative to q's current value
 q = p + 5;        // re-snapshots -- a later access uses the NEW range
 
-int *r;    // no initializer at all -- r never becomes a candidate
-r = p;     // r[i] is never checked
-
 int *s = malloc(...);
-s = p;     // s's OWN initializer wasn't checked-rooted -- s never
-           // propagates, even though this later assignment is
+s = p;     // s's OWN initializer wasn't checked-rooted -- s is OPT, not
+           // FULL (see below), NOT poisoned to NONE the way #919 alone
+           // would have left it
 ```
+
+**Path-sensitive propagation via runtime snapshot validity** (#942). An
+OPT candidate's `[lo, hi)` snapshot temps are refreshed at **every**
+assignment to `q`, not just the checked-rooted ones: a non-checked-rooted
+store writes an explicit "invalid" sentinel (`lo = (char*)-1, hi =
+(char*)0` — an inverted range no legitimate bound can ever produce) instead
+of leaving the temps untouched, and the temps are also seeded with the
+sentinel at function entry (covering an uninitialized declaration, a loop
+back-edge that hasn't looped yet, or a `goto` past `q`'s own declaration).
+The runtime check itself (`CHKRO`, distinct from the `CHKR` a FULL candidate
+or a direct declared-checked access still emits) treats the sentinel as a
+deliberate no-op rather than a violation.
+
+This makes propagation exact per *executed* path with **no CFG, no join
+operator, and no fixpoint over a control-flow graph at all** — a
+conservative static join would still leave `q[i]` below unchecked, because
+the fact is only live on one incoming edge of the `if`:
+
+```c
+int * [[cccc::array, cccc::count(n)]] p = ...;
+int *q = malloc(...);
+if (c) q = p;
+q[i];   // ENFORCED when c took the `q = p` branch, silently unchecked
+        // (no trap either way) when it didn't -- exactly per the path
+        // actually taken at runtime, decided by which store actually ran
+
+int *r;    // no initializer -- still a candidate (#942 extended
+           // registration to cover this; #919 never registered `r` at all)
+if (c) r = p;
+r[i];   // same as `q` above: enforced iff `c` was true THIS run
+
+int *s = p;
+s[i];       // checked: s's most recent store (the init) was rooted
+s = malloc(...);
+s[j];       // NOT checked: s's most recent store was not rooted -- ordinary
+            // flow-sensitivity/kill-set behavior falls out of the same
+            // runtime mechanism for free, no separate tracking needed
+```
+
+A FULL candidate gets none of this machinery — no sentinel, no entry init,
+plain `CHKR` — so its codegen is byte-for-byte identical to before #942.
 
 A #921 member is a valid propagation *source* too, so the two features
 compose: `int *q = obj.p;` propagates from `obj.p`'s own member bounds.
@@ -879,44 +922,56 @@ int *r = q + 1;   // propagates from q (a chained source)
 int *s = r + 1;   // propagates from r -- chains to arbitrary depth
 ```
 
-This is decided by iterating the whole-function eligibility rule above to a
-fixpoint: round 0 accepts only declared-checked sources (today's #919 rule);
-each later round additionally trusts whichever candidates survived the
-*previous* round as sources too, so the accepted-source set grows
-monotonically and the pass always terminates (bounded by the number of
-candidates in the function, with a defensive round cap on top — stopping
-early is sound, it just leaves any chain longer than the cap unpropagated).
-Seeding from the bottom (declared sources only, then growing) rather than
-optimistically from the top (assume everything propagates, then remove
-failures) is what keeps an unrooted cycle from ever self-validating: `q = r +
-1; r = q + 1;` with no declared root anywhere in the cycle never propagates,
-no matter how many rounds run, because neither `q` nor `r` is ever a member
-of any round's *frozen* accepted-source set.
+This is decided by iterating the whole-function classification rule above to
+a fixpoint: round 0 accepts only declared-checked sources as a *source*
+(today's #919 rule); each later round additionally trusts whichever
+candidates survived the *previous* round as sources too, so the
+accepted-source set grows monotonically and the pass always terminates
+(bounded by the number of candidates in the function, with a defensive round
+cap on top). Seeding from the bottom (declared sources only, then growing)
+rather than optimistically from the top (assume everything propagates, then
+remove failures) is what keeps an unrooted cycle from ever self-validating:
+`q = r + 1; r = q + 1;` with no declared root anywhere in the cycle never
+propagates (classifies NONE), no matter how many rounds run, because neither
+`q` nor `r` is ever a member of any round's *frozen* accepted-source set.
 
 Chaining needs one more soundness argument beyond #919's own: a chained
 source's bounds are runtime values living in its own snapshot temps, not a
 recomputable expression, so `q`'s temps must be written before `r`'s
-snapshot reads them. That holds because candidacy still requires `q`'s own
-**declaration initializer** to be checked-rooted — unchanged from #919 — so
-`q`'s temps are stored at `q`'s declaration, which precedes every use of `q`,
-including `r`'s. One residual: `goto` past a declaration (`{ goto L; int *q
-= p; L: int *r = q + 1; }`) skips `q`'s initializer, leaving its temps
-unwritten — but `q` itself is equally indeterminate at that point, so the
-program is already undefined behavior before any check runs; not treated as
-a gap worth paying for (e.g. trap-initializing every temp) on its own.
+snapshot reads them. That holds because a chain source's own temps are
+refreshed at *every* one of its assignments (rooted → real bounds, non-rooted
+→ sentinel, per #942 above) plus at function entry, so `q`'s temps are always
+in a well-defined state — real or sentinel — by the time any use of `q`,
+including `r`'s snapshot read, is reached. `goto` past `q`'s own declaration
+is covered by the same phase-B' entry sentinel, not left as a residual (see
+below).
+
+**#942 also threads OPT-ness through the chain**: a candidate chained from an
+OPT source is itself OPT, even when its own single store is, in isolation,
+unconditionally checked-rooted:
+
+```c
+int * [[cccc::array, cccc::count(n)]] p = ...;
+int *q = malloc(...);
+if (c) q = p;      // q is OPT
+int *r = q + 1;    // r's own store IS rooted (from q) -- but r must still
+                    // be OPT, not FULL, or r[i] would read q's sentinel
+                    // through a plain CHKR and TRAP on this correct,
+                    // unrooted-path code
+r[i];              // enforced iff `c` was true this run, same as q[i] would be
+```
+
+The round loop's fixpoint test compares both the survivor count and the
+OPT-survivor count between rounds; if the round cap is hit before either
+converges, every remaining survivor is conservatively forced to OPT rather
+than trusted as FULL — OPT only ever costs precision, so this is the only
+sound direction to err in when the cap cuts a chain short.
 
 Residual gaps, deliberately out of scope for this pass and left as
 follow-up work rather than a full dataflow rewrite:
 
-- **No path-sensitive joins.** The whole-function rule above is
-  straight-line: *every* assignment to `q` anywhere in the function must be
-  checked-rooted, or `q` never propagates at all — there is no notion of
-  "propagates on some paths, not others" (`q = malloc(...); if (c) q = p;`
-  never propagates, even on the path where `q` does hold `p`'s value). This
-  bounds the chained case too: a chain candidate whose source itself only
-  propagates on some paths still never propagates at all.
-- **`CHKNT` does not propagate**, chained or not — see the terminator-invariant
-  gap list below.
+- **`CHKNT` does not propagate**, FULL, OPT, or chained — see the
+  terminator-invariant gap list below.
 - **No assignment-time bounds-implication check.** This pass only ever
   *widens* trust (an unchecked `q` borrows a checked source's bounds); it
   never *narrows* it — assigning into a `q` that is itself declared checked
@@ -1032,13 +1087,13 @@ Known coverage gaps, left as follow-up work rather than built into this pass:
 
 - **Non-integer/non-pointer pointees are skipped** (a `float`-typed
   `ntarray` has no meaningful "null terminator").
-- **`CHKNT` does not propagate across assignment.** #919 added `CHKR` bounds
-  propagation (see "Bounds propagation across assignment" above), but
-  `Node.checked_nt_terminator` is deliberately left false for a propagated
-  deref — `q[n] = 'x'` through a propagated `q` snapshotted from an
-  `ntarray` source is an ordinary in-range `CHKR`-checked write, not a
-  `CHKNT`-guarded one, even though the direct-access equivalent through the
-  source itself would trap.
+- **`CHKNT` does not propagate across assignment.** #919/#942 added `CHKR`/
+  `CHKRO` bounds propagation (see "Bounds propagation across assignment"
+  above), but `Node.checked_nt_terminator` is deliberately left false for a
+  propagated deref, FULL or OPT alike — `q[n] = 'x'` through a propagated
+  `q` snapshotted from an `ntarray` source is an ordinary in-range
+  `CHKR`/`CHKRO`-checked write, not a `CHKNT`-guarded one, even though the
+  direct-access equivalent through the source itself would trap.
 
 ## VM Heap Allocator
 

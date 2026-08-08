@@ -4456,27 +4456,24 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
     return 0;
 }
 
-static inline int op_CHKR_fn(VirtualMachine *vm) {
-    // Checked-pointer range check (Checked C-style spatial safety, #770/#482-484).
-    // Format: [CHKR] [rs_addr:8|rs_lo:8|rs_hi:8|unused:8] (RRR operand word)
-    //         [access_size:i64]
-    // Unlike CHKB/CHKP3, lo/hi are NOT derived from sorted_allocs or any
-    // other allocation-time side table -- they are the caller-computed
-    // declared bounds of a checked pointer (from its count()/byte_count()/
-    // bounds() attribute), passed in fresh at every checked access by
-    // codegen. That is what lets this opcode work uniformly across heap,
-    // stack and global storage, which CHKB cannot do for non-heap bases.
-    long long operands = cc_read_word(vm);
-    int rs_addr, rs_lo, rs_hi;
-    DECODE_RRR(operands, rs_addr, rs_lo, rs_hi);
-    long long access_size = cc_read_i64(vm);
-
+// Shared body for CHKR/CHKRO (#942): `allow_sentinel` is true only for
+// CHKRO, and skips the check entirely when [lo, hi) is the propagation
+// pass's "snapshot not yet rooted on this path" sentinel
+// (lo == -1 && hi == 0, an inverted range no legitimate bound can ever
+// produce -- see src/parse.c's checked_prop_rewrite_assign()/phase B').
+// Pulled out of op_CHKR_fn so the two opcodes can never drift apart on the
+// actual violation test, only on whether the sentinel is recognised.
+static inline int chkr_common(VirtualMachine *vm, int rs_addr, int rs_lo, int rs_hi,
+                              long long access_size, bool allow_sentinel) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS))
         return 0;
 
     long long addr = vm->regs[rs_addr];
     long long lo   = vm->regs[rs_lo];
     long long hi   = vm->regs[rs_hi];
+
+    if (allow_sentinel && lo == -1 && hi == 0)
+        return 0;
 
     // NULL is always out of range for any declared bound: this is what gives
     // a [[cccc::single]] pointer its "null-checked on deref" semantics for
@@ -4495,6 +4492,38 @@ static inline int op_CHKR_fn(VirtualMachine *vm) {
     }
 
     return 0;
+}
+
+static inline int op_CHKR_fn(VirtualMachine *vm) {
+    // Checked-pointer range check (Checked C-style spatial safety, #770/#482-484).
+    // Format: [CHKR] [rs_addr:8|rs_lo:8|rs_hi:8|unused:8] (RRR operand word)
+    //         [access_size:i64]
+    // Unlike CHKB/CHKP3, lo/hi are NOT derived from sorted_allocs or any
+    // other allocation-time side table -- they are the caller-computed
+    // declared bounds of a checked pointer (from its count()/byte_count()/
+    // bounds() attribute), passed in fresh at every checked access by
+    // codegen. That is what lets this opcode work uniformly across heap,
+    // stack and global storage, which CHKB cannot do for non-heap bases.
+    long long operands = cc_read_word(vm);
+    int rs_addr, rs_lo, rs_hi;
+    DECODE_RRR(operands, rs_addr, rs_lo, rs_hi);
+    long long access_size = cc_read_i64(vm);
+    return chkr_common(vm, rs_addr, rs_lo, rs_hi, access_size, false);
+}
+
+static inline int op_CHKRO_fn(VirtualMachine *vm) {
+    // Optional checked-pointer range check (#942) -- see the X-macro comment
+    // in src/cccc.h. Identical wire format and violation test to CHKR;
+    // differs only in treating the [lo=-1, hi=0) sentinel as a deliberate
+    // no-op rather than a violation, which is what lets a checked-bounds-
+    // propagation candidate that's only checked-rooted on SOME paths
+    // (Obj.checked_prop_optional in src/parse.c) decide, per access, at
+    // runtime, whether the path that actually ran had a real snapshot.
+    long long operands = cc_read_word(vm);
+    int rs_addr, rs_lo, rs_hi;
+    DECODE_RRR(operands, rs_addr, rs_lo, rs_hi);
+    long long access_size = cc_read_i64(vm);
+    return chkr_common(vm, rs_addr, rs_lo, rs_hi, access_size, true);
 }
 
 static inline int op_CHKNT_fn(VirtualMachine *vm) {

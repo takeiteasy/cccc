@@ -412,6 +412,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
 | `CHKT3` | Heap type-tag check on dereference (effective-type model), resolving the base pointer via `vm->sorted_allocs` | `CCCC_TYPE_CHECKS` |
 | `CHKR` | Checked-pointer range check (`[[cccc::single/array/ntarray]]`): traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
+| `CHKRO` | Optional checked-pointer range check (#942): identical to `CHKR`, except the sentinel `lo == (char*)-1 && hi == (char*)0` is a no-op instead of a violation | `CCCC_CHECKED_BOUNDS` |
 | `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
 
 `CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
@@ -437,6 +438,24 @@ reference. Like every opcode in this table, `CHKR` has no equivalent in
 and ignore `--checked-pointers` rather than emitting an inline check.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
+
+`CHKRO` (#942) is `CHKR`'s sibling for a checked-pointer-bounds-propagation
+candidate (`src/parse.c`'s `propagate_checked_bounds()`) that is only
+checked-rooted on *some* paths, not every path — "OPT" in
+[SAFETY.md](SAFETY.md#checked-pointers)'s propagation writeup, as opposed to
+a "FULL" candidate (every store checked-rooted), which still emits plain
+`CHKR` with identical codegen to before #942. An OPT candidate's snapshot
+temps are refreshed at every assignment, rooted or not — a non-rooted store
+writes the `[lo=-1, hi=0)` sentinel instead of skipping the refresh, and the
+temps are also seeded with it at function entry — so whichever store
+actually executed on the current path (or none at all) is what `CHKRO` sees.
+This makes propagation exact per executed path with no CFG/join/fixpoint
+needed: a static, join-based dataflow pass would still leave `q[i]` in `q =
+malloc(...); if (c) q = p; q[i];` permanently unchecked (the fact isn't live
+on every incoming edge of the join), whereas `CHKRO` enforces it exactly on
+the runs where `c` took the `q = p` branch. Wire format is identical to
+`CHKR` (`op_CHKR_fn`/`op_CHKRO_fn` in `src/ops.c` share one `chkr_common()`
+body, differing only in whether the sentinel short-circuits).
 
 `CHKNT` (#923/#938) covers the one gap `CHKR`'s bounds widening for
 `[[cccc::ntarray]]` opens: `count()`/`byte_count()`/`bounds()` all widen the

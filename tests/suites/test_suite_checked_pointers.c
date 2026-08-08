@@ -1234,3 +1234,243 @@ void test_prop_chain_in_loop_oob(void) {
     int x = *r;
     (void)x;
 }
+
+// ---------------------------------------------------------------------
+// #942 -- path-sensitive propagation via runtime snapshot validity. #919's
+// rule was whole-function/straight-line: ONE non-checked-rooted store to a
+// candidate, anywhere, disqualified it for the whole function -- even on a
+// path where the candidate provably does hold a checked-rooted value.
+// `int *q = malloc(...); if (c) q = p; q[i];` never propagated at all, even
+// on the `c` branch. A conservative static join (kill the fact wherever
+// it's not live on every incoming edge) doesn't fix this either -- it's
+// still dead after the join. Instead, propagate_checked_bounds() now
+// classifies each surviving candidate as FULL (every store checked-rooted
+// -- byte-identical codegen to #919/#941, proven by the untouched tests
+// above) or OPT (a mix): an OPT candidate's snapshot temps are refreshed at
+// EVERY store, rooted or not (a non-rooted store writes an explicit
+// [lo=-1, hi=0) sentinel instead of skipping the refresh), and at function
+// entry, so the temps always reflect whichever store actually executed on
+// this path. CHKRO (src/ops.c) then simply no-ops when it reads the
+// sentinel. No CFG, no join, no fixpoint over a graph -- the runtime state
+// naturally follows whichever path execution actually took.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_opt_unrooted_path_not_checked(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 0;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    if (c)
+        q = p;
+    q[10] = 99; // c==0: q holds buf (unrooted) -- not checked, no trap
+    AssertEq(q[10], 99);
+    free(buf);
+}
+
+[[cccc::test]]
+void test_opt_rooted_path_checked_in_bounds(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 1;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    if (c)
+        q = p;
+    AssertEq(q[2], 3); // c==1: q holds p (rooted) -- checked, in bounds
+    free(buf);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_opt_rooted_path_checked_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 1;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    if (c)
+        q = p;
+    int x = q[10]; // c==1: q holds p -- OOB against p's count(4), must trap
+    (void)x;
+}
+
+// The uninitialized-declaration shape of the same headline case -- #942
+// extended candidate registration to cover `int *q;` (no initializer),
+// which #919/#941 never registered as a candidate at all.
+[[cccc::test]]
+void test_opt_uninitialized_unrooted_path_not_checked(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 0;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q;
+    if (c)
+        q = p;
+    else
+        q = buf;
+    q[10] = 99; // c==0: q holds buf -- not checked, no trap
+    AssertEq(q[10], 99);
+    free(buf);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_opt_uninitialized_rooted_path_checked_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 1;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q;
+    if (c)
+        q = p;
+    else
+        q = buf;
+    int x = q[10]; // c==1: q holds p -- OOB against p's count(4), must trap
+    (void)x;
+}
+
+// Flow-sensitivity/kill-set behavior falls out of the same runtime
+// mechanism for free: `q[i]` is checked (its most recent store, `q = p`,
+// was rooted), `q[j]` is not (its most recent store, `q = malloc(...)`,
+// wasn't) -- no separate kill-set tracking needed, the snapshot temps
+// simply hold whatever the last executed store put there.
+[[cccc::test]]
+void test_opt_flow_sensitive_kill_and_revive(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    void *buf;
+    int *q = p;
+    AssertEq(q[2], 3); // checked: q's most recent store is rooted (init)
+    buf = malloc(sizeof(int) * 16);
+    q = buf;
+    q[10] = 7; // not checked: q's most recent store is unrooted
+    AssertEq(q[10], 7);
+    free(buf);
+}
+
+// #941-chain composition: `r`'s own single store IS checked-rooted (from
+// `q`), but `q` itself is only OPT -- `r` must inherit OPT-ness
+// transitively (Obj.checked_prop_optional propagated through
+// checked_prop_scan_src_optional), or this would be exactly the false-trap
+// hazard #942's design review flagged: a naively-FULL `r` would read `q`'s
+// sentinel through plain CHKR and trap on this correct, unrooted-path code.
+[[cccc::test]]
+void test_opt_chain_through_optional_source_not_checked(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 0;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    if (c)
+        q = p;
+    int *r = q + 1; // r's own store is unconditionally rooted (from q)
+    r[10] = 5;       // c==0: q (and therefore r) is unrooted -- no trap
+    AssertEq(r[10], 5);
+    free(buf);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_opt_chain_through_optional_source_oob(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 1;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    if (c)
+        q = p;
+    int *r = q + 1;
+    int x = r[10]; // c==1: r chains from p through q -- OOB, must trap
+    (void)x;
+}
+
+// Three-deep chain through an OPT source -- OPT-ness must propagate past
+// more than one hop.
+[[cccc::test]]
+void test_opt_chain_three_deep_through_optional_source_not_checked(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 0;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    if (c)
+        q = p;
+    int *r = q + 1;
+    int *s = r + 1;
+    s[10] = 5; // c==0: whole chain unrooted -- no trap
+    AssertEq(s[10], 5);
+    free(buf);
+}
+
+// OPT candidate whose only rooted store is reached through a loop back
+// edge -- the sentinel must be live before the loop's first iteration
+// (phase B' entry init) and the real snapshot must be live after the
+// rooted store executes.
+[[cccc::test]]
+void test_opt_loop_back_edge_rooted_store(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    int total = 0;
+    for (int i = 0; i < 3; i++) {
+        if (i == 1)
+            q = p; // rooted only on this one iteration
+        else if (i == 2)
+            total += q[2]; // checked: q's most recent store (i==1) was rooted
+    }
+    AssertEq(total, 3);
+    free(buf);
+}
+
+// `switch` fallthrough must not confuse the classifier or cause a false
+// trap on the branch whose only reachable store is unrooted.
+[[cccc::test]]
+void test_opt_switch_fallthrough_not_checked(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c = 0;
+    void *buf = malloc(sizeof(int) * 16);
+    int *q = buf;
+    switch (c) {
+    case 1:
+        q = p;
+        break;
+    default:
+        break;
+    }
+    q[10] = 42; // c==0 (default): q holds buf -- not checked, no trap
+    AssertEq(q[10], 42);
+    free(buf);
+}
+
+// `goto` past a rooted store must not cause a false trap on the path that
+// skips it -- the entry sentinel (phase B') covers exactly this.
+[[cccc::test]]
+void test_opt_goto_skips_rooted_store_not_checked(void) {
+    int n = 4;
+    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    void *buf = malloc(sizeof(int) * 16);
+    int *q;
+    goto skip;
+    q = p;
+skip:
+    q = buf;
+    q[10] = 7; // reached only via goto -- q holds buf, not checked, no trap
+    AssertEq(q[10], 7);
+    free(buf);
+}
+
+// #943's gap (CHKNT does not propagate) must still hold for an OPT
+// candidate, not just a FULL one.
+[[cccc::test]]
+void test_opt_chknt_does_not_propagate(void) {
+    int n = 3;
+    volatile int c = 1;
+    void *buf = malloc(8);
+    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q = buf;
+    if (c)
+        q = s;
+    q[3] = 'x'; // would trap via CHKNT through `s` directly; not through `q`
+    AssertEq(q[3], 'x');
+}

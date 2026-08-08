@@ -3559,7 +3559,15 @@ static void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_t
     emit_i64(vm, (long long)size);
 }
 
-// Emit CHKR (checked-pointer range check, #770/#482-484).
+// Emit CHKR (checked-pointer range check, #770/#482-484), or CHKRO (#942)
+// when `optional` -- identical wire format, CHKRO just treats the
+// [lo=-1, hi=0) sentinel as a no-op instead of a violation. `optional` comes
+// straight from the deref node's checked_bounds_optional flag (true only for
+// a checked-bounds-propagation candidate that's checked-rooted on some but
+// not all paths, per src/parse.c's propagate_checked_bounds()) -- a direct
+// declared-checked access or a fully-rooted (#919/#941) propagation
+// candidate always passes false here, so its codegen is unchanged from
+// before #942.
 // rs_addr/rs_lo/rs_hi are caller-computed registers: the accessed address and
 // the checked pointer's declared bounds (from its count()/byte_count()/
 // bounds() attribute, desugared to [lo, hi) by the caller). access_size is
@@ -3567,8 +3575,8 @@ static void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_t
 // scalar deref). No-op at runtime unless CCCC_CHECKED_BOUNDS is set -- callers
 // gate emission on that flag so the default build never emits this opcode.
 static void emit_chkr(VirtualMachine *vm, int rs_addr, int rs_lo, int rs_hi,
-                      long long access_size) {
-    emit_rrrs_i(vm, CHKR, rs_addr, rs_lo, rs_hi, 0, access_size);
+                      long long access_size, bool optional) {
+    emit_rrrs_i(vm, optional ? CHKRO : CHKR, rs_addr, rs_lo, rs_hi, 0, access_size);
 }
 
 // Emit CHKNT (checked-pointer null-terminator guard, #923).
@@ -3727,7 +3735,8 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             int r_hi = alloc_temp_reg();
             gen_expr(vm, node->checked_bounds_lo, r_lo);
             gen_expr(vm, node->checked_bounds_hi, r_hi);
-            emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size);
+            emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size,
+                     node->checked_bounds_optional);
             free_temp_reg(r_hi);
             free_temp_reg(r_lo);
         }

@@ -1190,6 +1190,10 @@ static bool op_byte0_is_int_src(int op) {
     // 1-2 need no separate listing since the generic decode already marks
     // rs1/rs2 as uses unconditionally for non-float-src opcodes.
     case CHKR:
+    // Optional checked-pointer range check (#942): identical operand shape
+    // to CHKR (rs_addr/rs_lo/rs_hi all pure sources), so the same listing
+    // applies verbatim -- see CHKR's comment immediately above.
+    case CHKRO:
     // Checked-pointer null-terminator guard (#923): byte 0 (rs_addr), byte 1
     // (rs_hi) and byte 2 (rs_val) are all pure sources -- same reasoning as
     // CHKR immediately above, including the value register (rs_val), which
