@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-08
+
 ### Added
 
 - **`CHKNT`'s null-terminator guard now covers `float`/`double`, `struct`/
