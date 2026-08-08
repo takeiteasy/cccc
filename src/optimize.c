@@ -1199,6 +1199,10 @@ static bool op_byte0_is_int_src(int op) {
     // CHKR immediately above, including the value register (rs_val), which
     // only ever reads the just-computed store value, never defines it.
     case CHKNT:
+    // Checked-pointer assignment-time bounds implication (#944): byte 0
+    // (rs_val), byte 1 (rs_slo) and byte 2 (rs_shi) are all pure sources --
+    // same reasoning as CHKR/CHKNT immediately above.
+    case CHKAB:
         return true;
     default:
         return false;

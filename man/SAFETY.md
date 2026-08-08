@@ -1003,15 +1003,48 @@ for the non-atomic desugar, hi/access-size/nt-terminator only for the atomic
 one (matching #937's own direct-access split, which has no `lo` to give the
 CAS-loop's `ND_CAS` node) — onto the mirror once they're known.
 
-Residual gap, deliberately out of scope for this pass and left as follow-up
-work rather than a full dataflow rewrite:
+**Assignment-time bounds implication** (#944, Checked C's
+`_Assume_bounds_cast` direction). The propagation pass above only ever
+*widens* trust into a previously-*unchecked* target; a **separate** sibling
+pass, `verify_checked_assign_bounds()` (disjoint target set — propagation
+candidacy requires `checked_kind == CHECKED_NONE`, so an already-declared-
+checked target is never a propagation candidate), now *verifies* trust the
+other direction: an `ND_ASSIGN` whose LHS is itself declared checked, and
+whose RHS is rooted at a **directly declared-checked** source (not a #941
+chain — v1 boundary, see below), is rewritten so a new `CHKAB` opcode checks
+that the source's own bounds imply the target's own declared bounds:
 
-- **No assignment-time bounds-implication check.** This pass only ever
-  *widens* trust (an unchecked `q` borrows a checked source's bounds); it
-  never *narrows* it — assigning into a `q` that is itself declared checked
-  does not verify the source's bounds imply `q`'s own declared bounds
-  (Checked C's `_Assume_bounds_cast` direction). `q` keeps its own declared
-  bounds in that case, unaffected by propagation either way.
+```c
+int * [[cccc::array, cccc::count(4)]]  p = ...;   // declared bound: 4
+int * [[cccc::array, cccc::count(10)]] q;         // declared bound: 10
+q = p;   // now traps: p's bounds (4) don't imply q's own declared bounds (10)
+```
+
+`CHKAB rs_val, rs_slo, rs_shi` traps unless `slo <= val && val <= shi`;
+codegen emits it twice per checked assignment — once with the target's own
+declared `lo`, once with its `hi` — which together enforce
+`[dlo, dhi) ⊆ [slo, shi]`. Ordering is the **inverse** of the propagation
+pass's own snapshot: the target's declared bounds are self-referencing
+(`[q, q + m*sizeof(T))` for a `count(m)` target), so `checked_assign_dst_lo/
+hi` are deliberately left as bare expressions, evaluated **after** the
+store, to see the just-written value — the source's bounds, by contrast, are
+snapshotted into compiler-generated temps **before** the store (the rewrite
+is `(temp = source bounds), (q = E)`, mirroring #919's own before-the-store
+snapshot), since the source expression may itself alias or be overwritten by
+the assignment.
+
+v1 boundary, deliberate, not a residual gap:
+
+- The RHS must be a **directly declared-checked** source
+  (`checked_prop_source_bounds()`'s kind 1) — a #941-propagated local can
+  hold the OPT sentinel range, which would need a sentinel-aware `CHKAB`
+  variant; `q = r;` where `r` is itself only a propagation candidate is
+  silently skipped, same as any other unrecognised source.
+- Only a direct `q = E;` `ND_ASSIGN` is covered — function argument passing
+  and return values are not.
+- A target with no resolvable bounds form (`CB_NONE`/`bounds(unknown)`) is
+  skipped, same rationale as the propagation pass's identically-named source
+  exclusion.
 
 Gated on `--checked-pointers` at **parse time**, unlike the rest of the
 checked-pointer machinery (which populates its fields unconditionally and

@@ -3593,6 +3593,17 @@ static void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
     emit_rrrs_i(vm, CHKNT, rs_addr, rs_hi, rs_val, 0, elem_size);
 }
 
+// Emit CHKAB (checked-pointer assignment-time bounds implication, #944).
+// rs_val is the target's own declared bound being checked (lo when
+// `is_hi` is false, hi when true); rs_slo/rs_shi are the source's snapshot
+// bounds, already evaluated into registers by the caller. Traps unless
+// rs_slo <= rs_val <= rs_shi. No-op at runtime unless CCCC_CHECKED_BOUNDS is
+// set, same as CHKR/CHKNT; callers gate emission on that flag.
+static void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
+                       bool is_hi) {
+    emit_rrrs_i(vm, CHKAB, rs_val, rs_slo, rs_shi, 0, is_hi ? 1 : 0);
+}
+
 // ========== Address Generation ==========
 
 // Generate address of an lvalue into dest_reg
@@ -5347,6 +5358,45 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_store_ex(vm, node->ty, r_val, r_addr, !addr_is_local_frame(vm, node->lhs));
         }
         vm->compiler.in_union_member_access = lhs_saved_union_flag;
+
+        // #944: assignment-time bounds implication (Checked C's
+        // _Assume_bounds_cast direction) -- verify the value just stored
+        // into a declared-checked lhs actually satisfies the lhs's OWN
+        // declared bounds, given a declared-checked rhs. Must run AFTER the
+        // store above: checked_assign_dst_lo/hi are the lhs's own bounds
+        // expressions, deliberately left unevaluated by
+        // verify_checked_assign_rewrite() (src/parse.c) so gen_expr reads
+        // the lhs's just-written value here, not its pre-assignment one --
+        // the inverse ordering from checked_assign_src_lo/hi, which were
+        // already snapshotted into temps BEFORE the store by that same
+        // rewrite (the source may alias or be overwritten by the store
+        // itself). r_val/r_addr are marked in-use first since dest_reg's
+        // final mov and the r_addr free below both still need them live
+        // across this block's own temp allocations.
+        if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_assign_dst_lo) {
+            mark_temp_reg_used(r_val);
+            if (r_addr >= 0)
+                mark_temp_reg_used(r_addr);
+            int r_slo = alloc_temp_reg();
+            gen_expr(vm, node->checked_assign_src_lo, r_slo);
+            mark_temp_reg_used(r_slo);
+            int r_shi = alloc_temp_reg();
+            gen_expr(vm, node->checked_assign_src_hi, r_shi);
+            mark_temp_reg_used(r_shi);
+
+            int r_dlo = alloc_temp_reg();
+            gen_expr(vm, node->checked_assign_dst_lo, r_dlo);
+            emit_chkab(vm, r_dlo, r_slo, r_shi, false);
+            free_temp_reg(r_dlo);
+
+            int r_dhi = alloc_temp_reg();
+            gen_expr(vm, node->checked_assign_dst_hi, r_dhi);
+            emit_chkab(vm, r_dhi, r_slo, r_shi, true);
+            free_temp_reg(r_dhi);
+
+            free_temp_reg(r_shi);
+            free_temp_reg(r_slo);
+        }
 
         // Update or invalidate the restrict cache for this store.
         restrict_cache_handle_store(vm, node->lhs, r_val);

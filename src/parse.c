@@ -3526,6 +3526,149 @@ static void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     checked_prop_attach_scan(vm, fn->body);
 }
 
+// #944 per-assignment rewrite: `q = E` where `q` is a declared-checked
+// target and `E` is rooted at a declared-checked source becomes
+// `(__slo = (char*)SRC_LO, __shi = (char*)SRC_HI), (q = E)` -- the source's
+// bounds are snapshotted BEFORE the store into two fresh compiler-generated
+// pointer_to(char) temps (reusing new_checked_prop_temp(), same shape as
+// #919's own snapshot temps), and the ND_ASSIGN itself (the untouched `orig`
+// copy, exactly like checked_prop_rewrite_assign()'s wrapping trick) is
+// stamped with all four CHKAB operands: checked_assign_src_lo/hi are var
+// reads of the two temps just stored, checked_assign_dst_lo/hi are the
+// target's OWN bounds expressions, built fresh here and left for codegen to
+// evaluate AFTER the store (see the ordering note above
+// verify_checked_assign_bounds()). Mutates `assign_node` in place, same
+// parent-pointer-preserving technique as checked_prop_rewrite_assign().
+static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn, Node *assign_node,
+                                          Node *dst_lo, Node *dst_hi,
+                                          Node *src_lo, Node *src_hi) {
+    Token *tok = assign_node->tok;
+    Obj *slo_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+    Obj *shi_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+
+    Node *store_slo = new_binary(vm, ND_ASSIGN, new_var_node(vm, slo_var, tok),
+                                 new_cast(vm, src_lo, pointer_to(vm, ty_char)), tok);
+    add_type(vm, store_slo);
+    Node *store_shi = new_binary(vm, ND_ASSIGN, new_var_node(vm, shi_var, tok),
+                                 new_cast(vm, src_hi, pointer_to(vm, ty_char)), tok);
+    add_type(vm, store_shi);
+    Node *snapshot = new_binary(vm, ND_COMMA, store_slo, store_shi, tok);
+    add_type(vm, snapshot);
+
+    Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *orig = *assign_node;
+    orig->next = NULL;
+    orig->checked_assign_dst_lo = dst_lo;
+    orig->checked_assign_dst_hi = dst_hi;
+    orig->checked_assign_src_lo = new_var_node(vm, slo_var, tok);
+    add_type(vm, orig->checked_assign_src_lo);
+    orig->checked_assign_src_hi = new_var_node(vm, shi_var, tok);
+    add_type(vm, orig->checked_assign_src_hi);
+
+    Node *comma = new_binary(vm, ND_COMMA, snapshot, orig, tok);
+    add_type(vm, comma);
+    Node *saved_next = assign_node->next;
+    *assign_node = *comma;
+    assign_node->next = saved_next;
+}
+
+// #944 tree walk: finds every ND_ASSIGN whose lhs is a declared-checked
+// target (ND_VAR or a side-effect-free ND_MEMBER) with a resolvable bounds
+// form, and whose rhs is rooted at a declared-checked source with a
+// resolvable bounds form (checked_prop_source_bounds()'s kind 1 only -- see
+// verify_checked_assign_bounds()'s v1-scope comment), and rewrites it via
+// verify_checked_assign_rewrite(). Structurally the same shape as
+// checked_prop_rewrite_scan() -- recurse into rhs first, then rewrite, then
+// `continue` past the resulting ND_COMMA wrapper's own copy of this same
+// ND_ASSIGN so the generic descent below doesn't match and rewrite it again.
+static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_ASSIGN && node->lhs &&
+            (node->lhs->kind == ND_VAR || node->lhs->kind == ND_MEMBER)) {
+            CheckedBase dst_base = find_checked_base(node->lhs);
+            if (checked_base_is_declared(dst_base) &&
+                !(dst_base.mem && node_has_side_effects(dst_base.obj))) {
+                Type *dst_pty = dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
+                Node *dst_lo, *dst_hi;
+                bool dst_nt;
+                compute_checked_bounds(vm, dst_base, dst_pty, node->tok, &dst_lo, &dst_hi,
+                                      &dst_nt);
+                if (dst_lo && dst_hi) {
+                    Node *src_lo, *src_hi;
+                    bool src_optional, src_nt;
+                    int64_t src_nt_elem;
+                    CheckedBase src_base = find_checked_base(node->rhs);
+                    bool is_source = checked_base_is_declared(src_base) &&
+                        checked_prop_source_bounds(vm, node->rhs, node->tok, &src_lo, &src_hi,
+                                                   &src_optional, &src_nt, &src_nt_elem);
+                    if (is_source && src_lo && src_hi) {
+                        verify_checked_assign_scan(vm, fn, node->rhs);
+                        verify_checked_assign_rewrite(vm, fn, node, dst_lo, dst_hi,
+                                                      src_lo, src_hi);
+                        continue; // node is now the wrapper; parts already scanned
+                    }
+                }
+            }
+        }
+
+        verify_checked_assign_scan(vm, fn, node->lhs);
+        verify_checked_assign_scan(vm, fn, node->rhs);
+        verify_checked_assign_scan(vm, fn, node->cond);
+        verify_checked_assign_scan(vm, fn, node->then);
+        verify_checked_assign_scan(vm, fn, node->els);
+        verify_checked_assign_scan(vm, fn, node->init);
+        verify_checked_assign_scan(vm, fn, node->inc);
+        verify_checked_assign_scan(vm, fn, node->body);
+        for (Node *a = node->args; a; a = a->next)
+            verify_checked_assign_scan(vm, fn, a);
+    }
+}
+
+// #944: Checked C's `_Assume_bounds_cast` direction -- verifies, at
+// assignment time, that a declared-checked TARGET's own bounds are implied
+// by a declared-checked SOURCE's bounds, rather than trusting the target's
+// declared bounds unconditionally the way every access through it otherwise
+// does. A sibling pass to propagate_checked_bounds(), not folded into it:
+// candidacy there requires `checked_kind == CHECKED_NONE` (an
+// already-declared-checked target is never a propagation candidate), so the
+// two passes have entirely disjoint target sets and don't interact. Called
+// from the same three function()/block-literal tail sites as
+// propagate_checked_bounds(), immediately after it, and gated the same way
+// on `vm->flags & CCCC_CHECKED_BOUNDS` at parse time -- the snapshot temps
+// this emits cost real stack slots and stores per checked assignment, only
+// worth paying when something might enforce them.
+//
+// v1 scope, all deliberate (see man/SAFETY.md for the user-facing writeup):
+//  - Source must be a directly DECLARED-checked base (find_checked_base() +
+//    checked_base_is_declared()), i.e. kind 1 of checked_prop_source_bounds()
+//    -- not a #941-propagated local, which can hold the OPT sentinel and
+//    would need a sentinel-aware variant of CHKAB. `q = r;` where `r` is
+//    itself only a propagation candidate is silently skipped, same as an
+//    unrecognised source.
+//  - Target must be ND_VAR or ND_MEMBER (side-effect-free object expression
+//    for the latter), declared checked, with a resolvable bounds form
+//    (compute_checked_bounds() returns non-NULL lo/hi) -- CB_NONE/
+//    CB_UNKNOWN targets are skipped, same rationale as propagation's
+//    identically-named source exclusion.
+//  - Function argument passing and return values are not covered -- only a
+//    direct `q = E;` ND_ASSIGN.
+//
+// Ordering is the INVERSE of propagate_checked_bounds()'s snapshot: the
+// target's own declared bounds are self-referencing (`[q, q + m*sizeof(T))`
+// for a count(m) target), so they must be evaluated AFTER the store, off
+// q's just-written value -- checked_assign_dst_lo/hi on the ND_ASSIGN node
+// are left as bare (unsnapshotted) expressions for codegen to evaluate
+// post-store for exactly this reason. The SOURCE's bounds, by contrast, are
+// snapshotted into compiler-generated temps BEFORE the store (the rewrite
+// below is `(temp = src bounds), (q = E)`, mirroring #919's own
+// before-the-store snapshot) since the source expression may itself be
+// overwritten or aliased by the assignment (`q = q;` self-store, or `q = r;`
+// where `r` and `q` alias the same storage).
+static void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return;
+    verify_checked_assign_scan(vm, fn, fn->body);
+}
 
 // Generate code for computing a VLA size.
 static Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
@@ -8381,6 +8524,7 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     resolve_objsize_queries(vm, block_fn->body);
     mark_addr_escapes(block_fn->body);
     propagate_checked_bounds(vm, block_fn);
+    verify_checked_assign_bounds(vm, block_fn);
 
     // Collect captured variables from the parsed body.
     // Walk all ancestor scopes so that variables from grandparent+ scopes are
@@ -14373,6 +14517,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
             resolve_objsize_queries(vm, fn->body);
             mark_addr_escapes(fn->body);
             propagate_checked_bounds(vm, fn);
+            verify_checked_assign_bounds(vm, fn);
             // check_nonnull_flow() runs post-parse now (#688) -- see the
             // loop in parse() -- so a forward-referenced callee's summary
             // is available. This negative-test path nulls fn->body below
@@ -14467,6 +14612,7 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
         // above) and set is_captured on whichever of `fn`'s own locals it
         // touches, so propagate_checked_bounds() sees a complete picture.
         propagate_checked_bounds(vm, fn);
+        verify_checked_assign_bounds(vm, fn);
         // #836: mark this nested function's captures on whichever enclosing
         // function(s) they belong to, before that/those function(s)'s own
         // codegen runs prepare_local_promotion / prepare_fp_local_promotion.

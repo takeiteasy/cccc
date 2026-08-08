@@ -1601,3 +1601,102 @@ void test_opt_chknt_unrooted_path_no_trap(void) {
     free(buf);
 }
 
+// ---------------------------------------------------------------------
+// #944 -- assignment-time bounds implication (Checked C's
+// _Assume_bounds_cast direction). Assigning a declared-checked source into a
+// TARGET that is itself declared checked now verifies the source's own
+// bounds imply the target's declared bounds, via the new CHKAB opcode. See
+// man/SAFETY.md's Checked Pointers section for the full writeup; the ticket
+// example (a wider count(10) target trusting a narrower count(4) source's
+// value) traps in tests/test_checked_pointers_assume_bounds_error.c.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_assume_bounds_equal_ok(void) {
+    int * [[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
+    int * [[cccc::array, cccc::count(4)]] q;
+    q = p; // equal bounds -- must not trap
+    AssertEq(q[3], 4);
+}
+
+[[cccc::test]]
+void test_assume_bounds_narrower_target_ok(void) {
+    int * [[cccc::array, cccc::count(10)]] p =
+        (int[10]){0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int * [[cccc::array, cccc::count(4)]] q;
+    q = p; // target's own bounds are a SUBSET of the source's -- must not trap
+    AssertEq(q[3], 3);
+}
+
+[[cccc::test]]
+void test_assume_bounds_byte_count_ok(void) {
+    int * [[cccc::array, cccc::byte_count(16)]] p = (int[4]){1, 2, 3, 4};
+    int * [[cccc::array, cccc::byte_count(16)]] q;
+    q = p;
+    AssertEq(q[0], 1);
+}
+
+[[cccc::test]]
+void test_assume_bounds_range_form_ok(void) {
+    int arr[4] = {1, 2, 3, 4};
+    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
+    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] q;
+    q = p;
+    AssertEq(q[0], 1);
+}
+
+// #944: `bounds(lo, hi)` is an absolute range, independent of the pointer's
+// own value -- an asymmetric case (target strictly narrower than source)
+// exercises the actual subset direction, not just the identical-range case
+// above, which can't distinguish a correct implication check from a broken
+// one that e.g. always passes or always compares the wrong endpoint.
+[[cccc::test]]
+void test_assume_bounds_range_form_narrower_target_ok(void) {
+    int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    int * [[cccc::array, cccc::bounds(arr + 2, arr + 6)]] q;
+    int * [[cccc::array, cccc::bounds(arr, arr + 8)]] p = arr;
+    q = p; // q's [arr+2, arr+6) IS a subset of p's [arr, arr+8) -- must not trap
+    AssertEq(q[2], 2); // arr+2, within q's own absolute range
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_assume_bounds_range_form_wider_target_error(void) {
+    int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    int * [[cccc::array, cccc::bounds(arr, arr + 8)]] q;
+    int * [[cccc::array, cccc::bounds(arr + 2, arr + 6)]] p = arr + 2;
+    q = p; // q's [arr, arr+8) is NOT a subset of p's [arr+2, arr+6) -- traps
+}
+
+[[cccc::test]]
+void test_assume_bounds_single_target_ok(void) {
+    int x = 7;
+    int * [[cccc::single]] p = &x;
+    int * [[cccc::single]] q;
+    q = p; // [[cccc::single]] target -- [q, q+sizeof(int)) implied by p's own
+    AssertEq(*q, 7);
+}
+
+[[cccc::test]]
+void test_assume_bounds_member_target_ok(void) {
+    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
+    struct prop_member_s t = {4, 0};
+    t.p = s.p; // member LHS -- narrower-or-equal, must not trap
+    AssertEq(t.p[3], 4);
+}
+
+[[cccc::test]]
+void test_assume_bounds_unknown_target_skipped(void) {
+    int * [[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
+    int * [[cccc::array, cccc::bounds(unknown)]] q;
+    q = p; // CB_UNKNOWN target -- v1 skips the check entirely, never trap
+    AssertEq(q[0], 1); // and q itself is usable afterwards, unaffected
+}
+
+[[cccc::test]]
+void test_assume_bounds_unchecked_source_skipped(void) {
+    int * [[cccc::array, cccc::count(4)]] q;
+    q = malloc(4 * sizeof(int)); // non-declared-checked rhs -- v1 skips
+    q[0] = 5;
+    AssertEq(q[0], 5);
+    free(q);
+}

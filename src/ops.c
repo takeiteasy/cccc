@@ -4573,6 +4573,42 @@ static inline int op_CHKNT_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_CHKAB_fn(VirtualMachine *vm) {
+    // Checked-pointer assignment-time bounds implication (#944, Checked C's
+    // _Assume_bounds_cast direction). Format:
+    // [CHKAB] [rs_val:8|rs_slo:8|rs_shi:8|unused:8] (RRR operand word)
+    //         [is_hi:i64]
+    // Traps unless slo <= val && val <= shi -- see the X-macro comment in
+    // src/cccc.h for how codegen pairs two of these (one for the target's
+    // own declared lo, one for its hi) to enforce
+    // [dlo, dhi) subset-of [slo, shi]. is_hi only selects the diagnostic
+    // wording below; the comparison itself is identical either way.
+    long long operands = cc_read_word(vm);
+    int rs_val, rs_slo, rs_shi;
+    DECODE_RRR(operands, rs_val, rs_slo, rs_shi);
+    long long is_hi = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return 0;
+
+    long long val = vm->regs[rs_val];
+    long long slo = vm->regs[rs_slo];
+    long long shi = vm->regs[rs_shi];
+
+    if (val < slo || val > shi) {
+        printf("\n===== CHECKED ASSIGNMENT BOUNDS VIOLATION =====\n");
+        printf("Assignment does not satisfy the target's declared bounds\n");
+        printf("Target's declared %s: 0x%llx\n", is_hi ? "upper bound" : "lower bound", val);
+        printf("Source's declared bounds: [0x%llx, 0x%llx]\n", slo, shi);
+        printf("PC: 0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)vm->pc);
+        printf("================================================\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 static inline int op_CHKI_fn(VirtualMachine *vm) {
     // Check initialization: fail if variable at bp+offset has not been written.
     // Format: [CHKI] [offset:i64]

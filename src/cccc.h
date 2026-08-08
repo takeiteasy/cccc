@@ -515,7 +515,31 @@ extern "C" {
                    assignment checked-rooted, #919/#941's original rule) \
                    still emits plain CHKR, unchanged -- CHKRO only appears \
                    for a partially-rooted candidate. Gated on \
-                   CCCC_CHECKED_BOUNDS, same as CHKR. */
+                   CCCC_CHECKED_BOUNDS, same as CHKR. */ \
+    X(CHKAB, 3) /* Checked-pointer assignment-time bounds implication \
+                   (#944, Checked C's _Assume_bounds_cast direction): traps \
+                   unless slo <= val && val <= shi. \
+                   Format: [CHKAB][rs_val:8|rs_slo:8|rs_shi:8|unused:8] \
+                   [is_hi:i64] (RRR operand word + i64 immediate; is_hi is \
+                   only a diagnostic-wording selector, not part of the \
+                   check itself). Emitted twice per checked assignment \
+                   `q = E` where both `q` (the lhs) and `E` (the rhs) are \
+                   declared-checked with a statically resolvable bounds \
+                   form -- once with rs_val/is_hi bound to q's own declared \
+                   lo and is_hi=0, once to q's own declared hi and is_hi=1 \
+                   -- against rs_slo/rs_shi, the RHS's [lo, hi) bounds \
+                   snapshotted into compiler-generated temps BEFORE the \
+                   store (the rhs may itself be `q`-derived or otherwise \
+                   overwritten by the store). Together the two checks \
+                   enforce [dlo, dhi) subset-of [slo, shi], i.e. that the \
+                   value just stored into q actually satisfies every bound \
+                   q's own declaration promises. q's own lo/hi are \
+                   evaluated AFTER the store (self-referencing on q's own, \
+                   now-updated, value) -- the inverse ordering from CHKR's \
+                   snapshot-before-store propagation temps. Only emitted \
+                   for a declared-checked (not #941-propagated) rhs; see \
+                   man/SAFETY.md's Checked Pointers section for the v1 \
+                   scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -1468,6 +1492,24 @@ struct Node {
     // bounds. NULL for every ordinary deref (to_assign() only sets this on
     // the two RMW desugar paths).
     struct Node *checked_rmw_mirror;
+
+    // #944: on an ND_ASSIGN whose lhs is itself a declared-checked target
+    // (Checked C's `_Assume_bounds_cast` direction) with a declared-checked
+    // rhs, set by verify_checked_assign_bounds() (src/parse.c) to the four
+    // expressions CHKAB needs: checked_assign_dst_lo/hi are the target's OWN
+    // declared bounds, deliberately left as bare expressions re-evaluated
+    // AFTER the store (they're self-referencing -- `[q, q + m*sizeof(T))` --
+    // so they must see the just-stored value, the opposite ordering from
+    // #919's pre-store snapshot); checked_assign_src_lo/hi are var reads of
+    // compiler-generated snapshot temps holding the source's bounds,
+    // evaluated and stored BEFORE the assignment executes (the source may
+    // alias or be overwritten by the store itself). NULL/NULL on
+    // checked_assign_dst_lo/hi means no check is emitted -- an unchecked lhs,
+    // a non-declared-checked rhs, or a CB_NONE/CB_UNKNOWN target.
+    struct Node *checked_assign_dst_lo;
+    struct Node *checked_assign_dst_hi;
+    struct Node *checked_assign_src_lo;
+    struct Node *checked_assign_src_hi;
 
     // #919: marks the `&A` node to_assign() synthesizes for its *generic*
     // compound-assign/++/-- desugar (`tmp = &A, *tmp = *tmp op B`), src/

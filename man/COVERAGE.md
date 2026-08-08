@@ -989,7 +989,9 @@ once).
 
 Runtime enforcement (the `CHKR` opcode, plus `CHKNT` guarding a non-null
 write into `ntarray`'s widened terminator slot, #923 — including through a
-propagated pointer, #943) is gated behind
+propagated pointer, #943 — and `CHKAB` verifying a checked-rooted
+assignment's source bounds imply an already-declared-checked target's own
+bounds, #944, Checked C's `_Assume_bounds_cast` direction) is gated behind
 `--checked-pointers` / `#pragma cccc config(checked_pointers = true)` —
 opt-in, not part of any `-0`/`-1`/`-2`/`-3` preset. Full reference, including
 the bounds-carry-within-an-expression semantics, the whole-function

@@ -414,6 +414,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKR` | Checked-pointer range check (`[[cccc::single/array/ntarray]]`): traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
 | `CHKRO` | Optional checked-pointer range check (#942): identical to `CHKR`, except the sentinel `lo == (char*)-1 && hi == (char*)0` is a no-op instead of a violation | `CCCC_CHECKED_BOUNDS` |
 | `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
+| `CHKAB` | Checked-pointer assignment-time bounds implication (#944, Checked C's `_Assume_bounds_cast` direction): traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
 
 `CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
 `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the largest
@@ -493,6 +494,21 @@ read-modify-write and `_Atomic` desugars are covered too, via a
 at parse time (before propagation has resolved anything) so the propagation
 pass's attach walk can find and stamp the synthesized RMW store node once
 its bounds are known.
+
+`CHKAB` (#944) is `CHKR`'s counterpart for the *opposite* trust direction —
+Checked C's `_Assume_bounds_cast`. Where propagation only ever widens trust
+into a previously-unchecked target, `CHKAB` *verifies* trust when assigning
+into a target that is itself already declared checked: `src/parse.c`'s
+`verify_checked_assign_bounds()` rewrites `q = E;` (both `q` and `E`
+declared-checked, `E` a direct source, not a #941-propagated one) into
+`(temp = E's own bounds), (q = E)`, and codegen emits `CHKAB` twice after the
+store — once against `q`'s own declared lower bound, once against its upper
+bound — enforcing that `E`'s bounds imply `q`'s. `q`'s own bounds are
+evaluated *after* the store (self-referencing on `q`'s own value, e.g.
+`[q, q + m*sizeof(T))` for `count(m)`); the source's bounds are snapshotted
+into temps *before* it, the inverse of `CHKR`'s own propagation-snapshot
+ordering. See [SAFETY.md](SAFETY.md#checked-pointers) for the full writeup
+of both features.
 
 `CHKT3` is live (#651, extended to byte granularity by #653). It is emitted
 by `emit_load_ex`/`emit_store_ex` (`src/codegen.c`) right after `CHKP3`,
