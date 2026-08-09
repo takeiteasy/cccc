@@ -484,9 +484,9 @@ static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
 
 // #956: -c=generated support -- tracks which macro-generated functions
 // already have a prototype in the output (either from a preceding
-// forward-declare or their own definition), so a function body that calls
-// another generated function whose own emit event hasn't been reached yet
-// can have that callee's prototype inserted just ahead of it.
+// forward-declare or their own definition), so a function body that
+// references another generated function whose own emit event hasn't been
+// reached yet can have that callee's prototype inserted just ahead of it.
 typedef struct {
     Obj **data;
     int len;
@@ -510,17 +510,19 @@ static void obj_vec_push(ObjVec *vec, Obj *obj) {
     vec->data[vec->len++] = obj;
 }
 
-// Walks a function body for direct calls (ND_FUNCALL through a plain
-// ND_VAR callee) to other macro-generated functions. Mirrors
-// collect_node_types's traversal shape.
+// Walks a function body for any reference (ND_VAR) to another
+// macro-generated function -- both a direct call (ND_FUNCALL through a
+// plain ND_VAR callee) and a bare reference used as a function-pointer
+// value (e.g. a closure built from `(void (*)(...))some_generated_fn`)
+// need the same forward declaration. Mirrors collect_node_types's
+// traversal shape.
 static void collect_generated_call_targets(Node *node, ObjVec *out) {
     if (!node)
         return;
 
-    if (node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
-        node->lhs->var && node->lhs->var->is_function &&
-        node->lhs->var->is_macro_generated)
-        obj_vec_push(out, node->lhs->var);
+    if (node->kind == ND_VAR && node->var && node->var->is_function &&
+        node->var->is_macro_generated)
+        obj_vec_push(out, node->var);
 
     if (node->kind == ND_SWITCH) {
         collect_generated_call_targets(node->cond, out);
