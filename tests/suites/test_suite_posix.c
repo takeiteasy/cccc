@@ -2239,8 +2239,8 @@ int test_posix_locale(void) {
 // POSIX_SPAWN_SETSIGDEF; waitpid() for a clean exit, then read the
 // redirected output back. Also exercises the opaque posix_spawnattr_t/
 // posix_spawn_file_actions_t handles (init/destroy) and the sigmask/
-// sigdefault guest<->host sigset_t round-trip.
-extern char **environ;
+// sigdefault guest<->host sigset_t round-trip. environ comes from
+// <unistd.h> (#957 host-global accessor) -- no separate extern needed.
 
 [[cccc::test(return = 42)]]
 int test_posix_spawn(void) {

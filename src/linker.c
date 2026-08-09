@@ -101,6 +101,13 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
         vm->compiler.link_progs[i] = progs[i];
     }
 
+    // #957: cc_link_progs runs twice on the --ffi-decls path (main.c calls
+    // it once to gather FFI signatures, then again for the real build) --
+    // reset the alias count (not free: the array itself is reused/grown by
+    // realloc below) so a second run doesn't append onto stale entries from
+    // the first.
+    vm->compiler.global_aliases_count = 0;
+
     // Build a hashmap to detect duplicate external-linkage symbols.
     // Internal-linkage objects are file-local and must not be canonicalized by
     // name across translation units.
@@ -168,6 +175,35 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 obj->init_data = canonical->init_data;
                 obj->rel = canonical->rel;
                 obj->ty = canonical->ty;
+
+                // #957: this non-canonical Obj is dropped from the merged
+                // list below and never reaches gen()'s data-segment
+                // allocation loop, so it would otherwise keep whatever
+                // offset it had at creation (0, since codegen never ran) --
+                // any reference compiled against it (gen_addr bakes
+                // var->offset in as an immediate) would silently read/write
+                // data-segment offset 0 instead of the canonical global's
+                // real slot. Record the pair here; gen() copies
+                // canonical->offset onto every alias right after the
+                // allocation loop runs. Functions are called by name
+                // (CALL patched by call_patches), not by baked-in offset,
+                // so they need no such propagation.
+                if (!obj->is_function) {
+                    if (vm->compiler.global_aliases_count == vm->compiler.global_aliases_cap) {
+                        vm->compiler.global_aliases_cap =
+                            vm->compiler.global_aliases_cap ? vm->compiler.global_aliases_cap * 2 : 8;
+                        vm->compiler.global_aliases = realloc(
+                            vm->compiler.global_aliases,
+                            sizeof(*vm->compiler.global_aliases) * vm->compiler.global_aliases_cap);
+                    }
+                    vm->compiler.global_aliases[vm->compiler.global_aliases_count].alias = obj;
+                    vm->compiler.global_aliases[vm->compiler.global_aliases_count].canonical = canonical;
+                    vm->compiler.global_aliases_count++;
+
+                    canonical->is_used |= obj->is_used;
+                    canonical->is_maybe_unused |= obj->is_maybe_unused;
+                    canonical->is_deprecated |= obj->is_deprecated;
+                }
             }
 
             // Only add canonical objects to the merged list

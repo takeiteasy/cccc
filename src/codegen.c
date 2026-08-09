@@ -220,6 +220,16 @@ static void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                 target_offset = cc_pc_to_byte_offset((Pc)target->code_addr);
                 value        = target_offset + rel->addend;
             } else {
+                // #957: a static initializer taking &g needs the same
+                // defined-or-deferred check as an ordinary reference (see
+                // the fourth pass in gen()) -- find_global_obj resolves by
+                // name regardless of whether target is ever defined, so
+                // without this an extern-declared-but-never-defined global
+                // silently gets an address into an inert zero slot.
+                if (!target->is_definition && !target->is_tentative &&
+                    !target->init_data &&
+                    !(vm->compiler.compile_only || vm->compiler.deferred_link))
+                    error("undefined global: %s", target->name);
                 segment      = 0;
                 target_offset = target->offset;
                 value        = (long long)(vm->data_seg + target_offset + rel->addend);
@@ -3746,7 +3756,10 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 }
             }
         } else {
-            // Global variable (TLS or shared)
+            // Global variable (TLS or shared). #957: mark it referenced here
+            // (codegen, not parse-time) so `extern int g; sizeof(g);` still
+            // compiles without a definition -- sizeof never reaches gen_addr.
+            node->var->is_referenced = true;
             if (node->var->is_tls)
                 emit_ldtls3(vm, dest_reg, node->var->offset);
             else
@@ -8595,6 +8608,21 @@ void gen(VirtualMachine *vm, Obj *prog) {
         }
     }
 
+    // #957: propagate the canonical global's data-segment offset (and
+    // is_tls, which gen_addr also branches on for global loads/stores) onto
+    // every non-canonical alias Obj that cc_link_progs left behind in a
+    // non-canonical translation unit's own AST. Must run here: after the
+    // allocation loop above (which is what assigns var->offset in the first
+    // place) and before function codegen begins (gen_addr bakes offsets in
+    // as immediates, so any alias reference compiled before this point
+    // would still get the wrong/zero offset).
+    for (int i = 0; i < vm->compiler.global_aliases_count; i++) {
+        Obj *alias = vm->compiler.global_aliases[i].alias;
+        Obj *canonical = vm->compiler.global_aliases[i].canonical;
+        alias->offset = canonical->offset;
+        alias->is_tls = canonical->is_tls;
+    }
+
     // Allocate return buffer pool for struct/union returns at end of data
     // segment
     for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
@@ -8737,6 +8765,36 @@ void gen(VirtualMachine *vm, Obj *prog) {
     }
 
     hashmap_deinit(&fn_defs);
+
+    // #957: cross-TU reference roll-up. A reference compiled in a
+    // *non-defining* translation unit marks the alias Obj (gen_addr sets
+    // is_referenced on whichever Obj the AST node points at), but aliases
+    // are dropped from `prog` by cc_link_progs and so are invisible to the
+    // fourth pass below. Fold each alias's mark onto its canonical Obj
+    // before checking. Must run after function codegen (gen_addr has by now
+    // run for every reference) and before the check.
+    for (int i = 0; i < vm->compiler.global_aliases_count; i++) {
+        Obj *alias = vm->compiler.global_aliases[i].alias;
+        Obj *canonical = vm->compiler.global_aliases[i].canonical;
+        canonical->is_referenced |= alias->is_referenced;
+    }
+
+    // Fourth pass: a global variable that is referenced but never defined
+    // (mirrors the "undefined function" check above -- see #957). Suppressed
+    // under -c/--link for the same reason as the function case: there is no
+    // name-based data relocation mechanism (unlike text_relocs for
+    // functions), so this can only be suppressed here, not deferred; a
+    // real cross-module miss surfaces as a link-time/runtime failure
+    // instead.
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function || !var->is_referenced)
+            continue;
+        if (var->is_definition || var->is_tentative || var->init_data)
+            continue;
+        if (vm->compiler.compile_only || vm->compiler.deferred_link)
+            continue;
+        error("undefined global: %s", obj_external_name(var));
+    }
 
     apply_global_relocations(vm, prog);
 

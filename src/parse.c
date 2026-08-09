@@ -14890,6 +14890,70 @@ static Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *at
     return tok;
 }
 
+// #957: fold a redeclaration of an existing global variable (`prev`) into
+// it, rather than creating a second Obj. Every rule below only strengthens
+// prev's state -- never clears something a prior declaration established --
+// because C allows any order of `extern`/definition/tentative redeclarations
+// and each one only adds information. Does not touch prev->init_data/rel or
+// is_tentative; the caller runs gvar_initializer (which may write init_data)
+// and sets/clears is_tentative itself, since those depend on tok, not on
+// this declaration's attr/ty alone. Does not check the redefinition case
+// either -- the caller must reject `equal(tok,"=") && prev->init_data`
+// before calling this, since by the time this runs prev's fields have
+// already started changing.
+static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
+                              VarAttr *attr, Token *name_tok) {
+    bool is_def_now = !attr->is_extern;
+
+    if (is_def_now)
+        prev->is_definition = true;
+    if (attr->is_static)
+        prev->is_static = true;
+    if (attr->is_tls)
+        prev->is_tls = true;
+
+    if (attr->is_constexpr) {
+        if (attr->is_extern || attr->is_tls)
+            error_tok(vm, name_tok,
+                      "constexpr object must be a definition with internal storage");
+        prev->is_constexpr = true;
+        prev->is_static = true;
+    }
+
+    if (attr->align > prev->align)
+        prev->align = attr->align;
+
+    // Definition wins outright; otherwise an incomplete array type adopts a
+    // later declaration's complete size (`extern int a[]; extern int a[5];`)
+    // so the data-segment allocation loop (which sizes the slot from
+    // var->ty->size) gets the real size instead of the first-seen one.
+    if (is_def_now ||
+        (prev->ty->kind == TY_ARRAY && prev->ty->size < 0 &&
+         ty->kind == TY_ARRAY && ty->size >= 0))
+        prev->ty = ty;
+
+    if (ty->asm_label) {
+        if (!prev->asm_label)
+            prev->asm_label = ty->asm_label;
+        else if (strcmp(prev->asm_label, ty->asm_label) != 0)
+            error_tok(vm, name_tok, "conflicting asm label for '%s'", prev->name);
+    }
+
+    if (ty->checked_kind != CHECKED_NONE) {
+        prev->checked_kind = ty->checked_kind;
+        prev->checked_bounds_form = ty->checked_bounds_form;
+        resolve_checked_bounds(vm, prev);
+    }
+
+    prev->is_maybe_unused |= ty->is_maybe_unused;
+    prev->is_deprecated |= ty->is_deprecated;
+    if (!prev->deprecated_msg)
+        prev->deprecated_msg = ty->deprecated_msg;
+
+    if (is_def_now)
+        prev->tok = name_tok;
+}
+
 static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                               VarAttr *attr) {
     bool first = true;
@@ -14938,16 +15002,28 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                           decl_depth > 0 ? " " : "", stars);
             }
 
-            Obj *var = new_gvar(vm, var_name, var_name_len, deduced);
+            Obj *prev = hashmap_get(&vm->compiler.global_decl_map, var_name);
+            Obj *var;
+            if (prev) {
+                if (prev->init_data)
+                    error_tok(vm, ty->name, "redefinition of '%s'", var_name);
+                merge_global_decl(vm, prev, deduced, attr, ty->name);
+                push_scope(vm, var_name, var_name_len)->var = prev;
+                var = prev;
+            } else {
+                var = new_gvar(vm, var_name, var_name_len, deduced);
+                var->is_static = attr->is_static;
+                if (attr->align)
+                    var->align = attr->align;
+                if (var->checked_kind != CHECKED_NONE)
+                    resolve_checked_bounds(vm, var);
+                hashmap_put(&vm->compiler.global_decl_map, var_name, var);
+            }
             var->is_definition = true;
-            var->is_static = attr->is_static;
-            if (attr->align)
-                var->align = attr->align;
-            if (var->checked_kind != CHECKED_NONE)
-                resolve_checked_bounds(vm, var);
 
             // Re-parse from eq_tok to write init_data correctly
             gvar_initializer(vm, &tok, eq_tok->next, var);
+            var->is_tentative = false;
 
             run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_GLOBAL, var->name,
                                   var->ty, var, var->tok);
@@ -14955,13 +15031,16 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         }
 
         // For extern declarations, check whether a macro-generated global
-        // already exists in macro_globals.  If so, push the macro Obj into
-        // scope directly so code referencing this name uses the same Obj that
-        // will have init_data and the correct data-segment offset in codegen.
-        // (Global variable references are offset-based, unlike function calls
-        // which are patched by name, so both the scope and codegen must agree
-        // on the same Obj.)
-        if (attr->is_extern && vm->compiler.macro_globals) {
+        // already exists in macro_globals.  If so, register it in
+        // global_decl_map (so later declarations in this TU canonicalize
+        // onto it via the ordinary path below) and push it into scope
+        // directly so code referencing this name uses the same Obj that
+        // will have init_data and the correct data-segment offset in
+        // codegen. (Global variable references are offset-based, unlike
+        // function calls which are patched by name, so both the scope and
+        // codegen must agree on the same Obj.)
+        if (attr->is_extern && vm->compiler.macro_globals &&
+            !hashmap_get(&vm->compiler.global_decl_map, var_name)) {
             Obj *mg = NULL;
             for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
                 if (!o->is_function &&
@@ -14972,6 +15051,7 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                 }
             }
             if (mg) {
+                hashmap_put(&vm->compiler.global_decl_map, var_name, mg);
                 push_scope(vm, var_name, var_name_len)->var = mg;
                 if (equal(tok, "="))
                     gvar_initializer(vm, &tok, tok->next, mg);
@@ -14981,44 +15061,53 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             }
         }
 
+        // #957: -Wredundant-decls must be evaluated against the pre-merge
+        // state (find_var, a scope-visibility question, not a linkage
+        // question) -- evaluating it after merge_global_decl below would
+        // always see is_definition already folded in and never fire.
         VarScope *previous = find_var(vm, ty->name);
         if (previous && previous->var && !previous->var->is_function &&
             !previous->var->is_definition && attr->is_extern &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", var_name);
-        Obj *var = new_gvar(vm, var_name, var_name_len, ty);
-        if (previous && previous->var && !previous->var->is_function) {
-            var->is_maybe_unused |= previous->var->is_maybe_unused;
-            var->is_deprecated |= previous->var->is_deprecated;
-            if (!var->deprecated_msg)
-                var->deprecated_msg = previous->var->deprecated_msg;
-            previous->var->is_maybe_unused |= var->is_maybe_unused;
-            previous->var->is_deprecated |= var->is_deprecated;
-            if (!previous->var->deprecated_msg)
-                previous->var->deprecated_msg = var->deprecated_msg;
-        }
-        var->is_definition = !attr->is_extern;
-        var->is_static = attr->is_static;
-        var->is_tls = attr->is_tls;
-        var->is_constexpr = attr->is_constexpr;
-        if (attr->align)
-            var->align = attr->align;
-        if (var->checked_kind != CHECKED_NONE)
-            resolve_checked_bounds(vm, var);
 
-        if (var->is_constexpr) {
-            if (attr->is_extern || attr->is_tls)
-                error_tok(vm, ty->name,
-                          "constexpr object must be a definition with internal storage");
-            var->is_static = true;
+        // #957: canonicalize by name within this translation unit so every
+        // reference (offset-based, not name-patched -- see gen_addr) lands
+        // on one Obj. See merge_global_decl() for the field-merge rules.
+        Obj *prev = hashmap_get(&vm->compiler.global_decl_map, var_name);
+        Obj *var;
+        if (prev) {
+            if (equal(tok, "=") && prev->init_data)
+                error_tok(vm, ty->name, "redefinition of '%s'", var_name);
+            merge_global_decl(vm, prev, ty, attr, ty->name);
+            push_scope(vm, var_name, var_name_len)->var = prev;
+            var = prev;
+        } else {
+            var = new_gvar(vm, var_name, var_name_len, ty);
+            var->is_definition = !attr->is_extern;
+            var->is_static = attr->is_static;
+            var->is_tls = attr->is_tls;
+            var->is_constexpr = attr->is_constexpr;
+            if (attr->align)
+                var->align = attr->align;
+            if (var->checked_kind != CHECKED_NONE)
+                resolve_checked_bounds(vm, var);
+
+            if (var->is_constexpr) {
+                if (attr->is_extern || attr->is_tls)
+                    error_tok(vm, ty->name,
+                              "constexpr object must be a definition with internal storage");
+                var->is_static = true;
+            }
+            hashmap_put(&vm->compiler.global_decl_map, var_name, var);
         }
 
         if (equal(tok, "="))
             gvar_initializer(vm, &tok, tok->next, var);
         else if (var->is_constexpr)
             error_tok(vm, ty->name, "constexpr object requires an initializer");
-        else if (!attr->is_extern && !attr->is_tls)
+        else if (!attr->is_extern && !attr->is_tls && !var->init_data)
             var->is_tentative = true;
 
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_GLOBAL, var->name,
@@ -15407,6 +15496,14 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
 
     declare_builtin_functions(vm);
     vm->compiler.globals = NULL;
+    // #957: reset the per-TU global-declaration canonicalization map. Must
+    // happen here, not just once at vm init, because main.c reuses one vm
+    // across multiple input files (parse() runs once per TU) -- a stale
+    // entry from a previous TU would otherwise alias an unrelated Obj by
+    // name across TUs, which is exactly the cross-module hazard
+    // cc_link_progs (not this map) is responsible for.
+    hashmap_deinit(&vm->compiler.global_decl_map);
+    memset(&vm->compiler.global_decl_map, 0, sizeof(vm->compiler.global_decl_map));
 
     tok = parse_file_scope_decls(vm, tok);
 

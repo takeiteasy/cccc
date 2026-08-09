@@ -1597,6 +1597,8 @@ void cc_destroy(VirtualMachine *vm) {
 
     // Free linked programs array
     free(vm->compiler.link_progs);
+    free(vm->compiler.global_aliases);
+    hashmap_deinit(&vm->compiler.global_decl_map);
 
     // Free source map and index (debugger)
     free(vm->dbg.source_map);

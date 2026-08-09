@@ -400,6 +400,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         or "errors generated" in output
         or "cannot open file" in output
         or "undefined function" in output
+        or "undefined global" in output
         or "unknown warning option" in output
         or (not started_running and "expected" in output and "got" in output)
     )

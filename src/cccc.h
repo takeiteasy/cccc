@@ -1684,6 +1684,14 @@ struct Obj {
     // Global variable
     bool is_tentative;
     bool is_tls;
+    bool is_referenced; // #957: codegen materialized this global's storage
+                        // address (gen_addr's ND_VAR global branch). Distinct
+                        // from is_used, which the parser sets on any
+                        // identifier lookup including sizeof/typeof -- a
+                        // declaration-only extern global that is only ever
+                        // sizeof()'d must still compile, so "referenced" has
+                        // to mean "codegen actually emitted a load/store/
+                        // address-of", not "the parser saw the name".
     bool is_compound_literal; // Anonymous global synthesized to hold a
                               // compound literal's value (postfix's
                               // compound-literal branch). GCC/clang extend
@@ -3060,6 +3068,31 @@ typedef struct Compiler {
     // Linked programs for extern offset propagation
     Obj **link_progs;    // Array of original program lists
     int link_prog_count; // Number of programs
+
+    // #957: (alias, canonical) pairs recorded by cc_link_progs for every
+    // non-static global declaration Obj that was superseded by a canonical
+    // Obj of the same name from another translation unit. Global references
+    // compile to a data-segment offset baked into the Obj at codegen time
+    // (gen_addr), and cc_link_progs drops non-canonical Objs from its merged
+    // list, so without this array a declaration-only Obj left behind in a
+    // non-canonical TU's own AST (e.g. `extern int g;` in a TU that never
+    // defines it) would never have its offset filled in -- gen() propagates
+    // canonical->offset onto every alias right after the data-segment
+    // allocation loop, see codegen.c.
+    struct { Obj *alias; Obj *canonical; } *global_aliases;
+    int global_aliases_count;
+    int global_aliases_cap;
+
+    // #957: per-translation-unit name -> Obj* map for canonicalizing global
+    // variable (not function) declarations within a single TU. Reset at the
+    // start of every parse() call (alongside vm->compiler.globals = NULL) so
+    // it never leaks across TUs or into the persistent-scope-chain hazard
+    // that ruled out reusing find_var() for this (parse() re-enters without
+    // a matching leave_scope, so file scopes from prior TUs remain reachable
+    // via the scope chain -- see global_variable() in parse.c). hashmap_put
+    // copies the key, so this is safe to deinit/reset independently of the
+    // parser arena.
+    HashMap global_decl_map;
 
     // Per-instance state (moved from static globals for thread-safety)
     int unique_name_counter; // Counter for new_unique_name()

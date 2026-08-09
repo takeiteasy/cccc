@@ -34,6 +34,17 @@ typedef long ssize_t;
 #define W_OK 2
 #define R_OK 4
 
+/* environ aliases the host process's real environment array (via an
+ * accessor function, same pattern as errno in errno.h and stdin/stdout/
+ * stderr in stdio.h -- see "Host-global accessors" in src/stdlib/posix.c)
+ * rather than being an inert, always-NULL guest global (#957). Because this
+ * is a macro (not a plain extern), guest code must not *also* write its own
+ * `extern char **environ;` after including <unistd.h> -- the macro expands
+ * inside that declarator too and produces nonsense syntax. Just use
+ * `environ` directly once this header is included. */
+extern char ***__cccc_environ_ptr(void);
+#define environ (*__cccc_environ_ptr())
+
 extern ssize_t read(int fd, void *buf, size_t count);
 extern ssize_t write(int fd, const void *buf, size_t count);
 extern int close(int fd);

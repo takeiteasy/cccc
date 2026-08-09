@@ -410,7 +410,12 @@ narrower gap remains even with a matching `--link` path: a **file-scope** global
 variable's initializer taking that address (`int (*fp)(int) = abs;` at file scope,
 as opposed to inside a function body) still resolves to the host FFI symbol —
 `apply_global_relocations` (`src/codegen.c`) has no relocation mechanism for an
-unresolved data-segment reference by name, unlike the text-segment case.
+unresolved data-segment reference by name, unlike the text-segment case. This is
+also why an undefined *data* global (not a function) can only be **suppressed**
+under `-c`/`--link`, never deferred to a link-time diagnostic the way an
+undefined function is (a `text_relocs` entry, resolved by name when the link
+step runs): there is no equivalent data-segment relocation table, so a
+`.c4a` library's exported data symbols can't be resolved by name either (#957).
 
 ### The `--link` compiler flag
 

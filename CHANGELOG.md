@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-09
+
 ### Added
 
 - **New `-Wint-conversion` warning (part of `-Wall`) for an implicit
@@ -19,6 +21,49 @@ All notable changes to CCCC are documented here. Format loosely follows
   path.
 
 ### Fixed
+
+- **A referenced `extern` global variable that is never defined anywhere
+  resolved silently instead of erroring, and — more seriously — redeclaring
+  the same global (across an `extern` declaration and its definition,
+  within one translation unit or across separate ones) could silently read
+  the wrong global's value or the wrong constant offset entirely** (#957).
+  Global variable references compile to a data-segment offset baked
+  straight into the `Obj` at codegen time (`gen_addr`, `src/codegen.c`),
+  but every declaration of a global created its own `Obj`
+  (`new_gvar`/`global_variable()`, `src/parse.c`) with nothing reconciling
+  them — codegen's allocation loop gave each one its own slot, and
+  `cc_link_progs` (`src/linker.c`) canonicalized definitions across
+  translation units by name but never propagated the resulting offset onto
+  the declaration-only `Obj`s it dropped from the merged list. Concretely,
+  before this fix: `extern int g; int f(void){return g;} int g=42;` read 0
+  instead of 42 from `f()`; `int g=42; extern int g;` likewise read 0; and
+  linking two files where one declared `extern int g;` and the other
+  defined `int g=42; int pad=7;` silently read `pad`'s value (7) instead of
+  `g`'s (42), with the result depending on file order. Fixed by
+  canonicalizing every redeclaration of a global variable within a
+  translation unit onto a single `Obj` (`merge_global_decl()` in
+  `src/parse.c`, keyed by a new per-TU `global_decl_map`) and propagating
+  each canonical global's offset onto the alias `Obj`s `cc_link_progs`
+  drops (`global_aliases` array, populated in `src/linker.c`, applied in
+  `src/codegen.c`'s `gen()` right after the data-segment allocation loop).
+  A referenced-but-never-defined global is now a hard `undefined global:
+  <name>` compile error, mirroring the existing `undefined function: %s`
+  check (suppressed, not deferred, under `-c`/`--link`, since there is no
+  name-based data relocation mechanism for globals); `sizeof()` of an
+  undefined extern global still compiles, since the reference is only
+  counted where codegen actually materializes an address. Two full
+  definitions of the same global (`int g=1; int g=2;`) are now also a
+  `redefinition of '<name>'` error, matching the pre-existing cross-TU
+  check — previously silently accepted, with the second initializer
+  winning. `environ` (used by `posix_spawnp` in the POSIX test suite) is
+  now exposed via the same host-global accessor macro pattern as `errno`
+  and `stdin`/`stdout`/`stderr` (`include/unistd.h`,
+  `src/stdlib/posix.c`), since it would otherwise have started hitting the
+  new undefined-global error as an inert, host-disconnected guest global.
+  See `tests/test_extern_global_undefined.c`,
+  `tests/suites/test_suite_global_canonicalization.c`,
+  `tests/test_cross_tu_global_offset.c`/`_reversed.c`, and
+  `tests/test_global_redefinition.c`.
 
 - **`tests/failures/` was silently excluded from test discovery, so every
   test inside it — 41 files — never ran** — `discover_tests()`

@@ -57,7 +57,7 @@ runtime mixed-access detection, tracked separately from the POSIX pthread layer.
 | Function declarations and definitions | ✓ | |
 | Recursive functions | ✓ | |
 | Function pointers — declaration, call, assignment | ✓ | |
-| `extern` linkage | ✓ | |
+| `extern` linkage | ✓ | Every redeclaration of the same global variable within a translation unit canonicalizes onto a single object, and offsets are shared across translation units at link time (#957) -- an `extern` declared, referenced, but never anywhere-defined global is a hard `undefined global: <name>` compile error, mirroring the existing `undefined function: <name>` check; suppressed (not deferred) under `-c`/`--link`, since there is no name-based data relocation mechanism for globals |
 | `static` — locals, globals, functions | ✓ | |
 | `const` | ✓ | |
 | `volatile` | ✓ | Volatile locals routed via generic LDR/STR (watchpoint-safe, C11 §6.7.3p7) |
@@ -1451,15 +1451,17 @@ category constants and `LC_*_MASK` bitmask constants, `<langinfo.h>`'s
 `nl_item` values, and `<poll.h>`'s
 `POLLRDNORM`/`POLLWRNORM`/`POLLRDBAND`/`POLLWRBAND` event bits.
 
-A handful of host libc globals (`errno`, and getopt's `optarg`/`optind`/
-`opterr`/`optopt`) are exposed the same way `stdin`/`stdout`/`stderr` always
-have been: as a macro expanding to a dereferenced accessor-function call
-(`#define errno (*__cccc_errno_ptr())`) rather than a plain `extern` global.
-Ordinary compiled globals live in the VM's own data segment and have no
-connection to identically-named host process state, so a plain `extern int
-errno;` would silently stay zero forever regardless of what host-backed calls
-actually did. The accessor pattern makes these specific, known globals alias
-the host's real storage directly, so guest code observes the real outcome.
+A handful of host libc globals (`errno`, `environ`, and getopt's
+`optarg`/`optind`/`opterr`/`optopt`) are exposed the same way
+`stdin`/`stdout`/`stderr` always have been: as a macro expanding to a
+dereferenced accessor-function call (`#define errno (*__cccc_errno_ptr())`)
+rather than a plain `extern` global. Ordinary compiled globals live in the
+VM's own data segment and have no connection to identically-named host
+process state, so a plain `extern int errno;` would now be a hard
+`undefined global: errno` compile error (#957) rather than silently staying
+zero forever regardless of what host-backed calls actually did. The
+accessor pattern makes these specific, known globals alias the host's real
+storage directly, so guest code observes the real outcome.
 
 | Header | Status | Notes |
 |---|---|---|

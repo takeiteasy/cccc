@@ -3228,6 +3228,11 @@ static char **__cccc_optarg_ptr(void) { return &optarg; }
 static int *__cccc_optind_ptr(void) { return &optind; }
 static int *__cccc_opterr_ptr(void) { return &opterr; }
 static int *__cccc_optopt_ptr(void) { return &optopt; }
+// #957: environ (declared via the same accessor-macro pattern in
+// include/unistd.h) -- extern char **environ is the host's real process
+// environment array here, declared by the host <unistd.h> included above.
+extern char **environ;
+static char ***__cccc_environ_ptr(void) { return &environ; }
 
 // #841 -- macOS libc's _strfmon() (see the "monetary.h" registration below)
 // over-reads its own internal scratch allocation under AddressSanitizer:
@@ -3460,6 +3465,7 @@ void register_posix_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_opterr_ptr", (void*)__cccc_opterr_ptr, 0, 0);
     cc_register_cfunc(vm, "__cccc_optopt_ptr", (void*)__cccc_optopt_ptr, 0, 0);
     cc_register_cfunc(vm, "__cccc_errno_ptr",  (void*)__cccc_errno_ptr,  0, 0);
+    cc_register_cfunc(vm, "__cccc_environ_ptr", (void*)__cccc_environ_ptr, 0, 0);
     cc_register_cfunc(vm, "gettimeofday", (void*)gettimeofday, 2, 0);
     cc_register_cfunc(vm, "settimeofday", (void*)settimeofday, 2, 0);
     cc_register_cfunc(vm, "mmap",         (void*)mmap,         6, 0);
