@@ -20,6 +20,19 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- **`Quote()`/`QuoteN()` templates no longer drop statements after the
+  first one** — an unbraced multi-statement template like
+  `Quote("if (!$1) $1 = f($2); return $1;", a, b)` parsed only the leading
+  `if` (`quote_core()` in `src/reflection.c` called `cc_parse_stmt()` once
+  and never inspected the leftover tokens), silently discarding the
+  `return` and leaving the generated function falling through with an
+  undefined return value — a silent-miscompile-shaped footgun with no
+  warning or error. An unbraced multi-statement template is now
+  transparently wrapped in braces and parsed as a block, exactly like the
+  already-safe `Quote("{ ... }")` form; any template that still leaves
+  tokens unparsed after that (e.g. trailing garbage on an expression
+  template) is now a compile error instead of a silent drop. (#955)
+
 - **`RunCustom`'s vendored shell now performs POSIX-correct quote removal,
   backslash escaping, and `$VAR`/`${VAR}` expansion** — the lexer
   (`src/build_shell.c`) previously only recognized a quote as the very

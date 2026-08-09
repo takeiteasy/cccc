@@ -1214,6 +1214,22 @@ int main(void) {
 }
 ```
 
+A template with more than one top-level statement does not need explicit
+braces — `Quote("a; b; return c;")` and `Quote("{ a; b; return c; }")` produce
+the same block, and every statement is kept either way:
+
+```c
+[[cccc::comptime]]
+Node *pick_or_default(Node *a, Node *b) {
+    return Quote("if (!$1) $1 = $2; return $1;", a, b);
+}
+```
+
+A `;` inside a nested `(...)`/`[...]`/`{...}` (e.g. a `for (a; b; c)` header)
+does not count as a top-level separator. Any tokens left over once the
+template has been fully parsed — a genuinely malformed template, not a
+missing brace — are a compile error rather than being silently discarded.
+
 Numbered holes can be reused and reordered. Use `$$` for sequential left-to-
 right holes when order is enough:
 

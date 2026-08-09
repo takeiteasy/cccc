@@ -1413,13 +1413,20 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def Quote
  * @brief Parse a C code template string into an AST node, substituting `$N` / `$@N` splice points with the given argument nodes.
  * @param tmpl A C expression or statement as a string literal with splice points.
- * @param ... Node* arguments corresponding to the splice points (up to 64; use QuoteN for more). */
+ * @param ... Node* arguments corresponding to the splice points (up to 64; use QuoteN for more).
+ * @note A template with more than one top-level statement does not need explicit braces:
+ *       @c Quote("a; b; return c;") and @c Quote("{ a; b; return c; }") parse to the same
+ *       block, and every statement is kept either way. A @c ';' inside a nested
+ *       @c (...)/[...]/{...} (e.g. a @c for(a;b;c) header) is not treated as a top-level
+ *       separator. Any tokens left unparsed once the template's statement(s) or expression
+ *       have been consumed are a compile error rather than being silently discarded. */
 #define Quote(tmpl, ...) __builtin_quote(tmpl, ##__VA_ARGS__)
 /*! @def QuoteN
  * @brief Array-form quasi-quote that validates the splice count and supports more nodes than Quote's variadic form.
  * @param tmpl Template string with `$N` / `$@N` splice points.
  * @param nodes Array of Node* splice arguments.
- * @param count Length of the nodes array. */
+ * @param count Length of the nodes array.
+ * @note See @ref Quote for the multi-statement and trailing-token parsing rules. */
 #define QuoteN(tmpl, nodes, count) __builtin_quote_n(tmpl, nodes, count)
 // Build a ->next-linked chain from a compound-literal array for $@k splices:
 //   NodeList((Node*[]){ a, b, c }, 3)

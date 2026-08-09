@@ -3096,6 +3096,28 @@ static void quote_rebind_macro_scope(Node *node, Scope *old_scope,
                                  new_scope);
 }
 
+// Determine lexically whether an unbraced template holds more than one
+// top-level statement: a ';' at bracket/paren/brace depth 0 that is not the
+// last non-EOF token. Depth tracking keeps a `for (a; b; c)` header (and an
+// already-braced template, which never sees depth return to 0 mid-stream)
+// from being misdetected as multi-statement.
+static bool quote_is_multi_stmt(Token *tok) {
+    int depth = 0;
+    for (Token *t = tok; t && t->kind != TK_EOF; t = t->next) {
+        if (t->kind != TK_PUNCT)
+            continue;
+        if (equal(t, "(") || equal(t, "[") || equal(t, "{"))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]") || equal(t, "}"))
+            depth--;
+        else if (depth == 0 && t->len == 1 && t->loc[0] == ';') {
+            if (t->next && t->next->kind != TK_EOF)
+                return true;
+        }
+    }
+    return false;
+}
+
 // Determine lexically whether the token stream should be parsed as a statement.
 // Uses the first token kind/text and, as a fallback, whether the last
 // non-EOF token is ';' (expression-statement form).
@@ -3184,6 +3206,23 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
         return NULL;
     convert_pp_tokens(vm, toks);
 
+    // 1b. #955: a template with more than one top-level statement used to
+    // silently drop everything after the first one unless the caller wrapped
+    // it in braces (Quote() parsed exactly one statement, via cc_parse_stmt,
+    // and never inspected the leftover tokens). Detect that shape and
+    // re-tokenize the brace-wrapped source so Quote("a; b;") means exactly
+    // what Quote("{ a; b; }") already means -- one ND_BLOCK holding every
+    // statement. Re-tokenizing (rather than splicing synthetic '{'/'}'
+    // tokens onto the existing chain) keeps $N rewriting and the parse below
+    // each running exactly once, over the final chain only.
+    if (quote_is_multi_stmt(toks)) {
+        char *braced = arena_format(vm, "{ %s }", tmpl);
+        toks = tokenize_string(vm, (char *)"<quote>", braced);
+        if (!toks)
+            return NULL;
+        convert_pp_tokens(vm, toks);
+    }
+
     // 2. Scan, validate mixing, rewrite $$ / $@ / $@N
     uint64_t splice_mask = 0;
     int max_index = quote_scan_and_rewrite(vm, toks, &splice_mask);
@@ -3251,12 +3290,27 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
     vm->compiler.comptime_splice_active = true;
     Token *rest = NULL;
     Node *result = NULL;
-    if (quote_is_stmt(toks)) {
+    bool parsed_as_stmt = quote_is_stmt(toks);
+    if (parsed_as_stmt) {
         result = cc_parse_stmt(vm, &rest, toks);
     } else {
         result = cc_parse_expr(vm, &rest, toks);
     }
     vm->compiler.comptime_splice_active = saved_splice_active;
+
+    // #955: previously any tokens left over after the single parsed
+    // statement/expression were silently discarded -- e.g. an unbraced
+    // expression-form template like "a = 1; b = 2" (no trailing ';', so
+    // quote_is_stmt() took the expression branch) dropped "b = 2" with no
+    // diagnostic. The multi-statement case above is now handled by wrapping
+    // in braces before parsing; anything still leaving tokens behind here is
+    // a genuine malformed template and should be a compile error, not a
+    // silent truncation.
+    if (rest && rest->kind != TK_EOF)
+        error_tok(vm, rest,
+                  "__builtin_quote: unparsed tokens remain after the "
+                  "template's %s; wrap a multi-statement template in braces",
+                  parsed_as_stmt ? "first statement" : "expression");
 
     quote_rebind_macro_scope(result, &quote_scope, quote_scope.next);
 
