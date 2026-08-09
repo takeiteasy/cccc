@@ -2473,6 +2473,14 @@ typedef struct TypeNameRecord {
     // and must never be silently dropped from generated output.
     bool from_include;
     bool always_emit;
+    // #953: the declaring token's resolved file path (NULL when there is no
+    // token, i.e. always_emit records). Lets cc_serialize_program's
+    // generated_only path (-c=generated) tell a from_include type whose
+    // header was actually auto-captured into the output (safe to skip
+    // re-deriving) apart from one reached only via a never-captured
+    // `#include @comptime`/`@shared`/`@build`/`@test` route, which has
+    // nothing else to supply its definition.
+    char *file_path;
     struct TypeNameRecord *next;
 } TypeNameRecord;
 

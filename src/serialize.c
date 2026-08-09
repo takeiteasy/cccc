@@ -150,6 +150,10 @@ typedef struct {
     // re-emitting a definition the consumer's own #include already provides.
     bool from_include;
     bool always_emit;
+    // #953: mirrors TypeNameRecord.file_path -- used in generated_only mode
+    // to tell whether this type's declaring header was actually captured
+    // into the output.
+    char *file_path;
 } TypeName;
 
 typedef struct {
@@ -172,6 +176,12 @@ typedef struct {
     bool emit_cccc; // --emit-cccc: serialize checked-pointer qualifiers instead of dropping them
     int anon_local_counter; // names compiler-synthesized temps (e.g. ++/-- desugaring)
     int anon_global_counter; // names non-string-literal `.L..N` globals (#925)
+    // #953: resolved paths of headers actually auto-captured into
+    // generated_only (-c=generated) output -- built once in
+    // cc_serialize_program from vm->compiler.emit_include_paths. Only
+    // consulted in generated_only mode; see serialize_type_defs_for_owner.
+    char **captured_paths;
+    int captured_paths_len;
 } SerializeContext;
 
 // Forward declaration
@@ -291,7 +301,8 @@ static void type_vec_push(TypeVec *vec, Type *ty) {
 
 static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
                            char *name, int name_len, Obj *owner_fn,
-                           bool from_include, bool always_emit) {
+                           bool from_include, bool always_emit,
+                           char *file_path) {
     if (!ty || !name || name_len <= 0)
         return;
 
@@ -306,6 +317,7 @@ static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
     (*items)[*len].owner_fn = owner_fn;
     (*items)[*len].from_include = from_include;
     (*items)[*len].always_emit = always_emit;
+    (*items)[*len].file_path = file_path;
     (*len)++;
 }
 
@@ -314,12 +326,12 @@ static void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
         if (rec->is_tag)
             type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, rec->ty,
                            rec->name, rec->name_len, rec->owner_fn,
-                           rec->from_include, rec->always_emit);
+                           rec->from_include, rec->always_emit, rec->file_path);
         else
             type_name_push(&ctx->typedefs, &ctx->typedefs_len,
                            &ctx->typedefs_cap, rec->ty, rec->name,
                            rec->name_len, rec->owner_fn,
-                           rec->from_include, rec->always_emit);
+                           rec->from_include, rec->always_emit, rec->file_path);
     }
 }
 
@@ -1724,6 +1736,21 @@ static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
     return false;
 }
 
+// #953: true when `path` (a type's declaring file, TypeName.file_path) is
+// one of the resolved include paths auto-capture actually re-emitted into
+// generated_only (-c=generated) output -- see the ctx->captured_paths
+// population in cc_serialize_program. A NULL path (no declaring token) or a
+// path not in the set means nothing else supplies this definition, so the
+// caller must still serialize it despite from_include being true.
+static bool path_is_captured(SerializeContext *ctx, const char *path) {
+    if (!path)
+        return false;
+    for (int i = 0; i < ctx->captured_paths_len; i++)
+        if (ctx->captured_paths[i] && strcmp(ctx->captured_paths[i], path) == 0)
+            return true;
+    return false;
+}
+
 static bool aggregate_typedef_is_definition(SerializeContext *ctx,
                                             TypeName *alias) {
     if (!alias->ty)
@@ -1786,9 +1813,25 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // struct/union/enum. Usage sites still refer to it by name
         // (find_tag_name/find_typedef_name above are unaffected); only the
         // standalone definition is suppressed.
+        //
+        // #953: generated_only (-c=generated) output can ALSO already
+        // contain this definition via an auto-captured `#include` -- the
+        // capture (preprocess.c) records source text into emit_events_head
+        // regardless of generated_only, and cc_serialize_program's
+        // generated_only branch replays it verbatim -- so re-deriving the
+        // same struct/enum here produces a hard "redefinition" error. That
+        // only holds when the include was actually captured, though: a type
+        // reached solely via `#include @comptime "x.h"` (never captured --
+        // its whole point is to stay invisible to the runtime TU) has
+        // nothing else to supply the definition, so it must still be
+        // re-derived. path_is_captured() distinguishes the two by checking
+        // whether provenance_source's declaring file is one of the
+        // resolved paths auto-capture actually emitted for this program.
         TypeName *provenance_source = tag ? tag : alias;
-        if (!ctx->generated_only && !ctx->emit_strict && provenance_source &&
-            provenance_source->from_include && !provenance_source->always_emit)
+        if (!ctx->emit_strict && provenance_source &&
+            provenance_source->from_include && !provenance_source->always_emit &&
+            (!ctx->generated_only ||
+             path_is_captured(ctx, provenance_source->file_path)))
             continue;
         if (ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, ty);
@@ -1895,6 +1938,19 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext 
     }
 }
 
+// #953: hashmap_foreach callback collecting emit_include_paths' values
+// (resolved paths of auto-captured #include directives) into
+// ctx->captured_paths for path_is_captured() to scan.
+static int collect_captured_path(char *key, int keylen, void *val, void *user_data) {
+    (void)key;
+    (void)keylen;
+    SerializeContext *ctx = user_data;
+    ctx->captured_paths = realloc(ctx->captured_paths,
+                                  sizeof(char *) * (ctx->captured_paths_len + 1));
+    ctx->captured_paths[ctx->captured_paths_len++] = val;
+    return 0;
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -1902,6 +1958,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     SerializeContext ctx = {.generated_only = generated_only,
                            .emit_strict = vm->compiler.emit_strict != 0,
                            .emit_cccc = vm->compiler.emit_cccc};
+    if (generated_only)
+        hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path, &ctx);
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
     for (Obj *obj = prog; obj; obj = obj->next) {
@@ -1970,6 +2028,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         free(ctx.defs.data);
         free(ctx.tags);
         free(ctx.typedefs);
+        free(ctx.captured_paths);
         return;
     }
 
@@ -2080,5 +2139,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.defs.data);
     free(ctx.tags);
     free(ctx.typedefs);
+    free(ctx.captured_paths);
 }
 

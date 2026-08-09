@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -131,6 +131,15 @@ Cases:
       used to return the first same-kind tagless typedef in scope (e.g.
       stdarg.h's own tagless `va_list` struct) without checking it actually
       names the type being serialized.
+  36: #953 regression: `-c=generated` output for a type reached via
+      `GetType()` from a comptime function, where that type is also defined
+      in a plain `#include`d header, must not duplicate the definition --
+      the auto-captured `#include` already supplies it (a hard
+      "redefinition" error otherwise).
+  37: #953 regression guard: the same case, but the header is reached only
+      via `#include @comptime` (never auto-captured) -- the definition must
+      still be re-derived, since nothing else supplies it. Also asserts the
+      `@comptime`-routed `#include` itself is never leaked into the output.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -1088,11 +1097,96 @@ def case_anon_union_member_not_va_list(cccc: Path, tmp: str) -> bool:
     return True
 
 
+LOBJ_TYPES_HEADER = (
+    "typedef struct LObj {\n"
+    "    int tag;\n"
+    "    double value;\n"
+    "} LObj;\n"
+)
+
+LOBJ_COMPTIME_PROGRAM = (
+    "[[cccc::comptime]]\n"
+    "void gen(void) {\n"
+    "    Type *t = GetType(\"LObj\");\n"
+    "    Obj *fn = MakeFunction(\"touch_lobj\", GetType(\"int\"));\n"
+    "    FunctionAddParam(fn, \"p\", MakePointer(t));\n"
+    "    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(0)));\n"
+    "    PublishNode(fn);\n"
+    "}\n"
+    "gen();\n"
+    "int main(void) { return touch_lobj((void *)0) == 0 ? 42 : 1; }\n"
+)
+
+
+def case_generated_no_duplicate_captured_include(cccc: Path, tmp: str) -> bool:
+    print("  36: -c=generated output for a GetType()'d struct reached via a "
+          "plain #include has no duplicate definition (#953)")
+    write(Path(tmp) / "lobj_types_953.h", LOBJ_TYPES_HEADER)
+    src = Path(tmp) / "lobj_953a.c"
+    write(src, '#include "lobj_types_953.h"\n' + LOBJ_COMPTIME_PROGRAM)
+    out_path = Path(tmp) / "lobj_953a.gen.c"
+    result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    out = out_path.read_text()
+    if out.count("struct LObj {") != 0 or "typedef struct LObj" in out:
+        # The captured #include supplies the definition; a re-derived typedef
+        # would still be dropped in generated_only mode, but a re-derived
+        # *struct body* (from the tagless typedef falling back to
+        # find_anonymous_typedef_name-less inline emission) must not appear.
+        print(f"    FAIL: -c=generated output re-derives LObj's definition "
+              f"on top of the captured #include\n    {out}")
+        return False
+    if "touch_lobj" not in out or '#include "lobj_types_953.h"' not in out:
+        print(f"    FAIL: -c=generated output missing expected content\n    {out}")
+        return False
+    obj = Path(tmp) / "lobj_953a.o"
+    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
+                                capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_generated_comptime_include_still_derives(cccc: Path, tmp: str) -> bool:
+    print("  37: -c=generated output for a GetType()'d struct reached only "
+          "via #include @comptime still emits its definition (#953 guard)")
+    write(Path(tmp) / "lobj_types_953b.h", LOBJ_TYPES_HEADER)
+    src = Path(tmp) / "lobj_953b.c"
+    write(src, '#include @comptime "lobj_types_953b.h"\n' + LOBJ_COMPTIME_PROGRAM)
+    out_path = Path(tmp) / "lobj_953b.gen.c"
+    result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    out = out_path.read_text()
+    if "struct LObj {" not in out:
+        print(f"    FAIL: -c=generated output dropped LObj's definition -- "
+              f"its @comptime-routed #include is never captured, so nothing "
+              f"else supplies it\n    {out}")
+        return False
+    if '#include @comptime' in out or '#include "lobj_types_953b.h"' in out:
+        print(f"    FAIL: -c=generated output leaked the @comptime-routed "
+              f"#include verbatim\n    {out}")
+        return False
+    obj = Path(tmp) / "lobj_953b.o"
+    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
+                                capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1135,6 +1229,8 @@ def main() -> int:
             case_test_run_bytecode_no_global_contamination,
             case_c_generated_defaults_and_aliases,
             case_anon_union_member_not_va_list,
+            case_generated_no_duplicate_captured_include,
+            case_generated_comptime_include_still_derives,
         ]
         results = [case(cccc, tmp) for case in cases]
 

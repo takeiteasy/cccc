@@ -816,6 +816,7 @@ static void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_
     rec->from_include = decl_tok && decl_tok->file &&
                         decl_tok->file != vm->compiler.primary_file &&
                         !cc_file_is_cccc_only(vm, decl_tok->file->name);
+    rec->file_path = decl_tok && decl_tok->file ? decl_tok->file->name : NULL;
     rec->next = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
