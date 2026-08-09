@@ -4,6 +4,13 @@ Compile-time macros are C functions that CCCC compiles and runs during
 compilation. They can inspect compile-time types, build AST nodes, generate
 functions and global variables, and replace macro call sites with generated code.
 
+A worked, real-world use of the comptime pass — a small Lisp compiler that
+runs entirely inside a comptime function, lowering a `.lisp` source file to
+plain generated C — lives in
+[`examples/ccccl/`](../examples/ccccl); its README covers the
+`-c=generated`/`--emit-only` invocation shape and the AST-building patterns
+used to get there.
+
 A macro function is declared by annotating it with `[[cccc::comptime]]` (C23
 attribute syntax), `__attribute__((comptime))` (GNU attribute syntax), or the
 concise `@comptime` shorthand. The `__comptime` and `__comptime__` keyword
