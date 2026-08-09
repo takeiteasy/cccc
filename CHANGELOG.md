@@ -5,7 +5,37 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **New `-Wint-conversion` warning (part of `-Wall`) for an implicit
+  integer↔pointer conversion with no cast** — `warn_implicit_conversion()`
+  (`src/type.c`) had branches for pointer↔pointer, integer↔integer and
+  float conversions, but no branch matched an int/pointer pair, so e.g.
+  `const char *p = 'a';` compiled silently and only failed later, at
+  runtime, if the resulting garbage pointer was dereferenced. Covers
+  assignment/scalar initialization, `return`, and prototyped call
+  arguments; suppressed for the null pointer constant `0`. Does not cover
+  file-scope/global initializers, which take a separate constant-evaluation
+  path.
+
 ### Fixed
+
+- **`RunCustom`'s vendored shell now performs POSIX-correct quote removal,
+  backslash escaping, and `$VAR`/`${VAR}` expansion** — the lexer
+  (`src/build_shell.c`) previously only recognized a quote as the very
+  first character of a word, and even then returned its interior
+  unprocessed: an embedded quote (`pre'mid'post`), a backslash escape, or a
+  delimiter inside quotes (`a";"b`) all passed through with the quote
+  characters still attached instead of being stripped. A `RunCustom`
+  command whose value needed embedded quotes — e.g. `cccc -c=generated
+  ... -DSOME_MACRO='"literal"'` — therefore handed the child a
+  multi-character character-constant instead of a string literal, silently
+  converted to a pointer and dereferenced (SIGSEGV in the *child* process,
+  not the outer `--build` process, which correctly reported the step's
+  failure and non-zero exit). The word reader now performs real quote
+  removal and backslash escaping per POSIX, plus `$VAR`/`${VAR}` expansion
+  from the process environment as a single non-re-split, non-globbed
+  literal chunk. (#954)
 
 - **The comptime declaration index no longer mis-names a declaration whose
   segment contains a fixed-size array inside an anonymous struct/union body,

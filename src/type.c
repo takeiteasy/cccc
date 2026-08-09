@@ -547,6 +547,22 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
         return;
     }
 
+    // -Wint-conversion: implicit integer <-> pointer conversion with no cast
+    // (e.g. `const char *p = 'a';` or `int n = some_ptr;`). Suppressed when
+    // the source is the null pointer constant `0`, matching the standard
+    // exemption for `T *p = 0;`.
+    if ((vm->compiler.warnings & CCCC_WARN_INT_CONVERSION) &&
+        ((to->kind == TY_PTR && is_integer(from)) ||
+         (from->kind == TY_PTR && is_integer(to)))) {
+        bool is_null_const = to->kind == TY_PTR && expr->kind == ND_NUM && expr->val == 0;
+        if (!is_null_const)
+            warn_tok(vm, tok, CCCC_WARN_INT_CONVERSION,
+                     to->kind == TY_PTR
+                         ? "incompatible integer to pointer conversion"
+                         : "incompatible pointer to integer conversion");
+        return;
+    }
+
     if (from->kind == to->kind && from->is_unsigned == to->is_unsigned)
         return;
 

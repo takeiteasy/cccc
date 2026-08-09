@@ -66,5 +66,9 @@ void main(void) {
     int *ip2 = cp;
     (void)ip2;
 
+    // -Wint-conversion: char literal assigned to a pointer
+    const char *p2 = 'a';
+    (void)p2;
+
     printf("done\n");
 }

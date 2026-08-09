@@ -799,6 +799,7 @@ typedef enum {
     CCCC_WARN_MAYBE_NONNULL    = (1ULL << 56), // maybe-null (post-branch-merge) value reaching a nonnull param / returns_nonnull return; opt-in, not in -Wall/-Wextra (#687)
     CCCC_WARN_SENTINEL         = (1ULL << 57), // missing/non-literal NULL terminator in a call to a sentinel-marked variadic function (#658)
     CCCC_WARN_DESIGNATED_INIT  = (1ULL << 58), // positional member initializer of a struct declared __attribute__((designated_init)); opt-in, not in -Wall/-Wextra (#659)
+    CCCC_WARN_INT_CONVERSION  = (1ULL << 59), // implicit integer <-> pointer conversion with no cast
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -840,7 +841,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_INCOMPATIBLE_POINTER_TYPES |
                    CCCC_WARN_OVERRIDE_INIT |
                    CCCC_WARN_NONNULL |
-                   CCCC_WARN_SENTINEL,
+                   CCCC_WARN_SENTINEL |
+                   CCCC_WARN_INT_CONVERSION,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |

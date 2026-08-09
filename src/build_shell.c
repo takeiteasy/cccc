@@ -152,6 +152,13 @@ typedef struct shell_token {
     shell_token_type type;
     unsigned char *begin;
     int length;
+    /* True when `begin` points at a heap buffer owned by this token (quote
+     * removal / backslash / $VAR decoding can shrink or grow a word relative
+     * to its source slice, so decoded ATOM tokens can no longer point into
+     * cmd_copy). False for tokens that still alias the source buffer
+     * (operators, and any ATOM whose raw slice happens to equal its decoded
+     * form is still built through the owned path for simplicity). */
+    bool owned;
 } shell_token_t;
 
 typedef struct shell_lexer {
@@ -307,11 +314,103 @@ static shell_token_t new_token(shell_lexer_t *l, shell_token_type type) {
     };
 }
 
-static shell_token_t read_atom(shell_lexer_t *l) {
+/* --- Word buffer: growable byte buffer used to build a decoded ATOM's
+ * content while the lexer walks quotes/escapes/expansions. --- */
+typedef struct word_buf {
+    unsigned char *buf;
+    size_t len;
+    size_t cap;
+} word_buf_t;
+
+static void word_buf_init(word_buf_t *b) {
+    b->cap = 32;
+    b->buf = xmalloc(b->cap);
+    b->len = 0;
+}
+
+static void word_buf_push(word_buf_t *b, unsigned char c) {
+    if (b->len + 1 > b->cap) {
+        b->cap *= 2;
+        b->buf = xrealloc(b->buf, b->cap);
+    }
+    b->buf[b->len++] = c;
+}
+
+static void word_buf_push_str(word_buf_t *b, const char *s) {
+    while (*s)
+        word_buf_push(b, (unsigned char)*s++);
+}
+
+/* Copy the raw bytes of the utf8 codepoint currently under the cursor into
+ * `out`, then advance past it. */
+static void word_buf_push_current(shell_lexer_t *l, word_buf_t *out) {
+    int clen = l->cursor.ch_length;
+    for (int i = 0; i < clen; i++)
+        word_buf_push(out, l->cursor.ptr[i]);
+    advance(l);
+}
+
+static inline bool is_name_start_char(wchar_t c) {
+    return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static inline bool is_name_char(wchar_t c) {
+    return is_name_start_char(c) || (c >= '0' && c <= '9');
+}
+
+/* `$NAME` / `${NAME}` expansion (unquoted and double-quoted words only).
+ * Assumes the cursor is currently on the '$'. Appends the expanded value (or
+ * a literal '$' if it isn't followed by a name) to `out`. Returns false and
+ * sets l->error on a malformed `${...}`. Expansion is a single literal
+ * chunk: the result is never re-split or globbed. */
+static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
+    advance(l); /* consume '$' */
+    wchar_t c = peek(l);
+    bool braced = (c == '{');
+    if (braced)
+        advance(l);
+    if (!braced && !is_name_start_char(c)) {
+        /* '$' not followed by a name: literal. */
+        word_buf_push(out, '$');
+        return true;
+    }
+    unsigned char *name_start = l->cursor.ptr;
+    while (!is_eof(l) && is_name_char(peek(l)))
+        advance(l);
+    size_t namelen = (size_t)(l->cursor.ptr - name_start);
+    if (braced) {
+        if (peek(l) != '}') {
+            l->error = "unterminated ${";
+            l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+            return false;
+        }
+        advance(l); /* consume '}' */
+    }
+    char namebuf[256];
+    if (namelen >= sizeof(namebuf))
+        namelen = sizeof(namebuf) - 1;
+    memcpy(namebuf, name_start, namelen);
+    namebuf[namelen] = '\0';
+    const char *val = getenv(namebuf);
+    if (val)
+        word_buf_push_str(out, val);
+    return true;
+}
+
+/* Reads one shell word, performing quote removal, backslash escaping and
+ * $VAR/${VAR} expansion as it goes (see the module-level RunCustom grammar
+ * notes in man/BUILDING.md). Unlike the old raw-slice reader, the decoded
+ * content can differ in length from the source text, so the returned token
+ * always owns a heap buffer (`owned = true`). */
+static shell_token_t read_word(shell_lexer_t *l) {
+    word_buf_t out;
+    word_buf_init(&out);
+
     for (;;) {
         if (is_eof(l))
-            goto BAIL;
-        switch (peek(l)) {
+            break;
+        wchar_t wc = peek(l);
+        switch (wc) {
             case ' ':
             case '\t':
             case '\v':
@@ -323,14 +422,106 @@ static shell_token_t read_atom(shell_lexer_t *l) {
             case '<':
             case '>':
             case ';':
-                goto BAIL;
+                goto DONE;
+            case '\'': {
+                advance(l); /* consume opening quote */
+                for (;;) {
+                    if (is_eof(l)) {
+                        l->error = "unterminated quote";
+                        l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+                        free(out.buf);
+                        return new_token(l, SHELL_TOKEN_ERROR);
+                    }
+                    if (peek(l) == '\'') {
+                        advance(l);
+                        break;
+                    }
+                    word_buf_push_current(l, &out);
+                }
+                break;
+            }
+            case '"': {
+                advance(l); /* consume opening quote */
+                for (;;) {
+                    if (is_eof(l)) {
+                        l->error = "unterminated quote";
+                        l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+                        free(out.buf);
+                        return new_token(l, SHELL_TOKEN_ERROR);
+                    }
+                    wchar_t c = peek(l);
+                    if (c == '"') {
+                        advance(l);
+                        break;
+                    }
+                    if (c == '\\') {
+                        advance(l);
+                        if (is_eof(l)) {
+                            l->error = "unterminated quote";
+                            l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+                            free(out.buf);
+                            return new_token(l, SHELL_TOKEN_ERROR);
+                        }
+                        wchar_t nc = peek(l);
+                        /* Inside double quotes, backslash is only special
+                         * before " \ $ or a newline (POSIX); otherwise the
+                         * backslash itself is kept literal. */
+                        if (nc == '"' || nc == '\\' || nc == '$' || nc == '\n') {
+                            if (nc == '\n')
+                                advance(l); /* line continuation: drop both */
+                            else
+                                word_buf_push_current(l, &out);
+                        } else {
+                            word_buf_push(&out, '\\');
+                            word_buf_push_current(l, &out);
+                        }
+                        continue;
+                    }
+                    if (c == '$') {
+                        if (!expand_var(l, &out)) {
+                            free(out.buf);
+                            return new_token(l, SHELL_TOKEN_ERROR);
+                        }
+                        continue;
+                    }
+                    word_buf_push_current(l, &out);
+                }
+                break;
+            }
+            case '\\': {
+                advance(l); /* consume backslash */
+                if (is_eof(l)) {
+                    word_buf_push(&out, '\\');
+                    goto DONE;
+                }
+                if (peek(l) == '\n')
+                    advance(l); /* line continuation: drop both */
+                else
+                    word_buf_push_current(l, &out);
+                break;
+            }
+            case '$': {
+                if (!expand_var(l, &out)) {
+                    free(out.buf);
+                    return new_token(l, SHELL_TOKEN_ERROR);
+                }
+                break;
+            }
             default:
-                advance(l);
+                word_buf_push_current(l, &out);
                 break;
         }
     }
-BAIL:
-    return new_token(l, SHELL_TOKEN_ATOM);
+DONE: {
+    int length = (int)out.len;
+    word_buf_push(&out, '\0');
+    return (shell_token_t) {
+        .type = SHELL_TOKEN_ATOM,
+        .begin = out.buf,
+        .length = length,
+        .owned = true
+    };
+}
 }
 
 static shell_token_t read_token(shell_lexer_t *l) {
@@ -348,32 +539,6 @@ static shell_token_t read_token(shell_lexer_t *l) {
             skip_whitespace(l);
             update(l);
             return read_token(l);
-        case '"':
-        case '\'': {
-            wchar_t quote = wc;
-            unsigned char *start = l->cursor.ptr + l->cursor.ch_length;
-            unsigned char *p = start;
-            for (;;) {
-                wchar_t ch;
-                int len = utf8read(p, &ch);
-                if (ch == '\0') {
-                    l->error = "unterminated quote";
-                    l->begin = start;
-                    l->cursor.ptr = p;
-                    if (l->input_begin)
-                        l->error_pos = (size_t)(p - l->input_begin);
-                    return new_token(l, SHELL_TOKEN_ERROR);
-                }
-                if (ch == quote) {
-                    l->begin = start;
-                    l->cursor.ptr = p;
-                    shell_token_t tok = new_token(l, SHELL_TOKEN_ATOM);
-                    advance(l);
-                    return tok;
-                }
-                p += len;
-            }
-        }
         case '&':
             advance(l);
             if (peek(l) == '&') {
@@ -394,7 +559,7 @@ static shell_token_t read_token(shell_lexer_t *l) {
             advance(l);
             return new_token(l, (shell_token_type)wc);
         default:
-            return read_atom(l);
+            return read_word(l);
     }
     return new_token(l, SHELL_TOKEN_ERROR);
 }
@@ -416,6 +581,21 @@ static bool shell_token_array_append(shell_token_array_t *arr, shell_token_t tok
     }
     arr->data[arr->count++] = token;
     return true;
+}
+
+/* Frees any decoded (owned) token buffers plus the array itself. Word
+ * decoding (quote removal / escapes / $VAR expansion) means ATOM tokens can
+ * now own heap storage instead of aliasing cmd_copy -- see shell_token_t. */
+static void shell_token_array_free(shell_token_array_t *arr) {
+    if (!arr)
+        return;
+    for (size_t i = 0; i < arr->count; i++)
+        if (arr->data[i].owned)
+            free(arr->data[i].begin);
+    free(arr->data);
+    arr->data = NULL;
+    arr->count = 0;
+    arr->capacity = 0;
 }
 
 static shell_token_array_t shell_parse(shell_lexer_t *l) {
@@ -1154,14 +1334,14 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
         shell_token_array_t tokens = shell_parse(&lexer);
 
         if (!tokens.data || lexer.error) {
-            if (tokens.data) free(tokens.data);
+            shell_token_array_free(&tokens);
             free(cmd_copy);
             _exit(SHELL_ERR_TOKENIZE);
         }
 
         shell_ast_t *ast = shell_eval_parser(tokens);
         if (!ast) {
-            free(tokens.data);
+            shell_token_array_free(&tokens);
             free(cmd_copy);
             _exit(SHELL_ERR_EVAL);
         }
@@ -1169,7 +1349,7 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
         /* EXECUTE with Context; CCCC patch: propagate real exit code */
         int result = ast_exec(ctx, ast);
 
-        free(tokens.data);
+        shell_token_array_free(&tokens);
         free_ast(ast);
         free(cmd_copy);
         _exit(result >= 0 ? result : 1);
@@ -1246,21 +1426,21 @@ static int posix_shell_inline(const char *cmd, shell_ctx *ctx) {
         if (lexer.error) {
             printf("error: '%s'\n", lexer.error);
         }
-        if (tokens.data) free(tokens.data);
+        shell_token_array_free(&tokens);
         free(cmd_copy);
         return -1;
     }
 
     shell_ast_t *ast = shell_eval_parser(tokens);
     if (!ast) {
-        free(tokens.data);
+        shell_token_array_free(&tokens);
         free(cmd_copy);
         return -1;
     }
 
     /* CCCC patch: ast_exec now returns the real exit code */
     int result = ast_exec(ctx, ast);
-    free(tokens.data);
+    shell_token_array_free(&tokens);
     free_ast(ast);
     free(cmd_copy);
     return result;

@@ -105,6 +105,7 @@ static const WarningInfo warning_infos[] = {
     {"maybe-nonnull",              CCCC_WARN_MAYBE_NONNULL,              false},
     {"sentinel",                   CCCC_WARN_SENTINEL,                   false},
     {"designated-init",            CCCC_WARN_DESIGNATED_INIT,            false},
+    {"int-conversion",             CCCC_WARN_INT_CONVERSION,             false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
