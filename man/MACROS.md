@@ -363,7 +363,12 @@ Use a non-inline macro with a file-scope call when generated functions should be
 available to the whole parsed program. The call runs before the main parse, and
 CCCC automatically synthesizes forward declarations for every generated function
 and `extern` declarations for every generated global variable, so no manual
-publication is needed.
+publication is needed. This also holds for `-c=generated`/`-m` output: a
+generated function's C text gets a forward-declared prototype ahead of any
+other generated function that calls it, regardless of the order the functions
+were created or published in, so mutual recursion between generated functions
+compiles under a plain downstream `cc`. A `FunctionPrototype()` published but
+never given a body still reaches the output as a bare declaration.
 
 ```c
 [[cccc::comptime]]

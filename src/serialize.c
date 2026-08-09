@@ -482,6 +482,75 @@ static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
     collect_node_types(ctx, obj->body);
 }
 
+// #956: -c=generated support -- tracks which macro-generated functions
+// already have a prototype in the output (either from a preceding
+// forward-declare or their own definition), so a function body that calls
+// another generated function whose own emit event hasn't been reached yet
+// can have that callee's prototype inserted just ahead of it.
+typedef struct {
+    Obj **data;
+    int len;
+    int cap;
+} ObjVec;
+
+static bool obj_vec_contains(ObjVec *vec, Obj *obj) {
+    for (int i = 0; i < vec->len; i++)
+        if (vec->data[i] == obj)
+            return true;
+    return false;
+}
+
+static void obj_vec_push(ObjVec *vec, Obj *obj) {
+    if (!obj || obj_vec_contains(vec, obj))
+        return;
+    if (vec->len == vec->cap) {
+        vec->cap = vec->cap ? vec->cap * 2 : 8;
+        vec->data = realloc(vec->data, sizeof(Obj *) * vec->cap);
+    }
+    vec->data[vec->len++] = obj;
+}
+
+// Walks a function body for direct calls (ND_FUNCALL through a plain
+// ND_VAR callee) to other macro-generated functions. Mirrors
+// collect_node_types's traversal shape.
+static void collect_generated_call_targets(Node *node, ObjVec *out) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var && node->lhs->var->is_function &&
+        node->lhs->var->is_macro_generated)
+        obj_vec_push(out, node->lhs->var);
+
+    if (node->kind == ND_SWITCH) {
+        collect_generated_call_targets(node->cond, out);
+        for (Node *c = node->case_next; c; c = c->case_next)
+            collect_generated_call_targets(c->lhs, out);
+        if (node->default_case)
+            collect_generated_call_targets(node->default_case->lhs, out);
+        collect_generated_call_targets(node->next, out);
+        return;
+    }
+
+    if (node->kind == ND_CASE) {
+        collect_generated_call_targets(node->lhs, out);
+        collect_generated_call_targets(node->next, out);
+        return;
+    }
+
+    collect_generated_call_targets(node->lhs, out);
+    collect_generated_call_targets(node->rhs, out);
+    collect_generated_call_targets(node->cond, out);
+    collect_generated_call_targets(node->then, out);
+    collect_generated_call_targets(node->els, out);
+    collect_generated_call_targets(node->init, out);
+    collect_generated_call_targets(node->inc, out);
+    collect_generated_call_targets(node->body, out);
+    collect_generated_call_targets(node->args, out);
+
+    collect_generated_call_targets(node->next, out);
+}
+
 static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 
 // --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
@@ -2005,6 +2074,25 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             serialize_type_decl(f, &ctx, obj->ty, obj->name);
             fprintf(f, ";\n");
         }
+        // #956: forward-declare a macro-generated function's callees the
+        // moment its own event is reached, rather than hoisting every
+        // prototype up front -- emission order here follows
+        // PublishNode/MakeFunction event order, which has no relation to
+        // the call graph, so a function's body can reference another
+        // generated function whose own event appears later. Hoisting
+        // every prototype unconditionally (tried first) broke two other
+        // guarantees: a prototype placed ahead of the #include that
+        // defines one of its struct-tag types gets function-prototype
+        // scope for that tag, conflicting with the type's real,
+        // later-in-scope definition (#953); and a function generated
+        // inside a preprocessor-routed `#ifdef` block (test_emit_ordered_
+        // ifdef.c) needs its prototype to stay inside that block, not
+        // float above it. Doing this on demand, scanning each function's
+        // body for calls to not-yet-declared generated functions right
+        // before emitting it, keeps unrelated functions and #ifdef-guarded
+        // ones exactly where they were and only forward-declares what a
+        // caller actually needs.
+        ObjVec declared = {0};
         for (EmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next) {
             if (ev->kind == CCCC_EMIT_SOURCE) {
                 fprintf(f, "%s\n", ev->source);
@@ -2014,16 +2102,35 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             if (!obj || !obj->is_macro_generated)
                 continue;
             if (obj->is_function) {
-                if (!obj->is_definition && !obj->body)
-                    continue;
-                serialize_function_signature(f, &ctx, obj);
-                fprintf(f, ";\n\n");
+                if (obj->body) {
+                    ObjVec needed = {0};
+                    collect_generated_call_targets(obj->body, &needed);
+                    for (int i = 0; i < needed.len; i++) {
+                        Obj *callee = needed.data[i];
+                        if (obj_vec_contains(&declared, callee))
+                            continue;
+                        serialize_function_signature(f, &ctx, callee);
+                        fprintf(f, ";\n");
+                        obj_vec_push(&declared, callee);
+                    }
+                    free(needed.data);
+                }
+                // A FunctionPrototype()+PublishNode() that never gets a
+                // body still needs to reach the output -- previously
+                // dropped entirely by this loop's `!is_definition &&
+                // !body` skip.
+                if (!obj_vec_contains(&declared, obj)) {
+                    serialize_function_signature(f, &ctx, obj);
+                    fprintf(f, ";\n\n");
+                    obj_vec_push(&declared, obj);
+                }
                 if (obj->body)
                     serialize_function(f, vm, &ctx, obj);
             } else if (obj->name[0] != '.') {
                 serialize_global_var(f, vm, &ctx, obj);
             }
         }
+        free(declared.data);
         free(ctx.seen.data);
         free(ctx.defs.data);
         free(ctx.tags);
@@ -2116,12 +2223,20 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             // could conflict with the real one from a re-emitted header.
             if (obj->is_implicit)
                 continue;
-            Token *t = obj->tok;
-            bool from_primary = t && t->file &&
-                (t->file == vm->compiler.primary_file ||
-                 cc_file_is_cccc_only(vm, t->file->name));
-            if (!from_primary)
-                continue;
+            // #956: a FunctionPrototype()+PublishNode() generated function
+            // has no obj->tok (it was synthesized, not parsed from any
+            // file), so the from_primary check below would always drop
+            // it -- treat every macro-generated prototype as eligible
+            // regardless of origin, matching the emit-event path's
+            // unconditional hoist above.
+            if (!obj->is_macro_generated) {
+                Token *t = obj->tok;
+                bool from_primary = t && t->file &&
+                    (t->file == vm->compiler.primary_file ||
+                     cc_file_is_cccc_only(vm, t->file->name));
+                if (!from_primary)
+                    continue;
+            }
         }
         serialize_function_signature(f, &ctx, obj);
         fprintf(f, ";\n\n");

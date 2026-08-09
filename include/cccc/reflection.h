@@ -2067,7 +2067,9 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Create a function forward declaration (prototype) without a body.
  * @param name The function name.
  * @param ret The return type.
- * @details Use FunctionAddParam for parameters and PublishNode to expose it in scope. */
+ * @details Use FunctionAddParam for parameters and PublishNode to expose it in scope.
+ * A published prototype that never receives a body via FunctionSetBody still
+ * appears in `-c=generated`/`-m` output as a bare declaration. */
 #define FunctionPrototype(name, ret)                                  \
     __builtin_ast_function_prototype(name, ret)
 

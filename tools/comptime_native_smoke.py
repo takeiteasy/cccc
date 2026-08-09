@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -1182,11 +1182,74 @@ def case_generated_comptime_include_still_derives(cccc: Path, tmp: str) -> bool:
     return True
 
 
+MUTUAL_RECURSION_PROGRAM = """
+[[cccc::comptime]]
+void gen(void) {
+    Type *t = GetType("int");
+    Obj *c = FunctionPrototype("gen_c", t);
+    FunctionAddParam(c, "x", t);
+    PublishNode(c);
+
+    Obj *a = MakeFunction("gen_a", t);
+    FunctionAddParam(a, "x", t);
+    Obj *b = MakeFunction("gen_b", t);
+    FunctionAddParam(b, "x", t);
+    PublishNode(a);
+    PublishNode(b);
+    WithFn(a) {
+        Node *xr = MakeParamRef(a, "x");
+        FunctionSetBody(a, Quote("{ return gen_b($1); }", xr));
+    }
+    WithFn(b) {
+        Node *xr = MakeParamRef(b, "x");
+        FunctionSetBody(b, Quote("{ return gen_a($1); }", xr));
+    }
+}
+gen();
+
+int main(void) { return 42; }
+"""
+
+
+def case_generated_forward_decls_hoisted(cccc: Path, tmp: str) -> bool:
+    print("  38: -c=generated forward-declares a generated function's "
+          "callee even when published earlier in program order, and never "
+          "drops a body-less published prototype (#956)")
+    src = Path(tmp) / "mutual_956.c"
+    write(src, MUTUAL_RECURSION_PROGRAM)
+    out_path = Path(tmp) / "mutual_956.gen.c"
+    result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    out = out_path.read_text()
+    if "gen_c(int x);" not in out:
+        print(f"    FAIL: -c=generated output dropped gen_c's never-defined "
+              f"published prototype\n    {out}")
+        return False
+    a_def = out.find("gen_a(int x) {")
+    b_decl = out.find("gen_b(int x);")
+    if a_def == -1 or b_decl == -1 or b_decl > a_def:
+        print(f"    FAIL: gen_a's definition (created before gen_b) calls "
+              f"gen_b, but gen_b's forward declaration does not precede it "
+              f"-- mutual recursion is not satisfied by either creation "
+              f"order\n    {out}")
+        return False
+    obj = Path(tmp) / "mutual_956.o"
+    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
+                                capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1231,6 +1294,7 @@ def main() -> int:
             case_anon_union_member_not_va_list,
             case_generated_no_duplicate_captured_include,
             case_generated_comptime_include_still_derives,
+            case_generated_forward_decls_hoisted,
         ]
         results = [case(cccc, tmp) for case in cases]
 
