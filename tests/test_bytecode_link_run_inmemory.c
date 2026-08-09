@@ -22,16 +22,16 @@ int build_main(Builder *ctx) {
 
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/lib && ./cccc "
-        "examples/build_bytecode_libs_demo/src/math_lib.c "
-        "-I examples/build_bytecode_libs_demo/include "
+        "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include "
         "--compile=bytecode -o %s 2>&1",
         out_dir, lib_out);
     if (!CaptureCommand(ctx, cmd)) return 1;
 
     // No -o here: this is the exact repro from #898.
     snprintf(cmd, sizeof(cmd),
-        "sh -c './cccc examples/build_bytecode_libs_demo/src/main.c "
-        "-I examples/build_bytecode_libs_demo/include --link %s "
+        "sh -c './cccc tests/fixtures/build_bytecode_libs_demo/src/main.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include --link %s "
         ">/dev/null 2>&1; echo \"exit=$?\"'",
         lib_out);
     const char *result = CaptureCommand(ctx, cmd);

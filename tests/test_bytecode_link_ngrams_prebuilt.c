@@ -23,8 +23,8 @@ int build_main(Builder *ctx) {
     // Build a library.
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/lib && ./cccc "
-        "examples/build_bytecode_libs_demo/src/math_lib.c "
-        "-I examples/build_bytecode_libs_demo/include "
+        "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include "
         "--compile=bytecode -o %s 2>&1",
         out_dir, lib_out);
     if (!CaptureCommand(ctx, cmd)) return 1;
@@ -33,8 +33,8 @@ int build_main(Builder *ctx) {
     // against (the analysis path is what's under test, not linking itself).
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/bin && ./cccc "
-        "examples/build_bytecode_libs_demo/src/main.c "
-        "-I examples/build_bytecode_libs_demo/include --link %s -o %s 2>&1",
+        "tests/fixtures/build_bytecode_libs_demo/src/main.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include --link %s -o %s 2>&1",
         out_dir, lib_out, app_out);
     if (!CaptureCommand(ctx, cmd)) return 1;
 

@@ -8,7 +8,7 @@
 [[cccc::build_target(kind=bytecode)]]
 BuildTarget *bc_plugin(Builder *ctx) {
     BuildTarget *t = DynamicLib(ctx, "plugin");
-    AddSource(t, "examples/build_bytecode_libs_demo/src/plugin.c");
+    AddSource(t, "tests/fixtures/build_bytecode_libs_demo/src/plugin.c");
     return t;
 }
 

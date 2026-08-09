@@ -9,8 +9,8 @@
 [[cccc::build_target(kind=bytecode)]]
 BuildTarget *bc_mathlib(Builder *ctx) {
     BuildTarget *t = StaticLib(ctx, "mathlib");
-    AddSource(t, "examples/build_bytecode_libs_demo/src/math_lib.c");
-    AddInclude(t, "examples/build_bytecode_libs_demo/include");
+    AddSource(t, "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c");
+    AddInclude(t, "tests/fixtures/build_bytecode_libs_demo/include");
     return t;
 }
 

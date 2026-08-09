@@ -22,16 +22,16 @@ int build_main(Builder *ctx) {
 
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/lib && ./cccc "
-        "examples/build_bytecode_libs_demo/src/math_lib.c "
-        "-I examples/build_bytecode_libs_demo/include "
+        "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include "
         "--compile=bytecode -o %s 2>&1",
         out_dir, lib_out);
     if (!CaptureCommand(ctx, cmd)) return 1;
 
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/bin && ./cccc "
-        "examples/build_bytecode_libs_demo/src/fnptr_main.c "
-        "-I examples/build_bytecode_libs_demo/include "
+        "tests/fixtures/build_bytecode_libs_demo/src/fnptr_main.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include "
         "--link %s -o %s 2>&1",
         out_dir, lib_out, exe_out);
     if (!CaptureCommand(ctx, cmd)) return 1;

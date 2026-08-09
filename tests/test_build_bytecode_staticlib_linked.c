@@ -9,12 +9,12 @@
 [[cccc::build_target(kind=bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
     BuildTarget *lib = StaticLib(ctx, "mathlib");
-    AddSource(lib, "examples/build_bytecode_libs_demo/src/math_lib.c");
-    AddInclude(lib, "examples/build_bytecode_libs_demo/include");
+    AddSource(lib, "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c");
+    AddInclude(lib, "tests/fixtures/build_bytecode_libs_demo/include");
 
     BuildTarget *app = Executable(ctx, "app");
-    AddSource(app, "examples/build_bytecode_libs_demo/src/main.c");
-    AddInclude(app, "examples/build_bytecode_libs_demo/include");
+    AddSource(app, "tests/fixtures/build_bytecode_libs_demo/src/main.c");
+    AddInclude(app, "tests/fixtures/build_bytecode_libs_demo/include");
     LinkWith(app, lib);
     return app;
 }

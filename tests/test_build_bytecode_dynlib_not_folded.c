@@ -13,12 +13,12 @@
 BuildTarget *bc_exe_with_plugin(Builder *ctx) {
     // Dynamic module: no main(), loaded at runtime.
     BuildTarget *plugin = DynamicLib(ctx, "plugin");
-    AddSource(plugin, "examples/build_bytecode_libs_demo/src/plugin.c");
+    AddSource(plugin, "tests/fixtures/build_bytecode_libs_demo/src/plugin.c");
 
     // Executable: declares extern symbols, loads plugin at runtime.
     BuildTarget *app = Executable(ctx, "app");
-    AddSource(app, "examples/build_bytecode_libs_demo/src/main.c");
-    AddInclude(app, "examples/build_bytecode_libs_demo/include");
+    AddSource(app, "tests/fixtures/build_bytecode_libs_demo/src/main.c");
+    AddInclude(app, "tests/fixtures/build_bytecode_libs_demo/include");
     // DependsOn ensures the plugin is built before the exe, but does NOT fold.
     DependsOn(app, plugin);
     return app;

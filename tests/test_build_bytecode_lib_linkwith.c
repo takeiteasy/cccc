@@ -12,13 +12,13 @@
 BuildTarget *bc_app(Builder *ctx) {
     // Static library: defines lib_add/lib_mul, no main().
     BuildTarget *lib = StaticLib(ctx, "mathlib");
-    AddSource(lib, "examples/build_bytecode_libs_demo/src/math_lib.c");
-    AddInclude(lib, "examples/build_bytecode_libs_demo/include");
+    AddSource(lib, "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c");
+    AddInclude(lib, "tests/fixtures/build_bytecode_libs_demo/include");
 
     // Executable: calls lib functions.
     BuildTarget *app = Executable(ctx, "app");
-    AddSource(app, "examples/build_bytecode_libs_demo/src/main.c");
-    AddInclude(app, "examples/build_bytecode_libs_demo/include");
+    AddSource(app, "tests/fixtures/build_bytecode_libs_demo/src/main.c");
+    AddInclude(app, "tests/fixtures/build_bytecode_libs_demo/include");
     LinkWith(app, lib);
     return app;
 }

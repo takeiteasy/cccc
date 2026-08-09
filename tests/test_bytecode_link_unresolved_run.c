@@ -23,8 +23,8 @@ int build_main(Builder *ctx) {
     // A library that does not define undefined_fn.
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/lib && ./cccc "
-        "examples/build_bytecode_libs_demo/src/math_lib.c "
-        "-I examples/build_bytecode_libs_demo/include "
+        "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include "
         "--compile=bytecode -o %s 2>&1",
         out_dir, lib_out);
     if (!CaptureCommand(ctx, cmd)) return 1;

@@ -13,13 +13,13 @@
 BuildTarget *bc_app(Builder *ctx) {
     // Library target: defines answer(), no main().  Folded into app.
     BuildTarget *lib = Executable(ctx, "answer_lib");
-    AddSource(lib, "examples/build_linkwith_demo/src/answer.c");
-    AddInclude(lib, "examples/build_linkwith_demo/include");
+    AddSource(lib, "tests/fixtures/build_linkwith_demo/src/answer.c");
+    AddInclude(lib, "tests/fixtures/build_linkwith_demo/include");
 
     // Executable target: calls answer() from lib.
     BuildTarget *app = Executable(ctx, "app");
-    AddSource(app, "examples/build_linkwith_demo/src/main.c");
-    AddInclude(app, "examples/build_linkwith_demo/include");
+    AddSource(app, "tests/fixtures/build_linkwith_demo/src/main.c");
+    AddInclude(app, "tests/fixtures/build_linkwith_demo/include");
     LinkWith(app, lib);
     return app;
 }

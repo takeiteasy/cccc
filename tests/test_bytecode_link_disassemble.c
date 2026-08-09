@@ -34,8 +34,8 @@ int build_main(Builder *ctx) {
     // Build a library.
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/lib && ./cccc "
-        "examples/build_bytecode_libs_demo/src/math_lib.c "
-        "-I examples/build_bytecode_libs_demo/include "
+        "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include "
         "--compile=bytecode -o %s 2>&1",
         out_dir, lib_out);
     if (!CaptureCommand(ctx, cmd)) return 1;
@@ -43,16 +43,16 @@ int build_main(Builder *ctx) {
     // Disassemble directly from source + --link (no -o).
     snprintf(cmd, sizeof(cmd),
         "mkdir -p %s/bin && ./cccc "
-        "examples/build_bytecode_libs_demo/src/main.c "
-        "-I examples/build_bytecode_libs_demo/include --link %s "
+        "tests/fixtures/build_bytecode_libs_demo/src/main.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include --link %s "
         "--disassemble > %s 2>&1",
         out_dir, lib_out, disasm_direct);
     if (!CaptureCommand(ctx, cmd)) return 1;
 
     // Write the fully linked .c4 via -o, then disassemble *that* file.
     snprintf(cmd, sizeof(cmd),
-        "./cccc examples/build_bytecode_libs_demo/src/main.c "
-        "-I examples/build_bytecode_libs_demo/include --link %s -o %s 2>&1",
+        "./cccc tests/fixtures/build_bytecode_libs_demo/src/main.c "
+        "-I tests/fixtures/build_bytecode_libs_demo/include --link %s -o %s 2>&1",
         lib_out, app_out);
     if (!CaptureCommand(ctx, cmd)) return 1;
 
