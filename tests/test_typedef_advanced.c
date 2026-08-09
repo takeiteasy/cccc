@@ -32,5 +32,7 @@ int main() {
     PointPtr pp = &p;
     
     // Verify values
-    return a + p.x + p.y + pp->x + pp->y;  // 10 + 5 + 7 + 5 + 7 = 34
+    if (a != 10 || p.x != 5 || p.y != 7 || pp->x != 5 || pp->y != 7)
+        return 1;
+    return 42;
 }

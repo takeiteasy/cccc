@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test statement-level error recovery
 // This file has 4 stray statement errors
 // All should be reported with Level 2 recovery

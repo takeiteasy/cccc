@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test multiple statement errors with valid code interleaved
 
 int func1() {

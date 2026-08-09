@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test file to verify error collection
 // This file intentionally contains multiple errors
 

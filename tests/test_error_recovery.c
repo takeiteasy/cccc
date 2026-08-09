@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test error recovery and multi-error reporting
 // This test demonstrates that the parser can collect multiple errors
 // when run in error collection mode (enabled by default in main.c)

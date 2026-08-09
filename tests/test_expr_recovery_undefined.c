@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test expression recovery for undefined variables
 // This should report 3 separate undefined variable errors
 

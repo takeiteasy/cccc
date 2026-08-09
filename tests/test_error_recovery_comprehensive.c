@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Comprehensive error recovery test
 // This file contains multiple syntax errors that should be collected
 // and reported together, demonstrating Level 2 error recovery

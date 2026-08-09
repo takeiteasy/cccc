@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test struct member error recovery
 // Should report member errors without cascading
 

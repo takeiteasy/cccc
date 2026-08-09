@@ -1,6 +1,7 @@
-// Test temporal memory tagging with multiple alloc/free cycles
-// This should FAIL when run with --memory-tagging flag
-// Expected: TEMPORAL SAFETY VIOLATION error
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --memory-tagging
+// Test temporal memory tagging across multiple alloc/free/reallocate cycles:
+// a pointer tagged with an old generation is a temporal safety violation no
+// matter how many generations the underlying block has cycled through since.
 
 void *malloc(long size);
 void free(void *ptr);
@@ -32,5 +33,5 @@ int main() {
     // This should trigger temporal safety violation
     int bad_value = *stale1;
 
-    return bad_value;  // Should never reach here
+    return bad_value;  // unreachable: --memory-tagging aborts on the read above
 }

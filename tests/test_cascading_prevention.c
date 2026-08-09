@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test that error type propagation prevents cascading errors
 // Should only report the root cause, not secondary errors
 

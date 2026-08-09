@@ -1,6 +1,7 @@
-// Test temporal memory tagging with explicit memory reuse
-// This should FAIL when run with --memory-tagging flag
-// Expected: TEMPORAL SAFETY VIOLATION error
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --memory-tagging
+// Test temporal memory tagging with explicit memory reuse: a stale pointer
+// into a freed-and-reallocated struct carries the old generation tag, so
+// dereferencing it after reuse is a temporal safety violation.
 
 void *malloc(long size);
 void free(void *ptr);
@@ -32,6 +33,6 @@ int main() {
     // because stale was tagged with generation N, but memory is now generation N+1
     int bad_value = stale->value;
 
-    // This should never execute
+    // unreachable: --memory-tagging aborts on the read above
     return bad_value;
 }

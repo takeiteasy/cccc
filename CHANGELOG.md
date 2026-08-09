@@ -20,6 +20,45 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- **`tests/failures/` was silently excluded from test discovery, so every
+  test inside it — 41 files — never ran** — `discover_tests()`
+  (`tools/testing/discovery.py`) filtered out any path with a `failures`
+  component, but nothing generated or consumed that exclusion elsewhere; it
+  quietly turned the directory into dead weight, including real regression
+  coverage for tickets #1, #78, #172, #194, #195, #357, #884. The exclusion
+  is removed and every file audited individually: 33 tests moved into
+  `tests/`/`tests/macros/` (12 already correct as-is; 3 that needed the
+  `__builtin_quote` diagnostic fix below; 3 memory-tagging tests that needed
+  `CCCC_FLAGS: --memory-tagging` + `EXPECT_RUNTIME_ERROR`, since without the
+  flag they were passing by accident on reused-but-unvalidated memory
+  content; 14 error-recovery/`_BitInt` tests that were already correctly
+  rejected at compile time but had never been marked `EXPECT_COMPILE_ERROR`;
+  1 `extern`-symbol test additionally marked `CCCC_C4_SKIP`, matching
+  `test_bytecode_link_unresolved.c`'s existing #565 rationale; 1 typedef
+  test rewritten from a bare non-42 return to the exit-42 assertion
+  protocol). 7 files deleted as invalid C predating the current test
+  conventions (a misunderstanding of the declaration-comma vs.
+  comma-operator distinction, and `##` at the start of a `__VA_OPT__`
+  argument, both rejected by GCC/Clang too) or an incomplete scratch
+  fragment with no `main()`. 1 file (an unreferenced `extern` global that
+  resolves silently instead of erroring) deleted pending a separate ticket,
+  since fixing it is a VM-level design question, not a test fix. Also added
+  `tests/test_va_opt_basic.c`, since the audit found `__VA_OPT__` had no
+  surviving coverage anywhere in the suite.
+
+- **`error()` (no source location) never printed the "N error(s)
+  generated." summary that `error_tok()` produces, and never incremented
+  `vm->error_count`** — three `Quote()` validation diagnostics in
+  `quote_scan_and_rewrite()`/`quote_substitute()`/`quote_core()`
+  (`src/reflection.c`) used the location-less `error()`, so the test
+  runner's `has_compile_error` check (`tools/testing/runner.py`, which keys
+  off that summary text) couldn't distinguish "correctly rejected at compile
+  time" from "compiled fine and the program itself returned a non-42 exit
+  code" — the *test harness* misclassified three correct
+  `EXPECT_COMPILE_ERROR` tests as failures. Converted to `error_tok()` with
+  the offending token, which also gives these diagnostics a real source
+  location instead of none.
+
 - **`Quote()`/`QuoteN()` templates no longer drop statements after the
   first one** — an unbraced multi-statement template like
   `Quote("if (!$1) $1 = f($2); return $1;", a, b)` parsed only the leading

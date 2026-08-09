@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test error recovery in declarations
 // Multiple declaration errors should be collected
 

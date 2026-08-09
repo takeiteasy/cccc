@@ -2777,7 +2777,7 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
                 // $@N positional splice
                 has_positional = true;
                 if (has_incremental) {
-                    error("__builtin_quote: cannot mix positional ($@N) and incremental "
+                    error_tok(vm, t, "__builtin_quote: cannot mix positional ($@N) and incremental "
                           "($@ / $$) splice syntax in one template");
                     return -1;
                 }
@@ -2788,7 +2788,7 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
                 buf[numlen] = '\0';
                 k = atoi(buf);
                 if (k <= 0) {
-                    error("__builtin_quote: $@0 is not a valid splice index "
+                    error_tok(vm, t, "__builtin_quote: $@0 is not a valid splice index "
                           "(splice indices start at 1)");
                     return -1;
                 }
@@ -2803,7 +2803,7 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
                 // $@ incremental splice
                 has_incremental = true;
                 if (has_positional) {
-                    error("__builtin_quote: cannot mix positional ($@N) and incremental "
+                    error_tok(vm, t, "__builtin_quote: cannot mix positional ($@N) and incremental "
                           "($@ / $$) splice syntax in one template");
                     return -1;
                 }
@@ -2830,7 +2830,7 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
             // $$ incremental
             has_incremental = true;
             if (has_positional) {
-                error("__builtin_quote: cannot mix $N positional and $$ incremental "
+                error_tok(vm, t, "__builtin_quote: cannot mix $N positional and $$ incremental "
                       "splice syntax in one template");
                 return -1;
             }
@@ -2845,7 +2845,7 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
             // $N positional
             has_positional = true;
             if (has_incremental) {
-                error("__builtin_quote: cannot mix $N positional and $$ incremental "
+                error_tok(vm, t, "__builtin_quote: cannot mix $N positional and $$ incremental "
                       "splice syntax in one template");
                 return -1;
             }
@@ -2958,7 +2958,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
         // (Direct arg-list and initializer positions are handled elsewhere.)
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->splice_vars[i] && node->var == s->splice_vars[i]) {
-                error("__builtin_quote: $@%d is only valid in statement-list "
+                error_tok(s->vm, node->tok, "__builtin_quote: $@%d is only valid in statement-list "
                       "position (inside a block { }), as a direct call "
                       "argument, or as the sole element of a compound-literal "
                       "initializer; cannot be used as a sub-expression", i + 1);
@@ -3231,7 +3231,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
 
     // 3. Validate count (the array form enforces this; variadic derives n)
     if (max_index > n) {
-        error("__builtin_quote: template references $%d but only %d argument%s supplied",
+        error_tok(vm, toks, "__builtin_quote: template references $%d but only %d argument%s supplied",
               max_index, n, n == 1 ? "" : "s");
         return NULL;
     }

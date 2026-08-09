@@ -1,6 +1,8 @@
-// Test basic temporal memory tagging - UAF with memory reuse
-// This should FAIL when run with --memory-tagging flag
-// Expected: TEMPORAL SAFETY VIOLATION error
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --memory-tagging
+// Test basic temporal memory tagging - UAF with memory reuse.
+// A stale pointer carries the generation tag of the allocation it was taken
+// from; reading through it after the underlying block has been freed and
+// reallocated (bumping the generation) is a temporal safety violation.
 
 void *malloc(long size);
 void free(void *ptr);
@@ -26,5 +28,5 @@ int main() {
     // This should be caught as a temporal safety violation
     int value = *stale_ptr;
 
-    return value;  // Should never reach here
+    return value;  // unreachable: --memory-tagging aborts on the read above
 }

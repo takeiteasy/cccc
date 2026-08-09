@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test expression recovery with multiple errors
 // Should report multiple errors without cascading
 

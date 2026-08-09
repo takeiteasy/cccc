@@ -1,3 +1,4 @@
+// EXPECT_COMPILE_ERROR
 // Test type error recovery
 // Should report type errors and continue
 
