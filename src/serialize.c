@@ -349,6 +349,14 @@ static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
     return NULL;
 }
 
+// #952: matches a typedef that actually names `ty` itself, not merely a
+// same-kind tagless typedef -- e.g. `typedef struct { char *reg_ptr; ...; }
+// va_list;` (include/stdarg.h) used to win this lookup for *every* anonymous
+// struct in scope, since the loop below only compared ty->kind before
+// checking type_has_tag_for_owner. The same_type_or_origin() check makes
+// this the "does an alias exist for this exact type" query its caller
+// (serialize_type) already assumes it is; unrelated tagless typedefs now
+// correctly fall through to serialize_anon_aggregate() instead.
 static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
         return NULL;
@@ -359,6 +367,8 @@ static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
         TypeName *name = &ctx->typedefs[i];
         if (!name_visible(name, ctx->current_fn) || !name->ty ||
             name->ty->kind != ty->kind)
+            continue;
+        if (!same_type_or_origin(name->ty, ty))
             continue;
         if (!type_has_tag_for_owner(ctx, name->ty, name->owner_fn))
             return name;

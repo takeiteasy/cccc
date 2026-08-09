@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -124,6 +124,13 @@ Cases:
       besides `MakeStringLiteral` which #925 already covered) contains no
       raw `.L..` name, has real forward-declared definitions, and -- the
       only real proof -- compiles cleanly through the host `cc`.
+
+  35: #952 regression: `-m` output for an anonymous struct type used as a
+      union member (the near-universal tagged-union idiom) must print the
+      real member body, never `va_list` -- find_anonymous_typedef_name()
+      used to return the first same-kind tagless typedef in scope (e.g.
+      stdarg.h's own tagless `va_list` struct) without checking it actually
+      names the type being serialized.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -1041,11 +1048,51 @@ def case_c_generated_defaults_and_aliases(cccc: Path, tmp: str) -> bool:
     return True
 
 
+LOBJ_UNION_PROGRAM = (
+    "#include <stdarg.h>\n"
+    "struct LObj {\n"
+    "    int tag;\n"
+    "    union {\n"
+    "        struct { const char *name; } atom;\n"
+    "        struct { struct LObj *car, *cdr; } pair;\n"
+    "    } as;\n"
+    "};\n"
+    "struct LObj g;\n"
+    "int main(void) { return 42; }\n"
+)
+
+
+def case_anon_union_member_not_va_list(cccc: Path, tmp: str) -> bool:
+    print("  35: -m output for an anonymous struct used as a union member "
+          "prints the real body, never 'va_list' (#952)")
+    src = Path(tmp) / "lobj_union_952.c"
+    write(src, LOBJ_UNION_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if result.returncode != 0:
+        print(f"    FAIL: -m exited {result.returncode}\n    {result.stderr}")
+        return False
+    if "va_list" in out:
+        print(f"    FAIL: -m output still mis-prints a union member as va_list\n    {out}")
+        return False
+    if "const char *name" not in out or "struct LObj *car" not in out:
+        print(f"    FAIL: -m output missing the real anonymous member bodies\n    {out}")
+        return False
+    obj = Path(tmp) / "lobj_union_952.o"
+    cc_result = subprocess.run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
+                                input=out, capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -m output\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1087,6 +1134,7 @@ def main() -> int:
             case_test_run_basic_level_compiles,
             case_test_run_bytecode_no_global_contamination,
             case_c_generated_defaults_and_aliases,
+            case_anon_union_member_not_va_list,
         ]
         results = [case(cccc, tmp) for case in cases]
 
