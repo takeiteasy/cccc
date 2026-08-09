@@ -403,19 +403,58 @@ static void index_enum_constants(VirtualMachine *vm, HashMap *ordinary_map,
     }
 }
 
-// Token immediately before the first top-level (depth-0) '[' array-dimension
-// group in [seg_start, seg_last], or seg_last itself if there is none --
-// the candidate declared name for a simple (non-function) declarator, with
-// any trailing array dimensions skipped. Tokens are singly-linked, so this
-// is a forward scan that remembers the position rather than a true
-// backward walk.
+// Token immediately before the first top-level (depth-0, outside any brace
+// body) '[' array-dimension group in [seg_start, seg_last], or seg_last
+// itself if there is none -- the candidate declared name for a simple
+// (non-function) declarator, with any trailing array dimensions skipped.
+// Tokens are singly-linked, so this is a forward scan that remembers the
+// position rather than a true backward walk.
+//
+// Two things a naive '['/']' depth counter gets wrong, both fixed here
+// (#951):
+//
+//  - An array member inside an anonymous struct/union body declared in the
+//    same statement as its own declarator (e.g. "typedef struct { char
+//    n[32]; } A;") is *inside* the segment, since there is no depth-0 tag
+//    pair to end the tag scan early. Without brace tracking, that member's
+//    '[' is mistaken for A's own array dimension and the declaration gets
+//    indexed under the member's name ("n") instead of "A" -- silently
+//    misindexed, surfacing later as an unrelated "expected ','" when
+//    something tries to splice "A" and finds no index entry.
+//  - A leading C23 attribute-specifier-seq ("[[deprecated]] int dx;") is a
+//    double '[' at the very start of the segment, before any real
+//    declarator token. Without skipping it as a unit, its first '[' is
+//    taken as an array-dimension start with no preceding token, so `result`
+//    becomes NULL and the declaration is never indexed at all.
 static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
     Token *result = seg_last;
     bool found_bracket = false;
     int depth = 0;
+    int brace_depth = 0;
     Token *prev = NULL;
-    for (Token *t = seg_start; ; t = t->next) {
-        if (equal(t, "[")) {
+    for (Token *t = seg_start; t; ) {
+        // Skip a C23 attribute-specifier-seq in its entirety -- its
+        // brackets are never array dimensions and must not perturb the
+        // depth counter below.
+        if (brace_depth == 0 && equal(t, "[") && t->next && equal(t->next, "[")) {
+            int attr_depth = 0;
+            Token *u = t;
+            for (;;) {
+                if (equal(u, "["))
+                    attr_depth++;
+                else if (equal(u, "]"))
+                    attr_depth--;
+                bool at_end = (u == seg_last);
+                if (attr_depth == 0 || at_end) {
+                    prev = u;
+                    t = at_end ? NULL : u->next;
+                    break;
+                }
+                u = u->next;
+            }
+            continue;
+        }
+        if (brace_depth == 0 && equal(t, "[")) {
             if (depth == 0 && !found_bracket) {
                 result = prev;
                 found_bracket = true;
@@ -423,10 +462,15 @@ static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
             depth++;
         } else if (equal(t, "]") && depth > 0) {
             depth--;
+        } else if (equal(t, "{")) {
+            brace_depth++;
+        } else if (equal(t, "}") && brace_depth > 0) {
+            brace_depth--;
         }
         if (t == seg_last)
             break;
         prev = t;
+        t = t->next;
     }
     return result;
 }

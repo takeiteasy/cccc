@@ -5,6 +5,25 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The comptime declaration index no longer mis-names a declaration whose
+  segment contains a fixed-size array inside an anonymous struct/union body,
+  or a leading C23 attribute** — `segment_declarator_name()` (`src/macros.c`)
+  finds a declaration's declared name by scanning forward for the first
+  depth-0 `[` array-dimension group, but tracked `[`/`]` depth without
+  tracking brace depth. A member array inside an anonymous struct/union body
+  declared in the same statement as its own declarator (e.g. `typedef struct
+  { char n[32]; } A;`) put that member's `[` at apparent depth 0, so the
+  declaration was indexed under the member's name (`n`) instead of its own
+  (`A`); a leading attribute (`[[deprecated]] int dx;`) hit the same `[` path
+  with no preceding token, so the declaration was never indexed at all.
+  Either way, something later needing the real name as a typename (e.g. using
+  it as another struct's member type) failed to resolve it and misparsed
+  with an unrelated `expected ','`. The scan now tracks brace depth (only
+  treating a `[` as an array dimension at brace depth 0) and skips a leading
+  `[[ ... ]]` attribute-specifier-seq as a unit. (#951)
+
 ## [0.2.3] - 2026-08-08
 
 ### Added
