@@ -599,6 +599,155 @@ union FwVal test_union_field(void) {
     return (union FwVal){.i = 123};
 }
 
+// Union arms alias the same storage, so an *omitted* arm must not be
+// treated as "expected zero" -- .f is never asserted on here. Before #489
+// this bit pattern would fail: the comparator used to walk every member,
+// so the omitted .f arm was read back as ~1.0f and compared against an
+// implicit 0.0 expectation.
+[[cccc::test(return = (union FwVal){.i = 0x3f800000})]]
+union FwVal test_union_field_bitpattern(void) {
+    return (union FwVal){.i = 0x3f800000};
+}
+
+// Nested/aggregate return= fields (ticket #489, follow-up to #353): a
+// struct/union field that is itself a struct, union, or array, plus
+// anonymous struct members. See man/TESTING.md's Struct/union section.
+struct FwInner { int a; int b; };
+struct FwOuter { struct FwInner p; int z; };
+
+// The ticket's own example spelling: an explicitly-typed nested literal.
+[[cccc::test(return = (struct FwOuter){.p = (struct FwInner){.a = 1, .b = 2}, .z = 3})]]
+struct FwOuter test_nested_typed(void) {
+    return (struct FwOuter){.p = (struct FwInner){.a = 1, .b = 2}, .z = 3};
+}
+
+// The more common spelling: a bare brace-list inherits its type from the
+// member being initialized.
+[[cccc::test(return = (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3})]]
+struct FwOuter test_nested_bare(void) {
+    return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
+}
+
+struct FwL1 { int v; };
+struct FwL2 { struct FwL1 l1; int w; };
+struct FwL3 { struct FwL2 l2; int x; };
+
+[[cccc::test(return = (struct FwL3){.l2 = {.l1 = {.v = 5}, .w = 6}, .x = 7})]]
+struct FwL3 test_nested_two_levels(void) {
+    return (struct FwL3){.l2 = {.l1 = {.v = 5}, .w = 6}, .x = 7};
+}
+
+[[cccc::test(return != (struct FwOuter){.p = {.a = 9, .b = 9}, .z = 0})]]
+struct FwOuter test_nested_ne(void) {
+    return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
+}
+
+// A nested field omitted from the literal entirely: its sub-fields are
+// expected to be zero, recursively.
+[[cccc::test(return = (struct FwOuter){.z = 3})]]
+struct FwOuter test_nested_omitted(void) {
+    struct FwOuter r = {0};
+    r.z = 3;
+    return r;
+}
+
+struct FwInnerMix { char *label; double val; };
+struct FwOuterMix { struct FwInnerMix m; int code; };
+
+[[cccc::test(return = (struct FwOuterMix){.m = {.label = "ok", .val = 2.5}, .code = 1})]]
+struct FwOuterMix test_nested_mixed_fields(void) {
+    return (struct FwOuterMix){.m = {.label = "ok", .val = 2.5}, .code = 1};
+}
+
+struct FwHolder { union FwVal v; int tag; };
+
+[[cccc::test(return = (struct FwHolder){.v = {.i = 42}, .tag = 1})]]
+struct FwHolder test_nested_union(void) {
+    return (struct FwHolder){.v = {.i = 42}, .tag = 1};
+}
+
+struct FwArr { int a[5]; int n; };
+
+// Trailing array elements not listed in the literal are expected to be zero.
+[[cccc::test(return = (struct FwArr){.a = {1, 2, 3}, .n = 3})]]
+struct FwArr test_array_field(void) {
+    struct FwArr r = {0};
+    r.a[0] = 1; r.a[1] = 2; r.a[2] = 3; r.n = 3;
+    return r;
+}
+
+struct FwPair { int a; int b; };
+struct FwArrOfStruct { struct FwPair items[2]; };
+
+[[cccc::test(return = (struct FwArrOfStruct){
+    .items = {(struct FwPair){.a = 1, .b = 2}, (struct FwPair){.a = 3, .b = 4}}
+})]]
+struct FwArrOfStruct test_array_of_struct(void) {
+    struct FwArrOfStruct r;
+    r.items[0] = (struct FwPair){.a = 1, .b = 2};
+    r.items[1] = (struct FwPair){.a = 3, .b = 4};
+    return r;
+}
+
+struct FwBuf { char buf[8]; int n; };
+
+// A char[] member compared against a string literal: matched with C
+// zero-initialization semantics (bytes past the literal's NUL expected 0).
+[[cccc::test(return = (struct FwBuf){.buf = "hi", .n = 2})]]
+struct FwBuf test_array_field_string(void) {
+    struct FwBuf r = {0};
+    r.buf[0] = 'h'; r.buf[1] = 'i'; r.n = 2;
+    return r;
+}
+
+// Anonymous struct member: its fields (.x, .y) live directly in the outer
+// struct's designator namespace, same as C's own anonymous-member lookup.
+struct FwAnonS {
+    struct {
+        int x;
+        int y;
+    };
+    int z;
+};
+
+[[cccc::test(return = (struct FwAnonS){.x = 1, .y = 2, .z = 3})]]
+struct FwAnonS test_anon_struct_member(void) {
+    return (struct FwAnonS){.x = 1, .y = 2, .z = 3};
+}
+
+// Malformed nested literal: the inner brace list is missing a value, so
+// only that field's assertion is skipped (with a -Wattributes warning) --
+// parsing recovers past the *matching* '}' rather than desyncing on the
+// first inner '}', so the sibling `name =` attribute after it still applies.
+[[cccc::test(return = (struct FwOuter){.p = {.a = 1, .b}, .z = 3},
+             name = "malformed nested literal recovers cleanly")]]
+struct FwOuter test_nested_malformed_recovery(void) {
+    return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
+}
+
+// Depth cap: a compound literal nested past CCCC_RET_FIELD_MAX_DEPTH (8)
+// levels produces a -Wattributes warning and the whole assertion is
+// skipped (test still runs and passes -- there's simply no return=
+// assertion left to check).
+struct FwD0 { int v; };
+struct FwD1 { struct FwD0 a; };
+struct FwD2 { struct FwD1 a; };
+struct FwD3 { struct FwD2 a; };
+struct FwD4 { struct FwD3 a; };
+struct FwD5 { struct FwD4 a; };
+struct FwD6 { struct FwD5 a; };
+struct FwD7 { struct FwD6 a; };
+struct FwD8 { struct FwD7 a; };
+struct FwD9 { struct FwD8 a; };
+
+[[cccc::test(return = (struct FwD9){
+    .a = {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.v = 1}}}}}}}}}
+}, name = "nested past max depth is skipped, not crashed")]]
+struct FwD9 test_nested_too_deep(void) {
+    struct FwD9 r = {0};
+    return r;
+}
+
 // [from test_return_types.c]
 // Return value assertions: string, float, operator forms (tickets #346, #343).
 #pragma cccc suite begin "framework/return_types"

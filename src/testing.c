@@ -801,6 +801,214 @@ static bool check_output_pattern(const char *pat, const char *buf,
 }
 #endif
 
+// --- RET_STRUCT comparison (#353, #489) ---------------------------------
+//
+// A return= compound-literal assertion is compared recursively against the
+// captured return buffer: cmp_ret_aggregate walks a struct/union/array
+// type, cmp_ret_value dispatches one member/element (scalar vs. nested
+// aggregate), and cmp_ret_scalar reads one leaf value. Every function also
+// renders the "got" side of a failure message into a caller-supplied
+// bounded buffer via sb_appendf.
+
+// Bounded string-builder append: truncates cleanly on overflow instead of
+// overrunning a fixed-size "got" rendering buffer.
+static void sb_appendf(char *dst, size_t cap, const char *fmt, ...) {
+    size_t len = strlen(dst);
+    if (len >= cap) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(dst + len, cap - len, fmt, ap);
+    va_end(ap);
+}
+
+static bool cmp_ret_aggregate(const char *buf, int base_off, Type *ty,
+                              const TestRetField *expected, double eps,
+                              char *got, size_t got_cap);
+
+// Compare one scalar leaf value (struct member or array element) of type
+// `mty` living at `addr` against expected field `ef` (NULL => expect
+// zero/default). Writes the rendered actual value (no field name prefix)
+// into field_val/field_val_cap. Returns whether it matched.
+static bool cmp_ret_scalar(const char *addr, Type *mty, const TestRetField *ef,
+                           double eps, char *field_val, size_t field_val_cap) {
+    if (mty->kind == TY_FLOAT) {
+        float fv = 0.0f;
+        memcpy(&fv, addr, sizeof(fv));
+        double actual = (double)fv;
+        double expect = 0.0;
+        if (ef) expect = (ef->kind == RET_INT) ? (double)ef->val.i : ef->val.f;
+        snprintf(field_val, field_val_cap, "%g", actual);
+        return (actual - expect < eps && expect - actual < eps);
+    }
+    if (mty->kind == TY_DOUBLE) {
+        double actual = 0.0;
+        memcpy(&actual, addr, sizeof(actual));
+        double expect = 0.0;
+        if (ef) expect = (ef->kind == RET_INT) ? (double)ef->val.i : ef->val.f;
+        snprintf(field_val, field_val_cap, "%g", actual);
+        return (actual - expect < eps && expect - actual < eps);
+    }
+    if (mty->kind == TY_PTR && ef && ef->kind == RET_STR) {
+        // char* field compared with strcmp
+        uintptr_t ptr_val = 0;
+        memcpy(&ptr_val, addr, sizeof(uintptr_t));
+        char *actual = (char *)ptr_val;
+        const char *expect = ef->val.s;
+        int cmp = (actual && expect) ? strcmp(actual, expect)
+                                    : (actual ? 1 : (expect ? -1 : 0));
+        snprintf(field_val, field_val_cap, "\"%s\"", actual ? actual : "(null)");
+        return cmp == 0;
+    }
+    // Integer (any size up to 8 bytes) -- also the fallback for a RET_STR
+    // expectation against a non-pointer member, which is a kind mismatch.
+    int64_t actual = 0;
+    int sz = mty->size < 8 ? mty->size : 8;
+    if (sz <= 0) sz = 1;
+    if (mty->is_unsigned) {
+        uint64_t uv = 0;
+        memcpy(&uv, addr, sz);
+        actual = (int64_t)uv;
+    } else {
+        uint64_t uv = 0;
+        memcpy(&uv, addr, sz);
+        int shift = (8 - sz) * 8;
+        if (shift > 0 && shift < 64)
+            actual = (int64_t)((int64_t)(uv << shift) >> shift);
+        else
+            actual = (int64_t)uv;
+    }
+    snprintf(field_val, field_val_cap, "%" PRId64, actual);
+    if (ef && ef->kind == RET_STR) return false; // kind mismatch: string expected
+    int64_t expect = 0;
+    if (ef) expect = (ef->kind == RET_FLOAT) ? (int64_t)ef->val.f : ef->val.i;
+    return actual == expect;
+}
+
+// Dispatch one member/element: a nested struct/union/array recurses via
+// cmp_ret_aggregate, everything else is a scalar leaf via cmp_ret_scalar.
+// Appends the rendered actual value to got/got_cap either way.
+static bool cmp_ret_value(const char *buf, int base_off, Type *ty,
+                          const TestRetField *ef, double eps,
+                          char *got, size_t got_cap) {
+    if (ty->kind == TY_ARRAY && ef && ef->kind == RET_STR) {
+        // char[] compared against a string literal (C zero-initialization
+        // semantics: bytes past the literal's NUL are expected to be zero).
+        const char *actual = buf + base_off;
+        const char *expect = ef->val.s ? ef->val.s : "";
+        size_t n = ty->array_len > 0 ? (size_t)ty->array_len : 0;
+        size_t elen = strlen(expect);
+        bool ok = true;
+        for (size_t i = 0; i < n; i++) {
+            char e = (i < elen) ? expect[i] : '\0';
+            if (actual[i] != e) { ok = false; break; }
+        }
+        sb_appendf(got, got_cap, "\"%.*s\"", (int)n, actual);
+        return ok;
+    }
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ARRAY) {
+        if (ef && ef->kind != RET_STRUCT) {
+            sb_appendf(got, got_cap, "(type mismatch)");
+            return false;
+        }
+        return cmp_ret_aggregate(buf, base_off, ty, ef ? ef->val.sub : NULL,
+                                 eps, got, got_cap);
+    }
+    if (ef && ef->kind == RET_STRUCT) {
+        sb_appendf(got, got_cap, "(type mismatch)");
+        return false;
+    }
+    char field_val[64];
+    bool ok = cmp_ret_scalar(buf + base_off, ty, ef, eps, field_val, sizeof(field_val));
+    sb_appendf(got, got_cap, "%s", field_val);
+    return ok;
+}
+
+// Compares the members of one struct/union type against `expected`,
+// appending ".name = value" entries (no wrapping braces) directly into
+// got/*first. Used both for the top-level type and, for an anonymous
+// struct/union member, recursively with the SAME expected list and *first
+// tracking -- an anonymous member's fields live directly in the parent's
+// name namespace (C anonymous-member lookup rules), not under a nested
+// name of their own.
+static bool cmp_ret_struct_body(const char *buf, int base_off, Type *ty,
+                                const TestRetField *expected, double eps,
+                                char *got, size_t got_cap, bool *first) {
+    bool all_eq = true;
+    bool is_union = (ty->kind == TY_UNION);
+    for (Member *m = ty->members; m; m = m->next) {
+        if (!m->name) {
+            // Anonymous struct/union member.
+            if (!cmp_ret_struct_body(buf, base_off + m->offset, m->ty,
+                                     expected, eps, got, got_cap, first))
+                all_eq = false;
+            continue;
+        }
+
+        // Find the matching expected field (NULL → expect 0, except for a
+        // union arm, which is simply not asserted on -- see below).
+        const TestRetField *ef = NULL;
+        for (const TestRetField *f = expected; f; f = f->next) {
+            if (f->name && m->name->len == strlen(f->name) &&
+                strncmp(m->name->loc, f->name, m->name->len) == 0) {
+                ef = f;
+                break;
+            }
+        }
+
+        // Union arms alias the same storage: an arm not named in the
+        // literal is not "expected zero", it's simply unasserted.
+        if (is_union && !ef) continue;
+
+        if (!*first) sb_appendf(got, got_cap, ", ");
+        sb_appendf(got, got_cap, ".%.*s = ", (int)m->name->len, m->name->loc);
+        if (!cmp_ret_value(buf, base_off + m->offset, m->ty, ef, eps, got, got_cap))
+            all_eq = false;
+        *first = false;
+    }
+    return all_eq;
+}
+
+// Recursively compares a struct/union/array value living at buf+base_off
+// against the expected field list, rendering a "{...}" / "[elements]"
+// actual-value string into got/got_cap as it goes. Returns whether every
+// compared field/element matched.
+static bool cmp_ret_aggregate(const char *buf, int base_off, Type *ty,
+                              const TestRetField *expected, double eps,
+                              char *got, size_t got_cap) {
+    if (ty->kind == TY_ARRAY) {
+        sb_appendf(got, got_cap, "{");
+        Type *elem_ty = ty->base;
+        int elem_size = elem_ty ? elem_ty->size : 0;
+        int n = ty->array_len;
+        bool all_eq = true;
+        const TestRetField *cur = expected;
+        for (int i = 0; i < n; i++) {
+            if (i > 0) sb_appendf(got, got_cap, ", ");
+            const TestRetField *ef = cur;
+            if (cur) cur = cur->next;
+            if (elem_ty) {
+                if (!cmp_ret_value(buf, base_off + i * elem_size, elem_ty, ef,
+                                   eps, got, got_cap))
+                    all_eq = false;
+            }
+        }
+        sb_appendf(got, got_cap, "}");
+        return all_eq;
+    }
+
+    if (!ty->members) {
+        sb_appendf(got, got_cap, "{}");
+        return true; // opaque/incomplete type -- nothing to compare
+    }
+
+    sb_appendf(got, got_cap, "{");
+    bool first = true;
+    bool all_eq = cmp_ret_struct_body(buf, base_off, ty, expected, eps,
+                                      got, got_cap, &first);
+    sb_appendf(got, got_cap, "}");
+    return all_eq;
+}
+
 int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
     // Reverse setup records to declaration order (built by prepending).
@@ -1433,95 +1641,14 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                         ret_ok = true; // can't compare; skip silently
                         break;
                     }
-                    // Build failure "got" string and compare field-by-field.
+                    // Build failure "got" string and compare field-by-field
+                    // (recursively -- see cmp_ret_aggregate).
                     // For != the whole struct must differ (all-equal → mismatch).
-                    char got_str[512] = "{";
-                    bool all_eq = true;
-                    bool first_field = true;
+                    char got_str[512] = {0};
                     double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
-                    for (Member *m = st->members; m; m = m->next) {
-                        if (!m->name) continue; // anonymous / padding pseudo-member
-
-                        // Find the matching expected field (NULL → expect 0)
-                        const TestRetField *ef = NULL;
-                        for (const TestRetField *f = r->ret_expect.ret_fields; f; f = f->next) {
-                            if (f->name && m->name &&
-                                m->name->len == strlen(f->name) &&
-                                strncmp(m->name->loc, f->name, m->name->len) == 0) {
-                                ef = f;
-                                break;
-                            }
-                        }
-
-                        // Read actual value from the captured buffer.
-                        bool field_eq = true;
-                        char field_got[64] = {0};
-                        const char *field_delim = first_field ? "" : ", ";
-
-                        if (m->ty->kind == TY_FLOAT) {
-                            float fv = 0.0f;
-                            memcpy(&fv, ret_struct_buf + m->offset, sizeof(fv));
-                            double actual = (double)fv;
-                            double expect = ef ? ef->val.f : 0.0;
-                            if (ef && ef->kind == RET_INT) expect = (double)ef->val.i;
-                            field_eq = (actual - expect < eps && expect - actual < eps);
-                            snprintf(field_got, sizeof(field_got), "%s.%.*s = %g",
-                                     field_delim, (int)m->name->len, m->name->loc, actual);
-                        } else if (m->ty->kind == TY_DOUBLE) {
-                            double actual = 0.0;
-                            memcpy(&actual, ret_struct_buf + m->offset, sizeof(actual));
-                            double expect = ef ? ef->val.f : 0.0;
-                            if (ef && ef->kind == RET_INT) expect = (double)ef->val.i;
-                            field_eq = (actual - expect < eps && expect - actual < eps);
-                            snprintf(field_got, sizeof(field_got), "%s.%.*s = %g",
-                                     field_delim, (int)m->name->len, m->name->loc, actual);
-                        } else if (m->ty->kind == TY_PTR &&
-                                   ef && ef->kind == RET_STR) {
-                            // char* field compared with strcmp
-                            uintptr_t ptr_val = 0;
-                            memcpy(&ptr_val, ret_struct_buf + m->offset,
-                                   sizeof(uintptr_t));
-                            char *actual = (char *)ptr_val;
-                            const char *expect = ef->val.s;
-                            int cmp = (actual && expect) ? strcmp(actual, expect)
-                                                        : (actual ? 1 : (expect ? -1 : 0));
-                            field_eq = (cmp == 0);
-                            snprintf(field_got, sizeof(field_got), "%s.%.*s = \"%s\"",
-                                     field_delim, (int)m->name->len, m->name->loc,
-                                     actual ? actual : "(null)");
-                        } else {
-                            // Integer (any size up to 8 bytes)
-                            int64_t actual = 0;
-                            int sz = m->ty->size < 8 ? m->ty->size : 8;
-                            if (m->ty->is_unsigned) {
-                                uint64_t uv = 0;
-                                memcpy(&uv, ret_struct_buf + m->offset, sz);
-                                actual = (int64_t)uv;
-                            } else {
-                                // Sign-extend for signed types < 8 bytes
-                                uint64_t uv = 0;
-                                memcpy(&uv, ret_struct_buf + m->offset, sz);
-                                int shift = (8 - sz) * 8;
-                                if (shift > 0 && shift < 64)
-                                    actual = (int64_t)((int64_t)(uv << shift) >> shift);
-                                else
-                                    actual = (int64_t)uv;
-                            }
-                            int64_t expect = ef ? ef->val.i : 0;
-                            if (ef && ef->kind == RET_FLOAT)
-                                expect = (int64_t)ef->val.f;
-                            field_eq = (actual == expect);
-                            snprintf(field_got, sizeof(field_got), "%s.%.*s = %" PRId64,
-                                     field_delim, (int)m->name->len, m->name->loc, actual);
-                        }
-
-                        // Append to got_str
-                        strncat(got_str, field_got,
-                                sizeof(got_str) - strlen(got_str) - 1);
-                        if (!field_eq) all_eq = false;
-                        first_field = false;
-                    }
-                    strncat(got_str, "}", sizeof(got_str) - strlen(got_str) - 1);
+                    bool all_eq = cmp_ret_aggregate(ret_struct_buf, 0, st,
+                                                    r->ret_expect.ret_fields, eps,
+                                                    got_str, sizeof(got_str));
 
                     // For = : all fields must be equal.
                     // For !=: at least one field must differ (not all equal).

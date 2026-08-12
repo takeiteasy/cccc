@@ -1643,12 +1643,7 @@ void cc_destroy(VirtualMachine *vm) {
         if (r->ret_kind == RET_STR)
             free(r->ret_expect.ret_str);
         else if (r->ret_kind == RET_STRUCT) {
-            for (TestRetField *f = r->ret_expect.ret_fields, *fn; f; f = fn) {
-                fn = f->next;
-                free(f->name);
-                if (f->kind == RET_STR) free(f->val.s);
-                free(f);
-            }
+            cc_free_ret_fields(r->ret_expect.ret_fields);
             free(r->ret_struct_text);
         }
         for (int i = 0; i < r->test_ffi_allow_count; i++)

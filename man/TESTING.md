@@ -1005,7 +1005,7 @@ const char *test_status(void) {
 }
 ```
 
-**Struct / union**: use an inline compound literal to assert a struct or union return value. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation).
+**Struct / union**: use an inline compound literal to assert a struct or union return value. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
 
 ```c
 struct Point { int x; int y; };
@@ -1035,9 +1035,64 @@ If the assertion fails:
 expected return value = (struct Point){.x = 1, .y = 2}, got {.x = 99, .y = 2}
 ```
 
-**Scope limitations** — the following are not supported in v1 and are deferred to follow-up tickets:
+**Nested fields**: a field that is itself a struct, union, or array can be asserted with a nested compound literal. The nested literal may repeat the `(struct|union TAG)` prefix or, more commonly, be a bare brace list — its type is inferred from the field being initialized. Nesting recurses to a maximum of 8 levels; a literal nested deeper than that produces a `-Wattributes` warning and the whole assertion is skipped.
 
-- *Nested struct fields* — a flat struct whose field is itself a struct.
+```c
+struct Inner { int a; int b; };
+struct Outer { struct Inner p; int z; };
+
+[[cccc::test(return = (struct Outer){.p = {.a = 1, .b = 2}, .z = 3})]]
+struct Outer make_outer(void) {
+    return (struct Outer){.p = {.a = 1, .b = 2}, .z = 3};
+}
+```
+
+A field omitted from a nested literal is expected to be zero, recursively — an entirely omitted nested field means all of its own fields are expected to be zero.
+
+**Anonymous struct/union members**: an anonymous member's fields are addressed directly by the outer struct's own designators, matching C's own anonymous-member lookup rules — there is no extra level of nesting in the literal.
+
+```c
+struct WithAnon {
+    struct { int x; int y; }; // anonymous
+    int z;
+};
+
+[[cccc::test(return = (struct WithAnon){.x = 1, .y = 2, .z = 3})]]
+struct WithAnon make(void) {
+    return (struct WithAnon){.x = 1, .y = 2, .z = 3};
+}
+```
+
+**Arrays**: array-typed fields are asserted with a brace list of positional (undesignated) elements, matched left-to-right; elements past the end of the list are expected to be zero. A `char[]` field may instead be compared against a string literal, following C zero-initialisation semantics (bytes past the literal's terminating `NUL` are expected to be zero).
+
+```c
+struct Buf { int values[5]; char label[8]; };
+
+[[cccc::test(return = (struct Buf){.values = {1, 2, 3}, .label = "hi"})]]
+struct Buf make_buf(void) {
+    struct Buf r = {0};
+    r.values[0] = 1; r.values[1] = 2; r.values[2] = 3;
+    r.label[0] = 'h'; r.label[1] = 'i';
+    return r;
+}
+```
+
+An array of structs takes a positional list of (optionally `(struct TAG)`-prefixed) nested literals: `.items = {(struct Pair){.a=1,.b=2}, (struct Pair){.a=3,.b=4}}`.
+
+**Unions**: union arms alias the same storage, so — unlike a struct — an arm *not* named in the literal is not asserted on at all (it is not "expected zero", since reading it back would just reinterpret whichever arm actually was asserted). Only the arms named in the literal are compared.
+
+```c
+union Val { int i; float f; };
+
+[[cccc::test(return = (union Val){.i = 0x3f800000})]]
+union Val make_val(void) {
+    return (union Val){.i = 0x3f800000}; // .f is not checked
+}
+```
+
+**Scope limitations** — the following are not supported and are deferred to follow-up tickets:
+
+- *Bitfields* — a bitfield member is compared as its whole storage unit, not its individual bit-width.
 - *Non-`char *` pointer fields* — pointer fields other than `char *` are read as integers.
 - *Pre-declared constants* — field values must be compile-time literals; named constants (enum names, `#define` values) are not resolved in this context (see [ticket #349](https://todo.sr.ht/~takeiteasy/cccc/349)).
 
@@ -1836,7 +1891,7 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 
 - Test functions must take no arguments and return `void`, `int`, `double`, `float`, `char *`, or a flat struct/union. Use `return = value` to assert on the return value.
 - `return =` assertions support integer literals, float literals, string literals, and compound struct/union literals (`(struct T){.f = v, ...}`). Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`). Unrecognized operands produce a `-Wattributes` warning and skip the assertion.
-- Struct `return =` supports flat structs (scalar and `char *` fields only). Nested struct fields and non-`char *` pointer fields are not supported in v1.
+- Struct `return =` supports nested struct/union/array fields and anonymous struct/union members (recursing to a maximum of 8 levels), in addition to scalar and `char *` fields. Bitfield members and non-`char *` pointer fields are not supported.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `Assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.

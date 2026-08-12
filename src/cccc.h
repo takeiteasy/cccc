@@ -1971,17 +1971,25 @@ typedef enum {
 
 // One expected field value for a RET_STRUCT return assertion.
 // Linked list built by parse_test_args; consumed by cc_run_tests.
+// `name == NULL` marks a positional entry (used for array-element lists,
+// e.g. `.a = {1, 2, 3}`); named entries are matched by designator instead.
 typedef struct TestRetField TestRetField;
 struct TestRetField {
-    char      *name;    // designated field name (e.g. "x")
-    RetKind    kind;    // RET_INT / RET_FLOAT / RET_STR per scalar type
+    char      *name;    // designated field name (e.g. "x"); NULL = positional
+    RetKind    kind;    // RET_INT / RET_FLOAT / RET_STR / RET_STRUCT per field
     union {
-        int64_t  i;    // RET_INT
-        double   f;    // RET_FLOAT
-        char    *s;    // RET_STR — heap-allocated strdup
+        int64_t       i;   // RET_INT
+        double        f;   // RET_FLOAT
+        char         *s;   // RET_STR — heap-allocated strdup
+        TestRetField *sub; // RET_STRUCT — nested struct/union/array child list
     } val;
     TestRetField *next;
 };
+
+// Recursively frees a TestRetField list (including nested `val.sub` chains).
+// Single shared implementation -- called from both the parser's error-recovery
+// path (src/preprocess.c) and TestFnRecord teardown (src/vm.c).
+void cc_free_ret_fields(TestRetField *f);
 
 // Output bundle for cc_parse_test_flags(). Holds the full delta to apply when
 // lazily recompiling for a per-test flags= attribute.

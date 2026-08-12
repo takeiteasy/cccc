@@ -2916,15 +2916,174 @@ static bool parse_scalar_operand(Token **p_ptr,
     return false;
 }
 
-// Free a TestRetField linked list (heap-allocated by parse_test_args).
-static void free_ret_fields(TestRetField *f) {
+// Free a TestRetField linked list (heap-allocated by parse_test_args),
+// including nested RET_STRUCT children. Declared in cccc.h -- also called
+// from TestFnRecord teardown (src/vm.c) so there is exactly one
+// implementation.
+void cc_free_ret_fields(TestRetField *f) {
     while (f) {
         TestRetField *next = f->next;
         free(f->name);
         if (f->kind == RET_STR) free(f->val.s);
+        else if (f->kind == RET_STRUCT) cc_free_ret_fields(f->val.sub);
         free(f);
         f = next;
     }
+}
+
+// Skip tokens until the '}' that closes the currently-open brace list,
+// tracking nested '{'/'}' pairs. *p_ptr must point somewhere inside an
+// already-opened '{' (i.e. at brace depth 1 relative to that '{'). Leaves
+// *p_ptr just past the matching top-level '}' (or at TK_EOF if unbalanced).
+static void skip_balanced_braces(Token **p_ptr) {
+    Token *p = *p_ptr;
+    int depth = 1;
+    while (p && p->kind != TK_EOF && depth > 0) {
+        if (equal(p, "{")) depth++;
+        else if (equal(p, "}")) depth--;
+        p = p->next;
+    }
+    *p_ptr = p;
+}
+
+// Max nesting depth accepted for a compound-literal return= assertion
+// (struct-in-struct, array-of-struct, etc). Guards against runaway
+// recursion on a malformed/adversarial attribute; deeper literals produce a
+// -Wattributes warning and the assertion is skipped.
+#define CCCC_RET_FIELD_MAX_DEPTH 8
+
+// Recursively parse a brace-delimited initializer list for a return=
+// compound-literal assertion: `{ [.name =] value, ... }`. *p_ptr must point
+// to the first token *after* the opening '{'; on success it is left just
+// past the matching '}' and *out holds the parsed field list (caller owns,
+// free with cc_free_ret_fields). A `value` may itself be a nested
+// initializer -- `(struct|union TAG){...}` or a bare `{...}` -- which
+// recurses with depth+1, producing a RET_STRUCT field whose `val.sub` is the
+// child list. Entries without a `.name =` designator are positional (used
+// for array-element lists) and get `name == NULL`.
+//
+// On failure (malformed syntax or depth exceeded), warns via warn_tok,
+// frees any partially-built list, advances *p_ptr past the matching '}' via
+// skip_balanced_braces (so the caller's token stream stays in sync even
+// with nested braces), and returns false. If out_close is non-NULL, *out_close
+// receives the matching '}' token on success (used by the top-level caller
+// to compute the source span for diagnostics); it is left NULL on failure.
+static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
+                                 TestRetField **out, Token **out_close,
+                                 int depth) {
+    Token *p = *p_ptr;
+    *out = NULL;
+    if (out_close) *out_close = NULL;
+
+    if (depth > CCCC_RET_FIELD_MAX_DEPTH) {
+        warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                 "compound-literal return= assertion nested too deeply "
+                 "(max %d levels); assertion skipped",
+                 CCCC_RET_FIELD_MAX_DEPTH);
+        skip_balanced_braces(&p);
+        *p_ptr = p;
+        return false;
+    }
+
+    TestRetField *fields = NULL, **ftail = &fields;
+    bool parse_ok = true;
+    bool warned = false; // true once a specific diagnostic has been emitted,
+                         // so the generic "malformed compound literal"
+                         // fallback below doesn't double-warn
+    Token *close_brace = NULL;
+
+    while (p && !equal(p, "}") && p->kind != TK_EOF) {
+        char *fname = NULL;
+        if (equal(p, ".")) {
+            p = p->next;
+            if (!p || p->kind != TK_IDENT) { parse_ok = false; break; }
+            fname = strndup(p->loc, p->len);
+            p = p->next;
+            if (!p || !equal(p, "=")) {
+                free(fname);
+                parse_ok = false;
+                break;
+            }
+            p = p->next;
+        }
+        // else: no designator -- positional entry (array-element list)
+
+        bool is_nested_typed = p && equal(p, "(") &&
+            p->next && (equal(p->next, "struct") || equal(p->next, "union")) &&
+            p->next->next && p->next->next->kind == TK_IDENT &&
+            p->next->next->next && equal(p->next->next->next, ")") &&
+            p->next->next->next->next && equal(p->next->next->next->next, "{");
+        bool is_nested_bare = p && equal(p, "{");
+
+        RetKind fkind = RET_NONE;
+        int64_t ival = 0;
+        double  fval = 0.0;
+        const char *sval = NULL;
+        TestRetField *sub = NULL;
+
+        if (is_nested_typed || is_nested_bare) {
+            p = is_nested_typed ? p->next->next->next->next->next // past ( struct|union TAG ) {
+                                 : p->next;                        // past {
+            TestRetField *children = NULL;
+            if (!parse_ret_init_list(vm, &p, &children, NULL, depth + 1)) {
+                // Inner call already warned and skipped past its own '}'.
+                free(fname);
+                parse_ok = false;
+                warned = true;
+                break;
+            }
+            fkind = RET_STRUCT;
+            sub = children;
+        } else if (!parse_scalar_operand(&p, &fkind, &ival, &fval, &sval)) {
+            if (fname)
+                warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                         "unrecognized value for field '%s' in compound-literal "
+                         "return= assertion; skipping",
+                         fname);
+            else
+                warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                         "unrecognized value in compound-literal return= "
+                         "assertion; skipping");
+            free(fname);
+            parse_ok = false;
+            warned = true;
+            break;
+        }
+
+        TestRetField *f = calloc(1, sizeof(TestRetField));
+        f->name = fname;
+        f->kind = fkind;
+        if      (fkind == RET_INT)    f->val.i   = ival;
+        else if (fkind == RET_FLOAT)  f->val.f   = fval;
+        else if (fkind == RET_STR)    f->val.s   = sval ? strdup(sval) : NULL;
+        else if (fkind == RET_STRUCT) f->val.sub = sub;
+        *ftail = f;
+        ftail = &f->next;
+
+        if (p && equal(p, ",")) p = p->next;
+    }
+
+    if (p && equal(p, "}")) {
+        close_brace = p;
+        p = p->next;
+    }
+
+    if (!parse_ok || !close_brace) {
+        cc_free_ret_fields(fields);
+        if (!warned) {
+            warn_tok(vm, p ? p : close_brace, CCCC_WARN_ATTRIBUTES,
+                     "malformed compound literal in return= assertion; "
+                     "skipping");
+        }
+        skip_balanced_braces(&p);
+        *p_ptr = p;
+        return false;
+    }
+
+    *out = fields;
+    if (out_close) *out_close = close_brace;
+    *p_ptr = p;
+    return true;
 }
 
 // Parse test(...) argument list. *p_ptr must point to the first token inside
@@ -3013,80 +3172,26 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                              "struct return= assertion only supports '=' or '!='; "
                              "ordered comparisons are not meaningful for structs; "
                              "assertion skipped");
-                    // Skip to closing brace
-                    while (p && !equal(p, "}") && p->kind != TK_EOF) p = p->next;
-                    if (p && equal(p, "}")) p = p->next;
+                    // Skip to closing brace (depth-aware: the literal may
+                    // itself contain nested compound literals).
+                    p = p->next->next->next->next->next; // past ( struct|union TAG ) {
+                    skip_balanced_braces(&p);
                 } else {
                     const char *span_start = p->loc;  // points to '('
                     // Advance past: ( struct|union TAG ) {
                     p = p->next->next->next->next->next;
 
-                    TestRetField *fields = NULL, **ftail = &fields;
-                    bool parse_ok = true;
+                    TestRetField *fields = NULL;
                     Token *close_brace = NULL;
-
-                    while (p && !equal(p, "}") && p->kind != TK_EOF) {
-                        if (!equal(p, ".")) { parse_ok = false; break; }
-                        p = p->next;
-                        if (!p || p->kind != TK_IDENT) { parse_ok = false; break; }
-                        char *fname = strndup(p->loc, p->len);
-                        p = p->next;
-                        if (!p || !equal(p, "=")) {
-                            free(fname);
-                            parse_ok = false;
-                            break;
-                        }
-                        p = p->next;
-
-                        RetKind fkind = RET_NONE;
-                        int64_t ival = 0;
-                        double  fval = 0.0;
-                        const char *sval = NULL;
-
-                        if (!parse_scalar_operand(&p, &fkind, &ival, &fval, &sval)) {
-                            warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                                     "unrecognized value for field '%s' in compound-literal "
-                                     "return= assertion; skipping",
-                                     fname);
-                            free(fname);
-                            parse_ok = false;
-                            break;
-                        }
-
-                        TestRetField *f = calloc(1, sizeof(TestRetField));
-                        f->name = fname;
-                        f->kind = fkind;
-                        if      (fkind == RET_INT)   f->val.i = ival;
-                        else if (fkind == RET_FLOAT) f->val.f = fval;
-                        else if (fkind == RET_STR)   f->val.s = sval ? strdup(sval) : NULL;
-                        *ftail = f;
-                        ftail = &f->next;
-
-                        if (p && equal(p, ",")) p = p->next;
-                    }
-
-                    if (p && equal(p, "}")) {
-                        close_brace = p;
-                        p = p->next;
-                    }
-
-                    if (!parse_ok || !close_brace) {
-                        // Malformed literal: warn, free partial fields, skip to '}'
-                        free_ret_fields(fields);
-                        if (!parse_ok) {
-                            warn_tok(vm, p ? p : close_brace, CCCC_WARN_ATTRIBUTES,
-                                     "malformed compound literal in return= assertion; "
-                                     "skipping");
-                        }
-                        while (p && !equal(p, "}") && p->kind != TK_EOF) p = p->next;
-                        if (p && equal(p, "}")) p = p->next;
-                    } else {
+                    if (parse_ret_init_list(vm, &p, &fields, &close_brace, 1)) {
                         size_t span_len = (close_brace->loc + close_brace->len) - span_start;
                         out->ret_struct_text = strndup(span_start, span_len);
                         out->ret_fields = fields;
                         out->ret_kind   = RET_STRUCT;
                         out->ret_op     = op;
                     }
+                    // On failure, parse_ret_init_list already warned, freed
+                    // the partial list, and left p past the matching '}'.
                 }
             } else {
                 // Scalar operands: use helper (handles STR / NUM / PP_NUM / negative int)
