@@ -1433,6 +1433,29 @@ VLA_MULTIDIM_PROGRAM = (
     "}\n"
 )
 
+# #973: `&v` on a VLA local used to yield the frame slot holding the alloca'd
+# data pointer instead of the data address itself -- `(*p)[i]` through
+# `int (*p)[n] = &v` read garbage. Fixed in codegen.c's gen_expr ND_ADDR case
+# (route through gen_expr instead of gen_addr for a TY_VLA operand); the
+# type (`int (*)[n]`, NOT decayed to `int *` the way TY_ARRAY is) was already
+# correct and unchanged. Exercises the value round trip and the row-stride
+# type check together.
+VLA_ADDR_PROGRAM = (
+    "int main(void) {\n"
+    "    int n = 3;\n"
+    "    int v[n];\n"
+    "    v[0] = 7; v[1] = 8; v[2] = 9;\n"
+    "    int (*p)[n] = &v;\n"
+    "    (*p)[1] = 42;\n"
+    "    int total = v[1]; // must see the write through p\n"
+    "\n"
+    "    long stride = (long)((char *)(&v + 1) - (char *)&v);\n"
+    "    total = total - total + (stride == (long)(n * sizeof(int)) ? 42 : 1);\n"
+    "\n"
+    "    return total;\n"
+    "}\n"
+)
+
 # #964: ND_OVERFLOW_ARITH had no serializer case (`/* unsupported expr kind
 # 55 */`) -- val (0/1/2) selects add/sub/mul, lowering directly onto the
 # same-named clang/gcc builtin. Exercises all three ops, both an overflowing
@@ -1526,11 +1549,19 @@ def case_vla_multidim_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     VLA_MULTIDIM_PROGRAM)
 
 
+def case_vla_addr_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  50: -c=native, `&v` on a VLA local yields the array's data "
+          "address (not the frame slot holding the alloca'd pointer) and "
+          "keeps its non-decayed `int (*)[n]` row-stride type (#973)")
+    return _vm_and_native_run_case(cccc, tmp, "vla_addr_973",
+                                    VLA_ADDR_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1587,6 +1618,7 @@ def main() -> int:
             case_vla_native_round_trip,
             case_overflow_native_round_trip,
             case_vla_multidim_native_round_trip,
+            case_vla_addr_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

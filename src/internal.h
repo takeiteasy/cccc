@@ -667,6 +667,11 @@ Type *array_of(VirtualMachine *vm, Type *base, int size);
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes);
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
+// #973 follow-up: true if ty is TY_VLA, or a chain of TY_PTR/TY_ARRAY whose
+// eventual base is TY_VLA (e.g. `int (*)[n]`) -- used to detect a local
+// whose C declarator reads a runtime-only variable and so can't be hoisted
+// to the top of its function. See Obj.deferred_vla_ptr_init (cccc.h).
+bool type_contains_vla(Type *ty);
 Type *enum_type(VirtualMachine *vm);
 Type *struct_type(VirtualMachine *vm);
 Type *union_type(VirtualMachine *vm);

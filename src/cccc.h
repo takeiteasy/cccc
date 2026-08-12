@@ -1671,6 +1671,21 @@ struct Obj {
     struct Obj *objsize_derived_from;
     int   objsize_derived_offset; // byte offset from objsize_derived_from
 
+    // #973 follow-up: a pointer-to-VLA local (e.g. `int (*p)[n] = &v;`) has a
+    // declarator that reads `n`, a runtime variable -- its declaration can't
+    // be hoisted to the top of the function like an ordinary local's (n
+    // isn't in scope there yet), the same reason a VLA's own declaration
+    // isn't hoisted. Unlike a VLA (which always gets its own synthesized
+    // `= alloca(...)` node, so its in-place declaration site is unconditional),
+    // a pointer-to-VLA local only needs deferred declaration when it actually
+    // has an initializer to anchor the in-place declaration to; this field is
+    // set (in declaration(), parse.c) to that initializer's ND_ASSIGN node
+    // when one exists, and left NULL otherwise. NULL means: not deferred,
+    // hoisted normally (matches today's behavior, including the still-open
+    // gap for a no-initializer pointer-to-VLA declaration -- see the comment
+    // at its hoist-skip check in serialize.c).
+    Node *deferred_vla_ptr_init;
+
     // Global variable or function
     bool is_function;   /**< True when this Obj represents a function. */
     bool is_definition;

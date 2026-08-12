@@ -385,4 +385,71 @@ int test_vla_3d_subscript(void) {
     return v[1][2][3];
 }
 
+// #973: `&v` on a VLA local must yield the array's data address, not the
+// frame slot that holds the alloca'd pointer -- `(void*)&v` and `(void*)v`
+// (the array's own decay-to-pointer value) must be the same address.
+[[cccc::test(return = 42)]]
+int test_vla_addr_equals_decay(void) {
+    int n = 3;
+    int v[n];
+    return (void *)&v == (void *)v ? 42 : 1;
+}
+
+// #973: `int (*p)[n] = &v;` must let `(*p)[i]` read/write the same storage
+// as `v[i]` -- before the fix, `p` pointed at the frame slot instead of the
+// VLA's data, so `(*p)[i]` read garbage.
+[[cccc::test(return = 42)]]
+int test_vla_addr_row_pointer_round_trip(void) {
+    int n = 3;
+    int v[n];
+    v[0] = 7;
+    v[1] = 8;
+    v[2] = 42;
+    int (*p)[n] = &v;
+    (*p)[0] += 1;
+    return (*p)[2] - (v[0] - 8);
+}
+
+// #973: `&v` has type `int (*)[n]` (pointer-to-VLA-row), which does NOT
+// decay to `int *` the way a fixed-size array's `&a` does -- `&v + 1` must
+// stride a whole row (n * sizeof(int)), not one element.
+[[cccc::test(return = 42)]]
+int test_vla_addr_stride_is_whole_row(void) {
+    int n = 3;
+    int v[n];
+    long stride = (long)((char *)(&v + 1) - (char *)&v);
+    return stride == (long)(n * sizeof(int)) ? 42 : 1;
+}
+
+// #973: `sizeof(*p)` for `int (*p)[n] = &v` must be the VLA's runtime row
+// size, confirming &v's pointee type is the VLA itself, not its element.
+[[cccc::test(return = 42)]]
+int test_vla_addr_sizeof_deref(void) {
+    int n = 3;
+    int v[n];
+    int (*p)[n] = &v;
+    return sizeof(*p) == n * sizeof(int) ? 42 : 1;
+}
+
+// #973: the same &v value/type rules apply to a 2-D VLA -- &v's row pointer
+// still reaches the same storage as the array itself.
+[[cccc::test(return = 42)]]
+int test_vla_2d_addr_equals_decay(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    return (void *)&v == (void *)v ? 42 : 1;
+}
+
+// #973 control: `&v[1]` (address of an inner VLA row reached by pointer
+// arithmetic, not the VLA variable itself) was already address-based and
+// correct before this fix -- must keep working unchanged.
+[[cccc::test(return = 42)]]
+int test_vla_2d_addr_of_row(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    int (*p)[m] = &v[1];
+    p[0][0] = 42;
+    return v[1][0];
+}
+
 #pragma cccc suite end

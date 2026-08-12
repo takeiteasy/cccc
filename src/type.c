@@ -282,6 +282,21 @@ Type *vla_of(VirtualMachine *vm, Type *base, Node *len) {
     return ty;
 }
 
+// #973 follow-up: see the prototype comment (internal.h) and
+// Obj.deferred_vla_ptr_init (cccc.h). Only chases TY_PTR/TY_ARRAY -- a VLA
+// reached through a struct/union member or function return type can't
+// appear in a local's own declarator the way `int (*p)[n]` can, so those
+// chains are deliberately not walked.
+bool type_contains_vla(Type *ty) {
+    for (Type *t = ty; t; t = t->base) {
+        if (t->kind == TY_VLA)
+            return true;
+        if (t->kind != TY_PTR && t->kind != TY_ARRAY)
+            return false;
+    }
+    return false;
+}
+
 Type *enum_type(VirtualMachine *vm) {
     return new_type(vm, TY_ENUM, 4, 4);  // enums are int-sized (4 bytes)
 }
@@ -733,13 +748,18 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         }
         case ND_ASSIGN:
-            // LIMITATION (#974): this should also reject a TY_VLA lvalue
-            // (e.g. `v[1] = w[2];` where each side is itself a VLA row in a
-            // multi-dimensional VLA) -- whole-row assignment is silently
-            // accepted today instead of erroring "not an lvalue" like the
-            // TY_ARRAY case below does. Found alongside #971 (fixed); not
-            // fixed here, needs its own regression coverage.
-            if (node->lhs->ty->kind == TY_ARRAY) {
+            // #974: a TY_VLA lvalue is rejected the same way TY_ARRAY is
+            // above (e.g. `v[1] = w[2];` where each side is itself a VLA row
+            // in a multi-dimensional VLA -- whole-row assignment must error
+            // "not an lvalue", matching the TY_ARRAY case). ND_VLA_PTR is
+            // excluded: it carries its variable's own TY_VLA type (see the
+            // ND_VLA_PTR case below in this same function) and every VLA
+            // declaration lowers to `ND_ASSIGN(new_vla_ptr(var), alloca(...))`
+            // (parse.c) -- without this exclusion every VLA declaration
+            // would become a compile error.
+            if (node->lhs->ty->kind == TY_ARRAY ||
+                (node->lhs->ty->kind == TY_VLA &&
+                 node->lhs->kind != ND_VLA_PTR)) {
                 if (vm->collect_errors && error_tok_recover(vm, node->lhs->tok,
                                                              "not an lvalue")) {
                     node->ty = ty_error;
@@ -927,10 +947,22 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         case ND_ADDR: {
             Type *ty = node->lhs->ty;
-            // LIMITATION (#973): TY_VLA should decay here the same way
-            // TY_ARRAY does -- `&v` on a VLA currently yields `TY_VLA *`
-            // instead of the correct `int (*)[n]`. Found alongside #971
-            // (fixed); not fixed here, needs its own regression coverage.
+            // #973: TY_VLA does NOT decay here the way TY_ARRAY does above --
+            // `pointer_to(vla)` already IS the correct `int (*)[n]` (verified
+            // against real gcc/clang: `&v+1` strides a whole row and
+            // `sizeof(*p)` is the row size). Decaying to `pointer_to(base)`
+            // like TY_ARRAY would regress both. The bug this ticket actually
+            // found was in the *value* produced for `&v`, not this type --
+            // see the ND_ADDR case in codegen.c's gen_expr.
+            //
+            // KNOWN ISSUE: this TY_ARRAY decay is itself non-standard --
+            // `&a` on a fixed-size array should have type `T (*)[N]` (same
+            // shape as the now-correct TY_VLA case above) so `&a+1` strides
+            // the whole array, but decaying to `pointer_to(base)` makes
+            // `&a+1` stride one element instead (measured: 4 instead of 12
+            // for `int a[3]`). Legacy from chibicc, potentially load-bearing
+            // elsewhere in the codebase -- found alongside #973/#974, not
+            // fixed here, filed as its own ticket.
             if (ty->kind == TY_ARRAY)
                 node->ty = pointer_to(vm, ty->base);
             else

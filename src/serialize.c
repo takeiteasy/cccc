@@ -233,16 +233,29 @@ static bool node_is_vla_ptr_assign(Node *n) {
     return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VLA_PTR;
 }
 
-// #964: true if any of blk's *immediate* statements is a VLA_PTR assignment.
-// declaration() bundles a statement's per-declarator initializers into one
-// ND_BLOCK (e.g. `int n = 4, v[n];` is a single ND_BLOCK holding both), so a
-// block containing a VLA declarator has to stay unbraced when serialized --
-// see serialize_stmt_list_item() below.
+// #973 follow-up: true for the initializer of a pointer-to-VLA local (see
+// Obj.deferred_vla_ptr_init, cccc.h and the matching ND_EXPR_STMT case in
+// serialize_stmt()) -- the same "must stay in scope past this block" shape
+// as node_is_vla_ptr_assign, just for `int (*p)[n] = &v;` instead of a VLA's
+// own `v = alloca(...)`.
+static bool node_is_deferred_vla_ptr_init(Node *n) {
+    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VAR &&
+          n->lhs->var->deferred_vla_ptr_init == n;
+}
+
+// #964: true if any of blk's *immediate* statements is a VLA_PTR assignment
+// or (#973 follow-up) a deferred pointer-to-VLA initializer. declaration()
+// bundles a statement's per-declarator initializers into one ND_BLOCK (e.g.
+// `int n = 4, v[n];` is a single ND_BLOCK holding both), so a block
+// containing such a declarator has to stay unbraced when serialized -- see
+// serialize_stmt_list_item() below.
 static bool block_defines_vla(Node *blk) {
     if (!blk || blk->kind != ND_BLOCK)
         return false;
     for (Node *s = blk->body; s; s = s->next)
-        if (s->kind == ND_EXPR_STMT && node_is_vla_ptr_assign(s->lhs))
+        if (s->kind == ND_EXPR_STMT &&
+            (node_is_vla_ptr_assign(s->lhs) ||
+             node_is_deferred_vla_ptr_init(s->lhs)))
             return true;
     return false;
 }
@@ -1462,6 +1475,23 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             fprintf(f, ";\n");
             break;
         }
+        // #973 follow-up: the initializer of a pointer-to-VLA local (see
+        // Obj.deferred_vla_ptr_init, cccc.h) was skipped by the hoist loop
+        // above -- this is its recorded in-place declaration site. Emit a
+        // real declaration with the initializer attached instead of a bare
+        // assignment to an as-yet-undeclared name. Identity (not shape)
+        // comparison: node->lhs is a plain ND_ASSIGN like any reassignment
+        // of the same variable would produce, so only the exact node
+        // recorded at parse time is treated as the declaration.
+        if (node_is_deferred_vla_ptr_init(node->lhs)) {
+            Obj *var = node->lhs->lhs->var;
+            print_indent_level(f, indent);
+            serialize_type_decl(f, ctx, var->ty, var->name);
+            fprintf(f, " = ");
+            serialize_expr(f, vm, ctx, node->lhs->rhs, 0);
+            fprintf(f, ";\n");
+            break;
+        }
         // An atomic store written as its own statement (the usual case)
         // discards its value, so hand it to the ND_ASTORE statement case and
         // emit the plain void-returning call rather than the value-producing
@@ -1827,6 +1857,19 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             // place by the ND_EXPR_STMT case in serialize_stmt() that
             // recognizes its `ND_VLA_PTR = alloca(...)` initializer.
             if (var->ty->kind == TY_VLA)
+                continue;
+
+            // #973 follow-up: same reasoning, extended to a pointer-to-VLA
+            // local (`int (*p)[n] = &v;`) -- its declarator also reads a
+            // runtime variable. Only skip when we know there's an
+            // initializer to anchor the in-place declaration to (see the
+            // ND_EXPR_STMT case below, and Obj.deferred_vla_ptr_init in
+            // cccc.h); a pointer-to-VLA local declared with no initializer
+            // falls through to the normal hoist below, which re-emits a
+            // declarator referencing a not-yet-declared variable and fails
+            // to compile -- a pre-existing gap this fix doesn't widen,
+            // tracked separately rather than fixed here.
+            if (var->deferred_vla_ptr_init)
                 continue;
 
             print_indent_level(f, 1);

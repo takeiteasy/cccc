@@ -4687,6 +4687,27 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_ADDR:
+        // #973: for a VLA operand the array's base address IS its value, not
+        // the address of the thing holding it. A VLA *variable*'s frame slot
+        // holds the alloca'd data pointer -- gen_addr's ND_VAR case would
+        // hand back the slot's own address (wrong: `(*p)[i]` through
+        // `int (*p)[n] = &v` would read the slot, not the data). A VLA
+        // sub-object reached by pointer arithmetic (`&v[1]` in a
+        // multi-dimensional VLA) is already address-based, so gen_expr and
+        // gen_addr agree there and this early-out is a no-op for it. Routing
+        // through gen_expr (rather than special-casing gen_addr's ND_VAR)
+        // picks up all three of its slot-address branches -- normal local,
+        // block capture, outer-function static chain -- for free. This
+        // deliberately skips the MARKP provenance emission below: VLA/alloca
+        // storage carries a real AllocHeader resolved via
+        // sorted_allocs/DYNOBJSZ (see __builtin_dynamic_object_size in
+        // COVERAGE.md), not provenance tracking, and the skipped MARKP would
+        // have fired on the wrong address (the slot) with the wrong size
+        // (8, the pointer's own size) anyway.
+        if (node->lhs->ty && node->lhs->ty->kind == TY_VLA) {
+            gen_expr(vm, node->lhs, dest_reg);
+            return;
+        }
         gen_addr(vm, node->lhs, dest_reg);
         // Track explicit address-of a local var for provenance. Dangling-pointer
         // detection no longer needs address-taken tracking here -- it's now a

@@ -4121,6 +4121,18 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
             // initializations happen sequentially
             vm->compiler.initializing_var = var;
             Node *expr = lvar_initializer(vm, &tok, tok->next, var);
+            // #973 follow-up: a pointer-to-VLA local's declarator reads a
+            // runtime variable (`int (*p)[n]`), so it can't be hoisted to
+            // the top of the function -- record this initializer as the
+            // in-place declaration site (serialize.c looks for it by
+            // pointer identity). `expr` is exactly the scalar
+            // ND_ASSIGN(ND_VAR(var), ...) create_lvar_init/lvar_initializer
+            // build for a non-aggregate initializer; var->ty is never itself
+            // TY_VLA here (that's a separate declaration() branch above,
+            // using ND_VLA_PTR + alloca()), so type_contains_vla only
+            // matches a pointer/array chain whose base is a VLA.
+            if (type_contains_vla(var->ty))
+                var->deferred_vla_ptr_init = expr;
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok);
             // Don't clear here - will be cleared by next init or at end of
             // parsing
@@ -5180,6 +5192,14 @@ static Node *create_vla_init(VirtualMachine *vm, Initializer *init, Type *ty, Ob
     Node *node = new_node(vm, ND_NULL_EXPR, tok);
     InitDesg desg = {NULL, 0, NULL, var};
 
+    // KNOWN ISSUE: when ty->base is itself TY_VLA (a multi-dimensional VLA,
+    // e.g. `int v[n][m] = {{1,2},{3,4}}`), create_lvar_init has no TY_VLA
+    // case -- it falls through to the generic `!init->expr` check, which is
+    // true for a nested brace group (no top-level scalar expr), so it
+    // silently returns ND_NULL_EXPR and the whole row's initializer is
+    // dropped. 1-D VLA init (ty->base a scalar/aggregate create_lvar_init
+    // does handle) is unaffected. Found alongside #973/#974 (measured: every
+    // element stays 0), not fixed here, filed as its own ticket.
     for (int i = 0; i < init_count; i++) {
         InitDesg desg2 = {&desg, i, NULL, NULL};
         if (init->children[i]) {
@@ -8457,6 +8477,15 @@ static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         else if (lhs->ty->base->kind == TY_FUNC || rhs->ty->base->kind == TY_FUNC)
             warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer to a function used in arithmetic");
+        // KNOWN ISSUE: when lhs->ty->base is TY_VLA (e.g. `&v[1] - &v[0]` on
+        // a 2-D VLA, both sides `int (*)[m]`), dividing by
+        // `lhs->ty->base->size` is wrong -- TY_VLA's `size` is always the
+        // placeholder 8 a pointer-sized new_type() call gives it (vla_of(),
+        // type.c), not the row's runtime byte size (vla_size). Should divide
+        // by `vla_size` instead, mirroring the VLA arm the ptr-num cases
+        // above this function already have. Found alongside #973/#974
+        // (measured: garbage result, e.g. -56911856220, instead of 1), not
+        // fixed here, filed as its own ticket.
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty = ty_long;
         return new_binary(vm, ND_DIV, node,
