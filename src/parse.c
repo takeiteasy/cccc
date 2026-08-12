@@ -4344,6 +4344,27 @@ static Member *struct_designator(VirtualMachine *vm, Token **rest, Token *tok, T
     return NULL;
 }
 
+// True when `mem` is the anonymous struct/union wrapper struct_designator()
+// returns for a designator that actually targets one of the wrapper's own
+// fields (per C's anonymous-member rules) -- in that case the designator
+// token was never consumed (struct_designator() rewound `*rest` to `start`),
+// so a -Woverride-init check belongs to the recursive designation() call
+// that re-parses the same token against the wrapper's own type, not to this
+// level (#961: the wrapper's own `is_set`/`mem` never reflects which leaf
+// field was actually targeted).
+static bool is_anon_aggregate_member(Member *mem) {
+    return !mem->name && (mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION);
+}
+
+// Shared -Woverride-init message for a designator that resolved to a named
+// member (struct_designator() never returns an unnamed, non-aggregate
+// member, so `mem->name` is always non-NULL here).
+static void warn_override_init_member(VirtualMachine *vm, Token *tok, Member *mem) {
+    warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+             "initializer overrides prior initialization of '%.*s'",
+             (int)mem->name->len, mem->name->loc);
+}
+
 // designation = ("[" const-expr "]" | "." ident)* "="? initializer
 static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initializer *init) {
     if (equal(tok, "[")) {
@@ -4374,16 +4395,9 @@ static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initialize
                      "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
-            init->children[mem->idx]->is_set) {
-            if (mem->name)
-                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
-                         "initializer overrides prior initialization of '%.*s'",
-                         (int)mem->name->len, mem->name->loc);
-            else
-                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
-                         "initializer overrides prior initialization of "
-                         "anonymous member");
-        }
+            !is_anon_aggregate_member(mem) &&
+            init->children[mem->idx]->is_set)
+            warn_override_init_member(vm, tok, mem);
         designation(vm, &tok, tok, init->children[mem->idx]);
         init->expr = NULL;
 
@@ -4403,6 +4417,19 @@ static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initialize
             warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
+        // Union members alias, so ANY prior designator into this union --
+        // same member re-designated, or a different member that already
+        // took the union's "active" slot -- overrides it (#961; unlike
+        // struct/array, there's no is_set-per-member state to compare,
+        // just whether this union has already been actively initialized).
+        if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
+            !is_anon_aggregate_member(mem) &&
+            init->mem && init->children[init->mem->idx]->is_set)
+            // Name whichever member was previously live, not the incoming
+            // one -- for a different-member override that's the field
+            // actually being overridden (e.g. `.i=1, .j=2` overrides 'i',
+            // not 'j', which was never set).
+            warn_override_init_member(vm, tok, init->mem);
         init->mem = mem;
         designation(vm, rest, tok, init->children[mem->idx]);
         return;
@@ -4597,16 +4624,9 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                          "designated initializers are a C99 extension");
             mem = struct_designator(vm, &tok, tok, init->ty);
             if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
-                init->children[mem->idx]->is_set) {
-                if (mem->name)
-                    warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
-                             "initializer overrides prior initialization of '%.*s'",
-                             (int)mem->name->len, mem->name->loc);
-                else
-                    warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
-                             "initializer overrides prior initialization of "
-                             "anonymous member");
-            }
+                !is_anon_aggregate_member(mem) &&
+                init->children[mem->idx]->is_set)
+                warn_override_init_member(vm, tok, mem);
             designation(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
             continue;
@@ -4658,10 +4678,34 @@ static void union_initializer(VirtualMachine *vm, Token **rest, Token *tok,
     // Unlike structs, union initializers take only one initializer,
     // and that initializes the first union member by default.
     // You can initialize other member using a designated initializer.
+    //
+    // #962: a union initializer can still have *multiple* comma-separated
+    // designators (e.g. `{.i = 1, .i = 2}` or `{.i = 1, .f = 2}`) -- valid
+    // C, accepted by gcc/clang, with the last designator's member winning
+    // (union members alias, so this is exactly the same "last write wins"
+    // rule an already-working named/anonymous nested union reaches via
+    // designation()'s TY_UNION branch above). Loop rather than parsing a
+    // single designator and demanding '}' immediately after.
     if (equal(tok, "{") && equal(tok->next, ".")) {
-        Member *mem = struct_designator(vm, &tok, tok->next, init->ty);
-        init->mem = mem;
-        designation(vm, &tok, tok, init->children[mem->idx]);
+        tok = tok->next;
+        for (;;) {
+            Member *mem = struct_designator(vm, &tok, tok, init->ty);
+            if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
+                !is_anon_aggregate_member(mem) &&
+                init->mem && init->children[init->mem->idx]->is_set)
+                // See the analogous comment in designation()'s TY_UNION
+                // branch: name the previously-live member, not the one
+                // currently being designated.
+                warn_override_init_member(vm, tok, init->mem);
+            init->mem = mem;
+            designation(vm, &tok, tok, init->children[mem->idx]);
+            if (equal(tok, ",") && equal(tok->next, ".")) {
+                tok = tok->next;
+                continue;
+            }
+            break;
+        }
+        consume(vm, &tok, tok, ",");
         *rest = skip(vm, tok, "}");
         return;
     }

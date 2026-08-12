@@ -25,6 +25,35 @@ All notable changes to CCCC are documented here. Format loosely follows
   `tests/test_warning_override_init_anon_member_960.c`, and the
   anonymous-union `return=` case in `tests/suites/test_suite_testing_framework.c`
   that #489 had to drop.
+- **`-Woverride-init` never fired for a union member override** (#961,
+  follow-up to #960). The ticket's own diagnosis (an anonymous-member
+  `is_set` propagation gap) turned out to be only half right — an
+  anonymous *struct* member already warned correctly. The real gap was
+  that `designation()`'s `TY_UNION` branch (`src/parse.c`) performed no
+  override check at all, which also silently affected a plain *named*
+  nested union, not just an anonymous one. Fixed by adding the check
+  there: since union members alias, it now also warns when a *different*
+  member's designator overrides one already set (e.g. `{.i=1, .f=2}`,
+  matching gcc/clang), naming whichever member was previously live. The
+  two struct-side call sites (`designation()`'s `TY_STRUCT` branch and
+  `struct_initializer1()`) now skip their own wrapper-level check for an
+  anonymous struct/union member and let the recursive `designation()`
+  call name the real leaf field instead, replacing the old generic
+  "...anonymous member" message. Covered by
+  `tests/test_warning_override_init_union_nested.c`,
+  `tests/test_warning_override_init_union_diff_member.c`,
+  `tests/test_warning_override_init_anon_struct.c`,
+  `tests/test_warning_override_init_anon_positional.c`, and a rewritten
+  `tests/test_warning_override_init_anon_member_960.c`.
+- **Multiple designators in a single union initializer were a hard parse
+  error** (#962, found while fixing #961). `union U u = {.i=1, .i=2};` or
+  `{.i=1, .f=2};` failed with "expected '}'" — valid C accepted by
+  gcc/clang, where later designators override earlier ones and the
+  union's active member is whichever came last. `union_initializer()`
+  (`src/parse.c`) parsed exactly one designator before demanding the
+  closing brace; fixed by looping over `,`-separated designators,
+  re-assigning the union's active member each time. Covered by
+  `test_union_multi_designator_962` in `tests/suites/test_suite_init.c`.
 
 ## [0.2.6] - 2026-08-12
 

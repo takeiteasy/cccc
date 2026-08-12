@@ -50,6 +50,23 @@ union tc_anon_union_desig_NestedUnion {
 // TY_UNION arm rather than create_lvar_init's.
 struct tc_anon_union_desig_S tc_anon_union_desig_global = {.i = 7, .tag = 1};
 
+// [from ticket #962, found while investigating #961]
+// A *top-level* union object with more than one comma-separated designator
+// in its own brace initializer -- `union U u = {.i = 1, .i = 2};` -- used
+// to be a hard parse error ("expected '}'"): union_initializer()'s
+// designator branch parsed exactly one `.field = value` and then demanded
+// the closing brace, even though this is valid C (later designators
+// override earlier ones; gcc/clang both accept it) and the equivalent
+// shape already worked when the union was reached through a struct member
+// instead of being the initializer's own top-level target.
+union tc_union_multi_desig_U { int i; float f; long l; };
+
+// Global union with multiple designators, exercises write_gvar_data's
+// TY_UNION arm (the local/lvar-init path is covered inline below).
+union tc_union_multi_desig_U tc_union_multi_desig_global = {.i = 1, .l = 99};
+
+struct tc_union_multi_desig_Wrap { union tc_union_multi_desig_U u; int tag; };
+
 // [from test_compound_literals]
 // Test compound literals in CCCC
 // Expected return: 42
@@ -481,6 +498,39 @@ int test_anon_union_designator_960(void) {
     // union_initializer()'s own struct_designator() call.
     union tc_anon_union_desig_NestedUnion u = {.i = 9};
     if (u.i != 9) return 7;
+
+    return 42;
+}
+
+// test_union_multi_designator_962
+[[cccc::test(return = 42)]]
+int test_union_multi_designator_962(void) {
+    // Same member re-designated at top level: last designator wins.
+    union tc_union_multi_desig_U a = {.i = 1, .i = 42};
+    if (a.i != 42) return 1;
+
+    // Different members: last designator's member is the one that's
+    // "live" -- reading through it must see exactly what it was set to.
+    union tc_union_multi_desig_U b = {.i = 1, .l = 42};
+    if (b.l != 42) return 2;
+
+    // Three designators, mixed same/different members.
+    union tc_union_multi_desig_U c = {.i = 1, .f = 2.0f, .i = 42};
+    if (c.i != 42) return 3;
+
+    // Trailing comma after the last designator.
+    union tc_union_multi_desig_U d = {.i = 1, .l = 42,};
+    if (d.l != 42) return 4;
+
+    // A union reached through a named struct member, multiple designators
+    // -- the shape that already worked before #962 (targeting the union
+    // is a nested designation() recursion, not union_initializer()'s own
+    // top-level parse), kept here as a control.
+    struct tc_union_multi_desig_Wrap w = {.u = {.i = 1, .l = 42}, .tag = 7};
+    if (w.u.l != 42 || w.tag != 7) return 5;
+
+    // Global with multiple designators (write_gvar_data's TY_UNION arm).
+    if (tc_union_multi_desig_global.l != 99) return 6;
 
     return 42;
 }
