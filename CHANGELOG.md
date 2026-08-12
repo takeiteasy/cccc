@@ -5,6 +5,102 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-12
+
+### Added
+
+- **The interactive REPL now formats struct/union/array/vector expression
+  results recursively instead of printing a placeholder** (#666). Previously
+  a non-scalar result printed `<struct Point value: aggregate printing not
+  yet supported>`; `repl_print_result` now delegates to a new shared
+  `cc_dump_value`/`cc_dump_value_reg` formatter (`src/dump.c`, declared in
+  `src/internal.h`) that prints lldb-style nested braces with depth/element
+  caps, `char[]`-as-string rendering, bitfield extraction, and pointer
+  validation — every pointer dereference (including nested inside a struct
+  member) is checked against the VM's live segments via the debugger's
+  `is_valid_vm_address` (now exposed as `cc_is_valid_vm_address`) before
+  being followed, so an uninitialized/garbage pointer prints as hex instead
+  of crashing. New PTY tests in `tools/test_repl.py` cover struct/union/
+  array/vector results and nested structs with pointer members. Follow-up
+  filed as #958 (debugger adoption of `cc_dump_value` for its inspect/print
+  commands).
+- **`examples/ccccl/`** — a trimmed copy of the `ccccl` project (a small
+  Lisp that lowers to C entirely inside CCCC's comptime pass), added as a
+  worked real-world example of `[[cccc::macro]]`/`Quote()` metaprogramming.
+  Linked from `man/MACROS.md`.
+
+### Fixed
+
+- **`gen_expr`'s `ND_MEMBER` case could silently corrupt a live value when
+  loading a `float`/`double` struct member** (#917). The member address was
+  computed into `dest_reg` and then loaded through that same register; for a
+  flonum member `dest_reg` is a float register, and `FREG_A0`-`FREG_A7`
+  alias `REG_A0`-`REG_A7` by raw index, so a caller needing the address and
+  the loaded value simultaneously live could have one silently overwrite the
+  other. No observable bug prior to this fix (the address was always dead
+  after the load), but the hazard is now closed by routing the address
+  through a dedicated temp register, mirroring the pattern `ND_VAR`'s
+  flonum branch already used. `man/VM.md`'s calling-convention section now
+  documents the FREG/REG index aliasing; regression coverage added in
+  `tests/suites/test_suite_floats.c` for flat/nested/pointer/array/union
+  float member reads and a deep nested expression exercising peak temp-
+  register pressure.
+- **FFI shadow-clear coverage for `strto*`/`wcsto*` was incomplete and,
+  where present, overly conservative** (#839). Only `strtol`/`strtod` had
+  an `FFI_SHADOW_BOUNDED` row narrowing the type-shadow clear to their
+  `*endptr` output; the other ten members of the family
+  (`strtof`/`strtold`/`strtoll`/`strtoul`/`strtoull` and the `wcsto*`
+  equivalents) fell through to the default whole-allocation clear. Added
+  the missing rows, then added `other_args_readonly` to `FfiShadowRule` (a
+  new opt-in field, defaulting to `false` so existing rows are unaffected)
+  and set it for the whole family, since none of these calls ever write
+  through their `nptr` argument — `ffi_shadow_backstop` now skips the clear
+  entirely for `nptr` instead of applying the default whole-object clear.
+  Covered by new negative tests (`test_heap_type_ffi_strtoull_bounded_error.c`,
+  `test_heap_type_ffi_strtof_bounded_error.c`,
+  `test_heap_type_ffi_strtol_nptr_preserved_error.c`); `man/SAFETY.md`'s
+  bounded-write description updated to name the whole family and describe
+  the read-only-others behavior.
+- **`-c=generated` output could emit a call to a function before its
+  declaration, and could silently drop a published-but-bodyless function
+  prototype** (#956). `cc_serialize_program`'s emit-event branch
+  (`src/serialize.c`) printed each macro-generated function's signature and
+  body together, in `PublishNode`/`MakeFunction` event order, which has no
+  relation to the call graph — a function referencing another generated
+  function published later in program order produced an undeclared-
+  identifier error in the emitted C. Fixed by scanning each function's body
+  for calls to other not-yet-declared generated functions immediately
+  before it is emitted and inserting a forward declaration there, handling
+  mutual recursion regardless of creation order without hoisting every
+  prototype unconditionally (which would break `#ifdef`-guarded generation
+  and struct-tag visibility for a type reached via a captured `#include`,
+  see #953). Broadened to also match a generated function referenced as a
+  bare value (e.g. cast to a function pointer), not just a direct call.
+  The same "dropped bodyless prototype" gap in the fallback (non-emit-
+  event) prototype pass is fixed too. Covered by
+  `tools/comptime_native_smoke.py` case 38.
+- A REPL/debugger prerequisite surfaced while implementing #666:
+  `cc_repl_compile_new()` never allocated the RETBUF return-buffer pool, so
+  any struct/union/vector-returning call in the REPL (or a debugger
+  conditional-breakpoint expression, which shares the same compile path)
+  crashed with "return buffer pool was not rehydrated". Extracted into
+  `alloc_return_buffer_pool()`, now called from both `gen()` and
+  `cc_repl_compile_new()`.
+- `dump_type_simple()` printed a struct/union/enum's *declarator* name
+  instead of its tag (`struct P p; p` printed as `"struct p"` regardless of
+  the tag name); now prefers `struct_tag`/`enum_tag`.
+- A variably modified type (VLA) at file scope was silently accepted and
+  then crashed `sizeof()` on the resulting global; file-scope VLAs are now
+  a compile error (C11 6.7.6.2p4/6.9.2p3), covered by
+  `tests/test_vla_file_scope.c`.
+
+### Changed
+
+- The bytecode-lib/linkwith test fixtures moved from `examples/` into
+  `tests/fixtures/` — they were never user-facing examples, just source
+  fixtures for the bytecode linking/static-lib/dynamic-lib test suite.
+  Internal only; no user-facing path changes.
+
 ## [0.2.4] - 2026-08-09
 
 ### Added
