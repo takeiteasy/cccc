@@ -29,7 +29,7 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
     - `rwatch <addr>`: Break on read.
     - `awatch <addr>`: Break on read or write.
 - **Execution Control**: Full control over program flow with commands to step into (`step`), step over (`next`), and step out of (`finish`) functions.
-- **State Inspection**: Inspect VM registers, the call stack, and raw memory at any address. The debugger tracks local and global variable names, allowing them to be used in expressions.
+- **State Inspection**: Inspect VM registers, the call stack, and raw memory at any address. The debugger tracks local and global variable names, allowing them to be used in expressions. `print <variable>` resolves a live local or global by name and formats its value the same way the [Interactive REPL](#result-formatting)'s expression results are formatted -- scalars directly, and struct/union/array/vector values recursively, field by field, in lldb-style multi-line braces (both share the `cc_dump_value` formatter in `src/dump.c`).
 
 ### Debugger Commands
 
@@ -51,8 +51,27 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `stack [count]` | `st [count]` | Print the top `count` entries of the stack (default 10). |
 | `disasm` | `dis` | Disassemble the current instruction. |
 | `memory <addr>` | `m <addr>` | Inspect memory at a given address. |
+| `print <var>` | `p <var>` | Print a variable's value, recursively formatting structs/unions/arrays/vectors. `print <hex_addr>` also works for a raw address (like `memory`, but by expression). |
 | `help` | `h`, `?` | Show the help message. |
 | `quit` | `q` | Exit the debugger and terminate the program. |
+
+### `print` and live-stack address validation
+
+`print`/`p` (and the recursive struct/union/array/vector formatting it uses)
+shares the same pointer-validation check the REPL's
+[result formatting](#result-formatting) relies on: every address is checked
+against the VM's live text/data/heap/stack segments before being
+dereferenced, so an uninitialized or garbage member prints as a bare hex
+address instead of crashing the debugger session.
+
+The stack half of that check used to validate against the wrong end of the
+stack's reserved address range -- close to `stack_seg` itself, which never
+actually holds committed data -- so it rejected every real local variable's
+address. This only went unnoticed because the REPL, the check's original
+caller, never dereferences a live stack address (its results always live in
+the RETBUF pool or the data segment). It is fixed for `print`'s live-local
+case: the check now validates against the stack's actual committed range,
+which tracks growth as the program's call depth increases.
 
 ### Example Debugging Session
 

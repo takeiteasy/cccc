@@ -18,7 +18,7 @@ Run each group independently:
 python3 tools/tests.py --suites     # framework suites only (tests/suites/)
 python3 tools/tests.py --legacy     # legacy single-file tests only (tests/)
 python3 tools/tests.py              # all tests in both directories
-python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + sqlite + header_resolution_smoke + comptime_native_smoke + audit_ffi + reflection_ffi_check + audit_reflection_enums)
+python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + debugger_print + sqlite + header_resolution_smoke + comptime_native_smoke + audit_ffi + reflection_ffi_check + audit_reflection_enums)
 
 ./cccc --build build.c --build-target=test_suites   # build + run framework suites
 ./cccc --build build.c --build-target=test_legacy   # build + run legacy tests
@@ -42,11 +42,13 @@ flags with `--std=` at file scope) remain as standalone files in `tests/`.
 
 `./cccc --build build.c --build-target=test` calls `tools/run_tests.py`,
 which is the unified orchestrator. It
-runs nine sub-suites in sequence: source mode, `.c4` round-trip, the macOS
+runs ten sub-suites in sequence: source mode, `.c4` round-trip, the macOS
 host-signal debugger integration (skipped on other platforms), the interactive
 REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
 the conditional-breakpoint PTY integration (`tools/test_debugger_condition.py`,
-same POSIX-only gating), the SQLite amalgamation smoke test (skips cleanly
+same POSIX-only gating), the debugger `print` command PTY integration
+(`tools/test_debugger_print.py`, same POSIX-only gating, #958), the SQLite
+amalgamation smoke test (skips cleanly
 when the zip is absent), the `src/stdlib` FFI registration audit
 (`tools/audit_ffi.py`, see below), the `reflection_ffi_gen` freshness check
 (`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)), and

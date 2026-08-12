@@ -26,8 +26,17 @@ int cc_is_valid_vm_address(VirtualMachine *vm, void *addr) {
     if (ptr >= (long long)vm->data_seg && ptr < (long long)vm->data_ptr) return 1;
     // Heap segment
     if (ptr >= (long long)vm->heap_seg && ptr < (long long)vm->heap_ptr) return 1;
-    // Stack segment (assuming stack grows up from stack_seg)
-    if (ptr >= (long long)vm->stack_seg && ptr < (long long)(vm->stack_seg + vm->poolsize)) return 1;
+    // Stack segment: grows downward from the top of the poolsize_max-sized
+    // reservation. The committed (and only ever live) range is
+    // [vm->stack_base, vm->initial_sp) -- stack_base tracks vm_stack_grow's
+    // downward commits (src/vm.c) and initial_sp is the fixed top of the
+    // reservation, set identically by both vm_alloc_segments (src/vm.c) and
+    // repl_init_stack (src/repl.c). Previously checked
+    // [stack_seg, stack_seg + poolsize), the low end of the much larger
+    // poolsize_max reservation, which never actually holds live stack data
+    // (#958).
+    if (vm->stack_base && vm->initial_sp &&
+        ptr >= (long long)vm->stack_base && ptr < (long long)vm->initial_sp) return 1;
     return 0;
 }
 
@@ -385,6 +394,8 @@ static void print_help(bool inspect_only) {
     printf("  stack/st [count]   - Print stack (default 10 entries)\n");
     printf("  disasm/dis         - Disassemble current instruction\n");
     printf("  memory/m <addr>    - Inspect memory at address (hex)\n");
+    printf("  print/p <variable> - Print a variable's value (recursively formats\n");
+    printf("                       structs/unions/arrays/vectors, #958)\n");
     printf("\nOther:\n");
     printf("  help/h/?           - Show this help\n");
     printf("  quit/q             - Exit debugger and program\n");
@@ -654,6 +665,40 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                 }
             } else {
                 printf("Usage: memory <hex_address>\n");
+            }
+        }
+        // Print a variable by name, recursively formatting structs/unions/
+        // arrays/vectors via the shared cc_dump_value formatter (#666/#958)
+        // instead of hand-rolling struct/array printing here.
+        else if (STREQ_LIT(cmd, "print") || STREQ_LIT(cmd, "p")) {
+            char expr[128];
+            if (sscanf(line, "%*s %127s", expr) == 1) {
+                DebugSymbol *sym = cc_lookup_symbol(vm, expr);
+                if (sym) {
+                    void *addr = debugger_symbol_address(vm, sym);
+                    if (cc_is_valid_vm_address(vm, addr)) {
+                        printf("%s = (", expr);
+                        cc_dump_type(stdout, sym->ty);
+                        printf(") ");
+                        cc_dump_value(stdout, vm, sym->ty, addr);
+                        printf("\n");
+                    } else {
+                        printf("Error: '%s' is not currently accessible (address %p out of range)\n",
+                               expr, addr);
+                    }
+                } else {
+                    long long raw_addr;
+                    if (sscanf(expr, "%llx", &raw_addr) == 1 &&
+                        cc_is_valid_vm_address(vm, (void *)raw_addr)) {
+                        long long value;
+                        memcpy(&value, (void *)raw_addr, sizeof(value));
+                        printf("0x%llx: 0x%016llx (%lld)\n", raw_addr, value, value);
+                    } else {
+                        printf("Error: Unable to resolve '%s'\n", expr);
+                    }
+                }
+            } else {
+                printf("Usage: print/p <variable> | print/p <hex_address>\n");
             }
         }
         // Watch (write watchpoint)

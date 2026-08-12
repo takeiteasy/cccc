@@ -10,6 +10,7 @@ Sub-suites:
   debugger            — macOS host-signal crash-debugger integration (macOS only)
   repl                — interactive REPL PTY integration (POSIX only, ticket #661)
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
+  debugger_print      — debugger `print`/`p` command PTY integration (POSIX only, #958)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
@@ -181,6 +182,39 @@ def _run_debugger_condition_suite(cccc):
 
         old_argv = sys.argv
         sys.argv = ["test_debugger_condition.py", "--binary", str(cccc)]
+        try:
+            rc = mod.main()
+        finally:
+            sys.argv = old_argv
+
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_debugger_print_suite(cccc):
+    """Run the debugger `print`/`p` command PTY integration tests (#958).
+
+    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
+    Same pty-required rationale as the REPL/debugger_condition suites above.
+    """
+    if sys.platform == "win32":
+        return "skipped (POSIX-only, needs a pty)", True
+
+    script = _TOOLS_DIR / "test_debugger_print.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_debugger_print", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        old_argv = sys.argv
+        sys.argv = ["test_debugger_print.py", "--binary", str(cccc)]
         try:
             rc = mod.main()
         finally:
@@ -530,6 +564,13 @@ def main():
     cond_status, ok_cond = _run_debugger_condition_suite(cccc)
     print(f"  {cond_status}")
     suite_results["debugger_condition"] = ok_cond
+
+    # --- Debugger print command PTY integration (#958) ---
+    print()
+    print("[ debugger print integration ]")
+    print_status, ok_print = _run_debugger_print_suite(cccc)
+    print(f"  {print_status}")
+    suite_results["debugger_print"] = ok_print
 
     # --- SQLite smoke ---
     print()
