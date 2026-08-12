@@ -358,76 +358,23 @@ void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
 }
 
 // ---------------------------------------------------------------------
-// Result formatting (v1 scope: scalars, enums, float/double, pointers, and
-// char* as strings; structs/unions/arrays print a placeholder -- rich
-// aggregate printing is tracked as REPL follow-up work).
+// Result formatting: scalars, enums, float/double, pointers (with char* as
+// strings), and recursive struct/union/array/vector formatting (#666) all
+// go through the shared cc_dump_value_reg helper (src/dump.c), which the
+// debugger's inspect/print commands are expected to adopt too (follow-up
+// ticket). _BitInt (wider than 64 bits, returned via a multi-word buffer
+// rather than a single register) and VLA results are not formatted.
 // ---------------------------------------------------------------------
 
-static void repl_print_result(Type *ty, long long ival, double fval) {
+static void repl_print_result(VirtualMachine *vm, Type *ty, long long ival, double fval) {
     if (!ty || ty->kind == TY_VOID)
         return;
 
-    switch (ty->kind) {
-    case TY_BOOL:
-        printf("(bool) %s\n", ival ? "true" : "false");
-        return;
-    case TY_CHAR:
-    case TY_SHORT:
-    case TY_INT:
-    case TY_LONG:
-    case TY_ENUM:
-        printf("(");
-        cc_dump_type(stdout, ty);
-        printf(") ");
-        if (ty->is_unsigned)
-            printf("%llu\n", (unsigned long long)ival);
-        else
-            printf("%lld\n", ival);
-        return;
-    case TY_FLOAT:
-    case TY_DOUBLE:
-    case TY_LDOUBLE:
-        printf("(");
-        cc_dump_type(stdout, ty);
-        printf(") %g\n", fval);
-        return;
-    case TY_NULLPTR_T:
-        printf("(nullptr_t) NULL\n");
-        return;
-    case TY_PTR:
-        printf("(");
-        cc_dump_type(stdout, ty);
-        printf(") ");
-        if (ival == 0) {
-            printf("NULL\n");
-        } else if (ty->base && ty->base->kind == TY_CHAR) {
-            printf("0x%llx \"%s\"\n", (unsigned long long)ival,
-                   (const char *)(intptr_t)ival);
-        } else {
-            printf("0x%llx\n", (unsigned long long)ival);
-        }
-        return;
-    case TY_FUNC:
-        printf("(function) 0x%llx\n", (unsigned long long)ival);
-        return;
-    case TY_BITINT:
-        // _BitInt values wider than 64 bits return via a multi-word buffer,
-        // not a single register; printing them is not yet supported.
-        printf("<_BitInt value: printing not yet supported>\n");
-        return;
-    case TY_STRUCT:
-    case TY_UNION:
-    case TY_ARRAY:
-    case TY_VLA:
-        // Recursive field/element formatting is follow-up work: ticket #666.
-        printf("<");
-        cc_dump_type(stdout, ty);
-        printf(" value: aggregate printing not yet supported>\n");
-        return;
-    default:
-        printf("<value: printing not yet supported for this type>\n");
-        return;
-    }
+    printf("(");
+    cc_dump_type(stdout, ty);
+    printf(") ");
+    cc_dump_value_reg(stdout, vm, ty, ival, fval);
+    printf("\n");
 }
 
 // ---------------------------------------------------------------------
@@ -540,7 +487,7 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
             long long ival = 0;
             double fval = 0.0;
             cc_expr_exec_wrapper(vm, fn, &ival, &fval);
-            repl_print_result(expr_node->ty, ival, fval);
+            repl_print_result(vm, expr_node->ty, ival, fval);
 
             // One-shot wrapper: drop it from the persistent globals list so
             // it is not recompiled by future units. Its bytecode/data stay

@@ -149,14 +149,29 @@ static void dump_type_simple(FILE *f, Type *ty) {
         fprintf(f, ")");
         break;
     case TY_STRUCT:
-    case TY_UNION:
-    case TY_ENUM:
+    case TY_UNION: {
         fprintf(f, "%s", type_kind_name(ty->kind));
-        if (ty->name) {
+        // Prefer the tag name (struct_tag survives declarator name-overwrite,
+        // #892) over ty->name, which is the *declarator* being typed against
+        // this struct/union type -- e.g. `struct P p;` set ty->name to "p",
+        // not "P", so printing ty->name here mis-spelled every tagged-type
+        // REPL result (#666).
+        Token *tag = ty->struct_tag ? ty->struct_tag : ty->name;
+        if (tag) {
             fprintf(f, " ");
-            fprintf(f, "%.*s", ty->name->len, ty->name->loc);
+            fprintf(f, "%.*s", tag->len, tag->loc);
         }
         break;
+    }
+    case TY_ENUM: {
+        fprintf(f, "%s", type_kind_name(ty->kind));
+        Token *tag = ty->enum_tag ? ty->enum_tag : ty->name;
+        if (tag) {
+            fprintf(f, " ");
+            fprintf(f, "%.*s", tag->len, tag->loc);
+        }
+        break;
+    }
     default:
         if (ty->is_unsigned && (ty->kind == TY_CHAR || ty->kind == TY_SHORT ||
                                  ty->kind == TY_INT || ty->kind == TY_LONG))
@@ -474,6 +489,376 @@ const char *cc_node_kind_name(NodeKind kind) {
 // command and result formatter (ticket #661).
 void cc_dump_type(FILE *f, Type *ty) {
     dump_type_simple(f, ty);
+}
+
+// ========================================================================
+// Recursive value formatter (#666) -- shared between the REPL's expression
+// result printer (src/repl.c) and, per the follow-up ticket filed alongside
+// #666, the debugger's inspect/print commands (src/debugger.c). LLDB-style
+// multi-line braces, e.g.:
+//
+//   (struct Outer) {
+//     id = 7
+//     pt = {
+//       x = 1
+//       y = 2
+//     }
+//     name = 0x1042 "bob"
+//   }
+//
+// Neither entry point prints the "(type) " prefix or a trailing newline --
+// the caller adds that, since the debugger wants "name = value" rather than
+// "(type) value".
+// ========================================================================
+
+#define CC_DUMP_MAX_DEPTH 8         // nested aggregate depth before "{...}"
+#define CC_DUMP_MAX_ARRAY_ELEMS 32  // array/vector elements before "..."
+#define CC_DUMP_MAX_STRING_LEN 200  // bytes of a char*/char[] string before "..."
+
+// Length-bounded C-style escaping, unlike json.c's print_escaped_string
+// (JSON escaping, NUL-terminated input only) -- a char[] member may contain
+// embedded NULs and is not JSON output.
+static void dump_escaped_span(FILE *f, const char *data, size_t len) {
+    fprintf(f, "\"");
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)data[i];
+        switch (c) {
+        case '"':  fprintf(f, "\\\""); break;
+        case '\\': fprintf(f, "\\\\"); break;
+        case '\n': fprintf(f, "\\n"); break;
+        case '\r': fprintf(f, "\\r"); break;
+        case '\t': fprintf(f, "\\t"); break;
+        case '\0': fprintf(f, "\\0"); break;
+        default:
+            if (c < 0x20 || c == 0x7f)
+                fprintf(f, "\\x%02x", c);
+            else
+                fprintf(f, "%c", c);
+            break;
+        }
+    }
+    fprintf(f, "\"");
+}
+
+// Reads a NUL-terminated string out of VM memory starting at `addr`,
+// validating every byte's address before dereferencing it (cc_is_valid_vm_address)
+// so a garbage/uninitialized char* prints as hex instead of crashing the
+// REPL -- the case that motivated validating every depth uniformly, not just
+// the top-level result (#666).
+static void dump_c_string_at(FILE *f, VirtualMachine *vm, long long addr) {
+    char buf[CC_DUMP_MAX_STRING_LEN];
+    size_t n = 0;
+    bool truncated = false;
+    while (n < sizeof(buf)) {
+        void *p = (void *)(intptr_t)(addr + (long long)n);
+        if (!cc_is_valid_vm_address(vm, p)) {
+            truncated = true;
+            break;
+        }
+        char c = *(char *)p;
+        if (c == '\0')
+            break;
+        buf[n++] = c;
+    }
+    if (n == sizeof(buf))
+        truncated = true;
+    dump_escaped_span(f, buf, n);
+    if (truncated)
+        fprintf(f, "...");
+}
+
+// Reads a `size`-byte integer at `addr`, zero/sign-extended to long long per
+// `is_unsigned`. size is expected to be 1/2/4/8 (bitfield containers and
+// scalar integer types); wider values (_BitInt > 64 bits) never reach here.
+static long long read_int_from_mem(const void *addr, int size, bool is_unsigned) {
+    long long raw = 0;
+    size_t n = (size_t)(size < 8 ? size : 8);
+    memcpy(&raw, addr, n);
+    if (is_unsigned || size >= 8)
+        return raw;
+    int bits = size * 8;
+    long long mask = 1LL << (bits - 1);
+    return (raw ^ mask) - mask; // sign-extend
+}
+
+static double read_float_from_mem(const void *addr, int size) {
+    if (size == 4) {
+        float v;
+        memcpy(&v, addr, sizeof(v));
+        return (double)v;
+    }
+    // double and ldouble: ldouble is read the same as double here, matching
+    // the existing register-based (fval) path's precision, which has always
+    // treated TY_LDOUBLE as a plain double (see repl_print_result's
+    // TY_FLOAT/TY_DOUBLE/TY_LDOUBLE case, unchanged by #666).
+    double v;
+    memcpy(&v, addr, sizeof(v));
+    return v;
+}
+
+static long long read_bitfield(const void *struct_addr, Member *m) {
+    const void *container = (const char *)struct_addr + m->offset;
+    long long word = read_int_from_mem(container, m->ty->size, true);
+    long long mask = (m->bit_width >= 64) ? ~0LL : ((1LL << m->bit_width) - 1);
+    long long v = (word >> m->bit_offset) & mask;
+    if (!m->ty->is_unsigned && m->bit_width < 64 && (v & (1LL << (m->bit_width - 1))))
+        v -= (1LL << m->bit_width);
+    return v;
+}
+
+static void dump_value_at(FILE *f, VirtualMachine *vm, Type *ty, const void *addr, int depth);
+
+// Scalar/pointer leaf formatting, reading directly from VM memory at `addr`.
+static void dump_scalar_at(FILE *f, VirtualMachine *vm, Type *ty, const void *addr) {
+    switch (ty->kind) {
+    case TY_BOOL: {
+        long long v = read_int_from_mem(addr, ty->size, true);
+        fprintf(f, "%s", v ? "true" : "false");
+        return;
+    }
+    case TY_CHAR:
+    case TY_SHORT:
+    case TY_INT:
+    case TY_LONG:
+    case TY_ENUM: {
+        long long v = read_int_from_mem(addr, ty->size, ty->is_unsigned);
+        if (ty->is_unsigned)
+            fprintf(f, "%llu", (unsigned long long)v);
+        else
+            fprintf(f, "%lld", v);
+        return;
+    }
+    case TY_FLOAT:
+    case TY_DOUBLE:
+    case TY_LDOUBLE: {
+        double v = read_float_from_mem(addr, ty->size == 4 ? 4 : 8);
+        fprintf(f, "%g", v);
+        return;
+    }
+    case TY_NULLPTR_T:
+        fprintf(f, "NULL");
+        return;
+    case TY_PTR: {
+        long long v = read_int_from_mem(addr, ty->size, true);
+        if (v == 0) {
+            fprintf(f, "NULL");
+            return;
+        }
+        fprintf(f, "0x%llx", (unsigned long long)v);
+        if (ty->base && ty->base->kind == TY_CHAR &&
+            cc_is_valid_vm_address(vm, (void *)(intptr_t)v)) {
+            fprintf(f, " ");
+            dump_c_string_at(f, vm, v);
+        }
+        return;
+    }
+    case TY_BITINT:
+        fprintf(f, "<_BitInt value: printing not yet supported>");
+        return;
+    case TY_DECIMAL32:
+    case TY_DECIMAL64:
+    case TY_DECIMAL128:
+        fprintf(f, "<_Decimal value: printing not yet supported>");
+        return;
+    default:
+        fprintf(f, "<value: printing not yet supported for this type>");
+        return;
+    }
+}
+
+// Recursive struct/union/array/vector aggregate formatting; falls through to
+// dump_scalar_at for leaf types.
+static void dump_value_at(FILE *f, VirtualMachine *vm, Type *ty, const void *addr, int depth) {
+    if (!ty) {
+        fprintf(f, "<null>");
+        return;
+    }
+
+    switch (ty->kind) {
+    case TY_STRUCT:
+    case TY_UNION: {
+        if (depth >= CC_DUMP_MAX_DEPTH) {
+            fprintf(f, "{...}");
+            return;
+        }
+        fprintf(f, "{\n");
+        for (Member *m = ty->members; m; m = m->next) {
+            // Flexible array member (`T x[];`, array_len == 0): no backing
+            // storage in any one instance, nothing to read.
+            if (m->ty->kind == TY_ARRAY && m->ty->array_len == 0)
+                continue;
+            print_indent(f, depth + 1);
+            if (m->name) // anonymous struct/union members print unlabeled
+                fprintf(f, "%.*s = ", m->name->len, m->name->loc);
+            if (m->is_bitfield) {
+                long long v = read_bitfield(addr, m);
+                if (m->ty->is_unsigned)
+                    fprintf(f, "%llu", (unsigned long long)v);
+                else
+                    fprintf(f, "%lld", v);
+            } else {
+                dump_value_at(f, vm, m->ty, (const char *)addr + m->offset, depth + 1);
+            }
+            fprintf(f, "\n");
+        }
+        print_indent(f, depth);
+        fprintf(f, "}");
+        return;
+    }
+    case TY_ARRAY: {
+        int len = ty->array_len;
+        if (ty->base && (ty->base->kind == TY_CHAR)) {
+            // char[]: print as a string, bounded by the array length (not
+            // necessarily NUL-terminated -- stop at the first NUL or the
+            // array/print-cap length, whichever comes first).
+            int cap = len < CC_DUMP_MAX_STRING_LEN ? len : CC_DUMP_MAX_STRING_LEN;
+            int actual = 0;
+            while (actual < cap && ((const char *)addr)[actual] != '\0')
+                actual++;
+            dump_escaped_span(f, (const char *)addr, (size_t)actual);
+            if (cap < len)
+                fprintf(f, "...");
+            return;
+        }
+        if (depth >= CC_DUMP_MAX_DEPTH) {
+            fprintf(f, "{...}");
+            return;
+        }
+        fprintf(f, "{\n");
+        int shown = len < CC_DUMP_MAX_ARRAY_ELEMS ? len : CC_DUMP_MAX_ARRAY_ELEMS;
+        for (int i = 0; i < shown; i++) {
+            print_indent(f, depth + 1);
+            fprintf(f, "[%d] = ", i);
+            dump_value_at(f, vm, ty->base, (const char *)addr + (size_t)i * (size_t)ty->base->size, depth + 1);
+            fprintf(f, "\n");
+        }
+        if (shown < len) {
+            print_indent(f, depth + 1);
+            fprintf(f, "...\n");
+        }
+        print_indent(f, depth);
+        fprintf(f, "}");
+        return;
+    }
+    case TY_VECTOR: {
+        if (depth >= CC_DUMP_MAX_DEPTH) {
+            fprintf(f, "{...}");
+            return;
+        }
+        fprintf(f, "{\n");
+        int len = ty->vec_len;
+        int shown = len < CC_DUMP_MAX_ARRAY_ELEMS ? len : CC_DUMP_MAX_ARRAY_ELEMS;
+        for (int i = 0; i < shown; i++) {
+            print_indent(f, depth + 1);
+            fprintf(f, "[%d] = ", i);
+            dump_value_at(f, vm, ty->base, (const char *)addr + (size_t)i * (size_t)ty->base->size, depth + 1);
+            fprintf(f, "\n");
+        }
+        if (shown < len) {
+            print_indent(f, depth + 1);
+            fprintf(f, "...\n");
+        }
+        print_indent(f, depth);
+        fprintf(f, "}");
+        return;
+    }
+    case TY_VLA:
+        fprintf(f, "<vla value: printing not yet supported>");
+        return;
+    default:
+        dump_scalar_at(f, vm, ty, addr);
+        return;
+    }
+}
+
+// Memory-based entry point: addr points directly at a live value of type ty
+// (a global/RETBUF-pool/heap address the caller already knows is valid).
+// This is what the debugger follow-up will call with a local/global's frame
+// address. Note: the REPL cannot use this for locals -- repl_exec_wrapper
+// (src/repl.c) resets sp/bp before the result is printed, so any pointer
+// into stack memory at print time is already stale; only RETBUF-pool,
+// data-segment, and heap addresses are safe, which is all cc_dump_value_reg
+// ever hands it.
+void cc_dump_value(FILE *f, VirtualMachine *vm, Type *ty, const void *addr) {
+    if (!ty)
+        return;
+    if (!addr) {
+        fprintf(f, "<null>");
+        return;
+    }
+    dump_value_at(f, vm, ty, addr, 0);
+}
+
+// REPL glue: ty's result came back in a register pair (ival/fval) rather
+// than from a known address. For aggregate kinds, ival *is* the address
+// (RETBUF pool for a returned struct/union/vector, data-segment address for
+// an array lvalue) -- validated here before handing off to cc_dump_value.
+void cc_dump_value_reg(FILE *f, VirtualMachine *vm, Type *ty, long long ival, double fval) {
+    if (!ty)
+        return;
+
+    switch (ty->kind) {
+    case TY_STRUCT:
+    case TY_UNION:
+    case TY_ARRAY:
+    case TY_VECTOR:
+        if (ival == 0 || !cc_is_valid_vm_address(vm, (void *)(intptr_t)ival)) {
+            fprintf(f, "<invalid address 0x%llx>", (unsigned long long)ival);
+            return;
+        }
+        cc_dump_value(f, vm, ty, (const void *)(intptr_t)ival);
+        return;
+    case TY_VLA:
+        fprintf(f, "<vla value: printing not yet supported>");
+        return;
+    case TY_BITINT:
+        fprintf(f, "<_BitInt value: printing not yet supported>");
+        return;
+    case TY_DECIMAL32:
+    case TY_DECIMAL64:
+    case TY_DECIMAL128:
+        fprintf(f, "<_Decimal value: printing not yet supported>");
+        return;
+    case TY_BOOL:
+        fprintf(f, "%s", ival ? "true" : "false");
+        return;
+    case TY_CHAR:
+    case TY_SHORT:
+    case TY_INT:
+    case TY_LONG:
+    case TY_ENUM:
+        if (ty->is_unsigned)
+            fprintf(f, "%llu", (unsigned long long)ival);
+        else
+            fprintf(f, "%lld", ival);
+        return;
+    case TY_FLOAT:
+    case TY_DOUBLE:
+    case TY_LDOUBLE:
+        fprintf(f, "%g", fval);
+        return;
+    case TY_NULLPTR_T:
+        fprintf(f, "NULL");
+        return;
+    case TY_PTR:
+        if (ival == 0) {
+            fprintf(f, "NULL");
+            return;
+        }
+        fprintf(f, "0x%llx", (unsigned long long)ival);
+        if (ty->base && ty->base->kind == TY_CHAR &&
+            cc_is_valid_vm_address(vm, (void *)(intptr_t)ival)) {
+            fprintf(f, " ");
+            dump_c_string_at(f, vm, ival);
+        }
+        return;
+    case TY_FUNC:
+        fprintf(f, "0x%llx", (unsigned long long)ival);
+        return;
+    default:
+        fprintf(f, "<value: printing not yet supported for this type>");
+        return;
+    }
 }
 
 // ========================================================================

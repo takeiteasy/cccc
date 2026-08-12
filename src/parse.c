@@ -14954,6 +14954,23 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
         prev->tok = name_tok;
 }
 
+// True if ty is a VLA, or a pointer/array chain that bottoms out at one
+// (e.g. `int (*p)[n]` at file scope). C11 6.7.6.2p4/6.9.2p3: an object with
+// variably modified type must have block scope and no linkage -- a file-
+// scope VLA is a constraint violation, not something CCCC should silently
+// accept (it previously did; `sizeof` on such a global then read an
+// unresolved/zero vla_size and crashed the compiler, see the test added
+// alongside this check).
+static bool type_has_vla(Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_VLA)
+        return true;
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY)
+        return type_has_vla(ty->base);
+    return false;
+}
+
 static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                               VarAttr *attr) {
     bool first = true;
@@ -14969,6 +14986,9 @@ static Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
 
         char *var_name     = get_ident(vm, ty->name);
         int   var_name_len = (int)ty->name->len;
+
+        if (type_has_vla(ty))
+            error_tok(vm, ty->name, "variably modified '%s' at file scope", var_name);
 
         // C23 auto type inference for global variables
         if (attr->is_auto) {

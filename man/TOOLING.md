@@ -425,12 +425,49 @@ session:
 | `:load <file>` | Read declarations/expressions from `<file>`, one logical unit at a time. |
 | `:quit` | Exit the REPL. |
 
-### Result formatting (current scope)
+### Result formatting
 
 Integers, `enum` (printed by value), `bool`, `float`/`double`, pointers (hex),
-and `char *` (also printed as a string) are supported. Struct, union, and
-array-typed results print a placeholder rather than their contents --
-recursive aggregate formatting is tracked as follow-up work (ticket #666).
+and `char *`/`char[]` (also printed as a string) are supported. Struct,
+union, array, and vector results are formatted recursively, field by field,
+in an lldb-style multi-line brace form:
+
+```
+cccc> struct Point { int x; int y; };
+cccc> struct Outer { int id; struct Point pt; char *name; };
+cccc> struct Outer o = {7, {1, 2}, "bob"};
+cccc> o
+(struct Outer) {
+  id = 7
+  pt = {
+    x = 1
+    y = 2
+  }
+  name = 0x1042 "bob"
+}
+```
+
+Notes on the formatting rules:
+
+- Each level of nesting indents by two spaces.
+- A `char[]`/`char *` value prints as a double-quoted, C-escaped string,
+  stopping at the first NUL byte (or the array length, whichever comes
+  first).
+- To keep large results readable, nested aggregates stop expanding past 8
+  levels of depth (`{...}`), and arrays/vectors stop listing elements past
+  32 (`...`).
+- Bitfield members print their extracted (sign-extended if signed) integer
+  value.
+- Every pointer is validated against the VM's live text/data/heap/stack
+  segments before being dereferenced (the same check the debugger's memory
+  inspection commands use) -- an uninitialized or garbage pointer, including
+  one nested inside a struct/union member, prints as a bare hex address
+  instead of crashing the REPL.
+- `_BitInt` values wider than 64 bits (returned via a multi-word buffer
+  rather than a single register) and variably-modified (VLA) results are not
+  formatted; both print a placeholder. In practice a VLA-typed result cannot
+  occur at the REPL's top level, since a variably modified type at file
+  scope is a compile error (see below).
 
 ### Known limitations
 

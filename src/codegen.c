@@ -8560,6 +8560,33 @@ static void sort_init_entries(CCCCInitEntry *list, int count, bool ascending) {
     }
 }
 
+// Allocate the RETBUF rotating pool (struct/union/vector/wide-_BitInt
+// returns) at the current end of the data segment. Idempotent -- guarded on
+// slot 0 being unset, the same check src/bytecode.c's incremental-cache
+// adoption path (~line 1354) already uses for this resource -- so it is
+// safe to call from both gen()'s whole-program pass and
+// cc_repl_compile_new()'s incremental pass without double-allocating.
+// cc_repl_compile_new() must call this too: before #666 it never did, so
+// any REPL expression (or debugger conditional-breakpoint expression, which
+// shares cc_repl_compile_new) returning a struct/union/vector hit "return
+// buffer pool was not rehydrated" at RETBUF-execution time.
+static void alloc_return_buffer_pool(VirtualMachine *vm) {
+    if (vm->compiler.return_buffer_pool[0] != NULL)
+        return;
+    for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
+        // Align to 8-byte boundary
+        long long offset = vm->data_ptr - vm->data_seg;
+        offset = (offset + 7) & ~7;
+        check_data_capacity(vm, offset + vm->compiler.return_buffer_size);
+        vm->data_ptr = vm->data_seg + offset;
+        vm->compiler.return_buffer_pool[i] = vm->data_ptr;
+        vm->compiler.return_buffer_offsets[i] = offset;
+        memset(vm->compiler.return_buffer_pool[i], 0,
+               vm->compiler.return_buffer_size);
+        vm->data_ptr += vm->compiler.return_buffer_size;
+    }
+}
+
 void gen(VirtualMachine *vm, Obj *prog) {
     // Reset patch counters
     vm->compiler.num_call_patches = 0;
@@ -8628,18 +8655,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     // Allocate return buffer pool for struct/union returns at end of data
     // segment
-    for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
-        // Align to 8-byte boundary
-        long long offset = vm->data_ptr - vm->data_seg;
-        offset = (offset + 7) & ~7;
-        check_data_capacity(vm, offset + vm->compiler.return_buffer_size);
-        vm->data_ptr = vm->data_seg + offset;
-        vm->compiler.return_buffer_pool[i] = vm->data_ptr;
-        vm->compiler.return_buffer_offsets[i] = offset;
-        memset(vm->compiler.return_buffer_pool[i], 0,
-               vm->compiler.return_buffer_size);
-        vm->data_ptr += vm->compiler.return_buffer_size;
-    }
+    alloc_return_buffer_pool(vm);
 
     // Pre-pass: Assign stack offsets for all functions
     // This is critical for nested functions, which are compiled before their
@@ -8894,6 +8910,13 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
             vm->dbg.num_watchpoints = 0;
         }
     }
+
+    // #666: the RETBUF pool must exist before any incrementally-compiled
+    // expression executes a struct/union/vector-returning call or return
+    // statement -- allocated here (not inside the !vm->text_seg block
+    // above) so it is correct regardless of whether this call or an earlier
+    // whole-program gen() allocated the segments first. Idempotent.
+    alloc_return_buffer_pool(vm);
 
     // Count and collect the new non-function globals, oldest-first (the list
     // is built by prepending, so walking old_head..globals gives newest-first).

@@ -13,7 +13,11 @@
 
 #define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)
 
-static int is_valid_vm_address(VirtualMachine *vm, void *addr) {
+// Exposed as cc_is_valid_vm_address (src/internal.h) for src/dump.c's
+// cc_dump_value (#666): the shared REPL/debugger aggregate value formatter
+// validates every pointer before dereferencing it, the same check the
+// debugger's memory-inspection commands already rely on.
+int cc_is_valid_vm_address(VirtualMachine *vm, void *addr) {
     long long ptr = (long long)addr;
     // Text segment
     if (ptr >= (long long)vm->text_seg &&
@@ -108,7 +112,7 @@ static int debugger_resolve_watch_expr(VirtualMachine *vm, const char *expr, voi
     if (sscanf(expr, "%llx", &raw_addr) == 1) {
         *addr = (void *)raw_addr;
         *size = 8;
-        return is_valid_vm_address(vm, *addr);
+        return cc_is_valid_vm_address(vm, *addr);
     }
 
     DebugSymbol *sym = cc_lookup_symbol(vm, expr);
@@ -117,7 +121,7 @@ static int debugger_resolve_watch_expr(VirtualMachine *vm, const char *expr, voi
 
     *addr = debugger_symbol_address(vm, sym);
     *size = sym->ty ? sym->ty->size : 8;
-    return is_valid_vm_address(vm, *addr);
+    return cc_is_valid_vm_address(vm, *addr);
 }
 
 void debugger_init(VirtualMachine *vm) {
@@ -284,7 +288,7 @@ void debugger_print_stack(VirtualMachine *vm, int count) {
 
     long long *sp = vm->sp;
     for (int i = 0; i < count; i++) {
-        if (!is_valid_vm_address(vm, sp)) break;
+        if (!cc_is_valid_vm_address(vm, sp)) break;
         printf("  sp[%2d] = 0x%016llx  (%lld)\n", i, *sp, *sp);
         sp++;
     }
@@ -639,8 +643,8 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         else if (STREQ_LIT(cmd, "memory") || STREQ_LIT(cmd, "m")) {
             long long addr;
             if (sscanf(line, "%*s %llx", &addr) == 1) {
-                if (is_valid_vm_address(vm, (void*)addr) &&
-                    is_valid_vm_address(vm, (void*)(addr + sizeof(long long) - 1))) {
+                if (cc_is_valid_vm_address(vm, (void*)addr) &&
+                    cc_is_valid_vm_address(vm, (void*)(addr + sizeof(long long) - 1))) {
                     long long value;
                     memcpy(&value, (void *)addr, sizeof(value));
                     printf("Memory at 0x%llx: 0x%016llx (%lld)\n",

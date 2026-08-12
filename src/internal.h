@@ -1005,6 +1005,7 @@ int debugger_check_breakpoint(VirtualMachine *vm);
 int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int access_type);
 void debugger_print_registers(VirtualMachine *vm);
 int debugger_run(VirtualMachine *vm, int argc, char **argv);
+int cc_is_valid_vm_address(VirtualMachine *vm, void *addr); // text/data/heap/stack segment bounds check (used by dump.c's cc_dump_value, #666)
 
 //
 // host_backtrace.c
@@ -1025,6 +1026,23 @@ void cc_host_backtrace_print(void);
 void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
 const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
 void cc_dump_type(FILE *f, Type *ty);                     // C-ish type spelling (used by the REPL, #661)
+
+// Recursive aggregate/scalar value formatter (#666), shared between the REPL
+// and (follow-up) the debugger's inspect/print commands. Neither prints a
+// "(type) " prefix or trailing newline -- callers add that themselves, since
+// the debugger will want "name = value" rather than "(type) value".
+//
+// cc_dump_value: memory-based -- addr points directly at a live value of
+// type ty (a global/RETBUF-pool/heap address the caller already validated is
+// still live). This is the entry point for the debugger follow-up: it always
+// has a frame/global address and a Type, never registers.
+void cc_dump_value(FILE *f, VirtualMachine *vm, Type *ty, const void *addr);
+// cc_dump_value_reg: REPL glue -- ty's result came back in a register pair
+// (ival/fval) rather than from a known address. For TY_STRUCT/TY_UNION/
+// TY_ARRAY/TY_VECTOR, ival *is* the address (RETBUF pool for a returned
+// struct/union/vector, data-segment address for an array lvalue), so this
+// just validates and delegates to cc_dump_value.
+void cc_dump_value_reg(FILE *f, VirtualMachine *vm, Type *ty, long long ival, double fval);
 
 //
 // json.c

@@ -175,6 +175,115 @@ def test_float_and_string_formatting():
     child.wait()
 
 
+def test_struct_result():
+    # Ticket #666: recursive aggregate result printing. Also a regression
+    # test for the tag-name spelling bug (src/dump.c's dump_type_simple used
+    # to print the declarator name "p", not the tag "P").
+    #
+    # These aggregate results span several lines, and since :quit is sent
+    # right away and wait() drains everything before returning, we just
+    # assert on the fully-drained text instead of interleaving expect()
+    # calls with the multi-line block -- expect() re-anchors its search past
+    # whatever the previous call already found, so a second expect() on text
+    # from the *same* single PTY read can miss data that arrived before the
+    # first call returned.
+    child = repl()
+    child.expect(PROMPT)
+    child.send("struct P { int x; int y; };")
+    child.send("struct P p = {1, 2};")
+    child.send("p")
+    child.send(":quit")
+    rc = child.wait()
+    text = child.text()
+    assert "(struct P) {" in text, text
+    assert "x = 1" in text, text
+    assert "y = 2" in text, text
+    assert rc == 0, (rc, text)
+
+
+def test_struct_returning_call():
+    # Regression test for the RETBUF pool never being allocated by
+    # cc_repl_compile_new (#666's prerequisite fix) -- before that fix, any
+    # struct/union/vector-returning call crashed the evaluator with
+    # "return buffer pool was not rehydrated".
+    child = repl()
+    child.expect(PROMPT)
+    child.send("struct P { int x; int y; };")
+    child.send("struct P mk(void) { struct P r; r.x = 7; r.y = 8; return r; }")
+    child.send("mk()")
+    child.send(":quit")
+    rc = child.wait()
+    text = child.text()
+    assert "(struct P) {" in text, text
+    assert "x = 7" in text, text
+    assert "y = 8" in text, text
+    assert rc == 0, (rc, text)
+
+
+def test_nested_struct_and_pointer_member():
+    child = repl()
+    child.expect(PROMPT)
+    child.send("struct P { int x; int y; };")
+    child.send("struct Outer { int id; struct P pt; char *name; };")
+    child.send('struct Outer o = {7, {1, 2}, "bob"};')
+    child.send("o")
+    child.send(":quit")
+    rc = child.wait()
+    text = child.text()
+    assert "(struct Outer) {" in text, text
+    assert "id = 7" in text, text
+    assert "pt = {" in text, text
+    assert "x = 1" in text, text
+    assert "y = 2" in text, text
+    assert '"bob"' in text, text
+    assert rc == 0, (rc, text)
+
+
+def test_array_and_char_array_results():
+    child = repl()
+    child.expect(PROMPT)
+    child.send("int a[3] = {1, 2, 3};")
+    child.send("a")
+    child.send('char s[6] = "hello";')
+    child.send("s")
+    child.send(":quit")
+    rc = child.wait()
+    text = child.text()
+    assert "(int[3]) {" in text, text
+    assert "[0] = 1" in text, text
+    assert "[1] = 2" in text, text
+    assert "[2] = 3" in text, text
+    assert '(char[6]) "hello"' in text, text
+    assert rc == 0, (rc, text)
+
+
+def test_union_result():
+    child = repl()
+    child.expect(PROMPT)
+    child.send("union U { int i; float f; };")
+    child.send("union U u = {.i = 65};")
+    child.send("u")
+    child.send(":quit")
+    rc = child.wait()
+    text = child.text()
+    assert "(union U) {" in text, text
+    assert "i = 65" in text, text
+    assert rc == 0, (rc, text)
+
+
+def test_array_truncation():
+    child = repl()
+    child.expect(PROMPT)
+    child.send("int big[64];")
+    child.send("big")
+    child.send(":quit")
+    rc = child.wait()
+    text = child.text()
+    assert "(int[64]) {" in text, text
+    assert "..." in text, text
+    assert rc == 0, (rc, text)
+
+
 def test_type_command():
     child = repl()
     child.expect(PROMPT)
@@ -254,6 +363,12 @@ TESTS = [
     test_typedef_makes_next_line_a_declaration,
     test_function_definition_and_call,
     test_float_and_string_formatting,
+    test_struct_result,
+    test_struct_returning_call,
+    test_nested_struct_and_pointer_member,
+    test_array_and_char_array_results,
+    test_union_result,
+    test_array_truncation,
     test_type_command,
     test_error_rolls_back_and_session_survives,
     test_multiline_continuation,

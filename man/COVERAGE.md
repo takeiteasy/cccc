@@ -96,7 +96,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
-| Variable-length arrays (VLA) | ✓ | Allocated via VM heap |
+| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3) |
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |
