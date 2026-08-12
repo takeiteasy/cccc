@@ -96,7 +96,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
-| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3) |
+| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3). A 1-D VLA round-trips through `-m`/`-c=native` as a real C VLA (#964). **Known issue**: subscripting a multi-dimensional VLA (`int v[n][m]; v[1][2]=...;`) crashes the VM ([#971](https://todo.sr.ht/~takeiteasy/cccc/971), independent of serialization — declaring one without subscripting it is fine) |
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |
@@ -1168,6 +1168,13 @@ are listed here rather than left to be discovered:
 `_Decimal` is a hard error rather than a divergence: `__builtin_decimal_to_chars`
 has no host equivalent, so a `CCCC_HAS_DECIMAL=1` build refuses to serialize it
 instead of emitting a call that would not link.
+
+A variable-length array declared in a `for`-loop initializer
+(`for (int i = 0, v[n]; ...)`) is likewise a hard error under `-m`/
+`-c=native`: the VM runs it fine, but the init clause is serialized as
+comma-joined assignments and C forbids mixing a declaration with expressions
+there, so it is rejected with a diagnostic rather than emitted as broken C
+(#964).
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).

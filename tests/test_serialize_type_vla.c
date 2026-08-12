@@ -9,9 +9,10 @@
 // SerializeContext -- TY_ARRAY's constant length is printed straight into
 // the declarator buffer and needs no such thing.
 //
-// Only the *type* is asserted here. The ND_VLA_PTR expression case is still
-// unserialized, so this program does not yet build under -c=native -- that
-// half is tracked separately.
+// Only the *type* is asserted here (-m does not build/run the output). The
+// full round trip -- the ND_VLA_PTR expression case, declaration-hoisting
+// order, and the subscript pointer-arithmetic fix -- is covered end-to-end
+// by tools/comptime_native_smoke.py's vla_964 case (#964).
 
 int main(void) {
     int n = 4;

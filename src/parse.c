@@ -13817,8 +13817,18 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         add_type(vm, a);
         add_type(vm, b);
         add_type(vm, ptr);
-        if (ptr->ty->kind != TY_PTR)
-            error_tok(vm, ptr->tok, "__builtin_*_overflow: third argument must be a pointer");
+        // #964: gcc/clang require a pointer to a non-const integer here --
+        // tightened from the previous bare "must be a pointer" check so a
+        // mistyped third argument (e.g. `float *`, `const int *`) is
+        // rejected at parse time instead of reaching the serializer and
+        // producing C the host compiler refuses (the emitted form calls the
+        // same builtin with the same signature, so any type the parser
+        // accepts here must also be one clang/gcc accept there).
+        if (ptr->ty->kind != TY_PTR || !ptr->ty->base || !is_integer(ptr->ty->base) ||
+            ptr->ty->base->is_const)
+            error_tok(vm, ptr->tok,
+                     "__builtin_*_overflow: third argument must be a pointer "
+                     "to a non-const integer type");
         Node *node = new_node(vm, ND_OVERFLOW_ARITH, start);
         node->lhs = a;
         node->rhs = b;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956 regressions).
+"""Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968 regressions).
 
 `tools/tests.py` runs everything through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
@@ -1373,6 +1373,59 @@ COMPLEX_NESTING_PROGRAM = (
     "}\n"
 )
 
+# #964: ND_VLA_PTR had no serializer case at all (`/* unsupported expr kind
+# 41 */`), and closing that gap surfaced three more defects: the VLA
+# declaration was hoisted above the variable its length reads, the
+# subscript lowering added a pointer to a pointer instead of a byte offset,
+# and a VLA declared inside a for-loop body's own block needed its wrapping
+# ND_BLOCK left unbraced so the declaration stays in scope for the rest of
+# the function. Covers a plain VLA, a `int n=..., v[n];` combined
+# declaration (one ND_BLOCK holding both), and a VLA re-declared each
+# iteration of a loop.
+VLA_PROGRAM = (
+    "int main(void) {\n"
+    "    int n = 4;\n"
+    "    int v[n];\n"
+    "    v[0] = 10;\n"
+    "    v[n - 1] = 21;\n"
+    "    int total = v[0] + v[3];\n"
+    "\n"
+    "    int m = 3, w[m];\n"
+    "    w[0] = 5;\n"
+    "    total += w[0];\n"
+    "\n"
+    "    for (int i = 1; i <= 3; i++) {\n"
+    "        int len = i;\n"
+    "        int loopvla[len];\n"
+    "        loopvla[0] = i;\n"
+    "        total += loopvla[0];\n"
+    "    }\n"
+    "\n"
+    "    return total;\n"
+    "}\n"
+)
+
+# #964: ND_OVERFLOW_ARITH had no serializer case (`/* unsupported expr kind
+# 55 */`) -- val (0/1/2) selects add/sub/mul, lowering directly onto the
+# same-named clang/gcc builtin. Exercises all three ops, both an overflowing
+# and a non-overflowing case.
+OVERFLOW_PROGRAM = (
+    "int main(void) {\n"
+    "    int r;\n"
+    "    int ok = __builtin_add_overflow(2, 3, &r);\n"
+    "    if (ok || r != 5) return 1;\n"
+    "    ok = __builtin_sub_overflow(10, 3, &r);\n"
+    "    if (ok || r != 7) return 2;\n"
+    "    ok = __builtin_mul_overflow(6, 7, &r);\n"
+    "    if (ok || r != 42) return 3;\n"
+    "    ok = __builtin_add_overflow(2147483647, 1, &r);\n"
+    "    if (!ok) return 4;\n"
+    "    ok = __builtin_mul_overflow(1000000000, 10, &r);\n"
+    "    if (!ok) return 5;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 
 def case_bitops_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  39: -c=native, bit-manipulation builtins keep their width "
@@ -1424,11 +1477,24 @@ def case_complex_nesting_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     COMPLEX_NESTING_PROGRAM)
 
 
+def case_vla_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  47: -c=native, a 1-D VLA (plain, combined `n=..,v[n]` "
+          "declaration, and one re-declared per loop iteration) round-trips "
+          "as a real C VLA (#964)")
+    return _vm_and_native_run_case(cccc, tmp, "vla_964", VLA_PROGRAM)
+
+
+def case_overflow_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  48: -c=native, __builtin_{add,sub,mul}_overflow round-trip, "
+          "overflowing and not (#964)")
+    return _vm_and_native_run_case(cccc, tmp, "overflow_964", OVERFLOW_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#968)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1482,6 +1548,8 @@ def main() -> int:
             case_addr_builtins_native_round_trip,
             case_asm_native_round_trip,
             case_complex_nesting_native_round_trip,
+            case_vla_native_round_trip,
+            case_overflow_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

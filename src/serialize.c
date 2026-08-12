@@ -193,6 +193,10 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                            int parent_prec);
 static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int indent);
+// #964: mutually recursive with serialize_stmt -- see the comment on its
+// definition, near ND_BLOCK below.
+static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                                     Node *node, int indent);
 
 // #918: usual_arith_conv() (src/type.c) casts BOTH operands of a pointer
 // +/- integer expression to the same pointer type before new_add()/
@@ -211,11 +215,36 @@ static Node *strip_casts(Node *n) {
 }
 
 static bool node_is_pointerish(Node *n) {
-    return n && n->ty && (n->ty->kind == TY_PTR || n->ty->kind == TY_ARRAY);
+    // #964: TY_VLA decays the same as TY_ARRAY in pointer arithmetic (`v + 1`
+    // on a VLA `v`) -- without it here, the ND_ADD/ND_SUB case below falls
+    // through to plain binary arithmetic and adds two pointers together.
+    return n && n->ty && (n->ty->kind == TY_PTR || n->ty->kind == TY_ARRAY ||
+                          n->ty->kind == TY_VLA);
 }
 
 static bool node_is_integerish(Node *n) {
     return n && n->ty && is_integer(n->ty);
+}
+
+// #964: true for the `v = alloca(tmp)` assignment declaration() (parse.c)
+// builds for a VLA local -- new_vla_ptr() (parse.c) has exactly one
+// construction site, at that assignment's lhs, so this check is exhaustive.
+static bool node_is_vla_ptr_assign(Node *n) {
+    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VLA_PTR;
+}
+
+// #964: true if any of blk's *immediate* statements is a VLA_PTR assignment.
+// declaration() bundles a statement's per-declarator initializers into one
+// ND_BLOCK (e.g. `int n = 4, v[n];` is a single ND_BLOCK holding both), so a
+// block containing a VLA declarator has to stay unbraced when serialized --
+// see serialize_stmt_list_item() below.
+static bool block_defines_vla(Node *blk) {
+    if (!blk || blk->kind != ND_BLOCK)
+        return false;
+    for (Node *s = blk->body; s; s = s->next)
+        if (s->kind == ND_EXPR_STMT && node_is_vla_ptr_assign(s->lhs))
+            return true;
+    return false;
 }
 
 // Returns true if the node produces no output (effectively a no-op expression).
@@ -618,17 +647,31 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
 
     if (ty->kind == TY_VLA) {
         // `int v[n]` -- the length is an expression, not a constant, so it
-        // has to be serialized through serialize_expr rather than printed
-        // into the declarator buffer like TY_ARRAY's constant length. The
-        // base is emitted first (VLA of VLA nests through this same path),
-        // then the name, then the bracketed length.
-        serialize_type(f, ctx, ty->base);
-        if (name && *name)
-            fprintf(f, " %s", name);
-        fprintf(f, "[");
+        // has to go through serialize_expr rather than be printed straight
+        // into the declarator buffer like TY_ARRAY's constant length. #964:
+        // this used to emit the base type, then name, then `[len]` directly
+        // -- correct for a single-dimension VLA, but a nested VLA-of-VLA (or
+        // VLA-of-array) mis-spelled as `int[m] v[n]` instead of the correct
+        // `int v[n][m]`, since the outer dimension's base was printed before
+        // recursing into it rather than after. Route through the same
+        // buffer-recursion shape TY_ARRAY uses above -- capture the length
+        // expression into a string via open_memstream (this file's existing
+        // idiom, see serialize_function_signature()), fold `name[len]` into
+        // one declarator buffer, then recurse on ty->base so nested
+        // dimensions accumulate in the right order regardless of whether
+        // they are VLA or constant-length TY_ARRAY.
+        char *lenbuf = NULL;
+        size_t lensz = 0;
+        FILE *lf = open_memstream(&lenbuf, &lensz);
         if (ty->vla_len && ctx->vm)
-            serialize_expr(f, ctx->vm, ctx, ty->vla_len, 0);
-        fprintf(f, "]");
+            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 0);
+        fclose(lf);
+
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "%s[%s]", name ? name : "",
+                 lenbuf ? lenbuf : "");
+        free(lenbuf);
+        serialize_type_decl(f, ctx, ty->base, buf);
         return;
     }
 
@@ -997,9 +1040,10 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             // MakeSubscript() on an array-typed anon global) -- serialize_type
             // would print `(int [3])`, and a cast to array type is not valid
             // C. Cast to pointer-to-element instead; the ND_DEREF this node
-            // is wrapped in still reads the right value through it.
+            // is wrapped in still reads the right value through it. #964:
+            // node->ty can also be TY_VLA (`int[n]`), same fix applies.
             fprintf(f, "(");
-            if (node->ty && node->ty->kind == TY_ARRAY) {
+            if (node->ty && (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
                 serialize_type(f, ctx, node->ty->base);
                 fprintf(f, " *");
             } else {
@@ -1018,9 +1062,10 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             // set_checked_deref_bounds() builds ND_ADD via new_binary()
             // directly and does not canonicalize -- handle it defensively.
             // Print lhs_inner for the same reason as above.
-            // #928: same array-cast fix as the ptr+num arm above.
+            // #928: same array-cast fix as the ptr+num arm above; #964
+            // extends it to TY_VLA (a cast to `int[n]` is equally invalid C).
             fprintf(f, "(");
-            if (node->ty && node->ty->kind == TY_ARRAY) {
+            if (node->ty && (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
                 serialize_type(f, ctx, node->ty->base);
                 fprintf(f, " *");
             } else {
@@ -1211,6 +1256,38 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
     }
 
+    case ND_VLA_PTR:
+        // #964: `v` decayed to `v` -- serialize_stmt_list_item()/the
+        // ND_EXPR_STMT case above already replace this node's only
+        // constructor site (the `v = alloca(...)` assignment, parse.c) with
+        // a real declaration, so this is a defensive fallback for any other
+        // use of the variable (e.g. `v[0]` decays through ND_ADD, which
+        // reaches here via node->lhs). `v` is now a genuine C array/VLA
+        // local, so referencing its name is correct in both lvalue and
+        // rvalue position.
+        fprintf(f, "%s", node->var ? node->var->name : "/* unknown_vla */");
+        break;
+
+    case ND_OVERFLOW_ARITH: {
+        // #964: val: 0=add 1=sub 2=mul (parse.c); lhs/rhs are the operands,
+        // cas_addr the result pointer -- this maps directly onto the same
+        // three GCC/clang builtins the parser accepted, both of which
+        // support this signature natively.
+        static const char *names[] = {
+            "__builtin_add_overflow", "__builtin_sub_overflow", "__builtin_mul_overflow",
+        };
+        const char *name = (node->val >= 0 && node->val <= 2) ? names[node->val]
+                                                               : "__builtin_add_overflow";
+        fprintf(f, "%s(", name);
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, ", ");
+        serialize_expr(f, vm, ctx, node->rhs, 0);
+        fprintf(f, ", ");
+        serialize_expr(f, vm, ctx, node->cas_addr, 0);
+        fprintf(f, ")");
+        break;
+    }
+
     case ND_DYNOBJ_SIZE:
         fprintf(f, "__builtin_dynamic_object_size(");
         serialize_expr(f, vm, ctx, node->lhs, 0);
@@ -1364,6 +1441,21 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 
     case ND_EXPR_STMT:
         if (is_noop_expr(node->lhs)) break;
+        // #964: `v = alloca(tmp)` is declaration()'s lowering of a VLA local
+        // -- re-emitting it literally would diverge from VM semantics
+        // (alloca in a loop body is not freed per iteration the way a real
+        // VLA is, so a loop declaring a VLA would grow the host stack
+        // unboundedly) and the assignment target isn't a valid C lvalue once
+        // `v` is a genuine array. Emit a real declaration in its place
+        // instead; serialize_stmt_list_item() keeps the enclosing block
+        // unbraced so it stays visible to later statements.
+        if (node_is_vla_ptr_assign(node->lhs)) {
+            Obj *var = node->lhs->lhs->var;
+            print_indent_level(f, indent);
+            serialize_type_decl(f, ctx, var->ty, var->name);
+            fprintf(f, ";\n");
+            break;
+        }
         // An atomic store written as its own statement (the usual case)
         // discards its value, so hand it to the ND_ASTORE statement case and
         // emit the plain void-returning call rather than the value-producing
@@ -1381,7 +1473,7 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         print_indent_level(f, indent);
         fprintf(f, "{\n");
         for (Node *s = node->body; s; s = s->next) {
-            serialize_stmt(f, vm, ctx, s, indent + 1);
+            serialize_stmt_list_item(f, vm, ctx, s, indent + 1);
         }
         print_indent_level(f, indent);
         fprintf(f, "}\n");
@@ -1418,6 +1510,19 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // (`for (i = 0; ...)`) is a bare ND_EXPR_STMT (expr_stmt(),
         // parse.c) and serializes the same way.
         if (node->init) {
+            // #964: a VLA declared in a for-loop initializer (`for (int i =
+            // 0, v[n]; ...)`) parses and runs in the VM, but this init
+            // clause is serialized as comma-joined *assignments* below --
+            // C forbids mixing a declaration with expressions there, and
+            // hoisting the declaration out ahead of the loop would change
+            // its scope/lifetime (and can read a variable the init clause
+            // itself assigns). Rejected with a diagnostic rather than
+            // emitted as broken C; doing this properly is tracked as a
+            // follow-up.
+            if (node->init->kind == ND_BLOCK && block_defines_vla(node->init))
+                error_tok(vm, node->tok,
+                         "a variable-length array declared in a for-loop "
+                         "initializer cannot be serialized to C");
             if (node->init->kind == ND_BLOCK) {
                 bool first_init = true;
                 for (Node *s = node->init->body; s; s = s->next) {
@@ -1539,6 +1644,27 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         fprintf(f, ";\n");
         break;
     }
+}
+
+// #964: serialize one statement in a *list* context (a function body or an
+// ND_BLOCK's own body) -- the one place a VLA-defining ND_BLOCK is safe to
+// unbrace. declaration()'s ND_BLOCK wrapping (used to bundle a single `type
+// v1, v2;` statement's per-declarator initializers) is not a real C block
+// scope; the plain ND_BLOCK case in serialize_stmt() braces it like any
+// other compound statement, which is harmless for an ordinary declaration
+// (its variable is already hoisted, only initializer assignments remain
+// inside) but would end a VLA's C-level scope right where it's declared.
+// Only called from statement-list positions -- never the direct body of an
+// if/else/loop/switch, where a declaration can't legally sit anyway (cccc
+// itself already rejects e.g. `if (n) int v[n];`).
+static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                                     Node *node, int indent) {
+    if (node && node->kind == ND_BLOCK && block_defines_vla(node)) {
+        for (Node *s = node->body; s; s = s->next)
+            serialize_stmt(f, vm, ctx, s, indent);
+        return;
+    }
+    serialize_stmt(f, vm, ctx, node, indent);
 }
 
 // KNOWN ISSUE (#897): a struct/union-by-value parameter's type is
@@ -1685,6 +1811,18 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 }
             } while (renamed_again);
 
+            // #964: a VLA's declaration can't be hoisted here -- its length
+            // expression reads a variable (`int n=4; int v[n];`) that must
+            // already be in scope at the point of the flattened declaration,
+            // and the hoist loop runs before any of the function body has
+            // been emitted. It keeps its slot in the collision-renaming
+            // above (so a same-named non-VLA local elsewhere still detects
+            // the collision), but the declaration itself is emitted in
+            // place by the ND_EXPR_STMT case in serialize_stmt() that
+            // recognizes its `ND_VLA_PTR = alloca(...)` initializer.
+            if (var->ty->kind == TY_VLA)
+                continue;
+
             print_indent_level(f, 1);
             serialize_type_decl(f, ctx, var->ty, var->name);
             fprintf(f, ";\n");
@@ -1698,7 +1836,7 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
         else
             body_stmts = fn->body;
         for (Node *s = body_stmts; s; s = s->next) {
-            serialize_stmt(f, vm, ctx, s, 1);
+            serialize_stmt_list_item(f, vm, ctx, s, 1);
         }
 
         fprintf(f, "}\n\n");
