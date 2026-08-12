@@ -5,6 +5,27 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-12
+
+### Fixed
+
+- **Designated initializer on a field of an anonymous *union* member
+  crashed the parser** (#960, follow-up to #489). `struct_designator()`
+  (`src/parse.c`) special-cased anonymous *struct* members when resolving
+  a `.name` designator but not anonymous unions, so `.i` in
+  `struct S { union { int i; float f; }; int tag; } r = {.i = 7, .tag = 1};`
+  fell through to a NULL `mem->name` dereference — reachable from a plain
+  brace initializer, a compound literal, or a global, not just the
+  compound-literal shape the ticket was found through. Fixed by matching
+  the condition `get_struct_member()` already used
+  (`TY_STRUCT || TY_UNION`), plus a defensive skip for any other nameless
+  member. Also guards two adjacent `-Woverride-init` diagnostics that
+  printed the same NULL `mem->name` for a re-initialized anonymous member.
+  Covered by `tests/suites/test_suite_init.c`,
+  `tests/test_warning_override_init_anon_member_960.c`, and the
+  anonymous-union `return=` case in `tests/suites/test_suite_testing_framework.c`
+  that #489 had to drop.
+
 ## [0.2.6] - 2026-08-12
 
 ### Added
