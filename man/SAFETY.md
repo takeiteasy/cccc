@@ -254,10 +254,13 @@ All features listed below can be enabled individually or through the safety leve
   - Prevents free list corruption and security vulnerabilities
   - Aborts execution with detailed error message including address, size, and generation
 - `--bounds-checks` **Runtime array bounds checking**
-  - Tracks requested vs allocated sizes for all heap allocations
-  - `CHKB` (pointer/subscript addition) and `CHKBN` (pointer subtraction,
-    #982) validate the pointer is within its allocated region
-  - Checks against originally requested size (not rounded allocation)
+  - Tracks the aligned/usable size (`AllocHeader.size`, not the raw
+    requested size) for all heap allocations
+  - Split into two checks (#983): `CHKB`/`CHKBN` (formation-time —
+    "pointer *subscript* addition"/"pointer subtraction", #982) validate a
+    pointer *value* as it's formed by `p + n`/`p - n`; `CHKD`
+    (dereference-time) validates the address actually read or written at
+    every load/store, struct/union copy, and vector load/store
   - Detects out-of-bounds array accesses with offset information
   - Resolves **interior pointers** (`p = q + k`) back to their containing
     allocation via `vm->sorted_allocs`, not just exact base pointers; a
@@ -268,13 +271,24 @@ All features listed below can be enabled individually or through the safety leve
     is never bounds-checked — its operand isn't a scaled byte offset, it's
     the ptr-ptr divide's raw subtraction, so checking it against an
     allocation's size would be checking an unrelated value (#982)
-  - **Known limitation**: forming a one-past-the-end pointer on heap memory
-    (`p + n` where `n == size`) is rejected even though it's legal C to
-    *form* (only dereferencing it is undefined) — `CHKB` is currently the
-    only check on an array subscript at all (`a[i]` desugars to `*(a+i)`),
-    so this can't simply be relaxed without also losing the ability to
-    catch `a[size]` itself; a real fix needs a separate check at the
-    dereference site (tracked as a follow-up ticket)
+  - **Formation vs. dereference (#983)**: forming a one-past-the-end
+    pointer on heap memory (`p + n` where `n == size`) is legal C — only
+    dereferencing it is undefined — and `CHKB`/`CHKBN` now allow it (they
+    used to reject it, since they were the *only* check on a subscript at
+    all, `a[i]` desugaring to `*(a+i)`). `CHKD` is the separate
+    dereference-time check that still traps on `a[size]` itself, so
+    forming the pointer and dereferencing it are no longer conflated.
+  - **Known limitation**: `CHKD` is emitted for scalar loads/stores,
+    struct/union/wide-`_BitInt`/`_Decimal` copies, and vector loads/stores,
+    but not for the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`) — their
+    operand words already carry a register-aliasing hazard (#497) that a
+    naive addition would risk reopening; tracked as a follow-up ticket.
+    Also, like `CHKB`/`CHKBN`, `CHKD` has no bound to check against for a
+    stack or global array (no `AllocHeader` to resolve).
+  - **Cost note**: under `-2`/`-3`, a scalar heap access now does two
+    `sorted_allocs` lookups instead of one (`CHKB` at formation, `CHKD` at
+    dereference) — `CHKP3` already does a lookup of its own at the same
+    site, so this is a proportional, not order-of-magnitude, increase.
 - `--checked-pointers` **Checked-pointer bounds checking (Checked C-style)**
   - Enforces the `[[cccc::single/array/ntarray]]` + `count()`/`byte_count()`/
     `bounds()` attributes declared on a pointer type (always parsed and

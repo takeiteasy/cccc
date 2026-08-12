@@ -2328,6 +2328,12 @@ static void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 // union punning (write one member, read another) would otherwise
 // false-positive -- so no CHKT3 is emitted at all for a union load.
 //
+// #983: CHKD (dereference-time bounds check) is gated the same way as
+// CHKP3 -- dangling_check false means rs_addr is a compile-time-known
+// bp-relative frame address, which is never resolvable via
+// heap_alloc_for_ptr (it isn't a heap allocation at all), so CHKD would
+// always no-op there anyway; skipping the emission avoids the dead check.
+//
 // Shared with restrict_cache_handle_deref's cache-hit path (#750), which
 // re-derives rs_addr purely to run these checks -- forward-declared near
 // CCCC_FUSION_UNSAFE_FLAGS since that caller sits earlier in the file.
@@ -2335,6 +2341,8 @@ static void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
                                      bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
+    if (dangling_check && (vm->flags & CCCC_BOUNDS_CHECKS))
+        emit_rri(vm, CHKD, rs_addr, 0, (long long)ty->size);
     if ((vm->flags & CCCC_TYPE_CHECKS) && !vm->compiler.in_union_member_access)
         emit_rri(vm, CHKT3, rs_addr, CHKT3_MODE_CHECK,
                  ((long long)ty->size << 8) | (long long)ty->kind);
@@ -2837,6 +2845,10 @@ static void emit_init_fp_promoted_params(VirtualMachine *vm) {
 static void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr, bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
+    // #983: see emit_load_safety_checks' comment on dangling_check gating
+    // CHKD the same way it gates CHKP3.
+    if (dangling_check && (vm->flags & CCCC_BOUNDS_CHECKS))
+        emit_rri(vm, CHKD, rs_addr, 0, (long long)ty->size);
     if (vm->flags & CCCC_TYPE_CHECKS) {
         int mode = vm->compiler.in_union_member_access ? CHKT3_MODE_CLEAR : CHKT3_MODE_STAMP;
         emit_rri(vm, CHKT3, rs_addr, mode,
@@ -4212,6 +4224,10 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Vector lvalue read: address, then a full-width load.
         int r_addr = alloc_temp_reg();
         gen_addr(vm, node, r_addr);
+        // #983: VLDR bypasses emit_load_ex entirely, so it needs its own
+        // CHKD, same local-frame exemption as emit_load_ex's dangling_check.
+        if ((vm->flags & CCCC_BOUNDS_CHECKS) && !addr_is_local_frame(vm, node))
+            emit_rri(vm, CHKD, r_addr, 0, (long long)node->ty->size);
         emit_rrs(vm, VLDR, dest_reg, r_addr, node->ty->size);
         free_temp_reg(r_addr);
         return;
@@ -4222,6 +4238,10 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         mark_temp_reg_used(r_val);
         int r_addr = alloc_temp_reg();
         gen_addr(vm, node->lhs, r_addr);
+        // #983: VSTR bypasses emit_store_ex entirely, same reasoning as the
+        // VLDR case above.
+        if ((vm->flags & CCCC_BOUNDS_CHECKS) && !addr_is_local_frame(vm, node->lhs))
+            emit_rri(vm, CHKD, r_addr, 0, (long long)node->ty->size);
         emit_rrs(vm, VSTR, r_val, r_addr, node->ty->size);
         free_temp_reg(r_addr);
         if (dest_reg == REG_ZERO)
@@ -5376,6 +5396,22 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 int r_hi = gen_checked_nt_hi(vm, node->lhs);
                 emit_chkntz(vm, r_dest, r_hi, r_src, node->lhs->checked_access_size);
                 free_temp_reg(r_hi);
+            }
+
+            // #983: struct/union/wide-_BitInt/_Decimal assignment reaches
+            // memory purely through this MCPY, bypassing emit_load_ex/
+            // emit_store_ex entirely -- so it needs its own CHKD pair,
+            // dereference-checking both the destination (a store) and the
+            // source (a load) address. Skipped for a compile-time-known
+            // local-frame address, same rule as emit_load_ex/emit_store_ex's
+            // dangling_check.
+            if (vm->flags & CCCC_BOUNDS_CHECKS) {
+                mark_temp_reg_used(r_dest);
+                mark_temp_reg_used(r_src);
+                if (!addr_is_local_frame(vm, node->lhs))
+                    emit_rri(vm, CHKD, r_dest, 0, (long long)node->ty->size);
+                if (!addr_is_local_frame(vm, node->rhs))
+                    emit_rri(vm, CHKD, r_src, 0, (long long)node->ty->size);
             }
 
             // MCPY: REG_A0=dest, REG_A1=src, REG_A2=size

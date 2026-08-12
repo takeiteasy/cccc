@@ -1185,6 +1185,11 @@ static bool op_byte0_is_int_src(int op) {
     // CHKB's SUB-form sibling with the identical RR operand shape, so it
     // needs the same listing for the same reason.
     case CHKB: case CHKBN:
+    // Dereference-time bounds check (#983): byte 0 (rs_addr) is a pure
+    // pointer source, same class as CHKB/CHKBN above -- byte 1 is unused
+    // padding (see CHKD's format comment in cccc.h), so no separate listing
+    // is needed for it.
+    case CHKD:
     // Provenance marker: byte 0 (rs_ptr) and byte 1 (rs_base) are both pure
     // sources, same class as CHKB above.
     case MARKP:

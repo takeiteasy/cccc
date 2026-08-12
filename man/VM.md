@@ -415,8 +415,8 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description | Controlled by |
 |--------|-------------|---------------|
-| `CHKB` | Array bounds check on `base + scaled_offset` (`p + n`, and via subscript desugaring `*(a+i)`, `a[i]` too), resolving `base` (exact or interior pointer) via `vm->sorted_allocs` | `CCCC_BOUNDS_CHECKS` |
-| `CHKBN` | Array bounds check on `base - scaled_offset` (`p - n`) — `CHKB`'s subtracting-form sibling (#982); same operand shape and resolution, opposite sign. Never emitted for a pointer *difference* (`&a - &b`, result type `ptrdiff_t`/`long`) — `scaled_offset` there is `new_sub`'s ptr-ptr divide result, not a scaled byte offset, so bounds-checking it would compare an unrelated value against the allocation's size | `CCCC_BOUNDS_CHECKS` |
+| `CHKB` | Array bounds check on `base + scaled_offset` (`p + n`, and via subscript desugaring `*(a+i)`, `a[i]` too), resolving `base` (exact or interior pointer) via `vm->sorted_allocs`. **Formation-time** check only (#983): a result exactly one past the allocation's end (`eff == size`) is allowed, since forming such a pointer is legal C — see `CHKD` below for the dereference-time check that catches an actual out-of-bounds access | `CCCC_BOUNDS_CHECKS` |
+| `CHKBN` | Array bounds check on `base - scaled_offset` (`p - n`) — `CHKB`'s subtracting-form sibling (#982); same operand shape, resolution, and one-past-the-end formation allowance (#983), opposite sign. Never emitted for a pointer *difference* (`&a - &b`, result type `ptrdiff_t`/`long`) — `scaled_offset` there is `new_sub`'s ptr-ptr divide result, not a scaled byte offset, so bounds-checking it would compare an unrelated value against the allocation's size | `CCCC_BOUNDS_CHECKS` |
 | `CHKI` | Uninitialised-variable read check (`bp+offset`) | `CCCC_UNINIT_DETECTION` |
 | `MARKI` | Mark variable at `bp+offset` as initialised | `CCCC_UNINIT_DETECTION` |
 | `CHKPA` | Validate pointer arithmetic against provenance | `CCCC_INVALID_ARITH` + `CCCC_PROVENANCE_TRACK` |
@@ -429,6 +429,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
 | `CHKNTZ` | Checked-pointer null-terminator guard (#939) for the memcpy-lowered `ntarray` pointees `CHKNT` cannot reach (struct/union, wide `_BitInt`/`_Decimal`): traps unless every byte at the source address is zero, checked before the `MCPY` it guards | `CCCC_CHECKED_BOUNDS` |
 | `CHKAB` | Checked-pointer assignment-time bounds implication (#944, Checked C's `_Assume_bounds_cast` direction): traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
+| `CHKD` | **Dereference-time** bounds check (#983), `CHKB`/`CHKBN`'s formation-time counterpart: traps unless `off + access_size <= header->size`, resolving the dereferenced address via `vm->sorted_allocs` the same way `CHKB`/`CHKP3` do. Emitted at every load/store site that reaches memory (scalar loads/stores, struct/union/wide-`_BitInt`/`_Decimal` `MCPY` copies, vector `VLDR`/`VSTR`) — not the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`), a documented residual tracked as a follow-up ticket. Silently passes for a NULL pointer (`CHKP3`'s job) or a non-heap address (no bound known, same limitation `CHKB`/`CHKBN` already have) | `CCCC_BOUNDS_CHECKS` |
 
 `CHKB`/`CHKBN` and `CHKP3` resolve their pointer's containing allocation via
 the same `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the
@@ -445,13 +446,26 @@ global array** — `CHKB` (ADD form) can only reject a literal negative
 offset there (`a[-1]`); `CHKBN` (SUB form) rejects nothing at all for a
 non-heap base, since a `p - n` there isn't necessarily an array's own start
 the way a bare subscript's base is (see the comment on `chkb_common`,
-`src/ops.c`). Separately, forming (not dereferencing) a one-past-the-end
-pointer on heap memory (`p + n` where `n == size`) is also rejected by
-`CHKB` even though it is legal C — a real fix needs a bounds check at the
-*dereference* site instead, since `CHKB` is currently the only check on a
-subscript at all (`a[i]` desugars to `*(a+i)`) and simply relaxing the
-comparison would stop `a[size]` itself being caught; tracked as a follow-up
-ticket, out of #982's scope. `CHKR` (#770/#482-484) closes the upper-bound
+`src/ops.c`).
+
+**Formation vs. dereference (#983).** Forming a one-past-the-end pointer on
+heap memory (`p + n` where `n == size`) is legal C — only dereferencing it
+is undefined. `CHKB`/`CHKBN` allow it (`eff == size` is not an error) since
+they run at pointer *formation*; `CHKD` is a separate check that runs at
+every *dereference* site and traps on exactly this case, so `int *e = p + 4;`
+(forming) is clean while `p[4] = 1;`/`*e = 1;` (dereferencing) still traps.
+This split exists because `CHKB`/`CHKBN` used to be the *only* runtime check
+on a subscript at all (`a[i]` desugars to `*(a+i)`), so simply relaxing
+their comparison to `>` would have silently stopped a genuine out-of-bounds
+access (`a[size]`) from being caught. The resolution relies on
+`heap_alloc_for_ptr`'s existing inclusive upper bound (`off > h->size` is
+its rejection condition, not `off >= h->size`), which is what lets `CHKD`
+reliably resolve the allocation an exactly-one-past address belongs to.
+`CHKD` has the same "no bound known" gap as `CHKB`/`CHKBN` for a stack or
+global array (no `AllocHeader` to resolve against), and is not emitted for
+the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`) — a documented residual,
+tracked as a follow-up ticket, since their operand words already carry the
+#497 register-aliasing hazard. `CHKR` (#770/#482-484) closes the upper-bound
 gap generally: its
 `[lo, hi)` bounds come from the checked pointer's declaration
 (`count()`/`byte_count()`/`bounds()`, or the implicit `[p, p+sizeof(T))` for
@@ -1362,7 +1376,7 @@ Because delivery isn't pinned to a call boundary, the normal caller-saved callin
 
 The VM does not rely on external sanitizer libraries.  Instead, the compiler injects safety opcodes at compile time and the interpreter implements the checks inline:
 
-* **Bounds checks** — `CHKB` (pointer/subscript addition) and `CHKBN` (pointer subtraction, #982) before every array-subscript or pointer-dereference that the compiler can annotate with a size; resolves interior heap pointers via `vm->sorted_allocs`, not just exact base pointers.
+* **Bounds checks** — `CHKB` (pointer/subscript addition) and `CHKBN` (pointer subtraction, #982) at pointer *formation*, plus `CHKD` (#983) at the *dereference* site, before every array-subscript or pointer-dereference that the compiler can annotate with a size; resolves interior heap pointers via `vm->sorted_allocs`, not just exact base pointers. `CHKB`/`CHKBN` deliberately allow a pointer to land exactly one past its allocation's end (legal C to *form*); `CHKD` is what still traps if that pointer is actually dereferenced.
 * **UAF detection** — `CHKP3` consults `AllocHeader` metadata (magic `0xDEADBEEF`, `freed` bit, generation counter); also resolves interior heap pointers via `vm->sorted_allocs`.
 * **Uninitialised reads** — `CHKI` / `MARKI` maintain a per-address hash map of initialised stack slots.
 * **Stack canaries** — `ENT3` writes a canary word; `LEV3` validates it before returning.

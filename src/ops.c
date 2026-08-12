@@ -4485,6 +4485,17 @@ static inline int op_VCVT_F64_I64_fn(VirtualMachine *vm) {
 // parse.c), so `base_off + n` was checked instead of `base_off - n`,
 // tripping a false ARRAY BOUNDS ERROR whenever `n` was large enough to
 // sail past the allocation's own size. CHKBN fixes this by subtracting.
+//
+// #983: this is the pointer-*formation* half of the bounds check --
+// `eff == header->size` (exactly one past the allocation's end) is
+// deliberately allowed here, since forming such a pointer (`p + n` where
+// `p` points at an n-element array) is legal C, only *dereferencing* it is
+// undefined. CHKD (op_CHKD_fn, below) is the other half: it runs at every
+// load/store site and traps on the dereference CHKB now lets through --
+// this is why `off > h->size` (not `off >= h->size`, i.e. the same
+// one-past-inclusive bound) is `heap_alloc_for_ptr`'s existing resolution
+// rule, which is what lets CHKD reliably resolve the allocation an
+// exactly-one-past address belongs to.
 static inline int chkb_common(VirtualMachine *vm, int rs1, int rs2, bool is_sub) {
     if (!(vm->flags & CCCC_BOUNDS_CHECKS))
         return 0;
@@ -4503,7 +4514,9 @@ static inline int chkb_common(VirtualMachine *vm, int rs1, int rs2, bool is_sub)
     if (header) {
         long long eff = is_sub ? (long long)base_off - scaled_offset
                                 : (long long)base_off + scaled_offset;
-        if (eff < 0 || eff >= (long long)header->size) {
+        // #983: `eff > size` (not `>=`) -- forming a one-past-the-end
+        // pointer is legal C. CHKD catches the dereference.
+        if (eff < 0 || eff > (long long)header->size) {
             printf("\n========== ARRAY BOUNDS ERROR ==========\n");
             printf("Array index out of bounds\n");
             printf("Scaled offset: %lld bytes (base offset %zu)\n",
@@ -4558,6 +4571,56 @@ static inline int op_CHKBN_fn(VirtualMachine *vm) {
     int rs1, rs2;
     DECODE_RR(operands, rs1, rs2);
     return chkb_common(vm, rs1, rs2, true);
+}
+
+// #983: dereference-time bounds check -- the other half of the formation
+// (CHKB/CHKBN) vs dereference split. chkb_common now deliberately lets a
+// pointer land exactly one past its allocation's end (legal C to *form*);
+// this is the check that traps when such a pointer (or any other
+// out-of-bounds address) is actually dereferenced through a load/store,
+// struct/union copy, or vector load/store.
+//
+// Deliberately silent (returns 0) for a NULL pointer -- CHKP3 already
+// reports NULL dereferences with its own, more specific banner -- and for
+// an address heap_alloc_for_ptr can't resolve to a live allocation: a
+// stack or global array has no AllocHeader, so there is no upper bound to
+// check here at all (the same limitation CHKB/CHKBN already have for
+// non-heap bases).
+static inline int op_CHKD_fn(VirtualMachine *vm) {
+    // Check bounds at dereference time.
+    // Format: [CHKD] [rs_addr:8|unused:8] (RR operand word) [access_size:i64]
+    long long operands = cc_read_word(vm);
+    int rs_addr, unused;
+    DECODE_RR(operands, rs_addr, unused);
+    (void)unused;
+    long long access_size = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_BOUNDS_CHECKS))
+        return 0;
+
+    long long ptr = vm->regs[rs_addr];
+    if (ptr == 0)
+        return 0; // NULL is CHKP3's job.
+
+    size_t base_off;
+    AllocHeader *header = heap_alloc_for_ptr(vm, ptr, &base_off);
+    if (!header)
+        return 0; // Non-heap base: no upper bound known here.
+
+    if ((long long)base_off + access_size > (long long)header->size) {
+        printf("\n========== ARRAY BOUNDS ERROR ==========\n");
+        printf("Dereference out of bounds\n");
+        printf("Access offset: %zu bytes (accessing %lld bytes)\n",
+               base_off, access_size);
+        printf("Array size:    %zu bytes\n", header->size);
+        printf("Base address:  0x%llx\n", ptr);
+        printf("Allocated at PC offset: %lld\n", header->alloc_pc);
+        printf("PC: 0x%llx (offset: %lld)\n",
+               (long long)vm->pc, (long long)vm->pc);
+        printf("=========================================\n");
+        return -1;
+    }
+    return 0;
 }
 
 // Shared body for CHKR/CHKRO (#942): `allow_sentinel` is true only for

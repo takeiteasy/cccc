@@ -611,7 +611,35 @@ extern "C" {
                   expected to let a __block box legitimately outlive its \
                   declaring frame, so any future reclamation pass targeting \
                   frame-scoped storage (#981) must never sweep this kind. \
-                  CHKB/CHKBN/CHKP3/DYNOBJSZ are unaffected, same as ALCA. */
+                  CHKB/CHKBN/CHKP3/DYNOBJSZ are unaffected, same as ALCA. */ \
+    /* #983: appended (never interleaved -- see the rule stated above CHKR) \
+       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */ \
+    X(CHKD, 3) /* Check bounds at DEREFERENCE time (the other half of the \
+                   #983 formation-vs-dereference split). CHKB/CHKBN (below) \
+                   check a pointer *value* when it is formed by `p + n` / \
+                   `p - n` and now deliberately allow it to land exactly \
+                   one past an allocation's end (`eff == size`), since that \
+                   is legal C to form and only illegal to dereference. \
+                   CHKD is the check that catches the dereference itself: \
+                   emitted at every load/store site CHKB used to indirectly \
+                   guard via the ADD/SUB that computed the address (scalar \
+                   loads/stores, struct/union/wide-_BitInt/_Decimal MCPY \
+                   copies, vector VLDR/VSTR) -- NOT the atomic ops \
+                   (ALDR/ASTR/AXCHG/ACAS), which are deliberately left \
+                   uninstrumented (a documented residual, tracked as a \
+                   follow-up ticket) since their operand words already \
+                   carry the #497 aliasing hazard. \
+                   Format: [CHKD] [rs_addr:8|unused:8] [access_size:i64] \
+                   (RR operand word + i64 immediate, identical shape to \
+                   CHKT3 -- see emit_rri). Resolves rs_addr's containing \
+                   allocation via heap_alloc_for_ptr/sorted_allocs, same as \
+                   CHKB, and traps unless \
+                   `off + access_size <= header->size`. A NULL pointer is \
+                   not checked here (CHKP3's job); an address \
+                   heap_alloc_for_ptr can't resolve (stack/global storage) \
+                   is not checked either -- the same "no bound known for a \
+                   non-heap base" limitation CHKB/CHKBN already document. \
+                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB/CHKBN. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
