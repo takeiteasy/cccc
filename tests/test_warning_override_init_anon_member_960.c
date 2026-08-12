@@ -9,7 +9,7 @@
 // anonymous member's field is tracked via the wrapper Initializer's
 // `is_set` flag, which the designation()/TY_UNION recursion never
 // actually sets to true (a separate, pre-existing gap, not part of
-// #960's scope). So this test's only real assertion is that
+// #960's scope -- filed as #961). So this test's only real assertion is that
 // re-designating an anonymous union field doesn't crash the compiler --
 // if the is_set gap is ever fixed and the warning starts firing, the
 // guarded message text ("...anonymous member") is what should appear.
