@@ -1245,11 +1245,147 @@ def case_generated_forward_decls_hoisted(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# The #963b group below asserts VM 42 -> native 42, not just "the -m output
+# looks right". That distinction is the whole point of the ticket: an
+# unhandled node kind in *statement* position used to serialize as
+# `/* unsupported expr kind N */;` -- a valid null statement -- so the native
+# binary compiled cleanly and silently returned a different answer than the
+# VM. Only running the binary catches that class.
+
+BITOPS_PROGRAM = (
+    "int main(void) {\n"
+    "    int a = __builtin_popcount(7);\n"
+    "    int b = __builtin_clz(1u);\n"
+    "    int c = __builtin_ctz(8u);\n"
+    "    int d = __builtin_ffs(4);\n"
+    "    unsigned e = __builtin_bswap32(0x01000000);\n"
+    "    long long w = 0xFFFFFFFFFFLL;\n"
+    "    int g = __builtin_popcountll(w);\n"
+    "    return a + b + c + d + (int)e + g - 39;\n"
+    "}\n"
+)
+
+ATOMICS_PROGRAM = (
+    "int main(void) {\n"
+    "    int x = 0;\n"
+    "    __builtin_atomic_store(&x, 20);\n"
+    "    int y = __builtin_atomic_load(&x);\n"
+    "    int old = __builtin_atomic_exchange(&x, 7);\n"
+    "    int expected = 7;\n"
+    "    int ok = __builtin_compare_and_swap(&x, &expected, 15);\n"
+    "    return y + old + x + (ok ? 0 : 100) - 13;\n"
+    "}\n"
+)
+
+COMPUTED_GOTO_PROGRAM = (
+    "int main(void) {\n"
+    "    void *tab[2];\n"
+    "    tab[0] = &&one;\n"
+    "    tab[1] = &&two;\n"
+    "    int acc = 0;\n"
+    "    int i = 0;\n"
+    "    goto *tab[i];\n"
+    "one:\n"
+    "    acc += 20;\n"
+    "    goto *tab[1];\n"
+    "two:\n"
+    "    acc += 22;\n"
+    "    return acc;\n"
+    "}\n"
+)
+
+COMPLEX_PROGRAM = (
+    "#include <complex.h>\n"
+    "int main(void) {\n"
+    "    double complex z = __cccc_cmplx(20.0, 22.0);\n"
+    "    double complex c = conj(z);\n"
+    "    return (int)creal(z) + (int)cimag(z) - (int)cimag(c) - 22;\n"
+    "}\n"
+)
+
+CONVERTVECTOR_PROGRAM = (
+    "typedef int v4i __attribute__((vector_size(16)));\n"
+    "typedef float v4f __attribute__((vector_size(16)));\n"
+    "int main(void) {\n"
+    "    v4i a = {10, 11, 10, 11};\n"
+    "    v4f b = __builtin_convertvector(a, v4f);\n"
+    "    return (int)(b[0] + b[1] + b[2] + b[3]);\n"
+    "}\n"
+)
+
+# __builtin_return_address is deliberately not value-asserted: the VM returns
+# a bytecode pc and the host returns a real return address. Only that it is
+# reachable, compiles, and does not disturb the result is checked.
+ADDR_BUILTINS_PROGRAM = (
+    "int trapper(int x) {\n"
+    "    if (x > 0)\n"
+    "        return 42;\n"
+    "    __builtin_unreachable();\n"
+    "}\n"
+    "int main(void) {\n"
+    "    void *fp = __builtin_frame_address(0);\n"
+    "    void *ra = __builtin_return_address(0);\n"
+    "    (void)ra;\n"
+    "    return fp ? trapper(1) : 1;\n"
+    "}\n"
+)
+
+ASM_PROGRAM = (
+    "int main(void) {\n"
+    "    asm(\"nop\");\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_bitops_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  39: -c=native, bit-manipulation builtins keep their width "
+          "(popcount/parity encode width 0, so the ll variant comes from the "
+          "argument type) (#963)")
+    return _native_run_case(cccc, tmp, "bitops_963", BITOPS_PROGRAM)
+
+
+def case_atomics_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  40: -c=native, atomic load/store/exchange/CAS run natively -- "
+          "an atomic store in statement position used to serialize to a null "
+          "statement and silently vanish (#963)")
+    return _native_run_case(cccc, tmp, "atomics_963", ATOMICS_PROGRAM)
+
+
+def case_computed_goto_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  41: -c=native, labels-as-values and `goto *ptr` round-trip (#963)")
+    return _native_run_case(cccc, tmp, "computed_goto_963", COMPUTED_GOTO_PROGRAM)
+
+
+def case_complex_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  42: -c=native, _Complex construction and creal/cimag/conj "
+          "round-trip (#963)")
+    return _native_run_case(cccc, tmp, "complex_963", COMPLEX_PROGRAM)
+
+
+def case_convertvector_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  43: -c=native, __builtin_convertvector round-trips with an "
+          "attributed vector type name (#963)")
+    return _native_run_case(cccc, tmp, "convertvector_963", CONVERTVECTOR_PROGRAM)
+
+
+def case_addr_builtins_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  44: -c=native, frame/return address and the trap builtins "
+          "compile and run (#963)")
+    return _native_run_case(cccc, tmp, "addr_builtins_963", ADDR_BUILTINS_PROGRAM)
+
+
+def case_asm_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  45: -c=native, asm(...) is emitted verbatim and handed to the "
+          "host compiler (#963)")
+    return _native_run_case(cccc, tmp, "asm_963", ASM_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1295,6 +1431,13 @@ def main() -> int:
             case_generated_no_duplicate_captured_include,
             case_generated_comptime_include_still_derives,
             case_generated_forward_decls_hoisted,
+            case_bitops_native_round_trip,
+            case_atomics_native_round_trip,
+            case_computed_goto_native_round_trip,
+            case_complex_native_round_trip,
+            case_convertvector_native_round_trip,
+            case_addr_builtins_native_round_trip,
+            case_asm_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -877,6 +877,20 @@ static void serialize_string_n(FILE *f, const char *str, int len) {
     fprintf(f, "\"");
 }
 
+// True when an ND_ALOAD/ND_ASTORE address expression has a pointee the
+// __atomic_* builtins accept. Mirrors codegen's ALDR/ASTR guard (1/2/4/8-byte
+// non-float pointee); anything else takes codegen's plain load/store fallback,
+// so serializing it as a plain dereference matches the VM -- and
+// __atomic_load_n would not compile on a float or aggregate pointee anyway.
+static bool atomic_serializable_pointee(Node *addr) {
+    if (!addr || !addr->ty || !addr->ty->base)
+        return false;
+    Type *base = addr->ty->base;
+    if (is_flonum(base))
+        return false;
+    return base->size == 1 || base->size == 2 || base->size == 4 || base->size == 8;
+}
+
 // Print indentation
 static void print_indent_level(FILE *f, int indent) {
     for (int i = 0; i < indent; i++)
@@ -1147,6 +1161,181 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // Empty expression
         break;
 
+    case ND_FRAME_ADDR:
+        // The parser rejects any level but 0, so there is nothing to carry.
+        fprintf(f, "__builtin_frame_address(0)");
+        break;
+
+    case ND_RETURN_ADDR:
+        // The *value* diverges by design: under the VM this is a bytecode pc
+        // cast to void*, natively it is a real host return address. Both are
+        // "the return address n frames up" in their own runtime, which is the
+        // most faithful mapping available -- see COVERAGE.md.
+        fprintf(f, "__builtin_return_address(%lld)", (long long)node->val);
+        break;
+
+    case ND_UNREACHABLE:
+        // __builtin_unreachable, __builtin_trap and __builtin_debugtrap all
+        // lower to the same BTRAP opcode, so the VM traps for all three and
+        // the original spelling is not recoverable here. __builtin_trap() is
+        // the emission that matches that behaviour; __builtin_unreachable()
+        // would be UB natively and the optimizer would delete the path.
+        fprintf(f, "__builtin_trap()");
+        break;
+
+    case ND_BITOP: {
+        // val = (op << 8) | width. popcount/parity encode width 0 (see
+        // parse.c), so the `ll` variant has to come from the argument's own
+        // type -- emitting __builtin_popcount for a 64-bit argument would
+        // compile cleanly and silently truncate.
+        int op = (int)(node->val >> 8);
+        int width = (int)(node->val & 0xff);
+        bool wide = node->lhs && node->lhs->ty && node->lhs->ty->size == 8;
+        const char *name;
+        switch (op) {
+        case 0: name = (width == 64) ? "__builtin_clzll" : "__builtin_clz"; break;
+        case 1: name = (width == 64) ? "__builtin_ctzll" : "__builtin_ctz"; break;
+        case 2: name = wide ? "__builtin_popcountll" : "__builtin_popcount"; break;
+        case 3: name = wide ? "__builtin_parityll" : "__builtin_parity"; break;
+        case 4: name = (width == 64) ? "__builtin_ffsll" : "__builtin_ffs"; break;
+        default:
+            // bswap: `width` is the byte count, not a bit width.
+            name = (width == 2) ? "__builtin_bswap16"
+                 : (width == 4) ? "__builtin_bswap32"
+                                : "__builtin_bswap64";
+            break;
+        }
+        fprintf(f, "%s(", name);
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, ")");
+        break;
+    }
+
+    case ND_DYNOBJ_SIZE:
+        fprintf(f, "__builtin_dynamic_object_size(");
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, ", %lld)", (long long)node->val);
+        break;
+
+    case ND_ALOAD:
+        // codegen only takes the atomic path for 1/2/4/8-byte non-float
+        // pointees and falls back to a plain load otherwise; mirror that,
+        // since __atomic_load_n does not accept a float or aggregate pointee
+        // and the VM is not being atomic there either.
+        if (atomic_serializable_pointee(node->lhs)) {
+            fprintf(f, "__atomic_load_n(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ", __ATOMIC_SEQ_CST)");
+        } else {
+            fprintf(f, "(*(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, "))");
+        }
+        break;
+
+    case ND_ASTORE:
+        // An atomic store in *expression* position has to yield the stored
+        // value (codegen gives it C assignment semantics) but
+        // __atomic_store_n returns void, so the value is threaded through a
+        // statement expression rather than evaluating the operand twice. The
+        // common statement-position case is handled in serialize_stmt and
+        // emits the plain call.
+        if (atomic_serializable_pointee(node->lhs)) {
+            fprintf(f, "__extension__ ({ __typeof__(*(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ")) __cccc_astore_v = (");
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f, "); __atomic_store_n(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ", __cccc_astore_v, __ATOMIC_SEQ_CST); __cccc_astore_v; })");
+        } else {
+            fprintf(f, "(*(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ") = ");
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f, ")");
+        }
+        break;
+
+    case ND_EXCH:
+        // codegen rejects float/odd-size pointees outright for exchange and
+        // compare-and-swap, so these two map 1:1 with no fallback arm.
+        fprintf(f, "__atomic_exchange_n(");
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, ", ");
+        serialize_expr(f, vm, ctx, node->rhs, 0);
+        fprintf(f, ", __ATOMIC_SEQ_CST)");
+        break;
+
+    case ND_CAS:
+        // (obj, *expected, desired) -> bool, matching codegen's ACAS contract:
+        // cas_old is a *pointer* to the expected value, as __atomic_compare_
+        // exchange_n also takes. weak = 0.
+        fprintf(f, "__atomic_compare_exchange_n(");
+        serialize_expr(f, vm, ctx, node->cas_addr, 0);
+        fprintf(f, ", ");
+        serialize_expr(f, vm, ctx, node->cas_old, 0);
+        fprintf(f, ", ");
+        serialize_expr(f, vm, ctx, node->cas_new, 0);
+        fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
+        break;
+
+    case ND_LABEL_VAL:
+        // [GNU] labels-as-values. node->label is the source identifier, the
+        // same one ND_LABEL/ND_GOTO already serialize.
+        fprintf(f, "&&%s", node->label ? node->label : "/* unknown label */");
+        break;
+
+    case ND_COMPLEX: {
+        // val: 0 = construct from (real, imag), 1 = creal, 2 = cimag,
+        // 3 = conj. The f/l suffix follows the element float type.
+        Type *elem = node->ty;
+        if (elem && elem->kind == TY_COMPLEX && elem->base)
+            elem = elem->base;
+        const char *suffix = !elem                     ? ""
+                           : (elem->kind == TY_FLOAT)  ? "f"
+                           : (elem->kind == TY_LDOUBLE) ? "l"
+                                                        : "";
+        if (node->val == 0) {
+            // __builtin_complex requires both operands to have the same real
+            // floating type, so each is cast to the element type explicitly.
+            fprintf(f, "__builtin_complex((");
+            serialize_type(f, ctx, elem);
+            fprintf(f, ")(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, "), (");
+            serialize_type(f, ctx, elem);
+            fprintf(f, ")(");
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f, "))");
+        } else {
+            const char *name = (node->val == 1) ? "creal"
+                             : (node->val == 2) ? "cimag"
+                                                : "conj";
+            fprintf(f, "__builtin_%s%s(", name, suffix);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ")");
+        }
+        break;
+    }
+
+    case ND_CONVERTVECTOR:
+        fprintf(f, "__builtin_convertvector(");
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, ", ");
+        serialize_type(f, ctx, node->ty);
+        fprintf(f, ")");
+        break;
+
+    case ND_DECIMAL_TO_CHARS:
+        // #402, CCCC_HAS_DECIMAL builds only. Unlike every other builtin
+        // here there is no host equivalent to lower to -- clang and gcc have
+        // no _Decimal support at all -- so this fails loudly rather than
+        // fabricating a call that would not link.
+        error("cccc: _Decimal is not supported in native/serialized output "
+              "(__builtin_decimal_to_chars has no host equivalent)");
+        break;
+
     default:
         fprintf(f, "/* unsupported expr kind %d */", node->kind);
         break;
@@ -1175,6 +1364,14 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 
     case ND_EXPR_STMT:
         if (is_noop_expr(node->lhs)) break;
+        // An atomic store written as its own statement (the usual case)
+        // discards its value, so hand it to the ND_ASTORE statement case and
+        // emit the plain void-returning call rather than the value-producing
+        // statement expression.
+        if (node->lhs && node->lhs->kind == ND_ASTORE) {
+            serialize_stmt(f, vm, ctx, node->lhs, indent);
+            break;
+        }
         print_indent_level(f, indent);
         serialize_expr(f, vm, ctx, node->lhs, 0);
         fprintf(f, ";\n");
@@ -1289,6 +1486,50 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 
     case ND_CASE:
         // Handled as part of switch
+        break;
+
+    case ND_GOTO_EXPR:
+        // [GNU] `goto *ptr`. Parsed by stmt() and consuming its own `;`, so
+        // it is a statement here even though the audit files it with the
+        // expression kinds.
+        print_indent_level(f, indent);
+        fprintf(f, "goto *(");
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, ");\n");
+        break;
+
+    case ND_ASTORE:
+        // Statement position discards the result, so the plain void-returning
+        // call is enough -- no statement expression needed. See the
+        // ND_ASTORE case in serialize_expr for the value-producing form.
+        print_indent_level(f, indent);
+        if (atomic_serializable_pointee(node->lhs)) {
+            fprintf(f, "__atomic_store_n(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f, ", __ATOMIC_SEQ_CST);\n");
+        } else {
+            fprintf(f, "*(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ") = ");
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f, ";\n");
+        }
+        break;
+
+    case ND_ASM:
+        // asm is the one construct deliberately emitted verbatim even though
+        // the VM does not execute it by default (--asm-passthru opts into VM
+        // execution): there is no way to evaluate host assembly in the VM, so
+        // native output hands it to the host compiler. See COVERAGE.md.
+        print_indent_level(f, indent);
+        fprintf(f, "asm(");
+        if (node->asm_str)
+            serialize_string_n(f, node->asm_str, (int)strlen(node->asm_str));
+        else
+            fprintf(f, "\"\"");
+        fprintf(f, ");\n");
         break;
 
     default:

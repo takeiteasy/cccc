@@ -200,7 +200,7 @@ language coverage figures apply.
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
 | `__inline` / `__inline__` | ✓ | Spelling aliases for `inline`; recognized as GCC keyword aliases (GCC compatibility) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
-| `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending |
+| `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending. **`-c=native`/`-m`/`-c=generated` always emit the `asm(...)` verbatim**, regardless of `--asm-passthru` — the one construct where serialized output deliberately does not mirror default VM behaviour, since there is no way to evaluate host assembly inside the VM at all. Executing it is the host compiler's job, and `--asm-passthru` governs VM execution only. See [Serialized-output divergences](#serialized-output-divergences) |
 | GNU `asm("symbol")` declaration labels | ~ | Supported on function declarations, including typedef-based and multi-declarator declarations; the label is used as the external FFI symbol name |
 | `__attribute__((vector_size(N)))` generic vectors | ~ | 128-, 256-, and 512-bit vectors (16/32/64-byte total size) — e.g. `v4f32`/`v8f32`/`v16f32`, `v2f64`/`v4f64`/`v8f64`, `v4i32`/`v8i32`/`v16i32`, and the corresponding `i64`/`i16`/`i8` lane layouts at each width; any other width (non-power-of-two byte counts, or wider than 64 bytes) is rejected with a diagnostic. Element-wise `+ - * /` and unary `-`/`~` on all lane types; integer lanes additionally support `% & \| ^` and integer `/`/`%`, each trapping per-lane on a zero divisor or `MIN/-1` overflow (stricter than default scalar `/`, which does not trap — matches scalar `DIVC`'s policy); `&`/`\|`/`^`/`~` are rejected on float lanes. Comparisons `== != < <= > >=` produce a per-lane all-ones(`-1`)/all-zero mask in a same-width **signed** integer vector (GCC semantics); ordered `< <=` on unsigned-int lanes compare the unsigned view. GNU vector `?:` select is supported (nonzero-per-lane condition, matching lane count/width). Scalar operands broadcast through arithmetic (`v + 5.0f`), matching GCC/clang — a bare scalar cannot initialize or be assigned to a whole vector. `v[i]` subscript supports a runtime-variable index. Brace-initializer syntax (`v4sf a = {1,2,3,4};`, including partial and nested forms) is supported, as are compound literals (`(v4sf){1,2,3,4}`) used as expressions, with a `static` storage-class specifier, or as the entire initializer of another global/static variable (`v4sf g = (v4sf){1,2,3,4};`). Designated lane initializers (`{[2]=3.0f}`) are rejected with a diagnostic, matching GCC/clang — vector types are non-aggregate in their model, and designated initializers only apply to aggregates. `__builtin_convertvector(expr, type)` converts between vectors with the same lane count; only `int32<->float32` and `int64<->float64` lane pairs are representable (matching lane counts forces matching element byte sizes), so same-domain conversions (e.g. changing signedness/width without crossing int/float) are rejected. `__builtin_shuffle` supports both a **compile-time-constant, brace-enclosed** index mask (`__builtin_shuffle(v, {3,2,1,0})`, 1- or 2-vector form — CCCC's own constant-mask form, closer to clang's `__builtin_shufflevector` than upstream GCC's syntax) and a **runtime or named integer vector mask** (`__builtin_shuffle(v, mask)` / `__builtin_shuffle(v1, v2, mask)`, matching upstream GCC's general form) — the mask must be an integer vector with the same lane count and element byte width as the vector being shuffled. Both forms lower via the same vector-subscript machinery with no dedicated opcode; the constant form range-checks each index at compile time (an out-of-range index is a compile error), while the runtime form takes each index modulo the lane count (1-vector) or twice the lane count (2-vector), matching GCC's documented wraparound semantics — a runtime index can't be rejected at compile time. Vectors can be passed as function parameters and returned by value: passed by memory (a caller-side scratch copy sized to the argument's own width, address handed to the callee, like a struct-by-value arg), returned via the RETBUF rotating pool (like a struct-by-value return) — see [VM.md](VM.md#simd--vector-operations). This includes a variadic `...` parameter: the by-memory scratch-pointer convention means a variadic vector arg always occupies exactly one 8-byte slot regardless of the vector's width, and `<stdarg.h>`'s `va_arg` detects a vector `type` via `__builtin_classify_type` and dereferences the slot instead of reading it directly — matches gcc/clang, which also accept a vector through `...` (verified). Not supported through the native FFI marshalling path (extern/`dlopen`ed functions — libffi has no portable vector type, and there's no struct-by-value FFI path to build on either) or a GNU/Apple block invocation — each rejected with a diagnostic. See [VM.md](VM.md#simd--vector-operations) for the opcode set |
 
@@ -1148,6 +1148,29 @@ int main(void) {
 
 Object asm labels are parsed as declaration syntax but do not change storage
 layout or serialized output.
+
+---
+
+## Serialized-output divergences
+
+`-c=native`, `-m` and `-c=generated` re-emit the program as C and hand it to a
+host compiler. The rule everywhere else in this document is that the emitted C
+behaves as the VM behaves. Four constructs cannot fully honour that, and they
+are listed here rather than left to be discovered:
+
+| Construct | VM | Serialized output |
+|---|---|---|
+| `asm(...)` | no-op by default; `--asm-passthru` compiles via native CC and executes through FFI | always emitted verbatim and executed by the host binary. There is no way to evaluate host assembly inside the VM, so this is offloaded to the host by design |
+| `__builtin_return_address(n)` | a VM bytecode offset (`Pc`) cast to `void*` | a real host return address. Both are "the return address `n` frames up" in their own runtime; the numeric values are unrelated |
+| `__builtin_dynamic_object_size(p, t)` | reads the VM allocation header, so the exact size is always known | the host builtin, which answers its documented "unknown" (`(size_t)-1` for types 0/1) unless the host optimizer can see the allocation — exact at `-O2`, unknown at `-O0` |
+| `__builtin_unreachable()` / `__builtin_trap()` / `__builtin_debugtrap()` | all three trap (one `BTRAP` opcode) | all three emit `__builtin_trap()`. The original spelling is not recoverable after lowering, and emitting `__builtin_unreachable()` would be undefined behaviour the host optimizer deletes — trapping is what matches the VM |
+
+`_Decimal` is a hard error rather than a divergence: `__builtin_decimal_to_chars`
+has no host equivalent, so a `CCCC_HAS_DECIMAL=1` build refuses to serialize it
+instead of emitting a call that would not link.
+
+Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
+drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 
 ---
 

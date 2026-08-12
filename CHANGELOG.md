@@ -5,6 +5,34 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Serialized output silently dropped 14 node kinds** (#963). `-c=native`,
+  `-m` and `-c=generated` routed any unhandled `NodeKind` to a `default:`
+  arm that emitted a *comment* instead of failing. In expression position
+  that broke the host build; in **statement** position it emitted
+  `/* unsupported expr kind N */;` — a syntactically valid null statement —
+  so the native binary compiled cleanly and silently returned a different
+  answer than the VM (`__builtin_atomic_store(&x, 42)` simply vanished).
+  Now serialized: the bit-manipulation builtins (`clz`/`ctz`/`popcount`/
+  `parity`/`ffs`/`bswap`, including recovering the `ll` variants of
+  `popcount`/`parity`, whose node encoding carries no width), the atomics
+  (`__atomic_load_n`/`store_n`/`exchange_n`/`compare_exchange_n`, mirroring
+  codegen's non-atomic fallback for float and odd-size pointees),
+  labels-as-values and `goto *ptr`, `_Complex` construction and
+  `creal`/`cimag`/`conj`, `__builtin_convertvector`,
+  `__builtin_frame_address`, `__builtin_return_address`,
+  `__builtin_dynamic_object_size`, the trap builtins, and `asm(...)`. Also
+  closes the parallel *type*-serializer gap (`TY_VLA` — including its length
+  expression, `TY_COMPLEX`, `TY_VECTOR`), which took the corpus from 34
+  files emitting `/* unknown type */` to 3. Covered by
+  `tests/test_serialize_{type,expr}_*.c` and, so the silent class is caught
+  by *running* the binary rather than only building it, seven VM-42 →
+  native-42 cases in `tools/comptime_native_smoke.py`. VLAs, the overflow
+  builtins and blocks remain unserialized and keep their own tickets;
+  divergences that cannot be avoided are documented in
+  [COVERAGE.md](man/COVERAGE.md#serialized-output-divergences).
+
 ## [0.2.7] - 2026-08-12
 
 ### Fixed
