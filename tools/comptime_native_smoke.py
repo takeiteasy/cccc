@@ -1593,11 +1593,40 @@ def case_vla_row_sub_and_init_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     VLA_ROW_SUB_AND_INIT_PROGRAM)
 
 
+# #982 (defect D): a PARTIAL multi-dimensional VLA brace initializer (fewer
+# rows than the array's outer dimension) left the omitted row relying on the
+# fresh alloca block already being zero -- true at the VM's default safety
+# level, but not under -2/-3's memory poisoning (0xCD fill). Fixed by
+# prepending an ND_MEMZERO ahead of the VLA init in var_definition()
+# (src/parse.c), read back through a runtime `ty->vla_size` byte count
+# (src/codegen.c). This case isn't about poisoning (the native path has no
+# such thing) -- it instead checks that a real C compiler agrees an omitted
+# row must read back as zero, and that the new ND_COMMA(ND_MEMZERO, init)
+# AST shape serializes correctly through -c=native at all (case 51 above
+# only covers a FULL initializer, never exercising the new memzero node).
+VLA_PARTIAL_INIT_PROGRAM = (
+    "int main(void) {\n"
+    "    int n = 2, m = 2;\n"
+    "    int v[n][m] = {{1, 2}};   // second row omitted\n"
+    "    int total = v[0][0] + v[0][1] * 10"
+    " + (v[1][0] == 0 && v[1][1] == 0 ? 0 : 100);\n"
+    "    return total == 21 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_vla_partial_init_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  52: -c=native, a partial multi-dimensional VLA brace "
+          "initializer zero-fills its omitted row (#982)")
+    return _vm_and_native_run_case(cccc, tmp, "vla_partial_init_982",
+                                    VLA_PARTIAL_INIT_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1656,6 +1685,7 @@ def main() -> int:
             case_vla_multidim_native_round_trip,
             case_vla_addr_native_round_trip,
             case_vla_row_sub_and_init_native_round_trip,
+            case_vla_partial_init_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

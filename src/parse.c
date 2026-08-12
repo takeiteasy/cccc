@@ -4069,9 +4069,37 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
                 Type *new_ty;
                 Initializer *init = initializer(vm, &tok, tok, ty, &new_ty);
                 Node *init_node = create_vla_init(vm, init, ty, var, tok_local);
-                if (init_node)
+                if (init_node) {
+                    // #982 (defect D): a partial VLA brace initializer
+                    // (fewer elements/rows than the array's own dimensions)
+                    // leaves the unspecified elements relying on the fresh
+                    // alloca block already being zero -- true by
+                    // construction at the default safety level, but not
+                    // under -2/-3's CCCC_MEMORY_POISONING, which fills
+                    // every fresh heap block with 0xCD before use
+                    // (vm_heap_bump_alloc_ex, src/ops.c). Every other
+                    // partial-initializer path pre-zeroes the object first
+                    // for exactly this reason (lvar_initializer, below in
+                    // this file); the VLA path bypasses lvar_initializer
+                    // entirely (create_vla_init can't use ty->array_len --
+                    // see its own comment) and never got the same
+                    // treatment. Mirror it here: the ND_ASSIGN(ND_VLA_PTR,
+                    // alloca(...)) statement just above already guarantees
+                    // ty->vla_size is live for the ND_MEMZERO codegen.
+                    Node *zero = new_node(vm, ND_MEMZERO, tok_local);
+                    zero->var = var;
+                    // A VLA's byte count isn't the constant ty->size codegen
+                    // defaults to (that's TY_VLA's placeholder size, see
+                    // vla_of()) -- it's the runtime value in ty->vla_size,
+                    // the same Obj the alloca() call above was sized from.
+                    // Stash it in ->rhs (unused by every other ND_MEMZERO
+                    // producer) so codegen can gen_expr it into REG_A2
+                    // instead of using the constant path.
+                    zero->rhs = new_var_node(vm, ty->vla_size, tok_local);
+                    Node *comma = new_binary(vm, ND_COMMA, zero, init_node, tok_local);
                     cur = cur->next =
-                        new_unary(vm, ND_EXPR_STMT, init_node, tok_local);
+                        new_unary(vm, ND_EXPR_STMT, comma, tok_local);
+                }
             }
 
             continue;

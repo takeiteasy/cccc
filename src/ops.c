@@ -3164,12 +3164,18 @@ static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr, AllocHeader
 // Returns NULL (without touching any VM register) on invalid size or OOM;
 // callers translate that into their own error-reporting convention.
 //
-// `is_internal` marks compiler-internal automatic storage (alloca/VLA,
-// __block box, routed here via the ALCA opcode -- #979): it gets a full
-// AllocHeader/sorted_allocs entry like any other allocation (CHKB/CHKP3/
-// DYNOBJSZ all keep working on it unchanged) but is never appended to
-// vm->alloc_list, so it never appears in a MEMORY LEAK DETECTED report.
-static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm, long long requested_size, size_t alignment, bool is_internal) {
+// `kind` marks what the allocation is (AllocKind, #979/#981): anything
+// other than ALLOC_KIND_USER is compiler-internal automatic storage
+// (alloca/VLA via ALCA, or a __block box via ALCB) rather than a plain
+// `malloc`-family call. It still gets a full AllocHeader/sorted_allocs
+// entry like any other allocation (CHKB/CHKBN/CHKP3/DYNOBJSZ all keep
+// working on it unchanged) but is never appended to vm->alloc_list, so it
+// never appears in a MEMORY LEAK DETECTED report. ALLOC_KIND_FRAME and
+// ALLOC_KIND_BLOCK_BOX are kept as distinct values (not folded back into a
+// single bool) specifically so a future reclamation pass (#981) can target
+// frame-scoped storage alone without ever sweeping a __block box, which
+// Block_copy is expected to let legitimately outlive its declaring frame.
+static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm, long long requested_size, size_t alignment, AllocKind kind) {
     if (requested_size <= 0)
         return NULL;
 
@@ -3208,7 +3214,7 @@ static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm, long long requeste
     header->freed = 0;
     header->generation = 0;
     header->creation_generation = 0;
-    header->is_internal = is_internal ? 1 : 0;
+    header->kind = kind;
     header->canary = 0;
     header->alloc_pc = vm->text_seg ? (long long)vm->pc : 0;
 
@@ -3240,7 +3246,7 @@ static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm, long long requeste
     // storage (alloca/VLA, __block box) is deliberately excluded -- it is
     // never meant to be user-freed, so it would otherwise be reported as a
     // leak on every single execution (#979).
-    if (!is_internal && (vm->flags & CCCC_MEMORY_LEAK_DETECT)) {
+    if (kind == ALLOC_KIND_USER && (vm->flags & CCCC_MEMORY_LEAK_DETECT)) {
         AllocRecord *rec = (AllocRecord *)malloc(sizeof(AllocRecord));
         if (rec) {
             rec->address = user_ptr;
@@ -3261,9 +3267,10 @@ static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm, long long requeste
 // Plain (non-internal) allocation -- the pre-#979 shape, kept so the
 // existing malloc/aligned_alloc/posix_memalign call sites below are
 // untouched. Internal automatic storage (alloca/VLA/__block) goes through
-// vm_heap_bump_alloc_ex directly with is_internal=true instead.
+// vm_heap_bump_alloc_ex directly with ALLOC_KIND_FRAME/ALLOC_KIND_BLOCK_BOX
+// instead.
 static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_size, size_t alignment) {
-    return vm_heap_bump_alloc_ex(vm, requested_size, alignment, false);
+    return vm_heap_bump_alloc_ex(vm, requested_size, alignment, ALLOC_KIND_USER);
 }
 
 // Shared by op_MALC_fn (direct `malloc(...)` calls, routed here by codegen's
@@ -3288,13 +3295,15 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
     return 0;
 }
 
-// Backs the ALCA opcode: alloca/VLA storage and __block boxes (#979).
-// Identical register/ABI shape to MALC (size=A0, result=A0) -- the only
-// difference is is_internal=true on the AllocHeader, which keeps it off the
-// leak-detection AllocRecord list while leaving sorted_allocs/CHKB/CHKP3/
-// DYNOBJSZ unaffected.
+// Backs the ALCA opcode: alloca/VLA storage (#979/#981). Identical
+// register/ABI shape to MALC (size=A0, result=A0) -- the only difference is
+// ALLOC_KIND_FRAME on the AllocHeader, which keeps it off the leak-
+// detection AllocRecord list while leaving sorted_allocs/CHKB/CHKBN/CHKP3/
+// DYNOBJSZ unaffected. Kept as its own AllocKind (distinct from a __block
+// box's ALLOC_KIND_BLOCK_BOX, backed by ALCB below) so a future
+// reclamation pass can target frame-scoped storage alone (#981).
 void *cccc_vm_heap_alloca(VirtualMachine *vm, long long requested_size) {
-    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, true);
+    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, ALLOC_KIND_FRAME);
     if (vm->debug_vm && user_ptr) {
         printf("ALCA: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7),
                (long long)user_ptr);
@@ -3303,9 +3312,31 @@ void *cccc_vm_heap_alloca(VirtualMachine *vm, long long requested_size) {
 }
 
 static inline int op_ALCA_fn(VirtualMachine *vm) {
-    // alloca/VLA/__block: size in REG_A0, return pointer in REG_A0
+    // alloca/VLA: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
     vm->regs[REG_A0] = (long long)cccc_vm_heap_alloca(vm, requested_size);
+    return 0;
+}
+
+// Backs the ALCB opcode: __block variable heap boxes (#981). Identical
+// register/ABI shape to ALCA/MALC (size=A0, result=A0) -- the only
+// difference is ALLOC_KIND_BLOCK_BOX on the AllocHeader. Split out from
+// ALCA so a future #981 reclamation pass can never sweep a __block box:
+// Block_copy is expected to let one legitimately outlive its declaring
+// frame, unlike alloca/VLA storage (ALLOC_KIND_FRAME), which dies with it.
+void *cccc_vm_heap_alloc_block(VirtualMachine *vm, long long requested_size) {
+    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, ALLOC_KIND_BLOCK_BOX);
+    if (vm->debug_vm && user_ptr) {
+        printf("ALCB: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7),
+               (long long)user_ptr);
+    }
+    return user_ptr;
+}
+
+static inline int op_ALCB_fn(VirtualMachine *vm) {
+    // __block box: size in REG_A0, return pointer in REG_A0
+    long long requested_size = vm->regs[REG_A0];
+    vm->regs[REG_A0] = (long long)cccc_vm_heap_alloc_block(vm, requested_size);
     return 0;
 }
 
@@ -4440,14 +4471,21 @@ static inline int op_VCVT_F64_I64_fn(VirtualMachine *vm) {
 
 // ========== Safety Opcodes ==========
 
-static inline int op_CHKB_fn(VirtualMachine *vm) {
-    // Check array bounds.
-    // Format: [CHKB] [rs1:base, rs2:scaled_offset] (RR operand word)
-    // rs1 = base pointer, rs2 = scaled byte offset (index * element_size)
-    long long operands = cc_read_word(vm);
-    int rs1, rs2;
-    DECODE_RR(operands, rs1, rs2);
-
+// Shared body for CHKB/CHKBN (#982): `is_sub` selects CHKBN's semantics
+// (the effective offset is base_off - scaled_offset, for `p - n`) versus
+// CHKB's (base_off + scaled_offset, for `p + n` and, via subscript
+// desugaring `*(a+i)`, for `a[i]` too). Pulled into one function so the two
+// opcodes can never drift apart on the actual violation test, only on the
+// sign of the offset -- the same pattern chkr_common already uses for
+// CHKR/CHKRO below.
+//
+// Before #982, op_CHKB_fn unconditionally added scaled_offset regardless of
+// whether the original expression was `p + n` or `p - n`; codegen always
+// hands CHKB a *positive* scaled magnitude for `p - n` (new_sub, src/
+// parse.c), so `base_off + n` was checked instead of `base_off - n`,
+// tripping a false ARRAY BOUNDS ERROR whenever `n` was large enough to
+// sail past the allocation's own size. CHKBN fixes this by subtracting.
+static inline int chkb_common(VirtualMachine *vm, int rs1, int rs2, bool is_sub) {
     if (!(vm->flags & CCCC_BOUNDS_CHECKS))
         return 0;
 
@@ -4463,7 +4501,8 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
     size_t base_off;
     AllocHeader *header = heap_alloc_for_ptr(vm, base, &base_off);
     if (header) {
-        long long eff = (long long)base_off + scaled_offset;
+        long long eff = is_sub ? (long long)base_off - scaled_offset
+                                : (long long)base_off + scaled_offset;
         if (eff < 0 || eff >= (long long)header->size) {
             printf("\n========== ARRAY BOUNDS ERROR ==========\n");
             printf("Array index out of bounds\n");
@@ -4481,8 +4520,14 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
     }
 
     // Non-heap or untracked base (stack/global arrays): no upper bound is
-    // known here, but a negative index is unconditionally invalid.
-    if (scaled_offset < 0) {
+    // known here. For CHKB's ADD form, a literal negative scaled_offset
+    // (e.g. `a[-1]`) is unconditionally invalid, since `base` is itself the
+    // subscripted array's own base. CHKBN's SUB form (`p - n`) instead
+    // modifies an arbitrary interior pointer, not necessarily an array's
+    // own start, so the equivalent lower-bound check isn't available here
+    // -- this is the same "no upper bound known for non-heap bases"
+    // limitation CHKB already has, just facing the other direction.
+    if (!is_sub && scaled_offset < 0) {
         printf("\n========== ARRAY BOUNDS ERROR ==========\n");
         printf("Negative array index (scaled offset: %lld)\n", scaled_offset);
         printf("Base address: 0x%llx\n", base);
@@ -4493,6 +4538,26 @@ static inline int op_CHKB_fn(VirtualMachine *vm) {
     }
 
     return 0;
+}
+
+static inline int op_CHKB_fn(VirtualMachine *vm) {
+    // Check array bounds (ADD form: `p + n`, and via subscript desugaring
+    // `*(a+i)`, `a[i]` too).
+    // Format: [CHKB] [rs1:base, rs2:scaled_offset] (RR operand word)
+    // rs1 = base pointer, rs2 = scaled byte offset (index * element_size)
+    long long operands = cc_read_word(vm);
+    int rs1, rs2;
+    DECODE_RR(operands, rs1, rs2);
+    return chkb_common(vm, rs1, rs2, false);
+}
+
+static inline int op_CHKBN_fn(VirtualMachine *vm) {
+    // Check array bounds (SUB form: `p - n`). See chkb_common's comment.
+    // Format: [CHKBN] [rs1:base, rs2:scaled_offset] (RR operand word)
+    long long operands = cc_read_word(vm);
+    int rs1, rs2;
+    DECODE_RR(operands, rs1, rs2);
+    return chkb_common(vm, rs1, rs2, true);
 }
 
 // Shared body for CHKR/CHKRO (#942): `allow_sentinel` is true only for

@@ -524,4 +524,63 @@ int test_vla_2d_brace_init_short(void) {
                : 1;
 }
 
+// #982: the six cases above all passed at the default safety level but
+// failed under -2/-3's CCCC_BOUNDS_CHECKS/CCCC_MEMORY_POISONING -- that gap
+// is exactly why they went unnoticed until #979/#980's verification pass.
+// Re-run each at -2 here (pinned via flags = "-2", not CCCC_FLAGS:, so only
+// these duplicates get bounds checks, not the whole suite) so a regression
+// in the CHKB/CHKBN split or the VLA memzero fix is caught at the safety
+// level it actually broke at.
+[[cccc::test(return = 42, flags = "-2")]]
+int test_vla_addr_stride_is_whole_row_bounds_checked(void) {
+    int n = 3;
+    int v[n];
+    long stride = (long)((char *)(&v + 1) - (char *)&v);
+    return stride == (long)(n * sizeof(int)) ? 42 : 1;
+}
+
+[[cccc::test(return = 42, flags = "-2")]]
+int test_vla_2d_row_ptr_sub_bounds_checked(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    long d1 = &v[1] - &v[0];
+    return d1 == 1 ? 42 : 1;
+}
+
+[[cccc::test(return = 42, flags = "-2")]]
+int test_vla_2d_row_ptr_sub_negative_bounds_checked(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    long d0 = &v[0] - &v[1];
+    return d0 == -1 ? 42 : 1;
+}
+
+[[cccc::test(return = 42, flags = "-2")]]
+int test_vla_row_ptr_minus_num_bounds_checked(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    int (*p)[m] = &v[1];
+    int (*p0)[m] = p - 1;
+    p0[0][0] = 42;
+    return v[0][0];
+}
+
+[[cccc::test(return = 42, flags = "-2")]]
+int test_vla_2d_brace_init_ragged_bounds_checked(void) {
+    int n = 2, m = 2;
+    int v[n][m] = {{1, 2}, {3}};
+    return v[0][0] == 1 && v[0][1] == 2 && v[1][0] == 3 && v[1][1] == 0
+               ? 42
+               : 1;
+}
+
+[[cccc::test(return = 42, flags = "-2")]]
+int test_vla_2d_brace_init_short_bounds_checked(void) {
+    int n = 2, m = 2;
+    int v[n][m] = {{1, 2}};
+    return v[0][0] == 1 && v[0][1] == 2 && v[1][0] == 0 && v[1][1] == 0
+               ? 42
+               : 1;
+}
+
 #pragma cccc suite end

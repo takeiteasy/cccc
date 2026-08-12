@@ -224,13 +224,16 @@ All features listed below can be enabled individually or through the safety leve
   - Performance overhead proportional to allocation size (memset on alloc/free)
 - `--memory-leak-detection` **Memory leak detection**
   - Tracks user-facing VM heap allocations in a host-memory linked list (AllocRecord)
-  - Compiler-internal automatic storage -- `alloca`/VLA backing blocks and
-    `__block` boxes -- is allocated via the separate `ALCA` opcode instead of
-    `MALC` and is deliberately excluded from this list (#979): it still gets
-    a full `AllocHeader`/`sorted_allocs` entry (so `CHKB`/`CHKP3`/
-    `__builtin_dynamic_object_size` are unaffected), but it is never meant to
-    be user-freed, so reporting it would be permanent false-positive noise on
-    every program that declares a VLA
+  - Compiler-internal automatic storage -- `alloca`/VLA backing blocks
+    (`ALCA` opcode, `AllocHeader.kind = ALLOC_KIND_FRAME`) and `__block`
+    boxes (`ALCB` opcode, `ALLOC_KIND_BLOCK_BOX`, split from `ALCA` in
+    #981's prerequisite so a future reclamation pass can target the former
+    without ever sweeping the latter) -- is allocated via these separate
+    opcodes instead of `MALC` and is deliberately excluded from this list
+    (#979): it still gets a full `AllocHeader`/`sorted_allocs` entry (so
+    `CHKB`/`CHKBN`/`CHKP3`/`__builtin_dynamic_object_size` are unaffected),
+    but it is never meant to be user-freed, so reporting it would be
+    permanent false-positive noise on every program that declares a VLA
   - Removes the record on free() and realloc()
   - Reports all unfreed allocations at program exit (in cc_destroy)
   - Shows address, size, and PC offset of allocation site for each leak
@@ -252,14 +255,26 @@ All features listed below can be enabled individually or through the safety leve
   - Aborts execution with detailed error message including address, size, and generation
 - `--bounds-checks` **Runtime array bounds checking**
   - Tracks requested vs allocated sizes for all heap allocations
-  - CHKP opcode validates pointer is within allocated region
+  - `CHKB` (pointer/subscript addition) and `CHKBN` (pointer subtraction,
+    #982) validate the pointer is within its allocated region
   - Checks against originally requested size (not rounded allocation)
   - Detects out-of-bounds array accesses with offset information
   - Resolves **interior pointers** (`p = q + k`) back to their containing
     allocation via `vm->sorted_allocs`, not just exact base pointers; a
-    negative index is only rejected once it steps before the *resolved
-    allocation's* start, so `p[-1]` on an interior pointer that stays
-    within the allocation is valid (#650)
+    negative effective offset is only rejected once it steps before the
+    *resolved allocation's* start, so `p[-1]` on an interior pointer that
+    stays within the allocation is valid (#650)
+  - A pointer **difference** (`&a - &b`, result type `ptrdiff_t`/`long`)
+    is never bounds-checked — its operand isn't a scaled byte offset, it's
+    the ptr-ptr divide's raw subtraction, so checking it against an
+    allocation's size would be checking an unrelated value (#982)
+  - **Known limitation**: forming a one-past-the-end pointer on heap memory
+    (`p + n` where `n == size`) is rejected even though it's legal C to
+    *form* (only dereferencing it is undefined) — `CHKB` is currently the
+    only check on an array subscript at all (`a[i]` desugars to `*(a+i)`),
+    so this can't simply be relaxed without also losing the ability to
+    catch `a[size]` itself; a real fix needs a separate check at the
+    dereference site (tracked as a follow-up ticket)
 - `--checked-pointers` **Checked-pointer bounds checking (Checked C-style)**
   - Enforces the `[[cccc::single/array/ntarray]]` + `count()`/`byte_count()`/
     `bounds()` attributes declared on a pointer type (always parsed and

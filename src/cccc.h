@@ -62,10 +62,19 @@ extern "C" {
     X(JMPI, 1)  /* Indirect jump */                                            \
     /* VM memory operations (self-contained, no system calls) */               \
     X(MALC, 0)                                                                 \
-    X(ALCA, 0) /* alloca/VLA/__block box: size=A0, result=A0; same shape as   \
-                  MALC but tagged AllocHeader.is_internal so leak detection   \
-                  never reports it (#979) -- CHKB/CHKP3/DYNOBJSZ still see    \
-                  a full AllocHeader via sorted_allocs, unchanged */          \
+    X(ALCA, 0) /* alloca/VLA storage: size=A0, result=A0; same shape as MALC \
+                  but tagged AllocHeader.kind=ALLOC_KIND_FRAME so leak       \
+                  detection never reports it (#979) -- CHKB/CHKBN/CHKP3/     \
+                  DYNOBJSZ still see a full AllocHeader via sorted_allocs,   \
+                  unchanged. __block boxes use the separate ALCB opcode      \
+                  below (#981's prerequisite): both started out sharing this \
+                  one opcode under a single is_internal bool, but a __block  \
+                  box legitimately outlives its declaring frame (Block_copy) \
+                  while alloca/VLA storage dies with it, and #981's eventual \
+                  reclamation pass must be able to target the latter without \
+                  ever sweeping the former -- so they need distinguishable   \
+                  AllocKinds, and hence distinguishable opcodes, well before  \
+                  that pass is written. */                                   \
     X(MFRE, 0)                                                                 \
     X(MCPY, 0)                                                                 \
     X(MSET, 0) /* memset to 0: dest=REG_A0, count=REG_A2; backs ND_MEMZERO */   \
@@ -567,7 +576,42 @@ extern "C" {
                    snapshot-before-store propagation temps. Only emitted \
                    for a declared-checked (not #941-propagated) rhs; see \
                    man/SAFETY.md's Checked Pointers section for the v1 \
-                   scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */
+                   scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */ \
+    /* #982: appended (never interleaved -- see the rule stated above CHKR) \
+       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */ \
+    X(CHKBN, 1) /* Check array bounds, subtracting form: CHKB's sibling for \
+                   pointer SUBTRACTION (`p - n`). Same operand format as CHKB \
+                   ([rs1:base, rs2:scaled_offset], RR operand word), but the \
+                   scaled offset is subtracted from, not added to, the base \
+                   pointer's offset into its allocation before the bounds \
+                   test. CHKB unconditionally added `scaled_offset`, which \
+                   was correct for `p + n` but wrong for `p - n` (new_sub \
+                   hands it a *positive* scaled magnitude, not a negative \
+                   one) -- `p - n` therefore checked `base_off + n` instead \
+                   of `base_off - n`, tripping a false ARRAY BOUNDS ERROR \
+                   whenever `n` was large enough to sail past the \
+                   allocation's own size. Could not be folded into CHKB by \
+                   reusing one of the operand word's two free bytes: \
+                   copy-prop sub-pass A's generic decode (src/optimize.c) \
+                   reads bytes 1-2 as rs1/rs2 sources and rewrites them in \
+                   place, and marking the word immediate-only (the escape \
+                   hatch op_operand_word_is_immediate uses for e.g. CHKI's \
+                   bp-relative offset) would stop sub-pass B from crediting \
+                   CHKB's real base-pointer/offset register reads, risking \
+                   the exact dead-MOV3 hazard #755 fixed for CHKB itself. A \
+                   separate opcode needs zero new optimizer register-shape \
+                   handling beyond joining it to CHKB's existing case arms, \
+                   the same property that made #979's ALCA opcode safe. \
+                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB. */ \
+    X(ALCB, 0) /* __block variable heap box: size=A0, result=A0; identical \
+                  register shape to ALCA/MALC. Split out of ALCA (#981's \
+                  prerequisite) so a __block box gets its own \
+                  AllocHeader.kind=ALLOC_KIND_BLOCK_BOX, distinguishable \
+                  from alloca/VLA's ALLOC_KIND_FRAME -- Block_copy is \
+                  expected to let a __block box legitimately outlive its \
+                  declaring frame, so any future reclamation pass targeting \
+                  frame-scoped storage (#981) must never sweep this kind. \
+                  CHKB/CHKBN/CHKP3/DYNOBJSZ are unaffected, same as ALCA. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -2377,6 +2421,28 @@ typedef struct DynamicSymbol {
 } DynamicSymbol;
 
 /*!
+ @brief Kind of storage an AllocHeader backs (#979/#981).
+ @details
+ ALLOC_KIND_USER is the default (MALC/REALC/aligned_alloc/... -- ordinary
+ user-visible heap memory). ALLOC_KIND_FRAME and ALLOC_KIND_BLOCK_BOX both
+ originate from ALCA-family opcodes rather than MALC and are excluded from
+ the leak-detection AllocRecord list (#979) since neither is ever meant to
+ be user-freed, but they are NOT interchangeable: ALLOC_KIND_FRAME is
+ automatic storage that dies with its declaring frame (alloca/VLA, backed
+ by ALCA) and is the only kind #981's eventual reclamation may target,
+ while ALLOC_KIND_BLOCK_BOX is a `__block` variable's heap box (backed by
+ ALCB), which `Block_copy` is expected to let legitimately outlive its
+ declaring frame -- #981 must never sweep it. Splitting what used to be a
+ single `is_internal` bool into this enum is the prerequisite #981 itself
+ names for adding any reclamation logic at all.
+*/
+typedef enum {
+    ALLOC_KIND_USER = 0,       /**< Ordinary user-visible allocation (malloc & co). */
+    ALLOC_KIND_FRAME = 1,      /**< alloca/VLA backing storage (ALCA); frame-scoped. */
+    ALLOC_KIND_BLOCK_BOX = 2,  /**< __block variable's heap box (ALCB); may outlive its frame. */
+} AllocKind;
+
+/*!
  @brief Metadata header stored before each heap allocation for tracking.
 */
 typedef struct AllocHeader {
@@ -2388,15 +2454,15 @@ typedef struct AllocHeader {
     int generation;   /**< Generation counter incremented on each free (for UAF detection) */
     int creation_generation; // Generation when pointer was created (for
                              // temporal safety)
-    int is_internal;   /**< Compiler-internal automatic storage (alloca/VLA,
-                            __block box) -- allocated via ALCA instead of
-                            MALC. Still tracked by sorted_allocs/CHKB/CHKP3/
-                            DYNOBJSZ like any other allocation, but excluded
-                            from the leak-detection AllocRecord list (#979)
-                            since it is never meant to be user-freed. Placed
-                            here (not after alloc_pc) to fill this struct's
-                            existing 4-byte tail pad instead of growing
-                            sizeof(AllocHeader). */
+    AllocKind kind;   /**< What kind of storage this is -- see AllocKind.
+                            Still tracked by sorted_allocs/CHKB/CHKBN/CHKP3/
+                            DYNOBJSZ like any other allocation regardless of
+                            kind; only leak detection (and, eventually,
+                            #981's reclamation) distinguishes them. Placed
+                            here (not after alloc_pc), same as the
+                            `is_internal` bool it replaces, to fill this
+                            struct's existing 4-byte tail pad instead of
+                            growing sizeof(AllocHeader). */
     long long alloc_pc;   /**< Program counter at allocation site (for debugging) */
     // Per-allocation type_kind was removed (#653): type tracking now lives
     // in a byte-granular shadow (vm->type_shadow_pages) so member/interior

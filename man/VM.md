@@ -385,7 +385,8 @@ These opcodes implement the C standard library heap (the default; `-V`/`--no-vm-
 | Opcode | Arguments | Description |
 |--------|-----------|-------------|
 | `MALC` | `REG_A0` = size | Allocate; pointer returned in `REG_A0` |
-| `ALCA` | `REG_A0` = size | Allocate compiler-internal automatic storage (`alloca`/VLA backing blocks, `__block` boxes); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.is_internal` flag excludes it from leak-detection's `AllocRecord` list (#979) — it is never meant to be freed by the guest program, and the VM heap's pure bump allocator can't reclaim it at frame exit anyway (no free list, `heap_ptr` never rewinds) |
+| `ALCA` | `REG_A0` = size | Allocate `alloca`/VLA backing storage (automatic, frame-scoped); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKBN`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.kind = ALLOC_KIND_FRAME` excludes it from leak-detection's `AllocRecord` list (#979) — it is never meant to be freed by the guest program, and the VM heap's pure bump allocator can't reclaim it at frame exit anyway (no free list, `heap_ptr` never rewinds; see #981) |
+| `ALCB` | `REG_A0` = size | Allocate a `__block` variable's heap box; pointer returned in `REG_A0`. Same shape as `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_BLOCK_BOX` instead — split into its own opcode (#981's prerequisite) so a future reclamation pass targeting frame-scoped `ALLOC_KIND_FRAME` storage can never sweep a `__block` box, which `Block_copy` is expected to let legitimately outlive its declaring frame. Before this split, `ALCA` alone backed both under a single `AllocHeader.is_internal` bool |
 | `MFRE` | `REG_A0` = ptr | Free pointer (detects double-free) |
 | `MCPY` | `REG_A0` = dest, `REG_A1` = src, `REG_A2` = count | `memcpy` |
 | `MSET` | `REG_A0` = dest, `REG_A2` = count | `memset` to 0; backs `ND_MEMZERO` (pre-zero for partial aggregate initialisers) |
@@ -399,13 +400,14 @@ These opcodes implement the C standard library heap (the default; `-V`/`--no-vm-
 (#668) pad the bump pointer *before* the `AllocHeader` so the returned user
 pointer lands on the requested alignment, while every consumer that recovers
 the header via `((AllocHeader*)ptr) - 1` (`MFRE`, `REALC`, `DYNOBJSZ`, `CHKB`,
-`CHKP3`, `CHKT3`) keeps working unmodified. Padding is only ever added
+`CHKBN`, `CHKP3`, `CHKT3`) keeps working unmodified. Padding is only ever added
 upward and is never reclaimed, consistent with the bump allocator having no
 free-list reuse. Both opcodes share `MALC`'s canary/poisoning/leak-detection/
 tagging tail via a common `vm_heap_bump_alloc_ex` helper, so `aligned_alloc` and
 `posix_memalign` allocations get the same heap safety coverage as `malloc`.
-`ALCA` shares the same helper with its `is_internal` flag set, which is the
-sole difference from `MALC` (#979).
+`ALCA`/`ALCB` share the same helper with `AllocHeader.kind` set to
+`ALLOC_KIND_FRAME`/`ALLOC_KIND_BLOCK_BOX` respectively — the sole difference
+from `MALC` (`ALLOC_KIND_USER`) (#979/#981).
 
 ### Safety Opcodes
 
@@ -413,7 +415,8 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description | Controlled by |
 |--------|-------------|---------------|
-| `CHKB` | Array bounds check on `base + scaled_offset`, resolving `base` (exact or interior pointer) via `vm->sorted_allocs` | `CCCC_BOUNDS_CHECKS` |
+| `CHKB` | Array bounds check on `base + scaled_offset` (`p + n`, and via subscript desugaring `*(a+i)`, `a[i]` too), resolving `base` (exact or interior pointer) via `vm->sorted_allocs` | `CCCC_BOUNDS_CHECKS` |
+| `CHKBN` | Array bounds check on `base - scaled_offset` (`p - n`) — `CHKB`'s subtracting-form sibling (#982); same operand shape and resolution, opposite sign. Never emitted for a pointer *difference* (`&a - &b`, result type `ptrdiff_t`/`long`) — `scaled_offset` there is `new_sub`'s ptr-ptr divide result, not a scaled byte offset, so bounds-checking it would compare an unrelated value against the allocation's size | `CCCC_BOUNDS_CHECKS` |
 | `CHKI` | Uninitialised-variable read check (`bp+offset`) | `CCCC_UNINIT_DETECTION` |
 | `MARKI` | Mark variable at `bp+offset` as initialised | `CCCC_UNINIT_DETECTION` |
 | `CHKPA` | Validate pointer arithmetic against provenance | `CCCC_INVALID_ARITH` + `CCCC_PROVENANCE_TRACK` |
@@ -427,18 +430,29 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKNTZ` | Checked-pointer null-terminator guard (#939) for the memcpy-lowered `ntarray` pointees `CHKNT` cannot reach (struct/union, wide `_BitInt`/`_Decimal`): traps unless every byte at the source address is zero, checked before the `MCPY` it guards | `CCCC_CHECKED_BOUNDS` |
 | `CHKAB` | Checked-pointer assignment-time bounds implication (#944, Checked C's `_Assume_bounds_cast` direction): traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
 
-`CHKB` and `CHKP3` resolve their pointer's containing allocation via the same
-`sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the largest
-tracked base address ≤ the pointer. This lets both checks recognise
+`CHKB`/`CHKBN` and `CHKP3` resolve their pointer's containing allocation via
+the same `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the
+largest tracked base address ≤ the pointer. This lets both checks recognise
 **interior pointers** (`p = q + k`) into a heap allocation, not only exact
 base pointers — an out-of-bounds index or a use-after-free reached through
-an interior pointer is now caught (#650). `CHKB`'s bound is
-`AllocHeader.size` (the aligned/usable size); a negative scaled offset is
+an interior pointer is now caught (#650). `CHKB`/`CHKBN`'s bound is
+`AllocHeader.size` (the aligned/usable size); a negative effective offset is
 only rejected once it steps before the *resolved allocation's* start, so
 `p[-1]` on an interior pointer that stays within the allocation is valid.
-Note the gap this leaves: `AllocHeader` only exists for VM-heap allocations,
-so **`CHKB` has no upper bound at all for a stack or global array** — it can
-only reject a negative offset there. `CHKR` (#770/#482-484) closes this: its
+Note the gaps this leaves: `AllocHeader` only exists for VM-heap
+allocations, so **`CHKB`/`CHKBN` have no upper bound at all for a stack or
+global array** — `CHKB` (ADD form) can only reject a literal negative
+offset there (`a[-1]`); `CHKBN` (SUB form) rejects nothing at all for a
+non-heap base, since a `p - n` there isn't necessarily an array's own start
+the way a bare subscript's base is (see the comment on `chkb_common`,
+`src/ops.c`). Separately, forming (not dereferencing) a one-past-the-end
+pointer on heap memory (`p + n` where `n == size`) is also rejected by
+`CHKB` even though it is legal C — a real fix needs a bounds check at the
+*dereference* site instead, since `CHKB` is currently the only check on a
+subscript at all (`a[i]` desugars to `*(a+i)`) and simply relaxing the
+comparison would stop `a[size]` itself being caught; tracked as a follow-up
+ticket, out of #982's scope. `CHKR` (#770/#482-484) closes the upper-bound
+gap generally: its
 `[lo, hi)` bounds come from the checked pointer's declaration
 (`count()`/`byte_count()`/`bounds()`, or the implicit `[p, p+sizeof(T))` for
 `[[cccc::single]]`), recomputed at each checked access, never from
@@ -1348,7 +1362,7 @@ Because delivery isn't pinned to a call boundary, the normal caller-saved callin
 
 The VM does not rely on external sanitizer libraries.  Instead, the compiler injects safety opcodes at compile time and the interpreter implements the checks inline:
 
-* **Bounds checks** — `CHKB` before every array-subscript or pointer-dereference that the compiler can annotate with a size; resolves interior heap pointers via `vm->sorted_allocs`, not just exact base pointers.
+* **Bounds checks** — `CHKB` (pointer/subscript addition) and `CHKBN` (pointer subtraction, #982) before every array-subscript or pointer-dereference that the compiler can annotate with a size; resolves interior heap pointers via `vm->sorted_allocs`, not just exact base pointers.
 * **UAF detection** — `CHKP3` consults `AllocHeader` metadata (magic `0xDEADBEEF`, `freed` bit, generation counter); also resolves interior heap pointers via `vm->sorted_allocs`.
 * **Uninitialised reads** — `CHKI` / `MARKI` maintain a per-address hash map of initialised stack slots.
 * **Stack canaries** — `ENT3` writes a canary word; `LEV3` validates it before returning.

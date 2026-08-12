@@ -5236,12 +5236,29 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             default:
                 error("unsupported int op");
             }
-            // For pointer add/sub, emit bounds check (CHKB) before the add and
-            // provenance check (CHKPA) after.
+            // For pointer add/sub, emit bounds check (CHKB/CHKBN) before the
+            // add and provenance check (CHKPA) after.
             bool is_ptr_arith = (node->kind == ND_ADD || node->kind == ND_SUB) &&
                                 node->lhs->ty && node->lhs->ty->base;
-            if (is_ptr_arith && (vm->flags & CCCC_BOUNDS_CHECKS))
-                emit_rr(vm, CHKB, r_lhs_op, r_rhs_op);
+            // #982 (defect A): a pointer DIFFERENCE (`&a - &b`, result type
+            // ptrdiff_t/long, not a pointer) is also an ND_SUB with a
+            // pointer lhs, but r_rhs_op here holds the *subtrahend's own
+            // address* (new_sub's ptr-ptr arm divides the raw SUB by the
+            // element size in a separate step, src/parse.c), not a scaled
+            // byte offset -- CHKB/CHKBN would then compare an address
+            // against an allocation's size and virtually always "fail".
+            // Detected by node->ty (the ND_SUB's own result type) rather
+            // than node->rhs->ty->base, confirmed against a real -a AST
+            // dump: ptr-int wraps its scaled offset in a `CAST :: T*`, so
+            // rhs->ty->base alone can't tell the two apart, but the SUB
+            // node's own type can (pointer for ptr-int, integer for
+            // ptr-ptr). CHKPA (below) is deliberately NOT gated on this --
+            // see its own comment.
+            bool is_ptr_diff = node->kind == ND_SUB &&
+                               node->lhs->ty && node->lhs->ty->base &&
+                               node->ty && !node->ty->base;
+            if (is_ptr_arith && !is_ptr_diff && (vm->flags & CCCC_BOUNDS_CHECKS))
+                emit_rr(vm, node->kind == ND_SUB ? CHKBN : CHKB, r_lhs_op, r_rhs_op);
 
             // Unsigned 64-bit comparison: use dedicated ULT3/ULE3 opcodes.
             // Shorter unsigned types (≤32-bit) are zero-extended in 64-bit
@@ -5259,6 +5276,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             if (node->ty->kind == TY_BITINT)
                 emit_bitint_trunc(vm, node->ty, dest_reg);
 
+            // #982: still gated on is_ptr_arith alone (not !is_ptr_diff) --
+            // narrowing this too was deliberately deferred rather than
+            // folded in as a side effect of the CHKB/CHKBN fix above. See
+            // tests/test_ptr_diff_*_provenance*.c for the -3 verification
+            // this comment refers to.
             if (is_ptr_arith && (vm->flags & (CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK))) {
                 emit(vm, CHKPA);
                 emit_word(vm, ENCODE_R(dest_reg));
@@ -7064,8 +7086,9 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
     // ND_MEMZERO: zero-clear a local variable's storage region.
     // Emitted as the first operand of the ND_COMMA produced by lvar_initializer
-    // for partial aggregate initialisers (e.g. `T arr[N] = {0}`).  The MSET
-    // opcode mirrors MCPY: dest=REG_A0, count=REG_A2.
+    // for partial aggregate initialisers (e.g. `T arr[N] = {0}`), and (#982)
+    // by var_definition's VLA initializer path for a partial VLA brace
+    // initializer.  The MSET opcode mirrors MCPY: dest=REG_A0, count=REG_A2.
     //
     // __block variables: their stack slot (bp+offset) holds an 8-byte heap
     // pointer written by the function prologue; a blind MSET of var->ty->size
@@ -7073,17 +7096,37 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     // slot to obtain the heap cell address and zero through that — mirroring
     // gen_addr's normal-local block path.  This ensures that `__block T arr[N]
     // = {partial}` correctly zeroes the unspecified elements in the heap cell.
+    //
+    // TY_VLA (#982, defect D): the frame slot holds the alloca'd data
+    // pointer, same shape as the __block case above, so it's dereferenced
+    // the same way. A VLA and a __block variable can't currently coincide
+    // (no __block VLA is reachable through the parser), so the two arms are
+    // mutually exclusive by construction; asserted rather than silently
+    // preferring one if that ever changes. The byte count is NOT
+    // var->ty->size -- that's TY_VLA's placeholder constant (vla_of()) --
+    // it's the runtime value var_definition() stashed in node->rhs (a
+    // ND_VAR read of ty->vla_size, the same Obj the preceding alloca() call
+    // was sized from).
     case ND_MEMZERO:
         // Compiler-internal zero-init of the var's own storage: the address
         // is consumed synchronously by the MSET below and never survives
         // beyond it (#676).
-        if (node->var->is_block_var) {
+        assert(!(node->var->is_block_var && node->var->ty->kind == TY_VLA) &&
+               "a __block VLA is not reachable through the parser; the "
+               "is_block_var and TY_VLA slot-dereference paths below have "
+               "never been decided against each other");
+        if (node->var->is_block_var || node->var->ty->kind == TY_VLA) {
             emit_lea3_internal(vm, REG_A0, node->var->offset); // &stack slot
             emit_rr(vm, LDR_D, REG_A0, REG_A0);       // heap ptr -> A0
         } else {
             emit_lea3_internal(vm, REG_A0, node->var->offset); // bp + offset -> A0
         }
-        emit_li3(vm, REG_A2, node->var->ty->size); // byte count -> A2
+        if (node->rhs) {
+            reset_temp_regs();
+            gen_expr(vm, node->rhs, REG_A2); // runtime byte count -> A2
+        } else {
+            emit_li3(vm, REG_A2, node->var->ty->size); // byte count -> A2
+        }
         emit(vm, MSET);
         return;
 
@@ -8567,12 +8610,16 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // The heap pointer is stored in the variable's stack slot
     for (Obj *var = fn->locals; var; var = var->next) {
         if (var->is_block_var) {
-            // Allocate heap memory for this __block variable via ALCA, not
+            // Allocate heap memory for this __block variable via ALCB, not
             // MALC (#979) -- the box is compiler-internal storage the guest
             // never frees directly, so it must not appear in a leak report.
-            // ALCA has MALC's exact register shape (size=A0, result=A0).
+            // ALCB (not ALCA -- #981's prerequisite) has MALC's exact
+            // register shape (size=A0, result=A0), but tags the AllocHeader
+            // as ALLOC_KIND_BLOCK_BOX rather than ALLOC_KIND_FRAME, since a
+            // __block box may legitimately outlive this frame (Block_copy)
+            // while alloca/VLA storage never does.
             emit_li3(vm, REG_A0, var->ty->size);
-            emit(vm, ALCA);
+            emit(vm, ALCB);
             // Store the heap pointer in the variable's stack slot
             int r_addr = alloc_temp_reg();
             // Slot address only feeds the immediate store below (#676).

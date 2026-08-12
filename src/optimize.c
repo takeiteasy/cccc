@@ -703,6 +703,7 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case LONGJMP:
             case MALC:
             case ALCA:
+            case ALCB:
             case REALC:
             case REALCA:
             case MALCA:
@@ -1180,8 +1181,10 @@ static bool op_byte0_is_int_src(int op) {
     // Bounds check: byte 0 (rs1, via DECODE_RR) is the base pointer source,
     // byte 1 the scaled offset source; neither is a destination (#755 --
     // missing here let copy-prop sub-pass B treat CHKB's base-pointer read as
-    // a definition and NOP the still-live MOV3 feeding it).
-    case CHKB:
+    // a definition and NOP the still-live MOV3 feeding it). CHKBN (#982) is
+    // CHKB's SUB-form sibling with the identical RR operand shape, so it
+    // needs the same listing for the same reason.
+    case CHKB: case CHKBN:
     // Provenance marker: byte 0 (rs_ptr) and byte 1 (rs_base) are both pure
     // sources, same class as CHKB above.
     case MARKP:
@@ -1375,9 +1378,11 @@ static bool op_implicit_abi_regs(int op, ImplicitRegs *out) {
         return true;
 
     // MALC/CALC(size=A0): reads A0, writes A0. SETJMP(jmp_buf=A0): same
-    // shape. ALCA (alloca/VLA/__block, #979) is MALC with an internal-only
-    // AllocHeader tag -- identical register contract.
-    case MALC: case CALC: case SETJMP: case ALCA:
+    // shape. ALCA (alloca/VLA, #979) and ALCB (__block box, #981's
+    // prerequisite -- split from ALCA so the two get distinguishable
+    // AllocKinds) are both MALC with an internal-only AllocHeader tag --
+    // identical register contract.
+    case MALC: case CALC: case SETJMP: case ALCA: case ALCB:
         out->reads = out->writes = IR_BIT(REG_A0);
         out->opaque = false;
         return true;
