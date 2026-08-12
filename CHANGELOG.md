@@ -5,6 +5,40 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-08-12
+
+### Fixed
+
+- **`CHKB` rejected forming a legal one-past-the-end pointer** (#983, found
+  while fixing #982). `int *e = p + 4;` on a `malloc(4 * sizeof(int))`
+  block is legal C to *form* -- only dereferencing it is undefined -- but
+  `chkb_common`'s `eff >= header->size` bounds test (`src/ops.c`) rejected
+  forming it at all. Couldn't simply relax the comparison to `>`, since
+  `CHKB`/`CHKBN` used to be the *only* runtime check on a subscript at all
+  (`a[i]` desugars to `*(a+i)`), so that alone would have silently stopped
+  a genuine out-of-bounds access (`a[size]`) from being caught. Fixed by
+  splitting the check into two: `chkb_common` (`CHKB`/`CHKBN`) now allows
+  `eff == size` at pointer *formation*, and a new `CHKD` opcode runs at
+  every *dereference* site instead -- scalar loads/stores
+  (`emit_load_safety_checks`/`emit_store_ex`), struct/union/wide-`_BitInt`/
+  `_Decimal` assignment (the `MCPY` lowering in `ND_ASSIGN`), and vector
+  loads/stores (`VLDR`/`VSTR` in `gen_vector_expr`) -- and traps on the
+  cases `CHKB`/`CHKBN` no longer do. The split relies on
+  `heap_alloc_for_ptr`'s existing inclusive upper bound (`off > h->size`,
+  not `off >= h->size`) to resolve an exactly-one-past dereference address
+  back to the right allocation. `CHKD` is appended at the end of `OPS_X`
+  (`src/cccc.h`), so `CCCC_VERSION` is unchanged and no `.c4`/`.c4a` needs
+  regenerating. Not instrumented on the atomic ops (`ALDR`/`ASTR`/`AXCHG`/
+  `ACAS`) -- a documented residual, tracked as a follow-up ticket, since
+  their operand words already carry the #497 register-aliasing hazard.
+  Covered by `tests/test_ptr_one_past_end_form.c`,
+  `test_ptr_one_past_end_form_max.c`, `test_ptr_one_past_end_deref_error.c`,
+  `test_ptr_one_past_end_deref_read_error.c`,
+  `test_ptr_one_past_end_sub_deref_error.c`, and
+  `test_ptr_one_past_end_struct_deref_error.c` -- the last four are the
+  load-bearing regression tests, proving a genuine out-of-bounds
+  dereference is still caught after the formation-side relaxation.
+
 ## [0.2.9] - 2026-08-12
 
 ### Fixed
