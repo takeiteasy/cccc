@@ -452,4 +452,76 @@ int test_vla_2d_addr_of_row(void) {
     return v[1][0];
 }
 
+// #976: `&v[1] - &v[0]` on a 2-D VLA must divide the byte difference by the
+// row's runtime size (vla_size), not TY_VLA's placeholder pointer-sized
+// `size` (8) -- and the pre-existing "VLA - num" arm must not intercept a
+// pointer rhs before this ptr-ptr arm ever runs (it used to, unconditionally,
+// whenever lhs was VLA-row-pointer-typed).
+[[cccc::test(return = 42)]]
+int test_vla_2d_row_ptr_sub(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    long d1 = &v[1] - &v[0];
+    return d1 == 1 ? 42 : 1;
+}
+
+// #976: the negative direction specifically discriminates the ty_ulong
+// division trap -- vla_size is an unsigned long Obj, so dividing a signed
+// byte difference by it without a cast to a signed type promotes the whole
+// division to unsigned, turning -1 into a huge positive garbage value. A
+// test that only checks the positive direction passes with that bug intact.
+[[cccc::test(return = 42)]]
+int test_vla_2d_row_ptr_sub_negative(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    long d0 = &v[0] - &v[1];
+    return d0 == -1 ? 42 : 1;
+}
+
+// #976 control: plain "VLA - num" pointer arithmetic (not ptr-ptr) must
+// still work after guarding that arm against a pointer rhs.
+[[cccc::test(return = 42)]]
+int test_vla_row_ptr_minus_num(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    int (*p)[m] = &v[1];
+    int (*p0)[m] = p - 1;
+    p0[0][0] = 42;
+    return v[0][0];
+}
+
+// #977: a multi-dimensional VLA brace initializer used to be silently
+// dropped -- create_lvar_init had no TY_VLA case, so a nested row's brace
+// group (whose own type is TY_VLA, not a scalar/aggregate create_lvar_init
+// already handled) fell through to the generic "no top-level expr" check
+// and returned a no-op. Every element must now read back correctly.
+[[cccc::test(return = 42)]]
+int test_vla_2d_brace_init(void) {
+    int n = 2, m = 2;
+    int v[n][m] = {{1, 2}, {3, 4}};
+    return v[0][0] + v[0][1] + v[1][0] * 10 + v[1][1] * 10 == 3 + 70 ? 42 : 1;
+}
+
+// #977: a ragged/short row (fewer initializers than the row width) must
+// zero-fill the remainder, same as a fixed-size array's partial row.
+[[cccc::test(return = 42)]]
+int test_vla_2d_brace_init_ragged(void) {
+    int n = 2, m = 2;
+    int v[n][m] = {{1, 2}, {3}};
+    return v[0][0] == 1 && v[0][1] == 2 && v[1][0] == 3 && v[1][1] == 0
+               ? 42
+               : 1;
+}
+
+// #977: a short outer initializer (fewer rows than the array's outer
+// dimension) must zero-fill the missing rows entirely.
+[[cccc::test(return = 42)]]
+int test_vla_2d_brace_init_short(void) {
+    int n = 2, m = 2;
+    int v[n][m] = {{1, 2}};
+    return v[0][0] == 1 && v[0][1] == 2 && v[1][0] == 0 && v[1][1] == 0
+               ? 42
+               : 1;
+}
+
 #pragma cccc suite end

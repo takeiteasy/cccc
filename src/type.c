@@ -947,26 +947,22 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         case ND_ADDR: {
             Type *ty = node->lhs->ty;
-            // #973: TY_VLA does NOT decay here the way TY_ARRAY does above --
-            // `pointer_to(vla)` already IS the correct `int (*)[n]` (verified
-            // against real gcc/clang: `&v+1` strides a whole row and
-            // `sizeof(*p)` is the row size). Decaying to `pointer_to(base)`
-            // like TY_ARRAY would regress both. The bug this ticket actually
-            // found was in the *value* produced for `&v`, not this type --
-            // see the ND_ADDR case in codegen.c's gen_expr.
-            //
-            // KNOWN ISSUE: this TY_ARRAY decay is itself non-standard --
-            // `&a` on a fixed-size array should have type `T (*)[N]` (same
-            // shape as the now-correct TY_VLA case above) so `&a+1` strides
-            // the whole array, but decaying to `pointer_to(base)` makes
-            // `&a+1` stride one element instead (measured: 4 instead of 12
-            // for `int a[3]`). Legacy from chibicc, potentially load-bearing
-            // elsewhere in the codebase -- found alongside #973/#974, not
-            // fixed here, filed as its own ticket.
-            if (ty->kind == TY_ARRAY)
-                node->ty = pointer_to(vm, ty->base);
-            else
-                node->ty = pointer_to(vm, ty);
+            // #973/#975: neither TY_ARRAY nor TY_VLA decays here --
+            // `pointer_to(ty)` is the standard `T (*)[N]`/`int (*)[n]` shape
+            // (verified against real gcc/clang: `&a+1`/`&v+1` strides the
+            // whole array/row, and `sizeof(*p)` is the array/row size), not
+            // `pointer_to(ty->base)`. This used to decay TY_ARRAY the way an
+            // ordinary array-to-pointer decay does elsewhere -- chibicc
+            // legacy, non-standard, and unrelated to that decay (which
+            // happens for a *bare* array name, not for `&a`; see ND_VAR in
+            // codegen.c). `&a` producing `T *` instead of `T (*)[N]` made
+            // `&a+1` stride one element instead of the whole array (measured:
+            // 4 instead of 12 for `int a[3]`) -- found alongside #973/#974,
+            // fixed here as its own ticket. The value side needed no change:
+            // gen_addr's ND_VAR case already returns the array's own base
+            // address (arrays don't have a separate frame-slot-holds-a-
+            // pointer indirection the way a VLA's alloca'd pointer does).
+            node->ty = pointer_to(vm, ty);
             return;
         }
         case ND_DEREF:

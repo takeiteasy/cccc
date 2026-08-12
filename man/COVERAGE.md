@@ -36,7 +36,7 @@ runtime mixed-access detection, tracked separately from the POSIX pthread layer.
 | `unsigned` integer variants | ✓ | |
 | `void` | ✓ | |
 | Pointers — declaration, `*`, `&`, arithmetic | ✓ | |
-| Arrays — fixed-size, multidimensional, initialisation | ✓ | |
+| Arrays — fixed-size, multidimensional, initialisation | ✓ | `&a` on a fixed-size array has the standard (non-decayed) type `T (*)[N]`, so `&a + 1` strides the whole array, not one element — mirroring the VLA `&v` shape below (#973/#975). A bare array name used as a value (not under `&`) still decays to an element pointer as usual; only `&a`'s own static type changed |
 | Structs — declaration, member access, nested | ✓ | |
 | Unions | ✓ | |
 | Enums — explicit values, use in expressions and switch | ✓ | |
@@ -96,7 +96,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
-| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3). A VLA of any dimension — including a multi-dimensional VLA (`int v[n][m]; v[1][2]=...;`) — round-trips through `-m`/`-c=native` as a real C VLA (#964/#971). `&v` has the standard (non-decayed) type `int (*)[n]` — like a fixed-size array's `&a`, it does *not* decay to a pointer to the element type, so `&v + 1` strides a whole row, not one element — and yields the array's real data address (#973); a whole-row assignment to a VLA lvalue (`v[1] = w[2];` where each side is itself a row of a multi-dimensional VLA) is a compile error, "not an lvalue", the same as for a fixed-size array (#974) |
+| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3). A VLA of any dimension — including a multi-dimensional VLA (`int v[n][m]; v[1][2]=...;`) — round-trips through `-m`/`-c=native` as a real C VLA (#964/#971). `&v` has the standard (non-decayed) type `int (*)[n]` — like a fixed-size array's `&a`, it does *not* decay to a pointer to the element type, so `&v + 1` strides a whole row, not one element — and yields the array's real data address (#973); a whole-row assignment to a VLA lvalue (`v[1] = w[2];` where each side is itself a row of a multi-dimensional VLA) is a compile error, "not an lvalue", the same as for a fixed-size array (#974). Pointer-to-VLA-row subtraction (`&v[1] - &v[0]` on a 2-D VLA, both sides `int (*)[m]`) divides by the row's runtime byte size, giving the correct element count in both directions (#976). **Brace initialization is a deliberate CCCC extension** — real GCC/clang reject `int v[n] = {...}` outright ("variable-sized object may not be initialized") — supported for any dimension, including a multi-dimensional VLA (`int v[n][m] = {{1,2},{3,4}}`, #977); a short row or short outer initializer zero-fills the remainder, the same as a fixed-size array's partial initializer (the tail comes from the alloca'd VM-heap block, not an explicit zero-fill pass) |
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | |

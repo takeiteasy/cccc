@@ -4496,9 +4496,13 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
         // elements
         if (init->ty->kind == TY_VLA) {
             init->is_flexible = false;
+            // len + 1: create_vla_init/create_lvar_init's TY_VLA branch
+            // counts elements by scanning for a NULL terminator (#977), so
+            // this array must be genuinely NULL-terminated, not just len
+            // long with a NULL landing past the end by arena luck.
             init->children = arena_alloc(&vm->compiler.parser_arena,
-                                         len * sizeof(Initializer *));
-            memset(init->children, 0, len * sizeof(Initializer *));
+                                         (len + 1) * sizeof(Initializer *));
+            memset(init->children, 0, (len + 1) * sizeof(Initializer *));
             for (int i = 0; i < len; i++)
                 init->children[i] = new_initializer(vm, init->ty->base, false);
         } else {
@@ -4588,9 +4592,10 @@ static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
         // elements
         if (init->ty->kind == TY_VLA) {
             init->is_flexible = false;
+            // len + 1: see the matching comment in array_initializer1 (#977).
             init->children = arena_alloc(&vm->compiler.parser_arena,
-                                         len * sizeof(Initializer *));
-            memset(init->children, 0, len * sizeof(Initializer *));
+                                         (len + 1) * sizeof(Initializer *));
+            memset(init->children, 0, (len + 1) * sizeof(Initializer *));
             for (int j = 0; j < len; j++)
                 init->children[j] = new_initializer(vm, init->ty->base, false);
         } else {
@@ -4976,6 +4981,36 @@ static Node *balanced_comma(VirtualMachine *vm, Node **items, int lo, int hi,
 
 static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
                               InitDesg *desg, Token *tok) {
+    // Multi-dimensional VLA (#977): a nested row's own type is TY_VLA (e.g.
+    // int v[n][m]'s outer dimension has a TY_VLA base), so a plain TY_ARRAY
+    // recursion never reaches it -- this branch is what create_vla_init
+    // (below) delegates to for both the outer VLA and any TY_VLA row nested
+    // inside it. init->children is NULL-terminated (array_initializer1/2,
+    // #977) rather than sized by a compile-time array_len, since a VLA's
+    // element count is only known at parse time from the initializer itself.
+    if (ty->kind == TY_VLA && init->children) {
+        int cnt_children = 0;
+        while (init->children[cnt_children])
+            cnt_children++;
+        if (cnt_children == 0)
+            return new_node(vm, ND_NULL_EXPR, tok);
+        Node **items = malloc((size_t)cnt_children * sizeof(Node *));
+        if (!items)
+            error_tok(vm, tok, "out of memory building VLA initializer");
+        int cnt = 0;
+        for (int i = 0; i < cnt_children; i++) {
+            InitDesg desg2 = {desg, i};
+            Node *rhs =
+                create_lvar_init(vm, init->children[i], ty->base, &desg2, tok);
+            if (rhs->kind != ND_NULL_EXPR)
+                items[cnt++] = rhs;
+        }
+        Node *node = cnt ? balanced_comma(vm, items, 0, cnt, tok)
+                         : new_node(vm, ND_NULL_EXPR, tok);
+        free(items);
+        return node;
+    }
+
     if (ty->kind == TY_ARRAY) {
         // Collect the per-element assignments, then fold them into a balanced
         // comma tree. Implicitly-zero elements lower to ND_NULL_EXPR, which
@@ -5169,47 +5204,30 @@ Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain) {
 
 // Generate initialization for VLA
 // Unlike create_lvar_init which uses ty->array_len, VLAs have
-// runtime-determined size We generate assignments based on the number of
-// initializer elements (known at parse time)
+// runtime-determined size, so element count comes from the NULL-terminated
+// init->children array built at parse time (array_initializer1/2). The
+// element-count guards are duplicated ahead of the delegate call rather than
+// left to create_lvar_init's own TY_VLA branch to keep create_vla_init's
+// "no VLA initializer present" contract (returning NULL) unchanged for
+// var_definition()'s NULL check (parse.c ~4066); create_lvar_init itself
+// returns ND_NULL_EXPR, not NULL, for an empty initializer. #977 folded the
+// former hand-rolled left-leaning comma spine (which built one ND_COMMA per
+// element and kept ND_NULL_EXPR children) into create_lvar_init's own
+// TY_VLA branch -- this now also correctly handles a multi-dimensional VLA
+// (int v[n][m] = {{1,2},{3,4}}), where ty->base is itself TY_VLA.
 static Node *create_vla_init(VirtualMachine *vm, Initializer *init, Type *ty, Obj *var,
                              Token *tok) {
-    if (!init || ty->kind != TY_VLA)
-        return NULL;
-
-    // Count how many elements are in the initializer
-    if (!init->children)
+    if (!init || ty->kind != TY_VLA || !init->children)
         return NULL;
 
     int init_count = 0;
-    // Count non-null children (initializer elements)
     while (init->children[init_count])
         init_count++;
-
     if (init_count == 0)
         return NULL;
 
-    // Generate assignments: arr[0] = val0, arr[1] = val1, ...
-    Node *node = new_node(vm, ND_NULL_EXPR, tok);
     InitDesg desg = {NULL, 0, NULL, var};
-
-    // KNOWN ISSUE: when ty->base is itself TY_VLA (a multi-dimensional VLA,
-    // e.g. `int v[n][m] = {{1,2},{3,4}}`), create_lvar_init has no TY_VLA
-    // case -- it falls through to the generic `!init->expr` check, which is
-    // true for a nested brace group (no top-level scalar expr), so it
-    // silently returns ND_NULL_EXPR and the whole row's initializer is
-    // dropped. 1-D VLA init (ty->base a scalar/aggregate create_lvar_init
-    // does handle) is unaffected. Found alongside #973/#974 (measured: every
-    // element stays 0), not fixed here, filed as its own ticket.
-    for (int i = 0; i < init_count; i++) {
-        InitDesg desg2 = {&desg, i, NULL, NULL};
-        if (init->children[i]) {
-            Node *rhs =
-                create_lvar_init(vm, init->children[i], ty->base, &desg2, tok);
-            node = new_binary(vm, ND_COMMA, node, rhs, tok);
-        }
-    }
-
-    return node;
+    return create_lvar_init(vm, init, ty, &desg, tok);
 }
 
 // A variable definition with an initializer is a shorthand notation
@@ -8443,8 +8461,14 @@ static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     if (!lhs->ty->base)
         error_tok(vm, tok, "invalid operands to - (left operand is not a pointer)");
 
-    // VLA + num
-    if (lhs->ty->base->kind == TY_VLA) {
+    // VLA - num. #976: must not fire for VLA - VLA-row-pointer (`&v[1] -
+    // &v[0]`) -- rhs->ty->base guards that off, since a plain integer offset
+    // has no ->base but a pointer operand does; without the guard this
+    // branch ran unconditionally whenever lhs was VLA-row-pointer-typed,
+    // treating rhs (itself a pointer) as though it were a raw element count
+    // and multiplying two pointer-ish values together, so the genuine ptr-ptr
+    // arm below was unreachable for the VLA case.
+    if (lhs->ty->base->kind == TY_VLA && !rhs->ty->base) {
         rhs = new_binary(vm, ND_MUL, rhs,
                          new_var_node(vm, lhs->ty->base->vla_size, tok), tok);
         add_type(vm, rhs);
@@ -8477,17 +8501,32 @@ static Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         else if (lhs->ty->base->kind == TY_FUNC || rhs->ty->base->kind == TY_FUNC)
             warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer to a function used in arithmetic");
-        // KNOWN ISSUE: when lhs->ty->base is TY_VLA (e.g. `&v[1] - &v[0]` on
-        // a 2-D VLA, both sides `int (*)[m]`), dividing by
-        // `lhs->ty->base->size` is wrong -- TY_VLA's `size` is always the
-        // placeholder 8 a pointer-sized new_type() call gives it (vla_of(),
-        // type.c), not the row's runtime byte size (vla_size). Should divide
-        // by `vla_size` instead, mirroring the VLA arm the ptr-num cases
-        // above this function already have. Found alongside #973/#974
-        // (measured: garbage result, e.g. -56911856220, instead of 1), not
-        // fixed here, filed as its own ticket.
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty = ty_long;
+        // #976: when lhs->ty->base is TY_VLA (e.g. `&v[1] - &v[0]` on a 2-D
+        // VLA, both sides `int (*)[m]`), TY_VLA's `size` is always the
+        // placeholder 8 a pointer-sized new_type() call gives it (vla_of(),
+        // type.c), not the row's runtime byte size -- divide by vla_size
+        // instead, mirroring the VLA arm the ptr-num cases above this
+        // function already have. Guarded on vla_size being non-NULL (unlike
+        // those ptr-num arms, which are only reached from a declared VLA's
+        // own arithmetic): a TY_VLA base can also arrive here from a
+        // declarator like `int (*p)[m]` for which compute_vla_size never
+        // ran, in which case the constant-size divide below is the best
+        // available fallback -- no worse than before this fix.
+        //
+        // The cast to ty_long is required, not cosmetic: vla_size is an Obj
+        // of type ty_ulong (parse.c, compute_vla_size), and dividing a
+        // ty_long numerator by a ty_ulong denominator promotes the whole
+        // division to unsigned via usual_arith_conv, which would turn a
+        // negative result (e.g. `&v[0] - &v[1]` == -1) into a huge positive
+        // garbage value instead.
+        if (lhs->ty->base->kind == TY_VLA && lhs->ty->base->vla_size) {
+            Node *divisor = new_cast(
+                vm, new_var_node(vm, lhs->ty->base->vla_size, tok), ty_long);
+            add_type(vm, divisor);
+            return new_binary(vm, ND_DIV, node, divisor, tok);
+        }
         return new_binary(vm, ND_DIV, node,
                           new_num(vm, lhs->ty->base->size, tok), tok);
     }

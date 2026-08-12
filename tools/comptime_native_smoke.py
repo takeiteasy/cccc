@@ -1456,6 +1456,34 @@ VLA_ADDR_PROGRAM = (
     "}\n"
 )
 
+# #976: `&v[1] - &v[0]` on a 2-D VLA used to divide the byte difference by
+# TY_VLA's placeholder pointer-sized `size` (8) instead of the row's runtime
+# vla_size -- worse, the "VLA - num" arm intercepted the ptr-ptr case
+# unconditionally (it didn't check whether rhs was itself a pointer), so the
+# fix to the divisor alone was dead code until that guard was added too.
+# Exercises both directions: only the negative one catches the ty_ulong
+# division trap (an unsigned divisor promotes the whole division, turning -1
+# into a huge positive garbage value).
+#
+# #977: a multi-dimensional VLA brace initializer (`int v[n][m] =
+# {{1,2},{3,4}}`) used to be silently dropped -- create_lvar_init had no
+# TY_VLA case for a nested row's brace group, so every element stayed 0.
+VLA_ROW_SUB_AND_INIT_PROGRAM = (
+    "int main(void) {\n"
+    "    int n = 2, m = 3;\n"
+    "    int v[n][m] = {{1, 2, 3}, {4, 5, 6}};\n"
+    "    int total = v[0][0] + v[0][1] + v[0][2]"
+    " + v[1][0] + v[1][1] + v[1][2]; // 21\n"
+    "\n"
+    "    long d1 = &v[1] - &v[0];\n"
+    "    long d0 = &v[0] - &v[1];\n"
+    "    total = total - total + (total == 21 && d1 == 1 && d0 == -1"
+    " ? 42 : 1);\n"
+    "\n"
+    "    return total;\n"
+    "}\n"
+)
+
 # #964: ND_OVERFLOW_ARITH had no serializer case (`/* unsupported expr kind
 # 55 */`) -- val (0/1/2) selects add/sub/mul, lowering directly onto the
 # same-named clang/gcc builtin. Exercises all three ops, both an overflowing
@@ -1557,11 +1585,19 @@ def case_vla_addr_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     VLA_ADDR_PROGRAM)
 
 
+def case_vla_row_sub_and_init_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  51: -c=native, pointer-to-VLA-row subtraction divides by the "
+          "row's runtime size (both directions) and a multi-dimensional VLA "
+          "brace initializer round-trips as real C (#976/#977)")
+    return _vm_and_native_run_case(cccc, tmp, "vla_row_sub_and_init_976_977",
+                                    VLA_ROW_SUB_AND_INIT_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1619,6 +1655,7 @@ def main() -> int:
             case_overflow_native_round_trip,
             case_vla_multidim_native_round_trip,
             case_vla_addr_native_round_trip,
+            case_vla_row_sub_and_init_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
