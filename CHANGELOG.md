@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-08-12
+
 ### Fixed
 
 - **Serialized output silently dropped 14 node kinds** (#963). `-c=native`,
