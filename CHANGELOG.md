@@ -5,7 +5,83 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-08-12
+
 ### Fixed
+
+- **`&a` on a fixed-size array decayed to `T *` instead of the standard
+  `T (*)[N]`** (#975, follow-up to #973). `&a + 1` strided one element
+  instead of the whole array. `add_type()`'s `ND_ADDR` case (`src/type.c`)
+  special-cased `TY_ARRAY` -- chibicc legacy, non-standard -- decaying to
+  `pointer_to(ty->base)` instead of the standard `pointer_to(ty)`, the same
+  shape #973 already established for a VLA's `&v`. Fixed by removing the
+  special case; array-to-pointer decay for a *bare* array name used as a
+  value is a separate mechanism (`ND_VAR` in `src/codegen.c`) and is
+  unaffected -- only `&a`'s own static type changed, never the value it
+  produces. Covered by `tests/test_addr_of_array_type.c`.
+
+- **Pointer-to-VLA-row subtraction produced garbage** (#976, follow-up to
+  #973). `&v[1] - &v[0]` on a 2-D VLA (`int v[n][m]`) did not return `1`.
+  Two compounding bugs: `new_sub()`'s "VLA - num" arm (`src/parse.c`) fired
+  unconditionally whenever the left operand was VLA-row-pointer-typed, with
+  no check that the right operand wasn't itself a pointer -- so a genuine
+  ptr-ptr subtraction never reached the dedicated ptr-ptr arm at all,
+  instead treating the right-hand pointer as a raw element count and
+  multiplying two pointer-ish values together. Once routed to the correct
+  arm, that arm itself divided by `TY_VLA`'s placeholder pointer-sized
+  `size` (8) instead of the row's runtime `vla_size`. Fixed by excluding a
+  pointer right operand from the "VLA - num" arm, and dividing by
+  `vla_size` (cast to a signed type -- `vla_size` is an unsigned `Obj`, and
+  an uncast division would promote the whole expression to unsigned,
+  corrupting a negative result such as `&v[0] - &v[1] == -1`) when the ptr-
+  ptr arm's left operand base is `TY_VLA`. Covered by new cases in
+  `tests/suites/test_suite_vla.c` and `tools/comptime_native_smoke.py`
+  case 51.
+
+- **Multi-dimensional VLA brace initializer silently dropped every
+  element** (#977, follow-up to #973). `int v[n][m] = {{1,2},{3,4}}` left
+  every element 0. `create_lvar_init` (`src/parse.c`) had no `TY_VLA` case,
+  so a nested row's brace group -- itself `TY_VLA`-typed, not a
+  scalar/aggregate type the function already handled -- fell through to a
+  generic no-op check. Fixed by adding a `TY_VLA` branch mirroring the
+  existing `TY_ARRAY` one; `create_vla_init` now delegates to it. Also
+  fixed a latent out-of-bounds read found along the way: the initializer's
+  element-count scan looked for a `NULL` terminator that `array_initializer1`/
+  `array_initializer2`'s VLA branches never actually allocated (both now
+  allocate one extra, zeroed slot). VLA brace initialization of any
+  dimension is a deliberate CCCC extension -- GCC/clang both reject
+  `int v[n] = {...}` outright -- now documented in
+  [COVERAGE.md](man/COVERAGE.md); its long-term status is tracked as an
+  open design question in #978. Covered by new cases in
+  `tests/suites/test_suite_vla.c` and `tools/comptime_native_smoke.py`
+  case 51.
+
+- **`&v` on a VLA local returned the wrong address, and whole-row VLA
+  assignment silently compiled** (#973, #974). `int (*p)[n] = &v;` read
+  garbage through `p`, because `gen_addr`'s `ND_VAR` case returned the VLA
+  local's frame slot (which holds the alloca'd data pointer) instead of the
+  pointer's own value. `&v`'s *type* was already correct
+  (`pointer_to(vla)` **is** the standard `int (*)[n]`, matching real
+  gcc/clang) -- decaying it the way `TY_ARRAY` does would have regressed
+  `&v + 1`'s stride from a whole row to one element. Fixed by
+  special-casing `TY_VLA` in `gen_expr`'s `ND_ADDR` case (`src/codegen.c`)
+  to route through `gen_expr` instead of `gen_addr`, covering all three of
+  `gen_addr`'s slot-address branches (plain local, block capture,
+  outer-function static chain) at once. Separately, `v[1] = w[2];` (a
+  whole-row assignment where each side is itself a VLA row in a
+  multi-dimensional VLA) compiled instead of erroring "not an lvalue" the
+  way the equivalent fixed-size-array assignment already does -- fixed by
+  adding a `TY_VLA` arm to `add_type`'s `ND_ASSIGN` check
+  (`src/type.c`), excluding `ND_VLA_PTR` (every VLA declaration lowers to
+  `ND_ASSIGN(new_vla_ptr(var), alloca(...))`, which must keep compiling).
+  Fixing #973 also exposed a native-serializer gap for a pointer-to-VLA
+  local's declarator (`int (*p)[n]`, which like a VLA's own declaration
+  can't be hoisted ahead of `n`) -- fixed via
+  `Obj.deferred_vla_ptr_init` (`src/cccc.h`), skipping just those locals in
+  the hoist loop and emitting their real declaration in place. Covered by
+  `tests/suites/test_suite_vla.c`'s `test_vla_addr_*`/`test_vla_2d_addr_*`
+  cases, `tests/test_vla_row_assign_error.c`, and
+  `tools/comptime_native_smoke.py` case 50.
 
 - **Subscripting a multi-dimensional VLA SIGSEGVed** (#971). `int v[n][m];
   v[1][2] = 42;` crashed both the stage0 and full build's VM. `v[1]` -- a
