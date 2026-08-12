@@ -5,6 +5,44 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-12
+
+### Added
+
+- **`return=` compound-literal test assertions now support nested
+  struct/union/array fields and anonymous struct/union members** (#489,
+  follow-up to #353). A field that is itself a struct or union can be
+  asserted with a nested compound literal (typed `(struct T){...}` or a
+  bare `{...}` whose type is inferred from the field), recursing to a
+  maximum of 8 levels; an array field takes a positional element list, or a
+  `char[]` field can be compared against a string literal with C
+  zero-initialisation semantics. An anonymous struct/union member's fields
+  are addressed directly through the parent's own designators, matching
+  C's anonymous-member lookup rules, rather than needing an extra level of
+  nesting. Implemented as a recursive descent through both the parser
+  (`parse_ret_init_list`, `src/preprocess.c`) and the comparator
+  (`cmp_ret_aggregate`/`cmp_ret_value`/`cmp_ret_struct_body`,
+  `src/testing.c`); malformed-literal recovery is brace-depth-aware so a
+  bad nested field doesn't desynchronise the rest of the attribute's token
+  stream. Also fixes a **latent union-comparison bug**: previously every
+  member of a union was compared, with an omitted arm expected to be zero
+  — but union arms alias the same storage, so an omitted arm doesn't mean
+  "zero," it means "not this arm." Only members actually named in the
+  literal are now compared for a union. Covered by new cases in
+  `tests/suites/test_suite_testing_framework.c`'s `framework/struct_return`
+  suite (nested/two-level nesting, nested `!=`, nested-omitted-expects-zero,
+  arrays, array-of-struct, `char[]`-vs-string, anonymous struct member,
+  malformed-nested-literal recovery, and the >8-levels depth cap). See the
+  Struct / union section of [TESTING.md](../man/TESTING.md).
+
+### Fixed
+
+- Freeing a `return=` compound-literal's parsed field list previously had
+  two separate implementations (`src/preprocess.c`'s error-recovery path
+  and `TestFnRecord` teardown in `src/vm.c`); consolidated into a single
+  `cc_free_ret_fields` so a nested field list can't be freed correctly in
+  one path and leaked in the other.
+
 ## [0.2.5] - 2026-08-12
 
 ### Added
