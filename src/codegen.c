@@ -7111,10 +7111,17 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Compiler-internal zero-init of the var's own storage: the address
         // is consumed synchronously by the MSET below and never survives
         // beyond it (#676).
-        assert(!(node->var->is_block_var && node->var->ty->kind == TY_VLA) &&
-               "a __block VLA is not reachable through the parser; the "
-               "is_block_var and TY_VLA slot-dereference paths below have "
-               "never been decided against each other");
+        // A __block VLA is not reachable through the parser today, so the
+        // is_block_var and TY_VLA slot-dereference paths below have never
+        // been decided against each other -- hard-error rather than
+        // silently letting branch order guess (an `assert` would instead
+        // vanish under -DNDEBUG, e.g. the `release` build target, src/
+        // build.c's make_cccc_exe_named_opt, leaving this exact case
+        // silently mis-zeroed in a release binary).
+        if (node->var->is_block_var && node->var->ty->kind == TY_VLA)
+            error_tok(vm, node->tok,
+                      "internal error: __block VLA zero-init is not "
+                      "implemented (unreachable through the current parser)");
         if (node->var->is_block_var || node->var->ty->kind == TY_VLA) {
             emit_lea3_internal(vm, REG_A0, node->var->offset); // &stack slot
             emit_rr(vm, LDR_D, REG_A0, REG_A0);       // heap ptr -> A0

@@ -547,6 +547,20 @@ int test_vla_2d_row_ptr_sub_bounds_checked(void) {
     return d1 == 1 ? 42 : 1;
 }
 
+// #982: `-3` (CCCC_SAFETY_MAX) additionally enables CHKPA (provenance
+// checking), which is deliberately still gated on the unchanged
+// is_ptr_arith (not narrowed by the is_ptr_diff exclusion CHKB/CHKBN got)
+// -- run the ptr-ptr subtraction case at -3 specifically to pin that CHKPA
+// does not itself false-positive on a pointer difference now that CHKB no
+// longer does.
+[[cccc::test(return = 42, flags = "-3")]]
+int test_vla_2d_row_ptr_sub_max_safety(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    long d1 = &v[1] - &v[0];
+    return d1 == 1 ? 42 : 1;
+}
+
 [[cccc::test(return = 42, flags = "-2")]]
 int test_vla_2d_row_ptr_sub_negative_bounds_checked(void) {
     int n = 2, m = 3;
