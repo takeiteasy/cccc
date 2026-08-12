@@ -5237,11 +5237,30 @@ static const FfiShadowRule ffi_shadow_rules[] = {
     {"read",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0, -1},
     {"recv",     FFI_SHADOW_BOUNDED, 1, 2, -1, 0, -1},
     {"recvfrom", FFI_SHADOW_BOUNDED, 1, 2, -1, 0, -1},
-    // strtol/strtod write a single pointer (*endptr) through arg 1, a
-    // fixed sizeof(char*) bytes -- there's no argument to read a length
-    // from.
+    // strtol/strtod and the rest of the strto*/wcsto* family write a single
+    // pointer (*endptr) through arg 1, a fixed sizeof(char*) bytes --
+    // there's no argument to read a length from. #839: strtof/strtold/
+    // strtoll/strtoul/strtoull and the wcsto* family take the identical
+    // (const {char,wchar_t} *nptr, {char,wchar_t} **endptr, ...) shape as
+    // strtol/strtod and were missing this entry, falling through to the
+    // default whole-allocation clear. arg 0 (nptr) is untouched by all of
+    // these but isn't the designated out_arg, so it still gets the default
+    // whole-object clear on the next loop iteration -- narrower coverage
+    // for that argument would need a new tier, filed as a follow-up.
     {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
     {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"strtof",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"strtold",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"strtoll",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"strtoul",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"strtoull", FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstof",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstold",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstoll",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstoul",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    {"wcstoull", FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
     // __cccc_dec_strtod(w, dst, s, endp) -- #832's strtod32/64/128 shim
     // (src/stdlib/stdlib.c). `endp` is arg index 3 here, not 1, since `dst`
     // (the decimal out-param) occupies index 1. `dst`'s own write still

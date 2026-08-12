@@ -308,11 +308,13 @@ All features listed below can be enabled individually or through the safety leve
     function can't introduce a false positive): a **read-only** allowlist
     (`strlen`, `strcmp`, `memcmp`, `fwrite`, ...) gets no clear at all; a
     **bounded-write** list (`fread`, `snprintf`, `read`, `recv`, `strncpy`,
-    `strtol`'s `*endptr`, ...) narrows the clear to the statically-known
+    the strto*/wcsto* family's `*endptr`, ...) narrows the clear to the statically-known
     extent written through the one argument that receives it, clamped
     against whichever segment resolves that argument, while every *other*
     pointer-shaped argument to that same call still gets the default
-    whole-object clear; the **printf
+    whole-object clear (the strto*/wcsto* family's `nptr` argument, for
+    instance, is untouched by the call but still takes the default clear,
+    since it isn't the designated `*endptr` argument); the **printf
     family** (`printf`, `fprintf`, `dprintf`, `sprintf`, `snprintf`) is
     read-only for every argument except its output buffer (if any) *unless*
     the format string may contain a `%n` conversion — which can write
