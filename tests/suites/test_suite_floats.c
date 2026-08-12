@@ -833,4 +833,83 @@ int test_fp_minimal(void) {
     return fp(10, 32);
 }
 
+// ND_MEMBER float/double loads (#917): gen_expr's ND_MEMBER case computes the
+// member address into dest_reg and then loads through the same register.
+// For a flonum member dest_reg is a float register, and FREG_A0-A7 alias
+// REG_A0-A7 by raw index -- these guard the refactor that routes the
+// address through a separate temp register (see man/VM.md's calling
+// convention section and ND_VAR's flonum branch in src/codegen.c).
+struct FM_Point {
+    double x, y;
+};
+struct FM_Nested {
+    struct FM_Point a;
+    struct FM_Point b;
+};
+struct FM_Mixed {
+    int i;
+    double d;
+    float f;
+};
+union FM_Union {
+    double d;
+    long long i;
+};
+
+static double fm_sum2(double a, double b) { return a + b; }
+static float fm_sumf2(float a, float b) { return a + b; }
+
+[[cccc::test(return = 42)]]
+int test_member_float_double_loads(void) {
+    // Flat double/float member reads, by value and as call arguments (the
+    // FREG_A0 aliasing case from the ticket).
+    struct FM_Mixed m = {.i = 10, .d = 21.0, .f = 11.0f};
+    double dv = m.d;
+    float fv = m.f;
+    if (dv != 21.0 || fv != 11.0f) return 1;
+    if (fm_sum2(m.d, 21.0) != 42.0) return 2;
+    if (fm_sumf2(m.f, 31.0f) != 42.0f) return 3;
+
+    // Mixed int/float member read in the same expression -- exercises the
+    // aliasing scenario directly (integer address computation interleaved
+    // with a flonum load through the same raw register index).
+    if ((double)m.i + m.d != 31.0) return 4;
+
+    // Member read through a pointer.
+    struct FM_Mixed *p = &m;
+    if (p->d != 21.0) return 5;
+
+    // Nested struct member chain.
+    struct FM_Nested n = {.a = {.x = 10.0, .y = 5.0}, .b = {.x = 20.0, .y = 7.0}};
+    if (n.a.x + n.b.x != 30.0) return 6;
+    struct FM_Nested *np = &n;
+    if (np->a.x + np->b.x != 30.0) return 7;
+
+    // Array-of-struct element members.
+    struct FM_Point pts[3] = {{1.0, 1.0}, {2.0, 2.0}, {3.0, 3.0}};
+    int idx = 1;
+    if (pts[idx].x != 2.0 || pts[idx].y != 2.0) return 8;
+
+    // Union float member.
+    union FM_Union u;
+    u.d = 42.0;
+    if (u.d != 42.0) return 9;
+
+    // Deeply nested float member expression: exercises peak temp-register
+    // use through the binary-op spill path (TEMP_REG_SPILL_THRESHOLD).
+    struct FM_Point a = {1.0, 2.0}, b = {3.0, 4.0}, c = {5.0, 6.0},
+                    d = {7.0, 8.0}, e = {9.0, 1.0}, f = {2.0, 3.0};
+    double deep = a.x * b.y + c.x * d.y + e.x * f.y - a.y * b.x - c.y * d.x -
+                  e.y * f.x;
+    // 1*4 + 5*8 + 9*3 - 2*3 - 6*7 - 1*2 = 4+40+27-6-42-2 = 21
+    if (deep != 21.0) return 10;
+
+    // Long member-chain through nested pointers.
+    struct FM_Nested chain = {.a = {.x = 40.0, .y = 0.0}, .b = {.x = 2.0, .y = 0.0}};
+    struct FM_Nested *cp = &chain;
+    if (cp->a.x + cp->b.x != 42.0) return 11;
+
+    return 42;
+}
+
 #pragma cccc suite end

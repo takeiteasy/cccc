@@ -5560,15 +5560,16 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
 
     case ND_MEMBER: {
-        // NOTE (#917): dest_reg holds the member address here and then gets
-        // loaded through below -- for a float/double member that's dest_reg
-        // in its FREG_A0..A7 sense, which aliases REG_A0..A7 by raw index
-        // (see ND_VAR's flonum branch above for the pattern that avoids
-        // this via a separate r_addr temp). No observable bug today since
-        // the address is dead after the load, but don't add a second live
-        // use of the address here without switching to that pattern first.
+        // For float/double members, dest_reg is a float register, and
+        // FREG_A0-A7 have the same raw numbers as REG_A0-A7 (same hazard
+        // ND_VAR's flonum branch above avoids). Use a temp register for the
+        // address so it never aliases the value register the load targets.
+        // Bitfields are always integer-typed, so temp_addr is only set on
+        // the standard-member path below.
         bool local_frame = addr_is_local_frame(vm, node);
-        gen_addr(vm, node, dest_reg);
+        bool temp_addr = !node->member->is_bitfield && is_flonum(node->ty);
+        int r_addr = temp_addr ? alloc_temp_reg() : dest_reg;
+        gen_addr(vm, node, r_addr);
 
         bool is_union_member = is_union_member_access(node);
         bool saved_union_flag = vm->compiler.in_union_member_access;
@@ -5577,7 +5578,7 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         if (node->member->is_bitfield) {
             Member *mem = node->member;
             // Load container value
-            emit_load_ex(vm, mem->ty, dest_reg, dest_reg, !local_frame);
+            emit_load_ex(vm, mem->ty, dest_reg, r_addr, !local_frame);
 
             if (mem->ty->is_unsigned) {
                 // Unsigned: (val >> bit_offset) & mask
@@ -5611,10 +5612,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Standard member
             if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
                 node->ty->kind != TY_UNION) {
-                emit_load_ex(vm, node->ty, dest_reg, dest_reg, !local_frame);
+                emit_load_ex(vm, node->ty, dest_reg, r_addr, !local_frame);
             }
         }
         vm->compiler.in_union_member_access = saved_union_flag;
+        if (temp_addr)
+            free_temp_reg(r_addr);
         return;
     }
 

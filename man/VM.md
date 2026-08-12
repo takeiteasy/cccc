@@ -65,6 +65,13 @@ TLS variable assignment (`vm->tls_template` write) happens in `gen()` at compile
 * **Return values** come back in `REG_A0` (integer) or `FREG_A0` (float).
 * **Struct returns** use a rotating pool of return buffers allocated in the data segment; the `RETBUF` opcode yields the next buffer address.
 * **Spilled arguments** (more than 8) are pushed onto the stack before the call.
+* `FREG_A0` … `FREG_A7` share raw register indices with `REG_A0` … `REG_A7`
+  (both 10-17, see `src/internal.h`), so a float value and an integer address
+  can never both be live "in" the same `A`-register at once. Codegen paths
+  that compute a member/variable address and then load a flonum through it
+  (e.g. `gen_expr`'s `ND_VAR`/`ND_MEMBER` cases in `src/codegen.c`) must use a
+  separate temp register for the address rather than reusing the destination
+  register.
 
 The `ENT3` opcode builds the stack frame, copies register arguments and stack-passed fixed arguments to their callee-local parameter slots, and optionally writes a stack canary. For variadic functions, `ENT3` still reserves and spills the first 8 argument slots so `va_arg` can consume any register-passed variadic tail; variadic arguments beyond those slots remain in the caller's stack area. `LEV3` restores `bp`, checks the canary, pops the return address, and resumes at the caller.
 
