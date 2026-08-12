@@ -9,6 +9,27 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Added
 
+- **The interactive debugger's new `print`/`p <variable>` command formats a
+  live local or global's value recursively instead of requiring a raw
+  `memory <addr>` dump** (#958, follow-up to #666). Adopts the shared
+  `cc_dump_value` formatter (`src/dump.c`) the REPL already used, printing
+  scalars directly and struct/union/array/vector values field by field in
+  the same lldb-style multi-line braces. This required first fixing
+  `cc_is_valid_vm_address` (`src/debugger.c`): its stack-segment bound
+  checked `[stack_seg, stack_seg + poolsize)`, the low end of the much
+  larger `poolsize_max` reservation, which never actually holds committed
+  data — the stack grows downward from the top, so every real local
+  variable's address was being rejected as invalid. The REPL never hit this
+  because its results always live in the RETBUF pool or data segment, never
+  on the stack; a debugger `print` of a live local hits it immediately. Now
+  validates against the stack's actual committed range,
+  `[stack_base, initial_sp)`, which `vm_stack_grow` and `repl_init_stack`
+  both already maintain correctly. Covered by new PTY integration tests in
+  `tools/test_debugger_print.py` (struct, nested struct, array, `char*`
+  string, pointer-to-local, data-segment global, and an unresolvable-symbol
+  error path), wired into `tools/run_tests.py`'s unified suite as
+  `debugger_print`. `man/TOOLING.md`'s Interactive Debugger section
+  documents the new command and the stack-bound fix.
 - **The interactive REPL now formats struct/union/array/vector expression
   results recursively instead of printing a placeholder** (#666). Previously
   a non-scalar result printed `<struct Point value: aggregate printing not
