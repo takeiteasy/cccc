@@ -329,4 +329,60 @@ int test_vla_with_constructor(void) {
     return vla_sink(buf, 42);
 }
 
+// Regression #971: subscripting a multi-dimensional VLA used to SIGSEGV.
+// `v[i]` (a row of a 2-D VLA) is itself VLA-typed -- the inner ND_DEREF must
+// leave its computed row *address* alone rather than loading through it, or
+// the outer subscript dereferences garbage. Both dimensions variable.
+[[cccc::test(return = 42)]]
+int test_vla_2d_subscript(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    v[0][0] = 1; v[0][1] = 2; v[0][2] = 3;
+    v[1][0] = 4; v[1][1] = 5; v[1][2] = 36;
+    return v[0][0] + v[0][1] + v[0][2] + v[1][0] + v[1][1] + v[1][2] - 9;
+}
+
+// #971: only the outer dimension is variable -- the element type is a plain
+// TY_ARRAY (already worked before the fix), kept as a control alongside the
+// other shapes below.
+[[cccc::test(return = 42)]]
+int test_vla_2d_variable_outer_dim(void) {
+    int n = 2;
+    int v[n][3];
+    v[1][2] = 42;
+    return v[1][2];
+}
+
+// #971: only the inner dimension is variable -- a constant outer bound still
+// makes the whole type a TY_VLA chain (array_dimensions' `ty->kind == TY_VLA`
+// propagation), so this shape crashed before the fix too.
+[[cccc::test(return = 42)]]
+int test_vla_2d_variable_inner_dim(void) {
+    int n = 3;
+    int v[2][n];
+    v[1][2] = 42;
+    return v[1][2];
+}
+
+// #971: a VLA row decays to a pointer just like an array row does -- reading
+// back through the decayed pointer must see the same storage.
+[[cccc::test(return = 42)]]
+int test_vla_2d_row_decay(void) {
+    int n = 2, m = 3;
+    int v[n][m];
+    int *row = v[1];
+    row[2] = 42;
+    return v[1][2];
+}
+
+// #971: three dimensions, all variable -- exercises the middle dimension's
+// vla_size (m*k, not just k) and two levels of address-only ND_DEREF.
+[[cccc::test(return = 42)]]
+int test_vla_3d_subscript(void) {
+    int n = 2, m = 3, k = 4;
+    int v[n][m][k];
+    v[1][2][3] = 42;
+    return v[1][2][3];
+}
+
 #pragma cccc suite end

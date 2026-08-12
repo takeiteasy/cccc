@@ -1405,6 +1405,34 @@ VLA_PROGRAM = (
     "}\n"
 )
 
+# #971: subscripting a multi-dimensional VLA used to SIGSEGV in the VM (an
+# inner ND_DEREF yielding a VLA-typed row loaded through the row address
+# instead of leaving it alone) and mis-serialized the pointer-to-VLA row type
+# as `int *[m]` instead of `int (*)[m]` (invalid C, fails to compile). Both
+# fixed; this exercises 2-D subscript, a decayed row pointer, and 3-D
+# subscript in one program.
+VLA_MULTIDIM_PROGRAM = (
+    "int main(void) {\n"
+    "    int n = 2, m = 3;\n"
+    "    int v[n][m];\n"
+    "    v[0][0] = 1; v[0][1] = 2; v[0][2] = 3;\n"
+    "    v[1][0] = 4; v[1][1] = 5; v[1][2] = 6;\n"
+    "    int total = v[0][0] + v[0][1] + v[0][2] +\n"
+    "                v[1][0] + v[1][1] + v[1][2];\n"
+    "\n"
+    "    int *row = v[1];\n"
+    "    row[2] = 42;\n"
+    "    total += v[1][2] - 6; // now 42 instead of 6\n"
+    "\n"
+    "    int k = 4;\n"
+    "    int w[n][m][k];\n"
+    "    w[1][2][3] = 42;\n"
+    "    total = total - total + w[1][2][3]; // isolate the 3-D result\n"
+    "\n"
+    "    return total;\n"
+    "}\n"
+)
+
 # #964: ND_OVERFLOW_ARITH had no serializer case (`/* unsupported expr kind
 # 55 */`) -- val (0/1/2) selects add/sub/mul, lowering directly onto the
 # same-named clang/gcc builtin. Exercises all three ops, both an overflowing
@@ -1490,11 +1518,19 @@ def case_overflow_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "overflow_964", OVERFLOW_PROGRAM)
 
 
+def case_vla_multidim_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  49: -c=native, a multi-dimensional VLA (2-D subscript, a "
+          "decayed row pointer, and 3-D subscript) round-trips as real C "
+          "and no longer SIGSEGVs in the VM (#971)")
+    return _vm_and_native_run_case(cccc, tmp, "vla_multidim_971",
+                                    VLA_MULTIDIM_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1550,6 +1586,7 @@ def main() -> int:
             case_complex_nesting_native_round_trip,
             case_vla_native_round_trip,
             case_overflow_native_round_trip,
+            case_vla_multidim_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -681,8 +681,14 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         if (ctx->emit_cccc)
             format_checked_ptr_qualifier(qual, sizeof(qual), ty);
         const char *sep = qual[0] ? " " : "";
+        // #971: TY_VLA is an array type for declarator-parenthesization
+        // purposes, same as TY_ARRAY -- pointer-to-VLA (the row type of a
+        // multi-dimensional VLA, `int (*)[m]`) needs the same `(*name)`
+        // grouping a fixed-size array pointer gets, or the `*` binds to the
+        // element type and mis-spells it as `int *[m]` (array of pointers).
         if (ty->base &&
-            (ty->base->kind == TY_ARRAY || ty->base->kind == TY_FUNC))
+            (ty->base->kind == TY_ARRAY || ty->base->kind == TY_VLA ||
+             ty->base->kind == TY_FUNC))
             snprintf(buf, sizeof(buf), "(*%s%s%s)", qual, sep, name ? name : "");
         else
             snprintf(buf, sizeof(buf), "*%s%s%s", qual, sep, name ? name : "");

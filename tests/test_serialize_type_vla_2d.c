@@ -9,11 +9,14 @@
 // through the same buffer-recursion shape TY_ARRAY uses, so dimensions
 // accumulate in the right order: `int v[n][m]`.
 //
-// -m only: multi-dimensional VLA *subscript* still SIGSEGVs in the VM (a
-// pre-existing parse/codegen bug, unrelated to serialization -- filed
-// separately as #971), so there is no round-trip half for this case. This
-// test asserts only that the declarator itself serializes correctly; -m
-// does not execute the program.
+// #971 (fixed): multi-dimensional VLA *subscript* used to SIGSEGV in the VM
+// (an unrelated codegen bug, not a serialization one -- gen_expr's ND_DEREF
+// case loaded through a VLA-typed intermediate row instead of treating it
+// as address-based like TY_ARRAY) and the -m output for a pointer-to-VLA row
+// mis-spelled `int (*)[m]` as `int *[m]` (serialize_type_decl's TY_PTR
+// branch parenthesized only for TY_ARRAY/TY_FUNC bases, not TY_VLA). Both
+// are now fixed, so this program round-trips as real, compilable C -- see
+// tools/comptime_native_smoke.py's VLA cases for the VM-vs-native assertion.
 
 int main(void) {
     int n = 2, m = 3;

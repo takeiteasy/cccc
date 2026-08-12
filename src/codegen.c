@@ -2547,6 +2547,7 @@ static bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int de
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
         node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX ||
+        node->ty->kind == TY_VLA || // #971: address-based, same as TY_ARRAY
         is_wide_bitint(node->ty) || is_decimal(node->ty)) // #402: address-based
         return false;
     IndexedAddr idx = {};
@@ -4668,8 +4669,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // TY_FUNC: dereferencing a function pointer is a no-op in C — *f and f
         // are interchangeable when f has pointer-to-function type.  Do not emit
         // a data load; the register already holds the callable address.
+        //
+        // TY_VLA (#971): a deref that *yields* a VLA sub-object (the inner
+        // row of `v[i]` in a multi-dimensional VLA, e.g. `int v[n][m]`) is
+        // address-based, same as TY_ARRAY -- the just-computed row address
+        // IS the value. This is the opposite rule from ND_VAR/TY_VLA below
+        // (a VLA *local*'s own frame slot holds an alloca'd pointer that
+        // must be loaded) -- do not "fix" that asymmetry, it is correct:
+        // a VLA variable is a pointer-in-a-slot, but a VLA sub-object
+        // reached by pointer arithmetic is not.
         if (node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
             node->ty->kind != TY_UNION && node->ty->kind != TY_FUNC &&
+            node->ty->kind != TY_VLA &&
             !is_wide_bitint(node->ty) && !is_decimal(node->ty)) {
             emit_load(vm, node->ty, dest_reg, dest_reg);
         }

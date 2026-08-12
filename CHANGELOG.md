@@ -7,6 +7,26 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- **Subscripting a multi-dimensional VLA SIGSEGVed** (#971). `int v[n][m];
+  v[1][2] = 42;` crashed both the stage0 and full build's VM. `v[1]` -- a
+  row of the VLA, itself VLA-typed -- desugars to an `ND_DEREF` whose result
+  type is `TY_VLA`; `gen_expr`'s `ND_DEREF` case (and its fused-load fast
+  path, `emit_indexed_load_if_possible`) excluded `TY_ARRAY` from the
+  trailing load but not `TY_VLA`, so the correctly-computed row address was
+  overwritten by a load of `v[1][0]` before the outer subscript dereferenced
+  it. Fixed by excluding `TY_VLA` the same way `TY_ARRAY` already is --
+  deliberately *not* touching the sibling `ND_VAR` read path, which must
+  keep loading a VLA variable's frame slot (it holds the alloca'd pointer,
+  not the array data itself). The `-m`/`-c=native` serializer had a
+  matching defect: a pointer to a VLA row (`int (*)[m]`) was mis-spelled
+  `int *[m]` (array of pointers, invalid as arithmetic/pointer type) because
+  `serialize_type_decl`'s `TY_PTR` branch only parenthesized for
+  `TY_ARRAY`/`TY_FUNC` bases. VLAs of any dimension now round-trip through
+  the VM and native output alike. Covered by
+  `tests/suites/test_suite_vla.c`'s multi-dimensional cases,
+  `tests/test_serialize_type_vla_2d.c`, and `tools/comptime_native_smoke.py`
+  case 49.
+
 - **Right-nested complex arithmetic computed the wrong value in the VM**
   (#968). `double complex z = 20.0 + 22.0 * I;` (parsed as
   `20.0 + (22.0 * I)`) evaluated to `19 + 0i` instead of `20 + 22i` --

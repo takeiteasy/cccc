@@ -733,6 +733,12 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         }
         case ND_ASSIGN:
+            // LIMITATION (#974): this should also reject a TY_VLA lvalue
+            // (e.g. `v[1] = w[2];` where each side is itself a VLA row in a
+            // multi-dimensional VLA) -- whole-row assignment is silently
+            // accepted today instead of erroring "not an lvalue" like the
+            // TY_ARRAY case below does. Found alongside #971 (fixed); not
+            // fixed here, needs its own regression coverage.
             if (node->lhs->ty->kind == TY_ARRAY) {
                 if (vm->collect_errors && error_tok_recover(vm, node->lhs->tok,
                                                              "not an lvalue")) {
@@ -921,6 +927,10 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         case ND_ADDR: {
             Type *ty = node->lhs->ty;
+            // LIMITATION (#973): TY_VLA should decay here the same way
+            // TY_ARRAY does -- `&v` on a VLA currently yields `TY_VLA *`
+            // instead of the correct `int (*)[n]`. Found alongside #971
+            // (fixed); not fixed here, needs its own regression coverage.
             if (ty->kind == TY_ARRAY)
                 node->ty = pointer_to(vm, ty->base);
             else
