@@ -1349,6 +1349,30 @@ ASM_PROGRAM = (
     "}\n"
 )
 
+# #968: gen_complex_expr()'s ND_ADD/SUB/MUL/DIV case used to generate the RHS
+# operand into *fixed* registers, so a right-nested complex binop (the
+# canonical `20.0 + 22.0 * I` literal, parsed as `20.0 + (22.0 * I)`) clobbered
+# itself and a function call anywhere in the RHS clobbered the LHS -- all
+# native only, since -c=native's host-compiler codegen was correct the whole
+# time (that mismatch is how the bug surfaced). Exercises right-nested `*`
+# and a funcall in the RHS.
+COMPLEX_NESTING_PROGRAM = (
+    "#include <complex.h>\n"
+    "static double helper(void) { return 7.0; }\n"
+    "int main(void) {\n"
+    "    double complex z = 20.0 + 22.0 * I;\n"
+    "    if (creal(z) != 20.0 || cimag(z) != 22.0) return 1;\n"
+    "    double complex a = __cccc_cmplx(1.0, 2.0);\n"
+    "    double complex b = __cccc_cmplx(3.0, 4.0);\n"
+    "    double complex c = __cccc_cmplx(5.0, 6.0);\n"
+    "    double complex mul_r = a * (b * c);\n"
+    "    if (creal(mul_r) != -85.0 || cimag(mul_r) != 20.0) return 2;\n"
+    "    double complex m = a * (2.0 + helper());\n"
+    "    if (creal(m) != 9.0 || cimag(m) != 18.0) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 
 def case_bitops_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  39: -c=native, bit-manipulation builtins keep their width "
@@ -1393,11 +1417,18 @@ def case_asm_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "asm_963", ASM_PROGRAM)
 
 
+def case_complex_nesting_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  46: right-nested complex binops and a funcall in the RHS match "
+          "-c=native (#968)")
+    return _vm_and_native_run_case(cccc, tmp, "complex_nesting_968",
+                                    COMPLEX_NESTING_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#968)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1450,6 +1481,7 @@ def main() -> int:
             case_convertvector_native_round_trip,
             case_addr_builtins_native_round_trip,
             case_asm_native_round_trip,
+            case_complex_nesting_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

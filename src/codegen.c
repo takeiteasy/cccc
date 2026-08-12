@@ -3943,27 +3943,74 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
     case ND_SUB:
     case ND_MUL:
     case ND_DIV: {
-        // BUG (#968): br/bi and t0-t2 are *fixed* registers, but this
-        // function recurses. A right-hand-nested complex binop
-        // (`a + (b + c)`, or the canonical `20.0 + 22.0 * I`) generates its
-        // operand into T5/T6 and then the nested op immediately reuses T5/T6
-        // for its own operands, destroying the outer right-hand value. Left
-        // nesting (`(a + b) + c`) happens to be fine because the outer
-        // real_reg/imag_reg are distinct from T5/T6. The fix is to allocate
-        // these through alloc_temp_reg() (float side) rather than hardcoding
-        // them, so each recursion level gets its own.
-        int br = REG_T5;
-        int bi = REG_T6;
-        int t0 = REG_T7;
-        int t1 = REG_T8;
-        int t2 = REG_T9;
+        // #968: br/bi and t0-t2 used to be *fixed* registers (T5-T9), but
+        // this function recurses -- a right-hand-nested complex binop
+        // (`a + (b + c)`, or the canonical `20.0 + 22.0 * I`) generated its
+        // RHS into T5/T6 and then the nested call immediately reused T5/T6
+        // for its own operands, destroying the outer RHS. Left nesting
+        // (`(a + b) + c`) survived only by accident, since the outer
+        // real_reg/imag_reg happened to differ from T5/T6.
+        //
+        // Simply drawing br/bi/t0-t2 from alloc_temp_reg() is not enough on
+        // its own: T0-T10 are *all* caller-saved, so a function call
+        // anywhere in the RHS subtree clobbers real_reg/imag_reg regardless
+        // of which temp they land in, and holding br/bi live across the RHS
+        // recursion (the natural allocator-only fix) accumulates two
+        // registers per nesting level, exhausting the pool around depth 5
+        // on a right-nested chain. So instead this unconditionally spills
+        // real_reg/imag_reg's bits to the stack before recursing into the
+        // RHS and reloads them after (same FR2R/R2FR-through-PSH3/POP3
+        // idiom the scalar float binop path uses under pressure, see
+        // TEMP_REG_SPILL_THRESHOLD above) -- the RHS recursion then reuses
+        // real_reg/imag_reg directly and holds zero extra pool registers
+        // live across itself, however deep the tree, at the cost of two
+        // push/pop pairs per node (negligible next to the rest of complex
+        // arithmetic).
         gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-        gen_complex_expr(vm, node->rhs, br, bi);
+        // The LHS may itself have gone through this same path and reset the
+        // temp pool; re-mark real_reg/imag_reg as in-use so the allocations
+        // below can't hand back a register this level (or an ancestor
+        // level, for real_reg/imag_reg that are themselves an outer call's
+        // br/bi) still needs live. No-op for FREG_A* inputs, which aren't
+        // part of the temp pool.
+        mark_temp_reg_used(real_reg);
+        mark_temp_reg_used(imag_reg);
 
         int fadd = fop_for_type(node->ty->base, FADD3);
         int fsub = fop_for_type(node->ty->base, FSUB3);
         int fmul = fop_for_type(node->ty->base, FMUL3);
         int fdiv = fop_for_type(node->ty->base, FDIV3);
+        int fr2r = fop_for_type(node->ty->base, FR2R);
+        int r2fr = fop_for_type(node->ty->base, R2FR);
+
+        int r_tmp = alloc_temp_reg();
+        emit_rr(vm, fr2r, r_tmp, real_reg); // real bits -> int reg
+        emit_psh3(vm, r_tmp);                // save on the stack
+        emit_rr(vm, fr2r, r_tmp, imag_reg); // imag bits -> int reg
+        emit_psh3(vm, r_tmp);
+        free_temp_reg(r_tmp); // nothing held across the RHS recursion
+
+        gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
+
+        int br = alloc_temp_reg();
+        int bi = alloc_temp_reg();
+        emit_fmov3(vm, br, real_reg); // RHS result -> its own registers
+        emit_fmov3(vm, bi, imag_reg);
+
+        int r_tmp2 = alloc_temp_reg();
+        emit_pop3(vm, r_tmp2); // LIFO: imag was pushed last
+        emit_rr(vm, r2fr, imag_reg, r_tmp2); // int bits -> LHS imag register
+        emit_pop3(vm, r_tmp2);
+        emit_rr(vm, r2fr, real_reg, r_tmp2); // int bits -> LHS real register
+        free_temp_reg(r_tmp2);
+
+        int t0 = 0, t1 = 0, t2 = 0;
+        if (node->kind == ND_MUL || node->kind == ND_DIV) {
+            t0 = alloc_temp_reg();
+            t1 = alloc_temp_reg();
+            if (node->kind == ND_DIV)
+                t2 = alloc_temp_reg();
+        }
 
         if (node->kind == ND_ADD) {
             emit_frrr(vm, fadd, real_reg, real_reg, br);
@@ -3998,6 +4045,15 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
             emit_fround_f32(vm, real_reg, real_reg);
             emit_fround_f32(vm, imag_reg, imag_reg);
         }
+
+        if (node->kind == ND_MUL || node->kind == ND_DIV) {
+            if (node->kind == ND_DIV)
+                free_temp_reg(t2);
+            free_temp_reg(t1);
+            free_temp_reg(t0);
+        }
+        free_temp_reg(bi);
+        free_temp_reg(br);
         return;
     }
     default:

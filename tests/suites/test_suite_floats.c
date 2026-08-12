@@ -358,6 +358,73 @@ int test_complex_tgmath(void) {
     return 42;
 }
 
+// [helper for test_complex_nesting]
+static double complex_nesting_helper(void) { return 7.0; }
+
+// test_complex_nesting (#968)
+//
+// gen_complex_expr()'s ND_ADD/SUB/MUL/DIV case used to generate the RHS
+// operand into fixed registers (T5/T6 + T7-T9 scratch). Since the function
+// recurses, a right-hand-nested complex binop re-entered the same case and
+// immediately reused those same registers for its own operands, destroying
+// the outer RHS -- `20.0 + 22.0 * I` (parsed as `20.0 + (22.0 * I)`) is the
+// canonical example. Left nesting survived by accident. A function call
+// anywhere in the RHS was a second, related clobber: every temp register is
+// caller-saved, so a call destroys the LHS regardless of which register it
+// occupies. Both are covered here with real values (not just "compiles"),
+// per the #963 lesson that a shape assertion alone cannot see a silent
+// wrong-answer miscompile.
+[[cccc::test(return = 42)]]
+int test_complex_nesting(void) {
+    // The literal repro from the ticket.
+    double complex z = 20.0 + 22.0 * I;
+    if (creal(z) != 20.0) return 1;
+    if (cimag(z) != 22.0) return 2;
+
+    double complex a = CMPLX(1.0, 2.0);
+    double complex b = CMPLX(3.0, 4.0);
+    double complex c = CMPLX(5.0, 6.0);
+
+    // Right nesting vs. left nesting, all four operators.
+    double complex add_r = a + (b + c), add_l = (a + b) + c;
+    if (creal(add_r) != 9.0 || cimag(add_r) != 12.0) return 3;
+    if (creal(add_l) != 9.0 || cimag(add_l) != 12.0) return 4;
+
+    double complex sub_r = a - (b - c), sub_l = (a - b) - c;
+    if (creal(sub_r) != 3.0 || cimag(sub_r) != 4.0) return 5;
+    if (creal(sub_l) != -7.0 || cimag(sub_l) != -8.0) return 6;
+
+    double complex mul_r = a * (b * c), mul_l = (a * b) * c;
+    if (creal(mul_r) != -85.0 || cimag(mul_r) != 20.0) return 7;
+    if (creal(mul_l) != -85.0 || cimag(mul_l) != 20.0) return 8;
+
+    double complex div_r = a / (b / c), div_l = (a / b) / c;
+    if (fabs(creal(div_r) - 1.72) > 1e-9) return 9;
+    if (fabs(cimag(div_r) - 3.04) > 1e-9) return 10;
+    if (fabs(creal(div_l) - 0.0439344262295082) > 1e-9) return 11;
+    if (fabs(cimag(div_l) - (-0.03672131147540984)) > 1e-9) return 12;
+
+    // Deep right-nested chain -- must not exhaust the temp register pool.
+    double complex d0 = CMPLX(1.0, 1.0), d1 = CMPLX(2.0, 2.0);
+    double complex d2 = CMPLX(3.0, 3.0), d3 = CMPLX(4.0, 4.0);
+    double complex deep = d0 + (d1 + (d2 + (d3 + (d0 + (d1 + (d2 + d3))))));
+    if (creal(deep) != 20.0 || cimag(deep) != 20.0) return 13;
+
+    // float complex, right-nested.
+    float complex fz = 2.0f + 3.0f * I;
+    if (crealf(fz) != 2.0f) return 14;
+    if (cimagf(fz) != 3.0f) return 15;
+
+    // A function call in the RHS clobbers the LHS if it isn't spilled.
+    double complex s = a + complex_nesting_helper();
+    if (creal(s) != 8.0 || cimag(s) != 2.0) return 16;
+
+    double complex m = a * (2.0 + complex_nesting_helper());
+    if (creal(m) != 9.0 || cimag(m) != 18.0) return 17;
+
+    return 42;
+}
+
 // test_fenv_tgmath_hexfloat
 [[cccc::test(return = 42)]]
 int test_fenv_tgmath_hexfloat(void) {

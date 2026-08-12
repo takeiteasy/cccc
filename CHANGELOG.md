@@ -5,6 +5,27 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Right-nested complex arithmetic computed the wrong value in the VM**
+  (#968). `double complex z = 20.0 + 22.0 * I;` (parsed as
+  `20.0 + (22.0 * I)`) evaluated to `19 + 0i` instead of `20 + 22i` --
+  `-c=native` was correct the whole time, which is how the bug surfaced.
+  `gen_complex_expr()`'s `ND_ADD`/`ND_SUB`/`ND_MUL`/`ND_DIV` case generated
+  its right-hand operand into a fixed pair of registers, but the function
+  recurses: a right-nested complex binop re-entered the same case and
+  immediately reused those same registers for its own operands, destroying
+  the outer right-hand value. Left nesting (`(a + b) + c`) survived only by
+  accident. Fixed by having the right-hand operand's registers -- and, for
+  `*`/`/`, its scratch registers -- come from the normal temp-register
+  allocator, with the left-hand value's bits unconditionally spilled to the
+  stack across the right-hand recursion. That spill also fixes a related
+  bug found in the same pass (#970): a function call anywhere in the
+  right-hand operand clobbered the left-hand value, since every temp
+  register is caller-saved. Covered by
+  `tests/suites/test_suite_floats.c:test_complex_nesting` and
+  `tools/comptime_native_smoke.py` case 46.
+
 ## [0.2.8] - 2026-08-12
 
 ### Fixed
