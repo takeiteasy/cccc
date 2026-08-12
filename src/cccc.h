@@ -62,19 +62,23 @@ extern "C" {
     X(JMPI, 1)  /* Indirect jump */                                            \
     /* VM memory operations (self-contained, no system calls) */               \
     X(MALC, 0)                                                                 \
-    X(ALCA, 0) /* alloca/VLA storage: size=A0, result=A0; same shape as MALC \
-                  but tagged AllocHeader.kind=ALLOC_KIND_FRAME so leak       \
-                  detection never reports it (#979) -- CHKB/CHKBN/CHKP3/     \
-                  DYNOBJSZ still see a full AllocHeader via sorted_allocs,   \
-                  unchanged. __block boxes use the separate ALCB opcode      \
-                  below (#981's prerequisite): both started out sharing this \
-                  one opcode under a single is_internal bool, but a __block  \
-                  box legitimately outlives its declaring frame (Block_copy) \
-                  while alloca/VLA storage dies with it, and #981's eventual \
-                  reclamation pass must be able to target the latter without \
-                  ever sweeping the former -- so they need distinguishable   \
-                  AllocKinds, and hence distinguishable opcodes, well before  \
-                  that pass is written. */                                   \
+    X(ALCA, 0) /* bare `__builtin_alloca` storage: size=A0, result=A0; same  \
+                  shape as MALC but tagged AllocHeader.kind=ALLOC_KIND_ALLOCA \
+                  so leak detection never reports it (#979) -- CHKB/CHKBN/   \
+                  CHKP3/DYNOBJSZ still see a full AllocHeader via            \
+                  sorted_allocs, unchanged. A VLA's own alloca(...) call     \
+                  uses the separate ALCV opcode (appended at the end of      \
+                  OPS_X, #981) instead of this one: both used to share ALCA  \
+                  under one ALLOC_KIND_FRAME value, but a VLA's storage dies \
+                  at the end of the *block* that declared it while a bare    \
+                  alloca's storage lives until the *function* returns, and   \
+                  #981's block-exit reclamation pass must be able to sweep   \
+                  the former without ever touching the latter -- so they     \
+                  need distinguishable AllocKinds, and hence distinguishable \
+                  opcodes. __block boxes use the separate ALCB opcode below  \
+                  (#981's prerequisite) for the same reason: a __block box   \
+                  legitimately outlives its declaring frame (Block_copy)     \
+                  while alloca/VLA storage does not. */                      \
     X(MFRE, 0)                                                                 \
     X(MCPY, 0)                                                                 \
     X(MSET, 0) /* memset to 0: dest=REG_A0, count=REG_A2; backs ND_MEMZERO */   \
@@ -639,7 +643,62 @@ extern "C" {
                    heap_alloc_for_ptr can't resolve (stack/global storage) \
                    is not checked either -- the same "no bound known for a \
                    non-heap base" limitation CHKB/CHKBN already document. \
-                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB/CHKBN. */
+                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB/CHKBN. */          \
+    /* #981: appended (never interleaved -- see the rule stated above CHKR) \
+       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */ \
+    X(ALCV, 0) /* VLA storage: size=A0, result=A0; identical register shape \
+                  to ALCA/MALC/ALCB, tagged AllocHeader.kind=ALLOC_KIND_FRAME \
+                  instead of ALCA's ALLOC_KIND_ALLOCA (see ALCA's own       \
+                  comment above for why the two are not interchangeable).  \
+                  A VLA's own lowered `alloca(...)` call (parse.c's        \
+                  new_alloca, only reached through a VLA declaration's     \
+                  ND_ASSIGN(ND_VLA_PTR, ...)) emits this opcode instead of \
+                  ALCA; a bare `__builtin_alloca` call still emits ALCA.   \
+                  Distinguished at parse time via Node.is_vla_alloca_call, \
+                  set only by new_alloca() (src/parse.c), never by the two \
+                  explicit `__builtin_alloca`/`__builtin_alloca_with_align` \
+                  call-construction sites in primary()/unary(). */          \
+    /* #981: appended (never interleaved -- see the rule stated above CHKR) \
+       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */ \
+    X(HMRK, 1) /* Heap mark: push a reclamation watermark for the current   \
+                  block. Format: [HMRK] [depth:i32], mirrors SCOPEIN's      \
+                  single-word immediate exactly (emit_word, not emit_i64 -- \
+                  a nesting depth never needs 64 bits). Emitted at the      \
+                  start of any ND_BLOCK that declares a VLA (gen_stmt's     \
+                  case ND_BLOCK, src/codegen.c), gated on                   \
+                  vm->heap_reclaim_enabled. Truncates any existing entry    \
+                  for this bp at depth >= D (a re-entered block via a       \
+                  backward goto, or loop iteration, must not accumulate     \
+                  stale entries), then records {vm->bp, D, vm->heap_ptr}.   \
+                  Touches no registers, so it needs no                     \
+                  op_byte0_is_int_src/op_implicit_abi_regs entry in         \
+                  src/optimize.c -- only op_operand_word_is_immediate, same \
+                  as SCOPEIN. See HeapMarks (src/cccc.h) and               \
+                  heap_rewind_to (src/ops.c) for the full #981 reclamation  \
+                  design: gated off whenever any address-keyed side table  \
+                  (UAF/bounds/dangling/tagging/type-checks/uninit-detection/ \
+                  leak-detection/heap-canaries) could go stale from address \
+                  reuse, and whenever more than one thread has been        \
+                  created (the VM heap is global, not per-thread). */       \
+    X(HREL, 1) /* Heap release: the matching block-exit half of HMRK.       \
+                  Format: [HREL] [depth:i32]. Finds the {vm->bp, D} entry   \
+                  HMRK pushed and rewinds vm->heap_ptr back to its recorded \
+                  mark via heap_rewind_to (src/ops.c), sweeping only        \
+                  ALLOC_KIND_FRAME (VLA/ALCV) allocations above the mark -- \
+                  never ALLOC_KIND_ALLOCA (a bare alloca outlives its       \
+                  enclosing block, only its frame) or ALLOC_KIND_BLOCK_BOX  \
+                  (a __block box may outlive its frame via Block_copy) --   \
+                  and never anything at all if a genuine ALLOC_KIND_USER    \
+                  allocation (malloc & co) sits above the mark, which pins  \
+                  the bump pointer at that allocation's end instead.        \
+                  Emitted at the end of the same ND_BLOCK that emitted the  \
+                  matching HMRK. A block left via break/continue/goto/      \
+                  return skips its own HREL; the mark stack is self-        \
+                  healing by design (indexed by depth, not a balanced       \
+                  push/pop) -- the next HREL at a shallower depth, or the   \
+                  frame's own LEV3, truncates the orphaned entry. A missed  \
+                  HREL only forfeits reclamation for that one exit path, it \
+                  can never over-reclaim. */                                \
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -800,6 +859,45 @@ typedef enum {
     CCCC_POINTER_CHECKS = (CCCC_UAF_DETECTION | CCCC_BOUNDS_CHECKS |
                           CCCC_DANGLING_DETECT | CCCC_MEMORY_TAGGING),
 } CCCCFlags;
+
+// #981: the flag-only portion of the heap-reclamation gate. Reclaiming
+// alloca/VLA storage means an address CAN be handed out again by a later
+// allocation, which every one of these features relies on never happening:
+// UAF/bounds/dangling-pointer detection and memory tagging (CCCC_POINTER_
+// CHECKS) all resolve a pointer's provenance through sorted_allocs/
+// AllocHeader, the effective-type shadow (CCCC_TYPE_CHECKS) and the
+// uninitialized-read tracker (CCCC_UNINIT_DETECTION) are both keyed by
+// address, CCCC_MEMORY_LEAK_DETECT's report would misattribute a reused
+// address's still-live allocation to a stale alloc_pc, and CCCC_HEAP_
+// CANARIES' front/rear guard values are meaningless once the bytes they
+// guarded can belong to a different, later allocation. Returns true only
+// when none of them are enabled -- true at -0 (and any explicit
+// combination of flags that happens not to set these bits), false at
+// -1/-2/-3.
+//
+// This is necessary but NOT sufficient for reclamation to actually run:
+// the full gate also requires !vm->dynobjsz_present (DYNOBJSZ resolves
+// interior pointers through sorted_allocs regardless of which flags are
+// set, so it has the identical address-reuse hazard) and no thread ever
+// having been created (the VM heap is a single global arena, not
+// per-thread -- see HeapMarks' own comment). dynobjsz_present is only
+// known once a full text-segment scan has run (cc_scan_dynobjsz, vm.c),
+// which can't happen until codegen has finished -- so THIS function alone
+// is what codegen.c uses to decide whether emitting HMRK/HREL for a given
+// VLA-declaring block is even worth it (skipping them entirely whenever
+// any of these flags is set, the common case at -1/-2/-3), while the full
+// runtime gate, vm->heap_reclaim_enabled (computed once in vm.c right
+// after the dynobjsz scan, folding in dynobjsz_present and reread at every
+// ENT3/LEV3/HMRK/HREL/CALLT/LONGJMP site in src/ops.c), is the actual
+// authority on whether a rewind happens. A block whose HMRK/HREL were
+// pruned here purely on flags can never wrongly skip a reclaim it should
+// have done -- it only ever forfeits one it was allowed to do, same as
+// any other missed-HREL case (see HREL's own comment above).
+static inline bool cc_heap_reclaim_flags_ok(uint32_t flags) {
+    return !(flags & (CCCC_POINTER_CHECKS | CCCC_TYPE_CHECKS |
+                       CCCC_UNINIT_DETECTION | CCCC_MEMORY_LEAK_DETECT |
+                       CCCC_HEAP_CANARIES));
+}
 
 /*!
  @brief Bitwise flags for compiler warning categories.
@@ -1468,6 +1566,18 @@ struct Node {
     bool pass_by_stack;
     bool has_splice_arg; // deferred arity/cast check needed after quote_substitute
     Obj *ret_buffer;
+    // #981: true only for the alloca(...) ND_FUNCALL synthesized by
+    // new_alloca() to back a VLA declaration (parse.c's
+    // ND_ASSIGN(ND_VLA_PTR, alloca(...)) lowering). False for every other
+    // call to the same underlying `alloca` Obj, in particular an explicit
+    // `__builtin_alloca`/`__builtin_alloca_with_align` call -- those two
+    // construct their own ND_FUNCALL node directly in primary()/unary()
+    // rather than through new_alloca(), and are never set. Lets codegen's
+    // ND_FUNCALL case (which only sees `node->lhs->var->is_builtin_alloca`,
+    // true for both) choose ALCV (ALLOC_KIND_FRAME, block-scoped, swept by
+    // HREL) vs ALCA (ALLOC_KIND_ALLOCA, frame-scoped, swept only at LEV3)
+    // without needing to inspect the call's syntactic origin.
+    bool is_vla_alloca_call;
 
     // Goto or labeled statement, or labels-as-values
     char *label;
@@ -1483,6 +1593,25 @@ struct Node {
     // ND_BLOCK: cleanup vars declared in this scope (declaration order); codegen emits LIFO
     CleanupVar *cleanup_vars;
     int cleanup_scope_depth; // parse-time cleanup_scope_depth when this block was built
+
+    // ND_BLOCK: true only for the synthetic wrapper declaration() (parse.c)
+    // returns to bundle one declaration statement's per-declarator
+    // initializers (e.g. `int n = 4, v[n];` is one such wrapper holding
+    // both declarators' statements) -- NOT a real C block scope, see
+    // declaration()'s own comment. #981 (codegen.c's ND_BLOCK case) relies
+    // on this to avoid a real correctness bug: without it, a VLA's own
+    // wrapper block would satisfy block_defines_vla (internal.h) directly
+    // and get its OWN narrow HMRK/HREL pair around just its own body
+    // (compute the VLA's size, alloca it) -- reclaiming the VLA's storage
+    // the instant it's declared, before any of the *enclosing* real
+    // scope's later statements (which is where the variable is actually
+    // used) ever run. Sibling flag to node_is_vla_ptr_assign/
+    // block_defines_vla (internal.h): a block's immediate ND_BLOCK child
+    // with is_decl_group set is treated as transparent -- looked *through*
+    // (one level, exhaustive: declaration() never nests a wrapper inside
+    // another) when deciding whether the ENCLOSING real scope needs a
+    // watermark, and never self-instrumented.
+    bool is_decl_group;
 
     // Switch
     struct Node *case_next;
@@ -2452,22 +2581,36 @@ typedef struct DynamicSymbol {
  @brief Kind of storage an AllocHeader backs (#979/#981).
  @details
  ALLOC_KIND_USER is the default (MALC/REALC/aligned_alloc/... -- ordinary
- user-visible heap memory). ALLOC_KIND_FRAME and ALLOC_KIND_BLOCK_BOX both
- originate from ALCA-family opcodes rather than MALC and are excluded from
- the leak-detection AllocRecord list (#979) since neither is ever meant to
- be user-freed, but they are NOT interchangeable: ALLOC_KIND_FRAME is
- automatic storage that dies with its declaring frame (alloca/VLA, backed
- by ALCA) and is the only kind #981's eventual reclamation may target,
- while ALLOC_KIND_BLOCK_BOX is a `__block` variable's heap box (backed by
- ALCB), which `Block_copy` is expected to let legitimately outlive its
- declaring frame -- #981 must never sweep it. Splitting what used to be a
- single `is_internal` bool into this enum is the prerequisite #981 itself
- names for adding any reclamation logic at all.
+ user-visible heap memory). ALLOC_KIND_FRAME, ALLOC_KIND_ALLOCA, and
+ ALLOC_KIND_BLOCK_BOX all originate from ALCA-family opcodes rather than
+ MALC and are excluded from the leak-detection AllocRecord list (#979)
+ since none of them is ever meant to be user-freed, but they are NOT
+ interchangeable:
+   - ALLOC_KIND_FRAME is a VLA's alloca-backed storage. Its lifetime ends
+     at the end of the *block* that declared it (C11 6.8.3), so #981's
+     reclamation sweeps it at both block exit (HREL) and frame exit
+     (LEV3).
+   - ALLOC_KIND_ALLOCA is a bare `__builtin_alloca` call's storage. Unlike
+     a VLA, its lifetime extends to the end of the *function*, not the
+     block it was called in -- C practice (and every mainstream compiler)
+     treats it as frame-scoped, so #981's reclamation sweeps it only at
+     frame exit (LEV3), never at a block's HREL. Before this split, both
+     shared ALLOC_KIND_FRAME; sweeping that kind at block exit would have
+     reclaimed a still-live alloca'd block stashed past the end of its
+     enclosing block, a real miscompile rather than a missed optimization.
+   - ALLOC_KIND_BLOCK_BOX is a `__block` variable's heap box (backed by
+     ALCB), which `Block_copy` is expected to let legitimately outlive its
+     declaring frame -- #981's reclamation must never sweep it, at either
+     block or frame exit.
+ Splitting what used to be a single `is_internal` bool into this enum is
+ the prerequisite #981 itself names for adding any reclamation logic at
+ all.
 */
 typedef enum {
     ALLOC_KIND_USER = 0,       /**< Ordinary user-visible allocation (malloc & co). */
-    ALLOC_KIND_FRAME = 1,      /**< alloca/VLA backing storage (ALCA); frame-scoped. */
-    ALLOC_KIND_BLOCK_BOX = 2,  /**< __block variable's heap box (ALCB); may outlive its frame. */
+    ALLOC_KIND_FRAME = 1,      /**< VLA backing storage (ALCA); block-scoped -- reclaimed at HREL and LEV3. */
+    ALLOC_KIND_BLOCK_BOX = 2,  /**< __block variable's heap box (ALCB); may outlive its frame -- never reclaimed. */
+    ALLOC_KIND_ALLOCA = 3,     /**< Bare __builtin_alloca storage (ALCA); frame-scoped -- reclaimed at LEV3 only. */
 } AllocKind;
 
 /*!
@@ -3371,6 +3514,30 @@ typedef struct {
     int capacity;
 } StackIntervals;
 
+// Heap-reclamation mark stack (#981): one entry per HMRK (block-scoped VLA
+// storage) or ENT3 (frame-scoped, depth == -1), truncated/rewound by HREL,
+// LEV3, and LONGJMP. VM-level, NOT per-thread like FrameEpochs/
+// StackIntervals above -- the heap it guards (vm->heap_ptr) is a single
+// VM-wide arena, and heap reclamation is unconditionally disabled the
+// moment more than one thread has ever been created (see
+// vm->heap_reclaim_enabled and the thread-record check in heap_rewind_to,
+// src/ops.c): two threads' allocations interleave in that one arena, so a
+// per-frame LIFO rewind on one thread could otherwise sweep another
+// thread's still-live VLA. Indexed by (bp, depth) rather than a plain
+// parallel-to-FrameEpochs stack because a block's mark must survive
+// sibling blocks at the same depth within one frame (loop iterations,
+// re-entry via a backward goto) without being confused for each other --
+// see heap_marks_push's truncate-then-push behavior in src/ops.c.
+typedef struct {
+    long long **bps;   // parallel array: bp identifying the owning frame
+    int *depths;       // parallel array: -1 == the frame's own ENT3 entry;
+                       // >= 0 == a block's nesting depth (HMRK's operand)
+    char **marks;      // parallel array: heap_ptr at the moment this entry
+                       // was pushed
+    int count;
+    int capacity;
+} HeapMarks;
+
 /*!
  @brief Encapsulates all state for the CCCC compiler and virtual
            machine. Instances are independent and support embedding.
@@ -3517,19 +3684,43 @@ struct VirtualMachine {
 
     // Sorted allocation array for O(log n) base-address range queries.
     // Populated by MALC (CALC/REALC delegate to MALC) as a simple append —
-    // the VM heap is a bump allocator so heap_ptr only grows, meaning every
-    // new base address is higher than all previous ones and the array stays
-    // sorted without a search. Entries for freed allocations are left in
-    // place (addresses are never reused) and are filtered out by checking
-    // AllocHeader.freed at lookup time. Used by DYNOBJSZ to resolve interior
-    // pointers (p + k) to their containing allocation; CHKB/CHKP3 could use
-    // the same table for interior-pointer provenance checks (follow-up).
+    // the VM heap is a bump allocator so heap_ptr only grows *between
+    // reclamations*, meaning every newly appended base address is higher
+    // than all previous ones and the array stays sorted without a search.
+    // Entries for freed (via MFRE) allocations are left in place (a plain
+    // free never reuses an address -- it only sets AllocHeader.freed) and
+    // are filtered out by checking that flag at lookup time. Used by
+    // DYNOBJSZ to resolve interior pointers (p + k) to their containing
+    // allocation; CHKB/CHKP3 could use the same table for interior-pointer
+    // provenance checks (follow-up).
+    //
+    // #981 exception: HREL/LEV3's heap reclamation *does* truncate the tail
+    // of this array (heap_rewind_to, src/ops.c) when it rewinds heap_ptr,
+    // specifically to preserve the "append order == address order" append-
+    // only invariant this comment used to state unconditionally -- without
+    // truncating, a later allocation reusing a reclaimed address would
+    // resolve through sorted_allocs_find into the earlier, now-defunct
+    // entry's stale header instead of its own. Reclamation itself is gated
+    // off (vm->heap_reclaim_enabled) whenever any address-keyed side table
+    // (UAF/bounds/dangling/tagging/type-checks/uninit-detection/leak-
+    // detection/heap-canaries) could go stale from that address reuse, so
+    // this array's addresses are still never reused under any of those
+    // safety features -- only when none of them are active.
     struct {
         void **addresses;      // Sorted array of base addresses (ascending)
         AllocHeader **headers; // Parallel array of headers
         int count;             // Number of tracked allocations (incl. freed)
         int capacity;          // Allocated array capacity
     } sorted_allocs;
+
+    // #981 heap-reclamation mark stack and its precomputed gate -- see
+    // HeapMarks' own comment above for why this is VM-level rather than a
+    // per-thread ExecState field. heap_reclaim_enabled is computed once,
+    // right after cccc_vm_scan_dynobjsz sets dynobjsz_present (vm.c), and
+    // re-read (never recomputed) at every ENT3/LEV3/HMRK/HREL/CALLT/
+    // LONGJMP site -- see heap_rewind_to and its callers in src/ops.c.
+    HeapMarks heap_marks;
+    bool heap_reclaim_enabled;
 
     // Segment growth tracking (reserve-and-commit scheme)
     size_t text_committed;  // committed bytes in text segment
@@ -3558,6 +3749,25 @@ struct VirtualMachine {
     int current_function_scope_id; // Scope ID of current function being
                                    // generated
     long long stack_high_water;    // Maximum stack usage tracking
+
+    // #981: codegen-time nesting counter for HMRK/HREL depth immediates.
+    // Incremented immediately before recursing into a VLA-declaring
+    // ND_BLOCK's body (gen_stmt's case ND_BLOCK, codegen.c) and decremented
+    // immediately after -- unlike current_scope_id above, only blocks that
+    // actually get an HMRK/HREL pair bump this, so it tracks "how many
+    // enclosing VLA-declaring blocks are currently open on this lexical
+    // path", not overall block nesting. That's exactly the ordering
+    // heap_marks_push's truncate-before-push rule (src/ops.c) needs: any
+    // genuinely nested pair of VLA-declaring blocks gets strictly
+    // increasing depths (so a descendant's HMRK can never truncate an
+    // still-open ancestor's mark), while two sibling VLA-declaring blocks
+    // may harmlessly share the same depth (they can never be
+    // simultaneously live within one activation -- see heap_marks_push's
+    // own comment for why that's safe). Deliberately NOT reused for
+    // current_scope_id above: that one is gated on CCCC_STACK_INSTR and
+    // only increments under that flag, whereas HMRK/HREL need to work at
+    // -0, where CCCC_STACK_INSTR is typically off.
+    int heap_mark_nest_depth;
     ScopeVarList *scope_vars;      // Array of per-scope variable lists
     int scope_vars_capacity;       // Capacity of scope_vars array
 

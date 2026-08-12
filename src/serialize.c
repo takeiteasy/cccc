@@ -226,39 +226,10 @@ static bool node_is_integerish(Node *n) {
     return n && n->ty && is_integer(n->ty);
 }
 
-// #964: true for the `v = alloca(tmp)` assignment declaration() (parse.c)
-// builds for a VLA local -- new_vla_ptr() (parse.c) has exactly one
-// construction site, at that assignment's lhs, so this check is exhaustive.
-static bool node_is_vla_ptr_assign(Node *n) {
-    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VLA_PTR;
-}
-
-// #973 follow-up: true for the initializer of a pointer-to-VLA local (see
-// Obj.deferred_vla_ptr_init, cccc.h and the matching ND_EXPR_STMT case in
-// serialize_stmt()) -- the same "must stay in scope past this block" shape
-// as node_is_vla_ptr_assign, just for `int (*p)[n] = &v;` instead of a VLA's
-// own `v = alloca(...)`.
-static bool node_is_deferred_vla_ptr_init(Node *n) {
-    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VAR &&
-          n->lhs->var->deferred_vla_ptr_init == n;
-}
-
-// #964: true if any of blk's *immediate* statements is a VLA_PTR assignment
-// or (#973 follow-up) a deferred pointer-to-VLA initializer. declaration()
-// bundles a statement's per-declarator initializers into one ND_BLOCK (e.g.
-// `int n = 4, v[n];` is a single ND_BLOCK holding both), so a block
-// containing such a declarator has to stay unbraced when serialized -- see
-// serialize_stmt_list_item() below.
-static bool block_defines_vla(Node *blk) {
-    if (!blk || blk->kind != ND_BLOCK)
-        return false;
-    for (Node *s = blk->body; s; s = s->next)
-        if (s->kind == ND_EXPR_STMT &&
-            (node_is_vla_ptr_assign(s->lhs) ||
-             node_is_deferred_vla_ptr_init(s->lhs)))
-            return true;
-    return false;
-}
+// node_is_vla_ptr_assign / node_is_deferred_vla_ptr_init / block_defines_vla
+// moved to internal.h (#981) so codegen.c can reuse the identical
+// "does this block declare a VLA" check for HMRK/HREL emission -- see
+// their comments there.
 
 // Returns true if the node produces no output (effectively a no-op expression).
 static bool is_noop_expr(Node *node) {

@@ -3533,6 +3533,18 @@ static void emit_scopeout(VirtualMachine *vm, int scope_id) {
     emit_word(vm, scope_id);
 }
 
+// Emit HMRK for a VLA-declaring block's heap-reclamation watermark (#981).
+static void emit_hmrk(VirtualMachine *vm, int depth) {
+    emit(vm, HMRK);
+    emit_word(vm, depth);
+}
+
+// Emit HREL, the matching block-exit release for emit_hmrk above.
+static void emit_hrel(VirtualMachine *vm, int depth) {
+    emit(vm, HREL);
+    emit_word(vm, depth);
+}
+
 // Emit CHKI (check initialized) for local at bp+offset.
 static void emit_chki(VirtualMachine *vm, long long offset) {
     emit(vm, CHKI);
@@ -6143,21 +6155,32 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 error_tok(vm, arg->tok,
                           "complex function argument ABI is not supported");
 
-        // Check if this is a builtin alloca call (used for VLAs)
+        // Check if this is a builtin alloca call (used for VLAs, and for an
+        // explicit __builtin_alloca)
         if (node->lhs->kind == ND_VAR &&
             node->lhs->var->is_builtin_alloca) {
-            // Special handling for alloca: uses ALCA opcode (#979 -- alloca
-            // and VLA backing storage is automatic storage, not a user
-            // allocation, so it must never show up in a leak report; ALCA
-            // has MALC's exact register shape, just tagged as internal on
-            // the AllocHeader).
+            // Special handling for alloca: uses the ALCA/ALCV opcode pair
+            // (#979/#981 -- alloca and VLA backing storage is automatic
+            // storage, not a user allocation, so it must never show up in
+            // a leak report; both have MALC's exact register shape, just
+            // tagged with a different AllocKind on the AllocHeader). Which
+            // opcode depends on which one this call actually is:
+            // node->is_vla_alloca_call is set only by parse.c's
+            // new_alloca(), reached only through a VLA declaration's
+            // lowering -- an explicit __builtin_alloca call never sets it.
+            // The two are NOT interchangeable for #981's reclamation: a
+            // VLA's storage dies at the end of its declaring *block*
+            // (ALCV/ALLOC_KIND_FRAME, swept by HREL below), a bare
+            // alloca's storage lives until the *function* returns (ALCA/
+            // ALLOC_KIND_ALLOCA, swept only at LEV3) -- see ALCA's/ALCV's
+            // own comments in src/cccc.h.
             if (!node->args) {
                 error_tok(vm, node->tok, "alloca requires a size argument");
             }
-            // Evaluate size argument into REG_A0 (ALCA reads from REG_A0)
+            // Evaluate size argument into REG_A0 (ALCA/ALCV read from REG_A0)
             reset_temp_regs();
             gen_expr(vm, node->args, REG_A0);
-            emit(vm, ALCA); // Size in REG_A0, returns pointer in REG_A0
+            emit(vm, node->is_vla_alloca_call ? ALCV : ALCA); // Size in REG_A0, returns pointer in REG_A0
             if (dest_reg != REG_A0) {
                 emit_mov3(vm, dest_reg, REG_A0);
             }
@@ -7952,6 +7975,32 @@ static bool try_emit_restrict_memcpy(VirtualMachine *vm, Node *node) {
     return true;
 }
 
+// #981: true if `blk` (a real, non-is_decl_group C block scope) declares a
+// VLA anywhere among its *immediate* statements, looking exactly one level
+// through a declaration()-built synthetic wrapper (Node.is_decl_group,
+// cccc.h) -- declaration() never nests one such wrapper inside another, so
+// one level is exhaustive. Deliberately distinct from block_defines_vla
+// (internal.h), which serialize.c applies directly to a CANDIDATE wrapper
+// itself (deciding whether that specific node needs unbracing); this one
+// is applied to the ENCLOSING real scope, which is where a VLA's storage
+// must actually stay reachable until, and is the only correct place for
+// this design's HMRK/HREL pair to live -- see gen_stmt's ND_BLOCK case
+// below and is_decl_group's own comment (cccc.h) for the miscompile this
+// avoids (reclaiming a VLA's storage the instant it's declared, before any
+// later statement in its real scope that actually uses it has run).
+static bool block_needs_heap_mark(Node *blk) {
+    if (!blk || blk->kind != ND_BLOCK)
+        return false;
+    for (Node *s = blk->body; s; s = s->next) {
+        if (s->kind == ND_EXPR_STMT &&
+            (node_is_vla_ptr_assign(s->lhs) || node_is_deferred_vla_ptr_init(s->lhs)))
+            return true;
+        if (s->kind == ND_BLOCK && s->is_decl_group && block_defines_vla(s))
+            return true;
+    }
+    return false;
+}
+
 static void gen_stmt(VirtualMachine *vm, Node *node) {
     if (!node)
         return;
@@ -7964,6 +8013,37 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
         if (vm->flags & CCCC_STACK_INSTR) {
             block_scope_id = vm->current_scope_id++;
             emit_scopein(vm, block_scope_id);
+        }
+
+        // #981: heap-reclamation watermark for a VLA-declaring block.
+        // cc_heap_reclaim_flags_ok is the flags-only half of the full
+        // vm->heap_reclaim_enabled gate -- the other half
+        // (!dynobjsz_present) isn't resolvable until after a full text-
+        // segment scan that can't run until codegen finishes (see its own
+        // comment, cccc.h), so this only prunes the common case (any of
+        // -1/-2/-3's flags already forbidding reclamation) rather than
+        // being fully authoritative; op_HMRK_fn/op_HREL_fn (ops.c) re-
+        // check the complete runtime gate and no-op if it's false.
+        //
+        // !node->is_decl_group is load-bearing, not defensive: node itself
+        // must be a real C block scope, never a declaration()-built
+        // synthetic wrapper (see is_decl_group's own comment, cccc.h) --
+        // instrumenting a wrapper directly would reclaim its VLA's storage
+        // the instant it's declared, before any later statement in the
+        // *enclosing* real scope (where block_needs_heap_mark below finds
+        // it instead, looking exactly one level through such a wrapper)
+        // ever runs. A block that doesn't declare a VLA never gets this
+        // pair at all: there's nothing here for a bare alloca in the same
+        // block to be endangered by (see ALCA/ALCV's own comments, cccc.h,
+        // for why the two need different opcodes and different sweep
+        // timing).
+        int heap_mark_depth = -1;
+        bool emit_heap_marks = !node->is_decl_group &&
+                               cc_heap_reclaim_flags_ok(vm->flags) &&
+                               block_needs_heap_mark(node);
+        if (emit_heap_marks) {
+            heap_mark_depth = vm->heap_mark_nest_depth++;
+            emit_hmrk(vm, heap_mark_depth);
         }
 
         // Push a cleanup scope entry if this block declared cleanup vars.
@@ -7985,6 +8065,18 @@ static void gen_stmt(VirtualMachine *vm, Node *node) {
             emit_scope_cleanups(vm, g_cleanup_scope);
 
         g_cleanup_scope = saved_cleanup;
+
+        // #981: release this block's heap-reclamation watermark on the
+        // natural (fall-through) exit path only -- same "LIFO order,
+        // natural exit only" scope as the cleanup emission just above. A
+        // break/continue/goto/return out of this block skips this HREL;
+        // that's by design, see emit_hrel's own callers' comments
+        // (HeapMarks, cccc.h) for why a skipped release only forfeits
+        // reclamation rather than causing incorrect behavior.
+        if (emit_heap_marks) {
+            emit_hrel(vm, heap_mark_depth);
+            vm->heap_mark_nest_depth--;
+        }
 
         if (block_scope_id >= 0)
             emit_scopeout(vm, block_scope_id);

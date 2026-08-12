@@ -1151,6 +1151,16 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->sorted_allocs.count = 0;
     vm->sorted_allocs.capacity = 0;
 
+    // #981: heap-reclamation mark stack. heap_reclaim_enabled starts false
+    // (conservative) and is properly computed per top-level call in
+    // cc_run_at_regs, once dynobjsz_present is resolvable.
+    vm->heap_marks.bps = NULL;
+    vm->heap_marks.depths = NULL;
+    vm->heap_marks.marks = NULL;
+    vm->heap_marks.count = 0;
+    vm->heap_marks.capacity = 0;
+    vm->heap_reclaim_enabled = false;
+
     // Initialize CFI shadow stack (will be allocated if enable_cfi is set)
     vm->shadow_stack = NULL;
     vm->shadow_sp = NULL;
@@ -1165,6 +1175,7 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->current_scope_id = 0;
     vm->current_function_scope_id = 0;
     vm->stack_high_water = 0;
+    vm->heap_mark_nest_depth = 0; // #981 HMRK/HREL codegen-time nesting counter
     vm->scope_vars = NULL;
     vm->scope_vars_capacity = 0;
 
@@ -1413,6 +1424,14 @@ void cc_destroy(VirtualMachine *vm) {
         free(vm->sorted_allocs.addresses);
     if (vm->sorted_allocs.headers)
         free(vm->sorted_allocs.headers);
+
+    // Free the #981 heap-reclamation mark stack
+    if (vm->heap_marks.bps)
+        free(vm->heap_marks.bps);
+    if (vm->heap_marks.depths)
+        free(vm->heap_marks.depths);
+    if (vm->heap_marks.marks)
+        free(vm->heap_marks.marks);
 
     // Free the heap and data (globals, #752) type shadows (#653;
     // page-chunked #753 -- lazily allocated/grown by type_shadow_ensure in
@@ -2130,6 +2149,20 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0, long long 
         error("VM not initialized - call cc_compile first");
     }
     cc_scan_dynobjsz(vm);
+    // #981: (re)compute the full heap-reclamation gate now that
+    // dynobjsz_present is resolved for whatever bytecode exists so far --
+    // cc_heap_reclaim_flags_ok (cccc.h) is the flags-only half codegen.c
+    // used to decide whether HMRK/HREL were worth emitting at all; ANDing
+    // in !dynobjsz_present here is the other half, only knowable after a
+    // full text-segment scan (which can't happen until codegen has
+    // finished for whatever's been compiled so far -- see cc_scan_dynobjsz
+    // above). Recomputed on every top-level call, not just once, since
+    // vm->flags can change between calls (a #pragma or per-test
+    // CCCC_FLAGS override, testing.c's one-cc_run_at-per-test-function
+    // model) and dynobjsz_present can flip from false to true if a later-
+    // compiled function introduces a DYNOBJSZ opcode.
+    vm->heap_reclaim_enabled =
+        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present;
     cc_running_vm = vm;
     cccc_gil_acquire(vm);
     cc_vm_profile_reset(vm);
@@ -2186,6 +2219,19 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0, long long 
     hashmap_deinit(&vm->live_epochs);
     hashmap_deinit(&vm->stack_ptr_epochs);
     vm->stack_intervals.count = 0;
+
+    // #981: same abandoned-call-stack problem as frame_epochs just above,
+    // for the heap-reclamation mark stack -- a host-level longjmp out of a
+    // failed __builtin_assert skips every abandoned frame's LEV3, so their
+    // heap_marks entries (and the VLA/alloca storage they were tracking)
+    // are never retired. vm->bp already sits at this fresh call's initial
+    // (shallowest) value from the stack setup above, so every leftover
+    // entry -- belonging exclusively to frames deeper than that -- gets
+    // reclaimed by the same heap_marks_truncate_to LONGJMP already uses,
+    // sweeping both VLA and bare-alloca storage since whole frames are
+    // being discarded, not just one block.
+    if (vm->heap_reclaim_enabled && !vm->thread_records)
+        heap_marks_truncate_to(vm, vm->bp);
 
     // Initialise main thread's TLS copy from the template built by gen()
     if (vm->tls_template_size > 0) {

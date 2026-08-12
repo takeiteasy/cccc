@@ -469,6 +469,55 @@ static inline const char *cc_opcode_name(int op) {
     return names[op];
 }
 
+// #964: true for the `v = alloca(tmp)` assignment declaration() (parse.c)
+// builds for a VLA local -- new_vla_ptr() (parse.c) has exactly one
+// construction site, at that assignment's lhs, so this check is exhaustive.
+// Shared by serialize.c (deciding whether a block must stay unbraced when
+// translated to native C) and codegen.c (#981: deciding whether a block
+// needs an HMRK/HREL watermark pair for heap reclamation) -- both need the
+// identical "does this block's own declaration statement include a VLA"
+// shape check, applied directly to whichever specific ND_BLOCK node the
+// caller already has in hand (never recursively hunting through a parent
+// for a nested one: declaration()'s per-declarator statements are always
+// flat, immediate children of the one ND_BLOCK it builds for that
+// declaration, and a genuinely nested user `{ }` scope gets its own
+// separate visit from whichever caller is walking the tree, so it never
+// needs to be found "through" an enclosing block either).
+static inline bool node_is_vla_ptr_assign(Node *n) {
+    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VLA_PTR;
+}
+
+// #973 follow-up: true for the initializer of a pointer-to-VLA local (see
+// Obj.deferred_vla_ptr_init, cccc.h and the matching ND_EXPR_STMT case in
+// serialize_stmt()) -- the same "must stay in scope past this block" shape
+// as node_is_vla_ptr_assign, just for `int (*p)[n] = &v;` instead of a VLA's
+// own `v = alloca(...)`.
+static inline bool node_is_deferred_vla_ptr_init(Node *n) {
+    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VAR &&
+          n->lhs->var->deferred_vla_ptr_init == n;
+}
+
+// #964: true if any of blk's *immediate* statements is a VLA_PTR assignment
+// or (#973 follow-up) a deferred pointer-to-VLA initializer. declaration()
+// bundles a statement's per-declarator initializers into one ND_BLOCK (e.g.
+// `int n = 4, v[n];` is a single ND_BLOCK holding both), so a block
+// containing such a declarator has to stay unbraced when serialized -- see
+// serialize_stmt_list_item() in serialize.c. #981 (codegen.c) reuses this
+// same check to decide whether a block needs an HMRK/HREL watermark pair: a
+// missed detection only forfeits reclamation for that block (its VLA
+// storage is still swept, just later, at frame exit), it never
+// miscompiles anything, so under-detecting here is always safe.
+static inline bool block_defines_vla(Node *blk) {
+    if (!blk || blk->kind != ND_BLOCK)
+        return false;
+    for (Node *s = blk->body; s; s = s->next)
+        if (s->kind == ND_EXPR_STMT &&
+            (node_is_vla_ptr_assign(s->lhs) ||
+             node_is_deferred_vla_ptr_init(s->lhs)))
+            return true;
+    return false;
+}
+
 void strarray_push(StringArray *arr, char *s);
 void arena_strarray_push(VirtualMachine *vm, StringArray *arr, char *s);
 char *format(char *fmt, ...) __attribute__((format(printf, 1, 2)));

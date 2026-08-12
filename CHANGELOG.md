@@ -5,7 +5,56 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **alloca/VLA storage is now reclaimed at block and frame exit** (#981).
+  The VM heap is a pure bump allocator -- `free` never moves the bump
+  pointer back -- so a VLA declared inside a loop or a recursive function
+  previously grew the heap without bound until the process exited. Now
+  reclaimed via a LIFO rewind, but only when doing so is provably safe:
+  requires every address-keyed safety feature to be off (bounds checks,
+  UAF/dangling-pointer/type checks, memory tagging, uninitialized-read
+  detection, leak detection, heap canaries -- true at `-0`, false at
+  `-1`/`-2`/`-3`) and single-threaded (the VM heap is one global arena, not
+  per-thread, so reclamation is simply not attempted once any thread has
+  been created -- a documented residual, tracked as a follow-up). A VLA's
+  own storage is reclaimed at both the exit of the block that declared it
+  (matching its actual C11 6.8.3 lifetime) and its enclosing frame's exit;
+  a bare `__builtin_alloca` call's storage -- whose lifetime extends to the
+  whole function, not just the block it was called in -- is reclaimed only
+  at frame exit, which required splitting `AllocKind` into a third value
+  (`ALLOC_KIND_ALLOCA`, distinct from a VLA's `ALLOC_KIND_FRAME`) so a
+  block-exit reclaim can never sweep a still-live `alloca`'d block in the
+  same lexical block. A `__block` box (`ALLOC_KIND_BLOCK_BOX`) is never
+  swept at all, matching `Block_copy`'s existing guarantee that it may
+  outlive its declaring frame. Two new opcodes, `HMRK`/`HREL` (block-exit
+  watermark push/release) and a repurposed `ALCV` (a VLA's own storage;
+  `ALCA` now means bare `alloca` alone), are appended at the end of the
+  opcode table, so `CCCC_VERSION` is unchanged and no `.c4`/`.c4a` needs
+  regenerating. See [man/SAFETY.md](man/SAFETY.md#vm-heap-allocator) and
+  [man/VM.md](man/VM.md#heap-reclamation-981) for the full gating and
+  mechanism writeup.
+
 ## [0.2.10] - 2026-08-12
+
+### Fixed
+
+- **`CHKD` extended to the atomic ops** (#985). #983 deliberately deferred
+  emitting `CHKD` ahead of `ALDR`/`ASTR`/`AXCHG`/`ACAS`, since those
+  opcodes' operand words already carry the #497 register-aliasing hazard
+  and a naive addition risked reopening it. That premise turned out to
+  already be discharged elsewhere in the tree: `ND_CAS`'s existing `CHKNT`
+  emission already staged a check between `REG_A0`-`A2` and the `ACAS`
+  call, proving it's safe to insert instructions there, and a standalone
+  `CHKD` never touches AXCHG/ACAS's own packed-immediate operand word, so
+  it cannot reopen #497 either way. Adds one `CHKD` at each of `ALDR`'s,
+  `ASTR`'s, and `AXCHG`'s emission sites, and two at `ACAS`'s (object
+  pointer and `expected` pointer, since a failed `compare_exchange` reads
+  *and* writes through `expected`). No new opcode, so `CCCC_VERSION` is
+  unchanged. Covered by `tests/test_atomic_one_past_end_load_error.c`,
+  `_store_error.c`, `_exchange_error.c`, `_cas_error.c`,
+  `_cas_expected_error.c` (the load-bearing proof of the second `ACAS`
+  check), and `_ok.c` (a positive control on the last valid element).
 
 ### Fixed
 

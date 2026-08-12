@@ -385,8 +385,11 @@ These opcodes implement the C standard library heap (the default; `-V`/`--no-vm-
 | Opcode | Arguments | Description |
 |--------|-----------|-------------|
 | `MALC` | `REG_A0` = size | Allocate; pointer returned in `REG_A0` |
-| `ALCA` | `REG_A0` = size | Allocate `alloca`/VLA backing storage (automatic, frame-scoped); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKBN`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.kind = ALLOC_KIND_FRAME` excludes it from leak-detection's `AllocRecord` list (#979) — it is never meant to be freed by the guest program, and the VM heap's pure bump allocator can't reclaim it at frame exit anyway (no free list, `heap_ptr` never rewinds; see #981) |
-| `ALCB` | `REG_A0` = size | Allocate a `__block` variable's heap box; pointer returned in `REG_A0`. Same shape as `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_BLOCK_BOX` instead — split into its own opcode (#981's prerequisite) so a future reclamation pass targeting frame-scoped `ALLOC_KIND_FRAME` storage can never sweep a `__block` box, which `Block_copy` is expected to let legitimately outlive its declaring frame. Before this split, `ALCA` alone backed both under a single `AllocHeader.is_internal` bool |
+| `ALCA` | `REG_A0` = size | Allocate a bare `__builtin_alloca` call's storage (automatic, **frame**-scoped — lives until the function returns); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKBN`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.kind = ALLOC_KIND_ALLOCA` excludes it from leak-detection's `AllocRecord` list (#979) — it is never meant to be freed by the guest program. Reclaimed only at frame exit (`LEV3`, never `HREL`) — see the Heap Reclamation section below |
+| `ALCV` | `REG_A0` = size | Allocate a VLA's backing storage (automatic, **block**-scoped — lives until the end of the declaring block, C11 6.8.3); pointer returned in `REG_A0`. Identical shape to `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_FRAME` instead. Split from `ALCA` (#981) specifically because the two have different lifetimes: reusing one `AllocKind` for both would let a block-exit reclaim (`HREL`) sweep a still-live bare-`alloca`'d block declared in the same block, corrupting it the moment the address was reused. `Node.is_vla_alloca_call` (set only by `new_alloca()`, `src/parse.c` — reached only through a VLA declaration's lowering, `ND_ASSIGN(ND_VLA_PTR, alloca(...))`) is what tells codegen which of `ALCA`/`ALCV` to emit for a given `alloca(...)` call |
+| `ALCB` | `REG_A0` = size | Allocate a `__block` variable's heap box; pointer returned in `REG_A0`. Same shape as `ALCA`/`ALCV`, tagged `AllocHeader.kind = ALLOC_KIND_BLOCK_BOX` instead — split into its own opcode (#981's prerequisite) so heap reclamation targeting `ALLOC_KIND_FRAME`/`ALLOC_KIND_ALLOCA` storage can never sweep a `__block` box, which `Block_copy` is expected to let legitimately outlive its declaring frame. Before this split, `ALCA` alone backed both under a single `AllocHeader.is_internal` bool |
+| `HMRK` | `depth` (i32 immediate) | Heap-reclamation watermark (#981): push `{vm->bp, depth, vm->heap_ptr}` onto `vm->heap_marks`, truncating any stale entry for this `(bp, depth)` first (loop re-entry, backward `goto`). Emitted at the start of any block that declares a VLA, only when reclamation could apply (see the Heap Reclamation section below). Identical single-word-immediate shape to `SCOPEIN` |
+| `HREL` | `depth` (i32 immediate) | The matching block-exit release for `HMRK`: find this `(bp, depth)`'s mark and rewind `vm->heap_ptr` to it, sweeping only `ALLOC_KIND_FRAME` (VLA) storage — never a bare alloca or a `__block` box. Emitted at the natural (fall-through) exit of the same block `HMRK` was emitted for; a `break`/`continue`/`goto`/`return` out of the block skips it, which only forfeits that block's reclamation (never over-reclaims) |
 | `MFRE` | `REG_A0` = ptr | Free pointer (detects double-free) |
 | `MCPY` | `REG_A0` = dest, `REG_A1` = src, `REG_A2` = count | `memcpy` |
 | `MSET` | `REG_A0` = dest, `REG_A2` = count | `memset` to 0; backs `ND_MEMZERO` (pre-zero for partial aggregate initialisers) |
@@ -405,9 +408,65 @@ upward and is never reclaimed, consistent with the bump allocator having no
 free-list reuse. Both opcodes share `MALC`'s canary/poisoning/leak-detection/
 tagging tail via a common `vm_heap_bump_alloc_ex` helper, so `aligned_alloc` and
 `posix_memalign` allocations get the same heap safety coverage as `malloc`.
-`ALCA`/`ALCB` share the same helper with `AllocHeader.kind` set to
-`ALLOC_KIND_FRAME`/`ALLOC_KIND_BLOCK_BOX` respectively — the sole difference
-from `MALC` (`ALLOC_KIND_USER`) (#979/#981).
+`ALCA`/`ALCV`/`ALCB` share the same helper with `AllocHeader.kind` set to
+`ALLOC_KIND_ALLOCA`/`ALLOC_KIND_FRAME`/`ALLOC_KIND_BLOCK_BOX` respectively —
+the sole difference from `MALC` (`ALLOC_KIND_USER`) (#979/#981).
+
+#### Heap Reclamation (#981)
+
+The VM heap is a pure bump allocator — `heap_ptr` only ever advances, and
+`MFRE` never moves it back (it only sets `AllocHeader.freed`). `HMRK`/`HREL`
+(block exit) and an equivalent check in `LEV3` (frame exit) rewind it back
+down for `alloca`/VLA storage specifically, when doing so is provably safe:
+
+- **Gate.** Reclamation requires `vm->heap_reclaim_enabled`, computed once
+  per top-level call (`cc_run_at_regs`, right after the `DYNOBJSZ`
+  text-segment scan resolves `dynobjsz_present`) as
+  `cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present`.
+  `cc_heap_reclaim_flags_ok` (`src/cccc.h`) requires every address-keyed
+  safety feature to be off: bounds checks, UAF/dangling-pointer detection,
+  memory tagging (`CCCC_POINTER_CHECKS`), type checks, uninitialized-read
+  detection, leak detection, and heap canaries — a reclaimed address can be
+  handed out again by a later allocation, and every one of those features
+  relies on that never happening. True at `-0`; false at `-1`/`-2`/`-3`, or
+  under any explicit combination of those flags. `DYNOBJSZ` has the
+  identical hazard (it resolves interior pointers through `sorted_allocs`
+  regardless of which flags are set) but isn't resolvable until after a
+  full text-segment scan, which can't run until codegen has finished — so
+  codegen.c uses `cc_heap_reclaim_flags_ok` alone (the flags-only, "is this
+  even worth emitting" half) to decide whether to emit `HMRK`/`HREL` at
+  all, while every opcode handler re-checks the complete
+  `vm->heap_reclaim_enabled` at runtime and no-ops if it's false.
+- **Threads.** Reclamation is additionally gated on `vm->thread_records ==
+  NULL` at every check site — the heap is a single VM-wide arena, not
+  per-thread (unlike `frame_epochs`/`stack_intervals`), so once any pthread
+  has been created, two threads' allocations can interleave in it and a
+  per-frame LIFO rewind on one thread could sweep another thread's still-
+  live VLA. Reclamation is simply never attempted once a thread exists —
+  a documented residual, not a partial/unsound attempt.
+- **Mechanism.** `heap_rewind_to` (`src/ops.c`) scans `vm->sorted_allocs`
+  backward from the top while each entry's base address is at or above the
+  target watermark — this is exactly the contiguous suffix of allocations
+  made since the mark was taken, since the bump allocator's append order
+  is address order. It stops at the first entry whose `AllocKind` isn't
+  sweepable for the caller (`HREL` sweeps only `ALLOC_KIND_FRAME`; `LEV3`
+  and a guest `longjmp` sweep both `ALLOC_KIND_FRAME` and
+  `ALLOC_KIND_ALLOCA`) — a genuine `malloc` (`ALLOC_KIND_USER`) or a
+  `__block` box (`ALLOC_KIND_BLOCK_BOX`) always pins the bump pointer at
+  its own end, giving a correct *partial* rewind rather than refusing the
+  whole watermark. `sorted_allocs` is truncated to match, which is what
+  keeps its "append order is address order" invariant true even though
+  addresses can now be reused (see its own comment, `src/cccc.h`).
+- **CALLT / longjmp.** A tail call (`CALLT`) reuses the caller's frame
+  before the caller's own `LEV3` would run, and can carry a heap-resident
+  VLA/alloca pointer as one of its own arguments — so `CALLT` only drops
+  the caller's `heap_marks` entries (never rewinding) rather than
+  reclaiming, leaving that storage to live on as it does today. A guest
+  `longjmp` (which skips every abandoned frame's `LEV3`) and the host-level
+  longjmp path used by a failed `__builtin_assert` (`testing.c`) both do
+  reclaim, mirroring `frame_epoch_truncate_to`'s exact monotonic-address
+  argument for discarding every entry belonging to a frame deeper than the
+  target.
 
 ### Safety Opcodes
 

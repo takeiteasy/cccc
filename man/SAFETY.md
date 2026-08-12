@@ -224,16 +224,21 @@ All features listed below can be enabled individually or through the safety leve
   - Performance overhead proportional to allocation size (memset on alloc/free)
 - `--memory-leak-detection` **Memory leak detection**
   - Tracks user-facing VM heap allocations in a host-memory linked list (AllocRecord)
-  - Compiler-internal automatic storage -- `alloca`/VLA backing blocks
-    (`ALCA` opcode, `AllocHeader.kind = ALLOC_KIND_FRAME`) and `__block`
-    boxes (`ALCB` opcode, `ALLOC_KIND_BLOCK_BOX`, split from `ALCA` in
-    #981's prerequisite so a future reclamation pass can target the former
-    without ever sweeping the latter) -- is allocated via these separate
-    opcodes instead of `MALC` and is deliberately excluded from this list
-    (#979): it still gets a full `AllocHeader`/`sorted_allocs` entry (so
+  - Compiler-internal automatic storage -- a VLA's backing storage (`ALCV`
+    opcode, `AllocHeader.kind = ALLOC_KIND_FRAME`), a bare `__builtin_alloca`
+    call's storage (`ALCA` opcode, `AllocHeader.kind = ALLOC_KIND_ALLOCA`),
+    and `__block` boxes (`ALCB` opcode, `ALLOC_KIND_BLOCK_BOX`) -- is
+    allocated via these separate opcodes instead of `MALC` and is
+    deliberately excluded from this list (#979): each still gets a full
+    `AllocHeader`/`sorted_allocs` entry (so
     `CHKB`/`CHKBN`/`CHKP3`/`__builtin_dynamic_object_size` are unaffected),
-    but it is never meant to be user-freed, so reporting it would be
-    permanent false-positive noise on every program that declares a VLA
+    but none of the three is ever meant to be user-freed, so reporting them
+    would be permanent false-positive noise on every program that declares
+    a VLA or calls `alloca`. The three-way split (rather than one shared
+    kind) exists because heap reclamation (#981, see
+    [VM Heap Allocator](#vm-heap-allocator) below) treats them differently:
+    a VLA's storage is reclaimed at both block and frame exit, a bare
+    alloca's only at frame exit, and a `__block` box's never at all
   - Removes the record on free() and realloc()
   - Reports all unfreed allocations at program exit (in cc_destroy)
   - Shows address, size, and PC offset of allocation site for each leak
@@ -745,8 +750,12 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   - Uses `hashmap_put_int` / `hashmap_get_int` for O(1) pointer tag lookup
   - **Limitation:** side table is keyed by address; if freed memory is reallocated at the same
     address (free-list path), the old entry is overwritten and stale pointers to that address
-    are not detected. The current bump allocator never reuses addresses, so this is not a
-    practical concern unless the free list is activated.
+    are not detected. The bump allocator never reuses addresses *while memory tagging is
+    active* — `--memory-tagging` is one of the exact features that keeps heap reclamation
+    (#981, see [VM Heap Allocator](#vm-heap-allocator) below) permanently disabled, precisely
+    to avoid this side table going stale — so this is not a practical concern with memory
+    tagging on. It would become one the moment a real free list is added on top of an
+    allocator mode where tagging is off, which doesn't exist today.
 - `--control-flow-integrity` **Control flow integrity (CFI)**
   - Implements shadow stack to detect ROP attacks and stack corruption
   - On CALL/CALLI: pushes return address to both main stack and shadow stack
@@ -1283,10 +1292,60 @@ Known coverage gaps, left as follow-up work rather than built into this pass:
   shape doesn't exist for `CHKNT`. It is new specifically because `CHKNTZ`
   extends the guard to pointee types that *do* have members.
 
+### VM Heap Allocator
+
 `malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`posix_memalign` route through the VM heap
 (`MALC`/`MFRE`/`CALC`/`REALC`/`MALCA`/`PMEMA` opcodes) by default at every safety level, including
 `-0`. This is what makes the heap safety features below usable without any special opt-in in
 normal code.
+
+The VM heap is a pure bump allocator: `MFRE` never moves the bump pointer
+back (it only marks an allocation `freed`), so ordinary user allocations are
+never reclaimed until the process exits. `alloca`/VLA backing storage
+(`ALCA`/`ALCV` opcodes) is the one exception — see **Heap Reclamation
+(#981)** below.
+
+#### Heap Reclamation (#981)
+
+`alloca`/VLA storage would otherwise grow the VM heap without bound in a
+long-running loop or recursive function (the symptom #981 was filed for),
+since #979 already excludes it from the `malloc`/`free` leak-tracking model
+entirely — there was nothing that could ever reclaim it. It is now
+reclaimed, but **only** when doing so cannot desync any other safety
+feature: reclaiming an address means a *later* allocation can be handed
+that same address back, which every address-keyed feature below (bounds
+checks, UAF/dangling-pointer/type checks, memory tagging, uninitialized-
+read detection, leak detection, heap canaries) assumes never happens.
+
+- **When it runs:** only at `-0` (or any explicit flag combination that
+  happens not to set the features above), single-threaded (no pthread has
+  been created), and only for `alloca`/VLA storage — never a genuine
+  `malloc`, never a `__block` box (`Block_copy` is expected to let one
+  legitimately outlive its declaring frame).
+- **When it doesn't:** at `-1`/`-2`/`-3`, under any of the flags listed
+  above individually, or once any thread exists — the heap simply keeps
+  growing as it always did, trading unbounded growth for keeping every
+  other safety feature's tracking fully sound. This is a deliberate
+  tradeoff, not an oversight: reclamation was designed from the start to
+  never have to choose between the two.
+- **Granularity:** a VLA's storage is reclaimed at both the exit of the
+  block that declared it (C11 6.8.3's actual VLA lifetime) and, as a
+  backstop, at the enclosing frame's exit. A bare `__builtin_alloca` call's
+  storage is reclaimed only at frame exit, since (unlike a VLA) its
+  lifetime extends to the whole function, not just the block it was called
+  in.
+
+Full opcode-level mechanics (`HMRK`/`HREL`, the `ALCA`/`ALCV`/`ALCB` split,
+`heap_rewind_to`'s pinning behavior, and the `CALLT`/`longjmp` interaction)
+are documented in [VM.md's Heap Reclamation section](VM.md#heap-reclamation-981).
+
+**Known residual:** reclamation is disabled entirely once any thread has
+been created, rather than attempted per-thread — the VM heap is one global
+arena shared by every thread (unlike the per-thread dangling-pointer
+bookkeeping), and `AllocHeader` has no spare room left to tag an owning
+thread without growing past its current 56-byte size. A threaded program
+simply keeps the pre-#981 unbounded-growth behavior. Tracked as a
+follow-up.
 
 - `-V` / `--no-vm-heap` **turns the VM heap off**, reverting all of the above to the host allocator
   via FFI. It is only valid at safety level 0 (default or explicit `-0`) with none of

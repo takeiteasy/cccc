@@ -703,6 +703,7 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case LONGJMP:
             case MALC:
             case ALCA:
+            case ALCV:
             case ALCB:
             case REALC:
             case REALCA:
@@ -1281,7 +1282,9 @@ static bool op_byte0_is_src(int op) {
 // bp-relative offset), and IOVFL (packed op_type|size_enc) were added by
 // #759 -- IOVFL in particular is live today: its implicit REG_A0 write also
 // needed a copy_of[A0] invalidation, see the AXCHG/ACAS/IOVFL/VRAISE arm in
-// sub-pass A below.
+// sub-pass A below. HMRK/HREL (#981) were added later, listed here for the
+// identical reason as SCOPEIN/SCOPEOUT: a plain block-nesting-depth
+// immediate, never a register encoding.
 //
 // STKTAG's first word is currently always emitted as a literal 0 by
 // emit_stktag() (never a live register byte), so listing it here is
@@ -1300,6 +1303,7 @@ static bool op_operand_word_is_immediate(int op) {
     case CALL: case CALLT: case CALLF:
     case ENT3: case ADJ:
     case SCOPEIN: case SCOPEOUT:
+    case HMRK: case HREL: // #981: depth immediate, identical shape to SCOPEIN/SCOPEOUT
     case CHKI: case MARKI: case MARKR: case MARKW: case CHKL:
     case STKTAG:
     case IOVFL:
@@ -1383,11 +1387,13 @@ static bool op_implicit_abi_regs(int op, ImplicitRegs *out) {
         return true;
 
     // MALC/CALC(size=A0): reads A0, writes A0. SETJMP(jmp_buf=A0): same
-    // shape. ALCA (alloca/VLA, #979) and ALCB (__block box, #981's
-    // prerequisite -- split from ALCA so the two get distinguishable
-    // AllocKinds) are both MALC with an internal-only AllocHeader tag --
+    // shape. ALCA (bare alloca, #979/#981), ALCV (VLA storage, #981 --
+    // split from ALCA so a VLA's block-scoped storage and a bare alloca's
+    // frame-scoped storage get distinguishable AllocKinds and hence
+    // different reclamation timing), and ALCB (__block box, #981's
+    // prerequisite) are all MALC with a different AllocHeader tag --
     // identical register contract.
-    case MALC: case CALC: case SETJMP: case ALCA: case ALCB:
+    case MALC: case CALC: case SETJMP: case ALCA: case ALCV: case ALCB:
         out->reads = out->writes = IR_BIT(REG_A0);
         out->opaque = false;
         return true;

@@ -3909,6 +3909,14 @@ static Node *new_alloca(VirtualMachine *vm, Node *sz) {
     node->func_ty = vm->compiler.builtin_alloca->ty;
     node->ty = vm->compiler.builtin_alloca->ty->return_ty;
     node->args = sz;
+    // #981: this helper is only ever called to back a VLA declaration's
+    // lowering (see its one call site below), never for an explicit
+    // `__builtin_alloca`/`__builtin_alloca_with_align` call -- those build
+    // their own ND_FUNCALL directly in primary()/unary() and never go
+    // through here. Tags the node so codegen.c's ND_FUNCALL case can emit
+    // ALCV (ALLOC_KIND_FRAME, block-scoped) instead of ALCA (ALLOC_KIND_
+    // ALLOCA, frame-scoped) for it.
+    node->is_vla_alloca_call = true;
     add_type(vm, sz);
     return node;
 }
@@ -4254,6 +4262,7 @@ static Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *bas
 
     Node *node = new_node(vm, ND_BLOCK, tok);
     node->body = head.next;
+    node->is_decl_group = true; // #981: not a real C block scope, see the field's own comment (cccc.h)
     *rest = tok->next;
     return node;
 }

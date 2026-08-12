@@ -671,6 +671,138 @@ static void frame_epoch_truncate_to(VirtualMachine *vm, long long *new_bp) {
     }
 }
 
+// ---- #981 heap-reclamation mark stack ----
+//
+// Mirrors the frame_epoch_* helpers above in spirit (push at ENT3, pop at
+// LEV3/CALLT, truncate at LONGJMP) but tracks vm->heap_ptr watermarks
+// instead of dangling-pointer liveness epochs, and additionally supports a
+// per-block entry (HMRK/HREL) alongside the per-frame one (ENT3/LEV3) --
+// see HeapMarks' own comment (src/cccc.h) for why. Defined here
+// (self-contained, touching only vm->heap_marks/vm->heap_ptr) so ENT3/LEV3/
+// CALLT below can call them directly; heap_rewind_to itself -- the part
+// that actually sweeps sorted_allocs and rewinds heap_ptr -- needs
+// type_shadow_clear and AllocHeader field access that aren't available
+// until much later in this file (near vm_heap_bump_alloc_ex), hence the
+// forward declaration.
+typedef enum {
+    HEAP_SWEEP_VLA_ONLY,       // HREL: ALLOC_KIND_FRAME only (a VLA's own
+                               // storage dies at its declaring block's exit;
+                               // a bare alloca in the same block must not be
+                               // swept here, it lives until the frame exits)
+    HEAP_SWEEP_FRAME_AND_ALLOCA, // LEV3/LONGJMP: both ALLOC_KIND_FRAME and
+                                  // ALLOC_KIND_ALLOCA -- nothing automatic
+                                  // is left un-reclaimed at frame exit
+} HeapSweepSet;
+
+static void heap_rewind_to(VirtualMachine *vm, char *target, HeapSweepSet sweep);
+
+// Push a new mark for `bp` at `depth` (-1 == a frame's own ENT3 entry, >= 0
+// == a block's HMRK). First truncates any existing entry for this exact
+// (bp, depth-or-deeper) pair: a loop iteration or backward goto re-entering
+// the same block must not accumulate stale siblings from a previous pass,
+// and a bp reused by a later, unrelated call (after a LEV3/CALLT pop that
+// itself was skipped by this function's own realloc-OOM fallback below)
+// must not be confused with the current one.
+static void heap_marks_push(VirtualMachine *vm, long long *bp, int depth) {
+    while (vm->heap_marks.count > 0 &&
+           vm->heap_marks.bps[vm->heap_marks.count - 1] == bp &&
+           vm->heap_marks.depths[vm->heap_marks.count - 1] >= depth)
+        vm->heap_marks.count--;
+
+    if (vm->heap_marks.count == vm->heap_marks.capacity) {
+        int new_cap = vm->heap_marks.capacity ? vm->heap_marks.capacity * 2 : 64;
+        long long **new_bps = realloc(vm->heap_marks.bps, (size_t)new_cap * sizeof(long long *));
+        if (new_bps)
+            vm->heap_marks.bps = new_bps;
+        int *new_depths = realloc(vm->heap_marks.depths, (size_t)new_cap * sizeof(int));
+        if (new_depths)
+            vm->heap_marks.depths = new_depths;
+        char **new_marks = realloc(vm->heap_marks.marks, (size_t)new_cap * sizeof(char *));
+        if (new_marks)
+            vm->heap_marks.marks = new_marks;
+        if (!new_bps || !new_depths || !new_marks) {
+            // Internal bookkeeping OOM: skip tracking this mark. Its range
+            // simply won't be reclaimed -- no false reclamation, only a
+            // missed opportunity, mirroring frame_epoch_push's identical
+            // fallback above.
+            return;
+        }
+        vm->heap_marks.capacity = new_cap;
+    }
+    vm->heap_marks.bps[vm->heap_marks.count] = bp;
+    vm->heap_marks.depths[vm->heap_marks.count] = depth;
+    vm->heap_marks.marks[vm->heap_marks.count] = (char *)vm->heap_ptr;
+    vm->heap_marks.count++;
+}
+
+// Pops every heap_marks entry belonging to `vm->bp` -- both the frame's own
+// ENT3 entry (depth == -1) and any surviving block-level HMRK entries
+// (depth >= 0, left behind by a break/continue/goto/return that skipped
+// its block's own HREL) -- and reports the SMALLEST (earliest-pushed)
+// heap_ptr mark among them via *out_target. Entries for one bp are always
+// pushed in non-decreasing heap_ptr order (heap_ptr only grows between
+// pushes for a live frame), so the entry popped LAST here -- the
+// earliest-pushed one -- naturally holds the smallest mark, with no need
+// to specifically hunt for the depth == -1 entry (which may be absent if
+// its own push was skipped by heap_marks_push's OOM fallback above).
+// Returns false (leaving *out_target untouched) if no entry matched.
+static bool heap_marks_pop_frame(VirtualMachine *vm, char **out_target) {
+    bool any = false;
+    while (vm->heap_marks.count > 0 &&
+           vm->heap_marks.bps[vm->heap_marks.count - 1] == vm->bp) {
+        vm->heap_marks.count--;
+        *out_target = vm->heap_marks.marks[vm->heap_marks.count];
+        any = true;
+    }
+    return any;
+}
+
+// The block-exit half: find `vm->bp`'s entry at exactly `depth` (searching
+// backward but stopping the instant the bp changes, so this never reaches
+// into an enclosing frame's entries), drop it and anything above it
+// (orphaned deeper siblings left by a skipped break/continue/goto HREL),
+// and rewind to its mark. A miss (idx < 0 -- HMRK's own push failed under
+// OOM) is a silent no-op: nothing to release, nothing to rewind.
+static void heap_marks_release(VirtualMachine *vm, int depth) {
+    int idx = -1;
+    for (int i = vm->heap_marks.count - 1;
+         i >= 0 && vm->heap_marks.bps[i] == vm->bp; i--) {
+        if (vm->heap_marks.depths[i] == depth) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0)
+        return;
+    char *target = vm->heap_marks.marks[idx];
+    vm->heap_marks.count = idx;
+    heap_rewind_to(vm, target, HEAP_SWEEP_VLA_ONLY);
+}
+
+// Pop every heap_marks entry with bp < new_bp (i.e. belonging to a frame
+// deeper than longjmp's target frame -- mirrors frame_epoch_truncate_to's
+// exact monotonic-bps argument above) and rewind to the SMALLEST mark
+// among them, sweeping both VLA and bare-alloca storage since those
+// frames are being discarded wholesale, not merely exiting one block. The
+// target frame's own entries (bp == new_bp), including any block-level
+// ones for blocks longjmp jumped out of mid-scope, are deliberately left
+// untouched -- same conservative "only forfeit, never over-reclaim"
+// reasoning as everywhere else in this design; they will be cleaned up by
+// a future HMRK re-push at an equal-or-shallower depth, or by this frame's
+// own eventual LEV3.
+static void heap_marks_truncate_to(VirtualMachine *vm, long long *new_bp) {
+    char *target = NULL;
+    bool any = false;
+    while (vm->heap_marks.count > 0 &&
+           vm->heap_marks.bps[vm->heap_marks.count - 1] < new_bp) {
+        vm->heap_marks.count--;
+        target = vm->heap_marks.marks[vm->heap_marks.count];
+        any = true;
+    }
+    if (any)
+        heap_rewind_to(vm, target, HEAP_SWEEP_FRAME_AND_ALLOCA);
+}
+
 static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Enter function: [ENT3] [stack_size:32|spill_param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
@@ -700,6 +832,19 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
     vm->bp = vm->sp;
+
+    // #981: record this frame's own heap-reclamation watermark (depth -1)
+    // unconditionally -- unlike frame_epoch_push above, there's no #703-
+    // style "only if a local escapes" pruning available here, since any
+    // VLA-declaring block anywhere in this frame's body needs a target to
+    // rewind to at LEV3/HREL. Gated on both halves of the design: the VM-
+    // wide reclaim gate (vm->heap_reclaim_enabled, which folds in whether
+    // any address-keyed safety feature is on) and !vm->thread_records (the
+    // heap is one global arena, not per-thread -- see HeapMarks' own
+    // comment, src/cccc.h). Cheap to check unconditionally: both are a
+    // single field read, no allocation happens unless both pass.
+    if (vm->heap_reclaim_enabled && !vm->thread_records)
+        heap_marks_push(vm, vm->bp, -1);
 
     // Assign this activation a fresh liveness epoch (#673, and #648 for
     // DYNOBJSZ stack-buffer sizing) -- but only when this function's body
@@ -817,6 +962,16 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
     // #703), before the bp that identifies it is overwritten below.
     if (stack_extents_enabled(vm))
         frame_epoch_pop_if_owner(vm);
+
+    // #981: reclaim this frame's alloca/VLA storage (and any of its
+    // blocks' storage a skipped HREL left behind) before bp is
+    // overwritten below, same ordering reason as frame_epoch_pop_if_owner
+    // just above.
+    if (vm->heap_reclaim_enabled && !vm->thread_records) {
+        char *target;
+        if (heap_marks_pop_frame(vm, &target))
+            heap_rewind_to(vm, target, HEAP_SWEEP_FRAME_AND_ALLOCA);
+    }
 
     // Restore old base pointer
     vm->bp = (long long *)*vm->sp++;
@@ -2820,6 +2975,23 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
     if (stack_extents_enabled(vm))
         frame_epoch_pop_if_owner(vm);
 
+    // #981: drop (never rewind) every heap_marks entry for this bp --
+    // both the frame's own ENT3 entry and any surviving block-level HMRK
+    // entries. Deliberately NOT a reclaim: the tail-callee's own ENT3 is
+    // about to push its own frame entry at this exact same bp (the frame
+    // is reused, not freed), and a heap-resident VLA/alloca pointer passed
+    // as one of the tail call's own arguments can legally still be read by
+    // the callee -- #716/#718's can_emit_tail_call guard only rejects a
+    // tail-call argument carrying a *stack-frame* address, not a heap
+    // pointer, so this storage must be treated as still live. Leaving the
+    // entries unpopped would instead risk the callee's first HMRK/ENT3
+    // truncating against a caller-era mark taken at a lower heap_ptr (see
+    // heap_marks_push's own truncate-before-push rule).
+    if (vm->heap_reclaim_enabled && !vm->thread_records) {
+        char *discarded;
+        heap_marks_pop_frame(vm, &discarded);
+    }
+
     vm->bp = (long long *)*vm->sp++;
 
     // sp now points at the return address — leave it in place.
@@ -3116,11 +3288,91 @@ static inline int op_ZX4_fn(VirtualMachine *vm) {
 
 // ========== Memory Allocation Opcodes ==========
 
+// #981: the shared rewind performed by heap_marks_release (HREL, block
+// exit), op_LEV3_fn/heap_marks_pop_frame (frame exit), and
+// heap_marks_truncate_to (LONGJMP). `target` is a previously-recorded
+// vm->heap_ptr watermark; `sweep` selects which AllocKinds may be reclaimed
+// (HEAP_SWEEP_VLA_ONLY at block exit -- a bare alloca in the same block
+// must survive to frame exit; HEAP_SWEEP_FRAME_AND_ALLOCA at frame exit --
+// nothing automatic should be left un-reclaimed).
+//
+// Callers are expected to have already checked vm->heap_reclaim_enabled
+// and !vm->thread_records (this function re-checks defensively, since it's
+// also reachable from op_HREL_fn below with no other gate in between).
+//
+// Because the heap is a pure bump allocator, sorted_allocs' append order is
+// address order (the same invariant sorted_allocs_insert's own comment
+// below relies on), so scanning backward from the top while an entry's
+// base address is >= target visits exactly the contiguous suffix of
+// allocations made since the mark was taken -- no binary search needed,
+// this *is* a linear scan of that suffix. The scan stops at (does not
+// consume) the first entry whose kind isn't in the sweep set: that
+// allocation -- a genuine malloc/calloc (ALLOC_KIND_USER), a __block box
+// (ALLOC_KIND_BLOCK_BOX), or (at block exit only) a bare alloca
+// (ALLOC_KIND_ALLOCA) -- pins the bump pointer at its own end instead of
+// wherever `target` asked for, giving a correct *partial* rewind rather
+// than giving up on the whole mark.
+static void heap_rewind_to(VirtualMachine *vm, char *target, HeapSweepSet sweep) {
+    if (!vm->heap_reclaim_enabled || vm->thread_records)
+        return;
+    if (!target || (char *)vm->heap_ptr <= target)
+        return; // nothing above the mark to reclaim
+
+    int stop = vm->sorted_allocs.count; // index of the first entry kept (exclusive upper bound of the swept suffix)
+    char *effective_target = target;
+    while (stop > 0) {
+        char *base = (char *)vm->sorted_allocs.addresses[stop - 1];
+        if (base < target)
+            break; // below the mark: predates it, not part of this suffix
+        AllocHeader *h = vm->sorted_allocs.headers[stop - 1];
+        bool sweepable = (h->kind == ALLOC_KIND_FRAME) ||
+                         (sweep == HEAP_SWEEP_FRAME_AND_ALLOCA &&
+                          h->kind == ALLOC_KIND_ALLOCA);
+        if (!sweepable) {
+            // Pinning entry: the bump pointer can rewind no further than
+            // wherever it stood right after this allocation, i.e. base +
+            // its own total footprint (size, plus the trailing heap-canary
+            // word when enabled -- mirrors vm_heap_bump_alloc_ex's own
+            // total_size computation below).
+            size_t footprint = h->size;
+            if (vm->flags & CCCC_HEAP_CANARIES)
+                footprint += sizeof(long long);
+            char *pin_end = base + footprint;
+            if (pin_end > effective_target)
+                effective_target = pin_end;
+            break;
+        }
+        stop--;
+    }
+
+    if (effective_target >= (char *)vm->heap_ptr)
+        return; // fully pinned: nothing left to reclaim after all
+
+    // The gate above (vm->heap_reclaim_enabled) already guarantees no
+    // effective type is stamped over the reclaimed range (CCCC_TYPE_CHECKS
+    // is one of the flags that disables reclamation), so this is belt-and-
+    // braces, not load-bearing -- and a no-op in practice, since no shadow
+    // page was ever touched.
+    type_shadow_clear(vm, effective_target,
+                      (size_t)((char *)vm->heap_ptr - effective_target));
+
+    vm->sorted_allocs.count = stop;
+    vm->heap_ptr = effective_target;
+}
+
 // Records a new heap allocation in vm->sorted_allocs for O(log n) interior-
 // pointer lookups (DYNOBJSZ, and future CHKB/CHKP3 provenance checks).
-// The VM heap is a pure bump allocator — heap_ptr only ever grows, so every
-// new allocation's base address is higher than all previous ones, and a
-// plain append preserves sorted order without a search.
+// The VM heap is a pure bump allocator — heap_ptr only ever grows *between
+// reclamations* (#981: HREL/LEV3/LONGJMP can rewind it back down again,
+// via heap_rewind_to just above, but always truncate this array's tail to
+// match in the same operation) -- so a newly appended allocation's base
+// address is higher than every earlier entry still present in this array,
+// and a plain append preserves sorted order without a search. Reclamation
+// itself only ever runs when vm->heap_reclaim_enabled is set, which
+// requires every address-keyed safety feature (UAF/bounds/dangling/
+// tagging/type-checks/uninit-detection/leak-detection/heap-canaries) to be
+// off -- so under any of those features, addresses genuinely are never
+// reused, exactly as this comment used to say unconditionally.
 static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr, AllocHeader *header) {
     if (vm->sorted_allocs.count == vm->sorted_allocs.capacity) {
         int new_cap = vm->sorted_allocs.capacity ? vm->sorted_allocs.capacity * 2 : 64;
@@ -3295,15 +3547,12 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
     return 0;
 }
 
-// Backs the ALCA opcode: alloca/VLA storage (#979/#981). Identical
-// register/ABI shape to MALC (size=A0, result=A0) -- the only difference is
-// ALLOC_KIND_FRAME on the AllocHeader, which keeps it off the leak-
-// detection AllocRecord list while leaving sorted_allocs/CHKB/CHKBN/CHKP3/
-// DYNOBJSZ unaffected. Kept as its own AllocKind (distinct from a __block
-// box's ALLOC_KIND_BLOCK_BOX, backed by ALCB below) so a future
-// reclamation pass can target frame-scoped storage alone (#981).
+// Backs the ALCA opcode: bare `__builtin_alloca` storage (#979/#981 -- see
+// ALCA's own comment in src/cccc.h for the full ALLOC_KIND_ALLOCA vs.
+// ALLOC_KIND_FRAME split). A VLA's own storage goes through the sibling
+// cccc_vm_heap_alloc_vla/ALCV below instead.
 void *cccc_vm_heap_alloca(VirtualMachine *vm, long long requested_size) {
-    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, ALLOC_KIND_FRAME);
+    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, ALLOC_KIND_ALLOCA);
     if (vm->debug_vm && user_ptr) {
         printf("ALCA: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7),
                (long long)user_ptr);
@@ -3312,9 +3561,48 @@ void *cccc_vm_heap_alloca(VirtualMachine *vm, long long requested_size) {
 }
 
 static inline int op_ALCA_fn(VirtualMachine *vm) {
-    // alloca/VLA: size in REG_A0, return pointer in REG_A0
+    // bare alloca: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
     vm->regs[REG_A0] = (long long)cccc_vm_heap_alloca(vm, requested_size);
+    return 0;
+}
+
+// Backs the ALCV opcode: VLA backing storage (#981). Identical register/
+// ABI shape to ALCA/MALC/ALCB (size=A0, result=A0) -- the only difference
+// is ALLOC_KIND_FRAME on the AllocHeader instead of ALCA's ALLOC_KIND_
+// ALLOCA. Split out from ALCA so #981's block-exit reclamation (HREL) can
+// sweep a VLA's storage -- which dies at the end of its declaring block --
+// without ever touching a bare alloca's storage in the same block, which
+// lives until the frame returns. See ALCV's own comment in src/cccc.h.
+void *cccc_vm_heap_alloc_vla(VirtualMachine *vm, long long requested_size) {
+    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, ALLOC_KIND_FRAME);
+    if (vm->debug_vm && user_ptr) {
+        printf("ALCV: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7),
+               (long long)user_ptr);
+    }
+    return user_ptr;
+}
+
+static inline int op_ALCV_fn(VirtualMachine *vm) {
+    // VLA storage: size in REG_A0, return pointer in REG_A0
+    long long requested_size = vm->regs[REG_A0];
+    vm->regs[REG_A0] = (long long)cccc_vm_heap_alloc_vla(vm, requested_size);
+    return 0;
+}
+
+static inline int op_HMRK_fn(VirtualMachine *vm) {
+    // Format: [HMRK] [depth:i32]
+    int depth = (int)cc_read_word(vm);
+    if (vm->heap_reclaim_enabled && !vm->thread_records)
+        heap_marks_push(vm, vm->bp, depth);
+    return 0;
+}
+
+static inline int op_HREL_fn(VirtualMachine *vm) {
+    // Format: [HREL] [depth:i32]
+    int depth = (int)cc_read_word(vm);
+    if (vm->heap_reclaim_enabled && !vm->thread_records)
+        heap_marks_release(vm, depth);
     return 0;
 }
 
@@ -5124,6 +5412,14 @@ static inline int op_LONGJMP_fn(VirtualMachine *vm) {
     // itself (bp == vm->bp) keeps its epoch -- it's still live.
     if (stack_extents_enabled(vm))
         frame_epoch_truncate_to(vm, vm->bp);
+
+    // #981: reclaim every discarded frame's alloca/VLA storage the same
+    // way -- those frames never ran their own LEV3, so nothing else would
+    // ever rewind heap_ptr past them. Sweeps both VLA and bare-alloca
+    // storage (HEAP_SWEEP_FRAME_AND_ALLOCA), same as a normal LEV3, since
+    // whole frames are being discarded here, not just exiting one block.
+    if (vm->heap_reclaim_enabled && !vm->thread_records)
+        heap_marks_truncate_to(vm, vm->bp);
 
     if (vm->flags & CCCC_CFI) {
         long long saved_offset = jmp_buf[3];
