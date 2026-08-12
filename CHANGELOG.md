@@ -55,6 +55,16 @@ All notable changes to CCCC are documented here. Format loosely follows
   re-assigning the union's active member each time. Covered by
   `test_union_multi_designator_962` in `tests/suites/test_suite_init.c`.
 
+### CI
+
+- **The v0.2.7 release build failed on GitHub's macos-arm64 runner**
+  (job 31596923436): `test_aio_sigev_signal`'s `aio_write()` retry budget
+  (200ms, #929) was exhausted by host contention. Widened
+  `aio_write_retry`/`aio_read_retry`/`aio_fsync_retry` in
+  `tests/suites/test_suite_posix.c` to ~1s (40 attempts × 25ms) and bumped
+  `test_aio_sigev_signal`'s timeout from 5000ms to 10000ms to match; see
+  #929 (reopened with this evidence).
+
 ## [0.2.6] - 2026-08-12
 
 ### Added

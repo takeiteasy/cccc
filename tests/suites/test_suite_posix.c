@@ -2896,19 +2896,29 @@ static int busy_spin_wait_checked(volatile int *flag, long long max_spins) {
     return checksum == expected;
 }
 
-// aio_write_retry (#929) -- macOS caps outstanding aio requests both
-// per-process (kern.aioprocmax, 16 on a stock host) and system-wide
-// (kern.aiomax, 90), and -- critically -- a request keeps its slot even
-// after it *completes*, until aio_return() reaps it. On a loaded shared
-// host (GitHub's hosted macOS runners, #929) that means aio_write() can
-// fail with EAGAIN through no fault of the guest or of CCCC: verified on
-// real macOS hardware with a host-native probe program that hit EAGAIN at
-// exactly request #16, all of them already complete. POSIX says retry on
-// EAGAIN, so this retries briefly (200ms total) before giving up; any
-// other errno is not retried. Returns 0 on success, -1 with errno intact
-// (from the final attempt) on exhaustion.
+// aio_write_retry (#929, widened #961 follow-up) -- macOS caps outstanding
+// aio requests both per-process (kern.aioprocmax, 16 on a stock host) and
+// system-wide (kern.aiomax, 90), and -- critically -- a request keeps its
+// slot even after it *completes*, until aio_return() reaps it. On a loaded
+// shared host (GitHub's hosted macOS runners, #929) that means aio_write()
+// can fail with EAGAIN through no fault of the guest or of CCCC: verified
+// on real macOS hardware with a host-native probe program that hit EAGAIN
+// at exactly request #16, all of them already complete. POSIX says retry
+// on EAGAIN, so this retries before giving up; any other errno is not
+// retried. Returns 0 on success, -1 with errno intact (from the final
+// attempt) on exhaustion.
+//
+// The original 200ms budget (10 attempts * 20ms) was not enough: the
+// v0.2.7 release run on GitHub's hosted macos-arm64 runner
+// (job 31596923436, c4 round-trip pass) still hit a persistent EAGAIN in
+// test_aio_sigev_signal after exhausting it. Every aio test in this file
+// was audited and confirmed to reap every request it submits via
+// aio_return(), so this isn't an in-process slot leak -- just a longer
+// contention window than 200ms on a sufficiently loaded runner. Widened to
+// ~1s (40 attempts * 25ms); test_aio_sigev_signal's own timeout was bumped
+// to match (see its [[cccc::test]] attribute below).
 static int aio_write_retry(struct aiocb *cb) {
-    for (int attempt = 0; attempt < 10; attempt++) {
+    for (int attempt = 0; attempt < 40; attempt++) {
         if (aio_write(cb) == 0)
             return 0;
         int saved_errno = errno; /* usleep() below can clobber errno=ETIMEDOUT
@@ -2921,14 +2931,14 @@ static int aio_write_retry(struct aiocb *cb) {
             errno = saved_errno;
             return -1;
         }
-        usleep(20000);
+        usleep(25000);
         errno = saved_errno;
     }
     return -1;
 }
 
 static int aio_read_retry(struct aiocb *cb) {
-    for (int attempt = 0; attempt < 10; attempt++) {
+    for (int attempt = 0; attempt < 40; attempt++) {
         if (aio_read(cb) == 0)
             return 0;
         int saved_errno = errno; /* see aio_write_retry's comment */
@@ -2936,7 +2946,7 @@ static int aio_read_retry(struct aiocb *cb) {
             errno = saved_errno;
             return -1;
         }
-        usleep(20000);
+        usleep(25000);
         errno = saved_errno;
     }
     return -1;
@@ -2946,7 +2956,7 @@ static int aio_read_retry(struct aiocb *cb) {
 // aio slot on macOS -- so it is equally exposed to transient EAGAIN under
 // host contention (#929). Same retry discipline as aio_write_retry above.
 static int aio_fsync_retry(int op, struct aiocb *cb) {
-    for (int attempt = 0; attempt < 10; attempt++) {
+    for (int attempt = 0; attempt < 40; attempt++) {
         if (aio_fsync(op, cb) == 0)
             return 0;
         int saved_errno = errno; /* see aio_write_retry's comment */
@@ -2954,7 +2964,7 @@ static int aio_fsync_retry(int op, struct aiocb *cb) {
             errno = saved_errno;
             return -1;
         }
-        usleep(20000);
+        usleep(25000);
         errno = saved_errno;
     }
     return -1;
@@ -3054,7 +3064,13 @@ static void aio_sigev_signal_handler(int sig) {
 // Retry transient EAGAIN; if it's still failing after that, fail loudly
 // with the errno folded into the return code (100 + errno, so the TAP
 // "got N" line names it) rather than a bare, undiagnosable "got 2".
-[[cccc::test(return = 42, timeout = 5000)]]
+//
+// #961 follow-up: aio_write_retry's budget was widened from 200ms to ~1s
+// after this test still hit a persistent EAGAIN on a v0.2.7 release run
+// (job 31596923436, macos-arm64, c4 pass) -- the timeout below is bumped
+// to match test_aio_slot_exhaustion's 10000ms precedent so the wider
+// retry budget can't turn an EAGAIN into a TIMEOUT instead.
+[[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_sigev_signal(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_signal_XXXXXX";
     int fd = mkstemp(tmpl);
