@@ -3943,6 +3943,15 @@ static void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int i
     case ND_SUB:
     case ND_MUL:
     case ND_DIV: {
+        // BUG (#968): br/bi and t0-t2 are *fixed* registers, but this
+        // function recurses. A right-hand-nested complex binop
+        // (`a + (b + c)`, or the canonical `20.0 + 22.0 * I`) generates its
+        // operand into T5/T6 and then the nested op immediately reuses T5/T6
+        // for its own operands, destroying the outer right-hand value. Left
+        // nesting (`(a + b) + c`) happens to be fine because the outer
+        // real_reg/imag_reg are distinct from T5/T6. The fix is to allocate
+        // these through alloc_temp_reg() (float side) rather than hardcoding
+        // them, so each recursion level gets its own.
         int br = REG_T5;
         int bi = REG_T6;
         int t0 = REG_T7;
