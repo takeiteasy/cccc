@@ -14,6 +14,42 @@ struct tc_compound_assign_comprehensive_Point {
     int y;
 };
 
+// [from ticket #960]
+// A designated initializer targeting a field of an *anonymous union*
+// member (reached via a top-level designator, both in a compound literal
+// and a plain brace initializer, and at both local and global scope) used
+// to segfault the parser -- struct_designator() only special-cased
+// anonymous *struct* members, so an anonymous union member fell through
+// to a NULL `mem->name` deref. Anonymous struct members and named union
+// members were unaffected; this suite covers all four shapes plus the
+// still-working control cases so a regression in either is caught.
+struct tc_anon_union_desig_S {
+    union { int i; float f; };
+    int tag;
+};
+
+struct tc_anon_union_desig_Named {
+    union {
+        int i;
+        float f;
+    } v;
+    int tag;
+};
+
+struct tc_anon_union_desig_AnonStruct {
+    struct { int i; };
+    int tag;
+};
+
+union tc_anon_union_desig_NestedUnion {
+    union { int i; float f; };
+    long l;
+};
+
+// Global compound-literal-shaped initializer, exercises write_gvar_data's
+// TY_UNION arm rather than create_lvar_init's.
+struct tc_anon_union_desig_S tc_anon_union_desig_global = {.i = 7, .tag = 1};
+
 // [from test_compound_literals]
 // Test compound literals in CCCC
 // Expected return: 42
@@ -407,6 +443,45 @@ int test_init(void) {
     int a;
     a = 10;
     if (a != 10) return 1;  // Assert a == 10
+    return 42;
+}
+
+// test_anon_union_designator_960
+[[cccc::test(return = 42)]]
+int test_anon_union_designator_960(void) {
+    // Ticket #960's exact repro: compound literal, designator on an
+    // anonymous union field.
+    struct tc_anon_union_desig_S r = (struct tc_anon_union_desig_S){.i = 7, .tag = 1};
+    if (r.i != 7 || r.tag != 1) return 1;
+
+    // Same shape as a plain brace initializer (no compound literal) --
+    // reaches the identical struct_designator() parser path.
+    struct tc_anon_union_desig_S r2 = {.i = 7, .tag = 1};
+    if (r2.i != 7 || r2.tag != 1) return 2;
+
+    // Designator order reversed: exercises the struct_initializer2(...,
+    // mem->next) continuation after the anonymous member.
+    struct tc_anon_union_desig_S r3 = {.tag = 1, .i = 7};
+    if (r3.i != 7 || r3.tag != 1) return 3;
+
+    // Global with the same initializer shape (write_gvar_data path).
+    if (tc_anon_union_desig_global.i != 7 || tc_anon_union_desig_global.tag != 1)
+        return 4;
+
+    // Control: named union member with a nested designator still works.
+    struct tc_anon_union_desig_Named n = {.v = {.i = 7}, .tag = 1};
+    if (n.v.i != 7 || n.tag != 1) return 5;
+
+    // Control: anonymous struct member (the case that already worked)
+    // still works after the fix.
+    struct tc_anon_union_desig_AnonStruct a = {.i = 7, .tag = 1};
+    if (a.i != 7 || a.tag != 1) return 6;
+
+    // Anonymous union nested directly inside a union: exercises
+    // union_initializer()'s own struct_designator() call.
+    union tc_anon_union_desig_NestedUnion u = {.i = 9};
+    if (u.i != 9) return 7;
+
     return 42;
 }
 

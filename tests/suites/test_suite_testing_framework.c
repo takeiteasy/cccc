@@ -715,6 +715,27 @@ struct FwAnonS test_anon_struct_member(void) {
     return (struct FwAnonS){.x = 1, .y = 2, .z = 3};
 }
 
+// Anonymous *union* member (ticket #960, a follow-up left over from #489):
+// dropped from the original coverage because a top-level designator into
+// an anonymous union member -- exactly what the compound literal below
+// does -- crashed the parser itself (struct_designator() only special-
+// cased anonymous struct members, not union). cmp_ret_struct_body's own
+// anonymous-member handling (`if (!m->name)`) was never gated on
+// TY_STRUCT/TY_UNION, so this exercises only the parser fix, not the
+// comparator.
+struct FwAnonU {
+    union {
+        int i;
+        float f;
+    };
+    int z;
+};
+
+[[cccc::test(return = (struct FwAnonU){.i = 1, .z = 3})]]
+struct FwAnonU test_anon_union_member(void) {
+    return (struct FwAnonU){.i = 1, .z = 3};
+}
+
 // Malformed nested literal: the inner brace list is missing a value, so
 // only that field's assertion is skipped (with a -Wattributes warning) --
 // parsing recovers past the *matching* '}' rather than desyncing on the

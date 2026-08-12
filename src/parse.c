@@ -4316,14 +4316,21 @@ static Member *struct_designator(VirtualMachine *vm, Token **rest, Token *tok, T
         error_tok(vm, tok, "expected a field designator");
 
     for (Member *mem = ty->members; mem; mem = mem->next) {
-        // Anonymous struct member
-        if (mem->ty->kind == TY_STRUCT && !mem->name) {
+        // Anonymous struct/union member (its fields are reachable through
+        // the parent's own designators, per C's anonymous-member rules).
+        if ((mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) &&
+            !mem->name) {
             if (get_struct_member(mem->ty, tok)) {
                 *rest = start;
                 return mem;
             }
             continue;
         }
+
+        // Any other nameless member (e.g. an unnamed bitfield) can't be
+        // targeted by a designator; skip rather than deref a NULL name.
+        if (!mem->name)
+            continue;
 
         // Regular struct member
         if (mem->name->len == tok->len &&
@@ -4367,10 +4374,16 @@ static void designation(VirtualMachine *vm, Token **rest, Token *tok, Initialize
                      "designated initializers are a C99 extension");
         Member *mem = struct_designator(vm, &tok, tok, init->ty);
         if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
-            init->children[mem->idx]->is_set)
-            warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
-                     "initializer overrides prior initialization of '%.*s'",
-                     (int)mem->name->len, mem->name->loc);
+            init->children[mem->idx]->is_set) {
+            if (mem->name)
+                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                         "initializer overrides prior initialization of '%.*s'",
+                         (int)mem->name->len, mem->name->loc);
+            else
+                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                         "initializer overrides prior initialization of "
+                         "anonymous member");
+        }
         designation(vm, &tok, tok, init->children[mem->idx]);
         init->expr = NULL;
 
@@ -4584,10 +4597,16 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                          "designated initializers are a C99 extension");
             mem = struct_designator(vm, &tok, tok, init->ty);
             if ((vm->compiler.warnings & CCCC_WARN_OVERRIDE_INIT) &&
-                init->children[mem->idx]->is_set)
-                warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
-                         "initializer overrides prior initialization of '%.*s'",
-                         (int)mem->name->len, mem->name->loc);
+                init->children[mem->idx]->is_set) {
+                if (mem->name)
+                    warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                             "initializer overrides prior initialization of '%.*s'",
+                             (int)mem->name->len, mem->name->loc);
+                else
+                    warn_tok(vm, tok, CCCC_WARN_OVERRIDE_INIT,
+                             "initializer overrides prior initialization of "
+                             "anonymous member");
+            }
             designation(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
             continue;
