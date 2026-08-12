@@ -312,9 +312,12 @@ All features listed below can be enabled individually or through the safety leve
     extent written through the one argument that receives it, clamped
     against whichever segment resolves that argument, while every *other*
     pointer-shaped argument to that same call still gets the default
-    whole-object clear (the strto*/wcsto* family's `nptr` argument, for
-    instance, is untouched by the call but still takes the default clear,
-    since it isn't the designated `*endptr` argument); the **printf
+    whole-object clear, *unless* the rule marks every non-designated
+    pointer argument as statically read-only, in which case those are
+    skipped entirely instead of cleared (the strto*/wcsto* family's `nptr`
+    argument, for instance, is never written through by any of these
+    calls, so its shadow state is left untouched rather than wiped); the
+    **printf
     family** (`printf`, `fprintf`, `dprintf`, `sprintf`, `snprintf`) is
     read-only for every argument except its output buffer (if any) *unless*
     the format string may contain a `%n` conversion — which can write

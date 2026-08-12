@@ -5187,6 +5187,15 @@ typedef struct FfiShadowRule {
     int len_arg2;     // BOUNDED: second length arg to multiply in (fread's nmemb), or -1
     size_t fixed_len; // BOUNDED: used when len_arg == -1 (a statically-known length)
     int fmt_arg;      // PRINTF: index of the format-string argument, else -1
+    bool other_args_readonly; // BOUNDED only: every pointer-shaped argument
+                               // besides out_arg is never written through
+                               // (e.g. strtol's nptr) -- skip the default
+                               // whole-object clear for them instead of
+                               // applying it. Defaults to false (0) for
+                               // every existing row's positional
+                               // initializer, so it can only ever narrow
+                               // clearing relative to today's behavior,
+                               // never widen it.
 } FfiShadowRule;
 
 static const FfiShadowRule ffi_shadow_rules[] = {
@@ -5243,24 +5252,24 @@ static const FfiShadowRule ffi_shadow_rules[] = {
     // strtoll/strtoul/strtoull and the wcsto* family take the identical
     // (const {char,wchar_t} *nptr, {char,wchar_t} **endptr, ...) shape as
     // strtol/strtod and were missing this entry, falling through to the
-    // default whole-allocation clear. arg 0 (nptr) is untouched by all of
-    // these but isn't the designated out_arg, so it still gets the default
-    // whole-object clear on the next loop iteration -- narrower coverage
-    // for that argument would need a new tier, filed as a follow-up.
-    {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"strtof",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"strtold",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"strtoll",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"strtoul",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"strtoull", FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstof",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstold",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstoll",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstoul",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
-    {"wcstoull", FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1},
+    // default whole-allocation clear. arg 0 (nptr) is never written by any
+    // of these calls -- other_args_readonly=true skips the default clear
+    // for it (and any other non-out_arg pointer argument) entirely, rather
+    // than just narrowing it.
+    {"strtol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"strtod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"strtof",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"strtold",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"strtoll",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"strtoul",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"strtoull", FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstol",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstod",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstof",   FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstold",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstoll",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstoul",  FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
+    {"wcstoull", FFI_SHADOW_BOUNDED, 1, -1, -1, sizeof(char *), -1, true},
     // __cccc_dec_strtod(w, dst, s, endp) -- #832's strtod32/64/128 shim
     // (src/stdlib/stdlib.c). `endp` is arg index 3 here, not 1, since `dst`
     // (the decimal out-param) occupies index 1. `dst`'s own write still
@@ -5488,6 +5497,11 @@ static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
             continue; // a %n-free printf-family call reads every argument
                       // other than its designated out_arg (if any) -- e.g.
                       // %d/%s/%p values -- never writes through them.
+
+        if (cls == FFI_SHADOW_BOUNDED && rule->other_args_readonly)
+            continue; // #839: every pointer arg besides out_arg is
+                      // statically known to be read-only for this call
+                      // (e.g. strtol's nptr) -- no clear needed.
 
         // Default: unclassified name, or a BOUNDED call's non-designated
         // pointer argument -- whole-object clear, heap or global
