@@ -223,7 +223,14 @@ All features listed below can be enabled individually or through the safety leve
   - Requires VM heap mode (on by default; not compatible with disabling it via `-V`)
   - Performance overhead proportional to allocation size (memset on alloc/free)
 - `--memory-leak-detection` **Memory leak detection**
-  - Tracks all VM heap allocations in a host-memory linked list (AllocRecord)
+  - Tracks user-facing VM heap allocations in a host-memory linked list (AllocRecord)
+  - Compiler-internal automatic storage -- `alloca`/VLA backing blocks and
+    `__block` boxes -- is allocated via the separate `ALCA` opcode instead of
+    `MALC` and is deliberately excluded from this list (#979): it still gets
+    a full `AllocHeader`/`sorted_allocs` entry (so `CHKB`/`CHKP3`/
+    `__builtin_dynamic_object_size` are unaffected), but it is never meant to
+    be user-freed, so reporting it would be permanent false-positive noise on
+    every program that declares a VLA
   - Removes the record on free() and realloc()
   - Reports all unfreed allocations at program exit (in cc_destroy)
   - Shows address, size, and PC offset of allocation site for each leak

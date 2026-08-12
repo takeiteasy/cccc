@@ -62,6 +62,10 @@ extern "C" {
     X(JMPI, 1)  /* Indirect jump */                                            \
     /* VM memory operations (self-contained, no system calls) */               \
     X(MALC, 0)                                                                 \
+    X(ALCA, 0) /* alloca/VLA/__block box: size=A0, result=A0; same shape as   \
+                  MALC but tagged AllocHeader.is_internal so leak detection   \
+                  never reports it (#979) -- CHKB/CHKP3/DYNOBJSZ still see    \
+                  a full AllocHeader via sorted_allocs, unchanged */          \
     X(MFRE, 0)                                                                 \
     X(MCPY, 0)                                                                 \
     X(MSET, 0) /* memset to 0: dest=REG_A0, count=REG_A2; backs ND_MEMZERO */   \
@@ -2384,6 +2388,15 @@ typedef struct AllocHeader {
     int generation;   /**< Generation counter incremented on each free (for UAF detection) */
     int creation_generation; // Generation when pointer was created (for
                              // temporal safety)
+    int is_internal;   /**< Compiler-internal automatic storage (alloca/VLA,
+                            __block box) -- allocated via ALCA instead of
+                            MALC. Still tracked by sorted_allocs/CHKB/CHKP3/
+                            DYNOBJSZ like any other allocation, but excluded
+                            from the leak-detection AllocRecord list (#979)
+                            since it is never meant to be user-freed. Placed
+                            here (not after alloc_pc) to fill this struct's
+                            existing 4-byte tail pad instead of growing
+                            sizeof(AllocHeader). */
     long long alloc_pc;   /**< Program counter at allocation site (for debugging) */
     // Per-allocation type_kind was removed (#653): type tracking now lives
     // in a byte-granular shadow (vm->type_shadow_pages) so member/interior

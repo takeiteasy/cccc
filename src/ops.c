@@ -3163,7 +3163,13 @@ static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr, AllocHeader
 //
 // Returns NULL (without touching any VM register) on invalid size or OOM;
 // callers translate that into their own error-reporting convention.
-static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_size, size_t alignment) {
+//
+// `is_internal` marks compiler-internal automatic storage (alloca/VLA,
+// __block box, routed here via the ALCA opcode -- #979): it gets a full
+// AllocHeader/sorted_allocs entry like any other allocation (CHKB/CHKP3/
+// DYNOBJSZ all keep working on it unchanged) but is never appended to
+// vm->alloc_list, so it never appears in a MEMORY LEAK DETECTED report.
+static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm, long long requested_size, size_t alignment, bool is_internal) {
     if (requested_size <= 0)
         return NULL;
 
@@ -3202,6 +3208,7 @@ static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_s
     header->freed = 0;
     header->generation = 0;
     header->creation_generation = 0;
+    header->is_internal = is_internal ? 1 : 0;
     header->canary = 0;
     header->alloc_pc = vm->text_seg ? (long long)vm->pc : 0;
 
@@ -3229,8 +3236,11 @@ static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_s
     if (vm->flags & CCCC_MEMORY_POISONING)
         memset(user_ptr, 0xCD, size);
 
-    // Leak detection: track active allocation
-    if (vm->flags & CCCC_MEMORY_LEAK_DETECT) {
+    // Leak detection: track active allocation. Compiler-internal automatic
+    // storage (alloca/VLA, __block box) is deliberately excluded -- it is
+    // never meant to be user-freed, so it would otherwise be reported as a
+    // leak on every single execution (#979).
+    if (!is_internal && (vm->flags & CCCC_MEMORY_LEAK_DETECT)) {
         AllocRecord *rec = (AllocRecord *)malloc(sizeof(AllocRecord));
         if (rec) {
             rec->address = user_ptr;
@@ -3246,6 +3256,14 @@ static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_s
         hashmap_put_int(&vm->ptr_tags, (long long)user_ptr, (void *)(intptr_t)0);
 
     return user_ptr;
+}
+
+// Plain (non-internal) allocation -- the pre-#979 shape, kept so the
+// existing malloc/aligned_alloc/posix_memalign call sites below are
+// untouched. Internal automatic storage (alloca/VLA/__block) goes through
+// vm_heap_bump_alloc_ex directly with is_internal=true instead.
+static inline void *vm_heap_bump_alloc(VirtualMachine *vm, long long requested_size, size_t alignment) {
+    return vm_heap_bump_alloc_ex(vm, requested_size, alignment, false);
 }
 
 // Shared by op_MALC_fn (direct `malloc(...)` calls, routed here by codegen's
@@ -3267,6 +3285,27 @@ static inline int op_MALC_fn(VirtualMachine *vm) {
     // malloc: size in REG_A0, return pointer in REG_A0
     long long requested_size = vm->regs[REG_A0];
     vm->regs[REG_A0] = (long long)cccc_vm_heap_malloc(vm, requested_size);
+    return 0;
+}
+
+// Backs the ALCA opcode: alloca/VLA storage and __block boxes (#979).
+// Identical register/ABI shape to MALC (size=A0, result=A0) -- the only
+// difference is is_internal=true on the AllocHeader, which keeps it off the
+// leak-detection AllocRecord list while leaving sorted_allocs/CHKB/CHKP3/
+// DYNOBJSZ unaffected.
+void *cccc_vm_heap_alloca(VirtualMachine *vm, long long requested_size) {
+    void *user_ptr = vm_heap_bump_alloc_ex(vm, requested_size, 8, true);
+    if (vm->debug_vm && user_ptr) {
+        printf("ALCA: allocated %zu bytes at 0x%llx\n", (size_t)((requested_size + 7) & ~7),
+               (long long)user_ptr);
+    }
+    return user_ptr;
+}
+
+static inline int op_ALCA_fn(VirtualMachine *vm) {
+    // alloca/VLA/__block: size in REG_A0, return pointer in REG_A0
+    long long requested_size = vm->regs[REG_A0];
+    vm->regs[REG_A0] = (long long)cccc_vm_heap_alloca(vm, requested_size);
     return 0;
 }
 

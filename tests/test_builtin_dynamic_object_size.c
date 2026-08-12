@@ -16,8 +16,10 @@
 // vm->sorted_allocs.  DYNOBJSZ binary-searches sorted_allocs for the
 // allocation containing the pointer (base or interior) and returns
 // AllocHeader.requested_size - offset.  alloca()/VLA buffers also resolve
-// through this path: both lower to MALC (a VM heap bump allocation), so they
-// carry a full AllocHeader with no separate mechanism needed (#648).
+// through this path: both lower to ALCA (a VM heap bump allocation with the
+// same AllocHeader/sorted_allocs shape as MALC, just tagged
+// AllocHeader.is_internal so leak detection skips it -- #979), so they carry
+// a full AllocHeader with no separate mechanism needed (#648).
 //
 // Runtime path, stack: fixed-size stack arrays/structs/unions whose address
 // escapes (e.g. passed through a function parameter, so the pointer's
@@ -335,10 +337,11 @@ void test_dynobj_fortify_style_heap(void) {
 }
 
 // ---------------------------------------------------------------------------
-// alloca()/VLA buffers (#648 follow-up to #640). Both lower to MALC (a VM
-// heap bump allocation with a full AllocHeader), so they resolve through the
-// same sorted_allocs path as malloc -- no new mechanism, just a regression
-// lock proving it. No -V/--no-vm-heap needed: MALC always carries an AllocHeader.
+// alloca()/VLA buffers (#648 follow-up to #640). Both lower to ALCA (a VM
+// heap bump allocation with a full AllocHeader, #979), so they resolve
+// through the same sorted_allocs path as malloc -- no new mechanism, just a
+// regression lock proving it. No -V/--no-vm-heap needed: ALCA always carries
+// an AllocHeader.
 // ---------------------------------------------------------------------------
 
 [[cccc::test]]

@@ -702,6 +702,7 @@ static void opt_constant_fold(VirtualMachine *vm, OptReplacement *repls,
             case IOVFL:
             case LONGJMP:
             case MALC:
+            case ALCA:
             case REALC:
             case REALCA:
             case MALCA:
@@ -1373,8 +1374,10 @@ static bool op_implicit_abi_regs(int op, ImplicitRegs *out) {
         out->writes = 0; out->opaque = false;
         return true;
 
-    // MALC/CALC(size=A0): reads A0, writes A0. SETJMP(jmp_buf=A0): same shape.
-    case MALC: case CALC: case SETJMP:
+    // MALC/CALC(size=A0): reads A0, writes A0. SETJMP(jmp_buf=A0): same
+    // shape. ALCA (alloca/VLA/__block, #979) is MALC with an internal-only
+    // AllocHeader tag -- identical register contract.
+    case MALC: case CALC: case SETJMP: case ALCA:
         out->reads = out->writes = IR_BIT(REG_A0);
         out->opaque = false;
         return true;

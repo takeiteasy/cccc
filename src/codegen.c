@@ -5598,8 +5598,20 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Update or invalidate the restrict cache for this store.
         restrict_cache_handle_store(vm, node->lhs, r_val);
 
-        // Stack instrumentation: record write and mark initialized (scalars only).
-        if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
+        // Stack instrumentation: record write and mark initialized (scalars
+        // only). A VLA declaration's lhs is ND_VLA_PTR, not ND_VAR (its
+        // lowering is ND_ASSIGN(ND_VLA_PTR, alloca(...)) -- see parse.c) but
+        // it still writes the same frame slot a later ND_VAR read of the
+        // VLA loads through, so it needs the identical MARKI or that read's
+        // CHKI trips a false UNINITIALIZED VARIABLE READ (#980). Unlike
+        // ND_VAR, ND_VLA_PTR only ever names a non-param local VLA, so no
+        // further guard is needed here.
+        if (node->lhs->kind == ND_VLA_PTR) {
+            if (vm->flags & CCCC_STACK_INSTR)
+                emit_markw(vm, node->lhs->var->offset);
+            if (vm->flags & CCCC_UNINIT_DETECTION)
+                emit_marki(vm, node->lhs->var->offset);
+        } else if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
             !node->lhs->var->is_param &&
             node->lhs->var->ty && node->lhs->var->ty->kind != TY_ARRAY &&
             node->lhs->var->ty->kind != TY_STRUCT &&
@@ -6076,14 +6088,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Check if this is a builtin alloca call (used for VLAs)
         if (node->lhs->kind == ND_VAR &&
             node->lhs->var->is_builtin_alloca) {
-            // Special handling for alloca: uses MALC opcode
+            // Special handling for alloca: uses ALCA opcode (#979 -- alloca
+            // and VLA backing storage is automatic storage, not a user
+            // allocation, so it must never show up in a leak report; ALCA
+            // has MALC's exact register shape, just tagged as internal on
+            // the AllocHeader).
             if (!node->args) {
                 error_tok(vm, node->tok, "alloca requires a size argument");
             }
-            // Evaluate size argument into REG_A0 (MALC reads from REG_A0)
+            // Evaluate size argument into REG_A0 (ALCA reads from REG_A0)
             reset_temp_regs();
             gen_expr(vm, node->args, REG_A0);
-            emit(vm, MALC); // Size in REG_A0, returns pointer in REG_A0
+            emit(vm, ALCA); // Size in REG_A0, returns pointer in REG_A0
             if (dest_reg != REG_A0) {
                 emit_mov3(vm, dest_reg, REG_A0);
             }
@@ -8551,10 +8567,12 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // The heap pointer is stored in the variable's stack slot
     for (Obj *var = fn->locals; var; var = var->next) {
         if (var->is_block_var) {
-            // Allocate heap memory for this __block variable
-            // MALC: REG_A0 = size, result in REG_A0
+            // Allocate heap memory for this __block variable via ALCA, not
+            // MALC (#979) -- the box is compiler-internal storage the guest
+            // never frees directly, so it must not appear in a leak report.
+            // ALCA has MALC's exact register shape (size=A0, result=A0).
             emit_li3(vm, REG_A0, var->ty->size);
-            emit(vm, MALC);
+            emit(vm, ALCA);
             // Store the heap pointer in the variable's stack slot
             int r_addr = alloc_temp_reg();
             // Slot address only feeds the immediate store below (#676).
