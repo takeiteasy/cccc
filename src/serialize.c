@@ -180,6 +180,10 @@ typedef struct {
     // generated_only (-c=generated) output -- built once in
     // cc_serialize_program from vm->compiler.emit_include_paths. Only
     // consulted in generated_only mode; see serialize_type_defs_for_owner.
+    // A VLA's length is an expression node, so serializing its declarator
+    // (serialize_type_decl, which has no vm parameter) needs the vm the
+    // expression serializer takes. Set once in cc_serialize_program.
+    VirtualMachine *vm;
     char **captured_paths;
     int captured_paths_len;
 } SerializeContext;
@@ -612,6 +616,22 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         return;
     }
 
+    if (ty->kind == TY_VLA) {
+        // `int v[n]` -- the length is an expression, not a constant, so it
+        // has to be serialized through serialize_expr rather than printed
+        // into the declarator buffer like TY_ARRAY's constant length. The
+        // base is emitted first (VLA of VLA nests through this same path),
+        // then the name, then the bracketed length.
+        serialize_type(f, ctx, ty->base);
+        if (name && *name)
+            fprintf(f, " %s", name);
+        fprintf(f, "[");
+        if (ty->vla_len && ctx->vm)
+            serialize_expr(f, ctx->vm, ctx, ty->vla_len, 0);
+        fprintf(f, "]");
+        return;
+    }
+
     if (ty->kind == TY_PTR) {
         char buf[1024];
         char qual[256] = "";
@@ -740,6 +760,22 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         break;
     case TY_ARRAY:
         serialize_type_decl(f, ctx, ty, "");
+        break;
+    case TY_VLA:
+        serialize_type_decl(f, ctx, ty, "");
+        break;
+    case TY_COMPLEX:
+        // `base` is the element float type (see ty_fcomplex/ty_dcomplex/
+        // ty_ldcomplex in type.c), so the spelling falls out of it directly.
+        fprintf(f, "_Complex ");
+        serialize_type(f, ctx, ty->base);
+        break;
+    case TY_VECTOR:
+        // GNU vector: element type + vector_size in *bytes* (ty->size is the
+        // total, which is what vector_size takes -- not vec_len). clang and
+        // gcc both accept the attribute in this position.
+        serialize_type(f, ctx, ty->base);
+        fprintf(f, " __attribute__((vector_size(%d)))", ty->size);
         break;
     case TY_STRUCT: {
         TypeName *tag = find_tag_name(ctx, ty);
@@ -2028,7 +2064,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 
     SerializeContext ctx = {.generated_only = generated_only,
                            .emit_strict = vm->compiler.emit_strict != 0,
-                           .emit_cccc = vm->compiler.emit_cccc};
+                           .emit_cccc = vm->compiler.emit_cccc,
+                           .vm = vm};
     if (generated_only)
         hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path, &ctx);
     collect_scope_names(&ctx, vm);
