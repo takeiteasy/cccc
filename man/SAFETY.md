@@ -278,12 +278,19 @@ All features listed below can be enabled individually or through the safety leve
     all, `a[i]` desugaring to `*(a+i)`). `CHKD` is the separate
     dereference-time check that still traps on `a[size]` itself, so
     forming the pointer and dereferencing it are no longer conflated.
-  - **Known limitation**: `CHKD` is emitted for scalar loads/stores,
-    struct/union/wide-`_BitInt`/`_Decimal` copies, and vector loads/stores,
-    but not for the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`) — their
-    operand words already carry a register-aliasing hazard (#497) that a
-    naive addition would risk reopening; tracked as a follow-up ticket.
-    Also, like `CHKB`/`CHKBN`, `CHKD` has no bound to check against for a
+  - **Atomic ops (#985)**: `CHKD` is also emitted ahead of the four atomic
+    opcodes — `ALDR`/`ASTR`/`AXCHG`/`ACAS` — so a one-past-the-end atomic
+    dereference traps the same as any other. `ACAS` gets two `CHKD`s (the
+    object pointer and the `expected` pointer, since a failed
+    `compare_exchange` reads *and writes* through `expected`). Emission is
+    unconditional under `CCCC_BOUNDS_CHECKS` (no `addr_is_local_frame` gate
+    like the scalar/vector sites use — at these sites the address is a
+    pointer-*valued* expression, not an lvalue node, so that classifier
+    would always report "not a local frame address" anyway). This was
+    originally deferred because `AXCHG`/`ACAS`'s own operand words carry a
+    register-aliasing hazard (#497); a standalone `CHKD` instruction
+    emitted ahead of them never touches that word, so it doesn't reopen it.
+    Like `CHKB`/`CHKBN`, `CHKD` still has no bound to check against for a
     stack or global array (no `AllocHeader` to resolve).
   - **Cost note**: under `-2`/`-3`, a scalar heap access now does two
     `sorted_allocs` lookups instead of one (`CHKB` at formation, `CHKD` at

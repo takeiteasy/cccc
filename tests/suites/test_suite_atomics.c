@@ -102,4 +102,20 @@ int test_atomic_ops_functional(void) {
     return 42; // CCCC test convention: 42 = pass
 }
 
+// #985: re-run the two functional cases above at -2 here (pinned via
+// flags = "-2", not CCCC_FLAGS:, so only these two get bounds checks) as a
+// false-positive canary across the whole atomic surface -- proof that
+// adding CHKD to ALDR/ASTR/AXCHG/ACAS doesn't false-positive on any of
+// their legitimate, in-bounds uses (stack locals, atomic_flag, all four
+// fetch_* ops, both compare_exchange forms).
+[[cccc::test(return = 42, flags = "-2")]]
+int test_atomic_fetch_ops_bounds_checked(void) {
+    return test_atomic_fetch_ops();
+}
+
+[[cccc::test(return = 42, flags = "-2")]]
+int test_atomic_ops_functional_bounds_checked(void) {
+    return test_atomic_ops_functional();
+}
+
 #pragma cccc suite end

@@ -429,7 +429,7 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
 | `CHKNTZ` | Checked-pointer null-terminator guard (#939) for the memcpy-lowered `ntarray` pointees `CHKNT` cannot reach (struct/union, wide `_BitInt`/`_Decimal`): traps unless every byte at the source address is zero, checked before the `MCPY` it guards | `CCCC_CHECKED_BOUNDS` |
 | `CHKAB` | Checked-pointer assignment-time bounds implication (#944, Checked C's `_Assume_bounds_cast` direction): traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
-| `CHKD` | **Dereference-time** bounds check (#983), `CHKB`/`CHKBN`'s formation-time counterpart: traps unless `off + access_size <= header->size`, resolving the dereferenced address via `vm->sorted_allocs` the same way `CHKB`/`CHKP3` do. Emitted at every load/store site that reaches memory (scalar loads/stores, struct/union/wide-`_BitInt`/`_Decimal` `MCPY` copies, vector `VLDR`/`VSTR`) — not the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`), a documented residual tracked as a follow-up ticket. Silently passes for a NULL pointer (`CHKP3`'s job) or a non-heap address (no bound known, same limitation `CHKB`/`CHKBN` already have) | `CCCC_BOUNDS_CHECKS` |
+| `CHKD` | **Dereference-time** bounds check (#983), `CHKB`/`CHKBN`'s formation-time counterpart: traps unless `off + access_size <= header->size`, resolving the dereferenced address via `vm->sorted_allocs` the same way `CHKB`/`CHKP3` do. Emitted at every load/store site that reaches memory: scalar loads/stores, struct/union/wide-`_BitInt`/`_Decimal` `MCPY` copies, vector `VLDR`/`VSTR`, and (#985) the atomic ops `ALDR`/`ASTR`/`AXCHG`/`ACAS` (`ACAS` gets two — object pointer and `expected` pointer). Silently passes for a NULL pointer (`CHKP3`'s job) or a non-heap address (no bound known, same limitation `CHKB`/`CHKBN` already have) | `CCCC_BOUNDS_CHECKS` |
 
 `CHKB`/`CHKBN` and `CHKP3` resolve their pointer's containing allocation via
 the same `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the
@@ -462,10 +462,12 @@ access (`a[size]`) from being caught. The resolution relies on
 its rejection condition, not `off >= h->size`), which is what lets `CHKD`
 reliably resolve the allocation an exactly-one-past address belongs to.
 `CHKD` has the same "no bound known" gap as `CHKB`/`CHKBN` for a stack or
-global array (no `AllocHeader` to resolve against), and is not emitted for
-the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`) — a documented residual,
-tracked as a follow-up ticket, since their operand words already carry the
-#497 register-aliasing hazard. `CHKR` (#770/#482-484) closes the upper-bound
+global array (no `AllocHeader` to resolve against). It is also emitted
+ahead of the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`, #985) — this was
+initially deferred because `AXCHG`/`ACAS`'s own operand words carry the
+#497 register-aliasing hazard, but a standalone `CHKD` instruction emitted
+ahead of them never touches that word, so it doesn't reopen it. `CHKR`
+(#770/#482-484) closes the upper-bound
 gap generally: its
 `[lo, hi)` bounds come from the checked pointer's declaration
 (`count()`/`byte_count()`/`bounds()`, or the implicit `[p, p+sizeof(T))` for

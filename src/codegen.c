@@ -7331,6 +7331,19 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         int sz = base_ty->size;
         if ((sz == 1 || sz == 2 || sz == 4 || sz == 8) && !is_flonum(base_ty)) {
             long long width_enc = ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
+            // #985: ALDR bypasses emit_load_ex/emit_load_safety_checks
+            // entirely, so it needs its own CHKD. Unconditional (no
+            // addr_is_local_frame gate like the vector CHKD sites use):
+            // node->lhs here is a pointer-*valued* expression, not the
+            // lvalue node itself, so addr_is_local_frame's default arm
+            // would always return false anyway -- op_CHKD_fn already
+            // no-ops for a non-heap address, so the gate would buy
+            // nothing but a dead call. See #983's CHKD, #497 for why this
+            // was originally deferred (that hazard is in ALDR's own
+            // operand-word decode in src/optimize.c, which this
+            // standalone CHKD instruction never touches).
+            if (vm->flags & CCCC_BOUNDS_CHECKS)
+                emit_rri(vm, CHKD, r_addr, 0, (long long)sz);
             emit_rri(vm, ALDR, dest_reg, r_addr, width_enc);
         } else {
             emit_load(vm, base_ty, dest_reg, r_addr);
@@ -7351,6 +7364,10 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         int sz = base_ty->size;
         if ((sz == 1 || sz == 2 || sz == 4 || sz == 8) && !is_flonum(base_ty)) {
             long long width_enc = ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
+            // #985: ASTR bypasses emit_store_ex entirely, same reasoning
+            // as the ALDR CHKD above.
+            if (vm->flags & CCCC_BOUNDS_CHECKS)
+                emit_rri(vm, CHKD, r_addr, 0, (long long)sz);
             emit_rri(vm, ASTR, r_val, r_addr, width_enc);
         } else {
             emit_store(vm, base_ty, r_val, r_addr);
@@ -7374,6 +7391,13 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         reset_temp_regs();
         gen_expr(vm, node->lhs, REG_A0); // addr (obj pointer)
         gen_expr(vm, node->rhs, REG_A1); // new value
+        // #985: CHKD ahead of AXCHG itself, same unconditional reasoning
+        // as ALDR/ASTR above. This is a standalone CHKD instruction
+        // emitted before AXCHG -- it never touches AXCHG's own operand
+        // word, so it cannot reopen the #497 aliasing hazard that gated
+        // this off originally.
+        if (vm->flags & CCCC_BOUNDS_CHECKS)
+            emit_rri(vm, CHKD, REG_A0, 0, (long long)sz);
         emit_with_arg(vm, AXCHG, width_enc);
         // old value returned in REG_A0
         if (dest_reg != REG_A0)
@@ -7423,6 +7447,18 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int r_hi = gen_checked_nt_hi(vm, node);
             emit_chknt(vm, REG_A0, r_hi, REG_A2, node->checked_access_size);
             free_temp_reg(r_hi);
+        }
+
+        // #985: two CHKDs ahead of ACAS -- obj (REG_A0) and expected
+        // (REG_A1). ACAS reads *and writes* through expected on failure,
+        // so guarding only the object pointer would leave half the
+        // dereference surface unchecked. Same unconditional/no-gate and
+        // #497-safety reasoning as the ALDR/ASTR/AXCHG sites above; mirrors
+        // the CHKNT emission just above, which already proved staging
+        // extra checks here doesn't disturb REG_A0-A2.
+        if (vm->flags & CCCC_BOUNDS_CHECKS) {
+            emit_rri(vm, CHKD, REG_A0, 0, (long long)sz);
+            emit_rri(vm, CHKD, REG_A1, 0, (long long)sz);
         }
 
         emit_with_arg(vm, ACAS, width_enc);
