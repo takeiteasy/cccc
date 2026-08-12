@@ -1250,7 +1250,19 @@ def case_generated_forward_decls_hoisted(cccc: Path, tmp: str) -> bool:
 # unhandled node kind in *statement* position used to serialize as
 # `/* unsupported expr kind N */;` -- a valid null statement -- so the native
 # binary compiled cleanly and silently returned a different answer than the
-# VM. Only running the binary catches that class.
+# VM. Only running the binary catches that class, and only running *both*
+# sides establishes that the two agree rather than that the native side
+# happens to hit 42 on its own.
+
+
+def _vm_and_native_run_case(cccc: Path, tmp: str, name: str, program: str) -> bool:
+    src = Path(tmp) / f"{name}.c"
+    write(src, program)
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+    return _native_run_case(cccc, tmp, name, program)
 
 BITOPS_PROGRAM = (
     "int main(void) {\n"
@@ -1342,43 +1354,43 @@ def case_bitops_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  39: -c=native, bit-manipulation builtins keep their width "
           "(popcount/parity encode width 0, so the ll variant comes from the "
           "argument type) (#963)")
-    return _native_run_case(cccc, tmp, "bitops_963", BITOPS_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "bitops_963", BITOPS_PROGRAM)
 
 
 def case_atomics_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  40: -c=native, atomic load/store/exchange/CAS run natively -- "
           "an atomic store in statement position used to serialize to a null "
           "statement and silently vanish (#963)")
-    return _native_run_case(cccc, tmp, "atomics_963", ATOMICS_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "atomics_963", ATOMICS_PROGRAM)
 
 
 def case_computed_goto_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  41: -c=native, labels-as-values and `goto *ptr` round-trip (#963)")
-    return _native_run_case(cccc, tmp, "computed_goto_963", COMPUTED_GOTO_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "computed_goto_963", COMPUTED_GOTO_PROGRAM)
 
 
 def case_complex_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  42: -c=native, _Complex construction and creal/cimag/conj "
           "round-trip (#963)")
-    return _native_run_case(cccc, tmp, "complex_963", COMPLEX_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "complex_963", COMPLEX_PROGRAM)
 
 
 def case_convertvector_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  43: -c=native, __builtin_convertvector round-trips with an "
           "attributed vector type name (#963)")
-    return _native_run_case(cccc, tmp, "convertvector_963", CONVERTVECTOR_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "convertvector_963", CONVERTVECTOR_PROGRAM)
 
 
 def case_addr_builtins_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  44: -c=native, frame/return address and the trap builtins "
           "compile and run (#963)")
-    return _native_run_case(cccc, tmp, "addr_builtins_963", ADDR_BUILTINS_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "addr_builtins_963", ADDR_BUILTINS_PROGRAM)
 
 
 def case_asm_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  45: -c=native, asm(...) is emitted verbatim and handed to the "
           "host compiler (#963)")
-    return _native_run_case(cccc, tmp, "asm_963", ASM_PROGRAM)
+    return _vm_and_native_run_case(cccc, tmp, "asm_963", ASM_PROGRAM)
 
 
 def main() -> int:

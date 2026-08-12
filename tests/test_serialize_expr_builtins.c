@@ -1,5 +1,6 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: __builtin_frame_address\(0\)
+// CCCC_EXPECT_STDOUT: __builtin_dynamic_object_size\(
 // CCCC_REJECT_STDOUT: unsupported expr kind
 //
 // Frame/return address, trap and dynamic object size pass straight back
@@ -27,9 +28,19 @@ int trapper(int x) {
     __builtin_unreachable();
 }
 
+// Only the emitted *spelling* is asserted for the size query, deliberately:
+// the value legitimately differs between the two runtimes, so a native
+// run-and-compare would encode the host optimizer's setting rather than
+// anything about the serializer.
+unsigned long remaining(char *p) {
+    return __builtin_dynamic_object_size(p, 0);
+}
+
 int main(void) {
     void *fp = __builtin_frame_address(0);
     void *ra = __builtin_return_address(0);
+    char buf[64];
     (void)ra;
+    (void)remaining(buf);
     return fp ? trapper(1) : 1;
 }
