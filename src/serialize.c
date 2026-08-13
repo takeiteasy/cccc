@@ -1157,6 +1157,37 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     case ND_FUNCALL:
+        // #969: __builtin_pc_function_name / __builtin_pc_source_location
+        // lower to a call into a VM-only FFI shim (__cccc_pc_to_name /
+        // __cccc_pc_to_source, cc_load_symbolize_runtime, debugger.c) whose
+        // argument is a VM bytecode offset. Neither the shim nor the symbol
+        // table it reads exists natively, so there is nothing to lower to --
+        // reject here rather than emit a call the host compiler rejects by
+        // its internal name. Deliberately not rejected at parse time
+        // (primary(), parse.c): under -c=generated only *generated* code is
+        // serialized, and a __builtin_pc_* call in VM-only code is legal
+        // there.
+        if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var) {
+            const char *pc_builtin = NULL;
+            if (vm->compiler.builtin_pc_to_name &&
+                node->lhs->var == vm->compiler.builtin_pc_to_name)
+                pc_builtin = "__builtin_pc_function_name";
+            else if (vm->compiler.builtin_pc_to_source &&
+                     node->lhs->var == vm->compiler.builtin_pc_to_source)
+                pc_builtin = "__builtin_pc_source_location";
+            if (pc_builtin) {
+                if (node->tok)
+                    error_tok(vm, node->tok,
+                              "%s cannot be serialized to C: it resolves a "
+                              "VM bytecode offset via the VM's symbol "
+                              "table, which does not exist natively",
+                              pc_builtin);
+                else
+                    error("cccc: %s cannot be serialized to C: it resolves "
+                          "a VM bytecode offset via the VM's symbol table, "
+                          "which does not exist natively", pc_builtin);
+            }
+        }
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, "(");
         for (Node *arg = node->args; arg; arg = arg->next) {

@@ -219,6 +219,15 @@ void print_caller_info(void) {
 }
 ```
 
+This pipeline is **VM only**. `__builtin_pc_function_name` and
+`__builtin_pc_source_location` both lower to a call into a VM-internal FFI
+shim that resolves a VM bytecode offset through the VM's own symbol/source-map
+table — neither exists natively, so both are a hard compile error under
+`-c=native`/`-m`/`-c=generated`. `__builtin_return_address` alone still
+serializes and runs there, mapping to a real host return address instead of a
+VM bytecode offset — see [COVERAGE.md § Serialized-output
+divergences](COVERAGE.md#serialized-output-divergences).
+
 #### Embedder C API
 
 The same lookups are available to embedders through `cccc.h`:
