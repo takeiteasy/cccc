@@ -201,6 +201,14 @@ typedef struct {
     BlockEnvEntry *block_envs;
     int block_envs_len;
     int block_envs_cap;
+    // #989: types promoted from function-local to file scope (a block
+    // capture's own struct/union/enum type declared inside a function,
+    // needed because its lifted environment struct is emitted at file
+    // scope). Doubles as the post-order seen-set during promotion and as
+    // the skip-set serialize_type_defs_for_owner uses to avoid re-emitting
+    // a definition the preamble already wrote out.
+    TypeVec hoisted;
+    int hoisted_type_counter; // names renamed/synthesized hoisted tags, parallel to anon_global_counter
 } SerializeContext;
 
 // Forward declaration
@@ -2615,6 +2623,142 @@ static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
     return false;
 }
 
+// #989: true when `ty` already has a record (tag or typedef) with
+// owner_fn == NULL -- i.e. it's an ordinary file-scope type, not merely
+// unowned because it was never named at all (a tagless local aggregate has
+// no record either way, so type_decl_owner() alone can't tell the two
+// apart -- see hoist_local_type_to_file_scope()).
+static bool type_has_file_scope_name(SerializeContext *ctx, Type *ty) {
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (ctx->tags[i].owner_fn == NULL && same_type_or_origin(ctx->tags[i].ty, ty))
+            return true;
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (ctx->typedefs[i].owner_fn == NULL && same_type_or_origin(ctx->typedefs[i].ty, ty))
+            return true;
+    return false;
+}
+
+// #989: promotes a function-local struct/union/enum type (or one reachable
+// through a pointer/array/VLA/function-type chain) to file scope, so a block
+// literal's environment struct -- itself emitted at file scope, ahead of
+// the function that would otherwise bring the type's tag into scope -- can
+// spell a capture's type. Mirrors collect_type()'s traversal shape so
+// dependencies are promoted (and defined) before dependents.
+//
+// A tagless local aggregate (`struct { int x; } p`) has no TypeName record
+// at all -- previously serialize_type fell through to
+// serialize_anon_aggregate() and inlined a *fresh* anonymous body at every
+// use site, producing two structurally-identical but nominally distinct
+// types and a hard clang error at the env-struct assignment. This
+// synthesizes a tag for that case too, not just hoisting an already-named
+// one.
+static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
+                                           SerializeContext *ctx, Type *ty) {
+    if (!ty)
+        return;
+
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        hoist_local_type_to_file_scope(f, vm, ctx, ty->base);
+        return;
+    }
+
+    if (ty->kind == TY_FUNC) {
+        hoist_local_type_to_file_scope(f, vm, ctx, ty->return_ty);
+        for (Type *p = ty->params; p; p = p->next)
+            hoist_local_type_to_file_scope(f, vm, ctx, p);
+        return;
+    }
+
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return;
+
+    if (type_vec_contains(&ctx->hoisted, ty))
+        return;
+
+    Obj *owner = type_decl_owner(ctx, ty);
+    if (owner == NULL && type_has_file_scope_name(ctx, ty))
+        return; // already an ordinary file-scope type -- nothing to hoist
+
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            hoist_local_type_to_file_scope(f, vm, ctx, m->ty);
+
+    type_vec_push(&ctx->hoisted, ty);
+
+    // Find the first existing tag record (if any) so a collision-free tag
+    // keeps its original spelling -- this leaves existing -m output and
+    // existing tests untouched in the common (no-collision) case.
+    TypeName *existing_tag = NULL;
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+            existing_tag = &ctx->tags[i];
+            break;
+        }
+
+    char *chosen_name;
+    int chosen_len;
+    if (existing_tag) {
+        bool collides = false;
+        for (int i = 0; i < ctx->tags_len && !collides; i++) {
+            if (&ctx->tags[i] == existing_tag)
+                continue;
+            if (ctx->tags[i].owner_fn == NULL &&
+                ctx->tags[i].name_len == existing_tag->name_len &&
+                strncmp(ctx->tags[i].name, existing_tag->name,
+                        existing_tag->name_len) == 0 &&
+                !same_type_or_origin(ctx->tags[i].ty, ty))
+                collides = true;
+        }
+        if (!collides) {
+            chosen_name = existing_tag->name;
+            chosen_len = existing_tag->name_len;
+        } else {
+            chosen_name = arena_format(vm, "__cccc_local_%.*s_%d",
+                                       existing_tag->name_len, existing_tag->name,
+                                       ctx->hoisted_type_counter++);
+            chosen_len = (int)strlen(chosen_name);
+        }
+    } else {
+        chosen_name = arena_format(vm, "__cccc_local_anon_%d",
+                                   ctx->hoisted_type_counter++);
+        chosen_len = (int)strlen(chosen_name);
+    }
+
+    // #989: two different functions each declaring an identical `struct P`
+    // compare equal under same_type_or_origin's structural fallback, so
+    // hoisting one makes the other resolve to this same file-scope name too
+    // -- harmless (identical layout, one definition, consistent spelling)
+    // but non-obvious, hence this comment. Mutate every matching record, not
+    // just the first: type_decl_owner() above only inspected the first hit,
+    // but find_tag_name()/find_typedef_name() may later return a different
+    // one depending on ctx->current_fn.
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+            ctx->tags[i].owner_fn = NULL;
+            ctx->tags[i].name = chosen_name;
+            ctx->tags[i].name_len = chosen_len;
+        }
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+            ctx->typedefs[i].owner_fn = NULL;
+
+    if (!existing_tag)
+        // No tag record existed at all (a tagless local aggregate) --
+        // synthesize one so serialize_type prefers `struct <tag>` at every
+        // site, including inside the declaring function, which is exactly
+        // what gives the one-definition property.
+        type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty,
+                       chosen_name, chosen_len, NULL, false, true, NULL);
+
+    Obj *saved_fn = ctx->current_fn;
+    ctx->current_fn = NULL;
+    if (ty->kind == TY_ENUM)
+        serialize_enum_def(f, ctx, ty);
+    else
+        serialize_struct_def(f, ctx, ty);
+    ctx->current_fn = saved_fn;
+}
+
 // #953: true when `path` (a type's declaring file, TypeName.file_path) is
 // one of the resolved include paths auto-capture actually re-emitted into
 // generated_only (-c=generated) output -- see the ctx->captured_paths
@@ -2676,6 +2820,14 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
     for (int i = 0; i < ctx->defs.len; i++) {
         Type *ty = ctx->defs.data[i];
         if (type_decl_owner(ctx, ty) != owner_fn)
+            continue;
+        // #989: hoist_local_type_to_file_scope() rewrites a hoisted type's
+        // tag/typedef record(s) to owner_fn = NULL, so on the file-scope
+        // pass (owner_fn == NULL here) the check above no longer excludes
+        // it -- without this, serialize_block_preamble's already-emitted
+        // definition would be re-derived here too, a hard "redefinition"
+        // error.
+        if (type_vec_contains(&ctx->hoisted, ty))
             continue;
         // Types with no tag and no typedef alias have nothing to refer back
         // to them by, so they're serialized inline at their point of use
@@ -2897,6 +3049,33 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
 
     fprintf(f, "struct __cccc_block { void *__invoke; long __size; };\n\n");
 
+    // #989: hoist every capture's own struct/union/enum type to file scope
+    // -- if it was declared inside a function, this env struct (below) is
+    // emitted ahead of the function that would otherwise bring its tag into
+    // scope, and serialize_type/serialize_anon_aggregate would otherwise
+    // silently inline a fresh, nominally-distinct anonymous copy of the
+    // body at each use site (confirmed via a real clang "assigning to ...
+    // from incompatible type" error before this fix landed). Must run
+    // before the env-struct loop below so the definitions are already in
+    // ctx->hoisted (and already emitted) by the time serialize_type_decl
+    // needs to spell a capture's field. Gated on the same `reachable`
+    // condition the emit-event loop further down uses to decide what
+    // actually reaches the output (#969's precedent: hoist only what is
+    // actually serialized, not what merely exists in `prog`) -- under
+    // generated_only (-c=generated), an ordinary (non-macro-generated)
+    // block's code is never emitted at all, so hoisting its capture's type
+    // here would push a real file-scope tag into output that could collide
+    // with the consumer's own.
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->is_block)
+            continue;
+        bool reachable = !ctx->generated_only || obj->is_macro_generated;
+        if (!reachable)
+            continue;
+        for (int i = 0; i < obj->num_captures; i++)
+            hoist_local_type_to_file_scope(f, vm, ctx, obj->captures[i]->ty);
+    }
+
     static const char *BLOCK_FN_PREFIX = "__cccc_block_";
     size_t prefix_len = strlen(BLOCK_FN_PREFIX);
 
@@ -2915,56 +3094,11 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
         for (int i = 0; i < obj->num_captures; i++) {
             Obj *cap = obj->captures[i];
 
-            // #965: a capture whose own struct/union type was declared
-            // inside a function (rather than at file scope) can't be
-            // represented here -- this env struct is emitted at file
-            // scope, ahead of the function that would otherwise bring the
-            // tag into scope. Confirmed via a real clang "assigning to ...
-            // from incompatible type" error: without this check,
-            // serialize_type/serialize_anon_aggregate silently inline an
-            // anonymous copy of the struct body at each point of use
-            // instead, which does not match the capture's real,
-            // differently-scoped type. Checked directly on cap->ty and one
-            // level through TY_PTR (a pointer to a function-local
-            // struct/union has the same problem); not fixed here --
-            // tracked as a follow-up ticket.
-            // Gated on the same condition the emit-event loop below uses to
-            // decide what actually reaches the output (#969's precedent:
-            // reject only what is actually serialized, not what merely
-            // exists in `prog`) -- under generated_only (-c=generated), an
-            // ordinary (non-macro-generated) block's code is never emitted
-            // at all, so erroring on its capture here would reject a
-            // program that compiled cleanly before #965 (this env struct
-            // itself is harmless, unreferenced clutter in that case, same
-            // as any other never-emitted type collected into ctx->defs).
-            bool reachable = !ctx->generated_only || obj->is_macro_generated;
-            Type *agg_ty = cap->ty;
-            if (agg_ty && agg_ty->kind == TY_PTR)
-                agg_ty = agg_ty->base;
-            if (reachable && agg_ty &&
-                (agg_ty->kind == TY_STRUCT || agg_ty->kind == TY_UNION) &&
-                type_decl_owner(ctx, agg_ty) != NULL) {
-                // cap->tok (the captured variable's own declaration token)
-                // is used in preference to obj->tok (the lifted block
-                // function's) -- the latter is NULL (block_func_ty has no
-                // name token, func_type() never sets one for a synthetic
-                // block signature), which would fall to the tokenless
-                // error() below and lose both the source location and the
-                // "N error(s) generated" summary line has_compile_error()
-                // (tools/testing/runner.py) matches on.
-                if (cap->tok)
-                    error_tok(vm, cap->tok,
-                              "block capture '%s' has a struct/union type "
-                              "declared inside a function, which cannot be "
-                              "serialized to C (the type is not in scope at "
-                              "file scope, where the block's environment "
-                              "struct must be emitted)",
-                              cap->name);
-                else
-                    error("cccc: a block capture's function-local "
-                          "struct/union type cannot be serialized to C");
-            }
-
+            // #989: a capture whose own struct/union/enum type was declared
+            // inside a function is already hoisted to file scope (with
+            // renaming on collision) by the loop above, before this one
+            // runs -- see hoist_local_type_to_file_scope(). Previously
+            // (#965) this was a hard error; the fix landed here.
             Type *field_ty = cap->is_block_var ? pointer_to(vm, cap->ty) : cap->ty;
             char field_name[32];
             snprintf(field_name, sizeof(field_name), "__cap%d", i);
@@ -3038,6 +3172,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     // #965: block env structs (see serialize_block_preamble) ahead of
     // everything else -- shared by both branches below, since a block
     // literal can appear in ordinary or macro-generated code alike.
+    // #993 (found while implementing #989, deliberately not fixed there):
+    // this runs before the #include replay further down in the
+    // !generated_only branch, so a by-value capture of a *header-declared*
+    // type (e.g. `struct tm`) is serialized while that type isn't complete
+    // yet -- the mirror image of the function-local-type problem #989 fixed
+    // (there the env struct was ahead of the declaring function; here it's
+    // ahead of the #include that would bring the header type into scope).
     serialize_block_preamble(f, vm, &ctx, prog);
 
     if (generated_only && vm->compiler.emit_events_head) {
@@ -3125,6 +3266,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         free(ctx.typedefs);
         free(ctx.captured_paths);
         free(ctx.block_envs);
+        free(ctx.hoisted.data);
         return;
     }
 
@@ -3256,5 +3398,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.typedefs);
     free(ctx.captured_paths);
     free(ctx.block_envs);
+    free(ctx.hoisted.data);
 }
 

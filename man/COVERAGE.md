@@ -1219,12 +1219,22 @@ is a hard error — its descriptor is a local, and there is no enclosing frame
 to hold one — though this is unreachable in practice today, since the VM's
 own global-initializer constant-expression check already rejects a block
 literal there before serialization is ever reached. A capture whose type is
-itself a struct/union declared inside a function (rather than at file
-scope) is rejected with a diagnostic — the env struct is emitted at file
-scope and can't reference a function-local tag (tracked as a follow-up
-ticket); emitting `^{ }` verbatim behind a `-fblocks` opt-in, for callers
-who want clang dialect fidelity instead of this lowering, is tracked as a
-separate follow-up ticket too.
+itself a struct/union/enum declared inside a function (rather than at file
+scope) is promoted ("hoisted") to file scope ahead of the env struct that
+needs it, renaming its tag only on a collision with an unrelated file-scope
+name of the same spelling (#989); a *tagless* local aggregate capture gets a
+synthesized `__cccc_local_anon_N` tag rather than being inlined separately
+at every use site. Two different functions each independently declaring an
+identical `struct P` are treated as one type by this promotion (structural
+equality, not declaration identity) — harmless, since the layout is
+identical either way, but it means hoisting one's tag makes the other
+resolve to the same file-scope name too. A *by-value* capture of a
+*header-declared* type (e.g. `struct tm`) has the mirror-image problem —
+the env struct is emitted ahead of the `#include` replay that would
+complete the type — and is not yet fixed (tracked as a follow-up ticket);
+emitting `^{ }` verbatim behind a `-fblocks` opt-in, for callers who want
+clang dialect fidelity instead of this lowering, is tracked as a separate
+follow-up ticket too.
 
 A `NodeKind`/`TypeKind` with no serializer case above is a hard compile error
 (#963c), not a divergence: `serialize_expr`/`serialize_type`'s `default:` arms

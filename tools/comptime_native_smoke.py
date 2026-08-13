@@ -1720,11 +1720,38 @@ def case_block_partial_init_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     BLOCK_PARTIAL_INIT_PROGRAM)
 
 
+BLOCK_LOCAL_TYPE_HOIST_PROGRAM = (
+    "int main(void) {\n"
+    "    struct Q { int y; };\n"
+    "    struct P { struct Q q; };\n"
+    "    struct P p = {{1}};\n"
+    "    struct P *pp = &p;\n"
+    "    struct { int z; } t = {2};\n"
+    "\n"
+    "    int (^b1)(void) = ^{ return p.q.y; };\n"
+    "    int (^b2)(void) = ^{ return pp->q.y; };\n"
+    "    int (^b3)(void) = ^{ return t.z; };\n"
+    "\n"
+    "    return b1() + b2() + b3() + 38;\n"
+    "}\n"
+)
+
+
+def case_block_local_type_hoist_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  57: -c=native, a block capture whose own struct/union type is "
+          "declared inside a function round-trips as real C via file-scope "
+          "hoisting (#989) -- by-value capture of a tagged local struct, "
+          "pointer-to-local-struct capture, a tagless local aggregate, and "
+          "a nested local type (transitive hoisting), all in one program")
+    return _vm_and_native_run_case(cccc, tmp, "block_local_type_hoist_989",
+                                    BLOCK_LOCAL_TYPE_HOIST_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1788,6 +1815,7 @@ def main() -> int:
             case_block_mutable_native_round_trip,
             case_block_nested_copy_native_round_trip,
             case_block_partial_init_native_round_trip,
+            case_block_local_type_hoist_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
