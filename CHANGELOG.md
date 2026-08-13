@@ -3,7 +3,36 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.11] - 2026-08-13
+
+### Fixed
+
+- **Serializer `default:` arms now hard-error on an unhandled `NodeKind`/
+  `TypeKind` instead of emitting a comment** (#963c, closes #963).
+  `serialize_expr`'s and `serialize_type`'s `default:` arms used to emit
+  `/* unsupported expr kind N */`/`/* unknown type */` and keep going --
+  harmless in expression position (the host compiler then rejects the
+  comment loudly), but `serialize_stmt`'s own `default:` routes every
+  expression-kind `NodeKind` through `serialize_expr` and appends `;`,
+  turning that comment into a syntactically valid null statement: the
+  construct silently vanished from the native binary while the VM still
+  ran it correctly. This was the root cause behind #925, #926, #927, #930,
+  #897, #906, and #952, all discovered independently within a single week.
+  Gated on #964 (VLAs, `__builtin_*_overflow`) and #965 (blocks) landing
+  first, since flipping the arm earlier would have turned "emits broken C"
+  into "cccc internal error" for constructs with no serializer case at all
+  yet -- both landed, closing the arc (#963a audit, #963b fixes, #963c this
+  guardrail). Both `default:` arms now name the unhandled kind via
+  `cc_node_kind_name`/a new `cc_type_kind_name` export. `ND_MACRO_CALL`/
+  `ND_INIT_SPLICE` (comptime-internal, consumed before serialization ever
+  runs) and `TY_ERROR`/`TY_AUTO` (internal type sentinels) get explicit
+  cases instead of falling through the generic default; `ND_BLOCK_LITERAL`'s
+  own internal fallback, which emitted the identical marker string from
+  inside a handled case, is now a hard error too. `serialize_stmt`'s
+  `default:` is deliberately unchanged -- it's the legitimate expression-
+  statement route, not an unhandled-kind fallback, and now inherits the
+  hard error transitively through `serialize_expr`. Diagnostic-only: no
+  opcode/VM change, `CCCC_VERSION` unchanged, no `.c4`/`.c4a` regeneration.
 
 ### Added
 
