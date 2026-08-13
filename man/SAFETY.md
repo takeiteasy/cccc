@@ -1494,7 +1494,7 @@ Current PC:    0x8c5400140 (offset: 40)
 =========================================
 ```
 
-### Checked Pointers
+### Checked Pointers Example Output
 ```c
 // test_checked_bounds.c - Checked-pointer bounds checking example
 int main(void) {

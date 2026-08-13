@@ -42,18 +42,24 @@ flags with `--std=` at file scope) remain as standalone files in `tests/`.
 
 `./cccc --build build.c --build-target=test` calls `tools/run_tests.py`,
 which is the unified orchestrator. It
-runs ten sub-suites in sequence: source mode, `.c4` round-trip, the macOS
+runs 13 sub-suites in sequence: source mode, `.c4` round-trip, the macOS
 host-signal debugger integration (skipped on other platforms), the interactive
 REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
 the conditional-breakpoint PTY integration (`tools/test_debugger_condition.py`,
 same POSIX-only gating), the debugger `print` command PTY integration
 (`tools/test_debugger_print.py`, same POSIX-only gating, #958), the SQLite
 amalgamation smoke test (skips cleanly
-when the zip is absent), the `src/stdlib` FFI registration audit
+when the zip is absent), the header resolution smoke test
+(`tools/header_resolution_smoke.py`, CCCC header resolution from a foreign
+CWD, #891), the comptime/native serializer smoke test
+(`tools/comptime_native_smoke.py`, `-m`/`-c=generated`/`-c=native`
+regressions), the `src/stdlib` FFI registration audit
 (`tools/audit_ffi.py`, see below), the `reflection_ffi_gen` freshness check
-(`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)), and
-the reflection.h enum-parity audit (`tools/audit_reflection_enums.py`, see
-below). A non-zero exit is produced if any sub-suite fails.
+(`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)), the
+reflection.h enum-parity audit (`tools/audit_reflection_enums.py`, see
+below), and the fuzz regression corpus replay (`tools/fuzz_replay.py`,
+compile-only against `tests/fuzz/corpus/`, #625). A non-zero exit is
+produced if any sub-suite fails.
 
 ### FFI registration audit
 
