@@ -1419,14 +1419,47 @@ skipped. For macros that only use `MakeReturn(MakeIntLiteral(...))` directly
 this does not matter; it matters when the template produces a `return`
 statement.
 
-`FunctionSetBody` always attaches locals declared inside the body — including
+`FunctionSetBody` attaches locals declared inside the body — including
 `int x = 1;`-style declarations inside a `Quote()` template, and any local
 created by `MakeLocalVar`/`MakeCompoundLiteral` while the body is being built
 — to the function they were built for, whether or not that construction
-happened inside `WithFn`. `WithFn` is still required for the return-type cast
-above, and it's the only way to target `MakeLocalVar` at a specific function
-from outside a `Quote()` template, but it is no longer required just to give a
-generated function's own locals a home.
+happened inside `WithFn`, **as long as `FunctionSetBody` is called from
+file scope** (no comptime macro is currently executing on behalf of another
+function). `WithFn` is still required for the return-type cast above, and
+it's the only way to target `MakeLocalVar` at a specific function from
+outside a `Quote()` template, but it is no longer required just to give a
+top-level generated function's own locals a home.
+
+If a comptime macro is itself invoked from *inside* an ordinary function
+(an inline macro call, or a `[[cccc::comptime]]` function called from a
+normal function body) and, from there, calls
+`MakeFunction()`+`FunctionSetBody(fn2, ...)` on some *other* function `fn2`,
+`WithFn(fn2)` is **required** around that call:
+
+```c
+[[cccc::comptime]]
+Node *gen(void) {
+    Obj *fn = MakeFunction("helper", GetType("int"));
+    WithFn(fn) { // required here -- gen() is running inside main()
+        FunctionSetBody(fn, Quote("{ int a = 40; int b = 2; return a + b; }"));
+    }
+    PublishNode(fn);
+    return Quote("0");
+}
+int helper(void);
+int main(void) {
+    int y = gen(); // gen() runs from inside main()'s own body
+    return helper() + y;
+}
+```
+
+Without `WithFn(fn2)` here, `fn2`'s locals would be built while the calling
+function (`main`, above) is the active function context, and there is no
+reliable way to tell them apart from `main`'s own locals afterward —
+`FunctionSetBody` detects this and raises a compile error naming the
+required `WithFn(fn2)` wrapper rather than silently misattaching them (which
+previously produced broken generated C, or a genuine frame-slot aliasing
+hazard depending on the two functions' relative layout).
 
 ## Type And Symbol Reflection
 

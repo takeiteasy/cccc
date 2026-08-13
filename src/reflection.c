@@ -1971,10 +1971,28 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
     if (!node)
         return;
 
-    if (node->kind == ND_BLOCK_LITERAL && node->block_fn &&
-        node->block_fn->parent_fn == NULL) {
-        node->block_fn->parent_fn = fn;
-        node->block_fn->nesting_depth = fn->nesting_depth + 1;
+    if (node->kind == ND_BLOCK_LITERAL && node->block_fn) {
+        if (node->block_fn->parent_fn == NULL) {
+            node->block_fn->parent_fn = fn;
+            node->block_fn->nesting_depth = fn->nesting_depth + 1;
+        }
+        // #995: a lifted block function is created via new_gvar() and never
+        // gets is_macro_generated set at parse time (block_literal() has no
+        // way to know it's being parsed inside a macro-generated body --
+        // that only becomes true once __builtin_ast_function_set_body
+        // adopts this body onto a generated fn, here). Propagate it so the
+        // block's own definition is recorded as an emit event
+        // (cc_record_emit_object, macros.c) the same way MakeFunction/
+        // PublishNode does -- otherwise -c=generated silently drops the
+        // lifted function's body while still emitting calls to it.
+        // Recurse into the block's own body (not reached by the generic
+        // node->body walk below -- that field holds the *block literal
+        // expression's* children, the block function's body lives on
+        // block_fn->body) so a block nested inside another generated block
+        // is propagated too.
+        node->block_fn->is_macro_generated |= fn->is_macro_generated;
+        if (fn->is_macro_generated)
+            relink_orphan_block_parents(node->block_fn->body, node->block_fn);
     }
 
     if (node->kind == ND_SWITCH) {
@@ -2004,6 +2022,82 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
     relink_orphan_block_parents(node->args, fn);
 
     relink_orphan_block_parents(node->next, fn);
+}
+
+// #997: returns true if obj is present on the linked list starting at
+// candidates, by pointer identity.
+static bool obj_in_list(Obj *obj, Obj *candidates) {
+    for (Obj *o = candidates; o; o = o->next)
+        if (o == obj)
+            return true;
+    return false;
+}
+
+// #997: walk fn's finished body for every local Obj it actually references,
+// and return the first one found still sitting on stray_locals (the calling
+// function's vm->compiler.locals list, per the caller's comment) rather than
+// already attached to fn (fn->locals/fn->params). Mirrors
+// relink_orphan_block_parents()'s traversal shape. Recurses into a nested
+// block literal's own body via block_fn->body (not reached by the generic
+// node->body walk below -- see the comment on relink_orphan_block_parents).
+// Detection only, by design: a node kind this walk doesn't know about is
+// silently not reported, same as before this fix existed, rather than risk
+// a false negative turning into a false positive on unrelated code.
+static Obj *collect_stray_body_local(Node *node, Obj *stray_locals, Obj *fn) {
+    if (!node)
+        return NULL;
+
+    Obj *found = NULL;
+    if ((node->kind == ND_VAR || node->kind == ND_VLA_PTR) && node->var &&
+        obj_in_list(node->var, stray_locals) &&
+        !obj_in_list(node->var, fn->locals) &&
+        !obj_in_list(node->var, fn->params))
+        found = node->var;
+
+    if (!found && node->kind == ND_BLOCK_LITERAL) {
+        if (node->block_desc_var &&
+            obj_in_list(node->block_desc_var, stray_locals) &&
+            !obj_in_list(node->block_desc_var, fn->locals) &&
+            !obj_in_list(node->block_desc_var, fn->params))
+            found = node->block_desc_var;
+        if (!found && node->block_fn)
+            found = collect_stray_body_local(node->block_fn->body,
+                                             stray_locals, node->block_fn);
+    }
+    if (found)
+        return found;
+
+    if (node->kind == ND_SWITCH) {
+        if ((found = collect_stray_body_local(node->cond, stray_locals, fn)))
+            return found;
+        for (Node *c = node->case_next; c; c = c->case_next)
+            if ((found = collect_stray_body_local(c->lhs, stray_locals, fn)))
+                return found;
+        if (node->default_case &&
+            (found = collect_stray_body_local(node->default_case->lhs,
+                                              stray_locals, fn)))
+            return found;
+        return collect_stray_body_local(node->next, stray_locals, fn);
+    }
+
+    if (node->kind == ND_CASE) {
+        if ((found = collect_stray_body_local(node->lhs, stray_locals, fn)))
+            return found;
+        return collect_stray_body_local(node->next, stray_locals, fn);
+    }
+
+    if ((found = collect_stray_body_local(node->lhs, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->rhs, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->cond, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->then, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->els, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->init, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->inc, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->body, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node->args, stray_locals, fn)))
+        return found;
+
+    return collect_stray_body_local(node->next, stray_locals, fn);
 }
 
 void __builtin_ast_function_set_body(Obj *fn, Node *body) {
@@ -2069,8 +2163,64 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
                 tail = tail->next;
             tail->next = new_locals;
         }
+    }
 
-        relink_orphan_block_parents(fn->body, fn);
+    // #995: propagate is_macro_generated onto any block literal lifted
+    // while parsing this body (block_literal(), src/parse.c, has no way to
+    // know at parse time that its enclosing body will end up attached to a
+    // generated function), and backfill parent_fn/nesting_depth -- both
+    // needed regardless of which branch above ran (a body assembled under
+    // WithFn(fn) needs the propagation too, not just the adopted-locals
+    // case), so this call is unconditional rather than nested inside the
+    // guard above.
+    relink_orphan_block_parents(fn->body, fn);
+
+    // #997: current_fn != NULL means a comptime macro invoked from *inside*
+    // an ordinary function is building fn's body without wrapping the call
+    // in WithFn(fn) -- vm->compiler.locals genuinely belongs to current_fn
+    // here (its own temps), not to fn, so it can't be adopted the way the
+    // current_fn == NULL branch above does. But if the body just attached
+    // to fn actually declares its own locals, they were still prepended
+    // onto current_fn's list (every new_lvar call always prepends there,
+    // see the comment above) and now sit stranded, misattached to the
+    // wrong function's frame -- the exact #996 offset-aliasing hazard, one
+    // frame-layout change away from a SIGBUS. Detect (don't attempt to
+    // move: telling apart current_fn's own temps from fn's newly-declared
+    // locals on one shared list needs an AST walk of fn's finished body,
+    // and a missed node kind there would produce a *partial* move --  one
+    // local's offset assigned in fn's frame, another still in current_fn's
+    // -- genuine aliasing, worse than today's uniformly-wrong behavior) and
+    // hard-error naming the fix instead.
+    if (vm->compiler.current_fn != NULL && vm->compiler.current_fn != fn &&
+        vm->compiler.locals != NULL) {
+        Obj *stray = collect_stray_body_local(fn->body, vm->compiler.locals,
+                                              fn);
+        if (stray) {
+            // error_tok (used elsewhere in this file, e.g. #969's
+            // __builtin_pc_* rejection) needs a real token to report a
+            // location; vm->compiler.macro_call_tok is NULL when this
+            // builtin was reached other than via a live macro-call frame
+            // (should not happen here in practice, but bare error() is the
+            // same fallback shape #969 uses).
+            if (vm->compiler.macro_call_tok)
+                error_tok(vm, vm->compiler.macro_call_tok,
+                          "FunctionSetBody: local '%s' was declared for "
+                          "function '%s' while building it from inside "
+                          "function '%s'; wrap the call in WithFn(%s) { "
+                          "FunctionSetBody(...); }",
+                          stray->name, fn->name,
+                          vm->compiler.current_fn->name
+                              ? vm->compiler.current_fn->name
+                              : "<anonymous>",
+                          fn->name);
+            error("FunctionSetBody: local '%s' was declared for function "
+                  "'%s' while building it from inside function '%s'; wrap "
+                  "the call in WithFn(%s) { FunctionSetBody(...); }",
+                  stray->name, fn->name,
+                  vm->compiler.current_fn->name ? vm->compiler.current_fn->name
+                                                 : "<anonymous>",
+                  fn->name);
+        }
     }
 
     // Mark as having a definition

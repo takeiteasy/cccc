@@ -564,6 +564,17 @@ static void collect_generated_call_targets(Node *node, ObjVec *out) {
         node->var->is_macro_generated)
         obj_vec_push(out, node->var);
 
+    // #995: a block literal's descriptor initializer references its lifted
+    // function through node->block_fn directly, not through an ND_VAR child
+    // -- this pass would otherwise miss it entirely, since block_fn's
+    // definition is emitted later in event order (the macro_globals drain
+    // in macros.c is newest-first, and the calling function's own
+    // PublishNode event precedes the block's) than the caller's body that
+    // references it.
+    if (node->kind == ND_BLOCK_LITERAL && node->block_fn &&
+        node->block_fn->is_macro_generated)
+        obj_vec_push(out, node->block_fn);
+
     if (node->kind == ND_SWITCH) {
         collect_generated_call_targets(node->cond, out);
         for (Node *c = node->case_next; c; c = c->case_next)

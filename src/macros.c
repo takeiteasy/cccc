@@ -3002,15 +3002,20 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
     // extern declarations for every generated global variable, prepending
     // them to all input token streams so the parser can resolve references.
     for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
+        // #928/#995: an anon gvar or a lifted block function (dotted
+        // `.L..N` name -- reflect_new_anon_gvar/block_literal's
+        // new_unique_name, reflection.c/parse.c) is referenced directly
+        // through the Obj pointer already embedded in its ND_VAR/
+        // ND_BLOCK_LITERAL node, never by re-parsed textual reference, and
+        // doesn't get a real identifier until rename_anon_globals() renames
+        // it at serialization time (long after this pre-parse pass runs).
+        // Synthesizing `extern T .L..N;`/`static T .L..N(...);` here is
+        // both unnecessary and invalid C -- skip it. #995 gave a lifted
+        // block function is_macro_generated for the first time, so the
+        // is_fn_def arm needed the same `name[0] != '.'` guard #928 already
+        // gave is_gvar_def.
         bool is_fn_def  = o->is_function  && o->body &&
-                          o->is_macro_generated;
-        // #928: an anon gvar (dotted `.L..N` name -- reflect_new_anon_gvar,
-        // reflection.c) is referenced directly through the Obj pointer
-        // already embedded in its ND_VAR node, never by re-parsed textual
-        // reference, and doesn't get a real identifier until
-        // rename_anon_globals() renames it at serialization time (long
-        // after this pre-parse pass runs). Synthesizing `extern T .L..N;`
-        // here is both unnecessary and invalid C -- skip it.
+                          o->is_macro_generated && o->name[0] != '.';
         bool is_gvar_def = !o->is_function && o->is_definition &&
                             o->is_macro_generated && o->name[0] != '.';
         if (!is_fn_def && !is_gvar_def)

@@ -1989,11 +1989,81 @@ def case_macro_generated_block_locals_round_trip(cccc: Path, tmp: str) -> bool:
                                     MACRO_GENERATED_BLOCK_LOCALS_PROGRAM)
 
 
+# #995: same source as case 64 (MACRO_GENERATED_BLOCK_LOCALS_PROGRAM), but
+# this exercises -c=generated specifically -- a real header-comment/-m/
+# -c=native shape assertion cannot see this failure mode, since -m/-c=native
+# both run the (!generated_only) serializer path, which was never broken.
+# main() here is deliberately NOT macro-generated (it's hand-written, same
+# as case 64's), so it never reaches -c=generated's output at all -- the
+# generated .gen.c is linked against a *separate*, hand-written harness
+# object that supplies main() and calls use_block(), the only way to prove
+# __cccc_block_0's definition actually reached the linker (a `cc -c`
+# compile-only check, as case 38 uses for its own -c=generated assertion,
+# would not catch a dangling call to a function that was never emitted at
+# all -- that only shows up as an undefined-symbol error at link time).
+MACRO_GENERATED_BLOCK_HARNESS = (
+    "int use_block(void);\n"
+    "int main(void) {\n"
+    "    return use_block();\n"
+    "}\n"
+)
+
+
+def case_macro_generated_block_generated_output_links(cccc: Path, tmp: str) -> bool:
+    print("  65: -c=generated emits a block literal lifted while building a "
+          "macro-generated function body (#995) -- block_literal() never "
+          "set is_macro_generated on the lifted function, so "
+          "cc_record_emit_object never recorded it and it was silently "
+          "dropped from -c=generated output while the caller's body still "
+          "called it, leaving generated C that fails to link")
+    src = Path(tmp) / "macro_generated_block_gen_995.c"
+    write(src, MACRO_GENERATED_BLOCK_LOCALS_PROGRAM)
+    out_path = Path(tmp) / "macro_generated_block_gen_995.gen.c"
+    result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    out = out_path.read_text()
+    if out.count("__cccc_block_0") < 3:
+        # forward decl + descriptor reference + definition header, at least
+        print(f"    FAIL: -c=generated output does not look like it defines "
+              f"__cccc_block_0 (found {out.count('__cccc_block_0')} "
+              f"occurrences)\n    {out}")
+        return False
+    gen_obj = Path(tmp) / "macro_generated_block_gen_995.o"
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(gen_obj)], cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output\n"
+              f"    {cc_result.stderr}\n    {out}")
+        return False
+    harness_src = Path(tmp) / "macro_generated_block_harness_995.c"
+    write(harness_src, MACRO_GENERATED_BLOCK_HARNESS)
+    harness_obj = Path(tmp) / "macro_generated_block_harness_995.o"
+    cc_result = run(["cc", "-c", harness_src.name, "-o", str(harness_obj)], cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the harness\n    {cc_result.stderr}")
+        return False
+    out_bin = Path(tmp) / "macro_generated_block_gen_995_out"
+    link_result = run(["cc", "-o", str(out_bin), str(gen_obj), str(harness_obj)], cwd=tmp)
+    if link_result.returncode != 0:
+        print(f"    FAIL: linking the -c=generated object against a "
+              f"hand-written main() that calls use_block() failed -- "
+              f"__cccc_block_0 was likely dropped from the -c=generated "
+              f"output\n    {link_result.stderr}")
+        return False
+    run_result = run([str(out_bin)], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2065,6 +2135,7 @@ def main() -> int:
             case_block_no_literal_preamble_m_output,
             case_block_large_struct_capture_round_trip,
             case_macro_generated_block_locals_round_trip,
+            case_macro_generated_block_generated_output_links,
         ]
         results = [case(cccc, tmp) for case in cases]
 
