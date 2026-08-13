@@ -1248,6 +1248,29 @@ verbatim behind a `-fblocks` opt-in, for callers who want clang dialect
 fidelity instead of this lowering, is tracked as a separate follow-up
 ticket too.
 
+A by-value capture of an aggregate (`struct`/`union`/array) larger than one
+machine word, a wide `_BitInt`, or a `_Decimal128` used to be silently
+truncated to its first 8 bytes by the VM's own block-literal codegen (#994):
+the descriptor was a flat one-8-byte-slot-per-capture array, and every
+capture copied through exactly one 8-byte load+store regardless of its real
+size — a wide `_BitInt`/`_Decimal` capture (address-based storage) fared
+worse still, storing a pointer *into the enclosing frame* rather than a
+snapshotted value, dangling the instant that frame exited. This was VM-only
+— the native serializer already sized each env struct field from the
+capture's real type and copied it with plain struct assignment (valid C for
+every aggregate kind except a bare array, which needs `__builtin_memcpy`
+instead — also fixed by #994). Fixed by sizing each descriptor slot from the
+capture's own type (8 bytes for a scalar, a `__block` heap-box pointer, or a
+`TY_VLA`'s placeholder pointer; `align_to(size, 8)` otherwise) instead of a
+flat one-word-per-capture array, and copying a wide slot via the VM's
+existing `MCPY` opcode instead of a truncating 8-byte load+store. A second,
+independent gap surfaced by the same fix: a struct/union/vector/wide-
+`_BitInt`/`_Decimal` *parameter* is itself passed by pointer (its own frame
+slot holds a pointer to the value, not the value's bytes — the same ABI
+fact `gen_addr`'s plain variable-read path already accounts for), so
+capturing such a parameter needed one extra pointer dereference before the
+capture-copy loop's source address was usable.
+
 A `NodeKind`/`TypeKind` with no serializer case above is a hard compile error
 (#963c), not a divergence: `serialize_expr`/`serialize_type`'s `default:` arms
 used to emit a `/* unsupported expr kind N */`/`/* unknown type */` comment and

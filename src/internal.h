@@ -725,6 +725,14 @@ Type *enum_type(VirtualMachine *vm);
 Type *struct_type(VirtualMachine *vm);
 Type *union_type(VirtualMachine *vm);
 Type *block_type(VirtualMachine *vm, Type *return_ty, Type *params);
+// #994: size-aware block descriptor layout. A capture's slot is 8 bytes
+// (a scalar value, a __block heap-box pointer, or a TY_VLA's placeholder
+// pointer) or align_to(cap->ty->size, 8) for a wider by-value aggregate --
+// no longer a flat one-slot-per-capture array. codegen.c uses these
+// instead of re-deriving the layout so parse.c's descriptor-local size and
+// codegen.c's slot addressing can never drift apart.
+long cc_block_capture_offset(Obj *block_fn, int idx);
+long cc_block_desc_size(Obj *block_fn);
 Type *complex_type_for(VirtualMachine *vm, Type *base);
 Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned);
 void add_type(VirtualMachine *vm, Node *node);

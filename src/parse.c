@@ -8847,6 +8847,42 @@ static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
         collect_block_returns(vm, n, out, count, cap);
 }
 
+// #994: byte offset of block_fn->captures[idx]'s descriptor slot, measured
+// from the descriptor's own base (0 = invoke ptr, 8 = byte-size field, so
+// the first capture slot never starts before 16). A __block local's slot
+// holds its heap-box pointer (8 bytes, matching codegen's is_block_var
+// copy) and a TY_VLA capture keeps its placeholder-sized 8-byte pointer
+// slot (its ->size is a compile-time constant, not the real row-major
+// byte count -- see the TY_VLA comment elsewhere in this file); every
+// other by-value capture gets align_to(cap->ty->size, 8) bytes so a
+// struct/union/array/wide-_BitInt/_Decimal larger than one word is no
+// longer truncated. Each slot starts aligned to MAX(8, cap->ty->align).
+// codegen.c calls this instead of re-deriving the layout so the two
+// files can't drift apart; the descriptor local's own size is always
+// cc_block_desc_size(block_fn), read back by codegen for Block_copy's
+// byte count.
+long cc_block_capture_offset(Obj *block_fn, int idx) {
+    long off = 16;
+    for (int i = 0; i < idx; i++) {
+        Obj *cap = block_fn->captures[i];
+        int slot_size = (cap->is_block_var || cap->ty->kind == TY_VLA)
+                             ? 8 : align_to((int)cap->ty->size, 8);
+        int slot_align = (cap->is_block_var || cap->ty->kind == TY_VLA)
+                              ? 8 : MAX(8, cap->ty->align);
+        off = align_to((int)off, slot_align);
+        off += slot_size;
+    }
+    return off;
+}
+
+// #994: total descriptor byte size (invoke + size fields + every capture
+// slot per cc_block_capture_offset's layout, including trailing padding
+// so the last capture's slot ends on an 8-byte boundary).
+long cc_block_desc_size(Obj *block_fn) {
+    long off = cc_block_capture_offset(block_fn, block_fn->num_captures);
+    return align_to((int)off, 8);
+}
+
 // Parse a block literal: ^{ ... } or ^(params){ ... } or ^returntype(params){
 // ... }
 static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -9055,11 +9091,15 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     vm->compiler.objsize_queries = saved_objsize_queries;
 
     // Allocate descriptor storage on the enclosing function's stack frame.
-    // Layout: [invoke_ptr(0) | desc_size(8) | cap0(16) | cap1(24) | ...]
-    // Per-frame stack allocation ensures each invocation gets its own descriptor,
-    // so multiple calls to a function returning the same block literal are independent.
-    int desc_slots = 2 + num_captures;
-    Type *desc_arr_ty = array_of(vm, ty_long, desc_slots);
+    // Layout: [invoke_ptr(0) | desc_size(8) | cap0(16) | cap1(cc_block_capture_offset(block_fn,1)) | ...]
+    // -- capture slots are no longer a flat one-word-each array; a
+    // by-value aggregate capture wider than 8 bytes gets a wider slot
+    // (#994, see cc_block_capture_offset above). Per-frame stack
+    // allocation ensures each invocation gets its own descriptor, so
+    // multiple calls to a function returning the same block literal are
+    // independent.
+    long desc_bytes = cc_block_desc_size(block_fn);
+    Type *desc_arr_ty = array_of(vm, ty_long, (int)(desc_bytes / 8));
     Obj *desc_var = new_lvar(vm, "", 0, desc_arr_ty);
     // #965: pure serializer bookkeeping -- see Obj.block_desc_of.
     desc_var->block_desc_of = block_fn;

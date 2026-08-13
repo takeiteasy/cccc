@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: Apple Blocks extension
-// Source tests: test_blocks_basic, test_blocks_capture, test_blocks_copy, test_blocks_mutable, test_blocks_nested, test_blocks_release_no_stdlib
+// Source tests: test_blocks_basic, test_blocks_capture, test_blocks_copy, test_blocks_mutable, test_blocks_nested, test_blocks_release_no_stdlib, test_blocks_large_capture
 
 #include <stdlib.h>
 
@@ -82,6 +82,42 @@ typedef int (^IB)(void);
 static IB _blocks_release_no_stdlib_make_adder(int base) {
     IB b = ^{ return base + 1; };
     return Block_copy(b);
+}
+
+// [from test_blocks_large_capture]
+/*
+ * Regression test: block capture of a by-value aggregate larger than 8
+ * bytes (#994).
+ *
+ * The block descriptor used to be a flat one-8-byte-word-per-capture
+ * array, and the capture-copy loop always did exactly one 8-byte
+ * load+store regardless of the capture's real size -- so a struct/union/
+ * array capture wider than one word was silently truncated to its first
+ * word (and a wide _BitInt/_Decimal capture, which is address-based,
+ * stored a dangling pointer into the enclosing frame instead of a value).
+ * Fixed by sizing each descriptor slot from the capture's own type
+ * (cc_block_capture_offset/cc_block_desc_size, shared between parse.c and
+ * codegen.c) and copying a wide slot via MCPY instead of a truncating
+ * LDR_D/STR_D pair.
+ */
+
+struct BigS { long a; long b; };
+struct FiveInts { int a, b, c, d, e; };
+
+typedef int (^IntBlock2)(void);
+typedef struct BigS (^BigSBlock)(void);
+
+// Escapes its frame via Block_copy with a struct capture larger than 8
+// bytes -- the primary "return Block_copy(^{...})" idiom (mirrors
+// make_adder above), which evaluates the block literal inside an MCPY's
+// own argument-list position.
+static IntBlock2 _large_capture_make_reader(struct BigS s) {
+    IntBlock2 b = ^{ return (int)(s.a + s.b); };
+    return Block_copy(b);
+}
+
+static int _large_capture_use_bigs(struct BigS s) {
+    return (int)(s.a + s.b);
 }
 
 #pragma cccc suite begin "blocks"
@@ -329,6 +365,111 @@ int test_blocks_release_no_stdlib(void) {
     Block_release(b);
 
     return 42;
+}
+
+// test_blocks_large_capture
+[[cccc::test(return = 42)]]
+int test_blocks_large_capture(void) {
+    // Test 1: two-long struct capture -- exactly the #994 ticket repro,
+    // one word over the old flat 8-byte-per-capture slot.
+    struct BigS t1;
+    t1.a = 1;
+    t1.b = 41;
+    int (^r1)(void) = ^{ return (int)(t1.a + t1.b); };
+    if (r1() != 42) return 1;
+
+    // Test 2: five-int struct (20 bytes, not a multiple of 8) capture.
+    struct FiveInts t2 = {1, 2, 3, 4, 32};
+    int (^r2)(void) = ^{ return t2.a + t2.b + t2.c + t2.d + t2.e; };
+    if (r2() != 42) return 2;
+
+    // Test 3: two large captures in sequence, pins the slot-offset
+    // arithmetic (not just "bigger than one slot").
+    struct BigS t3a;
+    t3a.a = 1;
+    t3a.b = 2;
+    struct BigS t3b;
+    t3b.a = 3;
+    t3b.b = 4;
+    int (^r3)(void) = ^{ return (int)(t3a.a + t3a.b + t3b.a + t3b.b + 32); };
+    if (r3() != 42) return 3;
+
+    // Test 4: return the whole captured struct by value from inside the
+    // block -- exercises the read side (gen_addr's capture-address path)
+    // rather than a scalar member read.
+    struct BigS t4;
+    t4.a = 20;
+    t4.b = 22;
+    BigSBlock r4 = ^{ return t4; };
+    struct BigS out4 = r4();
+    if (out4.a + out4.b != 42) return 4;
+
+    // Test 5: pass the captured struct by value to a function from inside
+    // the block -- another read-side shape (the whole aggregate, not just
+    // one member).
+    struct BigS t5;
+    t5.a = 30;
+    t5.b = 12;
+    int (^r5)(void) = ^{ return _large_capture_use_bigs(t5); };
+    if (r5() != 42) return 5;
+
+    // Test 6: escape via Block_copy with a large struct *parameter*
+    // capture -- params passed by value larger than one register are
+    // themselves passed by pointer (a second, independent ABI gap #994
+    // uncovered: the capture-copy loop must dereference that pointer
+    // before it becomes the MCPY source, not treat the frame slot's own
+    // address as the data).
+    struct BigS t6;
+    t6.a = 40;
+    t6.b = 2;
+    IntBlock2 r6 = _large_capture_make_reader(t6);
+    int result6 = r6();
+    Block_release(r6);
+    if (result6 != 42) return 6;
+
+    // Test 7: transitive (nested) capture of a large struct through a
+    // parent block's own descriptor.
+    struct BigS t7;
+    t7.a = 15;
+    t7.b = 15;
+    int (^outer7)(void) = ^{
+        int (^inner7)(void) = ^{ return (int)(t7.a + t7.b + 12); };
+        return inner7();
+    };
+    if (outer7() != 42) return 7;
+
+    // Test 8: a wide _BitInt(128) capture (address-based storage, the
+    // other #994 kind that used to store a dangling pointer instead of a
+    // value) escaping its frame via Block_copy.
+    _BitInt(128) t8 = 42;
+    IntBlock2 b8 = ^{ return (int)t8; };
+    IntBlock2 r8 = Block_copy(b8);
+    int result8 = r8();
+    Block_release(r8);
+    if (result8 != 42) return 8;
+
+    // Test 9: a bare array capture (accepted by this compiler, unlike
+    // clang) is subject to the exact same truncation bug and must copy
+    // in full, not just its first 8 bytes (two ints).
+    int t9[3] = {1, 2, 39};
+    int (^r9)(void) = ^{ return t9[0] + t9[1] + t9[2]; };
+    if (r9() != 42) return 9;
+
+    return 42;
+}
+
+// #994/#982 pattern: a `-2`-flagged duplicate of the large-capture MCPY
+// path (test 1 above) as a CHKD false-positive canary -- the new MCPY
+// site introduced by #994's fix is exactly the kind of "did the bounds
+// check move to the correct side" question #982/#983 raised for the
+// struct-assignment MCPY site.
+[[cccc::test(return = 42, flags = "-2")]]
+int test_blocks_large_capture_bounds_checked(void) {
+    struct BigS t;
+    t.a = 1;
+    t.b = 41;
+    int (^r)(void) = ^{ return (int)(t.a + t.b); };
+    return r() == 42 ? 42 : 1;
 }
 
 #pragma cccc suite end

@@ -1615,7 +1615,19 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                 desc, block_fn->name, desc, desc);
         for (int i = 0; i < node->num_block_captures; i++) {
             Obj *cap = node->block_captures[i];
-            fprintf(f, ", %s.__cap%d = ", desc, i);
+            // #994: a by-value capture whose type is an array (accepted by
+            // the parser like clang rejects but this compiler doesn't --
+            // collect_captures_in_node has no guard) can't use plain `=` --
+            // C forbids array assignment. The env struct field is declared
+            // with the real array type (serialize_block_preamble), so copy
+            // through __builtin_memcpy instead; every other capture kind
+            // (scalar, struct/union, block-var pointer) keeps plain `=`,
+            // valid C for all of them.
+            bool is_array_cap = !cap->is_block_var && cap->ty->kind == TY_ARRAY;
+            if (is_array_cap)
+                fprintf(f, ", __builtin_memcpy(%s.__cap%d, ", desc, i);
+            else
+                fprintf(f, ", %s.__cap%d = ", desc, i);
 
             // Mirrors codegen's ND_BLOCK_LITERAL capture-copy loop
             // (codegen.c) exactly, three sources in the same order:
@@ -1639,6 +1651,8 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                 // Ordinary local or global: copy its value.
                 fprintf(f, "%s", cap->name);
             }
+            if (is_array_cap)
+                fprintf(f, ", sizeof(%s.__cap%d))", desc, i);
         }
         fprintf(f, ", (struct __cccc_block *)&%s)", desc);
         break;

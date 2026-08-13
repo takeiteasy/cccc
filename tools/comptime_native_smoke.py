@@ -1801,23 +1801,16 @@ def case_block_header_type_capture_native_round_trip(cccc: Path, tmp: str) -> bo
     print("  60: -c=native, a block's by-value capture of a header-declared "
           "type (struct tm) round-trips as real C (#993), and -m output "
           "places the #include ahead of the env struct that needs it. "
-          "Native-only (not _vm_and_native_run_case): struct tm is larger "
-          "than 8 bytes, and the VM's own block-capture codegen truncates "
-          "any by-value aggregate capture above 8 bytes to a single word "
-          "(#994, pre-existing, unrelated to #993 -- filed separately) -- "
-          "the VM side of this program does not return 42 regardless of "
-          "the serializer, so only the native side is asserted here")
+          "Also asserts VM/native equivalence directly (_vm_and_native_run_"
+          "case): struct tm is larger than 8 bytes, and until #994 the VM's "
+          "own block-capture codegen truncated any by-value aggregate "
+          "capture above 8 bytes to a single word, so this case used to be "
+          "native-only. #994 fixed the truncation, so the VM side now "
+          "returns 42 too and this can assert real equivalence instead")
     src = Path(tmp) / "block_header_type_capture_993.c"
-    out_bin = Path(tmp) / "block_header_type_capture_993_out"
     write(src, BLOCK_HEADER_TYPE_CAPTURE_PROGRAM)
-    compile_result = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
-    if compile_result.returncode != 0:
-        print(f"    FAIL: -c=native compile exited {compile_result.returncode}\n"
-              f"    {compile_result.stderr}")
-        return False
-    run_result = run([f"./{out_bin.name}"], cwd=tmp)
-    if run_result.returncode != 42:
-        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+    if not _vm_and_native_run_case(cccc, tmp, "block_header_type_capture_993",
+                                    BLOCK_HEADER_TYPE_CAPTURE_PROGRAM):
         return False
     result = run([str(cccc), "-m", src.name], cwd=tmp)
     out = result.stdout
@@ -1937,6 +1930,34 @@ def case_block_no_literal_preamble_m_output(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #994: a block capture of a by-value struct larger than 8 bytes used to be
+# silently truncated to its first word by the VM's block-literal codegen --
+# the descriptor was a flat one-8-byte-slot-per-capture array regardless of
+# the capture's real type. The native serializer already copied such a
+# capture correctly (plain struct assignment into a real-typed env struct
+# field), so this is a VM-only miscompile; asserting VM/native equivalence
+# is exactly what would have caught it.
+BLOCK_LARGE_STRUCT_CAPTURE_PROGRAM = (
+    "struct BigS { long a; long b; long c; };\n"
+    "int main(void) {\n"
+    "    struct BigS t;\n"
+    "    t.a = 10;\n"
+    "    t.b = 20;\n"
+    "    t.c = 12;\n"
+    "    int (^b)(void) = ^{ return (int)(t.a + t.b + t.c); };\n"
+    "    return b();\n"
+    "}\n"
+)
+
+
+def case_block_large_struct_capture_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  63: a block capture of a by-value struct larger than 8 bytes "
+          "(24-byte struct, three long members) round-trips VM 42 -> "
+          "native 42 (#994)")
+    return _vm_and_native_run_case(cccc, tmp, "block_large_struct_capture_994",
+                                    BLOCK_LARGE_STRUCT_CAPTURE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -2011,6 +2032,7 @@ def main() -> int:
             case_block_header_type_capture_native_round_trip,
             case_block_routed_include_type_capture_native_round_trip,
             case_block_no_literal_preamble_m_output,
+            case_block_large_struct_capture_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

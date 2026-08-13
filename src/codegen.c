@@ -2119,6 +2119,30 @@ static inline bool is_wide_bitint(Type *ty) {
     return ty && ty->kind == TY_BITINT && ty->bit_width > 64;
 }
 
+// #994: true when a block capture of this type needs a multi-word MCPY
+// copy into its descriptor slot rather than a single 8-byte load+store.
+// Any aggregate kind is routed through MCPY even when size <= 8 -- an
+// 8-byte LDR_D of a smaller struct/array sitting at the very end of an
+// allocation can still trip CHKD/bounds, which a same-size MCPY does not
+// (it copies exactly ty->size bytes). is_block_var/TY_VLA captures never
+// reach this check: both always copy a fixed 8-byte pointer (the heap
+// box, or the VLA's own placeholder pointer) regardless of the pointee's
+// real size -- see the caller in gen_expr's ND_BLOCK_LITERAL case.
+static bool block_capture_needs_mcpy(Type *ty) {
+    if (ty->size > 8)
+        return true;
+    switch (ty->kind) {
+    case TY_STRUCT:
+    case TY_UNION:
+    case TY_ARRAY:
+    case TY_COMPLEX:
+    case TY_VECTOR:
+        return true;
+    default:
+        return is_wide_bitint(ty) || is_decimal(ty);
+    }
+}
+
 // Emit CALLF for a named wide-bitint helper with `nargs` integer args already
 // loaded into REG_A0..REG_A{nargs-1}.  Returns false if function not found.
 static bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs) {
@@ -3697,7 +3721,10 @@ static void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 Obj *static_link = find_static_link_var(current_fn);
                 if (!static_link)
                     error("block function missing __static_link");
-                int cap_offset = (cap_idx + 2) * 8; // skip invoke(0) and size(1) slots
+                // #994: slot width/offset varies with the capture's type
+                // (a by-value aggregate wider than 8 bytes gets a wider
+                // slot) -- shared with parse.c so the layout can't drift.
+                long cap_offset = cc_block_capture_offset(current_fn, cap_idx);
                 // Compiler-internal: this LEA3 only materializes
                 // __static_link's own slot address to immediately load the
                 // descriptor pointer out of it (#676) -- the slot address
@@ -7518,16 +7545,20 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // Block descriptor layout (stack-allocated in enclosing function's frame):
         //   [0]  = invoke pointer (function address)
         //   [8]  = descriptor byte-size (for Block_copy to know how much to malloc)
-        //   [16] = first captured value
-        //   [24] = second captured value  ...
+        //   [16] = first captured value, cc_block_capture_offset(block_fn,1)-th
+        //          byte = second captured value, ...
+        //
+        // #994: capture slots are no longer a flat one-word-each array -- a
+        // by-value aggregate capture wider than 8 bytes gets a wider slot
+        // (cc_block_capture_offset, shared with parse.c so the two files
+        // can't drift apart on the layout).
         //
         // Stack allocation (via block_desc_var) gives each function invocation its
         // own descriptor, so multiple calls to the same function return independent
         // block instances without aliasing.
 
         int num_captures = node->num_block_captures;
-        int descriptor_slots = 2 + num_captures; // invoke + size + captures
-        int descriptor_size = descriptor_slots * 8;
+        long descriptor_size = node->block_desc_var->ty->size;
 
         // Load address of the pre-allocated stack descriptor slot
         int r_desc = alloc_temp_reg();
@@ -7565,11 +7596,11 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // from a grandparent scope).  Check the enclosing function's capture
         // list first so we read from the right source.
         //
-        // #994 (found while testing #990/#993, not fixed here): every branch
-        // below does exactly one 8-byte emit_load/STR_D, regardless of
-        // cap->ty->size -- correct for a scalar or an <=8-byte struct, but a
-        // by-value struct/union capture LARGER than 8 bytes is silently
-        // truncated to its first 8 bytes instead of being fully copied.
+        // #994: an is_block_var/TY_VLA capture always copies a fixed 8-byte
+        // pointer, as before. Any other capture whose type needs more than
+        // one word (block_capture_needs_mcpy) has r_val left holding its
+        // source *address* instead of its loaded value, and is copied via
+        // MCPY -- an exact ty->size copy, not a truncating 8-byte load.
         Obj *enc_fn = vm->compiler.current_fn;
         for (int i = 0; i < num_captures; i++) {
             Obj *cap = node->block_captures[i];
@@ -7577,6 +7608,8 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
             int enc_cap_idx = (enc_fn && enc_fn->is_block)
                               ? find_capture_index(enc_fn, cap) : -1;
+            bool wide_copy = !cap->is_block_var && cap->ty->kind != TY_VLA &&
+                              block_capture_needs_mcpy(cap->ty);
 
             if (enc_cap_idx >= 0) {
                 // Variable lives in the enclosing block's descriptor: read via
@@ -7585,12 +7618,17 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // every intermediate address here feeds an immediate load.
                 Obj *static_link = find_static_link_var(enc_fn);
                 emit_lea3_internal(vm, r_val, static_link->offset);
-                emit_rr(vm, LDR_D, r_val, r_val);                    // descriptor ptr
-                emit_addi3(vm, r_val, r_val, (enc_cap_idx + 2) * 8); // slot addr (skip invoke+size)
+                emit_rr(vm, LDR_D, r_val, r_val); // descriptor ptr
+                emit_addi3(vm, r_val, r_val,
+                           cc_block_capture_offset(enc_fn, enc_cap_idx)); // slot addr
                 if (cap->is_block_var)
                     emit_rr(vm, LDR_D, r_val, r_val); // heap ptr from descriptor slot
-                else
+                else if (!wide_copy)
                     emit_load(vm, cap->ty, r_val, r_val); // value from descriptor slot
+                // else: r_val already holds the slot's own address, used as
+                // the MCPY source below -- the enclosing descriptor's slot
+                // holds the aggregate's bytes inline, same as any other
+                // capture source.
             } else if (cap->is_block_var) {
                 // __block var directly in enclosing stack: copy heap pointer.
                 // Slot address only feeds the immediate load (#676).
@@ -7598,19 +7636,56 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_rr(vm, LDR_D, r_val, r_val);
             } else if (cap->is_local) {
                 // Regular local directly in enclosing stack: copy value.
-                // Slot address only feeds the immediate load (#676).
+                // Slot address only feeds the immediate load (#676) unless
+                // it's the MCPY source address itself (wide_copy).
                 emit_lea3_internal(vm, r_val, cap->offset);
-                emit_load(vm, cap->ty, r_val, r_val);
+                // #994: a struct/union/vector/wide-_BitInt/_Decimal
+                // *parameter*'s frame slot holds a pointer to the value,
+                // not the value's own bytes -- same ABI fact gen_addr's
+                // plain ND_VAR case already accounts for (codegen.c,
+                // search "passed by pointer too"). One extra dereference
+                // is needed here before r_val is a usable source address
+                // (or, for a non-wide type that still hits this rule --
+                // none do today, but the check is by kind not size, same
+                // as block_capture_needs_mcpy -- before emit_load below).
+                if (cap->is_param &&
+                    (cap->ty->kind == TY_STRUCT || cap->ty->kind == TY_UNION ||
+                     cap->ty->kind == TY_VECTOR || is_wide_bitint(cap->ty) ||
+                     is_decimal(cap->ty)))
+                    emit_rr(vm, LDR_D, r_val, r_val); // load pointer from slot
+                if (!wide_copy)
+                    emit_load(vm, cap->ty, r_val, r_val);
             } else {
                 // Global
                 emit_lda3(vm, r_val, cap->offset);
-                emit_load(vm, cap->ty, r_val, r_val);
+                if (!wide_copy)
+                    emit_load(vm, cap->ty, r_val, r_val);
             }
 
-            // Store at descriptor[(i + 2) * 8] (slots 0=invoke, 1=size, 2..n=captures)
+            // Store at descriptor[cc_block_capture_offset(node->block_fn, i)]
             int r_cap_addr = alloc_temp_reg();
-            emit_addi3(vm, r_cap_addr, r_desc, (i + 2) * 8);
-            emit_rr(vm, STR_D, r_val, r_cap_addr);
+            emit_addi3(vm, r_cap_addr, r_desc,
+                       cc_block_capture_offset(node->block_fn, i));
+            if (wide_copy) {
+                // #983: destination is always this call's own freshly
+                // allocated descriptor local -- a compile-time-known frame
+                // address, never captured or escaped yet, so no CHKD is
+                // needed there. The source address may come from a runtime
+                // pointer chase through __static_link (enc_cap_idx >= 0),
+                // so it gets checked unconditionally, matching emit_load's
+                // own dangling_check=true default that the scalar capture
+                // path above already always pays.
+                mark_temp_reg_used(r_val);
+                mark_temp_reg_used(r_cap_addr);
+                if (vm->flags & CCCC_BOUNDS_CHECKS)
+                    emit_rri(vm, CHKD, r_val, 0, (long long)cap->ty->size);
+                emit_mov3(vm, REG_A0, r_cap_addr);
+                emit_mov3(vm, REG_A1, r_val);
+                emit_li3(vm, REG_A2, (long long)cap->ty->size);
+                emit(vm, MCPY);
+            } else {
+                emit_rr(vm, STR_D, r_val, r_cap_addr);
+            }
             free_temp_reg(r_cap_addr);
             free_temp_reg(r_val);
         }
