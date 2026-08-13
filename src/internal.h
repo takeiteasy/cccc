@@ -1079,6 +1079,7 @@ void cc_host_backtrace_print(void);
 
 void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
 const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
+const char *cc_type_kind_name(TypeKind kind);              // kind→string (used by serialize.c's #963c hard error)
 void cc_dump_type(FILE *f, Type *ty);                     // C-ish type spelling (used by the REPL, #661)
 
 // Recursive aggregate/scalar value formatter (#666), shared between the REPL

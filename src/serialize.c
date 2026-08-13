@@ -891,8 +891,31 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         // handles it correctly.
         fprintf(f, "struct __cccc_block *");
         break;
+    case TY_ERROR:
+    case TY_AUTO:
+        // #963c: both are internal sentinels that must never survive to
+        // serialization. TY_ERROR only exists after a compile error has
+        // already been recorded (which bails out before this function is
+        // ever reached); TY_AUTO (C23 `auto`) is resolved to the inferred
+        // concrete type at parse time, before -m/-c=native/-c=generated's
+        // serialization pass runs. Reaching either case here means an
+        // internal invariant was violated upstream, not that the user wrote
+        // something unsupported -- hence a hard error naming the kind
+        // rather than a silently emitted comment (see the default: arm
+        // below for the general case this guards against).
+        error("cccc: internal error: TypeKind '%s' reached the serializer "
+              "unresolved (should have been eliminated before serialization)",
+              cc_type_kind_name(ty->kind));
+        break;
     default:
-        fprintf(f, "/* unknown type */");
+        // #963c: every TypeKind is expected to have an explicit case above.
+        // This used to emit "/* unknown type */" and keep going, producing
+        // C the host compiler then rejected at the use site -- a delayed,
+        // confusing failure. Fail immediately and name the kind instead, so
+        // the next TypeKind added without a case here is caught at
+        // implementation/test time rather than silently miscompiling.
+        error("cccc: internal error: no serializer case for TypeKind '%s' "
+              "(kind %d)", cc_type_kind_name(ty->kind), ty->kind);
         break;
     }
 }
@@ -1547,7 +1570,24 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         Obj *block_fn = node->block_fn;
         const char *env = block_fn ? find_block_env(ctx, block_fn) : NULL;
         if (!node->block_desc_var || !block_fn || !env) {
-            fprintf(f, "/* unsupported expr kind %d */", node->kind);
+            // #963c: this used to fall back to the same
+            // "/* unsupported expr kind N */" comment as the generic
+            // default: arm below -- a silent drop inside a *handled* case,
+            // in the newest code in this file. block_desc_var/block_fn/env
+            // are all set unconditionally by block_literal() (parse.c) and
+            // serialize_block_preamble()'s registration pass before this
+            // function ever runs, so reaching here means one of those
+            // invariants was violated upstream; fail loudly instead of
+            // emitting a null expression.
+            if (node->tok)
+                error_tok(vm, node->tok,
+                          "internal error: block literal is missing its "
+                          "descriptor local, function, or env struct at "
+                          "serialization time");
+            else
+                error("cccc: internal error: block literal is missing its "
+                      "descriptor local, function, or env struct at "
+                      "serialization time");
             break;
         }
         if (!ctx->current_fn) {
@@ -1626,8 +1666,55 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
     }
 
+    case ND_MACRO_CALL:
+    case ND_INIT_SPLICE:
+        // #963c: both are comptime-internal and are consumed before this
+        // function ever runs -- ND_MACRO_CALL is compiled away by
+        // compile_all_macros/cc_eager_expand_macro_call during
+        // cc_expand_macros (main.c), which always runs ahead of the
+        // -m/-c=native/-c=generated serialization pass, and the one path
+        // that could defer one into a global initializer
+        // (has_pending_macro_init, parse.c) is resolved to concrete .data
+        // bytes by cc_finalize_macro_gvar_inits, also inside
+        // cc_expand_macros, before serialization starts. ND_INIT_SPLICE is
+        // likewise expanded away by quote_substitute at comptime. Reaching
+        // either case here means a macro/splice escaped expansion, which is
+        // an internal invariant violation, not user-writable input -- fail
+        // loudly and name the kind rather than emitting a silently-dropped
+        // comment.
+        if (node->tok)
+            error_tok(vm, node->tok,
+                      "internal error: %s reached the serializer "
+                      "unexpanded (should have been resolved during "
+                      "macro/comptime expansion)",
+                      cc_node_kind_name(node->kind));
+        else
+            error("cccc: internal error: %s reached the serializer "
+                  "unexpanded (should have been resolved during "
+                  "macro/comptime expansion)", cc_node_kind_name(node->kind));
+        break;
+
     default:
-        fprintf(f, "/* unsupported expr kind %d */", node->kind);
+        // #963c: every reachable NodeKind is expected to have an explicit
+        // case above (see COVERAGE.md's "Serialized-output divergences"
+        // section for the constructs that are intentionally dropped with a
+        // diagnostic rather than serialized). This used to emit
+        // "/* unsupported expr kind N */" and keep going -- in expression
+        // position that fails the host build loudly, but in statement
+        // position (serialize_stmt's own default: routes here and appends
+        // ";") it produced a syntactically valid null statement: the
+        // construct silently vanished and the native binary returned a
+        // different answer than the VM (#963's whole motivation). Fail
+        // immediately and name the kind instead, so the next NodeKind added
+        // without a case here is caught at implementation/test time rather
+        // than silently miscompiling.
+        if (node->tok)
+            error_tok(vm, node->tok,
+                      "internal error: no serializer case for %s (kind %d)",
+                      cc_node_kind_name(node->kind), node->kind);
+        else
+            error("cccc: internal error: no serializer case for %s (kind %d)",
+                  cc_node_kind_name(node->kind), node->kind);
         break;
     }
 
@@ -1729,8 +1816,12 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // an ND_BLOCK whose body is one ND_EXPR_STMT per declarator
         // (declaration(), parse.c) -- not an expression, so handing it to
         // serialize_expr fell through to its default case and silently
-        // dropped the initialization (`/* unsupported expr kind N */`,
-        // loop variable left uninitialized). The declarations themselves
+        // dropped the initialization (loop variable left uninitialized;
+        // #963c has since turned that default case into a hard error, so
+        // this exact failure mode can no longer reach the host compiler
+        // silently -- this ND_FOR handling avoids it in the first place by
+        // never calling serialize_expr on the ND_BLOCK at all). The
+        // declarations themselves
         // are already hoisted to the top of the function by
         // serialize_function(); only the initializing assignment(s) belong
         // in the init clause, comma-joined for a multi-declarator init
@@ -1868,7 +1959,15 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     default:
-        // Treat as expression statement
+        // Treat as expression statement. #963c deliberately leaves this
+        // default: arm alone: it is the legitimate route for every
+        // expression-kind NodeKind reaching statement position (there is no
+        // per-kind list to maintain here), not a fallback for an unhandled
+        // kind. It now inherits serialize_expr's own hard error for any
+        // kind that function doesn't recognize, so an unhandled kind still
+        // fails loudly here -- it just fails one call deeper than it used
+        // to, instead of this arm silently emitting a "comment + ;" null
+        // statement (#963's original silent-miscompile symptom).
         print_indent_level(f, indent);
         serialize_expr(f, vm, ctx, node, 0);
         fprintf(f, ";\n");

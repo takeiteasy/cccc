@@ -1226,6 +1226,18 @@ ticket); emitting `^{ }` verbatim behind a `-fblocks` opt-in, for callers
 who want clang dialect fidelity instead of this lowering, is tracked as a
 separate follow-up ticket too.
 
+A `NodeKind`/`TypeKind` with no serializer case above is a hard compile error
+(#963c), not a divergence: `serialize_expr`/`serialize_type`'s `default:` arms
+used to emit a `/* unsupported expr kind N */`/`/* unknown type */` comment and
+keep going, which in statement position was a syntactically valid null
+statement — the construct silently vanished from the native binary while the
+VM still ran it. Every kind that reaches the serializer today has an explicit
+case (this document's four divergences above, plus the intentional-drop and
+hard-error constructs elsewhere in this section); anything that doesn't is
+rejected with a diagnostic naming the kind, so a future gap fails at
+implementation time instead of silently miscompiling a program that runs
+correctly in the VM.
+
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 

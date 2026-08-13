@@ -484,6 +484,13 @@ const char *cc_node_kind_name(NodeKind kind) {
     return node_kind_name(kind);
 }
 
+// Public access to the TypeKind name table (#963c) -- used by the
+// serializer's default-case hard error to name an unhandled TypeKind, the
+// same way cc_node_kind_name names an unhandled NodeKind above.
+const char *cc_type_kind_name(TypeKind kind) {
+    return type_kind_name(kind);
+}
+
 // Public entry point for printing a Type as C-ish declarator syntax (e.g.
 // "int *", "struct Point", "unsigned long"). Used by the REPL's `:type`
 // command and result formatter (ticket #661).
