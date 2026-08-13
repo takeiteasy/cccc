@@ -156,6 +156,16 @@ typedef struct {
     char *file_path;
 } TypeName;
 
+// #965: pairs a lifted block function (Obj.is_block) with the name of the
+// environment struct serialize_block_preamble() emitted for it, so
+// serialize_expr's ND_BLOCK_LITERAL/ND_BLOCK_CALL cases and ND_VAR's
+// captured-variable lookup can find it again without re-deriving it. Built
+// once in serialize_block_preamble(), read-only afterward.
+typedef struct {
+    Obj *block_fn;
+    char *env_struct_name; // includes the leading "struct " keyword
+} BlockEnvEntry;
+
 typedef struct {
     TypeVec seen;
     TypeVec defs;
@@ -186,6 +196,11 @@ typedef struct {
     VirtualMachine *vm;
     char **captured_paths;
     int captured_paths_len;
+    // #965: block-literal env structs -- see BlockEnvEntry and
+    // serialize_block_preamble().
+    BlockEnvEntry *block_envs;
+    int block_envs_len;
+    int block_envs_cap;
 } SerializeContext;
 
 // Forward declaration
@@ -864,6 +879,18 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         else if (ty->size == 4) fprintf(f, ty->is_unsigned ? "unsigned int" : "int");
         else fprintf(f, ty->is_unsigned ? "unsigned long" : "long");
         break;
+    case TY_BLOCK:
+        // #965: on the default (non `-fblocks`) lowering path a block value
+        // is always a pointer to the common-initial-sequence descriptor
+        // struct emitted by serialize_block_preamble() -- see the "Blocks"
+        // entry in COVERAGE.md's serialized-output-divergences section.
+        // TY_BLOCK never needs a case in serialize_type_decl (unlike
+        // TY_PTR/TY_ARRAY/TY_VLA/TY_FUNC): it's already an atomic
+        // pointer-sized type here, not a container recursing into a base,
+        // so the declarator-building default branch's plain "<type> <name>"
+        // handles it correctly.
+        fprintf(f, "struct __cccc_block *");
+        break;
     default:
         fprintf(f, "/* unknown type */");
         break;
@@ -908,6 +935,56 @@ static void serialize_string_n(FILE *f, const char *str, int len) {
         }
     }
     fprintf(f, "\"");
+}
+
+// #965: index of `var` in `block_fn`'s capture list, or -1. Mirrors
+// find_capture_index (codegen.c) exactly -- kept as an independent copy
+// here rather than shared, since codegen's version is `static` in a
+// different translation unit and this file's dependency surface is
+// otherwise limited to internal.h's declarations.
+static int block_capture_index(Obj *block_fn, Obj *var) {
+    if (!block_fn || !var)
+        return -1;
+    for (int i = 0; i < block_fn->num_captures; i++)
+        if (block_fn->captures[i] == var)
+            return i;
+    return -1;
+}
+
+// #965: the env struct name serialize_block_preamble() paired with
+// `block_fn`, or NULL if `block_fn` isn't a block function (or somehow has
+// no entry -- defensive only, every Obj.is_block function gets one).
+static const char *find_block_env(SerializeContext *ctx, Obj *block_fn) {
+    for (int i = 0; i < ctx->block_envs_len; i++)
+        if (ctx->block_envs[i].block_fn == block_fn)
+            return ctx->block_envs[i].env_struct_name;
+    return NULL;
+}
+
+// #965: when `var` is captured by the block literal currently being
+// serialized (ctx->current_fn), print the descriptor-field access that
+// reaches it through __static_link and return true; otherwise print
+// nothing and return false so the caller falls back to the variable's
+// plain name. Mirrors gen_addr's cap_idx >= 0 branch (codegen.c) exactly:
+// a plain capture's descriptor field holds the snapshotted value directly,
+// while an is_block_var capture's field holds the shared heap box's
+// pointer, so reading the *value* needs one extra dereference -- the `->`
+// in `(*((T*)p)->__capK)` already binds tighter than the outer `*`, so this
+// is unambiguous without further parenthesization.
+static bool serialize_block_capture_ref(FILE *f, SerializeContext *ctx, Obj *var) {
+    if (!ctx->current_fn || !ctx->current_fn->is_block)
+        return false;
+    int idx = block_capture_index(ctx->current_fn, var);
+    if (idx < 0)
+        return false;
+    const char *env = find_block_env(ctx, ctx->current_fn);
+    if (!env)
+        env = "struct __cccc_block_env_?"; // defensive only, see find_block_env
+    if (var->is_block_var)
+        fprintf(f, "(*((%s *)__static_link)->__cap%d)", env, idx);
+    else
+        fprintf(f, "((%s *)__static_link)->__cap%d", env, idx);
+    return true;
 }
 
 // True when an ND_ALOAD/ND_ASTORE address expression has a pointee the
@@ -981,6 +1058,19 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                               ? node->var->ty->array_len
                               : (int)strlen(node->var->init_data);
                 serialize_string_n(f, node->var->init_data, len);
+            } else if (serialize_block_capture_ref(f, ctx, node->var)) {
+                // #965: handled -- var is captured by the block literal
+                // currently being serialized.
+            } else if (node->var->is_block_var) {
+                // #965: a __block local's stack slot now holds a heap box
+                // pointer (see serialize_function's hoist loop) -- read
+                // through it so the expression's spelled type matches
+                // node->ty (the variable's declared type, not a pointer to
+                // it). Only reached here for a __block var referenced from
+                // *outside* any block capturing it (or from the same
+                // function that declared it); the captured case above
+                // already applies its own dereference.
+                fprintf(f, "(*%s)", node->var->name);
             } else {
                 fprintf(f, "%s", node->var->name);
             }
@@ -1216,7 +1306,16 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     case ND_MEMZERO:
-        if (node->var)
+        if (node->var && node->var->is_block_var)
+            // #965: a __block local's slot holds the heap box *pointer*
+            // (see serialize_function's hoist loop), not the storage
+            // itself -- &name/sizeof(name) would zero the 8-byte pointer
+            // slot instead of the real storage. Mirrors codegen's own
+            // is_block_var arm on ND_MEMZERO (codegen.c), the same arm
+            // #982's TY_VLA case was modelled on.
+            fprintf(f, "__builtin_memset(%s, 0, sizeof(*%s))",
+                    node->var->name, node->var->name);
+        else if (node->var)
             fprintf(f, "__builtin_memset(&%s, 0, sizeof(%s))",
                     node->var->name, node->var->name);
         else
@@ -1433,6 +1532,99 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         error("cccc: _Decimal is not supported in native/serialized output "
               "(__builtin_decimal_to_chars has no host equivalent)");
         break;
+
+    case ND_BLOCK_LITERAL: {
+        // #965: default lowering -- lift + explicit env struct
+        // (serialize_block_preamble, block_capture_index). The env struct
+        // instance lives in node->block_desc_var, an existing local on the
+        // *enclosing* function's frame (block_literal(), parse.c) --
+        // exactly matching the VM's own per-invocation stack descriptor
+        // (ND_BLOCK_LITERAL, codegen.c), so lifetime semantics carry over
+        // unchanged. Building it as a comma expression writes into that
+        // named local (rather than a temporary), which is what keeps the
+        // block value's address stable for the rest of the enclosing
+        // scope.
+        Obj *block_fn = node->block_fn;
+        const char *env = block_fn ? find_block_env(ctx, block_fn) : NULL;
+        if (!node->block_desc_var || !block_fn || !env) {
+            fprintf(f, "/* unsupported expr kind %d */", node->kind);
+            break;
+        }
+        if (!ctx->current_fn) {
+            // A block literal's descriptor is a *local* -- there is no
+            // enclosing frame to hold one at file scope.
+            if (node->tok)
+                error_tok(vm, node->tok,
+                          "a block literal cannot be serialized at file "
+                          "scope (its descriptor needs an enclosing "
+                          "function's frame)");
+            else
+                error("cccc: a block literal cannot be serialized at file scope");
+        }
+
+        const char *desc = node->block_desc_var->name;
+        fprintf(f, "(%s.__invoke = (void *)%s, %s.__size = (long)sizeof(%s)",
+                desc, block_fn->name, desc, desc);
+        for (int i = 0; i < node->num_block_captures; i++) {
+            Obj *cap = node->block_captures[i];
+            fprintf(f, ", %s.__cap%d = ", desc, i);
+
+            // Mirrors codegen's ND_BLOCK_LITERAL capture-copy loop
+            // (codegen.c) exactly, three sources in the same order:
+            int enc_idx = (ctx->current_fn->is_block)
+                              ? block_capture_index(ctx->current_fn, cap) : -1;
+            const char *enc_env =
+                enc_idx >= 0 ? find_block_env(ctx, ctx->current_fn) : NULL;
+            if (enc_idx >= 0 && enc_env) {
+                // Transitive capture: read from the enclosing block's own
+                // descriptor via __static_link. Exactly one dereference
+                // either way -- for an is_block_var capture the parent's
+                // field already holds the box pointer (copied verbatim
+                // below); for a plain capture the parent's field holds the
+                // value itself.
+                fprintf(f, "((%s *)__static_link)->__cap%d", enc_env, enc_idx);
+            } else if (cap->is_block_var) {
+                // Direct __block local in the enclosing stack: copy its box
+                // pointer verbatim -- the new field is T*, matching it.
+                fprintf(f, "%s", cap->name);
+            } else {
+                // Ordinary local or global: copy its value.
+                fprintf(f, "%s", cap->name);
+            }
+        }
+        fprintf(f, ", (struct __cccc_block *)&%s)", desc);
+        break;
+    }
+
+    case ND_BLOCK_CALL: {
+        // #965: GNU statement expression -- the descriptor pointer is
+        // needed twice (loaded from ->__invoke, then passed again as the
+        // static link), and evaluating node->lhs a second time would be
+        // wrong for a non-idempotent expression (e.g. a block-returning
+        // function call as the callee). gcc and clang both accept
+        // statement expressions, and this file's output is already
+        // GNU-flavoured (__builtin_memset/__builtin_memcpy elsewhere,
+        // ND_STMT_EXPR itself above).
+        fprintf(f, "({ struct __cccc_block *__cccc_blk = (struct __cccc_block *)(");
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, "); ((");
+        serialize_type(f, ctx, node->ty);
+        fprintf(f, " (*)(void *");
+        Type *block_ty = (node->lhs && node->lhs->ty &&
+                          node->lhs->ty->kind == TY_BLOCK)
+                             ? node->lhs->ty : NULL;
+        for (Type *p = block_ty ? block_ty->params : NULL; p; p = p->next) {
+            fprintf(f, ", ");
+            serialize_type(f, ctx, p);
+        }
+        fprintf(f, "))__cccc_blk->__invoke)(__cccc_blk");
+        for (Node *arg = node->args; arg; arg = arg->next) {
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, arg, 0);
+        }
+        fprintf(f, "); })");
+        break;
+    }
 
     default:
         fprintf(f, "/* unsupported expr kind %d */", node->kind);
@@ -1819,6 +2011,21 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             if (var->is_param)
                 continue;
 
+            // #965: __static_link (block_literal(), parse.c) is spliced
+            // into fn->params but never marked is_param -- that flag is
+            // only ever set by assign_lvar_offsets (codegen.c), which
+            // -m/-c=native never run. Match by list membership instead of
+            // trusting the flag, so it isn't re-declared here as an
+            // ordinary local (it's already a parameter, printed by
+            // serialize_function_signature). codegen.c's own
+            // assign_lvar_offsets (:8622-8633) does this exact membership
+            // scan for the same reason.
+            bool is_actual_param = false;
+            for (Obj *p = fn->params; p; p = p->next)
+                if (p == var) { is_actual_param = true; break; }
+            if (is_actual_param)
+                continue;
+
             if (var->name[0] == '\0')
                 // Compiler-synthesized temporaries (e.g. from ++/--/op=
                 // desugaring) have an empty name; give them one so they can
@@ -1873,6 +2080,37 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             // tracked separately rather than fixed here.
             if (var->deferred_vla_ptr_init)
                 continue;
+
+            // #965: a block literal's descriptor local (Node.block_desc_var)
+            // is typed `long[N]` at parse time only so it gets frame space --
+            // its real C type is the paired block function's env struct
+            // (serialize_block_preamble), which doesn't exist as a Type* and
+            // so can't go through serialize_type_decl. Emit its declaration
+            // directly instead.
+            if (var->block_desc_of) {
+                const char *env = find_block_env(ctx, var->block_desc_of);
+                print_indent_level(f, 1);
+                fprintf(f, "%s %s;\n", env ? env : "struct __cccc_block_env_?",
+                        var->name);
+                continue;
+            }
+
+            // #965: a __block local's stack slot holds a heap box pointer at
+            // runtime (codegen.c's ALCB prologue) -- declare it as a pointer
+            // and malloc it here, matching that prologue's per-function
+            // allocation. Every ordinary read/write of it is rewritten to
+            // `(*name)` by serialize_expr's ND_VAR case (and ND_MEMZERO's own
+            // is_block_var arm). Never freed, matching the VM's own
+            // never-reclaimed ALLOC_KIND_BLOCK_BOX.
+            if (var->is_block_var) {
+                print_indent_level(f, 1);
+                serialize_type_decl(f, ctx, pointer_to(vm, var->ty), var->name);
+                fprintf(f, ";\n");
+                print_indent_level(f, 1);
+                fprintf(f, "%s = __builtin_malloc(sizeof(*%s));\n", var->name,
+                        var->name);
+                continue;
+            }
 
             print_indent_level(f, 1);
             serialize_type_decl(f, ctx, var->ty, var->name);
@@ -2116,7 +2354,12 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
 
     if (ty->kind == TY_BOOL || ty->kind == TY_CHAR || ty->kind == TY_SHORT ||
         ty->kind == TY_INT || ty->kind == TY_LONG || ty->kind == TY_ENUM ||
-        ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T) {
+        ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T || ty->kind == TY_BLOCK) {
+        // #965: TY_BLOCK is 8 bytes, pointer-shaped (see block_type(),
+        // type.c) -- a block value can only be a compile-time-constant
+        // global initializer as a null pointer anyway (the VM's own
+        // is_const_expr rejects a real block literal there before this is
+        // ever reached), so it reads exactly like TY_PTR.
         int64_t iv = 0;
         int sz = ty->size < 8 ? ty->size : 8;
         memcpy(&iv, var->init_data + offset, sz);
@@ -2453,7 +2696,22 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
 // reference, it never gave the global a real name or definition.
 static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext *ctx) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_function || obj->name[0] != '.' || obj->is_string_literal)
+        // #965: a lifted block literal function (block_literal(), parse.c)
+        // is named ".L..N" from the same new_unique_name() counter as a
+        // string literal or compound literal, but it's a *function* -- the
+        // generic branch below is skipped for those (`obj->is_function`
+        // continues past it) since a real function normally already has a
+        // legal name. Rename it to a C-legal identifier here too, sharing
+        // the same counter; serialize_block_preamble() reuses this same
+        // numeric suffix for the function's paired env struct name, so the
+        // two stay paired without extra state.
+        if (obj->is_function) {
+            if (obj->is_block && obj->name[0] == '.')
+                obj->name = arena_format(vm, "__cccc_block_%d",
+                                         ctx->anon_global_counter++);
+            continue;
+        }
+        if (obj->name[0] != '.' || obj->is_string_literal)
             continue;
         // new_gvar() (parse.c) defaults display_name to the same dotted
         // name it was created with; only a static local overrides it (to
@@ -2488,6 +2746,163 @@ static int collect_captured_path(char *key, int keylen, void *val, void *user_da
     return 0;
 }
 
+// #965: does `node` (or anything reachable from it) directly call `target`
+// -- matched by identity against the callee's own ND_VAR, the shape
+// Block_copy(block) lowers to (parse.c). Mirrors collect_node_types's
+// traversal shape. Used only to decide whether serialize_block_preamble
+// needs to emit the native __cccc_block_copy_impl replacement.
+static bool node_calls_obj(Node *node, Obj *target) {
+    if (!node)
+        return false;
+    if (node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var == target)
+        return true;
+    return node_calls_obj(node->lhs, target) ||
+           node_calls_obj(node->rhs, target) ||
+           node_calls_obj(node->cond, target) ||
+           node_calls_obj(node->then, target) ||
+           node_calls_obj(node->els, target) ||
+           node_calls_obj(node->init, target) ||
+           node_calls_obj(node->inc, target) ||
+           node_calls_obj(node->body, target) ||
+           node_calls_obj(node->args, target) ||
+           node_calls_obj(node->next, target);
+}
+
+// #965: emits, once, everything a lowered block literal needs at file
+// scope: the common-initial-sequence `struct __cccc_block` every env
+// struct shares (so a block value's pointer type is well-defined
+// regardless of which block literal produced it), one
+// `struct __cccc_block_env_N` per block function (its captures, in the
+// exact order codegen's descriptor layout uses -- ND_BLOCK_LITERAL,
+// codegen.c), and -- only if Block_copy is actually reachable -- a native
+// replacement for the VM-only __cccc_block_copy_impl FFI shim (its real
+// implementation, src/stdlib/stdlib.c, exists only inside the VM's host
+// runtime and would otherwise leave a call to an undeclared symbol in the
+// generated C). Runs after rename_anon_globals() (block functions already
+// have their final __cccc_block_N names) and before type/prototype
+// collection, so both the generated_only and normal cc_serialize_program
+// branches share it -- a macro-generated block literal (via Quote(),
+// unlikely but not excluded) gets the same treatment as an ordinary one.
+static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                                     Obj *prog) {
+    bool any_block = false;
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_function && obj->is_block) {
+            any_block = true;
+            break;
+        }
+    }
+    if (!any_block)
+        return;
+
+    fprintf(f, "struct __cccc_block { void *__invoke; long __size; };\n\n");
+
+    static const char *BLOCK_FN_PREFIX = "__cccc_block_";
+    size_t prefix_len = strlen(BLOCK_FN_PREFIX);
+
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->is_block)
+            continue;
+
+        // obj->name was rewritten to "__cccc_block_<N>" by
+        // rename_anon_globals() just above -- reuse its numeric suffix so
+        // the env struct name pairs with it without extra state.
+        const char *suffix = (strncmp(obj->name, BLOCK_FN_PREFIX, prefix_len) == 0)
+                                 ? obj->name + prefix_len : obj->name;
+        char *env_name = arena_format(vm, "struct __cccc_block_env_%s", suffix);
+
+        fprintf(f, "%s {\n    void *__invoke;\n    long __size;\n", env_name);
+        for (int i = 0; i < obj->num_captures; i++) {
+            Obj *cap = obj->captures[i];
+
+            // #965: a capture whose own struct/union type was declared
+            // inside a function (rather than at file scope) can't be
+            // represented here -- this env struct is emitted at file
+            // scope, ahead of the function that would otherwise bring the
+            // tag into scope. Confirmed via a real clang "assigning to ...
+            // from incompatible type" error: without this check,
+            // serialize_type/serialize_anon_aggregate silently inline an
+            // anonymous copy of the struct body at each point of use
+            // instead, which does not match the capture's real,
+            // differently-scoped type. Checked directly on cap->ty and one
+            // level through TY_PTR (a pointer to a function-local
+            // struct/union has the same problem); not fixed here --
+            // tracked as a follow-up ticket.
+            // Gated on the same condition the emit-event loop below uses to
+            // decide what actually reaches the output (#969's precedent:
+            // reject only what is actually serialized, not what merely
+            // exists in `prog`) -- under generated_only (-c=generated), an
+            // ordinary (non-macro-generated) block's code is never emitted
+            // at all, so erroring on its capture here would reject a
+            // program that compiled cleanly before #965 (this env struct
+            // itself is harmless, unreferenced clutter in that case, same
+            // as any other never-emitted type collected into ctx->defs).
+            bool reachable = !ctx->generated_only || obj->is_macro_generated;
+            Type *agg_ty = cap->ty;
+            if (agg_ty && agg_ty->kind == TY_PTR)
+                agg_ty = agg_ty->base;
+            if (reachable && agg_ty &&
+                (agg_ty->kind == TY_STRUCT || agg_ty->kind == TY_UNION) &&
+                type_decl_owner(ctx, agg_ty) != NULL) {
+                // cap->tok (the captured variable's own declaration token)
+                // is used in preference to obj->tok (the lifted block
+                // function's) -- the latter is NULL (block_func_ty has no
+                // name token, func_type() never sets one for a synthetic
+                // block signature), which would fall to the tokenless
+                // error() below and lose both the source location and the
+                // "N error(s) generated" summary line has_compile_error()
+                // (tools/testing/runner.py) matches on.
+                if (cap->tok)
+                    error_tok(vm, cap->tok,
+                              "block capture '%s' has a struct/union type "
+                              "declared inside a function, which cannot be "
+                              "serialized to C (the type is not in scope at "
+                              "file scope, where the block's environment "
+                              "struct must be emitted)",
+                              cap->name);
+                else
+                    error("cccc: a block capture's function-local "
+                          "struct/union type cannot be serialized to C");
+            }
+
+            Type *field_ty = cap->is_block_var ? pointer_to(vm, cap->ty) : cap->ty;
+            char field_name[32];
+            snprintf(field_name, sizeof(field_name), "__cap%d", i);
+            fprintf(f, "    ");
+            serialize_type_decl(f, ctx, field_ty, field_name);
+            fprintf(f, ";\n");
+        }
+        fprintf(f, "};\n\n");
+
+        if (ctx->block_envs_len == ctx->block_envs_cap) {
+            ctx->block_envs_cap = ctx->block_envs_cap ? ctx->block_envs_cap * 2 : 8;
+            ctx->block_envs = realloc(ctx->block_envs,
+                                      sizeof(BlockEnvEntry) * ctx->block_envs_cap);
+        }
+        ctx->block_envs[ctx->block_envs_len].block_fn = obj;
+        ctx->block_envs[ctx->block_envs_len].env_struct_name = env_name;
+        ctx->block_envs_len++;
+    }
+
+    bool copy_used = false;
+    if (vm->compiler.builtin_block_copy) {
+        for (Obj *obj = prog; obj && !copy_used; obj = obj->next) {
+            if (obj->is_function && obj->body)
+                copy_used = node_calls_obj(obj->body, vm->compiler.builtin_block_copy);
+        }
+    }
+    if (copy_used) {
+        fprintf(f,
+            "static void *__cccc_block_copy_impl(void *__d) {\n"
+            "    long __n = ((struct __cccc_block *)__d)->__size;\n"
+            "    void *__c = __builtin_malloc((unsigned long)__n);\n"
+            "    if (__c) __builtin_memcpy(__c, __d, (unsigned long)__n);\n"
+            "    return __c;\n"
+            "}\n\n");
+    }
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -2520,6 +2935,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
                 vm->compiler.pragma_link_libs.data[i]);
     if (vm->compiler.pragma_link_libs.len > 0)
         fprintf(f, "\n");
+
+    // #965: block env structs (see serialize_block_preamble) ahead of
+    // everything else -- shared by both branches below, since a block
+    // literal can appear in ordinary or macro-generated code alike.
+    serialize_block_preamble(f, vm, &ctx, prog);
 
     if (generated_only && vm->compiler.emit_events_head) {
         serialize_type_defs_for_owner(f, &ctx, NULL);
@@ -2605,6 +3025,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         free(ctx.tags);
         free(ctx.typedefs);
         free(ctx.captured_paths);
+        free(ctx.block_envs);
         return;
     }
 
@@ -2676,6 +3097,17 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             continue;
         if (!obj->is_function)
             continue;
+        // #965: __cccc_block_copy_impl is a VM-only FFI shim (its real
+        // implementation is host-side, src/stdlib/stdlib.c) -- it has no
+        // obj->tok (ty->name was never set for this builtin prototype, see
+        // its registration in parse.c), so the from_primary check just
+        // below already leaves it unemitted here in practice. Skip it
+        // explicitly regardless, so a native replacement is only ever
+        // supplied by serialize_block_preamble's own static definition
+        // (emitted when Block_copy is actually reachable) and this loop
+        // can never introduce a second, conflicting extern declaration.
+        if (obj == vm->compiler.builtin_block_copy)
+            continue;
         if (!obj->is_definition && !obj->body) {
             // #901: a bare declaration with no body (e.g. `int abs(int
             // x);`) used to be dropped entirely here. The VM path needs
@@ -2724,5 +3156,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.tags);
     free(ctx.typedefs);
     free(ctx.captured_paths);
+    free(ctx.block_envs);
 }
 

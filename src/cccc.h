@@ -1957,6 +1957,23 @@ struct Obj {
     int num_captures;         // Number of captured variables
     struct Obj *block_outer_locals; // Parent scope's locals at block creation time (for transitive capture)
     bool is_block_var;        // True if declared with __block storage qualifier
+    Obj *block_desc_of; // #965: for a block literal's descriptor local
+                        // (Node.block_desc_var), the block function it
+                        // describes; NULL for every other Obj. Set at parse
+                        // time (block_literal(), parse.c) purely for the
+                        // serializer's benefit -- lets serialize_function's
+                        // hoist loop find the paired env struct
+                        // (serialize_block_preamble/find_block_env,
+                        // serialize.c) without a separate AST walk. No VM/
+                        // codegen consumer.
+    bool block_return_ty_pending; // #965: true while parsing a block literal's
+                                   // body whose return type wasn't written
+                                   // explicitly (`^{ ... }` / `^(params){ ... }`)
+                                   // -- block_literal() infers it from the
+                                   // body's `return` statements afterward, so
+                                   // the void-mismatch warning in stmt()'s
+                                   // "return" handling must stay quiet while
+                                   // this is set (the type is not final yet).
 
     // Static inline function
     bool is_live;

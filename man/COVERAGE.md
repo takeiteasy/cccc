@@ -194,7 +194,7 @@ language coverage figures apply.
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Empty structs and unions | ✓ | GNU extension; empty aggregates have size 0 |
 | Nested functions | ✓ | Access to parent-scope variables via static link |
-| Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy |
+| Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy. Serializes under `-c=native`/`-m`/`-c=generated` too (#965) — see [Serialized-output divergences](#serialized-output-divergences) for the lowering shape and its residual gaps |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) below |
 | `__thread` storage class | ✓ | TLS segment; per-thread private storage |
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
@@ -1187,6 +1187,44 @@ it reads exists natively, so — unlike `__builtin_return_address`, which maps
 faithfully to a real host return address — there is no meaningful native
 behaviour to fall back to. Rejected with a diagnostic naming the builtin
 (#969).
+
+Blocks `^{ ... }` serialize by lowering to a plain C function plus an explicit
+environment struct (#965) — not by emitting `^{ }` verbatim, so no
+`-fblocks`/libBlocksRuntime dependency is introduced. A block value becomes a
+pointer to `struct __cccc_block` (`{ void *__invoke; long __size; }`); each
+block literal gets a paired `struct __cccc_block_env_N` (the same two fields
+plus one per capture, in descriptor-slot order — a `__block` capture's field
+is a pointer to the captured type, matching the VM's own shared heap box) and
+is built as a comma expression writing into that struct; a block call becomes
+a GNU statement expression that loads `->__invoke` and calls it with the
+descriptor as the first ("static link") argument. A `__block` local is
+declared as a pointer and `__builtin_malloc`'d at function entry, exactly
+mirroring the VM's own `ALCB` prologue allocation — including never being
+freed, so it leaks in serialized output the same way the VM's own
+`ALLOC_KIND_BLOCK_BOX` is never reclaimed (see [SAFETY.md § Individual
+Memory Safety Features](SAFETY.md#individual-memory-safety-features)).
+`Block_copy` gets a
+native replacement for its VM-only FFI shim (`__cccc_block_copy_impl`,
+emitted only when `Block_copy` is actually reachable); `Block_release`
+already lowers to a plain `free()` call and needs no special handling in the
+common case — but `Block_release` without a `free` prototype in scope (no
+`<stdlib.h>` `#include`, #458's VM-only fallback) has no native declaration
+to fall back to either, and now that blocks serialize at all this is newly
+reachable under `-c=native` where it previously never got that far (a block
+literal itself failed to serialize first); `<stdlib.h>` must be included for
+`Block_release` to compile natively (tracked as a follow-up ticket, not
+fixed here — emitting a `free` prototype unconditionally risks colliding
+with a real one from `<stdlib.h>`). A block literal serialized at file scope
+is a hard error — its descriptor is a local, and there is no enclosing frame
+to hold one — though this is unreachable in practice today, since the VM's
+own global-initializer constant-expression check already rejects a block
+literal there before serialization is ever reached. A capture whose type is
+itself a struct/union declared inside a function (rather than at file
+scope) is rejected with a diagnostic — the env struct is emitted at file
+scope and can't reference a function-local tag (tracked as a follow-up
+ticket); emitting `^{ }` verbatim behind a `-fblocks` opt-in, for callers
+who want clang dialect fidelity instead of this lowering, is tracked as a
+separate follow-up ticket too.
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).

@@ -5799,8 +5799,18 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
                      "noreturn function should not return a value");
 
+        // #965: a block literal's return type may still be pending inference
+        // (block_literal() hasn't seen the full body yet) -- its declared
+        // return type is a placeholder `ty_void` at this point, so none of
+        // the mismatch warnings/casts below are meaningful yet. The real
+        // type is inferred from these very `return` statements after the
+        // body is fully parsed, and any needed cast is inserted then.
+        bool block_infer_pending = vm->compiler.current_fn &&
+                                   vm->compiler.current_fn->is_block &&
+                                   vm->compiler.current_fn->block_return_ty_pending;
+
         if (consume(vm, rest, tok->next, ";")) {
-            if (vm->compiler.current_fn) {
+            if (vm->compiler.current_fn && !block_infer_pending) {
                 Type *ty = vm->compiler.current_fn->ty->return_ty;
                 if (ty->kind != TY_VOID) {
                     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
@@ -5822,7 +5832,7 @@ static Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // (e.g. inside a top-level pragma macro call that uses $quote("return x;")).
         // Guard the implicit return-type cast; types will be resolved by add_type
         // later, or by the caller establishing context via $with_fn.
-        if (vm->compiler.current_fn) {
+        if (vm->compiler.current_fn && !block_infer_pending) {
             Type *ty = vm->compiler.current_fn->ty->return_ty;
             if (ty->kind == TY_VOID) {
                 warn_tok(vm, node->tok, CCCC_WARN_RETURN_TYPE,
@@ -8799,6 +8809,44 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_
                                  num_captures, cap_capacity);
 }
 
+// #965: collect every `return` statement in a block literal's own body, used
+// to infer its return type when none was written explicitly (see
+// Obj.block_return_ty_pending). Deliberately does NOT descend into a nested
+// block literal's body -- that lives on a separate Obj (node->block_fn->body),
+// never reached through any of the generic child fields walked here, so a
+// `return` inside a nested block is naturally excluded without special-casing
+// ND_BLOCK_LITERAL. Mirrors collect_captures_in_node's traversal shape.
+static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
+                                  int *count, int *cap) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_RETURN) {
+        if (*count >= *cap) {
+            *cap = (*cap == 0) ? 8 : *cap * 2;
+            Node **new_arr = arena_alloc(&vm->compiler.parser_arena,
+                                         sizeof(Node *) * (*cap));
+            for (int i = 0; i < *count; i++)
+                new_arr[i] = (*out)[i];
+            *out = new_arr;
+        }
+        (*out)[(*count)++] = node;
+    }
+
+    collect_block_returns(vm, node->lhs, out, count, cap);
+    collect_block_returns(vm, node->rhs, out, count, cap);
+    collect_block_returns(vm, node->cond, out, count, cap);
+    collect_block_returns(vm, node->then, out, count, cap);
+    collect_block_returns(vm, node->els, out, count, cap);
+    collect_block_returns(vm, node->init, out, count, cap);
+    collect_block_returns(vm, node->inc, out, count, cap);
+
+    for (Node *n = node->body; n; n = n->next)
+        collect_block_returns(vm, n, out, count, cap);
+    for (Node *n = node->args; n; n = n->next)
+        collect_block_returns(vm, n, out, count, cap);
+}
+
 // Parse a block literal: ^{ ... } or ^(params){ ... } or ^returntype(params){
 // ... }
 static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -8808,11 +8856,13 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Determine return type and parameters
     Type *return_ty = ty_void;
     Type *params = NULL;
+    bool return_ty_explicit = false;
     // bool has_params = false;
 
     // Check for explicit return type (anything before '(' that's a type)
     if (!equal(tok, "{") && !equal(tok, "(") && is_typename(vm, tok)) {
         return_ty = typename(vm, &tok, tok);
+        return_ty_explicit = true;
     }
 
     // Check for parameter list
@@ -8879,6 +8929,9 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Store parent's locals snapshot before entering our own scope so nested
     // blocks can walk the ancestry chain during transitive capture collection.
     block_fn->block_outer_locals = saved_locals;
+    // #965: return type inferred from the body below when not written
+    // explicitly, matching clang's block-literal inference.
+    block_fn->block_return_ty_pending = !return_ty_explicit;
 
     // Set up block function context
     vm->compiler.current_fn = block_fn;
@@ -8942,6 +8995,39 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     propagate_checked_bounds(vm, block_fn);
     verify_checked_assign_bounds(vm, block_fn);
 
+    // #965: infer the block's return type from its own `return` statements
+    // when it wasn't written explicitly. The VM never needed this -- a
+    // block's result always comes back through REG_A0/FREG_A0 regardless of
+    // the declared type -- but the native serializer needs a real,
+    // non-placeholder return type to spell out the lifted function's
+    // signature. stmt()'s "return" handling (see block_infer_pending there)
+    // deliberately skipped the mismatch warning and the implicit-cast
+    // insertion while this was still pending; both are done here instead,
+    // now that the real type is known.
+    if (block_fn->block_return_ty_pending) {
+        Node **rets = NULL;
+        int num_rets = 0, rets_cap = 0;
+        collect_block_returns(vm, block_fn->body, &rets, &num_rets, &rets_cap);
+
+        Type *inferred = ty_void;
+        for (int i = 0; i < num_rets; i++) {
+            if (rets[i]->lhs) {
+                inferred = rets[i]->lhs->ty;
+                break;
+            }
+        }
+
+        return_ty = inferred;
+        block_func_ty->return_ty = inferred;
+
+        if (inferred->kind != TY_STRUCT && inferred->kind != TY_UNION) {
+            for (int i = 0; i < num_rets; i++)
+                if (rets[i]->lhs)
+                    rets[i]->lhs = new_cast(vm, rets[i]->lhs, inferred);
+        }
+        block_fn->block_return_ty_pending = false;
+    }
+
     // Collect captured variables from the parsed body.
     // Walk all ancestor scopes so that variables from grandparent+ scopes are
     // captured transitively (inner block gets x from outer block's descriptor).
@@ -8975,6 +9061,8 @@ static Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     int desc_slots = 2 + num_captures;
     Type *desc_arr_ty = array_of(vm, ty_long, desc_slots);
     Obj *desc_var = new_lvar(vm, "", 0, desc_arr_ty);
+    // #965: pure serializer bookkeeping -- see Obj.block_desc_of.
+    desc_var->block_desc_of = block_fn;
 
     // Create the block literal node
     Node *node = new_node(vm, ND_BLOCK_LITERAL, start);

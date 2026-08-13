@@ -1622,11 +1622,109 @@ def case_vla_partial_init_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     VLA_PARTIAL_INIT_PROGRAM)
 
 
+# #965: ND_BLOCK_LITERAL/ND_BLOCK_CALL/TY_BLOCK had no serializer case at
+# all -- `-m`/`-c=native` printed `/* unsupported expr kind 49/50 */` and
+# `/* unknown type */` in their place, and the lifted function reached the
+# output unrenamed (a `.L..N` VM-internal label, not a legal C identifier).
+# A `-m` shape assertion alone can't see this failure mode (an unhandled
+# node kind in statement position is a silently-valid null statement) -- see
+# tests/test_serialize_expr_vla.c's own comment for the general rule this
+# repeats -- so each of the four cases below is a VM-42-then-native-42
+# round trip, covering the capture matrix COVERAGE.md:197 claims the VM
+# supports: plain by-value capture, __block mutation, transitive/nested
+# capture plus Block_copy escape, and a __block aggregate's partial brace
+# initializer (the one case that exercises ND_MEMZERO's new is_block_var
+# arm, which a `-m` shape assertion can't distinguish from the pre-#965
+# wrong-8-bytes shape either).
+BLOCK_CAPTURE_PROGRAM = (
+    "int main(void) {\n"
+    "    int a = 21;\n"
+    "    int (^add)(int) = ^(int x) { return x + a; };\n"
+    "    int r = add(21);\n"
+    "    return r == 42 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_block_capture_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  53: -c=native, a block literal with a by-value capture and a "
+          "block call round-trip as real C (#965)")
+    return _vm_and_native_run_case(cccc, tmp, "block_capture_965",
+                                    BLOCK_CAPTURE_PROGRAM)
+
+
+BLOCK_MUTABLE_PROGRAM = (
+    "int main(void) {\n"
+    "    __block int counter = 0;\n"
+    "    void (^inc)(void) = ^{ counter++; };\n"
+    "    inc();\n"
+    "    inc();\n"
+    "    return counter == 2 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_block_mutable_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  54: -c=native, a __block variable shared and mutated by a "
+          "block round-trips as real C (#965)")
+    return _vm_and_native_run_case(cccc, tmp, "block_mutable_965",
+                                    BLOCK_MUTABLE_PROGRAM)
+
+
+BLOCK_NESTED_COPY_PROGRAM = (
+    "#include <stdlib.h>\n"
+    "typedef int (^IntBlock)(void);\n"
+    "IntBlock make_adder(int x) {\n"
+    "    IntBlock inner = ^{ return x + 1; };\n"
+    "    return Block_copy(inner);\n"
+    "}\n"
+    "int main(void) {\n"
+    "    IntBlock a = make_adder(41);\n"
+    "    int ra = a();\n"
+    "    Block_release(a);\n"
+    "    int outer = 10;\n"
+    "    int (^level1)(void) = ^{\n"
+    "        int mid = outer + 1;\n"
+    "        int (^level2)(void) = ^{ return mid + outer; };\n"
+    "        return level2();\n"
+    "    };\n"
+    "    int r2 = level1();\n"
+    "    return (ra == 42 && r2 == 21) ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_block_nested_copy_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  55: -c=native, transitive/nested block capture and an "
+          "escaping Block_copy round-trip as real C (#965)")
+    return _vm_and_native_run_case(cccc, tmp, "block_nested_copy_965",
+                                    BLOCK_NESTED_COPY_PROGRAM)
+
+
+BLOCK_PARTIAL_INIT_PROGRAM = (
+    "int main(void) {\n"
+    "    __block int x[4] = {1};\n"
+    "    int (^sum)(void) = ^{\n"
+    "        return x[0] + x[1] + x[2] + x[3];\n"
+    "    };\n"
+    "    return sum() == 1 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_block_partial_init_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  56: -c=native, a __block aggregate's partial brace "
+          "initializer, read from inside a block, round-trips as real C "
+          "(#965) -- exercises ND_MEMZERO's is_block_var arm")
+    return _vm_and_native_run_case(cccc, tmp, "block_partial_init_965",
+                                    BLOCK_PARTIAL_INIT_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1686,6 +1784,10 @@ def main() -> int:
             case_vla_addr_native_round_trip,
             case_vla_row_sub_and_init_native_round_trip,
             case_vla_partial_init_native_round_trip,
+            case_block_capture_native_round_trip,
+            case_block_mutable_native_round_trip,
+            case_block_nested_copy_native_round_trip,
+            case_block_partial_init_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
