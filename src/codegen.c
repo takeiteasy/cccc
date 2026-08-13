@@ -7564,6 +7564,12 @@ static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // local) or from the enclosing block's descriptor (transitive capture
         // from a grandparent scope).  Check the enclosing function's capture
         // list first so we read from the right source.
+        //
+        // #994 (found while testing #990/#993, not fixed here): every branch
+        // below does exactly one 8-byte emit_load/STR_D, regardless of
+        // cap->ty->size -- correct for a scalar or an <=8-byte struct, but a
+        // by-value struct/union capture LARGER than 8 bytes is silently
+        // truncated to its first 8 bytes instead of being fully copied.
         Obj *enc_fn = vm->compiler.current_fn;
         for (int i = 0; i < num_captures; i++) {
             Obj *cap = node->block_captures[i];

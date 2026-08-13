@@ -3020,34 +3020,149 @@ static bool node_calls_obj(Node *node, Obj *target) {
            node_calls_obj(node->next, target);
 }
 
+// #990/#993: does `ty` (or anything reachable from it) mention TY_BLOCK --
+// used to decide whether `struct __cccc_block` itself needs a definition
+// even when the TU declares no block *literal* (e.g. a function that only
+// takes a block parameter and calls Block_copy/Block_release/the block
+// itself). Mirrors collect_type()'s PTR/ARRAY/VLA/FUNC traversal shape, but
+// deliberately does NOT recurse into struct/union members: a block-typed
+// member is stored as a pointer, and any *use* of it (a read, a call)
+// necessarily produces an expression whose own ->ty is TY_BLOCK, which
+// node_mentions_block below already catches -- recursing into members here
+// would need a seen-set to be cycle-safe for no additional coverage.
+static bool type_mentions_block(Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_BLOCK)
+        return true;
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_mentions_block(ty->base);
+    if (ty->kind == TY_FUNC) {
+        if (type_mentions_block(ty->return_ty))
+            return true;
+        for (Type *p = ty->params; p; p = p->next)
+            if (type_mentions_block(p))
+                return true;
+    }
+    return false;
+}
+
+// #990/#993: mirrors collect_node_types()'s traversal shape (including its
+// ND_SWITCH/ND_CASE special cases) to find any node whose type -- or a
+// var/member/func_ty attached to it -- mentions TY_BLOCK.
+static bool node_mentions_block(Node *node) {
+    if (!node)
+        return false;
+    if (type_mentions_block(node->ty))
+        return true;
+    if (node->var && type_mentions_block(node->var->ty))
+        return true;
+    if (node->member && type_mentions_block(node->member->ty))
+        return true;
+    if (node->func_ty && type_mentions_block(node->func_ty))
+        return true;
+
+    if (node->kind == ND_SWITCH) {
+        if (node_mentions_block(node->cond))
+            return true;
+        for (Node *c = node->case_next; c; c = c->case_next)
+            if (node_mentions_block(c->lhs))
+                return true;
+        if (node->default_case && node_mentions_block(node->default_case->lhs))
+            return true;
+        return node_mentions_block(node->next);
+    }
+    if (node->kind == ND_CASE)
+        return node_mentions_block(node->lhs) || node_mentions_block(node->next);
+
+    return node_mentions_block(node->lhs) || node_mentions_block(node->rhs) ||
+           node_mentions_block(node->cond) || node_mentions_block(node->then) ||
+           node_mentions_block(node->els) || node_mentions_block(node->init) ||
+           node_mentions_block(node->inc) || node_mentions_block(node->body) ||
+           node_mentions_block(node->args) || node_mentions_block(node->next);
+}
+
+// #990/#993: mirrors collect_obj_types()'s traversal shape.
+static bool obj_uses_block_type(Obj *obj) {
+    if (type_mentions_block(obj->ty))
+        return true;
+    if (node_mentions_block(obj->init_expr))
+        return true;
+    for (Obj *param = obj->params; param; param = param->next)
+        if (type_mentions_block(param->ty))
+            return true;
+    for (Obj *local = obj->locals; local; local = local->next)
+        if (type_mentions_block(local->ty))
+            return true;
+    return node_mentions_block(obj->body);
+}
+
 // #965: emits, once, everything a lowered block literal needs at file
 // scope: the common-initial-sequence `struct __cccc_block` every env
 // struct shares (so a block value's pointer type is well-defined
 // regardless of which block literal produced it), one
 // `struct __cccc_block_env_N` per block function (its captures, in the
 // exact order codegen's descriptor layout uses -- ND_BLOCK_LITERAL,
-// codegen.c), and -- only if Block_copy is actually reachable -- a native
-// replacement for the VM-only __cccc_block_copy_impl FFI shim (its real
-// implementation, src/stdlib/stdlib.c, exists only inside the VM's host
-// runtime and would otherwise leave a call to an undeclared symbol in the
-// generated C). Runs after rename_anon_globals() (block functions already
-// have their final __cccc_block_N names) and before type/prototype
-// collection, so both the generated_only and normal cc_serialize_program
-// branches share it -- a macro-generated block literal (via Quote(),
-// unlikely but not excluded) gets the same treatment as an ordinary one.
+// codegen.c), and -- only if Block_copy/Block_release is actually
+// reachable -- a native replacement for the VM-only __cccc_block_copy_impl
+// FFI shim (its real implementation, src/stdlib/stdlib.c, exists only
+// inside the VM's host runtime and would otherwise leave a call to an
+// undeclared symbol in the generated C) / an `extern void free(void *);`
+// declaration (#990: vm->compiler.builtin_free has no obj->tok, so the
+// prototype pass's from_primary filter always drops it). Runs after
+// rename_anon_globals() (block functions already have their final
+// __cccc_block_N names) and before type/prototype collection, so both the
+// generated_only and normal cc_serialize_program branches share it -- a
+// macro-generated block literal (via Quote(), unlikely but not excluded)
+// gets the same treatment as an ordinary one.
+//
+// #990/#993: `struct __cccc_block` itself, and the copy-impl/free
+// declarations, are needed even in a TU with no block *literal* at all --
+// e.g. a function that only takes a block parameter and calls
+// Block_copy/Block_release/the block itself. Gated on `any_block ||
+// uses_block_type || copy_used || release_used` rather than `any_block`
+// alone; the env-struct loop (and its #989 hoist pass) still only makes
+// sense when there's an actual block literal to describe, so those stay
+// gated on `any_block`.
 static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                                      Obj *prog) {
     bool any_block = false;
+    bool uses_block_type = false;
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_function && obj->is_block) {
+        if (obj->is_function && obj->is_block)
             any_block = true;
+        if (obj_uses_block_type(obj))
+            uses_block_type = true;
+        if (any_block && uses_block_type)
             break;
-        }
     }
-    if (!any_block)
+
+    // #990: gated on the same `reachable` condition the #989 hoist loop
+    // below uses -- under generated_only (-c=generated), a call inside an
+    // ordinary (non-macro-generated) function never reaches the output, so
+    // scanning it here would emit a copy-impl/free declaration nothing
+    // actually calls.
+    bool copy_used = false;
+    bool release_used = false;
+    for (Obj *obj = prog; obj && (!copy_used || !release_used); obj = obj->next) {
+        if (!obj->is_function || !obj->body)
+            continue;
+        bool reachable = !ctx->generated_only || obj->is_macro_generated;
+        if (!reachable)
+            continue;
+        if (!copy_used && vm->compiler.builtin_block_copy)
+            copy_used = node_calls_obj(obj->body, vm->compiler.builtin_block_copy);
+        if (!release_used && vm->compiler.builtin_free)
+            release_used = node_calls_obj(obj->body, vm->compiler.builtin_free);
+    }
+
+    if (!any_block && !uses_block_type && !copy_used && !release_used)
         return;
 
     fprintf(f, "struct __cccc_block { void *__invoke; long __size; };\n\n");
+
+    if (!any_block)
+        goto emit_copy_and_free;
 
     // #989: hoist every capture's own struct/union/enum type to file scope
     // -- if it was declared inside a function, this env struct (below) is
@@ -3118,13 +3233,7 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
         ctx->block_envs_len++;
     }
 
-    bool copy_used = false;
-    if (vm->compiler.builtin_block_copy) {
-        for (Obj *obj = prog; obj && !copy_used; obj = obj->next) {
-            if (obj->is_function && obj->body)
-                copy_used = node_calls_obj(obj->body, vm->compiler.builtin_block_copy);
-        }
-    }
+emit_copy_and_free:
     if (copy_used) {
         fprintf(f,
             "static void *__cccc_block_copy_impl(void *__d) {\n"
@@ -3134,6 +3243,17 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
             "    return __c;\n"
             "}\n\n");
     }
+    // #990: vm->compiler.builtin_free is a synthesized `free` prototype
+    // with no obj->tok (parse.c's Block_release path falls back to it when
+    // no user-visible `free` is in scope, #458) -- the prototype pass's
+    // from_primary filter always drops a tok-less Obj, so without this the
+    // generated C called an undeclared `free`. A redundant declaration
+    // here is always compatible with a real <stdlib.h> one if both end up
+    // in the output (builtin_free is only ever used when parse.c found no
+    // user `free`, so there is nothing for this to conflict with in
+    // practice either way).
+    if (release_used)
+        fprintf(f, "extern void free(void *);\n\n");
 }
 
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
@@ -3169,20 +3289,39 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     if (vm->compiler.pragma_link_libs.len > 0)
         fprintf(f, "\n");
 
-    // #965: block env structs (see serialize_block_preamble) ahead of
-    // everything else -- shared by both branches below, since a block
-    // literal can appear in ordinary or macro-generated code alike.
-    // #993 (found while implementing #989, deliberately not fixed there):
-    // this runs before the #include replay further down in the
-    // !generated_only branch, so a by-value capture of a *header-declared*
-    // type (e.g. `struct tm`) is serialized while that type isn't complete
-    // yet -- the mirror image of the function-local-type problem #989 fixed
-    // (there the env struct was ahead of the declaring function; here it's
-    // ahead of the #include that would bring the header type into scope).
-    serialize_block_preamble(f, vm, &ctx, prog);
-
+    // #965/#993: block env structs (see serialize_block_preamble) are
+    // emitted once both mechanisms that can bring a *capture's* type into
+    // scope have already run: serialize_type_defs_for_owner(f, &ctx, NULL)
+    // (file-scope struct/union/enum definitions -- including a
+    // cccc-only-routed include's type, which #896 deliberately re-derives
+    // here rather than re-emitting its #include) and, in the
+    // !generated_only branch, the #include replay further down (a plain
+    // captured header like <time.h>). Originally this call sat ahead of
+    // everything (see history) -- a by-value capture of a *header-declared*
+    // type (e.g. `struct tm`) was serialized while that type wasn't
+    // complete yet, the mirror image of the function-local-type problem
+    // #989 fixed (there the env struct was ahead of the declaring function;
+    // here it needed to be *behind* whichever mechanism brings the header
+    // type into scope). Moving the include replay alone is not sufficient:
+    // a cccc-only-routed include's type reaches the output via
+    // serialize_type_defs_for_owner, not the replay (#896), so both must
+    // precede this call. Placed identically in both branches below, right
+    // after each one's own serialize_type_defs_for_owner call.
+    //
+    // This flips the #989 hoist (inside serialize_block_preamble) relative
+    // to serialize_type_defs_for_owner: a function-local capture type still
+    // has owner_fn != NULL when the file-scope pass above runs, so it's
+    // skipped there (not yet hoisted), then hoisted/emitted here -- verified
+    // no double-emission against the #989 regression case.
+    //
+    // Residual, not fixed here: in the generated_only branch below, a
+    // captured #include is replayed via CCCC_EMIT_SOURCE events interleaved
+    // with generated functions (pinned there by #953), so a header-type
+    // capture in *generated* code can still precede its #include -- filed
+    // as #995.
     if (generated_only && vm->compiler.emit_events_head) {
         serialize_type_defs_for_owner(f, &ctx, NULL);
+        serialize_block_preamble(f, vm, &ctx, prog);
         // #928: forward-declare every macro-generated global before any
         // definition, mirroring the #918 pass below (serialize_global_var's
         // sibling loop, further down this function) and for the same
@@ -3302,6 +3441,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
 
     // Serialize file-scope type definitions before declarations that reference them.
     serialize_type_defs_for_owner(f, &ctx, NULL);
+
+    // #965/#993: see the comment on the generated_only branch's own call
+    // above -- must run after both the #include replay and the file-scope
+    // type-def pass just above, so a capture's type (however it reaches the
+    // output) is already visible.
+    serialize_block_preamble(f, vm, &ctx, prog);
 
     // #918: forward-declare every global before any definition, mirroring
     // the function-prototype pass below and for the same reason -- a

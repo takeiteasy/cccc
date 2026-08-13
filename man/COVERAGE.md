@@ -1206,15 +1206,19 @@ Memory Safety Features](SAFETY.md#individual-memory-safety-features)).
 `Block_copy` gets a
 native replacement for its VM-only FFI shim (`__cccc_block_copy_impl`,
 emitted only when `Block_copy` is actually reachable); `Block_release`
-already lowers to a plain `free()` call and needs no special handling in the
-common case — but `Block_release` without a `free` prototype in scope (no
-`<stdlib.h>` `#include`, #458's VM-only fallback) has no native declaration
-to fall back to either, and now that blocks serialize at all this is newly
-reachable under `-c=native` where it previously never got that far (a block
-literal itself failed to serialize first); `<stdlib.h>` must be included for
-`Block_release` to compile natively (tracked as a follow-up ticket, not
-fixed here — emitting a `free` prototype unconditionally risks colliding
-with a real one from `<stdlib.h>`). A block literal serialized at file scope
+already lowers to a plain `free()` call and needs no special handling when a
+`free` prototype is already in scope (`<stdlib.h>` `#include`d). When it
+isn't, `Block_release` falls back to `vm->compiler.builtin_free` (#458's
+VM-only fallback), a synthesized Obj with no source token — the
+function-prototype pass's `from_primary` filter always drops a tok-less Obj,
+so the generated C called an undeclared `free()` (#990, fixed): whenever
+`Block_release` is reachable, `serialize_block_preamble` now emits an
+explicit `extern void free(void *);`, always compatible with a real
+`<stdlib.h>` declaration if both end up in the output. `struct __cccc_block`
+itself (plus the `Block_copy`/`Block_release` support above) is also emitted
+for a TU that uses a block *type* but declares no block *literal* at all —
+e.g. a function that only takes a block parameter — rather than only when a
+literal is present (#990/#993). A block literal serialized at file scope
 is a hard error — its descriptor is a local, and there is no enclosing frame
 to hold one — though this is unreachable in practice today, since the VM's
 own global-initializer constant-expression check already rejects a block
@@ -1229,12 +1233,20 @@ identical `struct P` are treated as one type by this promotion (structural
 equality, not declaration identity) — harmless, since the layout is
 identical either way, but it means hoisting one's tag makes the other
 resolve to the same file-scope name too. A *by-value* capture of a
-*header-declared* type (e.g. `struct tm`) has the mirror-image problem —
-the env struct is emitted ahead of the `#include` replay that would
-complete the type — and is not yet fixed (tracked as a follow-up ticket);
-emitting `^{ }` verbatim behind a `-fblocks` opt-in, for callers who want
-clang dialect fidelity instead of this lowering, is tracked as a separate
-follow-up ticket too.
+*header-declared* type (e.g. `struct tm`) previously had the mirror-image
+problem — the env struct was emitted ahead of the `#include` replay that
+would complete the type — fixed (#993) by running the block preamble after
+both mechanisms that can bring such a type into scope: the `#include` replay
+itself, and (for a type reached only through a cccc-only-routed include
+whose own `#include` is deliberately not re-emitted, #896) the file-scope
+type-definition pass. In the `-c=generated` emit-events path specifically, a
+captured `#include` is replayed interleaved with generated functions
+(pinned there by #953) and still follows the block preamble, so a
+header-type capture in *generated* code can still precede its `#include`;
+this residual case is tracked as a follow-up ticket. Emitting `^{ }`
+verbatim behind a `-fblocks` opt-in, for callers who want clang dialect
+fidelity instead of this lowering, is tracked as a separate follow-up
+ticket too.
 
 A `NodeKind`/`TypeKind` with no serializer case above is a hard compile error
 (#963c), not a divergence: `serialize_expr`/`serialize_type`'s `default:` arms

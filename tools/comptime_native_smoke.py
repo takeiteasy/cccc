@@ -1747,11 +1747,201 @@ def case_block_local_type_hoist_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     BLOCK_LOCAL_TYPE_HOIST_PROGRAM)
 
 
+# #990: Block_release's builtin_free fallback has no obj->tok, so it was
+# silently dropped by the prototype pass's from_primary filter -- the
+# generated C called an undeclared free(). Deliberately no <stdlib.h> here,
+# or the test proves nothing (the header's own free() prototype would mask
+# the gap).
+BLOCK_RELEASE_NO_STDLIB_PROGRAM = (
+    "typedef int (^IntBlock)(void);\n"
+    "IntBlock make_adder(int x) {\n"
+    "    IntBlock inner = ^{ return x + 1; };\n"
+    "    return Block_copy(inner);\n"
+    "}\n"
+    "int main(void) {\n"
+    "    IntBlock a = make_adder(41);\n"
+    "    int r = a();\n"
+    "    Block_release(a);\n"
+    "    return r == 42 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_block_release_no_stdlib_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  58: -c=native, Block_copy/Block_release round-trip without "
+          "<stdlib.h> in scope (#990) -- builtin_free's fallback prototype "
+          "now gets its own extern declaration")
+    return _vm_and_native_run_case(cccc, tmp, "block_release_no_stdlib_990",
+                                    BLOCK_RELEASE_NO_STDLIB_PROGRAM)
+
+
+def case_block_release_with_stdlib_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  59: -c=native positive control, Block_copy/Block_release still "
+          "round-trip when <stdlib.h> IS in scope (#990) -- the new extern "
+          "free() declaration must not collide with the real one")
+    program = "#include <stdlib.h>\n" + BLOCK_RELEASE_NO_STDLIB_PROGRAM
+    return _vm_and_native_run_case(cccc, tmp, "block_release_with_stdlib_990",
+                                    program)
+
+
+# #993: a by-value capture of a header-declared type (struct tm) used to be
+# serialized ahead of the #include that brings it into scope.
+BLOCK_HEADER_TYPE_CAPTURE_PROGRAM = (
+    "#include <time.h>\n"
+    "int main(void) {\n"
+    "    struct tm t;\n"
+    "    t.tm_year = 42;\n"
+    "    int (^b)(void) = ^{ return t.tm_year; };\n"
+    "    return b();\n"
+    "}\n"
+)
+
+
+def case_block_header_type_capture_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  60: -c=native, a block's by-value capture of a header-declared "
+          "type (struct tm) round-trips as real C (#993), and -m output "
+          "places the #include ahead of the env struct that needs it. "
+          "Native-only (not _vm_and_native_run_case): struct tm is larger "
+          "than 8 bytes, and the VM's own block-capture codegen truncates "
+          "any by-value aggregate capture above 8 bytes to a single word "
+          "(#994, pre-existing, unrelated to #993 -- filed separately) -- "
+          "the VM side of this program does not return 42 regardless of "
+          "the serializer, so only the native side is asserted here")
+    src = Path(tmp) / "block_header_type_capture_993.c"
+    out_bin = Path(tmp) / "block_header_type_capture_993_out"
+    write(src, BLOCK_HEADER_TYPE_CAPTURE_PROGRAM)
+    compile_result = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    inc_idx = out.find("#include <time.h>")
+    env_idx = out.find("struct __cccc_block_env_")
+    if inc_idx < 0 or env_idx < 0 or inc_idx > env_idx:
+        print(f"    FAIL: -m output does not place #include <time.h> before "
+              f"the env struct (inc_idx={inc_idx}, env_idx={env_idx})\n"
+              f"    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+# #993 (second mechanism): a capture's type from a cccc-only-routed include
+# (whose own #include is deliberately never re-emitted, #896) reaches the
+# output via serialize_type_defs_for_owner instead of the #include replay --
+# moving only the replay would not have fixed this shape.
+BLOCK_ROUTED_INCLUDE_LIB = (
+    "#include @comptime <dlfcn.h>\n"
+    "\n"
+    "[[cccc::comptime]]\n"
+    "void gen(void) {\n"
+    "}\n"
+    "gen();\n"
+    "\n"
+    "struct Pt { int x; };\n"
+)
+
+BLOCK_ROUTED_INCLUDE_MAIN = (
+    '#include "routedlib_993.c"\n'
+    "int main(void) {\n"
+    "    struct Pt p;\n"
+    "    p.x = 42;\n"
+    "    int (^b)(void) = ^{ return p.x; };\n"
+    "    return b();\n"
+    "}\n"
+)
+
+
+def case_block_routed_include_type_capture_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  61: -c=native, a block's by-value capture of a struct declared "
+          "in a cccc-only-routed include (#896) still round-trips as real C "
+          "(#993) -- the type reaches the output via "
+          "serialize_type_defs_for_owner, not the #include replay")
+    write(Path(tmp) / "routedlib_993.c", BLOCK_ROUTED_INCLUDE_LIB)
+    src = Path(tmp) / "block_routed_include_993.c"
+    write(src, BLOCK_ROUTED_INCLUDE_MAIN)
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+    out_bin = Path(tmp) / "block_routed_include_993_out"
+    compile_result = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    def_idx = out.find("struct Pt {")
+    env_idx = out.find("struct __cccc_block_env_")
+    if def_idx < 0 or env_idx < 0 or def_idx > env_idx:
+        print(f"    FAIL: -m output does not place struct Pt's definition "
+              f"before the env struct (def_idx={def_idx}, env_idx={env_idx})\n"
+              f"    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+# #990/#993 (no-literal TU): a TU that only uses a block *type* (parameter,
+# no literal anywhere) used to skip the whole preamble -- struct
+# __cccc_block was never defined, and __cccc_block_copy_impl/free were both
+# left undeclared.
+BLOCK_NO_LITERAL_PROGRAM = (
+    "typedef int (^IntBlock)(void);\n"
+    "int consume(IntBlock b) {\n"
+    "    IntBlock c = Block_copy(b);\n"
+    "    int r = c();\n"
+    "    Block_release(c);\n"
+    "    return r;\n"
+    "}\n"
+)
+
+
+def case_block_no_literal_preamble_m_output(cccc: Path, tmp: str) -> bool:
+    print("  62: -m output defines struct __cccc_block and the copy/free "
+          "helpers for a TU that uses a block type but declares no block "
+          "literal (#990/#993) -- can't run this one (no main), so assert "
+          "on -m shape and that a system compiler accepts it")
+    src = Path(tmp) / "block_no_literal_990_993.c"
+    write(src, BLOCK_NO_LITERAL_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    missing = [needle for needle in (
+        "struct __cccc_block {",
+        "__cccc_block_copy_impl",
+        "extern void free(void *);",
+    ) if needle not in out]
+    if missing:
+        print(f"    FAIL: -m output missing {missing}\n    {out}")
+        return False
+    out_c = Path(tmp) / "block_no_literal_990_993_out.c"
+    write(out_c, out)
+    cc = os.environ.get("CC", "cc")
+    compile_result = run([cc, "-x", "c", "-c", "-o", os.devnull, out_c.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: system compiler rejected -m output "
+              f"(exit {compile_result.returncode})\n    {compile_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -1816,6 +2006,11 @@ def main() -> int:
             case_block_nested_copy_native_round_trip,
             case_block_partial_init_native_round_trip,
             case_block_local_type_hoist_native_round_trip,
+            case_block_release_no_stdlib_native_round_trip,
+            case_block_release_with_stdlib_native_round_trip,
+            case_block_header_type_capture_native_round_trip,
+            case_block_routed_include_type_capture_native_round_trip,
+            case_block_no_literal_preamble_m_output,
         ]
         results = [case(cccc, tmp) for case in cases]
 
