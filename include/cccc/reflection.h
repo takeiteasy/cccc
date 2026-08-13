@@ -2038,7 +2038,14 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def FunctionSetBody
  * @brief Set the body of a function.
  * @param fn The function object.
- * @param body The function body (a statement or block node). */
+ * @param body The function body (a statement or block node).
+ * @details Any local declared while building @c body — e.g. `int x = 1;`
+ *          inside a @c Quote() template, or a var created by
+ *          @c MakeLocalVar / @c MakeCompoundLiteral — is attached to @c fn,
+ *          whether or not this call happens inside a @c WithFn(fn) block.
+ *          @c WithFn is still required to give @c Quote("return x;") the
+ *          function's return type for its implicit cast, and to target
+ *          @c MakeLocalVar at @c fn from outside a template. */
 #define FunctionSetBody(fn, body)                                    \
     __builtin_ast_function_set_body(fn, body)
 /*! @def FunctionSetStatic

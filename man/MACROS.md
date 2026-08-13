@@ -1414,9 +1414,19 @@ generate_answer();
 ```
 
 Without `WithFn`, `Quote("return x;")` at file scope (where there is no
-enclosing function) will compile but the implicit return-type cast is skipped.
-For macros that only use `MakeReturn(MakeIntLiteral(...))` directly this does
-not matter; it matters when the template produces a `return` statement.
+enclosing function) still compiles, but the implicit return-type cast is
+skipped. For macros that only use `MakeReturn(MakeIntLiteral(...))` directly
+this does not matter; it matters when the template produces a `return`
+statement.
+
+`FunctionSetBody` always attaches locals declared inside the body — including
+`int x = 1;`-style declarations inside a `Quote()` template, and any local
+created by `MakeLocalVar`/`MakeCompoundLiteral` while the body is being built
+— to the function they were built for, whether or not that construction
+happened inside `WithFn`. `WithFn` is still required for the return-type cast
+above, and it's the only way to target `MakeLocalVar` at a specific function
+from outside a `Quote()` template, but it is no longer required just to give a
+generated function's own locals a home.
 
 ## Type And Symbol Reflection
 

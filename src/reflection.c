@@ -1957,6 +1957,55 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name,
     }
 }
 
+// #996: a block literal (^{ ... }) lifted while building fn's body outside a
+// WithFn(fn) block never learns its enclosing function -- block_literal()
+// (src/parse.c) sets block_fn->parent_fn from vm->compiler.current_fn at
+// parse time, which is NULL here (see the adoption comment below). Walk the
+// finished body for ND_BLOCK_LITERAL nodes and backfill parent_fn/
+// nesting_depth on any block_fn that's still unlinked, so it matches exactly
+// what WithFn(fn) would have produced -- this is what lets
+// belongs_to_outer_function()/calculate_chain_depth() (src/codegen.c) find a
+// captured outer variable through the static chain. Mirrors the traversal
+// shape of collect_node_types() (src/serialize.c).
+static void relink_orphan_block_parents(Node *node, Obj *fn) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_BLOCK_LITERAL && node->block_fn &&
+        node->block_fn->parent_fn == NULL) {
+        node->block_fn->parent_fn = fn;
+        node->block_fn->nesting_depth = fn->nesting_depth + 1;
+    }
+
+    if (node->kind == ND_SWITCH) {
+        relink_orphan_block_parents(node->cond, fn);
+        for (Node *c = node->case_next; c; c = c->case_next)
+            relink_orphan_block_parents(c->lhs, fn);
+        if (node->default_case)
+            relink_orphan_block_parents(node->default_case->lhs, fn);
+        relink_orphan_block_parents(node->next, fn);
+        return;
+    }
+
+    if (node->kind == ND_CASE) {
+        relink_orphan_block_parents(node->lhs, fn);
+        relink_orphan_block_parents(node->next, fn);
+        return;
+    }
+
+    relink_orphan_block_parents(node->lhs, fn);
+    relink_orphan_block_parents(node->rhs, fn);
+    relink_orphan_block_parents(node->cond, fn);
+    relink_orphan_block_parents(node->then, fn);
+    relink_orphan_block_parents(node->els, fn);
+    relink_orphan_block_parents(node->init, fn);
+    relink_orphan_block_parents(node->inc, fn);
+    relink_orphan_block_parents(node->body, fn);
+    relink_orphan_block_parents(node->args, fn);
+
+    relink_orphan_block_parents(node->next, fn);
+}
+
 void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !fn || !body)
@@ -1974,6 +2023,55 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     // CRITICAL: Run add_type on the body to assign types to all nodes
     // This is necessary for code generation to work correctly
     add_type(vm, fn->body);
+
+    // #996: locals declared while building this body (e.g. `int x = 1;`
+    // inside a Quote() template, or MakeLocalVar/MakeCompoundLiteral) are
+    // always prepended to vm->compiler.locals, never to fn->locals directly
+    // (src/parse.c's new_gvar-adjacent new_lvar, and the reflection.c
+    // prepend sites feeding __builtin_ast_local_var/compound-literal
+    // helpers). Two mechanisms normally move them onto the owning
+    // function's own list: cc_expand_macros's per-function loop
+    // (src/macros.c) and push_fn/pop_fn behind WithFn(fn) (below in this
+    // file). A file-scope comptime macro calling
+    // MakeFunction()+FunctionSetBody(fn, Quote(...)) without WithFn hits
+    // neither, so fn->locals stayed NULL and every local in the body kept
+    // its default offset of 0 -- they all aliased the same frame slot,
+    // corrupting anything sharing that slot (a lifted block's own invoke
+    // pointer, in the ticket's repro) and, separately, leaving -m/-c=native
+    // output referencing undeclared variables.
+    //
+    // Adopt vm->compiler.locals onto fn->locals here, but ONLY when
+    // current_fn == NULL. cc_expand_macros deliberately clears both
+    // current_fn and locals after its own per-function loop (see the
+    // comment there) specifically so a stray new_lvar in a global-init
+    // comptime context can't silently attach to the last function's frame
+    // -- so current_fn == NULL is the guarantee that nobody else already
+    // owns this list, and adopting it wholesale can't steal a local out
+    // from under another function. When current_fn != NULL (a macro
+    // invoked from inside an ordinary function that itself builds another
+    // function's body) the list genuinely belongs to that calling
+    // function; left alone and filed as #997 -- that case needs a
+    // different mechanism (an AST walk to tell the two sources of locals
+    // apart) rather than being folded in here.
+    //
+    // Appended (not replaced) so a second FunctionSetBody call on the same
+    // fn, or a body assembled across several builder calls, accumulates
+    // rather than dropping an earlier batch.
+    if (vm->compiler.current_fn == NULL && vm->compiler.locals != NULL) {
+        Obj *new_locals = vm->compiler.locals;
+        vm->compiler.locals = NULL;
+
+        if (fn->locals == NULL) {
+            fn->locals = new_locals;
+        } else {
+            Obj *tail = fn->locals;
+            while (tail->next)
+                tail = tail->next;
+            tail->next = new_locals;
+        }
+
+        relink_orphan_block_parents(fn->body, fn);
+    }
 
     // Mark as having a definition
     fn->is_definition = true;

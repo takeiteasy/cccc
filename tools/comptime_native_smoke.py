@@ -1958,11 +1958,42 @@ def case_block_large_struct_capture_round_trip(cccc: Path, tmp: str) -> bool:
                                     BLOCK_LARGE_STRUCT_CAPTURE_PROGRAM)
 
 
+MACRO_GENERATED_BLOCK_LOCALS_PROGRAM = (
+    "[[cccc::comptime]]\n"
+    "void gen(void) {\n"
+    "    Obj *fn = MakeFunction(\"use_block\", GetType(\"int\"));\n"
+    "    FunctionSetBody(fn, Quote(\n"
+    "        \"{ int n = 42; int (^b)(void) = ^{ return n; }; return b(); }\"\n"
+    "    ));\n"
+    "    PublishNode(fn);\n"
+    "}\n"
+    "gen();\n"
+    "\n"
+    "int use_block(void);\n"
+    "\n"
+    "int main(void) {\n"
+    "    return use_block();\n"
+    "}\n"
+)
+
+
+def case_macro_generated_block_locals_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  64: a capturing block literal inside a MakeFunction()+"
+          "FunctionSetBody(fn, Quote(...)) body built without WithFn(fn) "
+          "round-trips VM 42 -> native 42 (#996) -- a -m shape assertion "
+          "alone can't see the execution-level failure this ticket was "
+          "about (every local in the generated body aliased frame offset "
+          "0, so the block's own descriptor got clobbered and CALLI jumped "
+          "to a raw host address)")
+    return _vm_and_native_run_case(cccc, tmp, "macro_generated_block_locals_996",
+                                    MACRO_GENERATED_BLOCK_LOCALS_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2033,6 +2064,7 @@ def main() -> int:
             case_block_routed_include_type_capture_native_round_trip,
             case_block_no_literal_preamble_m_output,
             case_block_large_struct_capture_round_trip,
+            case_macro_generated_block_locals_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
