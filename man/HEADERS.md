@@ -135,10 +135,23 @@ by default). Two things follow from that:
   `static FILE *__cccc_stdout(void) { return stdout; }` — rather than
   leaving the call to an undeclared function in the generated C.
 
-`-c=generated` (without `-c=native`) is a separate, unaffected
-code path: its output is meant to be compiled *alongside* normal headers,
-so it has never re-emitted header-sourced typedefs (see `generated_only` in
-`serialize.c`).
+`-c=generated` (without `-c=native`) is a separate code path: its output is
+meant to be compiled *alongside* normal headers, so it has never re-emitted
+header-sourced typedefs (see `generated_only` in `serialize.c`). It has its
+own, narrower version of the same collision problem: a struct/enum reached
+through a `GetType()`/`Quote()` comptime macro is normally re-derived into
+the output (a `#include @comptime`-routed header's own `#include` is never
+replayed, so nothing else supplies the definition), but if the *same*
+header is also plainly `#include`d in the same TU, the plain include's
+`#include` line **is** replayed, and the definition must not also be
+re-derived on top of it. `path_is_captured()` in `src/serialize.c` (#953)
+resolves this by checking whether the type's declaring file is one of the
+paths auto-capture actually replayed for this program — including a
+standard header served from CCCC's embedded `src/std.c` table rather than
+resolved on disk, which is keyed under its own synthetic
+`<embedded>/<name>` path (`embedded_header_key()` in `src/preprocess.c`,
+registered into the same map an on-disk resolution uses) rather than a real
+filesystem path (#998).
 
 `--emit-cccc` inverts the header-collision behaviour described above for
 cccc-only includes: instead of skipping their re-emission (`cc_file_is_cccc_only`

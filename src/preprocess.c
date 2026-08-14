@@ -2335,6 +2335,17 @@ static char *try_embedded_std_header(VirtualMachine *vm, char *filename) {
     return src;
 }
 
+// #998: the synthetic path an embedded standard header (served from the
+// src/std.c table, no real file on disk) is keyed and recorded under --
+// shared between include_embedded_header()'s own #pragma once/include-guard
+// bookkeeping and the PP_INCLUDE handler's emit_include_paths registration,
+// so the two can't drift apart. Also what TypeName.file_path ends up
+// holding for a type declared in such a header (record_type_name, parse.c),
+// confirmed empirically against this exact string.
+static char *embedded_header_key(VirtualMachine *vm, const char *filename) {
+    return arena_format(vm, "<embedded>/%s", filename);
+}
+
 // Splice an embedded standard header's tokens into the include stream.
 // Mirrors include_file()'s #pragma once / include-guard bookkeeping, keyed
 // by a synthetic "<embedded>/name" string since there is no real path on
@@ -2342,7 +2353,7 @@ static char *try_embedded_std_header(VirtualMachine *vm, char *filename) {
 static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
                                       char *filename, char *src,
                                       Token *filename_tok) {
-    char *key = arena_format(vm, "<embedded>/%s", filename);
+    char *key = embedded_header_key(vm, filename);
 
     if (hashmap_get(&vm->compiler.pragma_once, key))
         return tok;
@@ -4825,6 +4836,32 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // (#891).
                 char *embedded_src = try_embedded_std_header(vm, filename);
                 if (embedded_src) {
+                    // #998: register this include's provenance BEFORE the
+                    // splice below -- the same header may already have been
+                    // seen once (e.g. routed @comptime earlier in this same
+                    // TU), in which case include_embedded_header() early-
+                    // returns on its #pragma once/include-guard check
+                    // without reaching any registration of its own. The
+                    // #include line is still replayed verbatim into
+                    // -c=generated output regardless (emit_directives,
+                    // above), so path_is_captured() (serialize.c) needs to
+                    // know this key is supplied by it -- otherwise
+                    // serialize_type_defs_for_owner() re-derives the type's
+                    // definition on top of the replayed #include, a
+                    // redefinition the host compiler rejects (#998).
+                    //
+                    // Deliberately NOT paired with a record_include_edge()
+                    // call the way the two on-disk branches above are: under
+                    // -c=native/-c=generated the downstream compiler opens
+                    // the real system header, not CCCC's embedded copy, so
+                    // a cc_file_is_cccc_only() closure computed over the
+                    // embedded copy would answer a question about the wrong
+                    // file -- it could only ever cause a false suppression
+                    // of a legitimate #include.
+                    if (ac_include_line)
+                        hashmap_put(&vm->compiler.emit_include_paths,
+                                   ac_include_line,
+                                   embedded_header_key(vm, filename));
                     tok = include_embedded_header(vm, tok, filename,
                                                   embedded_src,
                                                   start->next->next);

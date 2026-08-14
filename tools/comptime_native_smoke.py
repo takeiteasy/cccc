@@ -2059,11 +2059,117 @@ def case_macro_generated_block_generated_output_links(cccc: Path, tmp: str) -> b
     return True
 
 
+TIME_H_COMPTIME_PROGRAM = (
+    "[[cccc::comptime]]\n"
+    "void gen(void) {\n"
+    "    Obj *fn = MakeFunction(\"use_it\", GetType(\"int\"));\n"
+    "    FunctionSetBody(fn, Quote(\"{ struct tm t; t.tm_year = 42; "
+    "return t.tm_year; }\"));\n"
+    "    PublishNode(fn);\n"
+    "}\n"
+    "gen();\n"
+    "int use_it(void);\n"
+    "int main(void) { return use_it(); }\n"
+)
+
+
+def case_generated_embedded_header_no_duplicate(cccc: Path, tmp: str) -> bool:
+    print("  66: -c=generated output for a standard header served from the "
+          "embedded src/std.c table (no on-disk ./include, since this runs "
+          "from a temp cwd) has no duplicate struct tm when the header is "
+          "both @comptime-routed and plainly #included (#998)")
+    src = Path(tmp) / "time_h_998a.c"
+    write(src, "#include @comptime <time.h>\n#include <time.h>\n" +
+          TIME_H_COMPTIME_PROGRAM)
+    out_path = Path(tmp) / "time_h_998a.gen.c"
+    result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    out = out_path.read_text()
+    if "struct tm {" in out:
+        print(f"    FAIL: -c=generated output re-derives struct tm on top "
+              f"of the replayed #include <time.h>\n    {out}")
+        return False
+    if "#include <time.h>" not in out or "use_it" not in out:
+        print(f"    FAIL: -c=generated output missing expected content\n    {out}")
+        return False
+    obj = Path(tmp) / "time_h_998a.o"
+    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
+                                capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output (likely "
+              f"a struct tm redefinition)\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_generated_embedded_header_comptime_only_still_derives(cccc: Path, tmp: str) -> bool:
+    print("  67: -c=generated output for a standard header reached only via "
+          "#include @comptime (embedded resolution) still derives its "
+          "definition -- guards #998's fix against over-suppression")
+    src = Path(tmp) / "time_h_998b.c"
+    write(src, "#include @comptime <time.h>\n" + TIME_H_COMPTIME_PROGRAM)
+    out_path = Path(tmp) / "time_h_998b.gen.c"
+    result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {result.returncode}\n    {result.stderr}")
+        return False
+    out = out_path.read_text()
+    if "struct tm {" not in out:
+        print(f"    FAIL: -c=generated output dropped struct tm's "
+              f"definition -- its @comptime-routed #include is never "
+              f"captured, so nothing else supplies it\n    {out}")
+        return False
+    if "#include <time.h>" in out:
+        print(f"    FAIL: -c=generated output leaked the @comptime-routed "
+              f"#include verbatim\n    {out}")
+        return False
+    obj = Path(tmp) / "time_h_998b.o"
+    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
+                                capture_output=True, text=True, cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_native_embedded_header_include_not_suppressed(cccc: Path, tmp: str) -> bool:
+    print("  68: a plain #include <stdio.h> resolved from the embedded "
+          "src/std.c table still appears in -m output and still builds/runs "
+          "under -c=native (#998 regression guard: the new emit_include_paths "
+          "registration for an embedded header must not feed "
+          "cc_file_is_cccc_only and suppress a legitimate #include)")
+    src = Path(tmp) / "stdio_998.c"
+    write(src, '#include <stdio.h>\n'
+                'int main(void) { printf("hi\\n"); return 42; }\n')
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if m_result.returncode != 0:
+        print(f"    FAIL: -m exited {m_result.returncode}\n    {m_result.stderr}")
+        return False
+    if "#include <stdio.h>" not in m_result.stdout:
+        print(f"    FAIL: -m output dropped #include <stdio.h>\n    {m_result.stdout}")
+        return False
+    out_bin = Path(tmp) / "stdio_998_out"
+    result = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -c=native exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2136,6 +2242,9 @@ def main() -> int:
             case_block_large_struct_capture_round_trip,
             case_macro_generated_block_locals_round_trip,
             case_macro_generated_block_generated_output_links,
+            case_generated_embedded_header_no_duplicate,
+            case_generated_embedded_header_comptime_only_still_derives,
+            case_native_embedded_header_include_not_suppressed,
         ]
         results = [case(cccc, tmp) for case in cases]
 
