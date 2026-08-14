@@ -2296,11 +2296,112 @@ def case_static_name_collision_multi_tu(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_switch_break_continue_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  72: -c=native, break/continue (which used to serialize to the "
+          "literal text 'goto (null);', a host compile error) and a real "
+          "switch body -- multi-statement cases, fallthrough, a `default:` "
+          "that is not last in source order, a GNU case range, a `break` "
+          "inside a switch inside a loop, and a `continue` that must skip "
+          "over an enclosing switch frame to reach the loop -- round-trip "
+          "VM 42 -> native 42 (#1005). A -m shape assertion alone can't "
+          "see the switch-body drop returning a wrong answer; only "
+          "compiling and running the native output can")
+    program = (
+        "int main(void) {\n"
+        "    int total = 0;\n"
+        "    for (int i = 0; i < 6; i++) {\n"
+        "        switch (i) {\n"
+        "            default:\n"
+        "                total += 1;\n"
+        "                break;\n"
+        "            case 1 ... 3:\n"
+        "                total += i;\n"
+        "                continue;\n"
+        "            case 5:\n"
+        "                total += 100;\n"
+        "                break;\n"
+        "        }\n"
+        "        total += 1000;\n" # reached for default(0,4) and case 5 only
+        "    }\n"
+        "    // i=0: default, total+=1+1000=1001\n"
+        "    // i=1..3: case range, total += 1+2+3=6, no +1000 (continue)\n"
+        "    // i=4: default, total+=1+1000=1001\n"
+        "    // i=5: case 5, total+=100+1000=1100\n"
+        "    // total = 1001+6+1001+1100 = 3108\n"
+        "    if (total != 3108) return total & 0xff;\n"
+        "    int r = 0;\n"
+        "    for (int j = 0; j < 5; j++) {\n"
+        "        if (j == 3) break;\n"
+        "        switch (j) {\n"
+        "            case 0: r += 1;\n"
+        "            case 1: r += 10; break;\n"
+        "            case 2: r += 100;\n"
+        "        }\n"
+        "    }\n"
+        "    // j=0: falls through 0->1, r=11; j=1: r=21; j=2: r=121; j=3: break\n"
+        "    return r == 121 ? 42 : r;\n"
+        "}\n"
+    )
+    return _vm_and_native_run_case(cccc, tmp, "switch_break_continue_1005", program)
+
+
+def case_multi_tu_typedef_and_includes_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  73: -c=native, a non-primary translation unit's own file-scope "
+          "typedef and #include (the ticket's own two-file repro: a "
+          "`typedef enum` and <stdlib.h>/<stdio.h> written in the second "
+          ".c on the command line) both reach the output, instead of being "
+          "silently dropped ('unknown type name'/undeclared malloc/free/"
+          "puts) because record_type_name() and the preprocessor's "
+          "auto-capture gate both keyed off vm->compiler.primary_file, "
+          "which only ever names input_files[0] (#1006). This is the "
+          "load-bearing proof: the failure is a host compile/link failure "
+          "no -m shape assertion alone can see")
+    tu1_src = Path(tmp) / "multi_tu_1006_tu1.c"
+    tu2_src = Path(tmp) / "multi_tu_1006_tu2.c"
+    write(tu1_src, "int multi_tu_1006_other(void) { return 1; }\n")
+    write(tu2_src,
+          "#include <stdlib.h>\n"
+          "#include <stdio.h>\n"
+          "typedef enum { MULTI_TU_1006_A, MULTI_TU_1006_B } MultiTu1006Thing;\n"
+          "static MultiTu1006Thing multi_tu_1006_pick(const char *s) {\n"
+          "    (void)s;\n"
+          "    return MULTI_TU_1006_B;\n"
+          "}\n"
+          "int multi_tu_1006_other(void);\n"
+          "int main(void) {\n"
+          "    MultiTu1006Thing t = multi_tu_1006_pick(\"x\");\n"
+          "    void *p = malloc(8);\n"
+          "    free(p);\n"
+          "    puts(t == MULTI_TU_1006_B ? \"ok\" : \"no\");\n"
+          "    return multi_tu_1006_other() + (t == MULTI_TU_1006_B ? 41 : 0);\n"
+          "}\n")
+
+    vm_result = run([str(cccc), tu1_src.name, tu2_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "multi_tu_1006_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, tu1_src.name, tu2_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2379,6 +2480,8 @@ def main() -> int:
             case_dandy_vtable_pattern_multi_tu,
             case_polyfill_header_embedded_round_trip,
             case_static_name_collision_multi_tu,
+            case_switch_break_continue_native_round_trip,
+            case_multi_tu_typedef_and_includes_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

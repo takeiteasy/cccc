@@ -166,6 +166,24 @@ typedef struct {
     char *env_struct_name; // includes the leading "struct " keyword
 } BlockEnvEntry;
 
+// #1005: break/continue lower to an ND_GOTO with only `unique_label` set (a
+// non-C-identifier ".L..N" string, parse.c's new_unique_name()) -- a source
+// `goto` sets `label` instead. Serializing such an ND_GOTO back to a literal
+// `break;`/`continue;` needs to know, at the point it's printed, which
+// enclosing construct `unique_label` refers to. This mirrors NNJumpTarget/
+// nn_find_target (parse.c's null-neighbor analysis) exactly, including its
+// pointer-identity matching rule: new_unique_name() hands the identical
+// string pointer to both a construct's brk_label/cont_label and to every
+// break/continue targeting it, so `==` (not strcmp) is correct and cheap.
+typedef struct SerJumpFrame {
+    struct SerJumpFrame *parent;
+    char *brk_label;   // NULL if this construct isn't a break target
+    char *cont_label;  // NULL for switch -- parse.c's switch parsing only
+                        // saves/restores brk_label, never cont_label, so a
+                        // `continue` inside a switch inside a loop must skip
+                        // over the switch frame and resolve to the loop.
+} SerJumpFrame;
+
 typedef struct {
     TypeVec seen;
     TypeVec defs;
@@ -209,6 +227,12 @@ typedef struct {
     // a definition the preamble already wrote out.
     TypeVec hoisted;
     int hoisted_type_counter; // names renamed/synthesized hoisted tags, parallel to anon_global_counter
+    // #1005: current break/continue target stack (innermost first) and the
+    // innermost enclosing ND_SWITCH (for ND_CASE to test default_case
+    // against) -- both NULL outside any loop/switch, pushed/popped around
+    // ND_FOR/ND_DO/ND_SWITCH bodies in serialize_stmt.
+    SerJumpFrame *jumps;
+    Node *cur_switch;
 } SerializeContext;
 
 // Forward declaration
@@ -316,6 +340,38 @@ static bool same_type_or_origin(Type *a, Type *b) {
                 return false;
         }
         return ma == NULL && mb == NULL;
+    }
+
+    // #1006: two command-line input files can each independently declare an
+    // identical `typedef enum { ... } Thing;` at file scope (record_type_name
+    // no longer marks either from_include -- see the parse.c fix above), and
+    // unlike TY_STRUCT/TY_UNION just above, this branch previously had no
+    // structural fallback for TY_ENUM at all -- two origin-unrelated Type
+    // objects with the same tag/spelling always compared unequal, so
+    // type_vec_contains() (below) never deduped them and both got pushed
+    // into ctx->defs, producing a hard "redefinition of enumerator" error
+    // from the host compiler. Mirrors the TY_STRUCT/TY_UNION shape exactly:
+    // tag mismatch is conclusive when both are tagged; otherwise (or when
+    // tags match) fall back to comparing enumerators by name and value.
+    if (a && b && a->kind == TY_ENUM && b->kind == TY_ENUM) {
+        if (a->struct_tag && b->struct_tag) {
+            bool tag_match = a->struct_tag->len == b->struct_tag->len &&
+                             strncmp(a->struct_tag->loc, b->struct_tag->loc,
+                                     a->struct_tag->len) == 0;
+            if (!tag_match)
+                return false;
+        }
+        EnumConstant *ea = a->enum_constants;
+        EnumConstant *eb = b->enum_constants;
+        for (; ea && eb; ea = ea->next, eb = eb->next) {
+            if ((ea->name == NULL) != (eb->name == NULL))
+                return false;
+            if (ea->name && strcmp(ea->name, eb->name) != 0)
+                return false;
+            if (ea->value != eb->value)
+                return false;
+        }
+        return ea == NULL && eb == NULL;
     }
 
     return false;
@@ -484,22 +540,17 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     if (node->func_ty)
         collect_type(ctx, node->func_ty);
 
-    if (node->kind == ND_SWITCH) {
-        collect_node_types(ctx, node->cond);
-        for (Node *c = node->case_next; c; c = c->case_next)
-            collect_node_types(ctx, c->lhs);
-        if (node->default_case)
-            collect_node_types(ctx, node->default_case->lhs);
-        collect_node_types(ctx, node->next);
-        return;
-    }
-
-    if (node->kind == ND_CASE) {
-        collect_node_types(ctx, node->lhs);
-        collect_node_types(ctx, node->next);
-        return;
-    }
-
+    // #1005: no ND_SWITCH/ND_CASE special case here (there used to be one,
+    // walking node->case_next/->default_case instead of node->then) -- that
+    // walked only each case's *first* statement, so a type used later in a
+    // case's body (after its first statement) was never collected, and its
+    // definition never emitted. ND_CASE nodes sit inline in the switch
+    // body's statement list (node->then's ND_BLOCK -> ->body -> ->next
+    // chain), so the generic traversal below already reaches every case via
+    // ->then, and each ND_CASE's own generic ->lhs/->next below reaches its
+    // target statement and the following statement in the block -- no
+    // special-casing needed, matching how the ND_SWITCH/ND_CASE serializer
+    // arms were rewritten to work.
     collect_node_types(ctx, node->lhs);
     collect_node_types(ctx, node->rhs);
     collect_node_types(ctx, node->cond);
@@ -607,22 +658,10 @@ static void collect_generated_call_targets(Node *node, ObjVec *out) {
         node->block_fn->is_macro_generated)
         obj_vec_push(out, node->block_fn);
 
-    if (node->kind == ND_SWITCH) {
-        collect_generated_call_targets(node->cond, out);
-        for (Node *c = node->case_next; c; c = c->case_next)
-            collect_generated_call_targets(c->lhs, out);
-        if (node->default_case)
-            collect_generated_call_targets(node->default_case->lhs, out);
-        collect_generated_call_targets(node->next, out);
-        return;
-    }
-
-    if (node->kind == ND_CASE) {
-        collect_generated_call_targets(node->lhs, out);
-        collect_generated_call_targets(node->next, out);
-        return;
-    }
-
+    // #1005: see the matching comment in collect_node_types() -- no
+    // ND_SWITCH/ND_CASE special case needed; the generic traversal below
+    // already reaches every case via node->then and each ND_CASE's own
+    // ->lhs/->next.
     collect_generated_call_targets(node->lhs, out);
     collect_generated_call_targets(node->rhs, out);
     collect_generated_call_targets(node->cond, out);
@@ -1958,13 +1997,25 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         if (node->inc)
             serialize_expr(f, vm, ctx, node->inc, 0);
         fprintf(f, ")\n");
-        serialize_stmt(f, vm, ctx, node->then, indent + 1);
+        {
+            // #1005: push a jump frame so a break/continue in the body
+            // resolves back to this loop -- see the ND_GOTO arm below.
+            SerJumpFrame frame = {ctx->jumps, node->brk_label, node->cont_label};
+            ctx->jumps = &frame;
+            serialize_stmt(f, vm, ctx, node->then, indent + 1);
+            ctx->jumps = frame.parent;
+        }
         break;
 
     case ND_DO:
         print_indent_level(f, indent);
         fprintf(f, "do\n");
-        serialize_stmt(f, vm, ctx, node->then, indent + 1);
+        {
+            SerJumpFrame frame = {ctx->jumps, node->brk_label, node->cont_label};
+            ctx->jumps = &frame;
+            serialize_stmt(f, vm, ctx, node->then, indent + 1);
+            ctx->jumps = frame.parent;
+        }
         print_indent_level(f, indent);
         fprintf(f, "while (");
         serialize_expr(f, vm, ctx, node->cond, 0);
@@ -1972,27 +2023,63 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     case ND_SWITCH:
+        // #1005: previously reconstructed the switch from the case_next
+        // chain instead of serializing node->then -- that walked only the
+        // first statement following each `case`/`default` (everything after
+        // it, including the case's own `break`, was silently dropped),
+        // emitted cases in reverse source order (case_next is prepended at
+        // parse time) with `default:` always forced last (destroying
+        // fallthrough), and dropped GNU case ranges entirely. Serializing
+        // the real body -- mirroring ND_IF/ND_FOR's shape -- fixes all four
+        // at once; ND_CASE below now emits its own label in place and lets
+        // the enclosing ND_BLOCK's ->next walk handle subsequent statements.
         print_indent_level(f, indent);
         fprintf(f, "switch (");
         serialize_expr(f, vm, ctx, node->cond, 0);
-        fprintf(f, ") {\n");
-        for (Node *c = node->case_next; c; c = c->case_next) {
-            print_indent_level(f, indent);
-            fprintf(f, "case %ld:\n", c->begin);
-            serialize_stmt(f, vm, ctx, c->lhs, indent + 1);
+        fprintf(f, ")\n");
+        {
+            // A switch saves/restores only brk_label at parse time
+            // (parse.c) -- cont_label is deliberately NULL here so a
+            // `continue` inside this switch skips over this frame and
+            // resolves to the nearest enclosing loop, not this switch.
+            SerJumpFrame frame = {ctx->jumps, node->brk_label, NULL};
+            Node *saved_switch = ctx->cur_switch;
+            ctx->jumps = &frame;
+            ctx->cur_switch = node;
+            serialize_stmt(f, vm, ctx, node->then, indent + 1);
+            ctx->cur_switch = saved_switch;
+            ctx->jumps = frame.parent;
         }
-        if (node->default_case) {
-            print_indent_level(f, indent);
-            fprintf(f, "default:\n");
-            serialize_stmt(f, vm, ctx, node->default_case->lhs, indent + 1);
-        }
-        print_indent_level(f, indent);
-        fprintf(f, "}\n");
         break;
 
     case ND_GOTO:
         print_indent_level(f, indent);
-        fprintf(f, "goto %s;\n", node->label);
+        if (node->label) {
+            // A real source-level `goto label;` (parse.c sets ->label to
+            // the source identifier; resolve_goto_labels also fills in
+            // ->unique_label, but ->label is authoritative here).
+            fprintf(f, "goto %s;\n", node->label);
+        } else {
+            // #1005: break/continue lower to an ND_GOTO with only
+            // ->unique_label set (parse.c) -- a ".L..N" string that is not
+            // a valid C identifier and, unlike a source goto's target, has
+            // no ND_LABEL anywhere to jump to. Resolve which construct it
+            // targets by walking the jump-frame stack built above (pointer
+            // identity, matching parse.c's own nn_find_target) and emit the
+            // real C keyword instead of a (nonexistent) label reference.
+            const char *kw = NULL;
+            for (SerJumpFrame *fr = ctx->jumps; fr && !kw; fr = fr->parent) {
+                if (fr->brk_label && fr->brk_label == node->unique_label)
+                    kw = "break";
+                else if (fr->cont_label && fr->cont_label == node->unique_label)
+                    kw = "continue";
+            }
+            if (!kw)
+                error_tok(vm, node->tok,
+                          "internal error: break/continue target not found "
+                          "while serializing");
+            fprintf(f, "%s;\n", kw);
+        }
         break;
 
     case ND_LABEL:
@@ -2001,7 +2088,16 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     case ND_CASE:
-        // Handled as part of switch
+        print_indent_level(f, indent);
+        if (ctx->cur_switch && ctx->cur_switch->default_case == node) {
+            fprintf(f, "default:\n");
+        } else if (node->begin == node->end) {
+            fprintf(f, "case %ld:\n", node->begin);
+        } else {
+            // [GNU] Case ranges, e.g. "case 1 ... 5:"
+            fprintf(f, "case %ld ... %ld:\n", node->begin, node->end);
+        }
+        serialize_stmt(f, vm, ctx, node->lhs, indent);
         break;
 
     case ND_GOTO_EXPR:
@@ -3211,9 +3307,8 @@ static bool type_mentions_block(Type *ty) {
     return false;
 }
 
-// #990/#993: mirrors collect_node_types()'s traversal shape (including its
-// ND_SWITCH/ND_CASE special cases) to find any node whose type -- or a
-// var/member/func_ty attached to it -- mentions TY_BLOCK.
+// #990/#993: mirrors collect_node_types()'s traversal shape to find any node
+// whose type -- or a var/member/func_ty attached to it -- mentions TY_BLOCK.
 static bool node_mentions_block(Node *node) {
     if (!node)
         return false;
@@ -3226,19 +3321,8 @@ static bool node_mentions_block(Node *node) {
     if (node->func_ty && type_mentions_block(node->func_ty))
         return true;
 
-    if (node->kind == ND_SWITCH) {
-        if (node_mentions_block(node->cond))
-            return true;
-        for (Node *c = node->case_next; c; c = c->case_next)
-            if (node_mentions_block(c->lhs))
-                return true;
-        if (node->default_case && node_mentions_block(node->default_case->lhs))
-            return true;
-        return node_mentions_block(node->next);
-    }
-    if (node->kind == ND_CASE)
-        return node_mentions_block(node->lhs) || node_mentions_block(node->next);
-
+    // #1005: no ND_SWITCH/ND_CASE special case (see collect_node_types());
+    // the generic traversal below already reaches every case via node->then.
     return node_mentions_block(node->lhs) || node_mentions_block(node->rhs) ||
            node_mentions_block(node->cond) || node_mentions_block(node->then) ||
            node_mentions_block(node->els) || node_mentions_block(node->init) ||
@@ -3445,13 +3529,13 @@ emit_copy_and_free:
 // function or bodyless declaration written in input_files[1..N] used to be
 // misidentified as "supplied by a replayed header" and silently dropped
 // from -c=native/-m output (found investigating #1002; not what that ticket
-// itself reported, but blocks it -- see CLAUDE.md). Keyed by File.name,
-// which new_file() (tokenize.c) sets to the exact string main.c passed to
-// cc_preprocess(), so a straight lookup is sufficient -- no path
-// canonicalization is attempted here, matching every other filename
-// comparison in this file (e.g. cc_file_is_cccc_only).
+// itself reported, but blocks it -- see CLAUDE.md). #1006: promoted to a
+// shared cc_file_is_command_line_input() (preprocess.c) so record_type_name()
+// (parse.c) and the auto-capture gate (preprocess.c) could adopt the exact
+// same test for their own primary_file-keyed drops; kept here as a thin
+// wrapper so this file's existing call sites/comments didn't need to move.
 static bool file_is_command_line_input(VirtualMachine *vm, const char *name) {
-    return name && hashmap_get(&vm->compiler.command_line_inputs, name) != NULL;
+    return cc_file_is_command_line_input(vm, name);
 }
 
 static bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,

@@ -51,6 +51,45 @@ static char *host_dirname_dup(const char *path) {
     return dir;
 }
 
+// #1006: run_native_backend()'s -I forwarding used to name only
+// dirname(primary_file) -- fine when every replayed #include came from
+// input_files[0], but #1006 widened auto-capture (preprocess.c) to replay
+// every command-line input file's own #includes, so a non-primary TU's
+// quoted `#include "local.h"` needs its own directory forwarded too or the
+// host compiler can't resolve it. Iterates vm->compiler.command_line_inputs
+// (populated in main() before preprocessing, keyed by the exact strings
+// input_files[] held) pushing one -I per distinct directory; dedup is by
+// string identity against what's already been pushed, not path
+// canonicalization -- consistent with cc_file_is_command_line_input()'s own
+// no-canonicalization contract.
+typedef struct {
+    ArgVec *cc_args;
+    char **seen;
+    int seen_len;
+    int seen_cap;
+} NativeIncludeDirCtx;
+
+static int push_input_dir_i(char *key, int keylen, void *val, void *user_data) {
+    (void)keylen;
+    (void)val;
+    NativeIncludeDirCtx *ctx = user_data;
+    char *dir = host_dirname_dup(key);
+    for (int i = 0; i < ctx->seen_len; i++) {
+        if (strcmp(ctx->seen[i], dir) == 0) {
+            free(dir);
+            return 0;
+        }
+    }
+    if (ctx->seen_len == ctx->seen_cap) {
+        ctx->seen_cap = ctx->seen_cap ? ctx->seen_cap * 2 : 8;
+        ctx->seen = realloc(ctx->seen, sizeof(char *) * ctx->seen_cap);
+    }
+    ctx->seen[ctx->seen_len++] = dir;
+    argv_push(ctx->cc_args, "-I");
+    argv_push(ctx->cc_args, dir);
+    return 0;
+}
+
 static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
                               const char **inc_paths, int inc_paths_count,
                               const char **sys_inc_paths,
@@ -130,18 +169,16 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
         snprintf(std_flag, sizeof(std_flag), "-std=%s", std_arg);
         argv_push(&cc_args, std_flag);
     }
-    // #891: cccc auto-captures the primary file's own #include directives
-    // (preprocess.c) and re-emits them verbatim into source_path, which
-    // lives in a temp directory -- so a quoted `#include "local.h"` that
-    // cccc itself resolved relative to the primary file's own directory
-    // would otherwise be unresolvable to the native compiler. Forward that
-    // directory explicitly so re-emitted quoted includes still find it.
-    char *primary_dir = NULL;
-    if (vm->compiler.primary_file && vm->compiler.primary_file->name) {
-        primary_dir = host_dirname_dup(vm->compiler.primary_file->name);
-        argv_push(&cc_args, "-I");
-        argv_push(&cc_args, primary_dir);
-    }
+    // #891/#1006: cccc auto-captures each command-line input file's own
+    // #include directives (preprocess.c) and re-emits them verbatim into
+    // source_path, which lives in a temp directory -- so a quoted
+    // `#include "local.h"` that cccc itself resolved relative to some input
+    // file's own directory would otherwise be unresolvable to the native
+    // compiler. Forward every input file's directory explicitly (not just
+    // the primary one, #1006 widened auto-capture to every input file) so
+    // re-emitted quoted includes still find it.
+    NativeIncludeDirCtx incdir_ctx = {&cc_args, NULL, 0, 0};
+    hashmap_foreach(&vm->compiler.command_line_inputs, push_input_dir_i, &incdir_ctx);
     for (int i = 0; i < inc_paths_count; i++) {
         argv_push(&cc_args, "-I");
         argv_push(&cc_args, inc_paths[i]);
@@ -177,7 +214,9 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     free(source_path);
     free(exe_path);
     free(cc);
-    free(primary_dir);
+    for (int i = 0; i < incdir_ctx.seen_len; i++)
+        free(incdir_ctx.seen[i]);
+    free(incdir_ctx.seen);
     return rc;
 }
 

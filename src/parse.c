@@ -813,8 +813,17 @@ static void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_
     // suppresses the raw #include of such a file, so its own definition
     // has to be serialized normally instead of relying on that #include
     // to supply it to the downstream compiler.
+    // #1006: was `decl_tok->file != vm->compiler.primary_file`, which only
+    // ever names input_files[0] (cc_preprocess/linker.c pin primary_file to
+    // the *first* input file forever) -- so a typedef/struct/enum written
+    // in input_files[1..N] (a non-primary translation unit) was wrongly
+    // treated as header-supplied and its definition dropped from
+    // -c=native/-m output, even though nothing actually supplies it (its
+    // own TU's directives were never replayed either -- see the matching
+    // preprocess.c fix). cc_file_is_command_line_input() is the same test
+    // #1002 already established for serialize.c's function passes.
     rec->from_include = decl_tok && decl_tok->file &&
-                        decl_tok->file != vm->compiler.primary_file &&
+                        !cc_file_is_command_line_input(vm, decl_tok->file->name) &&
                         !cc_file_is_cccc_only(vm, decl_tok->file->name);
     rec->file_path = decl_tok && decl_tok->file ? decl_tok->file->name : NULL;
     rec->next = vm->compiler.type_names;

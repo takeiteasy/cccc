@@ -4299,6 +4299,7 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
 bool cc_is_source_define_name(VirtualMachine *vm, const char *name, int len);
 bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len); // #893
 bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename); // #896
+bool cc_file_is_command_line_input(VirtualMachine *vm, const char *name); // #1006
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);

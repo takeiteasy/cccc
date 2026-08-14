@@ -388,6 +388,26 @@ bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename) {
     return result;
 }
 
+// #1006 (investigation, filed as part of #1005/#1006's fix): true when
+// `name` is the exact path of one of the files the user listed on the
+// command line, as opposed to a header any of them #included. This used to
+// be serialize.c's file-local file_is_command_line_input() (added by
+// #1002's investigation); promoted to a shared, exported helper so
+// record_type_name() (parse.c) and the preprocessor's auto-capture gate
+// (below in this file) can use the exact same test serialize.c's function
+// passes already use, instead of each comparing against
+// vm->compiler.primary_file (pinned to input_files[0] forever,
+// cc_preprocess/linker.c) the way they did before -- that mismatch is what
+// #1006 was about: a type or #include written in input_files[1..N] was
+// treated as "not written by the user" and dropped from -c=native/-m
+// output. Keyed by File.name, which new_file() (tokenize.c) sets to the
+// exact string main.c passed to cc_preprocess(), so a straight lookup is
+// sufficient -- no path canonicalization is attempted, matching
+// cc_file_is_cccc_only() above.
+bool cc_file_is_command_line_input(VirtualMachine *vm, const char *name) {
+    return name && hashmap_get(&vm->compiler.command_line_inputs, name) != NULL;
+}
+
 // #1001: reset every bit of per-TU preprocessor state before preprocessing
 // the *next* command-line input file (main.c's per-TU loop calls this
 // between iterations, never before the first). Without this, #define/
@@ -4752,16 +4772,36 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                       "@shared is only valid on #include or #define");
         }
 
-        // Auto-capture: when not using --emit-only, record directives from the
-        // primary source file that are outside comptime blocks verbatim, so
-        // they appear in -c=generated output without needing [[cccc::emit]] annotations.
+        // Auto-capture: when not using --emit-only, record directives from any
+        // command-line input file (not just input_files[0]) that are outside
+        // comptime blocks verbatim, so they appear in -c=generated output
+        // without needing [[cccc::emit]] annotations, and get replayed into
+        // -c=native/-m output for the host compiler.
         // Skip during the macro-compilation preprocessing pass (in_macro_mode)
         // since those token streams re-use primary_file pointers but are not
         // part of the user-visible source.
         // For @shared includes, emit a clean line (route stripped) so generated
         // output contains a plain #include rather than #include @shared.
+        // #1006: was `vm->compiler.primary_file && start->file ==
+        // vm->compiler.primary_file` -- primary_file only ever names
+        // input_files[0] (cc_preprocess/linker.c pin it to the *first* input
+        // file forever), so a non-primary translation unit's own #includes
+        // (e.g. <stdlib.h>, <stdio.h>) were never captured, and so never
+        // replayed -- the host compiler then rejected size_t/malloc/free/
+        // puts as undeclared even though tu2.c alone compiled fine. Widened
+        // to cc_file_is_command_line_input() (preprocess.c), the same test
+        // #1002/#1006 already established for serialize.c's/parse.c's own
+        // primary_file-keyed drops. One residual: directives from more than
+        // one TU can now collide in the replayed output (e.g. two TUs each
+        // #define-ing the same macro to different values) -- harmless, since
+        // by the time this text is replayed every TU has already been fully
+        // parsed into AST using its own, now-per-TU (#1001) macro state; the
+        // replayed text exists only to bring types/library declarations into
+        // scope for the host compiler, so a colliding #define is at worst a
+        // host redefinition warning, not a semantic change. See
+        // man/HEADERS.md.
         char *ac_include_line = NULL; // #896: set below when this directive
-                                       // is a primary-file #include that got
+                                       // is a captured #include that got
                                        // auto-captured, so the PP_INCLUDE
                                        // case can pair it with its resolved
                                        // path once that's known
@@ -4769,8 +4809,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             ComptimeCtxEntry *_ac = ctx_top(vm);
             if (!vm->compiler.emit_strict &&
                 !vm->compiler.in_macro_mode &&
-                vm->compiler.primary_file &&
-                start->file == vm->compiler.primary_file &&
+                start->file &&
+                cc_file_is_command_line_input(vm, start->file->name) &&
                 !(_ac && _ac->type == CTX_COMPTIME) &&
                 !is_pragma_cccc(start)) {
                 char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED ||

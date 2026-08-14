@@ -128,6 +128,39 @@ by default). Two things follow from that:
   input file was misidentified as header-supplied and silently dropped;
   fixed by matching against every command-line input path, found while
   investigating #1002.
+- A typedef/struct/enum written at file scope *in* a non-primary
+  command-line input file, and that same input file's own top-level
+  `#include` directives, are both serialized/replayed exactly like the
+  primary file's — auto-capture and `TypeNameRecord.from_include` (above)
+  used to key off `vm->compiler.primary_file` specifically (pinned to the
+  *first* input file forever, same root cause as the previous bullet), so a
+  type or `#include` written in a second-or-later input file was
+  misclassified as "supplied by something else" and silently dropped from
+  `-c=native`/`-m` output — `unknown type name`, then implicit-declaration
+  errors for anything that file's own dropped `#include`s would have
+  declared (#1006). Both are now keyed by
+  `cc_file_is_command_line_input()`, matching the previous bullet.
+  `run_native_backend` (`src/main.c`) forwards one `-I<dirname>` per
+  command-line input file, not just the primary one, so a non-primary
+  file's re-emitted quoted `#include "local.h"` still resolves. One
+  residual: replayed directives from more than one input file can now
+  collide in the same output (e.g. two files each `#define`-ing the same
+  macro to different values) — harmless, since every input file has
+  already been fully parsed into its own AST by the time this text is
+  replayed (each with its own, per-TU preprocessor state, #1001); the
+  replayed text exists only to bring types/library declarations into scope
+  for the host compiler, so a colliding `#define` is at worst a host
+  redefinition warning, never a semantic change. An identical `typedef
+  enum { ... } Thing;` (or other scalar/enum typedef) written in more than
+  one input file is legal, duplicate-definition C from C11 on (the default
+  standard is C23) and is left as two identical typedefs in the output;
+  `same_type_or_origin` (`src/serialize.c`) gained a structural comparison
+  arm for `TY_ENUM` (mirroring the existing `TY_STRUCT`/`TY_UNION` one) so
+  two *structurally identical* enums declared in different input files
+  collapse to a single emitted definition instead of a hard "redefinition
+  of enumerator" error — enum was the one aggregate kind #999's opaque-
+  handle-preserving `copy_type()` exclusion doesn't apply to, since an enum
+  has no forward-declare-then-complete idiom to protect.
 - Two different `.c` inputs each independently defining `static int
   helper(void)` with no shared header compile and run correctly (each has
   its own `Obj`; internal linkage is respected — `cc_link_progs`
