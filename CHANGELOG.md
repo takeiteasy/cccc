@@ -3,6 +3,65 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.12] - 2026-08-14
+
+### Fixed
+
+- **Duplicate `struct` definition in `-c=generated` when a standard header
+  resolves from the embedded table** (#998). A TU that both
+  `#include @comptime`-routes and plainly `#include`s the same standard
+  header (e.g. `<time.h>`, so a comptime macro can `GetType()` it while
+  ordinary code also uses it) emitted both a re-derived definition and the
+  replayed `#include` line — a redefinition a real system compiler rejects.
+  Reproduces only when the header resolves from the embedded `src/std.c`
+  table rather than on disk (any CWD other than the repo root, or without
+  `-I`); the ticket's own hypothesis about the `@comptime`/plain collision
+  itself was not the cause. The `PP_INCLUDE` handler's embedded-header
+  branch never registered its synthetic `<embedded>/<name>` path into the
+  map `-c=generated`'s duplicate-definition filter (#953) consults — now
+  fixed.
+- **Block capture of a function-local struct/union/enum type** (#989). A
+  block literal capturing a variable whose type was declared inside the
+  enclosing function hard-errored, since the lifted env struct is emitted
+  at file scope, ahead of the function that brings the tag into scope.
+  Fixed by hoisting the type to file scope, including the tagless-local-
+  aggregate case that silently emitted broken, duplicated struct bodies
+  even before this fix.
+- **`Block_release`'s fallback `free()` + block preamble ordering** (#990,
+  #993). `Block_release(b)` falling back to a synthesized `free` prototype
+  (no user `free` in scope) generated a call to an undeclared `free` under
+  `-c=native`; a by-value capture of a header-declared type (e.g.
+  `struct tm`) could be serialized before that header's own definition was
+  in scope. Also fixed: a TU that uses a block *type* but declares no block
+  *literal* dropped the block preamble (env struct, copy/release helpers)
+  entirely.
+- **Block capture of a by-value aggregate larger than 8 bytes** (#994). The
+  block descriptor gave every capture a flat 8-byte slot regardless of
+  type, silently truncating a wider struct/union/array capture and storing
+  a dangling frame pointer for a wide `_BitInt`/`_Decimal128` capture
+  instead of a snapshot. Fixed with a size-aware descriptor layout;
+  also fixes a by-value struct/vector *parameter* capture (itself passed
+  by pointer) and a bare array capture (accepted by this compiler, invalid
+  C for the serializer's old comma-assignment form).
+- **Locals in a macro-generated function body get frame offset 0** (#996).
+  `MakeFunction()` + `FunctionSetBody(fn, Quote(...))` without wrapping in
+  `WithFn(fn)` never attached the quoted body's locals to `fn`, so every
+  local defaulted to offset 0 and aliased the same frame slot — SIGBUS or
+  silent corruption, not block-specific despite the ticket's repro using a
+  block literal. Fixed by adopting `vm->compiler.locals` onto `fn` when no
+  other function currently owns it.
+- **Lifted block function dropped from `-c=generated` output** (#995). A
+  block literal parsed while building a macro-generated function's body
+  (the #996 pattern) executed correctly in the VM but was silently missing
+  from `-c=generated` output — the generated C failed to link. Fixed by
+  propagating `is_macro_generated` onto a lifted block function.
+- **Locals stranded when a nested comptime macro builds another function's
+  body** (#997, companion to #996). A comptime macro invoked from inside an
+  ordinary function that itself calls `FunctionSetBody` on a *different*
+  function without `WithFn` misattaches that function's locals to the
+  caller's frame. Detected (not silently auto-adopted, to avoid a partial,
+  actively-aliasing move) with a hard compile error naming the fix.
+
 ## [0.2.11] - 2026-08-13
 
 ### Fixed
