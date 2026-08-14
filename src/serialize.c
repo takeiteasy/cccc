@@ -2847,6 +2847,21 @@ static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
 // population in cc_serialize_program. A NULL path (no declaring token) or a
 // path not in the set means nothing else supplies this definition, so the
 // caller must still serialize it despite from_include being true.
+// #1003: true when `path`'s final path component is exactly `name` --
+// `path` may be a real filesystem path, a bare filename (no directory
+// found on disk), or a synthetic "<embedded>/name" key (embedded_header_key,
+// preprocess.c), so a suffix match on '/' is used rather than assuming any
+// particular shape.
+static bool path_basename_is(const char *path, const char *name) {
+    if (!path)
+        return false;
+    size_t plen = strlen(path), nlen = strlen(name);
+    if (plen == nlen)
+        return strcmp(path, name) == 0;
+    return plen > nlen && path[plen - nlen - 1] == '/' &&
+           strcmp(path + plen - nlen, name) == 0;
+}
+
 static bool path_is_captured(SerializeContext *ctx, const char *path) {
     if (!path)
         return false;
@@ -3569,8 +3584,23 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         // --emit-cccc: re-emit cccc-only includes too -- the caller has
         // opted into dialect-fidelity output, so a downstream reader is
         // expected to understand the routing syntax those files carry.
-        if (!vm->compiler.emit_cccc && resolved && cc_file_is_cccc_only(vm, resolved))
+        if (!vm->compiler.emit_cccc && resolved && cc_file_is_cccc_only(vm, resolved)) {
+            // #1003: <decimal_math.h>'s static inline wrappers all bottom
+            // out in `extern __cccc_dec_*` symbols that exist only inside
+            // the VM's FFI runtime (src/stdlib/decimal_math.c) -- unlike
+            // every other header this loop suppresses (whose content the
+            // type/function-definition passes below can genuinely
+            // re-derive as real, linkable C), there is no host definition
+            // to link against here. Re-deriving would only trade "file not
+            // found" for "undefined symbol"; hard error instead, matching
+            // the existing _Decimal serialization refusal
+            // (__builtin_decimal_to_chars, above in this file).
+            if (path_basename_is(resolved, "decimal_math.h"))
+                error("cccc: <decimal_math.h> is not supported in "
+                      "native/serialized output (__cccc_dec_* helpers have "
+                      "no host definition)");
             continue;
+        }
         fprintf(f, "%s\n", line);
     }
     if (vm->compiler.emit_directives.len > 0)

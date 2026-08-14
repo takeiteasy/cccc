@@ -1984,6 +1984,41 @@ static bool is_compiler_owned_header(const char *name) {
     return false;
 }
 
+// #1003: standard headers whose CCCC copy is not merely *preferred* (like
+// is_compiler_owned_header's ABI-coupled list above) but is the **only**
+// implementation likely to exist at all on a typical host -- a C23/C11
+// header some platforms haven't shipped yet (stdbit.h, stdckdint.h,
+// threads.h, uchar.h), an Apple-only compatibility shim whose CCCC copy is
+// a deliberate stub (Availability.h), or a CCCC-specific extension header
+// with no standard name to collide with in the first place (decimal_math.h,
+// gated on CCCC_HAS_DECIMAL and declaring VM-only __cccc_dec_* symbols).
+// `-c=native`/`-m`/`-c=generated` auto-capture a plain #include and replay
+// it verbatim into the generated C (see man/HEADERS.md) -- correct for a
+// header the host is expected to have, but for one of these it produces an
+// unresolvable "file not found" from the downstream compiler even though
+// CCCC itself compiled the program fine. The PP_INCLUDE handler below marks
+// such a header cccc-only (mark_cccc_only_file) the moment it resolves,
+// reusing the #896/#999 machinery wholesale: the replay is suppressed
+// (cc_file_is_cccc_only, serialize.c's #include loop) and the header's own
+// content is re-derived into the output instead (record_type_name's
+// from_include check, parse.c; function_is_header_supplied, serialize.c) --
+// the same two mechanisms a @comptime-routed include already gets.
+// This is distinct from "owned": is_compiler_owned_header is neither
+// necessary nor sufficient here (stdckdint.h is owned and header-only, so
+// suppressing its replay alone is enough; stdbit.h is not owned but still
+// needs this).
+static bool is_cccc_supplied_only_header(const char *name) {
+    static const char *cccc_only[] = {
+        "stdbit.h", "stdckdint.h", "threads.h", "uchar.h", "Availability.h",
+        "decimal_math.h",
+        NULL,
+    };
+    for (int i = 0; cccc_only[i]; i++)
+        if (!strcmp(name, cccc_only[i]))
+            return true;
+    return false;
+}
+
 // Whether CCCC's own copy of a standard header — the embedded src/std.c
 // table (tried by the PP_INCLUDE handler before ever calling this function;
 // see man/HEADERS.md) or the on-disk builtin_include_dir fallback below —
@@ -4862,6 +4897,18 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         hashmap_put(&vm->compiler.emit_include_paths,
                                    ac_include_line,
                                    embedded_header_key(vm, filename));
+                    // #1003: a header whose CCCC copy is the only
+                    // implementation likely to exist on a typical host
+                    // (see is_cccc_supplied_only_header's comment above)
+                    // must never be replayed as a raw #include the host
+                    // compiler can't resolve -- reuse the #896/#999
+                    // cccc-only machinery wholesale by marking this exact
+                    // key (the same one just registered above) cccc-only,
+                    // so serialize.c's #include-replay loop suppresses it
+                    // and this header's own content is re-derived instead
+                    // of relied upon.
+                    if (is_cccc_supplied_only_header(filename))
+                        mark_cccc_only_file(vm, embedded_header_key(vm, filename));
                     tok = include_embedded_header(vm, tok, filename,
                                                   embedded_src,
                                                   start->next->next);
@@ -4874,6 +4921,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             if (ac_include_line) // #896
                 hashmap_put(&vm->compiler.emit_include_paths, ac_include_line,
                            path ? path : filename);
+            // #1003: same reasoning as the embedded branch above -- this is
+            // the branch a polyfill header resolves through when found on
+            // disk (e.g. under tools/tests.py's -I./include), which #1003's
+            // own investigation found is not merely the embedded-table
+            // case the ticket described.
+            if (is_cccc_supplied_only_header(filename))
+                mark_cccc_only_file(vm, path ? path : filename);
             tok = include_file(vm, tok, path ? path : filename,
                                start->next->next, filename,
                                !is_dquote || found_in_sys);

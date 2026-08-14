@@ -2236,11 +2236,29 @@ def case_dandy_vtable_pattern_multi_tu(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_polyfill_header_embedded_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  70: -c=native, #include <stdbit.h> (a cccc-owned polyfill with "
+          "no guaranteed real system counterpart) resolved from the "
+          "embedded src/std.c table -- since this runs from a temp cwd, "
+          "there is no on-disk ./include -- rounds trip VM 42 -> native 42 "
+          "instead of the host compiler failing with 'stdbit.h' file not "
+          "found (#1003). tests/test_serialize_polyfill_header_not_"
+          "replayed.c covers the -m shape and the on-disk resolution "
+          "branch (tools/tests.py always passes -I./include); this case "
+          "is the one that actually exercises the embedded branch, per "
+          "the #998 lesson that the two resolution paths need separate "
+          "coverage")
+    return _vm_and_native_run_case(
+        cccc, tmp, "polyfill_header_1003",
+        "#include <stdbit.h>\n"
+        "int main(void) { return (int)stdc_leading_zeros_ui(1u) + 11; }\n")
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2317,6 +2335,7 @@ def main() -> int:
             case_generated_embedded_header_comptime_only_still_derives,
             case_native_embedded_header_include_not_suppressed,
             case_dandy_vtable_pattern_multi_tu,
+            case_polyfill_header_embedded_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
