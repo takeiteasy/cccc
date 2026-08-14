@@ -115,13 +115,48 @@ by default). Two things follow from that:
   header isn't re-emitted there, so the type definitions are still needed.
 - A function declared with no body anywhere in the program (e.g. `int
   abs(int x);` with no matching definition) is serialized as a prototype
-  only when it was written in the primary file (or in a cccc-only-routed
-  include, whose own `#include` is never re-emitted — see below). The VM
-  path needs no such prototype, since it resolves the call as an FFI
-  symbol with a known signature; the native path hands the C to a system
-  compiler, which needs an explicit declaration for any call. A
+  only when it was written in a command-line input file (or in a
+  cccc-only-routed include, whose own `#include` is never re-emitted — see
+  below). The VM path needs no such prototype, since it resolves the call
+  as an FFI symbol with a known signature; the native path hands the C to
+  a system compiler, which needs an explicit declaration for any call. A
   header-sourced bare declaration is left out, since the auto-captured
-  `#include` already supplies it to the native compiler.
+  `#include` already supplies it to the native compiler. This check
+  (`file_is_command_line_input()`, `src/serialize.c`) used to compare
+  against `vm->compiler.primary_file` alone — pinned to the *first* input
+  file forever — so the identical shape written in a *second or later*
+  input file was misidentified as header-supplied and silently dropped;
+  fixed by matching against every command-line input path, found while
+  investigating #1002.
+- Two different `.c` inputs each independently defining `static int
+  helper(void)` with no shared header compile and run correctly (each has
+  its own `Obj`; internal linkage is respected — `cc_link_progs`
+  deliberately never canonicalizes `static` symbols across TUs, #957), but
+  `-c=native` used to merge both into one output file with two colliding
+  definitions of the same identifier (#1002). `rename_colliding_static_names()`
+  (`src/serialize.c`) renames every same-named `static` Obj but the first,
+  among Objs declared in more than one distinct file — a name with no
+  collision is left exactly as written.
+- A header whose CCCC copy is the only implementation likely to exist on a
+  typical host at all — `stdbit.h`, `stdckdint.h`, `threads.h`, `uchar.h`,
+  `Availability.h`, `decimal_math.h` — is a different problem from the
+  "CCCC's polyfill fights the real one" case just above: there, replaying
+  the `#include` is *wrong* because the host has its own copy that would
+  collide; here, replaying it is wrong because the host likely has **no**
+  copy at all, and CCCC's own bundled include directory is never forwarded
+  (previous bullet), so a downstream compile failed with `file not found`
+  even though CCCC itself ran the program fine (#1003).
+  `is_cccc_supplied_only_header()` (`src/preprocess.c`, next to but
+  distinct from `is_compiler_owned_header()` — neither necessary nor
+  sufficient for this: `stdckdint.h` is owned and `stdbit.h` is not) marks
+  such a header cccc-only the moment `PP_INCLUDE` resolves it, reusing the
+  #896 cccc-only machinery: the `#include` is suppressed and the header's
+  own content is re-derived into the output instead, the same treatment a
+  `@comptime`-routed include already gets. `decimal_math.h` is the one
+  exception — its `static inline` wrappers bottom out in `extern
+  __cccc_dec_*` symbols that exist only inside the VM's FFI runtime, so
+  re-deriving would only trade one unresolvable reference for another; it
+  is a hard compile error instead.
 - CCCC's own polyfill headers (`stdio.h`, `errno.h`, `getopt.h` in
   `src/std.c`) define a handful of identifiers (`stdout`/`stderr`/`stdin`,
   `errno`, `optarg`/`optind`/`opterr`/`optopt`) as macros that expand, at

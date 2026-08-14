@@ -1320,19 +1320,71 @@ Separately, a translation unit holding only typedefs/prototypes and no
 definitions is not a compile failure — `parse()`'s own contract returns
 `NULL` for that case, previously treated by `main.c`'s per-TU loop as
 unconditionally fatal (with the process exit code left at 0 regardless).
-**Deliberately not fixed under this ticket, tracked as a separate,
-architectural follow-up**: preprocessor macro definitions and
-`#pragma once`/include-guard state are shared across every input file one
-`cccc` invocation compiles together, rather than being independent per
-translation unit the way a standards-conforming multi-file build requires
-— a `#define` in one `.c` file is visible in another with no `#include` at
-all, and a header's include guard, once tripped by the first TU to include
-it, silently empties that same `#include` for every later TU. This is
-unrelated to the redefinition/typedef-spelling fixes just described (which
-apply equally whether or not a header carries a guard) but was the root
-cause blocking a full end-to-end reproduction of the ticket's own dandy
-(`~takeiteasy/dandy`) repro, since dandy's shared header does carry a
-guard.
+Two more gaps found alongside #999 and left for separate follow-up tickets
+are now fixed too. First (#1002): `function_is_header_supplied()`'s
+`from_primary` check — "was this static function's declaring file the
+*primary* input file" — meant a static function with a body, defined in any
+*non-first* command-line input file, was misidentified as header-supplied
+and silently dropped from `-m`/`-c=native` output. Fixed by
+`file_is_command_line_input()`, matching against every command-line input
+path, not just the first. Once fixed, the ticket's own scenario becomes
+observable: `cc_link_progs` deliberately leaves `static` (internal-linkage)
+Objs uncanonicalized across TUs (#957), so two different `.c` inputs each
+defining `static int helper(void)` with no shared header contribute two
+same-named Objs to the merged output. Fixed by `rename_colliding_static_names()`,
+run once after `rename_anon_globals()`: every same-named `static` Obj but
+the first, among Objs declared in more than one distinct file, is renamed
+in place. A name with no collision is left exactly as written.
+
+Second (#1003): a plain `#include` of a header whose CCCC copy is the only
+implementation likely to exist on a typical host at all (`stdbit.h`,
+`stdckdint.h`, `threads.h`, `uchar.h`, `Availability.h`, `decimal_math.h`)
+used to be replayed verbatim like any other standard header — correct for a
+header the host is expected to have, but an unresolvable `file not found`
+for one of these, even though CCCC itself compiled the program fine.
+`is_cccc_supplied_only_header()` marks such a header cccc-only the moment
+the `PP_INCLUDE` handler resolves it (on both the on-disk and
+embedded-`src/std.c`-table branches), reusing the #896/#999 cccc-only
+machinery wholesale: the `#include` is suppressed and the header's own
+content is re-derived into the output instead. `decimal_math.h` is the one
+exception — its `static inline` wrappers bottom out in `extern
+__cccc_dec_*` symbols that exist only inside the VM's FFI runtime, so
+re-deriving would only trade one unresolvable reference for another; it is
+a hard compile error instead, matching the existing `_Decimal`
+serialization refusal.
+
+Preprocessor macro definitions and `#pragma once`/include-guard state are
+now independent per translation unit (#1001), the way a standards-conforming
+multi-file build requires — previously they were shared across every input
+file one `cccc` invocation compiles together: a `#define` in one `.c` file
+was visible in another with no `#include` at all, and a header's include
+guard, once tripped by the first TU to include it, silently emptied that
+same `#include` for every later TU. This was the root cause blocking a full
+end-to-end reproduction of #999's own dandy (`~takeiteasy/dandy`) repro,
+since dandy's shared header carries a guard. Fixed by
+`cc_reset_preprocessor_state_for_next_tu()` (`main.c`'s per-TU preprocess
+loop, between files, never before the first): the macro table is restored
+to a fresh copy of the `-D`/`-U` baseline captured right after CLI
+processing, and `pragma_once`/`include_guards`/`included_headers`/
+`guard_macros` are all cleared. A second, load-bearing bug had to be fixed
+in the same change: `parse()` entered a file scope per translation unit
+with no matching `leave_scope()` at all, so every TU's declarations stayed
+reachable from every later TU's own parse — silently masking the guard leak
+above (a guard-emptied `#include` produces nothing new, but the earlier
+TU's declarations were still visible through the leaked scope chain).
+`cc_leave_top_file_scope()`, called from `main.c`'s parse loop between
+files, closes this — except after the *last* file, since a comptime macro
+function's body can reference a runtime symbol via the `$identifier`
+reflect operator, and macro compilation runs after every real TU has
+already been parsed, relying on the last TU's file scope still being live.
+
+One consequence worth calling out: a header that *defines* (not just
+declares) a non-`extern` global and is `#include`d, unguarded per TU, from
+more than one translation unit now produces a "redefinition" error —
+correct, matching what a real linker does with the equivalent two-`.o`
+build (verified against a real host `cc`/`ld`), but a change from the
+previous (masked-by-the-scope-leak) behavior for anyone who had, likely
+unknowingly, relied on it.
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).

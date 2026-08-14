@@ -34,6 +34,37 @@ All notable changes to CCCC are documented here. Format loosely follows
   holding only typedefs/prototypes is legitimately empty of new globals,
   but was treated as an unconditional failure with the process exit code
   left at 0 regardless — silent success dressed up as a bogus error.
+- **A `static` function defined in a *non-first* command-line input file
+  was silently dropped from `-m`/`-c=native` output** (found investigating
+  #1002). The "was this supplied by a replayed header" check compared
+  against the *primary* input file only, so the identical shape in a
+  second or later input file was misidentified as header-supplied.
+- **Two different `.c` inputs each defining a same-named `static` function
+  or global collided in `-c=native` output** (#1002). Internal-linkage
+  symbols are deliberately left uncanonicalized across translation units,
+  so two inputs sharing no header but defining, say, `static int
+  helper(void)`, both reached the merged output unrenamed. Now renamed
+  automatically on collision; a name with no collision is untouched.
+- **A cccc-owned polyfill header (`stdbit.h`, `stdckdint.h`, `threads.h`,
+  `uchar.h`, `Availability.h`, `decimal_math.h`) was replayed as an
+  unresolvable `#include` under `-c=native`** (#1003). These headers are
+  the only implementation likely to exist on a typical host at all, unlike
+  an ordinary standard header the host is expected to have; replaying them
+  verbatim produced a `file not found` from the downstream compiler even
+  though CCCC itself compiled the program fine. Such a header's `#include`
+  is now suppressed and its content re-derived into the output instead;
+  `decimal_math.h`'s VM-only FFI symbols have no host definition to
+  re-derive against, so it is a hard compile error instead.
+- **Preprocessor macro definitions and `#pragma once`/include-guard state
+  leaked across translation units** (#1001). Every `.c` file passed on one
+  `cccc` command line shared a single preprocessor state, so a `#define`
+  in one file was silently visible in another with no `#include` at all,
+  and a header's include guard, once tripped by the first file to include
+  it, emptied that same `#include` for every later file. A second,
+  load-bearing bug in the parser's scope handling had masked the
+  include-guard half of this for a common case, so both were fixed
+  together. Each `.c` input is now its own translation unit for
+  preprocessing purposes, as the standard requires.
 
 ## [0.2.12] - 2026-08-14
 

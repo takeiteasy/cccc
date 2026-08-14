@@ -388,6 +388,56 @@ bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename) {
     return result;
 }
 
+// #1001: reset every bit of per-TU preprocessor state before preprocessing
+// the *next* command-line input file (main.c's per-TU loop calls this
+// between iterations, never before the first). Without this, #define/
+// #undef and #pragma once/include-guard bookkeeping from one .c input
+// leaked into every later one sharing this cccc invocation's single
+// VirtualMachine -- non-conforming (each translation unit's preprocessing
+// is independent per the standard) and the direct cause of #1001's own
+// repro (a #define in one file, with no #include at all, silently visible
+// in another).
+//
+// The macro table is reset by re-taking a *fresh* deep copy of
+// vm->compiler.cli_macro_snapshot (the -D/-U baseline captured once, right
+// after CLI processing, in main.c) via hashmap_snapshot -- deliberately
+// not a bare hashmap_restore(&vm->compiler.macros,
+// vm->compiler.cli_macro_snapshot), which would hand cli_macro_snapshot's
+// own bucket array over to vm->compiler.macros (hashmap_restore's contract
+// is "install this snapshot", not "copy it") -- corrupting the baseline
+// the instant either map is mutated or freed again, and leaving nothing
+// for the *third* TU to restore from. hashmap_snapshot deep-copies, so the
+// baseline itself is untouched and can be re-taken for every remaining TU.
+//
+// pragma_once/include_guards/included_headers/guard_macros all own their
+// key copies (hashmap_put, not _borrowed -- mirrors the identical ownership
+// comment on compile_macro_program's own save/restore of the first two,
+// above) so need hashmap_deinit, not _borrowed. cond_incl is a plain
+// arena-allocated linked list (push_cond_incl) -- preprocess() itself
+// already errors if it's non-NULL at a file's EOF, so a well-formed file
+// leaves it NULL anyway; zeroed here defensively in case a recoverable
+// per-file error (error_tok_recover) left it non-NULL.
+void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm) {
+    if (vm->compiler.has_cli_macro_snapshot) {
+        HashMap fresh = hashmap_snapshot(&vm->compiler.cli_macro_snapshot);
+        hashmap_restore(&vm->compiler.macros, fresh);
+    } else {
+        hashmap_deinit(&vm->compiler.macros);
+        memset(&vm->compiler.macros, 0, sizeof(vm->compiler.macros));
+    }
+
+    hashmap_deinit(&vm->compiler.pragma_once);
+    memset(&vm->compiler.pragma_once, 0, sizeof(vm->compiler.pragma_once));
+    hashmap_deinit(&vm->compiler.include_guards);
+    memset(&vm->compiler.include_guards, 0, sizeof(vm->compiler.include_guards));
+    hashmap_deinit(&vm->compiler.included_headers);
+    memset(&vm->compiler.included_headers, 0, sizeof(vm->compiler.included_headers));
+    hashmap_deinit(&vm->compiler.guard_macros);
+    memset(&vm->compiler.guard_macros, 0, sizeof(vm->compiler.guard_macros));
+
+    vm->compiler.cond_incl = NULL;
+}
+
 static IncludeRoute read_include_route(Token **tok_ptr) {
     IncludeRoute route = INCLUDE_ROUTE_NORMAL;
     Token *rest = NULL;

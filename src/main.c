@@ -2489,6 +2489,13 @@ int main(int argc, const char *argv[]) {
 
     input_tokens = calloc(input_files_count, sizeof(Token *));
     for (int i = 0; i < input_files_count; i++) {
+        // #1001: each command-line input file is its own translation unit,
+        // so it gets its own preprocessor state -- a #define, #pragma once,
+        // or include guard set while preprocessing file i must not still be
+        // in effect when file i+1 is preprocessed. Skipped before the
+        // first file (nothing to reset yet).
+        if (i > 0)
+            cc_reset_preprocessor_state_for_next_tu(&vm);
         input_tokens[i] = cc_preprocess(&vm, input_files[i]);
         if (!input_tokens[i]) {
             fprintf(stderr, "error: failed to preprocess %s\n", input_files[i]);
@@ -2552,6 +2559,19 @@ int main(int argc, const char *argv[]) {
 
     input_progs = calloc(input_files_count, sizeof(Obj *));
     for (int i = 0; i < input_files_count; i++) {
+        // #1001: leave the *previous* TU's file scope before parsing this
+        // one, so this TU's declarations can't be resolved through an
+        // earlier TU's typedefs/tags/file-scope variables (find_var(),
+        // parse.c, walks the whole scope chain). Deliberately not done
+        // after every parse (e.g. inside cc_parse() itself): the *last*
+        // TU's file scope must stay reachable afterward, since
+        // compile_macro_program() (macros.c, run later via
+        // cc_expand_macros) relies on it to resolve a `$identifier`
+        // reflect-operator reference to a runtime symbol from inside a
+        // macro function body -- see cc_leave_top_file_scope's comment
+        // (parse.c) for the full reasoning.
+        if (i > 0)
+            cc_leave_top_file_scope(&vm);
         input_progs[i] = cc_parse(&vm, input_tokens[i]);
         // #999: parse() returning NULL is not on its own a failure -- its
         // own comment says outright it "returns NULL when no new globals

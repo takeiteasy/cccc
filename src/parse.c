@@ -15920,6 +15920,39 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     return vm->compiler.globals;
 }
 
+// #1001: parse() itself is called from two very different contexts --
+// once per command-line input file, from main.c's parse loop via
+// cc_parse() (linker.c), and once per *synthetic comptime program*, from
+// compile_macro_program() (macros.c). The latter deliberately relies on
+// the runtime TU's own file scope still being reachable when it does its
+// own enter_scope() -- a macro function's body can reference a runtime
+// global via the `$identifier` reflect operator (parse.c's primary(),
+// resolved through find_var() at parse time), and compile_macro_program
+// runs after every real TU has already been parsed (cc_expand_macros,
+// called from main.c after cc_link_progs). parse() itself therefore must
+// not leave_scope() unconditionally, and neither can cc_parse() do it
+// unconditionally after every call -- only *between* two real TUs, never
+// after the last one. Exposed here as a separate step main.c's parse loop
+// calls directly, once per boundary between two command-line input files
+// (never before the first, never after the last), rather than baked into
+// parse() or cc_parse() where it would run at the wrong times for either
+// caller.
+//
+// Before this fix, parse() enter_scope()'d once per translation unit with
+// no matching leave_scope() at all -- documented at struct Compiler's
+// primary_file comment as a known hazard -- so every TU's file scope
+// stacked on the previous one and find_var() (this file) walked straight
+// through the whole chain: a second command-line input file could resolve
+// a first file's typedef, tag, or file-scope variable with no #include at
+// all. This is what let the include-guard half of #1001 go unnoticed for
+// so long -- an already-guarded header re-#include'd by a later TU emits
+// nothing new, but that TU's own declarations were still visible via the
+// leaked scope chain, silently masking the guard leak.
+void cc_leave_top_file_scope(VirtualMachine *vm) {
+    if (vm->compiler.scope)
+        leave_scope(vm);
+}
+
 // Exposed parsing functions for K's ast_parse API
 Node *cc_parse_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     return expr(vm, rest, tok);

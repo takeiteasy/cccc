@@ -592,6 +592,7 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c);
 bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to);
 Obj *parse(VirtualMachine *vm, Token *tok);
+void cc_leave_top_file_scope(VirtualMachine *vm); // #1001, parse.c -- see comment there
 void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
