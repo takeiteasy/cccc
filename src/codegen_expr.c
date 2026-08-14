@@ -361,7 +361,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     // RETBUF+VSTR return-buffer convention (see ND_RETURN), handled in
     // ND_FUNCALL's result tail, not as a plain vector expression.
     // ND_BLOCK_CALL (Apple Blocks) is deliberately excluded from this bypass
-    // -- its ABI (src/codegen.c, `case ND_BLOCK_CALL`) has no RETBUF/pointer-
+    // -- its ABI (below, `case ND_BLOCK_CALL`) has no RETBUF/pointer-
     // arg machinery for aggregates at all, so a vector-typed block call still
     // falls to gen_vector_expr's default case below and reports a clean
     // "unsupported vector expression" error rather than silently
@@ -1449,7 +1449,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         // access to. Runs on the ND_DEREF-lhs store path only: lhs_fused is
         // ND_VAR-only and lhs_indexed's match_indexed_addr() already declines
         // under CCCC_CHECKED_BOUNDS (CCCC_FUSION_UNSAFE_FLAGS,
-        // src/codegen.c's #770/#484 fusion-gate comment), so an ND_DEREF
+        // src/codegen_regalloc.c's #770/#484 fusion-gate comment), so an ND_DEREF
         // checked store always has r_addr >= 0 and reaches the standard
         // emit_store_ex below -- verified by the -O2/-O3 tests, not assumed.
         if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->lhs->kind == ND_DEREF &&
