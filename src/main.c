@@ -2476,6 +2476,17 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    // #1002 (investigation): record every command-line input path before
+    // preprocessing any of them, so the serializer can ask "was this Obj
+    // written in a file the user asked to compile" for *any* input index,
+    // not just the first (vm.compiler.primary_file, set by cc_preprocess/
+    // linker.c, only ever names input_files[0] -- see
+    // file_is_command_line_input in serialize.c). Keys are borrowed: these
+    // strings are strdup'd once at argv-parsing time and outlive the vm.
+    for (int i = 0; i < input_files_count; i++)
+        hashmap_put_borrowed(&vm.compiler.command_line_inputs, input_files[i],
+                              (void *)(intptr_t)1);
+
     input_tokens = calloc(input_files_count, sizeof(Token *));
     for (int i = 0; i < input_files_count; i++) {
         input_tokens[i] = cc_preprocess(&vm, input_files[i]);

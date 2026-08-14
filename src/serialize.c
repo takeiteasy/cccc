@@ -3354,8 +3354,8 @@ emit_copy_and_free:
 }
 
 // #999: a `static` function with a body, declared in a plain #include'd
-// header (not the primary file, not a cccc-only-routed one -- #896) rather
-// than synthesized/macro-generated, is already supplied to the output by
+// header (not a command-line input file, not a cccc-only-routed one -- #896)
+// rather than synthesized/macro-generated, is already supplied to the output by
 // that header's own auto-captured #include text. Emitting it again from
 // `prog` -- which holds one Obj *per TU* that included the header, since
 // `static` internal-linkage functions are deliberately left uncanonicalized
@@ -3370,6 +3370,23 @@ emit_copy_and_free:
 // this function -- so path_is_captured() gates it there; a plain -m/
 // -c=native always replays every captured #include verbatim, so
 // from_primary alone is sufficient.
+// #1002 (investigation): true when `name` is the exact path of one of the
+// files the user listed on the command line, as opposed to a header any of
+// them #included. Replaces a plain `== vm->compiler.primary_file` token-file
+// comparison, which only ever names input_files[0] (cc_preprocess/linker.c
+// pin primary_file to the *first* input file forever) -- so a static
+// function or bodyless declaration written in input_files[1..N] used to be
+// misidentified as "supplied by a replayed header" and silently dropped
+// from -c=native/-m output (found investigating #1002; not what that ticket
+// itself reported, but blocks it -- see CLAUDE.md). Keyed by File.name,
+// which new_file() (tokenize.c) sets to the exact string main.c passed to
+// cc_preprocess(), so a straight lookup is sufficient -- no path
+// canonicalization is attempted here, matching every other filename
+// comparison in this file (e.g. cc_file_is_cccc_only).
+static bool file_is_command_line_input(VirtualMachine *vm, const char *name) {
+    return name && hashmap_get(&vm->compiler.command_line_inputs, name) != NULL;
+}
+
 static bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                         Obj *obj) {
     if (!obj->is_static || !obj->body || obj->is_macro_generated)
@@ -3377,7 +3394,7 @@ static bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ct
     Token *t = obj->tok;
     if (!t || !t->file)
         return false;
-    if (t->file == vm->compiler.primary_file ||
+    if (file_is_command_line_input(vm, t->file->name) ||
         cc_file_is_cccc_only(vm, t->file->name))
         return false;
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
@@ -3675,7 +3692,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             // symbol with a known signature -- but the downstream system
             // compiler does, so silently omitting it produced an
             // undeclared-function error in the generated C. Emit it when
-            // it was written in the primary file (or in a cccc-only-
+            // it was written in a command-line input file (or in a cccc-only-
             // routed include, whose own #include is never re-emitted --
             // #896); a header-sourced declaration is left out, since the
             // auto-captured #include (see TypeNameRecord.from_include)
@@ -3692,10 +3709,14 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             // unconditional hoist above.
             if (!obj->is_macro_generated) {
                 Token *t = obj->tok;
-                bool from_primary = t && t->file &&
-                    (t->file == vm->compiler.primary_file ||
+                // #1002 (investigation): file_is_command_line_input(), not a
+                // primary_file-only comparison -- see that function's
+                // comment. Variable renamed from from_primary to
+                // from_input to match.
+                bool from_input = t && t->file &&
+                    (file_is_command_line_input(vm, t->file->name) ||
                      cc_file_is_cccc_only(vm, t->file->name));
-                if (!from_primary)
+                if (!from_input)
                     continue;
             }
         }

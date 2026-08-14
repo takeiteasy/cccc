@@ -3127,6 +3127,19 @@ typedef struct Compiler {
     File *current_file;  // Input file
     File **input_files;  // A list of all input files
     File *primary_file;  // Top-level source file (set in cc_preprocess; used for auto-emit capture)
+    // #1002 (investigation): set of every path passed on the command line as
+    // an input .c/.h file, keyed by the exact path string main.c handed to
+    // cc_preprocess() (new_file() stores that same string verbatim as
+    // File.name, so a straight strcmp-equivalent lookup works). Unlike
+    // primary_file -- pinned to the *first* input file only (cc_preprocess,
+    // linker.c) -- this covers every command-line input, which is what
+    // "was this Obj written in one of the files the user asked to compile,
+    // as opposed to a header any of them #included" actually needs to ask
+    // (see file_is_command_line_input, serialize.c). Keys are borrowed --
+    // main.c's input_files[] strings outlive the VM, so no copy is taken and
+    // no separate teardown beyond hashmap_deinit_borrowed is required.
+    HashMap command_line_inputs;
+
     bool at_bol;         // True if at beginning of line
     bool has_space;      // True if follows a space character
     int file_no;          // Next real-input file index (indexes input_files); was a

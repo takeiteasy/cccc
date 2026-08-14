@@ -1483,6 +1483,10 @@ void cc_destroy(VirtualMachine *vm) {
     // Free guard_macros HashMap (set of macro names used as include guards)
     hashmap_deinit(&vm->compiler.guard_macros);
 
+    // Free command_line_inputs HashMap (#1002 investigation) -- borrowed
+    // keys (main.c's input_files[] strings), so _borrowed is correct here.
+    hashmap_deinit_borrowed(&vm->compiler.command_line_inputs);
+
     // Free dynamic patch tables (#555)
     if (vm->compiler.call_patches)
         free(vm->compiler.call_patches);
