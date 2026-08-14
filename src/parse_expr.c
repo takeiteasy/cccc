@@ -439,8 +439,8 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
     // bypass #937 reports. Copy lo/hi/access-size/nt-terminator across so the
     // store is checked exactly as if it had been written `s[n] = *tmp op B`
     // directly. Clone (not alias) the bounds expressions, same reasoning as
-    // every other per-deref-site copy in this file (clone_bounds_node()'s
-    // comment above): each access site owns its own Node objects. Both lo
+    // every other per-deref-site copy (clone_bounds_node()'s comment in
+    // parse_checked.c): each access site owns its own Node objects. Both lo
     // and hi must be copied together, never just the nt flag alone -- the
     // ND_ASSIGN codegen guard (src/codegen.c) only routes a store off the
     // promoted-local fast path (which never reaches CHKNT) when both are

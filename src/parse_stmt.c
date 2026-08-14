@@ -33,8 +33,8 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
     // typedef the demand-driven declaration index has seen but not yet
     // spliced in. Retry find_typedef() once after a successful splice --
     // deliberately NOT folded into find_typedef() itself, since the
-    // $Name/$type(Name) reflection operators (primary(), further down this
-    // file) call find_typedef() directly to reach into the *runtime*
+    // $Name/$type(Name) reflection operators (primary(), parse_postfix.c)
+    // call find_typedef() directly to reach into the *runtime*
     // Obj/Type tables, which must never be redirected through this index.
     if ((vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
         tok->kind == TK_IDENT &&

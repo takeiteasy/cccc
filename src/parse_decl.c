@@ -65,7 +65,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr
         // here, its body defined later elsewhere in the same TU): a forward
         // -declared tag is completed by *mutating the same Type object in
         // place* when its body is later parsed (struct_union_decl's
-        // `existing` reuse, this file) -- struct_decl looks the tag up
+        // `existing` reuse, parse_types.c) -- struct_decl looks the tag up
         // again by name and finds that same live object. copy_type() takes
         // a one-time snapshot; had it fired here, `Beta`'s recorded type
         // would have frozen at its still-incomplete size/members forever,
@@ -1495,7 +1495,7 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
 // Before this fix, parse() enter_scope()'d once per translation unit with
 // no matching leave_scope() at all -- documented at struct Compiler's
 // primary_file comment as a known hazard -- so every TU's file scope
-// stacked on the previous one and find_var() (this file) walked straight
+// stacked on the previous one and find_var() (parse_core.c) walked straight
 // through the whole chain: a second command-line input file could resolve
 // a first file's typedef, tag, or file-scope variable with no #include at
 // all. This is what let the include-guard half of #1001 go unnoticed for

@@ -138,7 +138,7 @@ static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
 // holds its heap-box pointer (8 bytes, matching codegen's is_block_var
 // copy) and a TY_VLA capture keeps its placeholder-sized 8-byte pointer
 // slot (its ->size is a compile-time constant, not the real row-major
-// byte count -- see the TY_VLA comment elsewhere in this file); every
+// byte count -- see compute_vla_size()'s comment in parse_init.c); every
 // other by-value capture gets align_to(cap->ty->size, 8) bytes so a
 // struct/union/array/wide-_BitInt/_Decimal larger than one word is no
 // longer truncated. Each slot starts aligned to MAX(8, cap->ty->align).
