@@ -373,6 +373,9 @@ static int cccc_ffi_posix_memalign(void **memptr, size_t alignment, size_t size)
 // Wrappers for int-returning functions that can return negative values
 static long long wrap_atoi(long long s)                      { return (long long)atoi((const char *)s); }
 static long long wrap_system(long long cmd)                  { return (long long)system((const char *)cmd); }
+static long long wrap_setenv(long long name, long long value, long long overwrite) { return (long long)setenv((const char *)name, (const char *)value, (int)overwrite); }
+static long long wrap_unsetenv(long long name)                { return (long long)unsetenv((const char *)name); }
+static long long wrap_putenv(long long string)                { return (long long)putenv((char *)string); }
 static long long wrap_mblen(long long s, long long n)        { return (long long)mblen((const char *)s, (size_t)n); }
 static long long wrap_mbtowc(long long pwc, long long s, long long n) { return (long long)mbtowc((wchar_t *)pwc, (const char *)s, (size_t)n); }
 static long long wrap_wctomb(long long s, long long wc)      { return (long long)wctomb((char *)s, (wchar_t)wc); }
@@ -518,6 +521,9 @@ void register_stdlib_functions(VirtualMachine *vm) {
 
     // Environment
     cc_register_cfunc(vm, "getenv", (void*)getenv, 1, 0);
+    cc_register_cfunc(vm, "setenv", (void*)wrap_setenv, 3, 0);
+    cc_register_cfunc(vm, "unsetenv", (void*)wrap_unsetenv, 1, 0);
+    cc_register_cfunc(vm, "putenv", (void*)wrap_putenv, 1, 0);
     cc_register_cfunc(vm, "system", (void*)wrap_system, 1, 0);
 
     // Search and sort
