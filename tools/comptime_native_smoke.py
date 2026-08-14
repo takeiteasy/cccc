@@ -2254,6 +2254,48 @@ def case_polyfill_header_embedded_round_trip(cccc: Path, tmp: str) -> bool:
         "int main(void) { return (int)stdc_leading_zeros_ui(1u) + 11; }\n")
 
 
+def case_static_name_collision_multi_tu(cccc: Path, tmp: str) -> bool:
+    print("  71: -c=native, two different .c inputs each independently "
+          "defining `static int collide_1002(void)` with no shared header "
+          "-- cc_link_progs deliberately never canonicalizes static Objs "
+          "across TUs (#957), so both reached -c=native output unrenamed "
+          "and collided ('redefinition of collide_1002'). "
+          "rename_colliding_static_names() (#1002) renames every same-"
+          "named static Obj but the first when more than one distinct "
+          "file defines it. Asserts VM 42 -> native 42 -- a link/compile "
+          "failure tests/test_serialize_static_name_collision.c's -m "
+          "shape assertion alone can't see")
+    a_src = Path(tmp) / "collision_1002_a.c"
+    b_src = Path(tmp) / "collision_1002_b.c"
+    write(a_src,
+          "static int collide_1002(void) { return 20; }\n"
+          "int collide_1002_call_a(void) { return collide_1002(); }\n")
+    write(b_src,
+          "int collide_1002_call_a(void);\n"
+          "static int collide_1002(void) { return 22; }\n"
+          "int main(void) { return collide_1002_call_a() + collide_1002(); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "collision_1002_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -2336,6 +2378,7 @@ def main() -> int:
             case_native_embedded_header_include_not_suppressed,
             case_dandy_vtable_pattern_multi_tu,
             case_polyfill_header_embedded_round_trip,
+            case_static_name_collision_multi_tu,
         ]
         results = [case(cccc, tmp) for case in cases]
 

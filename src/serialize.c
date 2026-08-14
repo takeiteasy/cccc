@@ -3096,6 +3096,58 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext 
     }
 }
 
+// #1002: cc_link_progs (linker.c) deliberately never canonicalizes `static`
+// (internal-linkage) Objs across translation units -- two different .c
+// inputs each defining `static int helper(void)` contribute two distinct
+// Objs, both named "helper", into the one flat merged `prog` list this file
+// serializes. The VM doesn't care (each Obj has its own body/bytecode), but
+// -c=native/-m print by name, so the host compiler sees two definitions of
+// the same identifier ("redefinition of 'helper'"). Renames every
+// static Obj's name but the first for any name shared by Objs declared in
+// more than one distinct file, so a name with no collision -- the common
+// case -- is left exactly as the user wrote it. Must run after
+// rename_anon_globals() (whose own renames can't collide with a
+// user-written name -- see that function) and before any pass that reads
+// obj->name, since every emit site (serialize_function_signature, ND_VAR,
+// serialize_global_var, ...) resolves the name through the Obj pointer, so
+// a rename here is automatically consistent everywhere except the one
+// string-keyed lookup, serialize_find_global()'s first-match strcmp scan
+// over vm->compiler.globals -- that scan runs after this pass too, so it
+// resolves a relocation's label against the (possibly already renamed)
+// Obj it actually points at, not a stale name.
+static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
+                                          SerializeContext *ctx) {
+    HashMap first_seen = {0}; // name -> first Obj* claiming it
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
+            continue;
+        // Only an Obj that actually reaches the output as a definition can
+        // collide with another TU's same-named one -- a bodyless static
+        // function prototype or a tentative (non-defining) declaration
+        // prints nothing a host compiler would reject twice.
+        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        if (!is_defining)
+            continue;
+        Obj *first = hashmap_get(&first_seen, obj->name);
+        if (!first) {
+            hashmap_put_borrowed(&first_seen, obj->name, obj);
+            continue;
+        }
+        // Only a genuine cross-TU collision -- two Objs of the same name
+        // declared in different files -- needs renaming; same-file
+        // same-name would already be a parse-time redefinition error long
+        // before serialization is reached, but check explicitly rather
+        // than assume.
+        const char *first_file = first->tok && first->tok->file ? first->tok->file->name : NULL;
+        const char *this_file = obj->tok && obj->tok->file ? obj->tok->file->name : NULL;
+        if (first_file && this_file && strcmp(first_file, this_file) == 0)
+            continue;
+        obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
+                                 ctx->anon_global_counter++);
+    }
+    hashmap_deinit_borrowed(&first_seen);
+}
+
 // #953: hashmap_foreach callback collecting emit_include_paths' values
 // (resolved paths of auto-captured #include directives) into
 // ctx->captured_paths for path_is_captured() to scan.
@@ -3427,6 +3479,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path, &ctx);
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
+    rename_colliding_static_names(vm, prog, &ctx); // #1002
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
