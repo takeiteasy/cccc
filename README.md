@@ -481,7 +481,7 @@ python3 tools/tests.py --ubsan -j 4
 On macOS, `cccc-asan` carries a built-in suppression for a heap over-read
 inside Apple's own `strfmon()` (not a CCCC bug -- confirmed with a standalone
 `clang -fsanitize=address` program; glibc is unaffected). See the
-`__asan_default_suppressions` hook in `src/stdlib/posix.c`.
+`__asan_default_suppressions` hook in `src/stdlib/posix_lang.c`.
 
 ## Credits 
 

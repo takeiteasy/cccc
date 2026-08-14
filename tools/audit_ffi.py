@@ -51,14 +51,14 @@ completely unconditionally but only ever registered under a conditional --
 both are the shape of a #792-class bug (a guest can see -- or fail to see
 -- a declaration that doesn't match what got wired into the FFI table).
 Each file's own outermost wrapper (a header's `#ifndef X_H` include guard,
-or `src/stdlib/posix.c`/`pthread.c`'s whole-file `#if !defined(_WIN32) &&
+or `src/stdlib/posix_*.c`/`pthread.c`'s whole-file `#if !defined(_WIN32) &&
 !defined(_WIN64)`) is detected and excluded automatically -- see
 strip_common_wrapper()'s docstring -- so it isn't mistaken for a real,
 per-symbol platform guard.
 
 Registration sites that sit inside a preprocessor conditional *and* are
 gated a second time by a `vm->flags &` runtime check (the `--posix-emulation`
-pattern used by ppoll/sched_setparam & co., src/stdlib/posix.c) are exempt
+pattern used by ppoll/sched_setparam & co., src/stdlib/posix_poll.c/posix_sched.c) are exempt
 from this check entirely, reported separately as "runtime-flag-gated,
 not checked" rather than silently passed or falsely flagged: the runtime
 flag corresponds to a macro (`__CCCC_POSIX_EMULATION__`) defined for the
@@ -308,7 +308,7 @@ def expected_mask(args):
 
 RUNTIME_GATE_MARKER = "vm->flags &"
 # How many lines above a registration call to search for RUNTIME_GATE_MARKER.
-# The real pattern (src/stdlib/posix.c's ppoll/sched_setparam et al.) is
+# The real pattern (src/stdlib/posix_poll.c/posix_sched.c's ppoll/sched_setparam et al.) is
 # "if (vm->flags & CCCC_POSIX_EMULATION) {" one line above a small run of
 # registration calls; this just needs to comfortably cover that block.
 RUNTIME_GATE_LOOKBACK_LINES = 8

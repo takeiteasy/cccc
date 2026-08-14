@@ -811,7 +811,7 @@ typedef enum {
                     // native compiler on the same host would do. Also
                     // restores raw ioctl() passthrough for request codes
                     // outside wrap_ioctl's layout-verified allowlist (#795,
-                    // src/stdlib/posix.c) -- off by default there too, for
+                    // src/stdlib/posix_io.c) -- off by default there too, for
                     // the same "don't risk an unverified host ABI without
                     // being asked" reason. VM-only; rejected under -c=native.
     CCCC_CHECKED_BOUNDS =

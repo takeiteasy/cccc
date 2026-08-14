@@ -9,7 +9,7 @@
 // direct passthrough silently addressed the wrong category on Linux. This
 // translates the guest's canonical category to the host's real value
 // before calling the real setlocale(), the same pattern _SC_*/_PC_*/_CS_*
-// use in src/stdlib/posix.c.
+// use in src/stdlib/posix_sched.c.
 static int guest_to_host_lc(int guest_category) {
     switch (guest_category) {
     case 0: return LC_ALL;

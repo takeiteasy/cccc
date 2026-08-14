@@ -3094,7 +3094,7 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
 // #904: CCCC's own polyfill headers (stdio.h/errno.h/getopt.h in src/std.c)
 // define stdout/stderr/stdin/errno/optarg/optind/opterr/optopt as macros
 // that expand to a call into an internal accessor shim (__cccc_stdout(),
-// etc -- see src/stdlib/stdio.c and src/stdlib/posix.c) so they reflect
+// etc -- see src/stdlib/stdio.c and src/stdlib/posix_io.c) so they reflect
 // the real host state instead of being inert, always-zero/NULL guest
 // globals (#736). That macro expansion happens during preprocessing,
 // before this backend ever runs, so the AST already contains a call to

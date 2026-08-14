@@ -623,7 +623,7 @@ dispatch:
 
     /* Poll pending SIGEV_THREAD notifications (#870) -- same safe point and
        same shape as the pending-signal poll just above: a host notification
-       thread (aio_*()/mq_notify(), src/stdlib/posix.c) can only latch a
+       thread (aio_*()/mq_notify(), src/stdlib/posix_aio.c/posix_mqueue.c) can only latch a
        cookie async-signal-safely, so the guest sigev_notify_function is
        actually invoked here, one notification per re-entry.
        Shares the pending-signal poll's async-delivery hazard -- this can
