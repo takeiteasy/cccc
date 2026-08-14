@@ -3,6 +3,38 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.13] - 2026-08-14
+
+### Fixed
+
+- **Frontend crash and `-c=native` miscompiles on a forward-referenced
+  static-function vtable pattern** (#999). `cccc -t`/`-c=native` on a
+  `static const` struct of function pointers to file-static functions
+  declared before their definitions (a common collector/dispatch-table
+  idiom) crashed with SIGSEGV and no diagnostic output at all. Root cause:
+  a member-access expression that already failed to typecheck left a
+  placeholder AST node with a NULL left-hand side, which a compound-
+  assignment lowering path then dereferenced unconditionally instead of
+  propagating the error. Fixed to surface the real diagnostic instead.
+- **`-m`/`-c=native` serializer bugs on the same vtable pattern** (#999,
+  same ticket). A global initializer taking a later-declared function's
+  address reached the output ahead of that function's own prototype
+  ("use of undeclared identifier"); a multi-file build's `-m`/
+  `-c=generated` output could report a spurious "unresolved relocation
+  target" for a symbol merged from an earlier translation unit; a `static`
+  function defined in a header shared by more than one translation unit
+  was re-emitted once per TU ("redefinition"); and a scalar typedef
+  (`typedef unsigned long DyValue;`) lost its name in serialized
+  signatures, printing its canonical underlying type instead — harmless on
+  most platforms, but a hard "conflicting types" error where the typedef
+  and its canonical spelling denote genuinely different types (e.g.
+  `uint64_t` vs. `unsigned long` on LP64 Darwin). All four fixed.
+- **A translation unit with no global definitions was reported as a parse
+  failure** (#999, found while investigating the above). A `.c` file
+  holding only typedefs/prototypes is legitimately empty of new globals,
+  but was treated as an unconditional failure with the process exit code
+  left at 0 regardless — silent success dressed up as a bogus error.
+
 ## [0.2.12] - 2026-08-14
 
 ### Fixed

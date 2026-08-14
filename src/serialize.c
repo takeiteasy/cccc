@@ -401,6 +401,38 @@ static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
     return NULL;
 }
 
+// #999: pointer-identity counterpart to find_typedef_name's structural
+// same_type_or_origin match, used for a non-aggregate (scalar/pointer)
+// typedef -- struct/union/enum already spell by name via find_typedef_name
+// (structural matching there is required: a typedef and its tag are
+// different Type objects for the same aggregate). A scalar typedef has no
+// tag of its own to distinguish it from the bare builtin type it aliases,
+// so matching structurally here would rename every plain use of that
+// builtin too (e.g. every `unsigned long` in the program, once one
+// `typedef unsigned long DyValue;` exists) -- parse_typedef() now
+// copy_type()s a scalar typedef's Type specifically so this exact check
+// can tell "this node's type really is the DyValue typedef" apart from
+// "this node's type merely has the same underlying representation".
+static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+    // Walk the ->origin chain copy_type() builds, not just `ty` itself: a
+    // parameter's Type is itself a copy_type() of whatever declarator()
+    // produced (func_params(), src/parse.c, always makes one more copy per
+    // parameter slot regardless of where the parameter's type came from),
+    // so a DyValue-typed parameter's own Type is one hop past the Type
+    // parse_typedef() actually recorded, not identical to it. Bounded to a
+    // handful of hops -- copy_type() chains built while parsing one
+    // declarator are short; this is a safety margin against an unforeseen
+    // cycle, not a realistic depth.
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].ty == ty &&
+                name_visible(&ctx->typedefs[i], ctx->current_fn))
+                return &ctx->typedefs[i];
+    return NULL;
+}
+
 // #952: matches a typedef that actually names `ty` itself, not merely a
 // same-kind tagless typedef -- e.g. `typedef struct { char *reg_ptr; ...; }
 // va_list;` (include/stdarg.h) used to win this lookup for *every* anonymous
@@ -784,6 +816,31 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // only ever emits is_const anyway (is_volatile/is_restrict are likewise
     // never serialized), but noted explicitly so it isn't "fixed" by a
     // future generalization of the qualifier-printing above.
+
+    // #999: a scalar (non-aggregate) typedef -- e.g. `typedef unsigned long
+    // DyValue;` -- previously always spelled as its canonical underlying
+    // type below, losing the typedef entirely. That's a cosmetic gap on a
+    // platform where the typedef and the canonical spelling denote the
+    // same real type, but a hard "conflicting types" error from the
+    // downstream compiler when they don't -- e.g. `uint64_t` is `unsigned
+    // long long` on LP64 Darwin, not `unsigned long`, so re-declaring a
+    // `uint64_t`-typed function parameter as `unsigned long` collides with
+    // that same function's real prototype in a header the output also
+    // includes. TY_STRUCT/TY_UNION/TY_ENUM already have their own alias
+    // lookup below (find_typedef_name, structural match -- needed there
+    // since a typedef and its tag are different Type objects); TY_FUNC
+    // recurses into serialize_type_decl and is left alone. Every other
+    // kind gets the same treatment here, via find_typedef_name_exact's
+    // pointer-identity match (see its own comment for why identity, not
+    // structural, matching is required for a scalar).
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM &&
+        ty->kind != TY_FUNC) {
+        TypeName *alias = find_typedef_name_exact(ctx, ty);
+        if (alias) {
+            fprintf(f, "%.*s", alias->name_len, alias->name);
+            return;
+        }
+    }
 
     switch (ty->kind) {
     case TY_VOID:
@@ -2832,9 +2889,24 @@ static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
     memcpy(name, alias->name, len);
     name[len] = '\0';
 
+    // #999: printing a typedef's own RHS must not resolve back to the
+    // typedef itself. find_typedef_name_exact() (used by serialize_type
+    // for a non-aggregate kind -- struct/union/enum avoid this because
+    // find_tag_name takes priority over find_typedef_name for them) would
+    // otherwise match `alias->ty` here against this exact `alias` record,
+    // since they're the same Type pointer -- e.g. `typedef int (^IntBlock)
+    // (int);` printed as `typedef IntBlock IntBlock;`. Temporarily hide
+    // this one record from that lookup for the duration of the call: the
+    // real Type is still passed through explicitly (serialize_type_decl's
+    // `ty` parameter), only the *lookup table entry* is blanked, so a
+    // different typedef further down the same origin chain (a real,
+    // distinct alias-of-an-alias) still resolves normally.
+    Type *real_ty = alias->ty;
+    alias->ty = NULL;
     fprintf(f, "typedef ");
-    serialize_type_decl(f, ctx, alias->ty, name);
+    serialize_type_decl(f, ctx, real_ty, name);
     fprintf(f, ";\n\n");
+    alias->ty = real_ty;
 }
 
 static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
@@ -3281,6 +3353,36 @@ emit_copy_and_free:
         fprintf(f, "extern void free(void *);\n\n");
 }
 
+// #999: a `static` function with a body, declared in a plain #include'd
+// header (not the primary file, not a cccc-only-routed one -- #896) rather
+// than synthesized/macro-generated, is already supplied to the output by
+// that header's own auto-captured #include text. Emitting it again from
+// `prog` -- which holds one Obj *per TU* that included the header, since
+// `static` internal-linkage functions are deliberately left uncanonicalized
+// across translation units by cc_link_progs (#957) -- produces a
+// "redefinition" error the moment more than one input file shares that
+// header (dandy's `internal.h`, `static inline` NaN-boxing accessors,
+// #999). Mirrors the from_primary check the prototype pass already uses
+// for a *bodyless* declaration just below, generalized to also cover a
+// function that has one. In generated_only mode (-c=generated), the same
+// header text is only in scope if it was actually auto-captured -- see
+// #953's identical reasoning for a struct/enum tag definition just above
+// this function -- so path_is_captured() gates it there; a plain -m/
+// -c=native always replays every captured #include verbatim, so
+// from_primary alone is sufficient.
+static bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
+                                        Obj *obj) {
+    if (!obj->is_static || !obj->body || obj->is_macro_generated)
+        return false;
+    Token *t = obj->tok;
+    if (!t || !t->file)
+        return false;
+    if (t->file == vm->compiler.primary_file ||
+        cc_file_is_cccc_only(vm, t->file->name))
+        return false;
+    return !ctx->generated_only || path_is_captured(ctx, t->file->name);
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -3493,6 +3595,46 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         fprintf(f, ";\n");
     }
 
+    // #999: forward-declare any function a global's initializer references
+    // by address (`var->rel`, resolved the same way serialize_reloc_init
+    // resolves it further down) -- e.g. `static const VT k = { .open =
+    // none_open };` where `none_open` is a `static` function defined later
+    // in `prog`. The #918 loop just above only forward-declares *globals*;
+    // the function-prototype pass below (which would otherwise supply
+    // `none_open`'s own declaration) doesn't run until after every global
+    // definition has already been emitted, so a forward reference like this
+    // one reached the output with nothing in scope yet ("use of undeclared
+    // identifier"). Resolved on demand here rather than by moving the whole
+    // prototype pass above the global-definitions pass: #953 records that
+    // hoisting every prototype unconditionally can put a struct-tag
+    // parameter type in function-prototype scope ahead of the #include that
+    // actually defines it, conflicting with the tag's real, later
+    // definition -- the same reasoning #956 used for generated-function
+    // forward declarations. Deduped so a vtable naming the same function
+    // twice (or two vtables sharing one) doesn't declare it twice.
+    {
+        ObjVec reloc_fns = {0};
+        for (Obj *obj = prog; obj; obj = obj->next) {
+            if (generated_only && !obj->is_macro_generated)
+                continue;
+            if (obj->is_function || obj->name[0] == '.')
+                continue;
+            for (Relocation *rel = obj->rel; rel; rel = rel->next) {
+                if (!rel->label || !*rel->label)
+                    continue;
+                Obj *target = serialize_find_global(vm, *rel->label);
+                if (!target || !target->is_function ||
+                    target == vm->compiler.builtin_block_copy ||
+                    obj_vec_contains(&reloc_fns, target))
+                    continue;
+                obj_vec_push(&reloc_fns, target);
+                serialize_function_signature(f, &ctx, target);
+                fprintf(f, ";\n");
+            }
+        }
+        free(reloc_fns.data);
+    }
+
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
@@ -3518,6 +3660,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         // (emitted when Block_copy is actually reachable) and this loop
         // can never introduce a second, conflicting extern declaration.
         if (obj == vm->compiler.builtin_block_copy)
+            continue;
+        // #999: a header-sourced `static` definition is already supplied
+        // by that header's own replayed #include text -- see
+        // function_is_header_supplied()'s comment. This is the "has a
+        // body" counterpart to the from_primary check the bodyless branch
+        // just below already applies.
+        if (function_is_header_supplied(vm, &ctx, obj))
             continue;
         if (!obj->is_definition && !obj->body) {
             // #901: a bare declaration with no body (e.g. `int abs(int
@@ -3558,7 +3707,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
-        if (obj->is_function)
+        if (obj->is_function && !function_is_header_supplied(vm, &ctx, obj))
             serialize_function(f, vm, &ctx, obj);
     }
 

@@ -2542,17 +2542,25 @@ int main(int argc, const char *argv[]) {
     input_progs = calloc(input_files_count, sizeof(Obj *));
     for (int i = 0; i < input_files_count; i++) {
         input_progs[i] = cc_parse(&vm, input_tokens[i]);
-        if (!input_progs[i]) {
-            // parse() returns NULL when no new globals were created
-            // (all declarations mapped to macro_globals). If macro
-            // globals exist, use those as the program instead.
-            if (vm.compiler.macro_globals) {
-                input_progs[i] = vm.compiler.macro_globals;
-            } else {
-                fprintf(stderr, "error: failed to parse %s\n", input_files[i]);
-                goto BAIL;
-            }
-        }
+        // #999: parse() returning NULL is not on its own a failure -- its
+        // own comment says outright it "returns NULL when no new globals
+        // were created", which is the ordinary, successful outcome for a
+        // TU holding only typedefs/prototypes and no definitions, not just
+        // the macro_globals case handled below. Treating it as fatal
+        // unconditionally used to print a bogus "failed to parse" message
+        // while leaving exit_code at its default 0 (silent success dressed
+        // up as a failure) -- and, worse, masked a *genuine* parse error
+        // recorded via error_tok_recover (which also leaves globals empty
+        // when every top-level declaration in the TU failed to recover
+        // into one) behind that same generic message instead of the real
+        // diagnostic. Do nothing here in either case: a NULL prog
+        // contributes no globals to cc_link_progs (which already tolerates
+        // one -- its per-Obj loop over `progs[i]` just doesn't execute,
+        // same as if this TU had never been linked at all), and any real
+        // error is caught with its actual message and exit_code = 1 by the
+        // cc_has_errors() check immediately below this loop.
+        if (!input_progs[i] && vm.compiler.macro_globals)
+            input_progs[i] = vm.compiler.macro_globals;
     }
 
     // Check for errors after parsing
@@ -2646,6 +2654,21 @@ int main(int argc, const char *argv[]) {
         // from serialized output (#482/#488 ABI transparency), so the flag
         // is genuinely a no-op here, not a conflict.
         vm.flags = warn_ignored_vm_flags(vm.flags, emit_generated_only ? "-c=generated" : "-m");
+        // #999: this path (-m / -c=generated) bails out before cc_compile()
+        // ever runs, so vm.compiler.globals still holds whatever the *last*
+        // TU's own parse() call left it as (each TU's parse() resets it to
+        // that TU's own list -- see the #957 comment in parse()), not the
+        // full merged, multi-TU program. serialize_find_global()
+        // (src/serialize.c) scans this list to resolve a Relocation's
+        // target (e.g. a function pointer in a static const vtable
+        // initializer, `.open = none_open`), so a target defined in an
+        // earlier TU than the one holding the initializer was reported as
+        // an unresolved relocation even though it's really just not merged
+        // in yet. Mirrors bytecode.c's own `vm->compiler.globals = prog`
+        // assignment (the -c=native/-c=bytecode path, which runs
+        // cc_compile() first and already sees the merged list) for the
+        // same reason.
+        vm.compiler.globals = merged_prog;
         cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
         if (f != stdout) {
             fclose(f);

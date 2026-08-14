@@ -1283,6 +1283,57 @@ rejected with a diagnostic naming the kind, so a future gap fails at
 implementation time instead of silently miscompiling a program that runs
 correctly in the VM.
 
+A multi-file build's serialized output no longer duplicates or misspells a
+few constructs a real host compiler would reject (#999). A `static`
+function *defined* in a plain `#include`d header and reached from more than
+one translation unit used to be re-emitted once per TU — internal-linkage
+functions are deliberately left uncanonicalized across TUs by
+`cc_link_progs` (#957), so each TU's own Obj carried a full copy of the
+body — producing a "redefinition" error from the host compiler the moment
+more than one input file shared such a header. It is now skipped entirely
+(both its forward declaration and its definition) whenever the header's own
+`#include` is already being replayed into the output, the same
+`from_primary`/`path_is_captured` reasoning the rest of this section
+already documents for a type. A scalar (non-struct/union/enum) typedef,
+e.g. `typedef unsigned long DyValue;`, previously always spelled as its
+canonical underlying type in a function's parameter/return position,
+dropping the typedef from the output entirely — cosmetic on a platform
+where the typedef and its canonical spelling denote the same real type, but
+a hard "conflicting types" error where they don't (`uint64_t` is `unsigned
+long long` on LP64 Darwin, not `unsigned long`, so re-declaring a
+`uint64_t`-typed parameter as `unsigned long` collides with that function's
+real prototype in a header the output also includes). The typedef's own
+spelling is now preserved by matching the parameter/return `Type`'s
+identity (walking the `copy_type()` chain a typedef declaration and each of
+its uses shares) against the recorded typedef table; struct/union/enum
+typedefs are untouched, since they already had a working, independent
+structural-matching alias mechanism that predates this fix. A `static
+const` global initializer taking the address of a function declared (but
+not yet defined) later in the same file — a vtable of function pointers to
+file-static functions, `static const VT k = { .open = later_fn };` — used
+to reach the output with nothing declaring `later_fn` yet, since the
+global-definitions pass ran ahead of the function-prototype pass; a
+targeted pass now forward-declares exactly the functions a global's
+initializer relocations reference, without hoisting every prototype
+unconditionally (which would reopen #953's struct-tag-scope hazard).
+Separately, a translation unit holding only typedefs/prototypes and no
+definitions is not a compile failure — `parse()`'s own contract returns
+`NULL` for that case, previously treated by `main.c`'s per-TU loop as
+unconditionally fatal (with the process exit code left at 0 regardless).
+**Deliberately not fixed under this ticket, tracked as a separate,
+architectural follow-up**: preprocessor macro definitions and
+`#pragma once`/include-guard state are shared across every input file one
+`cccc` invocation compiles together, rather than being independent per
+translation unit the way a standards-conforming multi-file build requires
+— a `#define` in one `.c` file is visible in another with no `#include` at
+all, and a header's include guard, once tripped by the first TU to include
+it, silently empties that same `#include` for every later TU. This is
+unrelated to the redefinition/typedef-spelling fixes just described (which
+apply equally whether or not a header carries a guard) but was the root
+cause blocking a full end-to-end reproduction of the ticket's own dandy
+(`~takeiteasy/dandy`) repro, since dandy's shared header does carry a
+guard.
+
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 

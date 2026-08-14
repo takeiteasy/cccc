@@ -6970,6 +6970,15 @@ static int static_branch_value(VirtualMachine *vm, Node *cond) {
 // Resolve the lvalue `node` points to into an ObjSizeInfo describing the
 // base object and nearest surrounding subobject.
 static bool objsize_resolve_lvalue(VirtualMachine *vm, Node *node, ObjSizeInfo *r) {
+    // #999: unlike this function's siblings (mark_escaping_root,
+    // constexpr_init_for_node), nothing upstream NULL-checks before
+    // recursing here -- the ND_MEMBER case below passes node->lhs straight
+    // through, and struct_ref()'s error-recovery paths can leave that NULL
+    // on a member access that already failed to typecheck (a placeholder
+    // node with ty = ty_error, no ->lhs). add_type(vm, NULL) itself is
+    // safe, but the switch just below is not.
+    if (!node)
+        return false;
     add_type(vm, node);
     switch (node->kind) {
     case ND_VAR: {
@@ -7718,6 +7727,22 @@ static Node *to_assign(VirtualMachine *vm, Node *binary) {
     add_type(vm, binary->lhs);
     add_type(vm, binary->rhs);
     Token *tok = binary->tok;
+
+    // #999: struct_ref()'s three error-recovery paths (called from
+    // postfix() to build binary->lhs before we ever get here) return a bare
+    // `new_node(vm, ND_MEMBER, tok)` with lhs left NULL and ty = ty_error --
+    // a placeholder standing in for "member access on something that
+    // already failed to typecheck", not a real member node. The `A.x op= C`
+    // branch just below unconditionally reads `binary->lhs->lhs->ty`,
+    // which SEGVs on that placeholder (verified via ASan: NULL+0x10) instead
+    // of surfacing whatever diagnostic error_tok_recover already queued --
+    // turning a compile error into an unexplained crash. Propagate the
+    // error type instead of descending into the ND_MEMBER branch.
+    if (is_error_type(binary->lhs->ty) || is_error_type(binary->rhs->ty)) {
+        Node *err_node = new_node(vm, ND_MEMBER, tok);
+        err_node->ty = ty_error;
+        return err_node;
+    }
 
     // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
     if (binary->lhs->kind == ND_MEMBER) {
@@ -14455,6 +14480,45 @@ static Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAtt
         Type *ty = declarator(vm, &tok, tok, basety);
         if (!ty->name)
             error_tok(vm, ty->name_pos, "typedef name omitted");
+        // #999: for a plain typedef of a builtin scalar (`typedef unsigned
+        // long DyValue;`), declarator() above returns `basety` itself
+        // unmodified (type_suffix() is a no-op with no `[`/`(` following
+        // the identifier) -- one of the shared singleton Type objects
+        // (ty_ulong, etc.), not a fresh one. Without copying, every
+        // subsequent `DyValue`-typed node's ->ty is pointer-identical to
+        // every unrelated plain `unsigned long`-typed node's, so a
+        // serializer pass matching a typedef alias by Type identity
+        // (find_typedef_name_exact, src/serialize.c) couldn't tell "spell
+        // this as DyValue" apart from "this was never typedef'd, spell it
+        // as unsigned long" -- and would have to pick one spelling for
+        // both, wrongly renaming every plain use of the underlying type.
+        // Copying gives each typedef its own Type identity (copy_type sets
+        // ->origin, so same_type_or_origin compatibility with the
+        // original -- and thus with any other typedef of the same
+        // underlying type -- is unaffected); find_typedef()'s lookup
+        // (called wherever `DyValue` is used as a type specifier) returns
+        // this same copy via sc->type_def below, so every node the
+        // typedef's name produces shares its identity, and only those
+        // nodes match.
+        //
+        // Deliberately excluded: TY_STRUCT/TY_UNION/TY_ENUM. Those already
+        // have a working, independent alias mechanism in the serializer
+        // (find_tag_name takes priority over find_typedef_name, and it
+        // matches structurally via same_type_or_origin, not by identity --
+        // see serialize_type's TY_STRUCT/TY_UNION/TY_ENUM cases), so they
+        // never needed this fix. Copying one would actively break the
+        // opaque-handle idiom (`typedef struct Beta Beta;` forward-declared
+        // here, its body defined later elsewhere in the same TU): a forward
+        // -declared tag is completed by *mutating the same Type object in
+        // place* when its body is later parsed (struct_union_decl's
+        // `existing` reuse, this file) -- struct_decl looks the tag up
+        // again by name and finds that same live object. copy_type() takes
+        // a one-time snapshot; had it fired here, `Beta`'s recorded type
+        // would have frozen at its still-incomplete size/members forever,
+        // silently reproducing an incomplete `struct Beta` in the output
+        // even after the real definition completed the original.
+        if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+            ty = copy_type(vm, ty);
         char *name = get_ident(vm, ty->name);
         VarScope *sc = push_scope(vm, name, ty->name->len);
         sc->type_def = ty;

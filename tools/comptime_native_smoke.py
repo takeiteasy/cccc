@@ -2165,11 +2165,82 @@ def case_native_embedded_header_include_not_suppressed(cccc: Path, tmp: str) -> 
     return True
 
 
+DANDY_PATTERN_HEADER = (
+    # No #pragma once / #ifndef guard, deliberately: this case is about a
+    # `static` definition and a scalar typedef reached by two translation
+    # units through an ordinary #include, independent of the separate,
+    # out-of-scope bug where pragma_once/include_guard state persists
+    # across every TU one cccc invocation compiles together (a guarded
+    # header would silently mask the very thing this case checks -- see
+    # tests/fixtures/header_static_skip_999.h's identical note).
+    "typedef unsigned long DPValue;\n"
+    "static inline DPValue dp_box(unsigned long x) { return x; }\n"
+    "typedef struct { int (*open)(void); int (*close)(void); } DPVT;\n"
+)
+
+DANDY_PATTERN_A = (
+    '#include "dandy_pattern_999.h"\n'
+    "static int dp_open(void);\n"
+    "static int dp_close(void);\n"
+    "static const DPVT kVT = { .open = dp_open, .close = dp_close };\n"
+    "static int dp_open(void) { return (int)dp_box(40); }\n"
+    "static int dp_close(void) { return (int)dp_box(2); }\n"
+    "int dp_call_a(void) { return kVT.open() + kVT.close(); }\n"
+)
+
+DANDY_PATTERN_B = (
+    '#include "dandy_pattern_999.h"\n'
+    "int dp_call_a(void);\n"
+    "DPValue dp_helper(DPValue v) { return dp_box(v); }\n"
+    "int main(void) {\n"
+    "    return dp_call_a() + (dp_helper(21) == 21 ? 0 : 999);\n"
+    "}\n"
+)
+
+
+def case_dandy_vtable_pattern_multi_tu(cccc: Path, tmp: str) -> bool:
+    print("  69: dandy's collector-vtable pattern (#999) -- a static const "
+          "vtable of pointers to later-defined file statics, plus a shared "
+          "header (no include guard) whose static inline accessor over a "
+          "scalar typedef is reached from two translation units -- compiles "
+          "and links under -c=native (not just a -m shape assertion: a "
+          "dropped/duplicated definition or a lost typedef spelling is a "
+          "*link/compile* failure, which tests/test_serialize_static_fn_"
+          "ptr_init.c, tests/test_serialize_header_static_skip.c and "
+          "tests/test_serialize_typedef_spelling.c individually can't see). "
+          "Asserts VM 42 -> native 42")
+    write(Path(tmp) / "dandy_pattern_999.h", DANDY_PATTERN_HEADER)
+    a_src = Path(tmp) / "dandy_pattern_999_a.c"
+    b_src = Path(tmp) / "dandy_pattern_999_b.c"
+    write(a_src, DANDY_PATTERN_A)
+    write(b_src, DANDY_PATTERN_B)
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "dandy_pattern_999_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2245,6 +2316,7 @@ def main() -> int:
             case_generated_embedded_header_no_duplicate,
             case_generated_embedded_header_comptime_only_still_derives,
             case_native_embedded_header_include_not_suppressed,
+            case_dandy_vtable_pattern_multi_tu,
         ]
         results = [case(cccc, tmp) for case in cases]
 
