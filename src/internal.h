@@ -1199,6 +1199,27 @@ void register_fenv_functions(VirtualMachine *vm);
 void register_locale_functions(VirtualMachine *vm);
 void register_math_functions(VirtualMachine *vm);
 void register_posix_functions(VirtualMachine *vm);
+// Per-domain POSIX registrars (#946 split of posix.c), called directly by
+// register_posix_functions() and also mapped 1:1 from tools/stdlib.tsv for
+// a header whose registered functions live in exactly one domain (#1012) --
+// see get_stdlib_reg_fn_name()/register_stdlib_for_header() in preprocess.c.
+// A header that spans more than one domain (unistd.h, strings.h,
+// sys/resource.h) stays mapped to register_posix_functions above.
+void register_posix_aio_functions(VirtualMachine *vm);
+void register_posix_dir_functions(VirtualMachine *vm);
+void register_posix_io_functions(VirtualMachine *vm);
+void register_posix_ipc_functions(VirtualMachine *vm);
+void register_posix_lang_functions(VirtualMachine *vm);
+void register_posix_mqueue_functions(VirtualMachine *vm);
+void register_posix_ndbm_functions(VirtualMachine *vm);
+void register_posix_net_functions(VirtualMachine *vm);
+void register_posix_poll_functions(VirtualMachine *vm);
+void register_posix_sched_functions(VirtualMachine *vm);
+void register_posix_search_functions(VirtualMachine *vm);
+void register_posix_spawn_functions(VirtualMachine *vm);
+void register_posix_statfs_functions(VirtualMachine *vm);
+void register_posix_wait_functions(VirtualMachine *vm);
+void register_posix_wordexp_functions(VirtualMachine *vm);
 void register_pthread_functions(VirtualMachine *vm);
 void register_threads_functions(VirtualMachine *vm);
 void cccc_pthread_cleanup(VirtualMachine *vm);
