@@ -3,6 +3,79 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.14] - 2026-08-14
+
+### Fixed
+
+- **`-c=native`/`-m` dropped or duplicated a `static` function or
+  file-scope typedef declared in a non-primary translation unit**
+  (#1002, #1006). A multi-file `cccc a.c b.c` build could silently drop
+  a `static` function or a `typedef`/`struct`/`enum` written in `b.c`
+  ("call to undeclared function" / "unknown type name"), or emit a
+  colliding definition for two same-named `static` functions in
+  different files ("redefinition"). Root cause: several serializer
+  predicates keyed off `vm->compiler.primary_file`, which only ever
+  names the *first* input file. Fixed by tracking every command-line
+  input file and checking membership in that set instead; colliding
+  `static` names across files are now automatically renamed rather than
+  emitted twice.
+- **`-c=native` emitted `goto (null);` for every `break`/`continue`, and
+  `switch` bodies were broken three more ways** (#1005). `break`/
+  `continue` printed a literal, invalid `goto (null);` — a host compile
+  error for any `-c=native` program using either inside a loop. Fixed to
+  emit real `break;`/`continue;` keywords. Investigating the fix
+  surfaced that `switch` itself was also broken: only each case's first
+  statement was emitted, cases came out in reverse source order with
+  `default:` forced last (breaking fallthrough), and GNU case ranges
+  (`case 1 ... 5:`) collapsed to their start value. All fixed together.
+- **Preprocessor macro/include-guard state and parser scope leaked
+  across translation units** (#1001). Every `.c` file on one `cccc`
+  command line shared one preprocessor state, so a `#define` in one
+  file was silently visible in another with no `#include` at all; a
+  matching parser scope leak meant every TU's declarations stayed
+  visible from every later TU's own parse, independently masking the
+  include-guard half of the same bug. Both are now reset per
+  translation unit. One intentional behavior change: a header that
+  *defines* (not just declares) a non-`extern` global, `#include`d
+  unguarded from more than one TU, is now a `redefinition` error,
+  matching what a real linker does with the equivalent two-object-file
+  build.
+- **`-c=native`/`-m` couldn't serialize a cccc-owned polyfill header**
+  (#1003) such as `<stdbit.h>`/`<threads.h>`/`<uchar.h>` — the
+  generated C tried to `#include` a header the host toolchain has no
+  guaranteed copy of, producing an unresolvable "file not found" even
+  though CCCC itself compiled the program fine. Such headers are now
+  marked cccc-only at the point they're resolved, so their content is
+  re-derived instead of replayed as an `#include`.
+- `setenv`/`unsetenv`/`putenv` are now registered in the FFI stdlib —
+  `getenv` was registered but its siblings weren't, so any guest
+  program calling them died with "undefined function".
+
+### Changed
+
+- Split `src/stdlib/posix.c` (3,722 lines) into 16 per-domain files —
+  `posix_io.c`, `posix_net.c`, `posix_poll.c`, `posix_wait.c`,
+  `posix_dir.c`, `posix_search.c`, `posix_sched.c`, `posix_statfs.c`,
+  `posix_ipc.c`, `posix_wordexp.c`, `posix_aio.c`, `posix_mqueue.c`,
+  `posix_ndbm.c`, `posix_spawn.c`, `posix_lang.c`, plus a shared
+  `posix_util.c`/`.h` — and mapped 43 of the 52 POSIX headers in
+  `tools/stdlib.tsv` to their own domain's registrar directly, instead
+  of the single monolithic aggregator. A guest program `#include`ing
+  only `<poll.h>`, for example, now lazily registers only that
+  domain's handful of FFI wrappers instead of the full ~340-function
+  POSIX surface. Pure refactor plus a registration-granularity change —
+  no wrapper behavior changed, and headers whose functions genuinely
+  span more than one domain (`unistd.h`, `strings.h`,
+  `sys/resource.h`) stay on the aggregator.
+- Split `src/codegen.c` (9,438 lines) into 7 files by section
+  (`codegen_regalloc.c`, `codegen_call.c`, `codegen_emit.c`,
+  `codegen_addr.c`, `codegen_expr.c`, `codegen_stmt.c`,
+  `codegen_func.c`) and `src/parse.c` (16,023 lines) into 10 files by
+  section (`parse_core.c`, `parse_types.c`, `parse_checked.c`,
+  `parse_init.c`, `parse_stmt.c`, `parse_analysis.c`, `parse_expr.c`,
+  `parse_blocks.c`, `parse_postfix.c`, `parse_decl.c`). Purely
+  mechanical — no behavioral changes.
+
 ## [0.2.13] - 2026-08-14
 
 ### Fixed
