@@ -605,7 +605,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     unrelated, already-returned sibling frame's own escaping local that
     happened to reuse the same physical stack address, misreporting a
     plainly-live access to the current frame's own memory as dangling.
-    `addr_is_local_frame` (`src/codegen.c`) recognizes when `gen_addr`'s
+    `addr_is_local_frame` (`src/codegen_addr.c`) recognizes when `gen_addr`'s
     result is guaranteed to be a bp-relative address of the *current*
     function's own live frame — built entirely through the plain
     local-offset path, with no intervening pointer *value* load (captured
@@ -1261,7 +1261,7 @@ non-atomic RMW desugar (`tmp = &A; *tmp = *tmp op B`, which lowers to an
 ordinary `CHKNTZ`-guarded store, same as any other) can reach one. `_Decimal`
 does support `+=`/`++`/`--`; its `_Atomic` CAS-loop path is unaffected by
 this ticket either way — `ND_CAS`'s own type check
-(`src/codegen.c`, `sz` must be 1/2/4/8 and not `is_flonum`) governs whether
+(`src/codegen_expr.c`, `sz` must be 1/2/4/8 and not `is_flonum`) governs whether
 an `_Atomic _Decimal` RMW is accepted at all, independent of `CHKNTZ`.
 
 **`CHKNT`/`CHKNTZ` propagate across assignment** (#943, extended #939). `q =

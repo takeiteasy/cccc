@@ -203,7 +203,7 @@ disabled whenever any of `--bounds-checks`, `--uaf-detection`,
 `--pointer-sanitizer`, `--type-checks`, or the invalid-arithmetic/
 provenance-tracking flags are enabled — each of these fusions elides a
 load/store and therefore bypasses the CHKP3/CHKT3 emission that the normal
-load/store path relies on (`CCCC_FUSION_UNSAFE_FLAGS` in `src/codegen.c`).
+load/store path relies on (`CCCC_FUSION_UNSAFE_FLAGS` in `src/codegen_internal.h`).
 This applies to each flag individually, not just their `-2`/`-3`/
 `--pointer-sanitizer` combinations, so a standalone `--type-checks -O3` build
 gets the same coverage as `-O0`.

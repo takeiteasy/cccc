@@ -409,7 +409,7 @@ a runtime `cc_load_module()` call, still resolves to the host FFI symbol. One
 narrower gap remains even with a matching `--link` path: a **file-scope** global
 variable's initializer taking that address (`int (*fp)(int) = abs;` at file scope,
 as opposed to inside a function body) still resolves to the host FFI symbol —
-`apply_global_relocations` (`src/codegen.c`) has no relocation mechanism for an
+`apply_global_relocations` (`src/codegen_regalloc.c`) has no relocation mechanism for an
 unresolved data-segment reference by name, unlike the text-segment case. This is
 also why an undefined *data* global (not a function) can only be **suppressed**
 under `-c`/`--link`, never deferred to a link-time diagnostic the way an

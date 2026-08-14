@@ -4,7 +4,7 @@
 
 ## Overview
 
-CCCC's C frontend produces a portable, register-based bytecode that runs on a built-in interpreter (the **VM**).  The VM is the runtime that powers `[[cccc::macro]]` execution and doubles as a self-contained, introspectable runtime for the memory-safety suite, the debugger, the profiler, and any program run without `-c=native`.  It is intentionally not a JIT-to-machine-code backend: every opcode is interpreted, which keeps the same binary that parses C also able to execute it (or to hand macro-expanded C off to `cc` / `clang` / `gcc` via `-c=native` — see the [README](../README.md)).  This design trades raw execution speed for portability, deep runtime instrumentation, and the ability to run untrusted or sandboxed code in a single self-contained binary.
+CCCC's C frontend produces a portable, register-based bytecode that runs on a built-in interpreter (the **VM**).  The VM is the runtime that powers `[[cccc::comptime]]` execution and doubles as a self-contained, introspectable runtime for the memory-safety suite, the debugger, the profiler, and any program run without `-c=native`.  It is intentionally not a JIT-to-machine-code backend: every opcode is interpreted, which keeps the same binary that parses C also able to execute it (or to hand macro-expanded C off to `cc` / `clang` / `gcc` via `-c=native` — see the [README](../README.md)).  This design trades raw execution speed for portability, deep runtime instrumentation, and the ability to run untrusted or sandboxed code in a single self-contained binary.
 
 Key properties:
 
@@ -30,7 +30,7 @@ Key properties:
 | `r18–r25` | `REG_S0` … `REG_S7` | Callee-saved registers |
 | `r26–r31` | `REG_T5` … `REG_T10` | Caller-saved temporaries |
 
-`r0`/`REG_ZERO` must never be used as an address or scratch register in codegen: writes to it are discarded, so a subsequent load through it always reads from address 0 rather than whatever value was "stored". This is distinct from `r0` legitimately being a load/store *destination* for a discarded-value result — the integer `op_LDR_*_fn` ops guard `rd != REG_ZERO` before writing back, so they simply skip the write; the float `op_FLDR_fn`/`op_FLDR_F32_fn` ops have no such guard and write `fregs[0]` unconditionally, which is harmless only because nothing treats `fregs[0]` as load-bearing. A codegen path that computes an address into `dest_reg` and then loads through that same register must first redirect any `REG_ZERO` destination to a real temporary (see the `gen_expr` guard at `src/codegen.c` ahead of `ND_DEREF`/`ND_MEMBER`, added for ticket #916 — a discarded float/double deref used to compute its address into `r0`, i.e. address 0, and segfault on the load).
+`r0`/`REG_ZERO` must never be used as an address or scratch register in codegen: writes to it are discarded, so a subsequent load through it always reads from address 0 rather than whatever value was "stored". This is distinct from `r0` legitimately being a load/store *destination* for a discarded-value result — the integer `op_LDR_*_fn` ops guard `rd != REG_ZERO` before writing back, so they simply skip the write; the float `op_FLDR_fn`/`op_FLDR_F32_fn` ops have no such guard and write `fregs[0]` unconditionally, which is harmless only because nothing treats `fregs[0]` as load-bearing. A codegen path that computes an address into `dest_reg` and then loads through that same register must first redirect any `REG_ZERO` destination to a real temporary (see the `gen_expr` guard at `src/codegen_expr.c` ahead of `ND_DEREF`/`ND_MEMBER`, added for ticket #916 — a discarded float/double deref used to compute its address into `r0`, i.e. address 0, and segfault on the load).
 
 The floating-point register file (`fregs[32]`) uses the **same indices** and stores a flat `double` per slot.  The frontend already emits type-specific opcodes (`FADD3` vs `FADD3_F32`, `FLDR` vs `FLDR_F32`), so the register itself carries no precision tag.  A `float` value is held as the `double` that results from rounding to float precision and then widening — which is exact — so any register can be read as a `double` with no per-access branch, and the `*_F32` opcodes round their result through `(float)` before the (exact) widening store.
 
@@ -69,7 +69,7 @@ TLS variable assignment (`vm->tls_template` write) happens in `gen()` at compile
   (both 10-17, see `src/internal.h`), so a float value and an integer address
   can never both be live "in" the same `A`-register at once. Codegen paths
   that compute a member/variable address and then load a flonum through it
-  (e.g. `gen_expr`'s `ND_VAR`/`ND_MEMBER` cases in `src/codegen.c`) must use a
+  (e.g. `gen_expr`'s `ND_VAR`/`ND_MEMBER` cases in `src/codegen_expr.c`) must use a
   separate temp register for the address rather than reusing the destination
   register.
 
@@ -564,7 +564,7 @@ checked range by one element (`sizeof(T)` bytes at the declared end of the
 range) so the terminator slot is a legal write target (`CHKR` already
 enforces this), but nothing stopped that write from putting a non-null value
 there and silently destroying the invariant the widening exists to serve.
-`CHKNT` is emitted from the store path (`src/codegen.c`'s `ND_ASSIGN` case),
+`CHKNT` is emitted from the store path (`src/codegen_expr.c`'s `ND_ASSIGN` case),
 not from `gen_addr` alongside `CHKR`, because it needs the value being
 stored, which `gen_addr` never sees. A second emission site (#937) sits in
 the `ND_CAS` case: `to_assign()` (`src/parse.c`) desugars a read-modify-write
@@ -598,7 +598,7 @@ its bounds are known.
 `CHKNTZ` (#939) covers the pointee types `CHKNT` structurally cannot: a
 struct/union or wide `_BitInt`/`_Decimal` assignment never puts its value in
 a single register at all — `ND_ASSIGN`'s codegen routes these through a
-dedicated memcpy branch (`src/codegen.c`, ahead of the generic scalar-store
+dedicated memcpy branch (`src/codegen_expr.c`, ahead of the generic scalar-store
 path `CHKNT` is emitted from) that stages a source address and a
 destination address for `MCPY`. `CHKNTZ` is emitted in that branch, right
 before the `MCPY`, scanning `checked_access_size` bytes at the *source*
@@ -641,7 +641,7 @@ ordering. See [SAFETY.md](SAFETY.md#checked-pointers) for the full writeup
 of both features.
 
 `CHKT3` is live (#651, extended to byte granularity by #653). It is emitted
-by `emit_load_ex`/`emit_store_ex` (`src/codegen.c`) right after `CHKP3`,
+by `emit_load_ex`/`emit_store_ex` (`src/codegen_emit.c`) right after `CHKP3`,
 carrying the pointee's static `TypeKind` and size, and a 3-way mode:
 `[rs:8|mode:8]` in the operand word, `[(size<<8)|expected_type:64]` as the
 trailing immediate. `mode` is `CHKT3Mode` (`src/cccc.h`):
@@ -975,7 +975,7 @@ parse time.
 
 **Clobber contract (#838):** every `D*` opcode and every `WIDE_*` opcode
 reads/writes only `REG_A0`–`REG_A5` and the fixed-A-register block's opaque
-side effects (`emit_wide_op`, `src/codegen.c`) — none of them touch a `T`
+side effects (`emit_wide_op`, `src/codegen_emit.c`) — none of them touch a `T`
 register, and codegen relies on this: the decimal and wide-`_BitInt` binop
 branches stage one operand's address across the other operand's evaluation
 in a `T` register, which would be silently clobbered if these opcodes reset
@@ -1026,7 +1026,7 @@ engine unconditionally (#728).
 
 **Variadic ABI.** A decimal argument in the variadic tail of a call — the
 `x` in `printf("%Df", x)` — is passed **by pointer** to a caller-frame
-scratch copy (`gen_decimal_arg_ptr`, `src/codegen.c`), mirroring the
+scratch copy (`gen_decimal_arg_ptr`, `src/codegen_emit.c`), mirroring the
 vector-variadic convention (#721, see the "ABI" subsection below).
 `_Decimal32/64/128` isn't
 subject to default argument promotion (unlike `float`→`double`), which is
