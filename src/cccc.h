@@ -2159,8 +2159,8 @@ typedef struct AttrTarget {
 
 /*!
  @brief Represents a compile-time macro function.
- @details Macro functions are functions marked with [[cccc::macro]] or
-             __attribute__((macro)) that execute during compilation to generate
+ @details Macro functions are functions marked with [[cccc::comptime]] or
+             __attribute__((comptime)) that execute during compilation to generate
              or transform AST nodes.
 */
 typedef struct MacroFn {
@@ -2171,7 +2171,7 @@ typedef struct MacroFn {
     bool is_macro_entry;   /**< True if callable from user program macro call sites (always true for [[cccc::comptime]] functions). */
     bool is_void_macro;   /**< True if declared with void return type (definition-only). */
     bool is_variadic;         // True if declaration has a trailing ...
-    bool is_attribute_handler; // True for @macro(attribute("name")) handlers
+    bool is_attribute_handler; // True for @comptime(attribute("name")) handlers
     char *attribute_name;      // Registered custom attribute name
     int fixed_param_count;    // Number of named parameters before ...
     struct MacroFn *next;   /**< Pointer to next macro in linked list. */
@@ -4282,13 +4282,15 @@ typedef enum {
 ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr);
 
 /*!
- @brief Execute all inline macros before parsing.
- @details Compiles and executes every [[cccc::macro(inline)]] (or
-             __attribute__((macro(inline)))) macro. Each inline macro runs
-             automatically at its declaration point (no explicit call needed).
-             Generated functions are stored in vm->compiler.macro_globals and
+ @brief Execute file-scope calls to global-generation comptime macros.
+ @details Compiles and executes every file-scope call to a non-inline
+             [[cccc::comptime]] macro before the main parse begins (the
+             function's name is a legacy misnomer — inline/call-site macros
+             run during macro expansion, after parsing, not here). Each call
+             runs at its position in the preprocessed token stream; side-effect
+             definitions are drained into vm->compiler.macro_globals and
              synthetic forward declarations are prepended to every input token
-             stream so the parser can resolve calls to generated functions
+             stream so the parser can resolve generated functions and globals
              without manual forward declarations. Must be called after all
              preprocessing and before cc_parse.
  @param vm The CCCC instance.

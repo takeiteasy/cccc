@@ -34,7 +34,7 @@
 // Per-run failure state allocated on the stack inside cc_run_tests.
 // s_run is set to point at the current run's state before each test loop and
 // cleared afterward.  A NULL check in the impl_assert* functions guards against
-// calls that arrive outside a test run (e.g. from a [[cccc::macro]] during the
+// calls that arrive outside a test run (e.g. from a [[cccc::comptime]] during the
 // comptime pass) -- ticket #334.
 typedef struct {
     jmp_buf jmp;

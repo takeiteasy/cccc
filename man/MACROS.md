@@ -30,7 +30,9 @@ __comptime                int helper(int n) { return n * 2; }
 @comptime           Node *make_val(void) { return MakeIntLiteral(42); }
 ```
 
-The deprecated `[[cccc::macro]]` alias is no longer accepted. Use `[[cccc::comptime]]`.
+The old `[[cccc::macro]]` / `__attribute__((macro))` aliases (and the `@macro`
+shorthand) are no longer accepted — using any of them is a compile error
+directing you to `[[cccc::comptime]]`. See the [Attribute Syntax](#attribute-syntax) note below.
 
 The macro API is private to macro compilation. CCCC embeds its own `cccc/reflection.h`
 and injects it automatically while macro and comptime helper functions are
@@ -817,8 +819,9 @@ each other even when the callee appears later in the translation unit.
 
 The GNU-attribute equivalent is `__attribute__((comptime))`.
 
-> **Deprecated:** `[[cccc::macro]]` and `__attribute__((macro))` are accepted as
-> aliases for `[[cccc::comptime]]` for backwards compatibility.
+> **Removed:** the old `[[cccc::macro]]` / `__attribute__((macro))` aliases (and
+> the `@macro` shorthand) are no longer accepted — using any of them is a
+> compile error directing you to `[[cccc::comptime]]`.
 
 ### Comptime block
 

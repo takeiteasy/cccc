@@ -18,7 +18,7 @@
 */
 
 // Macro compilation and execution subsystem
-// Compiles [[cccc::macro]] / __attribute__((macro)) functions and expands
+// Compiles [[cccc::comptime]] / __attribute__((comptime)) functions and expands
 // macro calls in the AST
 
 #include "./internal.h"
@@ -1218,7 +1218,7 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     }
 
     // Preprocessing reflection.h can trigger lookahead declaration-parsing
-    // (e.g. while scanning @macro bodies for locals) over expanded VM/$...
+    // (e.g. while scanning @comptime bodies for locals) over expanded VM/$...
     // tokens, which spuriously warns about CCCC's own internal API surface.
     // Suppress all warnings/werrors for the duration of this internal
     // preprocess pass; restore afterwards so the user's TU is unaffected.
@@ -1243,10 +1243,10 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 }
 
 // Ticket #235: idempotently preprocess reflection.h so that its built-in
-// @macro(attribute(...)) handlers (e.g. __builtin_attr_serialize) are registered
+// @comptime(attribute(...)) handlers (e.g. __builtin_attr_serialize) are registered
 // into vm->compiler.macro_fns before the first attribute-dispatch lookup
 // (find_attribute_macro / run_custom_attrs in parse.c). Without this, a
-// translation unit with no @macro definitions of its own never triggers
+// translation unit with no @comptime definitions of its own never triggers
 // implicit_reflection_tokens() until compile_macro_program() — too late for
 // the very first @serialize/@deserialize/etc. dispatch to find a handler.
 // Safe to call mid-parse: implicit_reflection_tokens only tokenizes and

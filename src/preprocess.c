@@ -621,7 +621,7 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
 
     if (!equal(tok, "{")) {
         error_tok(vm, start,
-                  "__attribute__((macro)): expected function body");
+                  "[[cccc::comptime]]: expected function body");
         return start;
     }
 
@@ -3417,8 +3417,10 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
 
 // Scan the attribute argument list of a GNU __attribute__(( ... )) or C23
 // [[ ... ]] block for [[cccc::comptime]], __attribute__((comptime)), and the
-// inline modifier. [[cccc::macro]] / __attribute__((macro)) are deprecated aliases
-// and are accepted with the same behavior. If a comptime marker is found, extract
+// inline modifier. The old [[cccc::macro]] / __attribute__((macro)) spellings
+// (and the @macro shorthand, which rewrites to __attribute__((macro))) are
+// rejected with a deprecation error directing the user to [[cccc::comptime]].
+// If a comptime marker is found, extract
 // the following function or variable definition from the token stream, register
 // it as a MacroFn or ComptimeVar, update *tok_ptr to the token
 // after the extracted definition, and return true.

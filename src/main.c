@@ -432,7 +432,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\nPreprocessor Options:\n");
     printf("\t   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)\n");
     printf("\t   --embed-hard-limit         Make #embed limit a hard error instead of warning\n");
-    printf("\t   --macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)\n");
+    printf("\t   --macro-recursion-limit=N  Limit recursive comptime macro expansion (default: 256, 0=unlimited)\n");
     printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
     printf("\t-C/--no-comptime              Skip the comptime/macro phase entirely (for\n");
     printf("\t                              large TUs that don't use [[cccc::comptime]])\n");
@@ -2588,7 +2588,7 @@ int main(int argc, const char *argv[]) {
     cc_execute_inline_macros(&vm, input_tokens, input_files_count);
 
     // Register test-runtime FFI symbols after the comptime pass so that any
-    // [[cccc::macro]] calling Assert produces an unresolved-symbol error
+    // [[cccc::comptime]] calling Assert produces an unresolved-symbol error
     // instead of longjmp-ing through an uninitialised jmp_buf (ticket #334).
     if (testing_mode)
         cc_load_test_runtime(&vm);

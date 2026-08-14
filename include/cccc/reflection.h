@@ -1,5 +1,5 @@
 /*
- CCCC: Comprehensiev C Compensation Compiler - Pragma Macro Reflection API
+ CCCC: Comprehensiev C Compensation Compiler - Comptime Reflection API
 
  Copyright (C) 2025 George Watson
 
@@ -19,7 +19,7 @@
 
 /*!
  * @file reflection.h
- * @brief Reflection and AST Construction API for CCCC Pragma Macros
+ * @brief Reflection and AST Construction API for CCCC Comptime Functions
  *
  * This header provides APIs for:
  * - Type introspection and lookup
@@ -31,21 +31,20 @@
  *
  * ## Return-value model
  *
- * A pragma macro's returned Node* is **the node spliced at the call site**,
+ * A comptime function's returned Node* is **the node spliced at the call site**,
  * replacing the invocation.  Top-level definitions (functions, globals) are
  * **side effects** — injected into the program regardless of the return value.
  *
- *  - **Expression position** (e.g. `int x = my_macro();`): the macro must
+ *  - **Expression position** (e.g. `int x = my_macro();`): the function must
  *    return a non-NULL node.  Returning NULL is an error.
  *
- *  - **Declaration position** (bare `my_macro();` at file scope, or an
- *    `inline` auto-run macro): there is no expression to replace.  Returning
- *    NULL — or declaring the macro `void` — is legal and means "I only emitted
- *    definitions."
+ *  - **Declaration position** (bare `my_macro();` at file scope): there is no
+ *    expression to replace.  Returning NULL — or declaring the function
+ *    `void` — is legal and means "I only emitted definitions."
  *
- * Declare a definition-only macro with a `void` return type for clarity:
+ * Declare a definition-only function with a `void` return type for clarity:
  * @code
- * #pragma macro
+ * [[cccc::comptime]]
  * void emit_helpers(void) {
  *     Obj *fn = MakeFunction("helper", GetType("int"));
  *     WithFn(fn) {
@@ -57,20 +56,20 @@
  * emit_helpers();
  * @endcode
  *
- * A void macro used in expression position is a compile error.
+ * A void comptime function used in expression position is a compile error.
  *
  * ## Usage
  *
  * This private header is embedded into CCCC and automatically injected when
- * compiling pragma macros. It is not installed as a public runtime header.
+ * compiling comptime functions. It is not installed as a public runtime header.
  * Functions that need VM context read it internally from a process-global
  * set by the compiler for the duration of macro execution -- macro authors
  * never see or pass a VM object.
  *
- * ## Example (expression macro)
+ * ## Example (expression comptime function)
  *
  * @code
- * #pragma macro
+ * [[cccc::comptime]]
  * Node *make_const_5(void) {
  *     return MakeIntLiteral(5);
  * }
@@ -94,7 +93,7 @@
 extern "C" {
 #endif
 
-// Forward declarations (opaque types for pragma macros)
+// Forward declarations (opaque types for comptime functions)
 
 /*! @brief Opaque compiler/VM instance. Macro authors never see or pass this;
  *           functions that need it read it internally from a process-global
@@ -108,7 +107,7 @@ typedef struct Type Type;
 
 /*! @brief Opaque AST node (expression, statement, or literal). Built with
  *           the @c Make* family of macros and spliced into the compiled
- *           program by returning it from a pragma macro or via PublishNode. */
+ *           program by returning it from a comptime function or via PublishNode. */
 typedef struct Node Node;
 
 /*! @brief Opaque global symbol (a function or global variable). Created by
@@ -139,7 +138,7 @@ typedef struct AttrTarget AttrTarget;
 /*! @brief Discriminates the kind of a Type: primitive, pointer, array,
  *           function, struct/union, or enum.
  * @details Mirrors the subset of cccc.h's internal @c TypeKind relevant to
- *             pragma macros. Query it via @c GetTypeKind(ty). */
+ *             comptime functions. Query it via @c GetTypeKind(ty). */
 typedef enum {
     TK_VOID = 0,
     TK_BOOL = 1,
@@ -163,7 +162,7 @@ typedef enum {
  *           to @c MakeBinary / @c MakeUnary or matched against a node's
  *           @c ->kind field.
  * @details A subset of cccc.h's internal @c ND_* node kinds relevant to
- *             pragma macros; the numeric values match cccc.h's @c NodeKind
+ *             comptime functions; the numeric values match cccc.h's @c NodeKind
  *             exactly, so the gaps (33-36, 39, 41, 44-50) are internal-only
  *             kinds not exposed here, not omissions. */
 typedef enum {
@@ -2521,7 +2520,7 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
 }
 
 // Ticket #235: GenerateGetters/GenerateSetters/GenerateConstructor
-// helpers. These are plain @macro functions (no attribute name), compiled
+// helpers. These are plain @comptime functions (no attribute name), compiled
 // into the same macro program as the @generate_* attribute handlers below
 // and called from them as ordinary functions.
 
@@ -2649,7 +2648,7 @@ void __builtin_attr_generate_constructor(AttrTarget *target) {
 // elem_ty's spelling (via TypeCName, since builtin scalar types have no
 // TypeName): sum_<T>, map_<T>, reduce_<T>, filter_<T>. Implemented as plain
 // C functions in reflection.c (registered via cc_register_cfunc) rather than
-// @macro functions, so they're callable from any [[cccc::comptime]] context,
+// @comptime functions, so they're callable from any [[cccc::comptime]] context,
 // not just from within reflection.h's own macro program.
 
 /*! @brief Publish `T sum_T(T *arr, size_t n)` summing all elements.

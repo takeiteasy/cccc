@@ -13,11 +13,11 @@ Guides live in [`man/`](man/) (linked throughout below); generated API docs for 
 
 ## Features
 
-- **Compile-time macros** — C functions annotated with `[[cccc::macro]]`, `__attribute__((macro))`, or the `@macro` shorthand that run during compilation (see [MACROS.md](man/MACROS.md))
-  - Inline pre-parse generators for parser-visible functions and declarations (`[[cccc::macro(inline)]]`)
-  - File-scope macro calls for explicit source-order generation
-  - Call-site expansion for expression and statement rewriting
-  - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)` templates, hygienic type/symbol reflection, `__cccc_gensym`, and AST construction helpers
+- **Compile-time macros** — C functions annotated with `[[cccc::comptime]]`, `__attribute__((comptime))`, the `@comptime` shorthand, or the `__comptime`/`__comptime__` keywords that CCCC compiles and runs during compilation to generate functions, globals, and types or rewrite call sites (see [MACROS.md](man/MACROS.md))
+  - Global generation via file-scope calls (run before the main parse; generated definitions are auto-forward-declared) and call-site expansion via inline `Node *` macros (replace the call with a returned AST during macro expansion)
+  - Custom attribute handlers (`@comptime(attribute("name"))`) that run when a file-scope declaration is parsed
+  - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)`/`QuoteN(...)` templates with `$1`/`$$`/`$@` splicing, the `$identifier` reflect operator, `Gensym`, and a full AST builder API (`MakeFunction`, `MakeVarRef`, `MakeLocalVarUnique`, ...)
+  - `#pragma cccc comptime begin/end` blocks, `@comptime`/`@shared`/`@emit` include and `#define` routing, comptime variables, C23 `constexpr` readback, and a bundled macro standard library in `reflection.h`
 - **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
   - This is the production path: full toolchain performance, system libraries, no VM overhead
   - `-o <file>` names the produced executable; defaults to `./a.out` if omitted. The temporary C source is removed after the build
@@ -46,7 +46,7 @@ Guides live in [`man/`](man/) (linked throughout below); generated API docs for 
   - `#include [[cccc::test]] "fixtures.h"` conditionally includes a file only in `--testing` mode
 - **Mode predefined macros** — `__CCCC_BUILD_MODE__`, `__CCCC_TEST_MODE__`, or `__CCCC_COMP_MODE__` is defined at compile time to reflect the active execution mode, enabling `#ifdef`-based mode branching
 - **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [COVERAGE.md](man/COVERAGE.md))
-  - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `macro`/`comptime`/`test`
+  - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `comptime`/`test` (the `macro` alias is deprecated)
   - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
   - `-E`/`-m`/`-c=generated`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
 - **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [TOOLING.md](man/TOOLING.md))

@@ -154,7 +154,7 @@ MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok) {
         return NULL;
     if (!tok || tok->kind != TK_IDENT)
         return NULL;
-    // Ticket #235: make sure reflection.h's built-in @macro(attribute(...))
+    // Ticket #235: make sure reflection.h's built-in @comptime(attribute(...))
     // handlers (e.g. __cccc_attr_serialize) are registered before searching.
     ensure_reflection_attrs_registered(vm);
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
@@ -263,7 +263,7 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
 static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
                              AttrTargetKind kind, char *name, Type *ty,
                              Obj *obj, Token *tok) {
-    // Ticket #235: make sure reflection.h's built-in @macro(attribute(...))
+    // Ticket #235: make sure reflection.h's built-in @comptime(attribute(...))
     // handlers (e.g. __cccc_attr_serialize) are registered before searching.
     if (attrs)
         ensure_reflection_attrs_registered(vm);
