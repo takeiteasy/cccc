@@ -3,6 +3,32 @@
 #ifndef __FENV_H
 #define __FENV_H
 
+/* #1021: this exact file is also what a native/generated re-emission's
+ * replayed `#include <fenv.h>` resolves to (run_native_backend forwards
+ * -I./include straight through to the host cc, and -I paths are searched
+ * ahead of system directories) -- but the content below needs
+ * __CCCC_SIZEOF_FENV_T__/__CCCC_FE_*, macros only CCCC's OWN preprocessor
+ * (init_fenv_macros(), src/preprocess.c) ever injects. A real host compiler
+ * reprocessing this text from scratch has never heard of them and fails
+ * outright ("use of undeclared identifier '__CCCC_SIZEOF_FENV_T__'").
+ * __CCCC__ is defined unconditionally by CCCC's own preprocessor
+ * (init_macros(), src/preprocess.c) before any header is ever read, so its
+ * absence here means this exact physical file is being read by a genuine
+ * host compiler instead -- during -c=native/-c=generated serializer
+ * replay, which is the only way a non-CCCC compiler ever sees this path at
+ * all. In that case, hand off to #include_next: found via -I (searched
+ * before the system dirs), this file's own #include_next continues the
+ * search *after* that directory and lands on the host's real,
+ * self-contained <fenv.h> -- exactly the header CCCC's own guest-side
+ * parser has no access to and this file exists to stand in for.
+ * Spelled `#ifdef __CCCC__` (not `#if !defined(__CCCC__) ... #else`) so
+ * tools/audit_ffi.py's guard-presence check sees a plain, nameable
+ * condition it can whitelist (GUEST_ONLY_DECL_GUARDS) the same way it
+ * already does for __STDC_IEC_60559_DFP__ -- src/stdlib/fenv.c's
+ * registrations are unconditional, so a `!(!defined(__CCCC__))`-shaped
+ * guard here would misreport as a mismatch. */
+#ifdef __CCCC__
+
 /* fexcept_t/fenv_t are sized from the real host <fenv.h> that
  * src/stdlib/fenv.c's wrap_fe*() functions were compiled against
  * (__CCCC_SIZEOF_FEXCEPT_T__/__CCCC_SIZEOF_FENV_T__, injected by
@@ -56,5 +82,9 @@ extern int fegetenv(fenv_t *envp);
 extern int feholdexcept(fenv_t *envp);
 extern int fesetenv(const fenv_t *envp);
 extern int feupdateenv(const fenv_t *envp);
+
+#else
+#include_next <fenv.h>
+#endif /* __CCCC__ */
 
 #endif /* __FENV_H */

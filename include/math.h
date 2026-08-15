@@ -51,7 +51,21 @@
  * iseqsig macros below (same _Generic pattern as include/tgmath.h). These
  * used to be formulas referencing a bare isnan/isinf that was never
  * defined anywhere, so isfinite/isnormal/fpclassify failed to compile;
- * signbit(x) ((x) < 0) compiled but was wrong for -0.0 and NaN. */
+ * signbit(x) ((x) < 0) compiled but was wrong for -0.0 and NaN.
+ *
+ * #1021: guarded on __CCCC__ (always defined while CCCC's own preprocessor
+ * parses guest source, see include/fenv.h's matching comment) -- a
+ * native/generated re-emission's replayed `#include <math.h>` reaches a
+ * real host compiler with these as plain, unconditional `extern`
+ * declarations otherwise, conflicting with the `static` definition
+ * serialize.c's native_accessor_shims emits once one of these is actually
+ * used ("static declaration follows non-static declaration", the same
+ * #1023 bug class __cccc_errno_ptr had). Unlike fenv.h/errno.h, no
+ * #include_next fallback is needed here: the shim's own `static` body
+ * (emitted ahead of every use) is a complete definition that also serves
+ * as its own prototype, so simply suppressing this redundant extern
+ * declaration during replay is enough. */
+#ifdef __CCCC__
 int __cccc_isnan_f(float);
 int __cccc_isnan_d(double);
 
@@ -63,6 +77,7 @@ int __cccc_signbit_d(double);
 
 int __cccc_fpclassify_f(float);
 int __cccc_fpclassify_d(double);
+#endif
 
 /* _Decimal32/64/128 arms (#828): include/decimal_math.h supplies
  * isnand32/64/128 etc as static inline definitions once CCCC_HAS_DECIMAL is

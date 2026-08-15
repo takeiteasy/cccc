@@ -10,7 +10,10 @@
 /* These alias the host's real getopt() state (via accessor functions, same
  * pattern as stdin/stdout/stderr in stdio.h) so they reflect what the host's
  * getopt()/getopt_long() actually parsed instead of being inert, always-zero
- * guest globals (#736). */
+ * guest globals (#736).
+ * LIMITATION (#1040): same unconditional-`extern`-vs-`static`-shim conflict
+ * as stdio.h's __cccc_stdin/etc under -c=native/-c=generated -- see that
+ * header's comment. */
 extern char **__cccc_optarg_ptr(void);
 extern int *__cccc_optind_ptr(void);
 extern int *__cccc_opterr_ptr(void);

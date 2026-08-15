@@ -12,6 +12,14 @@
 typedef void FILE;
 
 // Standard streams (accessed via getter functions)
+// LIMITATION (#1040): this unconditional `extern` collides with the
+// `static` definition serialize.c's native_accessor_shims emits, once
+// stdout/stdin/stderr is actually used, under -c=native/-c=generated --
+// same #1023 bug class include/math.h's __cccc_isnan_f/etc had (fixed via
+// an #ifdef __CCCC__ guard, #1021). Not fixed here: dormant in today's
+// corpus (no test currently triggers it), and stdio.h is pervasive enough
+// to deserve its own careful pass rather than a rushed fix riding along on
+// an unrelated ticket.
 extern FILE* __cccc_stdin(void);
 extern FILE* __cccc_stdout(void);
 extern FILE* __cccc_stderr(void);

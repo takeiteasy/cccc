@@ -24,6 +24,58 @@ All notable changes to CCCC are documented here. Format loosely follows
   (e.g. `s.i` where `i` belongs to an unnamed nested struct) used to emit
   the invalid `s./* unknown */.i`; the anonymous link is now left
   transparent, matching plain C semantics.
+- `-c=native`: six narrowly-scoped serializer/decl round-trip bugs found by
+  `--native`'s corpus sweep, each traced to a single root cause:
+  - a user-written `alloca()` call re-emitted as a bare, undeclared
+    `alloca(...)` — now emitted as `__builtin_alloca(...)`, which every
+    supported native cc supplies with no header.
+  - `<fenv.h>`/`<errno.h>` and other CCCC-preprocessor-dependent identifiers
+    (`FE_*`, `fenv_t`, `isnan`/`isinf`/`signbit`/`fpclassify`, `FLT_ROUNDS`,
+    non-finite float literals) failing to compile — a replayed `#include
+    <fenv.h>`/`<errno.h>` in a `-c=native`/`-c=generated` TU resolved back
+    to CCCC's own bundled copy (via `-I./include`), still needing macros
+    only CCCC's own preprocessor injects. `include/fenv.h`/`include/errno.h`
+    now guard their CCCC-flavored content behind `#ifdef __CCCC__`
+    (unconditionally defined while CCCC parses guest source) and
+    `#include_next` the host's own, self-contained header in the `#else`
+    branch — taken only when a real host compiler reprocesses the same
+    physical file during serializer replay; `tools/audit_ffi.py`'s
+    guard-presence check whitelists `__CCCC__` accordingly
+    (`GUEST_ONLY_DECL_GUARDS`). `serialize.c`'s `native_accessor_shims`
+    table gained `__cccc_isnan_f/d`, `__cccc_isinf_f/d`,
+    `__cccc_signbit_f/d`, `__cccc_fpclassify_f/d`, and `__cccc_flt_rounds`
+    (each spelled with a portable `__builtin_*` intrinsic in its body, not
+    the guest-facing macro name, since `<math.h>`'s/`<float.h>`'s own
+    isnan/FLT_ROUNDS macros dispatch right back to these same shims —
+    reading them literally would recurse); `include/math.h`'s/
+    `include/float.h`'s own now-redundant `extern` declarations for the
+    same five identifiers are likewise guarded on `#ifdef __CCCC__`, since
+    an unconditional one would conflict with the shim's `static`
+    definition the same way `errno.h`'s did. Non-finite float literals
+    (`inf`/`nan`) now emit `__builtin_inf()`/`__builtin_nan("")` instead of
+    the invalid bare tokens `inf`/`nan`.
+  - an untagged, alias-less struct/union global (e.g. `static const struct
+    { ... } codes[]`) forward-declared twice under two structurally
+    distinct anonymous types — the #918/#928 forward-declaration passes now
+    skip such a global; it has no name to forward-declare in the first
+    place, so the real definition supplies the only copy of the type.
+  - a `const`-qualified local's declaration and initializer, split across
+    two statements by the serializer's local-hoisting pass, re-emitting an
+    assignment to a `const` object — the hoisted declarator now strips only
+    the top-level `const`.
+  - a function returning a function pointer (`int (*f(void))(int, int)`)
+    mis-serialized as `int (*)(int, int) f(void)` — `serialize_type_decl`'s
+    `TY_FUNC` case and `serialize_function_signature` now build the
+    declarator via the same inside-out buffer recursion `TY_ARRAY`/`TY_PTR`
+    already use.
+  - an `asm("symbol")`-labeled function declaration losing the label
+    entirely, so the real symbol was never referenced and the link failed
+    — the label is now re-emitted via the portable
+    `asm(__CCCC_ASM_PREFIX__ "symbol")` idiom (`__USER_LABEL_PREFIX__`,
+    double-stringized), correct on both underscore-prefixed (Darwin) and
+    non-prefixed (Linux/ELF) targets; a `static` prefix is also suppressed
+    for an asm-labeled declaration, since internal linkage is meaningless
+    for a symbol the label aliases externally.
 
 ## [0.2.15] - 2026-08-15
 

@@ -3,6 +3,30 @@
 #ifndef __ERRNO_H
 #define __ERRNO_H
 
+/* #1021/#1023: see include/fenv.h's matching comment -- this exact file is
+ * also what a native/generated re-emission's replayed `#include <errno.h>`
+ * resolves to (-I./include is searched ahead of the system dirs), but a
+ * real host compiler reprocessing the CCCC-flavored content below hits a
+ * `static` __cccc_errno_ptr redefinition conflicting with the `extern`
+ * declared here (native_accessor_shims, src/serialize.c, always emits its
+ * own `static` definition once the accessor is used). __CCCC__ is absent
+ * only when a genuine host compiler is reading this physical file, which
+ * only happens during serializer replay -- hand off to #include_next for
+ * the host's own, self-contained <errno.h> in that case. The E* numeric
+ * values below are already baked into the AST as plain integer literals by
+ * the time any of this runs (CCCC's own guest-side parsing constant-folds
+ * every use), so skipping their (re)definition here costs nothing; `errno`
+ * itself is declared by the host's real header instead of CCCC's own
+ * `(*__cccc_errno_ptr())` macro, and __cccc_errno_ptr's own body (already
+ * emitted unconditionally by native_accessor_shims whenever it's used)
+ * reads that real, host-declared `errno` correctly, with no leftover
+ * `extern` from this file for it to conflict with.
+ * Spelled `#ifdef __CCCC__` (not `#if !defined(__CCCC__) ... #else`) so
+ * tools/audit_ffi.py's guard-presence check sees a plain, nameable
+ * condition it can whitelist (GUEST_ONLY_DECL_GUARDS), the same way it
+ * already does for __STDC_IEC_60559_DFP__. */
+#ifdef __CCCC__
+
 #ifdef _WIN32
 /* Windows FFI registration doesn't wire up __cccc_errno_ptr (POSIX-only
  * stdlib, not a tested CCCC target -- see man/COVERAGE.md); errno stays a
@@ -102,5 +126,9 @@ extern int *__cccc_errno_ptr(void);
 #define EDQUOT          __CCCC_EDQUOT__
 #define ETXTBSY         __CCCC_ETXTBSY__
 #define ENOTBLK         __CCCC_ENOTBLK__
+
+#else
+#include_next <errno.h>
+#endif /* __CCCC__ */
 
 #endif /* __ERRNO_H */

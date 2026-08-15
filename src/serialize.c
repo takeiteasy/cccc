@@ -847,6 +847,30 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 // suffix always lands on a valid floating-constant. inf/nan text
 // ("inf"/"-inf"/"nan") is left alone -- neither is a valid C floating
 // constant with an "f" suffix at all; that's a separate, pre-existing gap.
+// #1021: neither plain %g/%Lg text ("inf"/"-inf"/"nan") nor
+// format_float_literal's own "always end in a valid float suffix" fixup
+// (immediately below -- its comment already flagged this exact gap) produce
+// a token real C accepts; a bare `nan`/`inf` identifier is undeclared and
+// the host build fails with "call to undeclared function"/"use of
+// undeclared identifier". __builtin_{inf,nan}[f|l] are portable clang/gcc
+// intrinsics that always parse, with no header dependency at all. `suf` is
+// "" for TY_DOUBLE, "f" for TY_FLOAT, "l" for TY_LDOUBLE, matching each
+// builtin family's own naming (__builtin_inf/inff/infl,
+// __builtin_nan/nanf/nanl). Returns true (having already printed) when `v`
+// was non-finite; the caller falls through to its normal finite-value
+// formatting otherwise.
+static bool serialize_flonum_special(FILE *f, long double v, const char *suf) {
+    if (isnan(v)) {
+        fprintf(f, "__builtin_nan%s(\"\")", suf);
+        return true;
+    }
+    if (isinf(v)) {
+        fprintf(f, "%s__builtin_inf%s()", (v < 0) ? "-" : "", suf);
+        return true;
+    }
+    return false;
+}
+
 static void format_float_literal(char *buf, size_t cap, double v) {
     int n = snprintf(buf, cap, "%.9g", v);
     if (n > 0 && (size_t)n < cap
@@ -989,6 +1013,34 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
     serialize_type(f, ctx, ty);
     if (name && *name)
         fprintf(f, " %s", name);
+}
+
+// #1023: a global whose type is (or contains, through TY_ARRAY/TY_PTR)
+// an untagged, alias-less struct/union -- `static const struct { ... }
+// codes[74]` is exactly this -- has no name serialize_type_decl can spell
+// in a standalone forward declaration; each attempt instead falls through
+// to serialize_anon_aggregate (below) and re-derives the member list
+// verbatim, which the host compiler treats as a *structurally distinct*
+// anonymous type every time it's written out, even though the text is
+// identical (C has no notion of two anonymous struct spellings being "the
+// same" type). The #918/#928 forward-declaration pass emitting one before
+// the real definition therefore produces two non-identical types under one
+// name -- "redefinition of 'codes' with a different type". Such a global
+// is fundamentally unrepresentable as a forward declaration in C (there is
+// no name to forward-declare), so the caller skips the forward-decl line
+// for it entirely rather than emit invalid text; the real definition
+// (serialize_global_var) still carries the only copy of the type. Reuses
+// exactly the tag/typedef/anonymous-typedef lookup serialize_type's own
+// TY_STRUCT/TY_UNION cases use to decide whether to call
+// serialize_anon_aggregate in the first place, so this predicate is true
+// if and only if that call would be.
+static bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
+    while (ty && (ty->kind == TY_ARRAY || ty->kind == TY_PTR || ty->kind == TY_VLA))
+        ty = ty->base;
+    if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
+        return false;
+    return !find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
+           !find_anonymous_typedef_name(ctx, ty);
 }
 
 // Serialize the body of a struct/union with no tag and no typedef alias
@@ -1349,9 +1401,10 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                                 : dec_width_code(node->ty) == 1 ? "dd"
                                                                  : "dl";
             fprintf(f, "%s%s", node->dec_digits ? node->dec_digits : "0", suffix);
-        } else if (node->ty && is_flonum(node->ty))
-            fprintf(f, "%Lg", node->fval);
-        else
+        } else if (node->ty && is_flonum(node->ty)) {
+            if (!serialize_flonum_special(f, node->fval, ""))
+                fprintf(f, "%Lg", node->fval);
+        } else
             fprintf(f, "%lld", (long long)node->val);
         break;
 
@@ -1387,6 +1440,18 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                 // function that declared it); the captured case above
                 // already applies its own dereference.
                 fprintf(f, "(*%s)", node->var->name);
+            } else if (node->var == vm->compiler.builtin_alloca) {
+                // #1024: declare_builtin_functions (parse_decl.c) names this
+                // Obj literally "alloca" so the VM's own symbol table
+                // resolves it -- but that Obj has no source token and no
+                // definition, so the #901 from_include prototype pass never
+                // declares a plain `alloca` for the host compiler to see
+                // ("call to undeclared library function 'alloca'"). Every
+                // native cc that matters (gcc/clang) supplies
+                // __builtin_alloca with no header at all; spell the call
+                // that way here instead of trying to synthesize a
+                // <alloca.h>/<stdlib.h> declaration.
+                fprintf(f, "__builtin_alloca");
             } else {
                 fprintf(f, "%s", node->var->name);
             }
@@ -2380,30 +2445,37 @@ static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeConte
 // (unverified) hypothesis about the root cause.
 static void serialize_function_signature(FILE *f, SerializeContext *ctx,
                                          Obj *fn) {
-    if (fn->is_static)
+    // #1025: an asm("symbol")-labeled block-scope declaration (`Put
+    // local_puts asm("puts");`) aliases an *external* symbol -- internal
+    // linkage on the declaration is meaningless for it and, since the
+    // symbol is never defined under the local name, actively wrong (the
+    // native compiler emits an internal-linkage reference nothing ever
+    // defines, and the link fails). parse_decl.c forces is_static on every
+    // block-scope function declaration regardless of an asm label (a
+    // separate parse-level imprecision, not fixed here); suppress `static`
+    // here whenever an asm label is present instead.
+    if (fn->is_static && !fn->asm_label)
         fprintf(f, "static ");
 
-    char *rt = NULL;
-    size_t rtsz = 0;
-    FILE *rtf = open_memstream(&rt, &rtsz);
-    if (fn->ty && fn->ty->return_ty)
-        serialize_type(rtf, ctx, fn->ty->return_ty);
-    else
-        fprintf(rtf, "int");
-    fclose(rtf);
-    if (rtsz > 0 && rt[rtsz - 1] == '*')
-        fprintf(f, "%s%s(", rt, fn->name);
-    else
-        fprintf(f, "%s %s(", rt, fn->name);
-    free(rt);
+    // #1026: a function returning a function pointer (`int (*f(void))(int,
+    // int)`) can't be spelled as "<return-type> <name>(<params>)" -- the
+    // return type's own declarator has to wrap around the whole
+    // "name(params)" unit, the same way TY_ARRAY/TY_PTR recurse in
+    // serialize_type_decl. Render "name(params)[ asm("label")]" into a
+    // buffer first, then hand it to serialize_type_decl as the declarator
+    // name so a pointer/function return type nests correctly.
+    char *decl = NULL;
+    size_t declsz = 0;
+    FILE *df = open_memstream(&decl, &declsz);
+    fprintf(df, "%s(", fn->name);
 
     bool first = true;
     if (fn->params) {
         for (Obj *param = fn->params; param; param = param->next) {
             if (!first)
-                fprintf(f, ", ");
+                fprintf(df, ", ");
             first = false;
-            serialize_type_decl(f, ctx, param->ty, param->name);
+            serialize_type_decl(df, ctx, param->ty, param->name);
         }
     } else if (fn->ty) {
         // #901: a bodiless declaration (e.g. `int abs(int x);`) never runs
@@ -2415,7 +2487,7 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
         int anon = 0;
         for (Type *param = fn->ty->params; param; param = param->next) {
             if (!first)
-                fprintf(f, ", ");
+                fprintf(df, ", ");
             first = false;
             char buf[64];
             if (param->name) {
@@ -2427,17 +2499,30 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
             } else {
                 snprintf(buf, sizeof buf, "__a%d", anon++);
             }
-            serialize_type_decl(f, ctx, param, buf);
+            serialize_type_decl(df, ctx, param, buf);
         }
     }
 
     if (fn->ty && fn->ty->is_variadic && !first) {
-        fprintf(f, ", ...");
+        fprintf(df, ", ...");
     } else if (first) {
-        fprintf(f, "void");
+        fprintf(df, "void");
     }
+    fprintf(df, ")");
 
-    fprintf(f, ")");
+    if (fn->asm_label)
+        // __CCCC_ASM_PREFIX__ (see serialize_asm_prefix_preamble) supplies
+        // the platform's real symbol prefix; adjacent string literals
+        // concatenate at translation time, so this reads as e.g.
+        // asm("_puts") on Darwin and asm("puts") on Linux from one
+        // platform-independent emission.
+        fprintf(df, " asm(__CCCC_ASM_PREFIX__ \"%s\")", fn->asm_label);
+
+    fclose(df);
+    serialize_type_decl(f, ctx,
+                        (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : ty_int,
+                        decl ? decl : "");
+    free(decl);
 }
 
 // Serialize a function
@@ -2586,7 +2671,27 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             }
 
             print_indent_level(f, 1);
-            serialize_type_decl(f, ctx, var->ty, var->name);
+            // #1029: serialize_function hoists every local to a flat
+            // declaration here, with any initializer lowered to a separate
+            // assignment statement in the body below (const-qualified or
+            // not -- the split itself is unconditional). A `const`-typed
+            // local (`const long long max_spins = 2000000;`) would
+            // therefore emit as `const long long max_spins;` here and
+            // `max_spins = 2000000;` in the body -- an assignment to a
+            // const object, which real C rejects outright even though the
+            // VM (which never actually re-derives or enforces this split)
+            // has no problem with the original, un-hoisted source. Strip
+            // only the *top-level* const on the hoisted declarator; a
+            // pointer-level const on the pointee (`const char *p`) lives on
+            // the base type, one step down `var->ty->base`, and is
+            // untouched by this.
+            if (var->ty->is_const) {
+                Type *mutable_ty = copy_type(vm, var->ty);
+                mutable_ty->is_const = false;
+                serialize_type_decl(f, ctx, mutable_ty, var->name);
+            } else {
+                serialize_type_decl(f, ctx, var->ty, var->name);
+            }
             fprintf(f, ";\n");
         }
 
@@ -2791,9 +2896,11 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
 
     case TY_FLOAT: {
         float fv; memcpy(&fv, var->init_data + offset, 4);
-        char buf[64];
-        format_float_literal(buf, sizeof buf, (double)fv);
-        fprintf(f, "%sf", buf);
+        if (!serialize_flonum_special(f, (long double)fv, "f")) {
+            char buf[64];
+            format_float_literal(buf, sizeof buf, (double)fv);
+            fprintf(f, "%sf", buf);
+        }
         return;
     }
 
@@ -2804,7 +2911,8 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
         // long-double-precision/suffix gap, but pre-existing and unrelated
         // to #918's scope.
         double dv; memcpy(&dv, var->init_data + offset, 8);
-        fprintf(f, "%.17g", dv);
+        if (!serialize_flonum_special(f, (long double)dv, ""))
+            fprintf(f, "%.17g", dv);
         return;
     }
 
@@ -3330,6 +3438,41 @@ static const struct {
     {"__cccc_optind_ptr", "static int *__cccc_optind_ptr(void) { return &optind; }\n"},
     {"__cccc_opterr_ptr", "static int *__cccc_opterr_ptr(void) { return &opterr; }\n"},
     {"__cccc_optopt_ptr", "static int *__cccc_optopt_ptr(void) { return &optopt; }\n"},
+    // #1021: include/math.h's isnan/isinf/signbit/fpclassify are themselves
+    // #defined as `_Generic((x), float: __cccc_isnan_f, default:
+    // __cccc_isnan_d)(x)` etc -- a shim body that read the plain macro name
+    // would, once math.h's replayed #include brings that definition into
+    // scope, expand right back into a call to itself (infinite recursion),
+    // the same trap FLT_ROUNDS sits in below. __builtin_{isnan,isinf,
+    // signbit} are portable clang/gcc intrinsics with no such indirection.
+    // __builtin_fpclassify takes the FP_* class codes as arguments and
+    // returns whichever one matches. Every call site comparing against
+    // FP_INFINITE/FP_NAN/FP_NORMAL/FP_SUBNORMAL/FP_ZERO was already
+    // constant-folded to CCCC's OWN numeric values (include/math.h:23-27)
+    // at guest compile time, baked into the emitted TU as plain integer
+    // literals -- so the shim must return CCCC's numbering regardless of
+    // which <math.h> the shim's own text ends up seeing (confirmed the two
+    // can genuinely differ: real macOS FP_ZERO is 3, not CCCC's 5).
+    // Spelled as literals here, not the FP_* macro names, so this stays
+    // correct even on a platform where a real host <math.h>'s FP_* values
+    // don't match CCCC's own.
+    {"__cccc_isnan_f",      "static int __cccc_isnan_f(float x) { return __builtin_isnan(x); }\n"},
+    {"__cccc_isnan_d",      "static int __cccc_isnan_d(double x) { return __builtin_isnan(x); }\n"},
+    {"__cccc_isinf_f",      "static int __cccc_isinf_f(float x) { return __builtin_isinf(x); }\n"},
+    {"__cccc_isinf_d",      "static int __cccc_isinf_d(double x) { return __builtin_isinf(x); }\n"},
+    {"__cccc_signbit_f",    "static int __cccc_signbit_f(float x) { return __builtin_signbit(x); }\n"},
+    {"__cccc_signbit_d",    "static int __cccc_signbit_d(double x) { return __builtin_signbit(x); }\n"},
+    {"__cccc_fpclassify_f", "static int __cccc_fpclassify_f(float x) { return __builtin_fpclassify(2, 1, 3, 4, 5, x); }\n"},
+    {"__cccc_fpclassify_d", "static int __cccc_fpclassify_d(double x) { return __builtin_fpclassify(2, 1, 3, 4, 5, x); }\n"},
+    // #1021: include/float.h:73 defines `FLT_ROUNDS` itself as a call to
+    // this shim (`#define FLT_ROUNDS (__cccc_flt_rounds())`) -- so a body
+    // reading FLT_ROUNDS would textually expand right back into a call to
+    // itself (infinite recursion) once float.h's replayed #include is in
+    // scope. __builtin_flt_rounds() is the portable clang/gcc intrinsic for
+    // exactly this value, with no macro indirection to loop through.
+    // Signature matches float.h's own `extern int __cccc_flt_rounds(void);`
+    // (:72), not src/stdlib/fenv.c's VM-side long long version.
+    {"__cccc_flt_rounds",   "static int __cccc_flt_rounds(void) { return __builtin_flt_rounds(); }\n"},
 };
 
 static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
@@ -3347,6 +3490,33 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
     }
     if (any)
         fprintf(f, "\n");
+}
+
+// #1025: an asm("symbol") label names the real linker symbol directly,
+// bypassing the compiler's own C-name-mangling -- which on Darwin adds a
+// leading '_' to every external symbol and on Linux/ELF does not. Writing
+// the label as a plain string literal (`asm("puts")`) only links on a
+// platform with no such prefix; on Darwin the linker looks for the raw
+// "puts" symbol, which doesn't exist (the real one is "_puts"), and fails.
+// __USER_LABEL_PREFIX__ is a *token* (an actual `_` character, or nothing)
+// clang/gcc predefine for exactly this, string-pasted via the standard
+// double-macro stringize idiom so it works with the token being empty (an
+// empty macro argument stringizes to "", not an error). Emitted once, only
+// when some function actually carries an asm label, and ahead of every
+// asm-labeled declaration since it's used there as `asm(__CCCC_ASM_PREFIX__ "name")`.
+static bool prog_uses_asm_label(Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->is_used && obj->asm_label)
+            return true;
+    return false;
+}
+
+static void serialize_asm_prefix_preamble(FILE *f, Obj *prog) {
+    if (!prog_uses_asm_label(prog))
+        return;
+    fprintf(f, "#define __cccc_asm_str2(x) #x\n"
+               "#define __cccc_asm_str1(x) __cccc_asm_str2(x)\n"
+               "#define __CCCC_ASM_PREFIX__ __cccc_asm_str1(__USER_LABEL_PREFIX__)\n\n");
 }
 
 // #925/#928: new_anon_gvar() (parse.c) and reflect_new_anon_gvar()
@@ -4418,6 +4588,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             Obj *obj = ev->obj;
             if (!obj || !obj->is_macro_generated || obj->is_function || obj->name[0] == '.')
                 continue;
+            // #1023: see type_needs_anon_aggregate's comment on the #918
+            // loop below -- an untagged, alias-less struct/union global
+            // can't be forward-declared at all without re-deriving a
+            // structurally distinct anonymous type.
+            if (type_needs_anon_aggregate(&ctx, obj->ty))
+                continue;
             fprintf(f, obj->is_static ? "static " : "extern ");
             serialize_type_decl(f, &ctx, obj->ty, obj->name);
             fprintf(f, ";\n");
@@ -4533,6 +4709,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     // filter's gating for the same reason (see the comment on this function).
     if (!generated_only)
         serialize_native_accessor_shims(f, prog);
+    serialize_asm_prefix_preamble(f, prog);
 
     // Serialize file-scope type definitions before declarations that reference them.
     serialize_type_defs_for_owner(f, &ctx, NULL);
@@ -4557,6 +4734,17 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         if (generated_only && !obj->is_macro_generated)
             continue;
         if (obj->is_function || obj->name[0] == '.')
+            continue;
+        // #1023: an untagged, alias-less struct/union global (e.g.
+        // `static const struct { ... } codes[74]`) can't be
+        // forward-declared -- see type_needs_anon_aggregate's comment.
+        // Skipping it here is strictly better than the alternative
+        // (re-deriving a second, structurally distinct anonymous type that
+        // the host compiler rejects as a redefinition): the real
+        // definition below (serialize_global_var) still carries the only
+        // copy of the type, so nothing is lost except the (here,
+        // impossible) forward reference this pass exists to support.
+        if (type_needs_anon_aggregate(&ctx, obj->ty))
             continue;
         fprintf(f, obj->is_static ? "static " : "extern ");
         serialize_type_decl(f, &ctx, obj->ty, obj->name);

@@ -68,8 +68,16 @@
 
 /* Rounding mode as last set by fesetround() (<fenv.h>); required by C11 to
  * track the dynamic rounding mode rather than being a static constant.
- * Declared here (not via #include <fenv.h>) so <float.h> stays standalone. */
+ * Declared here (not via #include <fenv.h>) so <float.h> stays standalone.
+ *
+ * #1021: guarded on __CCCC__, same reasoning as include/math.h's matching
+ * comment on isnan_f/etc -- an unconditional `extern` here would conflict
+ * with the `static` definition serialize.c's native_accessor_shims emits
+ * once __cccc_flt_rounds is used, when a real host compiler reprocesses
+ * this replayed #include during -c=native/-c=generated. */
+#ifdef __CCCC__
 extern int __cccc_flt_rounds(void);
+#endif
 #define FLT_ROUNDS (__cccc_flt_rounds())
 
 /* C23 IEC 60559 decimal floating-point (#402): declarations, sizeof, and

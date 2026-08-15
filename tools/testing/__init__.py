@@ -128,14 +128,15 @@ NATIVE_SKIP_TESTS = {
     "test_destructor_exit_reentrant.c": "constructor/destructor ordering wrong under native (#1020)",
     "test_destructor_on_exit.c": "constructor/destructor ordering wrong under native (#1020)",
 
-    # --- #1021: fenv.h / math.h C23 IEEE identifiers fail to compile ---
-    "test_decimal_fold_clean_fenv.c": "fenv.h identifier missing under native (#1021)",
-    "test_fenv.c": "fenv.h identifier missing under native (#1021)",
-    "test_math_c23_ieee.c": "fenv.h identifier missing under native (#1021)",
-    "test_float_to_int_conversion.c": "fenv.h identifier missing under native (#1021)",
-    "test_fp_div_zero_ieee.c": "fenv.h identifier missing under native (#1021)",
-    "test_float_h_limits.c": "nan() undeclared under native (#1021)",
-    "test_math_classify.c": "inf identifier undeclared under native (#1021)",
+    # --- split out of #1021 (fenv.h/math.h identifiers fail to compile),
+    # now RESOLVED -- three distinct files that compile cleanly now but each
+    # fail for a different, unrelated reason discovered while fixing it ---
+    "test_fenv.c": "fenv_t FE_DFL_ENV sentinel (-1 pointer) dereferenced by "
+                   "the real host libm -- SIGSEGV (#1035)",
+    "test_float_to_int_conversion.c": "saturating float->int64/uint64 cast "
+                   "diverges from the host's raw C cast (#1036)",
+    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum "
+                   "family + an unrelated intmax_t provenance gap (#1037)",
 
     # --- #1022: pthread/threads native support gaps ---
     "test_thread_local_isolation.c": "threads fail under native (#1022)",
@@ -145,17 +146,8 @@ NATIVE_SKIP_TESTS = {
     "test_pthread_nonrecursive_deadlock_detect.c": "threads fail under native (#1022)",
     "test_pthread_recursive_mutex.c": "threads fail under native (#1022)",
 
-    # --- #1023: __cccc_errno_ptr static/non-static redeclaration conflict ---
-    "test_errno_eagain_nonblock_read.c": "__cccc_errno_ptr redeclaration conflict (#1023)",
-    "test_sys_ioctl_standalone.c": "__cccc_errno_ptr redeclaration conflict (#1023)",
-    "test_errno_no_collisions.c": "duplicate anon-struct global emission (#1023)",
-
     # --- singleton bugs, one ticket each ---
-    "test_alloca_no_block_reclaim.c": "alloca() undeclared under native (#1024)",
-    "test_asm_label_typedef_fn.c": "asm-labeled internal function fails to link (#1025)",
-    "test_indirect_call_expr_callee.c": "indirect call callee type wrong (#1026)",
     "test_minilua.c": "typedef ordering fails under native (#1027)",
-    "test_signal_async_regs.c": "const-qualified assignment rejected (#1029)",
     "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
     "test_sys_mount_statfs.c": "runtime divergence under native (#1031)",
     "test_edge_void_main_stray_block.c": "runtime divergence under native (#1031)",
@@ -180,6 +172,20 @@ NATIVE_SKIP_TESTS = {
     "test_c4.c": "old-style implicit-int main() -- VM leniency the host "
                  "compiler doesn't share, see COVERAGE.md Serialized-output "
                  "divergences",
+    "test_sys_ioctl_standalone.c": "asserts CCCC's VM-side wrap_ioctl() "
+                 "request-code allowlist (#795) rejects an unverified raw "
+                 "ioctl request; -c=native calls the real host ioctl() "
+                 "directly, which has no such allowlist to reject with, "
+                 "see COVERAGE.md Serialized-output divergences",
+    "test_alloca_no_block_reclaim.c": "asserts __builtin_alloca() addresses "
+                 "stay distinct across loop iterations sharing a block with "
+                 "a genuine VLA; the real host compiler (confirmed: clang "
+                 "-O0) legitimately reuses the same alloca slot each "
+                 "iteration via a stacksave/stacksave-restore pair scoped "
+                 "to the VLA's block, unlike the VM's separate per-AllocKind "
+                 "lifetimes (#981) -- the alloca call itself now compiles "
+                 "correctly (#1024, emitted as __builtin_alloca), see "
+                 "COVERAGE.md Serialized-output divergences",
     "test_main_bad_argc_error.c": "source is deliberately a bad main() "
                  "signature to test -Wmain; the host compiler treats it as "
                  "a hard error rather than a warning, see COVERAGE.md",

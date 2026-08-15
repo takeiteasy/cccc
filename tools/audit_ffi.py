@@ -133,7 +133,20 @@ BUILTIN_SPECIAL_CASED = {"raise"}
 # macro. A declaration guard whose text matches one of these is exempt from
 # the guard-presence check entirely, the same way a runtime-gated
 # registration is.
-GUEST_ONLY_DECL_GUARDS = {"__STDC_IEC_60559_DFP__"}
+#
+# __CCCC__ (#1021): include/fenv.h and include/errno.h wrap their whole
+# CCCC-flavored body in `#ifdef __CCCC__ ... #else #include_next <fenv.h
+# /errno.h> #endif`. __CCCC__ is always defined while CCCC's own
+# preprocessor parses guest source (init_macros(), src/preprocess.c) --
+# these declarations are unconditional from the guest's point of view, and
+# only take the #else branch when a real host compiler reprocesses this
+# exact file during -c=native/-c=generated serializer replay, at which
+# point the corresponding functions are declared by the host's own
+# #include_next'd header instead. Same guest-only/host-build-time mismatch
+# as __STDC_IEC_60559_DFP__ above; src/stdlib/fenv.c's registrations are
+# unconditional, so without this the guard-presence check would misreport
+# an "always guarded" declaration against an "always registered" C.
+GUEST_ONLY_DECL_GUARDS = {"__STDC_IEC_60559_DFP__", "__CCCC__"}
 
 # Headers whose declared functions are lowered directly by the compiler
 # (dedicated opcodes / codegen special-casing) rather than going through
