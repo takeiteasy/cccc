@@ -1386,6 +1386,37 @@ build (verified against a real host `cc`/`ld`), but a change from the
 previous (masked-by-the-scope-leak) behavior for anyone who had, likely
 unknowingly, relied on it.
 
+Two translation units that each independently *complete* a same-named but
+differently-shaped struct/union/enum tag — the opaque-handle idiom used
+per-backend, where a shared header only forward-declares the tag and each
+`.c` privately supplies its own `struct Foo { ... };` — no longer collide in
+`-c=native`/`-m` output (#1014). `same_type_or_origin()` already treated the
+two completions as different types (tag matches, member-wise comparison
+fails), so they were never wrongly deduplicated, but nothing renamed them
+apart either, and both reached the output under the identical plain tag
+name, producing a host "redefinition" error. Every colliding group but one
+is now renamed to `<name>__cccc_dup<N>` (sharing #1002's suffix and
+counter). At most one group can keep the plain spelling: the output still
+replays the shared header's own `#include`, which binds its uses of the tag
+*textually*, so whichever group is "header-exposed" always wins regardless
+of which `.c` is listed first on the command line — renaming that group
+instead would turn a working replayed prototype into a "conflicting types"
+error. If a replayed header genuinely exposes entities of *both* shapes —
+which cannot happen from the opaque-handle idiom itself, only from a
+header that inconsistently declares more than one signature over the same
+tag — the collision is unrepresentable in flat C by any renaming; the pass
+still renames deterministically (first-created wins) rather than leaving
+the ambiguity unresolved, and the host compiler reports whatever residual
+conflict remains. Two related gaps are known and not fixed by this change:
+renaming a colliding `enum` tag does not rename its *enumerators*, so two
+enums sharing both a tag and an enumerator name still collide on the
+enumerator (tracked as a follow-up ticket; cheap to fix later, since every
+enum use is constant-folded before serialization, leaving no use sites to
+update); and `same_type_or_origin()`'s member-wise comparison does not
+consider bit-field width, so `struct S { int x : 1; };` and
+`struct S { int x; };` are treated as the same shape and left uncollided
+(pre-existing, unrelated to this fix).
+
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 

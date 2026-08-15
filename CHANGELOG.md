@@ -7,6 +7,15 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- **Two translation units each independently completing a same-named but
+  differently-shaped `struct`/`union`/`enum` tag collided in
+  `-c=native`/`-m` output** (#1014) — the opaque-handle idiom used
+  per-backend (a shared header forward-declares the tag, each `.c`
+  privately supplies its own definition) produced a host "redefinition"
+  error even though the VM ran the program fine. Fixed by renaming every
+  colliding group but the header-exposed one to `<name>__cccc_dup<N>`,
+  regardless of which `.c` is listed first on the command line.
+
 - **`--uninitialized-detection`/`--safety=max` falsely reported
   `UNINITIALIZED VARIABLE READ` for a scalar local written through its
   address rather than a direct assignment** (#1008), most commonly the

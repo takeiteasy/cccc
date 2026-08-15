@@ -236,6 +236,11 @@ typedef struct {
     // ND_FOR/ND_DO/ND_SWITCH bodies in serialize_stmt.
     SerJumpFrame *jumps;
     Node *cur_switch;
+    // #1014: set by rename_colliding_type_tags() iff it actually renamed a
+    // colliding struct/union/enum tag -- gates find_tag_name()'s extra
+    // completeness-preferring scan so a program with no collision is
+    // unaffected (byte-identical output).
+    bool tag_renamed;
 } SerializeContext;
 
 // Forward declaration
@@ -458,9 +463,52 @@ static bool name_visible(TypeName *name, Obj *fn) {
     return name->owner_fn == NULL || name->owner_fn == fn;
 }
 
+// #1014: true when `ty` is a struct/union/enum with an actual body -- an
+// incomplete (forward-declared-only) tagged aggregate has no members/
+// enumerators for same_type_or_origin()'s structural fallback to compare, so
+// it deliberately compares equal to *any* complete aggregate sharing its tag
+// (#892, same_type_or_origin's `a->size < 0 || b->size < 0` branch above).
+// That's the right call for provenance/dedup, but fatal for
+// same_type_strong() below: without excluding incomplete types, a pure-use
+// TU's incomplete record would match -- and vote for -- every differently-
+// shaped complete group sharing the tag.
+static bool type_is_complete_tagged(Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        return ty->size >= 0;
+    if (ty->kind == TY_ENUM)
+        return ty->enum_constants != NULL;
+    return false;
+}
+
+// #1014: same_type_or_origin(), but additionally requires both sides to
+// agree on completeness. Used only where distinguishing two differently-
+// shaped *complete* aggregates sharing one tag actually matters
+// (rename_colliding_type_tags() and find_tag_name()'s post-rename lookup
+// below) -- everywhere else same_type_or_origin()'s looser, deliberate
+// incomplete-matches-complete behavior is still correct and unchanged.
+static bool same_type_strong(Type *a, Type *b) {
+    return type_is_complete_tagged(a) == type_is_complete_tagged(b) &&
+           same_type_or_origin(a, b);
+}
+
 static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
         return NULL;
+
+    // #1014: once a collision has actually been renamed, prefer a
+    // completeness-matched record first -- this is what routes a pure-use
+    // TU's incomplete Type (e.g. a bare `DyGC *` parameter) to the record
+    // that still carries the plain, header-exposed name, while each
+    // differently-shaped complete definition resolves to its own (possibly
+    // renamed) group. Skipped entirely when nothing was renamed, so a
+    // program with no tag collision serializes byte-identically to before.
+    if (ctx->tag_renamed)
+        for (int i = 0; i < ctx->tags_len; i++)
+            if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+                same_type_strong(ctx->tags[i].ty, ty))
+                return &ctx->tags[i];
 
     for (int i = 0; i < ctx->tags_len; i++)
         if (name_visible(&ctx->tags[i], ctx->current_fn) &&
@@ -3348,6 +3396,252 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
     hashmap_deinit_borrowed(&first_seen);
 }
 
+// #1014: does `ty` (or anything reachable through a PTR/ARRAY/VLA/FUNC
+// chain -- deliberately not through struct/union members, mirroring
+// hoist_local_type_to_file_scope()'s own reasoning: a member's type is
+// reached through its own uses/definitions elsewhere, and this scan doesn't
+// need a cycle guard as a result) match `group_ty` under same_type_strong()?
+// Used to decide whether an externally-visible Obj's signature "votes for"
+// a tag-collision group (rename_colliding_type_tags()'s tier-2 keeper
+// signal).
+static bool type_reaches_group(Type *ty, Type *group_ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM)
+        return same_type_strong(ty, group_ty);
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_reaches_group(ty->base, group_ty);
+    if (ty->kind == TY_FUNC) {
+        if (type_reaches_group(ty->return_ty, group_ty))
+            return true;
+        for (Type *p = ty->params; p; p = p->next)
+            if (type_reaches_group(p, group_ty))
+                return true;
+        return false;
+    }
+    return false;
+}
+
+// #1014: two translation units can each independently *complete* a
+// same-named but differently-shaped struct/union/enum tag -- the
+// opaque-handle idiom, where a shared header only forward-declares the tag
+// and each .c privately completes it (e.g. one .c per backend
+// implementation). same_type_or_origin() correctly treats the two
+// completions as different types (tag matches, structural comparison
+// fails), so they are never wrongly deduped by collect_type() -- but
+// nothing renames them apart either, and both reach serialize_struct_def()/
+// serialize_enum_def() under the identical plain tag name, producing a hard
+// "redefinition of 'DyGC'" from the host compiler. This is the tag-level
+// analogue of rename_colliding_static_names() just above -- that pass only
+// ever renames Obj (function/variable) names, never a struct/union/enum
+// tag.
+//
+// Unlike an Obj name collision, at most one of the colliding groups can
+// keep the plain spelling: a replayed `#include` of the shared header binds
+// its own uses of the tag *textually*, so whichever group is "header-
+// exposed" (a from_include TypeName record resolves to it) MUST keep the
+// plain name or the replayed header's own prototypes stop matching
+// (verified: renaming the header-exposed group produces a host "conflicting
+// types" error where the un-renamed one compiles clean). If more than one
+// group is header-exposed -- a replayed header genuinely declares entities
+// of *both* shapes -- the collision is unrepresentable in flat C by any
+// renaming; this pass still renames deterministically (first-created wins)
+// rather than leaving the collision maximally ambiguous, and the host
+// compiler is left to report whatever residual conflict remains (see
+// man/COVERAGE.md's serialized-output-divergences section).
+//
+// Renames every non-keeper group's records -- both in ctx->tags (spelling)
+// and in ctx->typedefs (a `typedef struct DyGC DyGC;` written in the .c
+// itself, not the header, would otherwise turn a struct redefinition into a
+// typedef-redefinition-with-different-types error once the struct itself is
+// renamed) -- to `<name>__cccc_dup<N>`, sharing rename_colliding_static_
+// names()'s suffix and ctx->anon_global_counter. A from_include typedef
+// record is left untouched: serialize_typedef_alias() already suppresses
+// those (#891), and the header text supplying the plain spelling can't be
+// rewritten anyway.
+static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
+                                       SerializeContext *ctx) {
+    // One entry per distinct colliding group discovered so far.
+    typedef struct {
+        Type *rep;          // representative (first-seen) Type* for this group
+        int name_len;
+        char *name;
+        int first_seen;     // lower = created earlier (creation-order index)
+        bool header_exposed; // a from_include tag/typedef record names this group
+        bool extern_ref;     // an externally-visible definition's type reaches this group
+    } TagGroup;
+    TagGroup *groups = NULL;
+    int groups_len = 0, groups_cap = 0;
+    // Names seen more than once by more than one distinct group -- only
+    // these need renaming at all.
+    bool *collided = NULL;
+
+    // ctx->tags is in reverse record-creation order (record_type_name()
+    // prepends; collect_scope_names() walks head-first) -- walk it back to
+    // front so `first_seen` below is a true creation-order index, matching
+    // the doc comment above and giving a deterministic first-created
+    // tie-break.
+    for (int i = ctx->tags_len - 1; i >= 0; i--) {
+        TypeName *rec = &ctx->tags[i];
+        if (rec->owner_fn != NULL) // function-local: hoist_local_type_to_file_scope()'s territory
+            continue;
+        if (!type_is_complete_tagged(rec->ty)) // an incomplete record must never define/claim a group
+            continue;
+
+        // A record only ever joins an *existing* group when it names the
+        // same tag AND matches its shape; a same-named-but-differently-
+        // shaped record instead falls through and becomes its own new
+        // group below -- the dedicated pass right after this loop is what
+        // actually detects and marks the resulting name collision.
+        int found = -1;
+        for (int g = 0; g < groups_len; g++) {
+            if (groups[g].name_len == rec->name_len &&
+                strncmp(groups[g].name, rec->name, rec->name_len) == 0 &&
+                same_type_strong(groups[g].rep, rec->ty)) {
+                found = g;
+                break;
+            }
+        }
+        if (found >= 0)
+            continue;
+
+        if (groups_len == groups_cap) {
+            groups_cap = groups_cap ? groups_cap * 2 : 8;
+            groups = realloc(groups, sizeof(TagGroup) * groups_cap);
+            collided = realloc(collided, sizeof(bool) * groups_cap);
+        }
+        groups[groups_len].rep = rec->ty;
+        groups[groups_len].name_len = rec->name_len;
+        groups[groups_len].name = rec->name;
+        groups[groups_len].first_seen = groups_len; // creation order, since we walk creation-ordered
+        groups[groups_len].header_exposed = false;
+        groups[groups_len].extern_ref = false;
+        collided[groups_len] = false;
+        groups_len++;
+    }
+
+    if (groups_len == 0)
+        return;
+
+    // Mark actual name collisions: any two distinct groups sharing a name.
+    for (int g1 = 0; g1 < groups_len; g1++)
+        for (int g2 = g1 + 1; g2 < groups_len; g2++)
+            if (groups[g1].name_len == groups[g2].name_len &&
+                strncmp(groups[g1].name, groups[g2].name, groups[g1].name_len) == 0) {
+                collided[g1] = true;
+                collided[g2] = true;
+            }
+
+    bool any_collision = false;
+    for (int g = 0; g < groups_len; g++)
+        if (collided[g])
+            any_collision = true;
+    if (!any_collision) {
+        free(groups);
+        free(collided);
+        return;
+    }
+
+    // Tier 1: header-exposed -- a from_include tag or typedef record names
+    // this group (from_include is command-line-input-keyed since #1006, so
+    // this is exactly "a replayed #include names this tag").
+    for (int i = 0; i < ctx->tags_len; i++) {
+        if (!ctx->tags[i].from_include || ctx->tags[i].always_emit)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (collided[g] && same_type_strong(ctx->tags[i].ty, groups[g].rep))
+                groups[g].header_exposed = true;
+    }
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (collided[g] && same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+                groups[g].header_exposed = true;
+    }
+
+    // Tier 2: an externally-visible definition's type reaches this group --
+    // needed because tier 1 alone can't pick the implementation TU's group
+    // when the private TU happens to be listed (and hence created) first.
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_static)
+            continue;
+        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        if (!is_defining || !obj->ty)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (collided[g] && type_reaches_group(obj->ty, groups[g].rep))
+                groups[g].extern_ref = true;
+    }
+
+    // Keeper choice per colliding name, composed as successive filters:
+    // restrict to header-exposed groups if any exist among that name's
+    // colliding groups, then prefer extern_ref, then lowest first_seen.
+    for (int g = 0; g < groups_len; g++) {
+        if (!collided[g] || groups[g].rep == NULL)
+            continue; // already resolved as part of an earlier group's pass, or not a collider
+
+        // Gather every group sharing this exact name.
+        int members[64];
+        int members_len = 0;
+        for (int g2 = g; g2 < groups_len && members_len < 64; g2++)
+            if (collided[g2] && groups[g2].rep &&
+                groups[g2].name_len == groups[g].name_len &&
+                strncmp(groups[g2].name, groups[g].name, groups[g].name_len) == 0)
+                members[members_len++] = g2;
+        if (members_len < 2)
+            continue;
+
+        bool any_header_exposed = false;
+        for (int m = 0; m < members_len; m++)
+            if (groups[members[m]].header_exposed)
+                any_header_exposed = true;
+
+        int keeper = -1;
+        for (int m = 0; m < members_len; m++) {
+            int idx = members[m];
+            if (any_header_exposed && !groups[idx].header_exposed)
+                continue;
+            if (keeper < 0)
+                keeper = idx;
+            else if (groups[idx].extern_ref && !groups[keeper].extern_ref)
+                keeper = idx;
+            else if (groups[idx].extern_ref == groups[keeper].extern_ref &&
+                     groups[idx].first_seen < groups[keeper].first_seen)
+                keeper = idx;
+        }
+        if (keeper < 0)
+            keeper = members[0];
+
+        for (int m = 0; m < members_len; m++) {
+            int idx = members[m];
+            if (idx == keeper) {
+                groups[idx].rep = NULL; // mark resolved, skip on future outer iterations
+                continue;
+            }
+            char *new_name = arena_format(vm, "%.*s__cccc_dup%d",
+                                          groups[idx].name_len, groups[idx].name,
+                                          ctx->anon_global_counter++);
+            int new_len = (int)strlen(new_name);
+            Type *victim = groups[idx].rep;
+            for (int i = 0; i < ctx->tags_len; i++)
+                if (same_type_strong(ctx->tags[i].ty, victim)) {
+                    ctx->tags[i].name = new_name;
+                    ctx->tags[i].name_len = new_len;
+                }
+            for (int i = 0; i < ctx->typedefs_len; i++)
+                if (!(ctx->typedefs[i].from_include && !ctx->typedefs[i].always_emit) &&
+                    same_type_strong(ctx->typedefs[i].ty, victim))
+                    ctx->typedefs[i].name = new_name, ctx->typedefs[i].name_len = new_len;
+            groups[idx].rep = NULL; // mark resolved
+            ctx->tag_renamed = true;
+        }
+    }
+
+    free(groups);
+    free(collided);
+}
+
 // #953: hashmap_foreach callback collecting emit_include_paths' values
 // (resolved paths of auto-captured #include directives) into
 // ctx->captured_paths for path_is_captured() to scan.
@@ -3668,6 +3962,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
     rename_colliding_static_names(vm, prog, &ctx); // #1002
+    rename_colliding_type_tags(vm, prog, &ctx); // #1014
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;

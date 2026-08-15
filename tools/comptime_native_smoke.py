@@ -2452,6 +2452,96 @@ def _case_opaque_handle_1010_order(cccc: Path, tmp: str, def_first: bool) -> boo
     return True
 
 
+DUP_TAG_1014_HEADER = (
+    "#pragma once\n"
+    "typedef struct DyGC1014Smoke DyGC1014Smoke;\n"
+    "DyGC1014Smoke *gc_open_1014_smoke(void);\n"
+    "int gc_val_1014_smoke(DyGC1014Smoke *g);\n"
+)
+
+# Header-exposed group: completes the tag with the shape gc_open_1014_smoke/
+# gc_val_1014_smoke's own signatures use -- must always keep the plain
+# `struct DyGC1014Smoke` spelling.
+DUP_TAG_1014_IMPL = (
+    '#include "dup_tag_1014_smoke.h"\n'
+    "struct DyGC1014Smoke { int v; };\n"
+    "static struct DyGC1014Smoke g_1014_smoke = { 42 };\n"
+    "DyGC1014Smoke *gc_open_1014_smoke(void) { return &g_1014_smoke; }\n"
+    "int gc_val_1014_smoke(DyGC1014Smoke *g) { return g->v; }\n"
+)
+
+# Private, differently-shaped completion of the same tag name -- never
+# includes the header, so it must always be renamed.
+DUP_TAG_1014_PRIVATE = (
+    "struct DyGC1014Smoke { double d; char pad; };\n"
+    "int priv_use_1014_smoke(void) {\n"
+    "    struct DyGC1014Smoke x;\n"
+    "    x.d = 1.0;\n"
+    "    x.pad = 'a';\n"
+    "    return (int)x.d;\n"
+    "}\n"
+)
+
+DUP_TAG_1014_MAIN = (
+    '#include "dup_tag_1014_smoke.h"\n'
+    "extern int priv_use_1014_smoke(void);\n"
+    "int main(void) {\n"
+    "    DyGC1014Smoke *g = gc_open_1014_smoke();\n"
+    "    (void)priv_use_1014_smoke();\n"
+    "    return gc_val_1014_smoke(g);\n"
+    "}\n"
+)
+
+
+def _case_dup_tag_1014_order(cccc: Path, tmp: str, impl_first: bool) -> bool:
+    write(Path(tmp) / "dup_tag_1014_smoke.h", DUP_TAG_1014_HEADER)
+    impl_src = Path(tmp) / "dup_tag_1014_smoke_impl.c"
+    private_src = Path(tmp) / "dup_tag_1014_smoke_private.c"
+    main_src = Path(tmp) / "dup_tag_1014_smoke_main.c"
+    write(impl_src, DUP_TAG_1014_IMPL)
+    write(private_src, DUP_TAG_1014_PRIVATE)
+    write(main_src, DUP_TAG_1014_MAIN)
+    order = ([impl_src.name, private_src.name] if impl_first
+              else [private_src.name, impl_src.name]) + [main_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    suffix = "implfirst" if impl_first else "privatefirst"
+    out_bin = Path(tmp) / f"dup_tag_1014_smoke_out_{suffix}"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    return True
+
+
+def case_dup_tag_1014_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  75: -c=native, two translation units each independently "
+          "completing a same-named but differently-shaped struct tag "
+          "(the opaque-handle idiom used per-backend -- one TU is "
+          "header-exposed and must keep the plain tag spelling, the other "
+          "never includes the header and must be renamed), in both input "
+          "orders (#1014). Previously both `struct DyGC1014Smoke { ... };` "
+          "bodies serialized under the identical plain tag name -- a host "
+          "'redefinition' compile failure no -m shape assertion alone can "
+          "see -- this is that proof, VM 42 -> native 42, both orders")
+    if not _case_dup_tag_1014_order(cccc, tmp, impl_first=True):
+        return False
+    if not _case_dup_tag_1014_order(cccc, tmp, impl_first=False):
+        return False
+    print("    ok")
+    return True
+
+
 def case_opaque_handle_multi_tu_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  74: -c=native, the opaque-handle idiom (a header forward-"
           "declares `typedef struct Foo Foo;`, exactly one .c file "
@@ -2481,7 +2571,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2563,6 +2653,7 @@ def main() -> int:
             case_switch_break_continue_native_round_trip,
             case_multi_tu_typedef_and_includes_native_round_trip,
             case_opaque_handle_multi_tu_native_round_trip,
+            case_dup_tag_1014_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
