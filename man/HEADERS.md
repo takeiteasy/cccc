@@ -319,6 +319,59 @@ positional arguments to `cccc` (`cccc -c=native -o out lib.c main.c`, no
 file is then preprocessed and merged by CCCC itself before native
 serialization.
 
+### Passing `-I` at CCCC's own bundled headers
+
+The first bullet above notes that CCCC's own bundled include directory
+(`vm->compiler.builtin_include_dir`) is never forwarded to the native
+compiler automatically. But nothing stops a caller from passing that same
+directory explicitly with `-I` — the test harness (`tools/testing/native.py`)
+does exactly this, since `./include` at the repo root *is* CCCC's own header
+source tree, and `run_native_backend` forwards every `-I` it's given
+straight through to the host compiler (same as any other user-supplied
+path). When that happens, a replayed `#include <foo.h>` in the generated TU
+resolves back to CCCC's own copy of `foo.h` instead of the host's — fine for
+most headers, which are self-contained, but wrong for the handful that need
+macros only CCCC's own preprocessor injects (`fenv.h`'s
+`__CCCC_SIZEOF_FENV_T__`/`__CCCC_FE_*`, `errno.h`'s `__CCCC_E*__` — see
+`init_fenv_macros()`/`init_errno_macros()` in `src/preprocess.c`): a real
+host compiler reprocessing that text from scratch has never heard of them
+and fails outright (#1021).
+
+`include/fenv.h` and `include/errno.h` handle this by guarding their whole
+CCCC-flavored body behind `#ifdef __CCCC__` (a macro CCCC's own preprocessor
+always defines before parsing any header, guest-side) and `#include_next`ing
+the host's own, self-contained header in the `#else` branch — taken only
+when a genuine, non-CCCC compiler reprocesses this exact physical file,
+which only happens during `-c=native`/`-c=generated` serializer replay with
+`-I` pointed at this directory. `#include_next` works correctly here because
+the file *was* reached via a real filesystem `#include` search (the `-I`
+that found it), so continuing the search *after* that directory lands on
+the real system header.
+
+A narrower version of the same problem hits any bundled header that
+declares an `extern` prototype for a name `serialize.c`'s
+`native_accessor_shims` table (see below) also gives a `static` definition
+to once it's used (`__cccc_errno_ptr`, `__cccc_isnan_f`/etc, and — as a
+still-open gap, #1040 — `__cccc_stdin`/`stdout`/`stderr` and the `getopt.h`
+accessors): the replayed extern and the emitted static definition disagree
+on linkage, and the host compiler rejects the redeclaration outright. Where
+the rest of the header doesn't need the full `#include_next` treatment
+(`include/math.h`'s `__cccc_isnan_f`/etc, `include/float.h`'s
+`__cccc_flt_rounds`), guarding just that one redundant `extern` declaration
+behind `#ifdef __CCCC__` is enough — the shim's own `static` definition,
+always emitted ahead of any use, serves as its own prototype. **Any new
+bundled header declaring a name that gets a `native_accessor_shims` entry
+needs one of these two treatments**, or it silently reintroduces this bug
+class the next time something exercises it under `-c=native`.
+
+`tools/audit_ffi.py`'s guard-presence check (`GUEST_ONLY_DECL_GUARDS`)
+whitelists `__CCCC__` as a condition that only means something to CCCC's own
+guest-side preprocessing, the same way it already does for
+`__STDC_IEC_60559_DFP__` — without that, wrapping a declaration in `#ifdef
+__CCCC__` would falsely report as "declared conditionally but registered
+unconditionally" against `src/stdlib/*.c`'s unconditional
+`cc_register_cfunc` calls.
+
 ## Private headers
 
 `include/cccc/reflection.h`, `testing.h`, and `building.h` are CCCC's own
