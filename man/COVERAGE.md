@@ -1504,9 +1504,11 @@ implements it directly (registered in the stdlib), so the VM run always
 succeeds; the native link depends on the host libc actually shipping the
 symbol, which glibc/BSD libc does and Apple's libc (as of macOS 15/Sequoia)
 does not. `-c=native` on macOS therefore fails to *link* a program that
-calls `reallocarray()`, with no CCCC-side fix available short of shipping an
-inline polyfill (tracked, not yet decided — see the #967 follow-up ticket
-tracker for the open question).
+calls `reallocarray()`. Decided (#1028): left as a documented platform gap,
+not fixed — `-c=native` links directly against the host's own libc with no
+CCCC-owned runtime shipped alongside the binary, so there is nowhere to
+place an inline polyfill without adding exactly the kind of runtime
+dependency `-c=native` exists to avoid.
 
 ---
 

@@ -155,13 +155,11 @@ NATIVE_SKIP_TESTS = {
     "test_asm_label_typedef_fn.c": "asm-labeled internal function fails to link (#1025)",
     "test_indirect_call_expr_callee.c": "indirect call callee type wrong (#1026)",
     "test_minilua.c": "typedef ordering fails under native (#1027)",
-    "test_reallocarray.c": "reallocarray undefined on macOS arm64 (#1028)",
     "test_signal_async_regs.c": "const-qualified assignment rejected (#1029)",
     "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
     "test_sys_mount_statfs.c": "runtime divergence under native (#1031)",
     "test_edge_void_main_stray_block.c": "runtime divergence under native (#1031)",
     "test_unsigned_int_to_float_conversion.c": "runtime divergence under native (#1031)",
-    "test_tu_guard_isolation_1001.c": "flaky/order-sensitive under native (#1032)",
 
     # --- #1034: comptime/macro-generated declarations fail to serialize ---
     "test_ast_builders_296.c": "comptime-generated decl fails to serialize (#1034)",
@@ -209,6 +207,18 @@ NATIVE_SKIP_TESTS = {
     "test_version.c": "--version prints and exits; no program to compile",
 }
 
+# Platform-specific -c=native skips, checked only when the running host
+# matches -- unlike NATIVE_SKIP_TESTS these are not bugs to fix, so they
+# aren't tied to a follow-up ticket that ever closes. reallocarray() is a
+# permanent macOS platform gap (#1028, decided: documented in COVERAGE.md,
+# no polyfill), not a bug -- it still runs (and should keep running) through
+# --native on Linux/glibc, the platform --native is meant to land in once
+# wired into CI.
+NATIVE_SKIP_TESTS_MACOS = {
+    "test_reallocarray.c": "reallocarray undefined on macOS libc, permanent "
+                            "platform gap (#1028), still exercised on Linux",
+}
+
 # CLI flags that -c=native drops with a warning rather than enforcing
 # (#935's VM-only-enforcement decision) -- exercising them natively would
 # silently test nothing, so they're skipped rather than run with the safety
@@ -247,13 +257,15 @@ _NATIVE_FRONTEND_PREFIXES = (
 )
 
 
-def native_skip_reason(filename, per_test_flags, cccc_args):
+def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
     """Return a skip_reason string if this test cannot go through the
     -c=native round-trip, else None. Called by native.py before the compile
     step; the per-test CCCC_FLAGS scan mirrors runner.py's own header parse.
     """
     if filename in NATIVE_SKIP_TESTS:
         return NATIVE_SKIP_TESTS[filename]
+    if platform == "macos" and filename in NATIVE_SKIP_TESTS_MACOS:
+        return NATIVE_SKIP_TESTS_MACOS[filename]
     all_flags = list(cccc_args) + list(per_test_flags)
     for f in all_flags:
         if f == "--build" or f.startswith("--build="):

@@ -2296,6 +2296,65 @@ def case_static_name_collision_multi_tu(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_header_static_fn_mixed_path_spelling_1032(cccc: Path, tmp: str) -> bool:
+    print("  80: -c=native, a header-defined static inline function shared "
+          "by two TUs, invoked with one input file as an absolute path and "
+          "the other relative (tools/testing/native.py's own invocation "
+          "shape) -- rename_colliding_static_names() compared File.name by "
+          "raw strcmp, so the two TUs' own #include resolution of the "
+          "identical on-disk header (dirname(including-file) + the quoted "
+          "spelling) recorded two differently-spelled paths for it, wrongly "
+          "treating a shared header-supplied function as a cross-file name "
+          "collision. The rename this produced was worse than a spurious "
+          "warning: it renamed the function's *call sites* (every use "
+          "resolves through the Obj, so a rename is 'free') while the "
+          "function's own definition is never re-emitted at all -- it "
+          "reaches the output solely via the replayed #include, still under "
+          "its original name -- so the renamed call sites referenced a "
+          "symbol nothing declares. files_are_same() (#1032) falls back to "
+          "realpath() before deciding two File.name spellings differ. "
+          "Asserts VM 42 -> native 42, absolute+relative order -- a host "
+          "'implicit function declaration' compile failure no -m shape "
+          "assertion alone can see")
+    hdr = Path(tmp) / "shared_static_1032.h"
+    write(hdr,
+          "#ifndef SHARED_STATIC_1032_H\n#define SHARED_STATIC_1032_H\n"
+          "static inline int box_1032(int x) { return x; }\n#endif\n")
+    a_src = Path(tmp) / "static_1032_a.c"
+    b_src = Path(tmp) / "static_1032_b.c"
+    write(a_src,
+          "#include \"shared_static_1032.h\"\n"
+          "int use_a_1032(void) { return box_1032(20); }\n")
+    write(b_src,
+          "#include \"shared_static_1032.h\"\n"
+          "int use_a_1032(void);\n"
+          "int main(void) { return use_a_1032() + box_1032(22); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "static_1032_out"
+    # Deliberately mixed path styles: a_src absolute, b_src relative --
+    # exactly what tripped the bug (tools/testing/native.py passes the
+    # discovered test file absolute and its CCCC_FLAGS-named sibling
+    # relative).
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, str(a_src), b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_switch_break_continue_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  72: -c=native, break/continue (which used to serialize to the "
           "literal text 'goto (null);', a host compile error) and a real "
@@ -2846,6 +2905,7 @@ def main() -> int:
             case_dandy_vtable_pattern_multi_tu,
             case_polyfill_header_embedded_round_trip,
             case_static_name_collision_multi_tu,
+            case_header_static_fn_mixed_path_spelling_1032,
             case_switch_break_continue_native_round_trip,
             case_multi_tu_typedef_and_includes_native_round_trip,
             case_opaque_handle_multi_tu_native_round_trip,

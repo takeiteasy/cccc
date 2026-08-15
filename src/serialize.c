@@ -3401,6 +3401,35 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext 
     }
 }
 
+// #1032: two File records can spell the identical on-disk header two
+// different ways -- one command-line input given as an absolute path and
+// another as a relative one (the ordinary shape when a build/test harness
+// mixes both, e.g. tools/testing/native.py's own compile_cmd) causes each
+// TU's own #include resolution (dirname(including file) + the quoted
+// spelling) to record a differently-spelled-but-identical path for the same
+// shared header. A raw strcmp of File.name (the #1006 "no canonicalization,
+// exact command-line spelling" design, cc_file_is_command_line_input's own
+// comment) then wrongly treats the two as different files. Used only by
+// rename_colliding_static_names() below, where getting this wrong renames a
+// header-defined static function's *call sites* (every use resolves through
+// the Obj, so the rename is "free") while the function's own definition is
+// never re-emitted at all -- it reaches the output solely via the replayed
+// #include, still under its original name -- producing a call to an
+// undeclared symbol. realpath() failing (a synthetic/embedded path with no
+// real file, e.g. the src/std.c embedded-header table's own paths) falls
+// back to the exact-string comparison this replaces, matching prior
+// behavior for anything that was never a real difference anyway.
+static bool files_are_same(const char *a, const char *b) {
+    if (!a || !b)
+        return false;
+    if (strcmp(a, b) == 0)
+        return true;
+    char ra[PATH_MAX], rb[PATH_MAX];
+    if (!realpath(a, ra) || !realpath(b, rb))
+        return false;
+    return strcmp(ra, rb) == 0;
+}
+
 // #1002: cc_link_progs (linker.c) deliberately never canonicalizes `static`
 // (internal-linkage) Objs across translation units -- two different .c
 // inputs each defining `static int helper(void)` contribute two distinct
@@ -3445,7 +3474,7 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         // than assume.
         const char *first_file = first->tok && first->tok->file ? first->tok->file->name : NULL;
         const char *this_file = obj->tok && obj->tok->file ? obj->tok->file->name : NULL;
-        if (first_file && this_file && strcmp(first_file, this_file) == 0)
+        if (files_are_same(first_file, this_file))
             continue;
         obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
                                  ctx->anon_global_counter++);

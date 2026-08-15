@@ -48,7 +48,7 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                          per_test_flags, per_test_run_args, is_negative_test,
                          expects_runtime_error, bench, is_diagnostic_test=False,
                          expect_stdout=None, reject_stdout=None,
-                         process_timeout=None):
+                         process_timeout=None, platform=None):
     """Compile a test with -c=native, then (for FULL-tier tests) run the
     resulting binary. Returns a result dict shaped like c4.run_c4_roundtrip's.
 
@@ -58,8 +58,11 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                             asserted natively.
     is_diagnostic_test:    CCCC_EXPECT_STDERR/CCCC_REJECT_STDERR present --
                             compile-only, same reasoning.
+    platform:               "macos"/"linux"/"windows" (runner.py's own
+                            detection) -- forwarded to native_skip_reason so
+                            a platform-only gap (e.g. #1028) skips just there.
     """
-    reason = native_skip_reason(test_file.name, per_test_flags, cccc_args)
+    reason = native_skip_reason(test_file.name, per_test_flags, cccc_args, platform)
     if reason:
         return _skip_result(idx, test_name, reason, is_negative_test, expects_runtime_error)
 
