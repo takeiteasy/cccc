@@ -1407,15 +1407,25 @@ header that inconsistently declares more than one signature over the same
 tag — the collision is unrepresentable in flat C by any renaming; the pass
 still renames deterministically (first-created wins) rather than leaving
 the ambiguity unresolved, and the host compiler reports whatever residual
-conflict remains. Two related gaps are known and not fixed by this change:
-renaming a colliding `enum` tag does not rename its *enumerators*, so two
-enums sharing both a tag and an enumerator name still collide on the
-enumerator (tracked as a follow-up ticket; cheap to fix later, since every
-enum use is constant-folded before serialization, leaving no use sites to
-update); and `same_type_or_origin()`'s member-wise comparison does not
-consider bit-field width, so `struct S { int x : 1; };` and
-`struct S { int x; };` are treated as the same shape and left uncollided
-(pre-existing, unrelated to this fix).
+conflict remains. One related gap is known and not fixed by this change:
+`same_type_or_origin()`'s member-wise comparison does not consider bit-field
+width, so `struct S { int x : 1; };` and `struct S { int x; };` are treated
+as the same shape and left uncollided (pre-existing, unrelated to this fix).
+
+Renaming a colliding `enum` tag does not by itself rename its
+*enumerators* — two enums sharing both a tag and an enumerator name (or, more
+generally, any two distinct enums sharing an enumerator name, tags colliding
+or not — a tagless `typedef enum { ... } T;` included) previously still
+collided on the enumerator even after the tag itself was renamed apart. Fixed
+separately (#1015): every enumerator name shared by two or more distinct enum
+groups is renamed the same way, to `<name>__cccc_dup<N>`, following the
+identical header-exposed/keeper rules described above so the two passes never
+disagree about which group keeps the plain spelling. The same unrepresentable
+case applies here too (more than one genuinely header-exposed group sharing
+an enumerator name) — renamed deterministically, host compiler reports what
+remains. Also filed as a follow-up rather than fixed: an enumerator colliding
+with an ordinary file-scope identifier (`static int AA;` in one file,
+`enum E { AA };` in another) is not caught by either rename pass.
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).

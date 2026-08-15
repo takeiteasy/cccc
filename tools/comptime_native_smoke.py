@@ -2542,6 +2542,78 @@ def case_dup_tag_1014_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1015: two translation units each independently declaring a same-named
+# enum tag AND a same-named enumerator with a different value/shape.
+# #1014's own rename_colliding_type_tags() already renames the colliding
+# tag apart (`enum E1015Smoke__cccc_dupN`), but until #1015, the
+# enumerator (AA1015Smoke) itself still collided -- a host "redefinition of
+# enumerator" compile failure no -m shape assertion alone can see, since it
+# only shows up once the host compiler actually builds the output.
+DUP_ENUM_1015_A = (
+    "enum E1015Smoke { AA1015Smoke = 1, BB1015Smoke = 2 };\n"
+    "int a_use_1015_smoke(void) { return AA1015Smoke + BB1015Smoke; }\n"
+)
+
+DUP_ENUM_1015_B = (
+    "enum E1015Smoke { AA1015Smoke = 5, CC1015Smoke = 6 };\n"
+    "int b_use_1015_smoke(void) { return AA1015Smoke + CC1015Smoke; }\n"
+)
+
+DUP_ENUM_1015_MAIN = (
+    "extern int a_use_1015_smoke(void);\n"
+    "extern int b_use_1015_smoke(void);\n"
+    "int main(void) {\n"
+    "    return a_use_1015_smoke() + b_use_1015_smoke() + 28;\n"
+    "}\n"
+)
+
+
+def _case_dup_enum_1015_order(cccc: Path, tmp: str, a_first: bool) -> bool:
+    a_src = Path(tmp) / "dup_enum_1015_smoke_a.c"
+    b_src = Path(tmp) / "dup_enum_1015_smoke_b.c"
+    main_src = Path(tmp) / "dup_enum_1015_smoke_main.c"
+    write(a_src, DUP_ENUM_1015_A)
+    write(b_src, DUP_ENUM_1015_B)
+    write(main_src, DUP_ENUM_1015_MAIN)
+    order = ([a_src.name, b_src.name] if a_first
+              else [b_src.name, a_src.name]) + [main_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    suffix = "afirst" if a_first else "bfirst"
+    out_bin = Path(tmp) / f"dup_enum_1015_smoke_out_{suffix}"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    return True
+
+
+def case_dup_enum_1015_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  76: -c=native, two translation units each independently "
+          "declaring a same-named enum tag AND a same-named enumerator "
+          "with a different value/shape, in both input orders (#1015). "
+          "#1014 already renames the colliding tag apart, but the "
+          "enumerator itself still collided -- a host 'redefinition of "
+          "enumerator' compile failure no -m shape assertion alone can "
+          "see -- this is that proof, VM 42 -> native 42, both orders")
+    if not _case_dup_enum_1015_order(cccc, tmp, a_first=True):
+        return False
+    if not _case_dup_enum_1015_order(cccc, tmp, a_first=False):
+        return False
+    print("    ok")
+    return True
+
+
 def case_opaque_handle_multi_tu_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  74: -c=native, the opaque-handle idiom (a header forward-"
           "declares `typedef struct Foo Foo;`, exactly one .c file "
@@ -2571,7 +2643,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2654,6 +2726,7 @@ def main() -> int:
             case_multi_tu_typedef_and_includes_native_round_trip,
             case_opaque_handle_multi_tu_native_round_trip,
             case_dup_tag_1014_native_round_trip,
+            case_dup_enum_1015_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

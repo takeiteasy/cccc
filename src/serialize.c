@@ -187,6 +187,16 @@ typedef struct SerJumpFrame {
                         // over the switch frame and resolve to the loop.
 } SerJumpFrame;
 
+// #1015: one renamed enumerator, keyed by the enum Type it belongs to (via
+// same_type_strong()) plus its original spelling -- see the ctx->
+// enum_renames doc comment on SerializeContext for why this is a table
+// rather than an in-place EnumConstant.name mutation.
+typedef struct {
+    Type *rep;
+    char *orig;
+    char *new_name;
+} EnumConstRename;
+
 typedef struct {
     TypeVec seen;
     TypeVec defs;
@@ -241,6 +251,19 @@ typedef struct {
     // completeness-preferring scan so a program with no collision is
     // unaffected (byte-identical output).
     bool tag_renamed;
+    // #1015: colliding-enumerator rename table, built by
+    // rename_colliding_enum_constants() (right after rename_colliding_
+    // type_tags()). Deliberately a print-time lookup table, not a mutation
+    // of EnumConstant.name -- same_type_or_origin()'s TY_ENUM arm compares
+    // enumerators by strcmp, and every consumer of it (collect_type,
+    // type_vec_contains/find, find_tag_name) runs after this pass; mutating
+    // one Type's enumerator and not a structurally-identical sibling's
+    // would break that equality and re-introduce the collision as a
+    // full-definition dup instead. Consulted only by serialize_enum_def via
+    // enum_const_spelling().
+    EnumConstRename *enum_renames;
+    int enum_renames_len;
+    int enum_renames_cap;
 } SerializeContext;
 
 // Forward declaration
@@ -492,6 +515,11 @@ static bool same_type_strong(Type *a, Type *b) {
     return type_is_complete_tagged(a) == type_is_complete_tagged(b) &&
            same_type_or_origin(a, b);
 }
+
+// #1015: forward-declared here since serialize_enum_def() (below) needs it
+// but its definition, next to rename_colliding_enum_constants(), comes
+// much later in this file.
+static const char *enum_const_spelling(SerializeContext *ctx, Type *ty, const char *name);
 
 static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
@@ -2928,7 +2956,8 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     fprintf(f, " {\n");
     for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
-        fprintf(f, "    %s = %lld", ec->name, (long long)ec->value);
+        fprintf(f, "    %s = %lld", enum_const_spelling(ctx, ty, ec->name),
+                (long long)ec->value);
         if (ec->next)
             fprintf(f, ",");
         fprintf(f, "\n");
@@ -3642,6 +3671,218 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     free(collided);
 }
 
+// #1015: two translation units can each independently declare a same-named
+// enumerator inside a differently-shaped enum -- reachable even when the
+// enclosing enum's own tag doesn't collide (different tags, same
+// enumerator) or has no tag at all (a tagless `typedef enum { ... } T;`,
+// which never forms a group in rename_colliding_type_tags() above, since
+// that pass only ever walks ctx->tags). Renaming the tag apart (#1014)
+// does nothing for this: same_type_or_origin()'s TY_ENUM arm compares
+// enumerators by strcmp on EnumConstant.name, entirely independent of
+// whichever (possibly renamed) tag spelling ctx->tags now carries -- it's
+// ec->name that collides in the emitted C, not the enum's own name.
+//
+// Groups every distinct complete enum Type (same_type_strong-deduped,
+// found via either a tag or a typedef record so a tagless typedef'd enum
+// is covered too), then for every enumerator name shared by two or more
+// distinct groups, renames every group's copy but one -- via the print-
+// time ctx->enum_renames table (consulted by enum_const_spelling()), never
+// by mutating EnumConstant.name itself; see that field's doc comment on
+// SerializeContext for why a mutation would silently reintroduce the
+// collision (same_type_or_origin's own enumerator comparison would then
+// disagree with the pre-rename groups this pass computed).
+//
+// Keeper selection deliberately mirrors rename_colliding_type_tags()'s own
+// tiers, in the same order, so the two passes always agree on which group
+// keeps the plain spelling -- disagreeing would print `enum E__cccc_dup0 {
+// AA }` next to a *different* group's `enum E { AA__cccc_dup1 }`: legal C,
+// but visibly incoherent output. Tier 1 here is a hard rule, not a
+// preference: a header-exposed group's enumerators are never renamed, full
+// stop -- the replayed #include binds AA textually inside the header's own
+// code, and renaming it there breaks the header (the same failure #1014
+// verified by hand-compiling a renamed header-exposed tag).
+static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
+                                            SerializeContext *ctx) {
+    typedef struct {
+        Type *rep;
+        int first_seen;
+        bool header_exposed;
+        bool extern_ref;
+    } EnumGroup;
+    EnumGroup *groups = NULL;
+    int groups_len = 0, groups_cap = 0;
+
+    // Collect one entry per distinct complete enum Type, from ctx->tags and
+    // ctx->typedefs alike, each walked back-to-front for an approximate
+    // creation order (exact only within each list -- the two don't share a
+    // common index -- used only as a last-resort tie-break, the same rigor
+    // rename_colliding_type_tags() itself relies on for its own first_seen).
+    for (int pass = 0; pass < 2; pass++) {
+        TypeName *recs = pass == 0 ? ctx->tags : ctx->typedefs;
+        int recs_len = pass == 0 ? ctx->tags_len : ctx->typedefs_len;
+        for (int i = recs_len - 1; i >= 0; i--) {
+            TypeName *rec = &recs[i];
+            if (rec->owner_fn != NULL) // function-local: not this pass's concern
+                continue;
+            if (!rec->ty || rec->ty->kind != TY_ENUM)
+                continue;
+            if (!type_is_complete_tagged(rec->ty))
+                continue;
+
+            bool found = false;
+            for (int g = 0; g < groups_len; g++)
+                if (same_type_strong(groups[g].rep, rec->ty)) {
+                    found = true;
+                    break;
+                }
+            if (found)
+                continue;
+
+            if (groups_len == groups_cap) {
+                groups_cap = groups_cap ? groups_cap * 2 : 8;
+                groups = realloc(groups, sizeof(EnumGroup) * groups_cap);
+            }
+            groups[groups_len].rep = rec->ty;
+            groups[groups_len].first_seen = groups_len;
+            groups[groups_len].header_exposed = false;
+            groups[groups_len].extern_ref = false;
+            groups_len++;
+        }
+    }
+
+    if (groups_len < 2) {
+        free(groups);
+        return;
+    }
+
+    // Tier 1: header-exposed -- a from_include tag or typedef record names
+    // this group.
+    for (int i = 0; i < ctx->tags_len; i++) {
+        if (!ctx->tags[i].from_include || ctx->tags[i].always_emit)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (same_type_strong(ctx->tags[i].ty, groups[g].rep))
+                groups[g].header_exposed = true;
+    }
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+                groups[g].header_exposed = true;
+    }
+
+    // Tier 2: an externally-visible definition's type reaches this group.
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_static)
+            continue;
+        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        if (!is_defining || !obj->ty)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (type_reaches_group(obj->ty, groups[g].rep))
+                groups[g].extern_ref = true;
+    }
+
+    // Every distinct enumerator name declared by at least one group,
+    // resolved exactly once below.
+    char **names = NULL;
+    int names_len = 0, names_cap = 0;
+    for (int g = 0; g < groups_len; g++)
+        for (EnumConstant *ec = groups[g].rep->enum_constants; ec; ec = ec->next) {
+            if (!ec->name)
+                continue;
+            bool seen = false;
+            for (int n = 0; n < names_len; n++)
+                if (strcmp(names[n], ec->name) == 0) {
+                    seen = true;
+                    break;
+                }
+            if (seen)
+                continue;
+            if (names_len == names_cap) {
+                names_cap = names_cap ? names_cap * 2 : 16;
+                names = realloc(names, sizeof(char *) * names_cap);
+            }
+            names[names_len++] = ec->name;
+        }
+
+    for (int n = 0; n < names_len; n++) {
+        const char *name = names[n];
+
+        // Every distinct group declaring this exact enumerator name.
+        int members[64];
+        int members_len = 0;
+        for (int g = 0; g < groups_len && members_len < 64; g++) {
+            for (EnumConstant *ec = groups[g].rep->enum_constants; ec; ec = ec->next)
+                if (ec->name && strcmp(ec->name, name) == 0) {
+                    members[members_len++] = g;
+                    break;
+                }
+        }
+        if (members_len < 2)
+            continue;
+
+        bool any_header_exposed = false;
+        for (int m = 0; m < members_len; m++)
+            if (groups[members[m]].header_exposed)
+                any_header_exposed = true;
+
+        int keeper = -1;
+        for (int m = 0; m < members_len; m++) {
+            int idx = members[m];
+            if (any_header_exposed && !groups[idx].header_exposed)
+                continue;
+            if (keeper < 0)
+                keeper = idx;
+            else if (groups[idx].extern_ref && !groups[keeper].extern_ref)
+                keeper = idx;
+            else if (groups[idx].extern_ref == groups[keeper].extern_ref &&
+                     groups[idx].first_seen < groups[keeper].first_seen)
+                keeper = idx;
+        }
+        if (keeper < 0)
+            keeper = members[0];
+
+        for (int m = 0; m < members_len; m++) {
+            int idx = members[m];
+            if (idx == keeper)
+                continue;
+            char *new_name = arena_format(vm, "%s__cccc_dup%d", name,
+                                          ctx->anon_global_counter++);
+            if (ctx->enum_renames_len >= ctx->enum_renames_cap) {
+                ctx->enum_renames_cap = ctx->enum_renames_cap ? ctx->enum_renames_cap * 2 : 8;
+                ctx->enum_renames = realloc(ctx->enum_renames,
+                                            sizeof(EnumConstRename) * ctx->enum_renames_cap);
+            }
+            ctx->enum_renames[ctx->enum_renames_len].rep = groups[idx].rep;
+            ctx->enum_renames[ctx->enum_renames_len].orig = (char *)name;
+            ctx->enum_renames[ctx->enum_renames_len].new_name = new_name;
+            ctx->enum_renames_len++;
+        }
+    }
+
+    free(names);
+    free(groups);
+}
+
+// #1015: print-time lookup for serialize_enum_def()'s enumerator loop,
+// consulting the table rename_colliding_enum_constants() built above -- see
+// ctx->enum_renames' doc comment on SerializeContext for why this is a
+// lookup rather than an EnumConstant.name mutation. Returns `name`
+// unchanged when nothing was renamed for this (ty, name) pair, so a
+// program with no enumerator collision serializes byte-identically to
+// before this pass existed.
+static const char *enum_const_spelling(SerializeContext *ctx, Type *ty, const char *name) {
+    if (!name)
+        return name;
+    for (int i = 0; i < ctx->enum_renames_len; i++)
+        if (same_type_strong(ctx->enum_renames[i].rep, ty) &&
+            strcmp(ctx->enum_renames[i].orig, name) == 0)
+            return ctx->enum_renames[i].new_name;
+    return name;
+}
+
 // #953: hashmap_foreach callback collecting emit_include_paths' values
 // (resolved paths of auto-captured #include directives) into
 // ctx->captured_paths for path_is_captured() to scan.
@@ -3963,6 +4204,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     rename_anon_globals(vm, prog, &ctx);
     rename_colliding_static_names(vm, prog, &ctx); // #1002
     rename_colliding_type_tags(vm, prog, &ctx); // #1014
+    rename_colliding_enum_constants(vm, prog, &ctx); // #1015
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
