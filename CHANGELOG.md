@@ -5,6 +5,28 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-08-15
+
+### Added
+
+- New `-Wnative-name-collision` warning (part of `-Wall`), naming a
+  collision the `-m`/`-c=native`/`-c=generated` serializer's rename
+  passes (#1014/#1015/#1016) can't resolve — currently a header-exposed
+  `enum`'s enumerator colliding with a plain file-scope identifier
+  declared in a `.c` that doesn't include that header (#1017). Neither
+  side of that collision can be safely renamed (the replayed `#include`
+  binds the enumerator textually; the identifier's rename would either
+  change an emitted symbol or widen an existing "only rename dups"
+  rule), so the collision still reaches the generated output for the
+  host compiler to report — but the warning now points at it first,
+  naming the enumerator and the header, instead of leaving the user
+  with only the host compiler's own diagnostic against a deleted
+  `/tmp` temp file under `-c=native`. Fixing this also surfaced a real
+  gap: nothing flushed a warning queued *during* serialization itself,
+  so this warning (and any future one raised from `src/serialize.c`)
+  was silently dropped even with `-Wall` passed — both
+  `cc_serialize_program()` callers now print it.
+
 ### Fixed
 
 - **Two translation units each independently completing a same-named but
@@ -15,7 +37,28 @@ All notable changes to CCCC are documented here. Format loosely follows
   error even though the VM ran the program fine. Fixed by renaming every
   colliding group but the header-exposed one to `<name>__cccc_dup<N>`,
   regardless of which `.c` is listed first on the command line.
-
+- **Renaming a colliding `enum` tag (#1014) didn't rename its colliding
+  *enumerators*** (#1015) — two enums sharing an enumerator name (tags
+  colliding or not) still hit a host "redefinition of enumerator" error
+  after the tag itself was renamed apart. Fixed the same way, following
+  the identical header-exposed/keeper rules so the two passes never
+  disagree about which group keeps the plain spelling.
+- **A colliding enumerator wasn't renamed against a plain file-scope
+  identifier of the same name** (#1016) — `static int AA;` in one file
+  and `enum E { AA };` in another (equally an `extern` global or a
+  function) collided, since neither #1014's tag pass nor #1015's
+  enumerator pass ever looked at the ordinary-identifier namespace an
+  enumerator also shares. Fixed by renaming every colliding enum
+  group's copy of the name instead — the file-scope identifier itself
+  is never renamed (renaming external linkage would change the emitted
+  symbol; renaming a unique `static` would be unsound in general).
+- **An opaque-handle struct's definition could be dropped or emitted as
+  a bare forward declaration across translation units** (#1010),
+  depending on which `.c` completing it was parsed first or last — a
+  host "incomplete definition of type" error even though the VM ran the
+  program fine. Also fixed a duplicated `static` local's hoisted
+  file-scope shadow global being declared twice in `-m`/`-c=native`
+  output (#1011, harmless but unintentional).
 - **`--uninitialized-detection`/`--safety=max` falsely reported
   `UNINITIALIZED VARIABLE READ` for a scalar local written through its
   address rather than a direct assignment** (#1008), most commonly the
