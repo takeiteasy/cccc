@@ -3712,6 +3712,30 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
     EnumGroup *groups = NULL;
     int groups_len = 0, groups_cap = 0;
 
+    // #1016: neither this pass nor rename_colliding_type_tags()/
+    // rename_colliding_static_names() looks at the other's namespace, but C
+    // has one ordinary identifier namespace at file scope -- an enumerator
+    // can collide with a plain static/extern/function name just as easily
+    // as with another enumerator. Build the set of every emitted file-scope
+    // Obj name once, up front, so the per-name loop below can also treat an
+    // Obj as a (single, un-renameable) "group" occupying a name. Must run
+    // after rename_anon_globals()/rename_colliding_static_names() -- reading
+    // obj->name here needs their final, possibly-already-renamed spelling,
+    // the same ordering requirement #1002's own comment documents for a
+    // different reason. Deliberately no is_defining filter (unlike #1002's
+    // own Obj scan just above): #1002 only cares about two *definitions*
+    // colliding, but here a bare prototype (`int AA(void);`) or `extern`
+    // declaration already occupies the ordinary-identifier namespace an
+    // enum constant shares, so it must be in this set too.
+    HashMap obj_names = {0};
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->name[0] == '.')
+            continue;
+        if (ctx->generated_only && !obj->is_macro_generated)
+            continue;
+        hashmap_put_borrowed(&obj_names, obj->name, obj);
+    }
+
     // Collect one entry per distinct complete enum Type, from ctx->tags and
     // ctx->typedefs alike, each walked back-to-front for an approximate
     // creation order (exact only within each list -- the two don't share a
@@ -3750,8 +3774,12 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         }
     }
 
-    if (groups_len < 2) {
+    // #1016: a single enum group can still collide with an Obj name, so the
+    // old groups_len < 2 bail-out (nothing to compare a lone group against)
+    // is only safe when there are no Obj names to check it against either.
+    if (groups_len < 1 || (groups_len < 2 && obj_names.used == 0)) {
         free(groups);
+        hashmap_deinit_borrowed(&obj_names);
         return;
     }
 
@@ -3820,7 +3848,13 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
                     break;
                 }
         }
-        if (members_len < 2)
+        // #1016: does an emitted file-scope Obj already occupy this
+        // spelling? An Obj is never renamed by this pass (external linkage
+        // makes that unsafe in general, see the function's own doc comment
+        // above), so when true no enum group below can keep the plain name
+        // either -- the Obj holds it unconditionally.
+        bool obj_collision = hashmap_get(&obj_names, name) != NULL;
+        if (members_len < 2 && !obj_collision)
             continue;
 
         bool any_header_exposed = false;
@@ -3829,24 +3863,34 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
                 any_header_exposed = true;
 
         int keeper = -1;
-        for (int m = 0; m < members_len; m++) {
-            int idx = members[m];
-            if (any_header_exposed && !groups[idx].header_exposed)
-                continue;
+        if (!obj_collision) {
+            for (int m = 0; m < members_len; m++) {
+                int idx = members[m];
+                if (any_header_exposed && !groups[idx].header_exposed)
+                    continue;
+                if (keeper < 0)
+                    keeper = idx;
+                else if (groups[idx].extern_ref && !groups[keeper].extern_ref)
+                    keeper = idx;
+                else if (groups[idx].extern_ref == groups[keeper].extern_ref &&
+                         groups[idx].first_seen < groups[keeper].first_seen)
+                    keeper = idx;
+            }
             if (keeper < 0)
-                keeper = idx;
-            else if (groups[idx].extern_ref && !groups[keeper].extern_ref)
-                keeper = idx;
-            else if (groups[idx].extern_ref == groups[keeper].extern_ref &&
-                     groups[idx].first_seen < groups[keeper].first_seen)
-                keeper = idx;
+                keeper = members[0];
         }
-        if (keeper < 0)
-            keeper = members[0];
 
         for (int m = 0; m < members_len; m++) {
             int idx = members[m];
             if (idx == keeper)
+                continue;
+            // #1016: tier 1 stays a hard rule even when an Obj occupies the
+            // name -- a header-exposed group's enumerators are never
+            // renamed (the replayed #include binds the name textually
+            // inside the header's own code, same reasoning #1014/#1015
+            // already established). The residual Obj-vs-header conflict is
+            // left for the host compiler to report; see man/COVERAGE.md.
+            if (obj_collision && groups[idx].header_exposed)
                 continue;
             char *new_name = arena_format(vm, "%s__cccc_dup%d", name,
                                           ctx->anon_global_counter++);
@@ -3864,6 +3908,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
 
     free(names);
     free(groups);
+    hashmap_deinit_borrowed(&obj_names);
 }
 
 // #1015: print-time lookup for serialize_enum_def()'s enumerator loop,
@@ -4547,5 +4592,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.captured_paths);
     free(ctx.block_envs);
     free(ctx.hoisted.data);
+    free(ctx.enum_renames); // #1016: was missing from this list
 }
 

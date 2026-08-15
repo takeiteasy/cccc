@@ -1423,9 +1423,30 @@ identical header-exposed/keeper rules described above so the two passes never
 disagree about which group keeps the plain spelling. The same unrepresentable
 case applies here too (more than one genuinely header-exposed group sharing
 an enumerator name) — renamed deterministically, host compiler reports what
-remains. Also filed as a follow-up rather than fixed: an enumerator colliding
-with an ordinary file-scope identifier (`static int AA;` in one file,
-`enum E { AA };` in another) is not caught by either rename pass.
+remains.
+
+An enumerator colliding with an ordinary file-scope identifier — `static int
+AA;` in one file, `enum E { AA };` in another, and equally an extern global
+or a function of the same name — was not caught by either rename pass above,
+since neither ever looked at the other's namespace even though C has one
+ordinary identifier namespace at file scope. Fixed (#1016) by widening
+`rename_colliding_enum_constants()` to also build the set of every emitted
+file-scope Obj name (including a bare prototype or `extern` declaration, not
+only a definition — unlike `rename_colliding_static_names()`'s own scan,
+which only cares about two *definitions* colliding) and treat a name in that
+set as occupying the namespace unconditionally: the Obj is never renamed
+(renaming an external-linkage Obj would change its emitted symbol and break
+linking against anything outside these translation units; renaming a unique
+`static` would widen #1002's "only rename dups" contract for a shape only
+reachable from a TU that doesn't include the shared header), so every
+colliding enum group's copy of the name is renamed instead — this composes
+for free with an enumerator that also collides with another enumerator.
+Tier 1 stays a hard rule even here: a header-exposed enum group's
+enumerators are still never renamed. One case remains genuinely
+unrepresentable and is not fixed: a header-exposed enum group's enumerator
+colliding with a file-scope Obj in a `.c` that doesn't include that header —
+neither side can be renamed without breaking something else, so the
+collision is left for the host compiler to report (filed as #1017).
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).

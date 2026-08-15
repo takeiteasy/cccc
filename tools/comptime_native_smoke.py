@@ -2614,6 +2614,83 @@ def case_dup_enum_1015_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1016: follow-up to #1014/#1015. Neither rename_colliding_type_tags()
+# (#1014, tag vs. tag) nor rename_colliding_enum_constants() (#1015,
+# enumerator vs. enumerator) looked at the other's namespace -- C has one
+# ordinary identifier namespace at file scope, so an enumerator can collide
+# with a plain static/extern/function name too. This exercises all three
+# Obj shapes verified reproducing during investigation in one TU: a static
+# variable, an external-linkage global, and a function, each colliding with
+# a same-named enumerator declared in the other TU.
+DUP_ENUM_OBJ_1016_A = (
+    "static int AA1016Smoke = 3;\n"
+    "int BB1016Smoke = 7;\n"
+    "int CC1016Smoke(void) { return 9; }\n"
+    "int a_use_1016_smoke(void) { return AA1016Smoke + BB1016Smoke + CC1016Smoke(); }\n"
+)
+
+DUP_ENUM_OBJ_1016_B = (
+    "enum E1016Smoke { AA1016Smoke = 100, BB1016Smoke = 101, CC1016Smoke = 102 };\n"
+    "int b_use_1016_smoke(void) { return AA1016Smoke + BB1016Smoke + CC1016Smoke; }\n"
+)
+
+DUP_ENUM_OBJ_1016_MAIN = (
+    "extern int a_use_1016_smoke(void);\n"
+    "extern int b_use_1016_smoke(void);\n"
+    "int main(void) {\n"
+    "    return a_use_1016_smoke() - 19 + (b_use_1016_smoke() - 303) + 42;\n"
+    "}\n"
+)
+
+
+def _case_dup_enum_obj_1016_order(cccc: Path, tmp: str, a_first: bool) -> bool:
+    a_src = Path(tmp) / "dup_enum_obj_1016_smoke_a.c"
+    b_src = Path(tmp) / "dup_enum_obj_1016_smoke_b.c"
+    main_src = Path(tmp) / "dup_enum_obj_1016_smoke_main.c"
+    write(a_src, DUP_ENUM_OBJ_1016_A)
+    write(b_src, DUP_ENUM_OBJ_1016_B)
+    write(main_src, DUP_ENUM_OBJ_1016_MAIN)
+    order = ([a_src.name, b_src.name] if a_first
+              else [b_src.name, a_src.name]) + [main_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    suffix = "afirst" if a_first else "bfirst"
+    out_bin = Path(tmp) / f"dup_enum_obj_1016_smoke_out_{suffix}"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    return True
+
+
+def case_dup_enum_obj_1016_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  77: -c=native, an enum's enumerators each colliding with a "
+          "same-named ordinary file-scope identifier (a static variable, "
+          "an extern global, and a function) declared in a separate "
+          "translation unit, in both input orders (#1016). Neither #1014's "
+          "tag rename nor #1015's enumerator-vs-enumerator rename looked at "
+          "the ordinary identifier namespace an enumerator also shares -- "
+          "a host 'redefinition'/'conflicting types' compile failure no -m "
+          "shape assertion alone can see -- this is that proof, "
+          "VM 42 -> native 42, both orders")
+    if not _case_dup_enum_obj_1016_order(cccc, tmp, a_first=True):
+        return False
+    if not _case_dup_enum_obj_1016_order(cccc, tmp, a_first=False):
+        return False
+    print("    ok")
+    return True
+
+
 def case_opaque_handle_multi_tu_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  74: -c=native, the opaque-handle idiom (a header forward-"
           "declares `typedef struct Foo Foo;`, exactly one .c file "
@@ -2643,7 +2720,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2727,6 +2804,7 @@ def main() -> int:
             case_opaque_handle_multi_tu_native_round_trip,
             case_dup_tag_1014_native_round_trip,
             case_dup_enum_1015_native_round_trip,
+            case_dup_enum_obj_1016_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
