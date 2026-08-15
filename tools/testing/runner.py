@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import LEAKS_SKIP_TESTS, leak_pass_wants_vm_heap, vm_profile_path
 from .c4 import run_c4_roundtrip
+from .native import run_native_roundtrip
 
 
 def has_matrix_skip(test_file):
@@ -21,7 +22,7 @@ def has_matrix_skip(test_file):
 
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
                     bench=False, c4_mode=False, profile_dir=None, process_timeout=None,
-                    matrix_mode=False):
+                    matrix_mode=False, native_mode=False):
     """Run one test file and return a result dict.
 
     matrix_mode: when True, strip any -On flags from per-test CCCC_FLAGS so
@@ -57,11 +58,17 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             if "EXPECT_RUNTIME_ERROR" in header:
                 expects_runtime_error = True
             c4_skip = False
+            native_skip = None
             matrix_skip_reason = None
             leaks_keep_vm_heap = False
             for line in header_lines:
                 if "CCCC_C4_SKIP" in line:
                     c4_skip = True
+                if "CCCC_NATIVE_SKIP" in line:
+                    if ":" in line:
+                        native_skip = line.split("CCCC_NATIVE_SKIP:", 1)[1].strip().rstrip("*/").strip()
+                    else:
+                        native_skip = "native-incompatible"
                 if "CCCC_LEAKS_KEEP_VM_HEAP" in line:
                     leaks_keep_vm_heap = True
                 if "CCCC_EXPECT_LEAK" in line:
@@ -167,6 +174,35 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             reject_stdout=reject_stdout,
             expect_stderr=expect_stderr,
             reject_stderr=reject_stderr,
+            process_timeout=process_timeout,
+        )
+
+    if native_mode and native_skip:
+        return {
+            "idx": idx,
+            "test_name": test_name,
+            "exit_code": 0,
+            "status": "native_skipped",
+            "output": "",
+            "is_negative_test": is_negative_test,
+            "expects_runtime_error": expects_runtime_error,
+            "stderr_mismatch": None,
+            "elapsed": 0,
+            "skip_reason": f"native-incompatible: {native_skip}",
+        }
+
+    if native_mode:
+        # CCCC_EXPECT_STDERR/CCCC_REJECT_STDERR tests already have their
+        # diagnostic assertion covered by the normal VM run; under -c=native
+        # they only assert that the compile step didn't regress into a
+        # build failure (native.py's compile-only tier).
+        is_diagnostic_test = expect_stderr is not None or reject_stderr is not None
+        return run_native_roundtrip(
+            idx, test_file, test_name, cccc, script_dir, cccc_args, per_test_flags,
+            per_test_run_args, is_negative_test, expects_runtime_error, bench,
+            is_diagnostic_test=is_diagnostic_test,
+            expect_stdout=expect_stdout,
+            reject_stdout=reject_stdout,
             process_timeout=process_timeout,
         )
 

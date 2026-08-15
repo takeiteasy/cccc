@@ -839,6 +839,22 @@ static void collect_generated_call_targets(Node *node, ObjVec *out) {
 
 static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 
+// Emit a float initializer value as a C `f`-suffixed floating constant.
+// `%.9g` of an integral value like 1.0f prints "1" with no '.'/'e' -- append
+// with the "f" suffix directly that reads as the invalid token `1f`
+// ("invalid digit 'f' in decimal constant" from the host compiler), not a
+// float literal. Force a decimal point when the %g text has none, so the
+// suffix always lands on a valid floating-constant. inf/nan text
+// ("inf"/"-inf"/"nan") is left alone -- neither is a valid C floating
+// constant with an "f" suffix at all; that's a separate, pre-existing gap.
+static void format_float_literal(char *buf, size_t cap, double v) {
+    int n = snprintf(buf, cap, "%.9g", v);
+    if (n > 0 && (size_t)n < cap
+        && !strpbrk(buf, ".eEnN")) {
+        snprintf(buf + n, cap - (size_t)n, ".0");
+    }
+}
+
 // --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
 // (+ count()/byte_count()/bounds() bounds form, if any) qualifier for
 // re-emission in the post-'*' declarator position it was originally written
@@ -1593,8 +1609,18 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         if (node->member && node->member->name)
             fprintf(f, ".%.*s", node->member->name->len,
                     node->member->name->loc);
-        else
+        else if (!node->member)
+            // Genuinely unresolved -- distinct from the anonymous-member
+            // case below, which is a normal, valid access.
             fprintf(f, "./* unknown */");
+        // else: node->member is an anonymous struct/union member (its
+        // C11 6.7.2.1p13 members are promoted into the enclosing
+        // aggregate's namespace) -- an intermediate link in a struct_ref()
+        // chain like `x.a` through `struct { struct { int a; }; } x`.
+        // It has no spelling of its own and is transparent in C, so it
+        // must serialize to nothing rather than the placeholder comment
+        // that used to sit here -- that produced `s./* unknown */.i`,
+        // which the host compiler rejects outright.
         break;
 
     case ND_STMT_EXPR:
@@ -2765,7 +2791,9 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
 
     case TY_FLOAT: {
         float fv; memcpy(&fv, var->init_data + offset, 4);
-        fprintf(f, "%.9gf", (double)fv);
+        char buf[64];
+        format_float_literal(buf, sizeof buf, (double)fv);
+        fprintf(f, "%sf", buf);
         return;
     }
 

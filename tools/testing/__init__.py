@@ -62,6 +62,217 @@ LEAKS_VM_HEAP_DEPENDENT_FLAGS = {
 }
 
 
+# Tests that cannot survive the -c=native round-trip (tools/testing/native.py,
+# ticket #967). Unlike C4_SKIP_TESTS this is a dict, not a set: {filename:
+# "reason (#ticket)"}, grouped by bug class under a comment header per group,
+# so the reason surfaces through the existing skip_reason plumbing
+# (report.py) and each entry can be deleted individually as its ticket
+# closes. Populated from a full-corpus sweep done while building #967 --
+# every entry here compiled and ran correctly through the VM but diverged
+# under -c=native (wrong compile, wrong link, or wrong runtime result).
+NATIVE_SKIP_TESTS = {
+    # --- #1018: variadic-function serialization gives wrong runtime results ---
+    # The repro_*.c entries below are dead weight for --native specifically
+    # (discover_tests only globs "test_*.c", so repro_*.c is never part of
+    # any tools/tests.py corpus, --native included) -- kept here anyway as a
+    # record of what #1018's sweep found, since deleting them would lose
+    # that trail. Harmless either way: a key discover_tests never produces
+    # is never looked up.
+    "repro_1to5.c": "variadic serialization gives wrong result (#1018)",
+    "repro_basic_var.c": "variadic serialization gives wrong result (#1018)",
+    "repro_debug.c": "variadic serialization gives wrong result (#1018)",
+    "repro_exact.c": "variadic serialization gives wrong result (#1018)",
+    "repro_inner_vararg.c": "variadic serialization gives wrong result (#1018)",
+    "repro_longname.c": "variadic serialization gives wrong result (#1018)",
+    "repro_minvar.c": "variadic serialization gives wrong result (#1018)",
+    "repro_mixed_args.c": "variadic serialization gives wrong result (#1018)",
+    "repro_namesize.c": "variadic serialization gives wrong result (#1018)",
+    "repro_nested2.c": "variadic serialization gives wrong result (#1018)",
+    "repro_nested3.c": "variadic serialization gives wrong result (#1018)",
+    "repro_nested4.c": "variadic serialization gives wrong result (#1018)",
+    "repro_nested5.c": "variadic serialization gives wrong result (#1018)",
+    "repro_nested_vararg.c": "variadic serialization gives wrong result (#1018)",
+    "repro_nested_varargs.c": "variadic serialization gives wrong result (#1018)",
+    "repro_only_nested.c": "variadic serialization gives wrong result (#1018)",
+    "repro_onlytest5.c": "variadic serialization gives wrong result (#1018)",
+    "repro_short.c": "variadic serialization gives wrong result (#1018)",
+    "repro_simple_loop.c": "variadic serialization gives wrong result (#1018)",
+    "repro_va_copy.c": "variadic serialization gives wrong result (#1018)",
+    "repro_vasize.c": "variadic serialization gives wrong result (#1018)",
+    "repro_withr.c": "variadic serialization gives wrong result (#1018)",
+    "repro_znames.c": "variadic serialization gives wrong result (#1018)",
+    "test_float_arg_marshalling.c": "variadic serialization gives wrong result (#1018)",
+    "test_math_ffi_signatures.c": "variadic serialization gives wrong result (#1018)",
+    "test_c4_argv.c": "variadic serialization gives wrong result (#1018)",
+    "test_use_system_headers_fallback.c": "variadic serialization gives wrong result (#1018)",
+    "test_aligned_alloc_vmheap.c": "variadic serialization gives wrong result (#1018)",
+
+    # --- #1019: vector_size arithmetic/select fails or misbehaves ---
+    "test_attr_vector_size.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_bitwise.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_brace_init.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_compare_select_opt.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_fusion.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_intdiv.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_select.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_wide256.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_wide512.c": "vector_size fails/misbehaves under native (#1019)",
+    "test_attr_vector_size_variadic.c": "vector_size fails/misbehaves under native (#1019)",
+
+    # --- #1020: constructor/destructor ordering wrong under native ---
+    "test_constructor_basic.c": "constructor/destructor ordering wrong under native (#1020)",
+    "test_constructor_c23.c": "constructor/destructor ordering wrong under native (#1020)",
+    "test_constructor_priority.c": "constructor/destructor ordering wrong under native (#1020)",
+    "test_constructor_destructor_static_opt.c": "constructor/destructor ordering wrong under native (#1020)",
+    "test_destructor_exit_atexit_order.c": "constructor/destructor ordering wrong under native (#1020)",
+    "test_destructor_exit_reentrant.c": "constructor/destructor ordering wrong under native (#1020)",
+    "test_destructor_on_exit.c": "constructor/destructor ordering wrong under native (#1020)",
+
+    # --- #1021: fenv.h / math.h C23 IEEE identifiers fail to compile ---
+    "test_decimal_fold_clean_fenv.c": "fenv.h identifier missing under native (#1021)",
+    "test_fenv.c": "fenv.h identifier missing under native (#1021)",
+    "test_math_c23_ieee.c": "fenv.h identifier missing under native (#1021)",
+    "test_float_to_int_conversion.c": "fenv.h identifier missing under native (#1021)",
+    "test_fp_div_zero_ieee.c": "fenv.h identifier missing under native (#1021)",
+    "test_float_h_limits.c": "nan() undeclared under native (#1021)",
+    "test_math_classify.c": "inf identifier undeclared under native (#1021)",
+
+    # --- #1022: pthread/threads native support gaps ---
+    "test_thread_local_isolation.c": "threads fail under native (#1022)",
+    "test_threads_basic.c": "threads fail under native (#1022)",
+    "test_threads_mutex.c": "threads fail under native (#1022)",
+    "test_threads_tss.c": "threads fail under native (#1022)",
+    "test_pthread_nonrecursive_deadlock_detect.c": "threads fail under native (#1022)",
+    "test_pthread_recursive_mutex.c": "threads fail under native (#1022)",
+
+    # --- #1023: __cccc_errno_ptr static/non-static redeclaration conflict ---
+    "test_errno_eagain_nonblock_read.c": "__cccc_errno_ptr redeclaration conflict (#1023)",
+    "test_sys_ioctl_standalone.c": "__cccc_errno_ptr redeclaration conflict (#1023)",
+    "test_errno_no_collisions.c": "duplicate anon-struct global emission (#1023)",
+
+    # --- singleton bugs, one ticket each ---
+    "test_alloca_no_block_reclaim.c": "alloca() undeclared under native (#1024)",
+    "test_asm_label_typedef_fn.c": "asm-labeled internal function fails to link (#1025)",
+    "test_indirect_call_expr_callee.c": "indirect call callee type wrong (#1026)",
+    "test_minilua.c": "typedef ordering fails under native (#1027)",
+    "test_reallocarray.c": "reallocarray undefined on macOS arm64 (#1028)",
+    "test_signal_async_regs.c": "const-qualified assignment rejected (#1029)",
+    "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
+    "test_sys_mount_statfs.c": "runtime divergence under native (#1031)",
+    "test_edge_void_main_stray_block.c": "runtime divergence under native (#1031)",
+    "test_unsigned_int_to_float_conversion.c": "runtime divergence under native (#1031)",
+    "test_tu_guard_isolation_1001.c": "flaky/order-sensitive under native (#1032)",
+
+    # --- #1034: comptime/macro-generated declarations fail to serialize ---
+    "test_ast_builders_296.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_comptime_and_runtime_fn_ptr_tables_309.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_comptime_decl_index_anon_array_951.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_comptime_decl_index_unused_894.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_comptime_include_boundary_890.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_comptime_ptr_303.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_custom_attributes_serialize_235.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_global_block_expansion.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_macros_generate_constructor_235.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_macros_local_var.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_macros_quote_multi_stmt_global.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_macros_stdlib_memcpy_strlen_strcmp_235.c": "comptime-generated decl fails to serialize (#1034)",
+    "test_macros_quote_args_splice.c": "comptime-generated decl fails to serialize (#1034)",
+
+    # --- by-design divergence, not a bug: see COVERAGE.md ---
+    "test_c4.c": "old-style implicit-int main() -- VM leniency the host "
+                 "compiler doesn't share, see COVERAGE.md Serialized-output "
+                 "divergences",
+    "test_main_bad_argc_error.c": "source is deliberately a bad main() "
+                 "signature to test -Wmain; the host compiler treats it as "
+                 "a hard error rather than a warning, see COVERAGE.md",
+    "test_warning_main_bad_params.c": "source is deliberately a bad main() "
+                 "signature to test -Wmain; the host compiler treats it as "
+                 "a hard error rather than a warning, see COVERAGE.md",
+    "test_warning_declarations_default.c": "source deliberately falls off "
+                 "the end of a non-void function to test the default "
+                 "return-type warning; the host compiler treats it as a "
+                 "hard error rather than a warning, see COVERAGE.md",
+    "test_warning_return_type.c": "source deliberately falls off the end "
+                 "of a non-void function to test -Wreturn-type; the host "
+                 "compiler treats it as a hard error rather than a "
+                 "warning, see COVERAGE.md",
+    "test_warning_implicit_function_ffi.c": "source deliberately calls an "
+                 "undeclared function to test "
+                 "-Wimplicit-function-declaration; the host compiler "
+                 "treats it as a hard error under C23, see COVERAGE.md",
+    "test_use_system_headers_pragma_suppress.c": "source deliberately "
+                 "leaves an unterminated '#pragma clang assume_nonnull' "
+                 "open across the file to test pragma-noise suppression; "
+                 "the host compiler's own pragma balance check rejects it",
+
+    # --- no compiled artifact to run (frontend-only invocation) ---
+    "test_version.c": "--version prints and exits; no program to compile",
+}
+
+# CLI flags that -c=native drops with a warning rather than enforcing
+# (#935's VM-only-enforcement decision) -- exercising them natively would
+# silently test nothing, so they're skipped rather than run with the safety
+# net quietly missing.
+NATIVE_VM_ONLY_FLAGS = {
+    "--checked-pointers",
+    "--bounds-checks", "-B",
+    "--uaf-detection",
+    "--type-checks",
+    "--heap-canaries",
+    "--memory-leak-detection", "-M",
+    "--memory-tagging",
+    "--pointer-sanitizer", "-P",
+    "--uninitialized-detection",
+    "--posix-emulation",
+    "--stack-canaries",
+    "-V",
+    "-1", "-2", "-3",
+    "--safety=basic", "--safety=standard", "--safety=max",
+    # CCCC FFI policy options: "-c=native cannot be combined with CCCC FFI
+    # policy options" (main.c) -- these govern the VM's own FFI call path
+    # and have no native-mode equivalent (a native binary calls libc
+    # directly, with no FFI layer to police).
+    "--ffi-allow", "--ffi-deny", "--disable-ffi", "-F",
+    "--ffi-errors-fatal", "--ffi-type-checking",
+}
+
+# Frontend/output modes -c=native can't be combined with, or that make the
+# per-test flags drive their own -c/-o (so the runner's own -c=native/-o
+# would collide). Checked by prefix against each per-test flag.
+_NATIVE_FRONTEND_PREFIXES = (
+    "-E", "-m", "--dump-", "--diagnostics-json", "--json", "-j", "-d", "--disassemble",
+    "-c=generated", "-c=gen", "-c=g", "-cgenerated", "-cgen", "-cg",
+    "--compile=generated", "--compile=gen", "--compile=g",
+    "--version", "-h", "--help",
+)
+
+
+def native_skip_reason(filename, per_test_flags, cccc_args):
+    """Return a skip_reason string if this test cannot go through the
+    -c=native round-trip, else None. Called by native.py before the compile
+    step; the per-test CCCC_FLAGS scan mirrors runner.py's own header parse.
+    """
+    if filename in NATIVE_SKIP_TESTS:
+        return NATIVE_SKIP_TESTS[filename]
+    all_flags = list(cccc_args) + list(per_test_flags)
+    for f in all_flags:
+        if f == "--build" or f.startswith("--build="):
+            return "--build mode"
+        if f == "--testing" or f.startswith("--test"):
+            return "--testing: no --test-native (#1033)"
+        if f in ("-c", "-o", "--out") or f.startswith("-c=") or f.startswith("-o=") \
+                or f.startswith("--compile") or f.startswith("--out="):
+            return "test drives -c/-o itself"
+        for p in _NATIVE_FRONTEND_PREFIXES:
+            if f == p or f.startswith(p):
+                return "frontend output mode"
+        if f in NATIVE_VM_ONLY_FLAGS or any(
+            f.startswith(v + "=") for v in NATIVE_VM_ONLY_FLAGS if v.startswith("--")
+        ):
+            return f"VM-only enforcement dropped by -c=native ({f})"
+    return None
+
+
 def leak_pass_wants_vm_heap(cccc_args, per_test_flags, keep_vm_heap_annotated=False):
     """True if any effective flag for this test requires the VM heap, so the
     leak pass must not pass -V (see LEAKS_VM_HEAP_DEPENDENT_FLAGS).

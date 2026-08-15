@@ -32,6 +32,7 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
             str(profile_dir) if profile_dir else None,
             process_timeout,
             matrix_mode,
+            getattr(args, "native", False),
         )
         for i, test_file in enumerate(test_files)
     ]
@@ -50,10 +51,15 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
     c4_skipped = 0
     c4_save_failed = 0
     matrix_skipped = 0
+    native_passed = 0
+    native_failed = 0
+    native_skipped = 0
+    native_compile_failed = 0
     failed_tests = []
     crashed_tests = []
     c4_skipped_tests = []
     matrix_skipped_tests = []
+    native_skipped_tests = []
     timings = []
 
     quiet = getattr(args, "quiet", False)
@@ -61,6 +67,7 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
     def print_single_result(result):
         nonlocal total, passed, failed, crashed, negative_passed
         nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed, matrix_skipped
+        nonlocal native_passed, native_failed, native_skipped, native_compile_failed
         total += 1
         test_name = result["test_name"]
         status = result["status"]
@@ -208,6 +215,31 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
                     # failure behind the TAP header/plan.
                     for line in lines[-10:]:
                         print(f"  {line}")
+        elif status == "native_passed":
+            native_passed += 1
+            if not quiet:
+                print(f"✓ {test_name}{timing_str}")
+        elif status == "native_skipped":
+            native_skipped += 1
+            reason = result.get("skip_reason", "")
+            if reason:
+                native_skipped_tests.append(f"{test_name} ({reason})")
+        elif status == "native_compile_failed":
+            native_compile_failed += 1
+            failed += 1
+            failed_tests.append(f"{test_name} (NATIVE COMPILE FAILED)")
+            if not quiet:
+                print(f"✗ {test_name} (NATIVE COMPILE FAILED){timing_str}")
+                for line in output.splitlines()[-10:]:
+                    print(f"  {line}")
+        elif status == "native_failed":
+            native_failed += 1
+            failed += 1
+            failed_tests.append(f"{test_name} (NATIVE RUNTIME FAILED, exit {exit_code})")
+            if not quiet:
+                print(f"✗ {test_name} (NATIVE RUNTIME FAILED, exit {exit_code}){timing_str}")
+                for line in output.splitlines()[-10:]:
+                    print(f"  {line}")
 
     def flush_results():
         nonlocal next_to_print
@@ -253,10 +285,15 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         "c4_skipped": c4_skipped,
         "c4_save_failed": c4_save_failed,
         "matrix_skipped": matrix_skipped,
+        "native_passed": native_passed,
+        "native_failed": native_failed,
+        "native_skipped": native_skipped,
+        "native_compile_failed": native_compile_failed,
         "failed_tests": failed_tests,
         "crashed_tests": crashed_tests,
         "c4_skipped_tests": c4_skipped_tests,
         "matrix_skipped_tests": matrix_skipped_tests,
+        "native_skipped_tests": native_skipped_tests,
         "timings": timings,
     }
 
@@ -264,10 +301,11 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
 _SUM_KEYS = (
     "total", "passed", "failed", "crashed", "negative_passed",
     "c4_passed", "c4_failed", "c4_skipped", "c4_save_failed", "matrix_skipped",
+    "native_passed", "native_failed", "native_skipped", "native_compile_failed",
 )
 _LIST_KEYS = (
     "failed_tests", "crashed_tests", "c4_skipped_tests",
-    "matrix_skipped_tests", "timings",
+    "matrix_skipped_tests", "native_skipped_tests", "timings",
 )
 
 
@@ -285,7 +323,14 @@ def merge_suite_results(a, b):
 # fails intermittently, sequential runs never do). Running it in its own
 # serial pass, sequenced after the rest of the parallel batch has finished,
 # removes that contention for the one file that's sensitive to it.
-ISOLATED_SERIAL_TESTS = frozenset({"test_suite_posix.c"})
+#
+# test_pthread_mutex.c joined this set while building #967's --native mode:
+# under -c=native its compiled child is a real OS-thread binary (unlike the
+# VM's own thread simulation), so it hits the same #853-shaped scheduler
+# contention under a full -j8 --native run (intermittent nonzero exit;
+# passes every time standalone or at -j1). Isolating it here fixes the
+# flake without adding a native-specific skip -- the test itself is correct.
+ISOLATED_SERIAL_TESTS = frozenset({"test_suite_posix.c", "test_pthread_mutex.c"})
 
 
 def run_test_suite_with_isolation(cccc, script_dir, use_leaks, platform, cccc_args,

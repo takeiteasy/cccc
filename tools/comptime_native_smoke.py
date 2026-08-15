@@ -2716,11 +2716,58 @@ def case_opaque_handle_multi_tu_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+FLOAT_GLOBAL_INIT_PROGRAM = """
+float g = 1.0f;
+float h = -2.0f;
+float z = 0.0f;
+
+int main(void) {
+    if (g != 1.0f) return 1;
+    if (h != -2.0f) return 2;
+    if (z != 0.0f) return 3;
+    return 42;
+}
+"""
+
+
+def case_float_global_init_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  78: -c=native, a float global initializer whose value prints "
+          "with no decimal point under %.9g (e.g. 1.0f) no longer emits the "
+          "invalid token `1f` -- serialize_init_bytes's TY_FLOAT arm now "
+          "forces a decimal point before appending the f suffix (#967)")
+    return _native_run_case(cccc, tmp, "float_global_init_967", FLOAT_GLOBAL_INIT_PROGRAM)
+
+
+ANON_MEMBER_ACCESS_PROGRAM = """
+struct S {
+    struct {
+        int i;
+    };
+    int tag;
+};
+
+int main(void) {
+    struct S s = { .i = 1, .tag = 2 };
+    s.i = 42;
+    return s.i == 42 && s.tag == 2 ? 42 : 1;
+}
+"""
+
+
+def case_anon_member_access_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  79: -c=native, member access through an anonymous struct/union "
+          "member (e.g. s.i where i belongs to an unnamed nested struct) no "
+          "longer emits the invalid `s./* unknown */.i` -- ND_MEMBER's else "
+          "arm now leaves the anonymous link transparent instead of "
+          "printing a placeholder comment (#967)")
+    return _native_run_case(cccc, tmp, "anon_member_967", ANON_MEMBER_ACCESS_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -2805,6 +2852,8 @@ def main() -> int:
             case_dup_tag_1014_native_round_trip,
             case_dup_enum_1015_native_round_trip,
             case_dup_enum_obj_1016_native_round_trip,
+            case_float_global_init_native_round_trip,
+            case_anon_member_access_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

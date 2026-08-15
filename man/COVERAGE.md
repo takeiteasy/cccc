@@ -1480,6 +1480,34 @@ them later.
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
 
+The VM tolerates a handful of pre-C23 constructs as warnings that a strict
+host C compiler rejects outright once the emitted C reaches it under
+`-c=native`/`-m`/`-c=generated`: an old-style implicit-int `main()` (or a
+non-standard first-parameter type CCCC only warns about via `-Wmain`), and a
+non-`void` function falling off its end without a `return` (`-Wreturn-type`/
+`-Wimplicit-function-declaration`-style leniency). This is not a serializer
+bug — the emitted C is a faithful re-statement of the source, and the source
+itself is not standard-conforming C; the VM is simply more permissive than
+the C standard for these specific shapes, matching how a debug build of a
+real toolchain might warn instead of erroring on legacy code. `tests/test_c4.c`
+(a self-hosting `c4`-in-`c` compiler exercised as a compile-stress case, not
+CCCC's own C4 bytecode format) hits the implicit-int case; several of
+`tools/tests.py --native`'s own `CCCC_EXPECT_STDERR` warning tests
+(`test_main_bad_argc_error.c`, `test_warning_main_bad_params.c`,
+`test_warning_declarations_default.c`, `test_warning_return_type.c`) are
+*deliberately* written this way specifically to exercise the warning, so
+they hit it too — see man/TESTING.md's "Native round-trip mode" section for
+the full list.
+
+`reallocarray()` is a platform gap, not a serializer bug: CCCC's VM
+implements it directly (registered in the stdlib), so the VM run always
+succeeds; the native link depends on the host libc actually shipping the
+symbol, which glibc/BSD libc does and Apple's libc (as of macOS 15/Sequoia)
+does not. `-c=native` on macOS therefore fails to *link* a program that
+calls `reallocarray()`, with no CCCC-side fix available short of shipping an
+inline polyfill (tracked, not yet decided — see the #967 follow-up ticket
+tracker for the open question).
+
 ---
 
 ## Standard Library and Built-in Functions

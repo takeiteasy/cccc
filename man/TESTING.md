@@ -328,7 +328,95 @@ serializer bugs in general. Cases covered:
   runs the same two assertions directly against
   `tests/suites/test_suite_arrays.c`, the tickets' own repro. See
   [HEADERS.md](HEADERS.md#pointer-arithmetic-and-global-initializer-reconstruction)
-  for the reconstruction approach.
+  for the reconstruction approach;
+- #967: a `float` global initializer whose value prints with no decimal
+  point under `%.9g` (e.g. `1.0f`) must not emit the invalid token `1f`; and
+  member access through an anonymous struct/union member (e.g. `s.i` where
+  `i` belongs to an unnamed nested struct) must not emit the invalid
+  `s./* unknown */.i` placeholder that used to sit there.
+
+### Native round-trip mode (`--native`)
+
+`tools/tests.py --c4` catches a *bytecode* round-trip regression: compile
+each positive test to `.c4`, reload it, run it, compare against 42. Before
+#967 there was no equivalent for the *serializer* — nothing ran the corpus
+through `-c=native` and compared the result against the VM run. That gap
+mattered more than it looked: `serialize_stmt`'s `default:` arm used to emit
+`/* ... */;`, a valid null statement, so an unhandled or *wrong* node in
+statement position produced a native binary that compiled, ran, and
+returned a different answer than the VM — a class of bug
+`comptime_native_smoke.py`'s hand-picked cases and `-m` shape assertions can
+catch only when someone thinks to write the specific case, and the VM-only
+main suite can never see at all, since it never runs `-c=native`.
+
+```
+python3 tools/tests.py --native
+```
+
+Three tiers, chosen per test from its header annotations:
+
+- **Full round-trip**: an eligible positive test is compiled with
+  `-c=native`, the artifact is confirmed to exist, then the compiled child
+  binary (a *separate* process from `cccc` itself — see the structural note
+  below) is run and its exit code checked against 42, or its stdout against
+  `CCCC_EXPECT_STDOUT`/`CCCC_REJECT_STDOUT` if the test declares those
+  instead.
+- **Compile-only**: `EXPECT_COMPILE_ERROR` tests assert the compile *fails*
+  (mirroring `--c4`'s negative-test handling); `EXPECT_RUNTIME_ERROR` tests
+  and tests with `CCCC_EXPECT_STDERR`/`CCCC_REJECT_STDERR` assert the compile
+  *succeeds*, but are not run — the exit-255 runtime-safety-violation trap is
+  a VM-only convention (`-c=native` warns and drops the safety flags that
+  produce it, see `#935` in COVERAGE.md's Serialized-output divergences),
+  and a diagnostic test's `CCCC_EXPECT_STDERR` assertion is already covered
+  by the normal (VM) test run — this tier only guards against a serializer
+  regression turning a previously-clean compile into a build failure.
+- **Skipped**: `--build` tests (no bytecode/native artifact to compile at
+  all), `--testing` suite files (see the coverage gap below), tests whose
+  `CCCC_FLAGS` drive their own `-c`/`-o`/frontend-output mode, and tests
+  using a VM-only safety flag `-c=native` drops with a warning rather than
+  enforcing (`--checked-pointers`, `--bounds-checks`, `--type-checks`,
+  `--memory-leak-detection`, `-1`/`-2`/`-3`, the FFI policy flags, …) —
+  exercising those natively would silently test nothing. A test can also
+  force a skip itself with a `CCCC_NATIVE_SKIP[: reason]` header annotation,
+  mirroring `CCCC_C4_SKIP`.
+
+**Structural difference from `--c4`:** under `--c4`, `cccc` itself executes
+the bytecode and returns 42. Under `--native`, `cccc`'s own exit code only
+reports whether the *compile* succeeded; the compiled artifact is a second,
+independent binary, and it is *that* binary that is expected to return 42.
+`-I./include` and the test's `CCCC_FLAGS` apply to the compile step only;
+`CCCC_RUN_ARGS` are passed to the child binary, not to `cccc`. `-O<n>`/
+`--optimize=<n>`/`-f<pass>` are stripped from a test's flags before the
+compile step rather than causing a skip — they tune the VM bytecode pipeline
+`-c=native` doesn't use, and `-c=native` hard-errors if it sees them
+verbatim.
+
+**Coverage gap:** every `[[cccc::test]]` suite file (`tests/suites/`, ~70
+files, `--testing` in `CCCC_FLAGS`) is skipped. `--test-c4` can compile,
+save, reload, and run a whole TAP suite inside one `cccc` invocation because
+`cc_load_bytecode` is a VM-internal API; there is no equivalent
+`--test-native`, since the native artifact is a wholly separate binary that
+would need the `[[cccc::test]]` harness's own registration/dispatch/TAP
+output serialized into it to run standalone. Tracked as a follow-up.
+
+**Known divergences:** the mode ships with a populated skip table
+(`NATIVE_SKIP_TESTS` in `tools/testing/__init__.py`) recording every test
+found, during #967's initial corpus sweep, to compile/link/run differently
+under `-c=native` than in the VM — each entry names its tracking ticket, and
+is deleted once that ticket lands. A handful of entries are not bugs at all:
+some `CCCC_EXPECT_STDERR` tests are deliberately invalid C (a bad `main()`
+signature, a non-void function falling off its end, an unterminated
+`#pragma`) written to exercise a CCCC-specific warning the VM tolerates as
+non-fatal; the host compiler on the regenerated C correctly treats the same
+construct as a hard error. Those are recorded in
+[COVERAGE.md](COVERAGE.md#serialized-output-divergences), not tracked as
+serializer bugs.
+
+**CI status:** opt-in only, run by hand like `--matrix` — not wired into the
+`test` build target or `.builds/linux-amd64.yml`. The skip table is large
+enough, and some entries platform-specific enough (e.g. `reallocarray` not
+existing in macOS's libc), that gating ordinary pushes on it isn't safe yet;
+revisit once the tracked follow-up tickets close.
 
 ## Architecture build and test workflows
 

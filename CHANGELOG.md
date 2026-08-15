@@ -5,6 +5,26 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- `tools/tests.py --native`: a serializer round-trip test mode, mirroring
+  `--c4`'s bytecode round-trip. Compiles each eligible positive test with
+  `-c=native`, confirms the compiled artifact exists, then runs it and
+  checks its exit code against the VM run — catching the class of bug where
+  `-c=native` compiles and runs cleanly but returns a different answer than
+  the VM. Opt-in (not wired into CI yet); see man/TESTING.md's "Native
+  round-trip mode" section.
+
+### Fixed
+
+- `src/serialize.c`: a `float` global initializer whose value prints with
+  no decimal point under `%.9g` (e.g. `1.0f`) used to emit the invalid
+  token `1f`; now forces a decimal point before the `f` suffix.
+- `src/serialize.c`: member access through an anonymous struct/union member
+  (e.g. `s.i` where `i` belongs to an unnamed nested struct) used to emit
+  the invalid `s./* unknown */.i`; the anonymous link is now left
+  transparent, matching plain C semantics.
+
 ## [0.2.15] - 2026-08-15
 
 ### Added

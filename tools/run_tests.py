@@ -49,13 +49,19 @@ from testing.suite import run_test_suite_with_isolation
 from testing.report import print_summary
 
 
-def _make_suite_args(quiet=True, bench=False, c4=False, vm_profile=False,
-                     process_timeout=None):
-    """Return a SimpleNamespace compatible with _run_test_suite's args parameter."""
+def _make_suite_args(quiet=True, bench=False, c4=False, native=False,
+                     vm_profile=False, process_timeout=None):
+    """Return a SimpleNamespace compatible with _run_test_suite's args parameter.
+
+    native defaults False and there is no --native sub-suite here (#967):
+    the mode is opt-in only (man/TESTING.md), run by hand like --matrix, not
+    wired into this orchestrator or the `test` build target.
+    """
     return types.SimpleNamespace(
         quiet=quiet,
         bench=bench,
         c4=c4,
+        native=native,
         vm_profile=vm_profile,
         process_timeout=process_timeout,
     )
