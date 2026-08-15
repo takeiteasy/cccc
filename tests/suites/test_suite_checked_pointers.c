@@ -1409,33 +1409,48 @@ void test_prop_reassignment_uses_new_range_oob(void) {
     (void)x;
 }
 
-// Negative-coverage: proves no false positives. Paired in this same file
-// with the positive OOB-traps tests above for the same shape -- if
-// propagation were entirely dead, these three would also (wrongly) "pass",
-// so the positive traps are what actually prove the feature works.
-[[cccc::test]]
+// These two were originally written as negative-coverage (expecting NO
+// check to fire, i.e. exit normally) under the belief that #919's original
+// initializer-only candidate registration and a "chain_src requires every
+// store rooted" rule still applied. Both premises went stale when #942
+// deliberately extended candidate registration to any unchecked pointer
+// local regardless of an initializer (parse_init.c, "#919/#942: candidate
+// registration...") and set Obj.checked_prop_chain_src from "!unsafe" alone
+// -- i.e. "at least one rooted store", not "every store rooted"
+// (propagate_checked_bounds()'s phase-A classifier, src/parse_checked.c).
+// #1013 (a runtime safety violation inside a [[cccc::test]] body now fails
+// the test instead of silently reporting "ok") surfaced that these two
+// were, in fact, already genuinely trapping and had been since #942 landed
+// -- caught here, not there, purely because cc_run_at's return value used
+// to be discarded. Traced by hand against the classifier: both `r`/`q`
+// really do end up checked-rooted against `p`'s real bounds by the time of
+// the OOB read, so the trap is correct, and these are now exit_code tests
+// asserting that, with the stale "not propagated" framing corrected.
+[[cccc::test(exit_code = 255)]]
 void test_prop_no_init_not_propagated(void) {
     int n = 4;
     int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *r; // no checked-rooted initializer -- not a candidate
+    int *r; // no initializer, but #942 still registers r as a candidate --
+            // its only store (r = p, below) is checked-rooted, so r DOES
+            // become a chain source with p's bounds.
     r = p;
-    volatile int i = 10; // past count(n), but r is never checked
+    volatile int i = 10; // past count(n) -- and r IS checked, so this traps.
     int x = r[i];
     (void)x;
 }
 
-[[cccc::test]]
+[[cccc::test(exit_code = 255)]]
 void test_prop_non_checked_rooted_reassign_not_propagated(void) {
     int n = 4;
     int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
     int local[4] = {0, 0, 0, 0};
-    int *q = local; // checked-rooted?  local is a plain array, not a
-                     // checked pointer -- NOT checked-rooted, so q is never
-                     // a candidate at all (poisoned right at its own
-                     // declaration, see checked_prop_poison_scan()).
-    q = p;
-    volatile int i = 10;
-    int x = q[i];
+    int *q = local; // unrooted store -- q survives as OPT (optional), not
+                     // poisoned outright: phase A only requires at least
+                     // one rooted store across the whole function, not
+                     // that this particular one be rooted.
+    q = p; // rooted store -- q's live snapshot now really is p's bounds.
+    volatile int i = 10; // q currently holds p, and i is past count(n).
+    int x = q[i]; // checked against p's bounds -- traps.
     (void)x;
 }
 
@@ -1626,30 +1641,32 @@ void test_prop_chain_broken_link_not_propagated(void) {
     (void)x;
 }
 
-// A cycle with no declared root anywhere in it never validates itself, no
-// matter how many fixpoint rounds run -- proves the fixpoint is seeded from
-// below (declared sources only) rather than optimistically from above
-// (assume everything propagates, then remove failures), which is what
-// would let this pair mutually "prove" each other.
-[[cccc::test]]
+// Originally written expecting a true cycle with no declared root to
+// silently un-check itself (see test_prop_chain_broken_link_not_propagated
+// just above for that actual shape). This one isn't that shape at all --
+// `p` IS a declared root reachable through the whole q -> r -> q chain,
+// sequentially: chain_src only requires "at least one rooted store" (not
+// "every store rooted", which the old comments below assumed -- see
+// test_prop_no_init_not_propagated's comment above for the same
+// correction), and checked_prop_rewrite_assign() snapshots LO/HI from the
+// SOURCE's live runtime value at each store, not a purely static
+// derivation. So: q=p+0 snapshots p's real bounds; r=q+1 reads q's
+// still-real snapshot (q's only store so far was rooted); q=r+1 reads r's
+// real snapshot (inherited from q) -- every store on this path is rooted
+// with p's actual bounds, so q[10] really is checked against p's 4-element
+// bound and really is out of it. #1013 (a safety violation inside a
+// [[cccc::test]] body now fails the test instead of silently "ok") is what
+// caught this had been genuinely trapping all along.
+[[cccc::test(exit_code = 255)]]
 void test_prop_chain_cycle_not_propagated(void) {
     int n = 4;
     int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0; // q's OWN declaration is checked-rooted (from p) --
-                     // but the reassignment below poisons q for the whole
-                     // function (straight-line rule: EVERY assignment to q
-                     // must be checked-rooted, not just the declaration),
-                     // so q never actually becomes a chain source at all.
-    int *r = q + 1; // r's declaration would need q as a chain source to
-                     // propagate -- q never qualifies (see above), so r is
-                     // poisoned right at its own declaration, same as any
-                     // other candidate whose init isn't checked-rooted.
-    q = r + 1;      // NOT checked-rooted (r never propagates, see above) --
-                     // this is what actually poisons q; included to show
-                     // the mutual, no-declared-root shape the comment above
-                     // describes, not because q was ever otherwise safe.
+    int *q = p + 0; // rooted: q's live snapshot = p's real bounds.
+    int *r = q + 1; // rooted from q (still holding p's real bounds).
+    q = r + 1;      // rooted from r (still holding p's real bounds) --
+                     // q's live snapshot is p's real bounds again.
     volatile int i = 10;
-    int x = q[i]; // never checked once q is poisoned
+    int x = q[i]; // checked against p's real bounds -- traps.
     (void)x;
 }
 

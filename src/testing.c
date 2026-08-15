@@ -593,11 +593,47 @@ static bool suite_matches(const char *suite, const char *filter) {
     return strncmp(s, filter, n) == 0 && (s[n] == '\0' || s[n] == '/');
 }
 
+// #1013: a runtime safety violation (uninitialized read, bounds error,
+// UAF, ...) inside a [[cccc::test]] body silently aborted the test --
+// cc_run_at's return value was discarded entirely, so execution simply
+// stopped mid-body and TAP still reported "ok". Checked immediately after
+// every in-process cc_run_at call, before anything else (a return-value
+// capture, teardown hooks) can run and clobber vm->runtime_fault via a
+// nested cc_run_at of its own. On a fault, formats a message naming the
+// opcode that aborted -- the violation's own diagnostic banner (printed by
+// the op handler itself, e.g. "UNINITIALIZED VARIABLE READ") already
+// reached stdout directly above wherever this message surfaces. Also
+// reports a host signal (vm->dbg.host_fault_signal), the same discard site
+// previously swallowing that too.
+static bool test_took_runtime_fault(VirtualMachine *vm, char *buf, size_t n) {
+    if (vm->dbg.host_fault_signal > 0) {
+        snprintf(buf, n, "aborted by host signal %d",
+                 (int)vm->dbg.host_fault_signal);
+        return true;
+    }
+    if (vm->runtime_fault) {
+        snprintf(buf, n,
+                 "runtime safety violation (%s at pc %lld) -- see the "
+                 "diagnostic above",
+                 vm->runtime_fault_op ? vm->runtime_fault_op : "<unknown>",
+                 (long long)vm->runtime_fault_pc);
+        return true;
+    }
+    return false;
+}
+
 // Run a single hook function by name (no-op if not found).
 static void run_hook(VirtualMachine *vm, Obj *prog, const char *fn_name) {
     Obj *fn = find_fn(prog, fn_name);
-    if (fn)
+    if (fn) {
         cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+        char fail_msg[512];
+        if (s_run && test_took_runtime_fault(vm, fail_msg, sizeof(fail_msg))) {
+            snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s", fail_msg);
+            s_run->failed = 1;
+            longjmp(s_run->jmp, 1);
+        }
+    }
 }
 
 // Run all matching setup or teardown hooks.
@@ -1085,6 +1121,25 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         return 0;
     }
 
+    // #1007: zero collected [[cccc::test]] functions used to exit 0 (TAP's
+    // own "1..0" is a legal, vacuously-passing plan) -- silent under casual
+    // use, and the shape most likely to indicate a --testing invocation
+    // whose test file's declarations never reached the parser (e.g. the
+    // multi-TU ordering bug this ticket also fixes). Keyed off the
+    // pre-filter vm->compiler.test_fns list, not the post-filter count n:
+    // a --test=GLOB/--test-suite filter matching nothing is a filter miss,
+    // not a broken build, and keeps its existing exit-0 behavior.
+    if (!vm->compiler.test_fns) {
+        fprintf(stderr,
+                "error: --testing: no [[cccc::test]] functions found in "
+                "any input file\n");
+        for (TestListNode *n2 = ordered,  *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
+        for (TestListNode *n2 = filtered, *nx; n2; n2 = nx) { nx = n2->next; free(n2); }
+        for (TestSetupRecord *s = setups, *nx; s; s = nx) { nx = s->next; free(s); }
+        free(once_suite);
+        return 1;
+    }
+
     CcTestFormat fmt = opts ? opts->format : TEST_FORMAT_TAP;
 
     switch (fmt) {
@@ -1550,6 +1605,16 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
             cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+            // #1013: check for a runtime safety violation / host signal
+            // before anything else -- a return-value capture below reads
+            // REG_A0 regardless of whether the body actually completed, and
+            // teardown hooks (run below) make their own nested cc_run_at
+            // call that would clobber vm->runtime_fault first.
+            char fault_msg[512];
+            if (test_took_runtime_fault(vm, fault_msg, sizeof(fault_msg))) {
+                run.failed = 1;
+                snprintf(run.fail_msg, sizeof(run.fail_msg), "%s", fault_msg);
+            }
             // Capture return values before teardown hooks clobber the registers.
             ret_int   = (int64_t)vm->regs[REG_A0];
             ret_float = cccc_freg_get_f64(vm, FREG_A0);

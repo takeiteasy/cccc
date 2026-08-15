@@ -716,6 +716,22 @@ void test_pointers(void) {
 
 No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`.
 
+### Multi-file `--testing` invocations
+
+`cccc --testing a.c b.c` compiles both files as independent translation
+units, exactly like an ordinary multi-file build. The assertion macros and
+`__builtin_assert_*` declarations are injected into *every* input file's own
+parse stream, so `[[cccc::test]]` functions can live in any file regardless
+of its position on the command line — `cccc -t helper.c tests.c` and
+`cccc -t tests.c helper.c` behave identically.
+
+A `--testing` run that collects zero `[[cccc::test]]` functions across every
+input file is a hard error (`error: --testing: no [[cccc::test]] functions
+found in any input file`, exit 1), not a silent `TAP version 13 / 1..0` pass
+— this catches an invocation whose test file's declarations never reached
+the parser. A `--test=GLOB`/`--test-suite=` filter that matches nothing is
+unaffected and keeps exiting 0 (that's a filter miss, not a broken build).
+
 ### Programmatic test generation via emit blocks
 
 `[[cccc::test]]` (and `[[cccc::test_setup]]` / `[[cccc::test_teardown]]`) inside
@@ -1186,6 +1202,30 @@ expected exit_code 139, got 0
 - `exit_code` tests are run in a forked subprocess. Setup hooks run in the parent (before the fork) so their state is visible to the child; teardown hooks run in the parent (after the child exits).
 - Global state changes made inside an `exit_code` test are not visible to subsequent tests (the child process exits and the parent restores its own snapshot as usual).
 - `exit_code` tests are skipped on non-POSIX platforms where `fork` is unavailable.
+
+## Runtime Safety Violations
+
+A runtime safety violation inside an ordinary (non-`exit_code`) `[[cccc::test]]`
+body — an uninitialized read, a bounds error, use-after-free, and the other
+checks documented in [SAFETY.md](SAFETY.md) — aborts the test function
+mid-body and reports `not ok`, with a message naming the opcode that
+aborted:
+
+```
+not ok 1 - test_reads_uninitialized_local
+  ---
+  message: runtime safety violation (CHKI at pc 9) -- see the diagnostic above
+  ...
+```
+
+The violation's own diagnostic banner (e.g. `UNINITIALIZED VARIABLE READ`)
+is printed directly above this message, since it comes from the same
+mechanism used outside `--testing` mode. Code after the trap point —
+including any `Assert*` call or `printf` meant to prove non-completion —
+never runs, exactly as it wouldn't outside `--testing`. A fault inside a
+setup or teardown hook is attributed the same way. Use an `exit_code =`
+test (above) instead if the point of the test is to assert on the specific
+exit code a crash produces.
 
 ## Setup and Teardown
 

@@ -3954,6 +3954,23 @@ struct VirtualMachine {
     // addresses (mixed atomic/non-atomic access). Tags set by ALDR/ASTR/AXCHG/ACAS.
     HashMap atomic_shadow;
 
+    // #1013: runtime safety-violation trap tracking. An opcode handler
+    // signals a fatal safety violation (uninitialized read, bounds error,
+    // UAF, ...) by returning nonzero from cccc_vm_eval_dispatch's per-op
+    // epilogue (vm.c); the return value alone can't tell a real trap apart
+    // from a guest function that legitimately returns -1, so this is a
+    // persistent marker set at the one dispatch choke point, mirroring the
+    // existing dbg.host_fault_signal precedent for a *host* signal. Cleared
+    // at the start of every cc_run_at_regs cycle so each run starts clean;
+    // set just before VM_TRAP_OR_RETURN propagates the fault, and cleared
+    // again if the crash-debug REPL resumes execution (the user continued,
+    // so it's no longer an unhandled trap). Consumed by --testing
+    // (src/testing.c) to fail a test whose body was silently aborted mid-run
+    // instead of reporting it "ok".
+    bool        runtime_fault;    // An opcode handler aborted execution.
+    const char *runtime_fault_op; // Opcode name that aborted, or NULL.
+    Pc          runtime_fault_pc; // PC of the aborting instruction.
+
     // Error handling (setjmp/longjmp for exception-like behavior)
     jmp_buf
         *error_jmp_buf;  // Jump buffer for error handling (NULL = use exit())

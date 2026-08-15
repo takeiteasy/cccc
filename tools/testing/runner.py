@@ -436,6 +436,12 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         # A --build script CLI/resolution error (e.g. main() defined, ambiguous
         # entry). The expect_stderr regex below validates the diagnostic.
         status = "negative_pass"
+    elif is_testing_mode and expect_stderr and exit_code != 0:
+        # A --testing run that is deliberately expected to fail/error (e.g.
+        # #1007's "zero tests collected" hard error, or #1013's "a runtime
+        # safety violation fails the test, not 'ok'"). The expect_stderr
+        # regex below validates the actual diagnostic/TAP failure text.
+        status = "negative_pass"
     elif is_testing_mode:
         # Compiled and ran, but the [[cccc::test]] framework reported a
         # failing/erroring subtest (nonzero exit, no compile-error markers

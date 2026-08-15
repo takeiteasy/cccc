@@ -533,6 +533,16 @@ static inline bool vm_crash_trap_active(VirtualMachine *vm) {
            !(vm->flags & CCCC_NO_DEBUG_ON_CRASH);
 }
 
+// #1013: record that an opcode handler aborted execution with a fatal
+// safety violation, so a caller like --testing (src/testing.c) can tell a
+// genuine trap apart from a guest function that legitimately returns -1
+// through REG_A0 -- vm_eval's own return value can't distinguish the two.
+static inline void cccc_vm_note_fault(VirtualMachine *vm, const char *op_name) {
+    vm->runtime_fault    = true;
+    vm->runtime_fault_op = op_name;
+    vm->runtime_fault_pc = vm->pc;
+}
+
 int cccc_vm_eval_dispatch(VirtualMachine *vm, volatile Pc *current_pc) {
     static void *op_table[] = {
 #define X(NAME, OPERANDS) [NAME] = &&op_##NAME,
@@ -554,6 +564,7 @@ dispatch:
     do {                                       \
         if (vm_crash_trap_active(vm)) {        \
             cc_debug_repl(vm);                 \
+            vm->runtime_fault = false;         \
             goto dispatch;                     \
         }                                      \
         return (rc);                           \
@@ -696,6 +707,7 @@ dispatch:
         int op = (int)cc_read_word(vm);
         if (__builtin_expect(op < 0 || op >= (int)(sizeof(op_table) / sizeof(op_table[0])) || !op_table[op], 0)) {
             printf("unknown instruction:%d\n", op);
+            cccc_vm_note_fault(vm, "<unknown>");
             VM_TRAP_OR_RETURN(-1);
         }
         if (__builtin_expect(vm->vm_profile_enabled, 0)) {
@@ -733,7 +745,10 @@ dispatch:
 #define X(NAME, OPERANDS)                                        \
     op_##NAME: {                                                 \
         int _r = op_##NAME##_fn(vm);                             \
-        if (__builtin_expect(_r != 0, 0)) VM_TRAP_OR_RETURN(_r); \
+        if (__builtin_expect(_r != 0, 0)) {                      \
+            cccc_vm_note_fault(vm, #NAME);                       \
+            VM_TRAP_OR_RETURN(_r);                                \
+        }                                                        \
         if (__builtin_expect(vm->pc == CCCC_INVALID_PC, 0))       \
             return (int)vm->regs[REG_A0];                        \
         goto dispatch;                                           \
@@ -2171,6 +2186,12 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0, long long 
     cccc_gil_acquire(vm);
     cc_vm_profile_reset(vm);
     vm->dbg.host_fault_signal = 0;
+    // #1013: clear the previous run's fault marker so each cc_run_at cycle
+    // starts clean -- otherwise a fault from an earlier call (e.g. a prior
+    // test) could be misattributed to this one.
+    vm->runtime_fault    = false;
+    vm->runtime_fault_op = NULL;
+    vm->runtime_fault_pc = 0;
 
     vm->pc = entry;
 

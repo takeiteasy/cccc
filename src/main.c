@@ -2507,25 +2507,6 @@ int main(int argc, const char *argv[]) {
 
     vm.compiler.skip_preprocess = skip_preprocess;
 
-    // Inject mode headers before preprocessing so their types/macros are in
-    // scope. When both --testing and --build are active, both headers are
-    // injected and their declaration lists are chained together.
-    Token *test_decls = NULL;
-    if (testing_mode)
-        test_decls = cc_inject_test_header(&vm);
-    if (build_mode) {
-        Token *build_decls = cc_inject_build_header(&vm);
-        if (build_decls && test_decls) {
-            Token *tail = build_decls;
-            while (tail->next && tail->next->kind != TK_EOF)
-                tail = tail->next;
-            tail->next = test_decls;
-            test_decls = build_decls;
-        } else if (build_decls) {
-            test_decls = build_decls;
-        }
-    }
-
     // #1002 (investigation): record every command-line input path before
     // preprocessing any of them, so the serializer can ask "was this Obj
     // written in a file the user asked to compile" for *any* input index,
@@ -2546,10 +2527,53 @@ int main(int argc, const char *argv[]) {
         // first file (nothing to reset yet).
         if (i > 0)
             cc_reset_preprocessor_state_for_next_tu(&vm);
+
+        // #1007: inject mode headers (testing.h/building.h) into *every*
+        // TU's own parse stream, not just input_tokens[0]. Their real
+        // payload is a side effect of preprocessing them -- registering the
+        // Assert*/build macros into vm.compiler.macros -- and
+        // cc_reset_preprocessor_state_for_next_tu() above deliberately
+        // undoes that (#1001) ahead of each TU after the first, restoring
+        // the macro table to the -D/-U CLI baseline. A one-shot injection
+        // done before this loop (the pre-#1007 shape) therefore only ever
+        // benefited TU 0: a later TU never saw the Assert* macros expand at
+        // all (an "undefined function: AssertEq" from a still-unexpanded
+        // macro call, not a missing __builtin_assert_eq prototype), and even
+        // if it had, the prototypes themselves were only ever spliced onto
+        // input_tokens[0]. When both --testing and --build are active, both
+        // headers are injected and their declaration lists are chained
+        // together, same as before.
+        Token *test_decls = NULL;
+        if (testing_mode)
+            test_decls = cc_inject_test_header(&vm);
+        if (build_mode) {
+            Token *build_decls = cc_inject_build_header(&vm);
+            if (build_decls && test_decls) {
+                Token *tail = build_decls;
+                while (tail->next && tail->next->kind != TK_EOF)
+                    tail = tail->next;
+                tail->next = test_decls;
+                test_decls = build_decls;
+            } else if (build_decls) {
+                test_decls = build_decls;
+            }
+        }
+
         input_tokens[i] = cc_preprocess(&vm, input_files[i]);
         if (!input_tokens[i]) {
             fprintf(stderr, "error: failed to preprocess %s\n", input_files[i]);
             goto BAIL;
+        }
+
+        // Prepend this TU's injected header declarations onto its own
+        // parse stream (mirrors the pre-#1007 input_tokens[0]-only splice,
+        // now applied per TU).
+        if (test_decls) {
+            Token *last = test_decls;
+            while (last->next && last->next->kind != TK_EOF)
+                last = last->next;
+            last->next = input_tokens[i];
+            input_tokens[i] = test_decls;
         }
     }
 
@@ -2563,15 +2587,6 @@ int main(int argc, const char *argv[]) {
         // #686: warnings have been printed; clear them so later checkpoints
         // (which reprint the whole vm->errors list) don't print them again.
         cc_clear_errors(&vm);
-    }
-
-    // Prepend injected header declarations into the first file's parse stream.
-    if ((testing_mode || build_mode) && test_decls && input_files_count > 0) {
-        Token *last = test_decls;
-        while (last->next && last->next->kind != TK_EOF)
-            last = last->next;
-        last->next = input_tokens[0];
-        input_tokens[0] = test_decls;
     }
 
     // If -E flag is set, output preprocessed source and exit
