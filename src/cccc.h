@@ -1850,6 +1850,23 @@ struct Obj {
     // entry, never reintroduce the #673 false negative. See man/SAFETY.md.
     bool addr_escapes;
 
+    // Uninitialized-variable-read false-positive fix (#1008). Set by the
+    // same post-parse scan (mark_addr_escapes in parse_analysis.c) for
+    // *every* syntactic `&expr` rooted at this local, regardless of whether
+    // the resulting address ever escapes the frame -- unlike addr_escapes
+    // above, which deliberately under-marks (safe for its own LEA3-pruning
+    // purpose, but not safe here: a write through a non-escaping address,
+    // e.g. `int *p = &x; *p = 1;`, still bypasses the syntactic-assignment
+    // MARKI tracking CHKI relies on). Consumed only by the read-side CHKI
+    // guard in codegen_expr.c to suppress precise initialization tracking
+    // for a local once its address is taken -- the same "address-based, so
+    // don't try to track precisely" treatment already given to
+    // struct/union/array/wide-_BitInt/_Decimal locals there (#402/#457).
+    // Defaults to false; under-marking here just leaves the false positive
+    // in place, over-marking costs an accepted false negative. See
+    // man/SAFETY.md.
+    bool addr_taken;
+
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
     // Only honored when the pointer is assigned exactly once (its declaration
     // initializer) and never has its address taken; see resolve_objsize_queries.

@@ -456,6 +456,20 @@ All features listed below can be enabled individually or through the safety leve
   - CHKI opcode validates variable is initialized before read
   - Detects use of uninitialized local variables with stack offset info
   - HashMap key: BP address + offset for per-function-call tracking
+  - **Address-based locals are exempt from the CHKI check** (#1008): a
+    struct/union/array/wide-`_BitInt`/`_Decimal` local was already exempt
+    (#402/#457, since those are always written through a raw pointer, never
+    a syntactic `var = expr;` that would emit MARKI). The same exemption now
+    also covers any scalar local whose address is ever taken (`&var`,
+    including through interior addressing like `&arr[i]`/`&s.field`,
+    tracked via `Obj.addr_taken`), one accessed from a nested function
+    (`is_captured`), and a `__block`-qualified local written from inside a
+    block literal (`is_block_var`) — all three write through a mechanism
+    the syntactic-assignment MARKI tracking never sees, most commonly the
+    ordinary C out-parameter idiom (`void fill(int *out){ *out = 42; }`).
+    Cost: a genuinely-uninitialized local that has its address taken is no
+    longer caught by this detector once that address is taken, even if the
+    read in question doesn't go through that address.
 - `--overflow-checks` **Signed integer overflow detection**
   - Detects arithmetic overflow for addition, subtraction, multiplication, and division
   - Emits checked opcodes (ADDC, SUBC, MULC, DIVC) when enabled

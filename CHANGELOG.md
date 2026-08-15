@@ -3,6 +3,24 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`--uninitialized-detection`/`--safety=max` falsely reported
+  `UNINITIALIZED VARIABLE READ` for a scalar local written through its
+  address rather than a direct assignment** (#1008), most commonly the
+  ordinary C out-parameter idiom (`void fill(int *out){ *out = 42; }`).
+  The same gap also covered a `__block` local written from inside a
+  block literal and a plain local written from inside a nested
+  function. Fixed by exempting a local from the read-side check once
+  its address is taken, mirroring the existing struct/array/wide
+  `_BitInt`/`_Decimal` exemptions. A downstream false
+  `MEMORY LEAK DETECTED` report (#1009) was investigated and found to
+  be entirely caused by #1008 — the uninit trap silently aborted the
+  program before its own `free`/teardown code ran — and closes as a
+  duplicate with no separate fix needed.
+
 ## [0.2.14] - 2026-08-14
 
 ### Fixed

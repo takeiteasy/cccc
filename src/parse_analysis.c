@@ -647,23 +647,27 @@ static void objsize_poison_scan(Node *node) {
     }
 }
 
-// #676: walk an addressed-lvalue chain rooted at an explicit `&expr`,
+// #676/#1008: walk an addressed-lvalue chain rooted at an explicit `&expr`,
 // finding the local Obj whose own frame-relative storage the resulting
-// LEA3 actually materializes, and mark it as escaping. Interior-aware:
-// &arr[i] and &s.field descend through the runtime-offset / member chain
-// to arr / s, the variable whose *base* LEA3 is what op_LEA3_fn actually
-// tags in stack_ptr_epochs (see #675's interior resolution, which depends
-// on that base still being recorded whenever it escapes). Purely additive:
-// if the chain bottoms out in something other than a plain local var (e.g.
-// a global, or an address computed off an unrelated pointer parameter),
+// LEA3 actually materializes, and mark it addr_taken (always) and
+// addr_escapes (only when `escaping` is true). Interior-aware: &arr[i] and
+// &s.field descend through the runtime-offset / member chain to arr / s,
+// the variable whose *base* LEA3 is what op_LEA3_fn actually tags in
+// stack_ptr_epochs (see #675's interior resolution, which depends on that
+// base still being recorded whenever it escapes). Purely additive: if the
+// chain bottoms out in something other than a plain local var (e.g. a
+// global, or an address computed off an unrelated pointer parameter),
 // there's no Obj to mark here and we simply do nothing -- safe, since no
 // LEA3-of-this-Obj recording decision hinges on it.
-static void mark_escaping_root(Node *n) {
+static void mark_root_var(Node *n, bool escaping) {
     while (n) {
         switch (n->kind) {
         case ND_VAR:
-            if (n->var)
-                n->var->addr_escapes = true;
+            if (n->var) {
+                n->var->addr_taken = true;
+                if (escaping)
+                    n->var->addr_escapes = true;
+            }
             return;
         case ND_MEMBER:
         case ND_CAST:
@@ -686,6 +690,12 @@ static void mark_escaping_root(Node *n) {
             return;
         }
     }
+}
+
+// #676: thin wrapper over mark_root_var for the existing escaping call
+// sites in find_and_mark_escaping_addr() below -- unchanged behaviour.
+static void mark_escaping_root(Node *n) {
+    mark_root_var(n, true);
 }
 
 // Walk value-transparent wrappers (cast, comma, ternary branches, chained
@@ -775,6 +785,17 @@ void mark_addr_escapes(Node *node) {
                  node->lhs->ty->kind == TY_STRUCT ||
                  node->lhs->ty->kind == TY_UNION))
                 find_and_mark_escaping_addr(node->rhs);
+            break;
+        case ND_ADDR:
+            // #1008: every explicit `&expr`, not just ones reaching a
+            // proven-escaping sink, marks its root var addr_taken (but not
+            // addr_escapes -- that's still decided by the cases above).
+            // Consumed by codegen_expr.c's CHKI guard to stop precisely
+            // tracking initialization for a local once its address is
+            // taken, since a write through that address bypasses the
+            // syntactic-assignment MARKI tracking relies on.
+            if (node->lhs)
+                mark_root_var(node->lhs, false);
             break;
         default:
             break;

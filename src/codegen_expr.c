@@ -563,6 +563,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // variable read" trap under CCCC_UNINIT_DETECTION (-2/-3) that
             // ticket #457 reported. (Consistent with structs/unions/arrays,
             // which are already exempt here.)
+            //
             if (node->var->is_local && !node->var->is_param &&
                 node->var->ty && node->var->ty->kind != TY_ARRAY &&
                 node->var->ty->kind != TY_STRUCT &&
@@ -571,7 +572,26 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 !is_decimal(node->var->ty)) { // #402: address-based, same exemption
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_chkl(vm, node->var->offset);
-                if (vm->flags & CCCC_UNINIT_DETECTION)
+                // #1008: MARKI is only ever emitted for a *syntactic*
+                // assignment whose LHS is this variable itself (see the
+                // ND_ASSIGN case below) -- a write through a pointer
+                // obtained via &var (an out-parameter call, or any other
+                // indirect store) never emits it. addr_taken (set for every
+                // `&var` by mark_addr_escapes, parse_analysis.c) exempts
+                // such a local from this check the same way the aggregate
+                // types above are exempt -- once its address is taken, stop
+                // trying to track its initialization precisely.
+                // is_captured/is_block_var cover the matching cases where a
+                // nested function or block literal writes the var without
+                // an explicit `&` ever appearing at this var's own
+                // declaring scope (static-link / block-box writes).
+                // Accepted cost: a genuinely-uninitialized address-taken
+                // local is no longer caught here. Deliberately does not
+                // affect CHKL/MARKR above/below (CCCC_STACK_INSTR is an
+                // unrelated feature). See man/SAFETY.md.
+                if ((vm->flags & CCCC_UNINIT_DETECTION) &&
+                    !node->var->addr_taken && !node->var->is_captured &&
+                    !node->var->is_block_var)
                     emit_chki(vm, node->var->offset);
                 if (vm->flags & CCCC_STACK_INSTR)
                     emit_markr(vm, node->var->offset);
