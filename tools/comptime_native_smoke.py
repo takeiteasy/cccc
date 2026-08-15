@@ -2397,6 +2397,86 @@ def case_multi_tu_typedef_and_includes_native_round_trip(cccc: Path, tmp: str) -
     return True
 
 
+OPAQUE_HANDLE_1010_HEADER = (
+    "#pragma once\n"
+    "typedef struct DyAtoms1010Smoke DyAtoms1010Smoke;\n"
+    "DyAtoms1010Smoke *make_atoms_1010_smoke(void);\n"
+    "int get_x_1010_smoke(DyAtoms1010Smoke *t);\n"
+)
+
+OPAQUE_HANDLE_1010_DEF = (
+    '#include "opaque_handle_1010_smoke.h"\n'
+    "struct DyAtoms1010Smoke { int x; };\n"
+    "DyAtoms1010Smoke *make_atoms_1010_smoke(void) {\n"
+    "    static struct DyAtoms1010Smoke a;\n"
+    "    a.x = 42;\n"
+    "    return &a;\n"
+    "}\n"
+    "int get_x_1010_smoke(DyAtoms1010Smoke *t) { return t->x; }\n"
+)
+
+OPAQUE_HANDLE_1010_USE = (
+    '#include "opaque_handle_1010_smoke.h"\n'
+    "int main(void) {\n"
+    "    DyAtoms1010Smoke *t = make_atoms_1010_smoke();\n"
+    "    return get_x_1010_smoke(t);\n"
+    "}\n"
+)
+
+
+def _case_opaque_handle_1010_order(cccc: Path, tmp: str, def_first: bool) -> bool:
+    write(Path(tmp) / "opaque_handle_1010_smoke.h", OPAQUE_HANDLE_1010_HEADER)
+    def_src = Path(tmp) / "opaque_handle_1010_smoke_def.c"
+    use_src = Path(tmp) / "opaque_handle_1010_smoke_use.c"
+    write(def_src, OPAQUE_HANDLE_1010_DEF)
+    write(use_src, OPAQUE_HANDLE_1010_USE)
+    order = [def_src.name, use_src.name] if def_first else [use_src.name, def_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    suffix = "deffirst" if def_first else "usefirst"
+    out_bin = Path(tmp) / f"opaque_handle_1010_smoke_out_{suffix}"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    return True
+
+
+def case_opaque_handle_multi_tu_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  74: -c=native, the opaque-handle idiom (a header forward-"
+          "declares `typedef struct Foo Foo;`, exactly one .c file "
+          "supplies `struct Foo { ... };`, another .c file only ever "
+          "dereferences the handle) across two command-line input files, "
+          "in both orders (#1010). Defect A: with the completing TU parsed "
+          "first, the struct's definition was dropped from the output "
+          "entirely (a later TU's own header forward declaration -- "
+          "record_type_name() prepends -- won find_tag_name()'s first-"
+          "match scan and looked header-supplied). Defect B: with the "
+          "completing TU parsed last, collect_type()'s same_type_or_origin "
+          "dedup let the incomplete Type* claim the definition slot first, "
+          "emitting a bare `struct Foo;`. Both are host compile failures "
+          "('incomplete definition of type'), which tests/test_serialize_"
+          "opaque_handle_1010.c and _rev.c's -m shape assertions catch but "
+          "can't prove the resulting binary actually links and runs -- "
+          "this is that proof, VM 42 -> native 42, both orders")
+    if not _case_opaque_handle_1010_order(cccc, tmp, def_first=True):
+        return False
+    if not _case_opaque_handle_1010_order(cccc, tmp, def_first=False):
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -2482,6 +2562,7 @@ def main() -> int:
             case_static_name_collision_multi_tu,
             case_switch_break_continue_native_round_trip,
             case_multi_tu_typedef_and_includes_native_round_trip,
+            case_opaque_handle_multi_tu_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

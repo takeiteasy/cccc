@@ -2798,6 +2798,21 @@ typedef struct TypeNameRecord {
     // `#include @comptime`/`@shared`/`@build`/`@test` route, which has
     // nothing else to supply its definition.
     char *file_path;
+    // #1010: true only for a tag record created at a struct/union/enum
+    // *definition* (install_tag_definition's two record_type_name call
+    // sites, src/parse_types.c) -- never for a forward-declaration's
+    // push_tag_scope record. record_type_name() prepends, so with more than
+    // one command-line input file a later TU's own forward declaration of
+    // an already-completed tag (from re-parsing a shared header, #1001's
+    // per-TU preprocessor isolation) can end up ahead of the completing
+    // record in scan order; same_type_or_origin() also deliberately treats
+    // a tagged incomplete aggregate as equal to the tagged complete one
+    // (serialize.c), so a naive first-match scan could pick the
+    // forward-declaration's from_include=true record and wrongly suppress
+    // the only definition available. serialize.c's
+    // find_tag_name_for_provenance() prefers a defines_type record over a
+    // merely-first one.
+    bool defines_type;
     struct TypeNameRecord *next;
 } TypeNameRecord;
 

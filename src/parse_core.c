@@ -574,6 +574,16 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
     vm->compiler.type_names = rec;
 }
 
+// #1010: marks the most-recently-created TypeNameRecord for `ty` as having
+// been recorded at a real definition (see TypeNameRecord.defines_type,
+// cccc.h). Only meaningful called immediately after the record_type_name()
+// call it's marking -- a no-op if type_names' head isn't that record (e.g.
+// record_type_name() itself declined to create one, ty/name were NULL).
+void mark_last_type_name_as_definition(VirtualMachine *vm, Type *ty) {
+    if (vm->compiler.type_names && vm->compiler.type_names->ty == ty)
+        vm->compiler.type_names->defines_type = true;
+}
+
 Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
     Initializer *init =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Initializer));

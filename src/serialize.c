@@ -154,6 +154,9 @@ typedef struct {
     // to tell whether this type's declaring header was actually captured
     // into the output.
     char *file_path;
+    // #1010: mirrors TypeNameRecord.defines_type -- see that field's comment
+    // (cccc.h) and find_tag_name_for_provenance() below.
+    bool defines_type;
 } TypeName;
 
 // #965: pairs a lifted block function (Obj.is_block) with the name of the
@@ -384,6 +387,23 @@ static bool type_vec_contains(TypeVec *vec, Type *ty) {
     return false;
 }
 
+// #1010 defect B: index-returning counterpart to type_vec_contains(), used
+// by collect_type()'s incomplete-vs-complete swap below.
+static int type_vec_find(TypeVec *vec, Type *ty) {
+    for (int i = 0; i < vec->len; i++)
+        if (same_type_or_origin(vec->data[i], ty))
+            return i;
+    return -1;
+}
+
+static void type_vec_remove_at(TypeVec *vec, int idx) {
+    if (idx < 0 || idx >= vec->len)
+        return;
+    for (int i = idx; i < vec->len - 1; i++)
+        vec->data[i] = vec->data[i + 1];
+    vec->len--;
+}
+
 static void type_vec_push(TypeVec *vec, Type *ty) {
     if (!ty || type_vec_contains(vec, ty))
         return;
@@ -398,7 +418,7 @@ static void type_vec_push(TypeVec *vec, Type *ty) {
 static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
                            char *name, int name_len, Obj *owner_fn,
                            bool from_include, bool always_emit,
-                           char *file_path) {
+                           char *file_path, bool defines_type) {
     if (!ty || !name || name_len <= 0)
         return;
 
@@ -414,6 +434,7 @@ static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
     (*items)[*len].from_include = from_include;
     (*items)[*len].always_emit = always_emit;
     (*items)[*len].file_path = file_path;
+    (*items)[*len].defines_type = defines_type;
     (*len)++;
 }
 
@@ -422,12 +443,14 @@ static void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
         if (rec->is_tag)
             type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, rec->ty,
                            rec->name, rec->name_len, rec->owner_fn,
-                           rec->from_include, rec->always_emit, rec->file_path);
+                           rec->from_include, rec->always_emit, rec->file_path,
+                           rec->defines_type);
         else
             type_name_push(&ctx->typedefs, &ctx->typedefs_len,
                            &ctx->typedefs_cap, rec->ty, rec->name,
                            rec->name_len, rec->owner_fn,
-                           rec->from_include, rec->always_emit, rec->file_path);
+                           rec->from_include, rec->always_emit, rec->file_path,
+                           rec->defines_type);
     }
 }
 
@@ -444,6 +467,39 @@ static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
             same_type_or_origin(ctx->tags[i].ty, ty))
             return &ctx->tags[i];
     return NULL;
+}
+
+// #1010: like find_tag_name(), but for deciding *provenance* (whether a
+// header supplies this type's definition) rather than spelling. ctx->tags
+// is in reverse record-creation order (collect_scope_names() walks
+// type_names head-first, and record_type_name() prepends), so
+// find_tag_name()'s first-match scan returns whichever record was created
+// *last* -- normally fine (a later declaration's provenance is the more
+// accurate one), but wrong when that later record is an unrelated forward
+// declaration of an already-completed tag: same_type_or_origin() treats a
+// tagged incomplete aggregate as equal to the tagged complete one
+// (deliberately -- see that function's #892 comment), so a from_include
+// forward declaration recorded after the real definition (e.g. a second
+// command-line input file re-parsing a shared header under #1001's per-TU
+// preprocessor isolation) would otherwise win and wrongly suppress the only
+// definition available. Prefers a defines_type record; falls back to the
+// first match (today's behavior) when no record actually defines the tag,
+// e.g. every command-line input file only ever forward-declares it.
+static TypeName *find_tag_name_for_provenance(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+
+    TypeName *first_match = NULL;
+    for (int i = 0; i < ctx->tags_len; i++) {
+        if (!name_visible(&ctx->tags[i], ctx->current_fn) ||
+            !same_type_or_origin(ctx->tags[i].ty, ty))
+            continue;
+        if (ctx->tags[i].defines_type)
+            return &ctx->tags[i];
+        if (!first_match)
+            first_match = &ctx->tags[i];
+    }
+    return first_match;
 }
 
 static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
@@ -584,8 +640,38 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
         return;
 
-    if (type_vec_contains(&ctx->seen, ty))
+    int seen_idx = type_vec_find(&ctx->seen, ty);
+    if (seen_idx >= 0) {
+        // #1010 defect B: same_type_or_origin() deliberately treats a
+        // tagged *incomplete* struct/union as equal to the tagged
+        // *complete* one (#892) -- so a use-site TU that only ever sees a
+        // header's forward declaration can get here first (e.g. #1001's
+        // per-TU preprocessor isolation re-parsing a shared header from a
+        // second command-line input file) and claim ctx->seen/ctx->defs'
+        // slot for its member-less Type* before the completing TU's own
+        // Type* is ever collected. serialize_struct_def then has no
+        // members to print and emits a bare `struct Foo;`. Swap the
+        // complete Type* in when this happens: remove-then-recollect
+        // (rather than mutating the ctx->defs entry in place) so a member
+        // type the incomplete stub never referenced -- e.g. `struct Outer
+        // { struct Inner i; }` -- is still collected and, being freshly
+        // pushed, still emitted ahead of its own user. TY_ENUM is excluded
+        // deliberately: same_type_or_origin()'s enum arm compares
+        // enum_constants lists directly with no completeness shortcut, so
+        // an incomplete (constant-less) enum never structurally matches a
+        // complete one in the first place -- this branch is unreachable
+        // for enums.
+        Type *prior = ctx->seen.data[seen_idx];
+        if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+            prior->size < 0 && ty->size >= 0) {
+            ctx->seen.data[seen_idx] = ty;
+            type_vec_remove_at(&ctx->defs, type_vec_find(&ctx->defs, ty));
+            for (Member *m = ty->members; m; m = m->next)
+                collect_type(ctx, m->ty);
+            type_vec_push(&ctx->defs, ty);
+        }
         return;
+    }
     type_vec_push(&ctx->seen, ty);
 
     for (Member *m = ty->members; m; m = m->next)
@@ -2678,6 +2764,20 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
     if (var->is_string_literal)
         return;
 
+    // #1011: the #918/#928 forward-declaration pass (cc_serialize_program,
+    // further down this file) already emitted a line for this global ahead
+    // of every definition -- `static T name;` for a static with no
+    // initializer, or `extern T name;` for a declaration with no
+    // definition (is_definition false). When this global also has no
+    // init_data, what follows below would print the exact same text a
+    // second time, back to back (e.g. a function-local `static struct Foo
+    // a;` hoisted to file scope by rename_anon_globals() as `__cccc_a_0`).
+    // A global that *does* have an initializer still needs both lines (the
+    // forward declaration, then the real `T name = ...;` definition), so
+    // this only skips the no-initializer case.
+    if (!var->init_data && (var->is_static || !var->is_definition))
+        return;
+
     if (var->is_static)
         fprintf(f, "static ");
     else if (!var->is_definition)
@@ -2926,7 +3026,7 @@ static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
         // site, including inside the declaring function, which is exactly
         // what gives the one-definition property.
         type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty,
-                       chosen_name, chosen_len, NULL, false, true, NULL);
+                       chosen_name, chosen_len, NULL, false, true, NULL, true);
 
     Obj *saved_fn = ctx->current_fn;
     ctx->current_fn = NULL;
@@ -3066,7 +3166,11 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // re-derived. path_is_captured() distinguishes the two by checking
         // whether provenance_source's declaring file is one of the
         // resolved paths auto-capture actually emitted for this program.
-        TypeName *provenance_source = tag ? tag : alias;
+        // #1010: use find_tag_name_for_provenance() rather than plain `tag`
+        // when a tag exists -- see that function's comment. A tagless
+        // typedef alias has exactly one record and no such ambiguity, so
+        // `alias` (from find_typedef_name() above) is used unchanged.
+        TypeName *provenance_source = tag ? find_tag_name_for_provenance(ctx, ty) : alias;
         if (!ctx->emit_strict && provenance_source &&
             provenance_source->from_include && !provenance_source->always_emit &&
             (!ctx->generated_only ||

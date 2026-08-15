@@ -996,6 +996,14 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
     Type *existing = find_tag_in_current_scope(vm, tag);
     if (!existing) {
         push_tag_scope(vm, tag, ty);
+        // #1010: this call site is only reached from struct_decl/union_decl/
+        // enum_specifier's `{ ... }` (definition) path -- a bare forward
+        // reference (`struct Foo;`) never calls install_tag_definition at
+        // all (see struct_union_decl/enum_specifier's own push_tag_scope
+        // calls). Mark the record push_tag_scope just created as a real
+        // definition so serialize.c's find_tag_name_for_provenance() can
+        // prefer it over an unrelated forward declaration recorded later.
+        mark_last_type_name_as_definition(vm, ty);
         return ty;
     }
 
@@ -1017,6 +1025,7 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
         // belongs to the definition, not the first mention (the same rule
         // Type.struct_tag was added for in #892/#897).
         record_type_name(vm, existing, tag->loc, tag->len, true, tag);
+        mark_last_type_name_as_definition(vm, existing); // #1010
         return existing;
     }
 

@@ -341,6 +341,7 @@ VarScope *push_scope(VirtualMachine *vm, char *name, int name_len);
 void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty);
 void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
                              bool is_tag, Token *decl_tok);
+void mark_last_type_name_as_definition(VirtualMachine *vm, Type *ty); // #1010
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var);
 void resolve_member_checked_bounds(VirtualMachine *vm, Member *members);
 void resolve_objsize_queries(VirtualMachine *vm, Node *body);
