@@ -135,8 +135,9 @@ NATIVE_SKIP_TESTS = {
                    "the real host libm -- SIGSEGV (#1035)",
     "test_float_to_int_conversion.c": "saturating float->int64/uint64 cast "
                    "diverges from the host's raw C cast (#1036)",
-    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum "
-                   "family + an unrelated intmax_t provenance gap (#1037)",
+    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
+                   "totalorder/etc family -- link failure, not a compile "
+                   "error (#1037)",
 
     # --- #1022: pthread/threads native support gaps ---
     "test_thread_local_isolation.c": "threads fail under native (#1022)",

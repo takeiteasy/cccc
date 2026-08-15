@@ -3504,9 +3504,20 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
 // empty macro argument stringizes to "", not an error). Emitted once, only
 // when some function actually carries an asm label, and ahead of every
 // asm-labeled declaration since it's used there as `asm(__CCCC_ASM_PREFIX__ "name")`.
+//
+// Deliberately does NOT check obj->is_used: serialize_function_signature
+// prints the asm(...) clause purely off fn->asm_label, with no is_used
+// gate of its own, and the function-prototype pass (cc_serialize_program,
+// further down this file) can emit a bodiless declaration's prototype
+// (e.g. `int f(void) asm("name");` with no definition anywhere in this TU)
+// regardless of whether anything in the program actually calls it. Gating
+// this preamble on is_used while that emission site isn't would leave
+// __CCCC_ASM_PREFIX__ referenced-but-undefined for exactly that case
+// ("expected string literal in 'asm'", confirmed) -- three unconditional
+// #defines cost nothing, so match unconditionally instead.
 static bool prog_uses_asm_label(Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->is_used && obj->asm_label)
+        if (obj->is_function && obj->asm_label)
             return true;
     return false;
 }
