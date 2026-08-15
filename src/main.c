@@ -149,6 +149,17 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
         return 1;
     }
     cc_serialize_program(f, vm, prog, false);
+    // #1017: cc_serialize_program() can itself queue a warning (e.g.
+    // CCCC_WARN_NATIVE_NAME_COLLISION) via warn_tok()/vm->collect_errors --
+    // nothing upstream of this call flushes vm->errors again, so print (and
+    // clear, matching every other checkpoint's own cc_has_errors()/
+    // cc_clear_errors() pairing, e.g. the one right before the -m/
+    // -c=generated bail-out this function's sibling call site guards) right
+    // here or it's silently dropped.
+    if (cc_has_errors(vm) || vm->warning_count > 0) {
+        cc_print_all_errors(vm);
+        cc_clear_errors(vm);
+    }
     if (fclose(f) != 0) {
         fprintf(stderr, "error: failed to write %s: %s\n", source_path,
                 strerror(errno));
@@ -2740,6 +2751,18 @@ int main(int argc, const char *argv[]) {
         // same reason.
         vm.compiler.globals = merged_prog;
         cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
+        // #1017: as above (run_native_backend) -- a warning queued by
+        // cc_serialize_program() itself (e.g. CCCC_WARN_NATIVE_NAME_COLLISION)
+        // is otherwise silently dropped, since this path bails out to BAIL
+        // right after without ever reaching the later cc_has_errors()/
+        // warning_count checkpoints. BAIL itself never reprints vm.errors
+        // (cc_destroy() below it just frees the parser arena vm.errors
+        // lives in), so the clear here is for symmetry with every other
+        // checkpoint's print+clear pairing, not strictly required.
+        if (cc_has_errors(&vm) || vm.warning_count > 0) {
+            cc_print_all_errors(&vm);
+            cc_clear_errors(&vm);
+        }
         if (f != stdout) {
             fclose(f);
             if (compile_format == COMPILE_GENERATED)

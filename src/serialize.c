@@ -3708,6 +3708,12 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         int first_seen;
         bool header_exposed;
         bool extern_ref;
+        // #1017: the from_include record's file_path, captured alongside
+        // header_exposed below -- names the header in the residual warning
+        // when this group collides with an un-renameable Obj. May stay NULL
+        // (TypeName.file_path itself can be NULL), in which case the
+        // warning falls back to not naming a header.
+        const char *header_path;
     } EnumGroup;
     EnumGroup *groups = NULL;
     int groups_len = 0, groups_cap = 0;
@@ -3770,6 +3776,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
             groups[groups_len].first_seen = groups_len;
             groups[groups_len].header_exposed = false;
             groups[groups_len].extern_ref = false;
+            groups[groups_len].header_path = NULL;
             groups_len++;
         }
     }
@@ -3789,15 +3796,21 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         if (!ctx->tags[i].from_include || ctx->tags[i].always_emit)
             continue;
         for (int g = 0; g < groups_len; g++)
-            if (same_type_strong(ctx->tags[i].ty, groups[g].rep))
+            if (same_type_strong(ctx->tags[i].ty, groups[g].rep)) {
                 groups[g].header_exposed = true;
+                if (!groups[g].header_path)
+                    groups[g].header_path = ctx->tags[i].file_path;
+            }
     }
     for (int i = 0; i < ctx->typedefs_len; i++) {
         if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
             continue;
         for (int g = 0; g < groups_len; g++)
-            if (same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+            if (same_type_strong(ctx->typedefs[i].ty, groups[g].rep)) {
                 groups[g].header_exposed = true;
+                if (!groups[g].header_path)
+                    groups[g].header_path = ctx->typedefs[i].file_path;
+            }
     }
 
     // Tier 2: an externally-visible definition's type reaches this group.
@@ -3852,8 +3865,11 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         // spelling? An Obj is never renamed by this pass (external linkage
         // makes that unsafe in general, see the function's own doc comment
         // above), so when true no enum group below can keep the plain name
-        // either -- the Obj holds it unconditionally.
-        bool obj_collision = hashmap_get(&obj_names, name) != NULL;
+        // either -- the Obj holds it unconditionally. #1017: keep the Obj*
+        // itself (not just a bool) so the tier-1 residual warning below can
+        // name and point at it.
+        Obj *colliding_obj = hashmap_get(&obj_names, name);
+        bool obj_collision = colliding_obj != NULL;
         if (members_len < 2 && !obj_collision)
             continue;
 
@@ -3889,9 +3905,34 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
             // renamed (the replayed #include binds the name textually
             // inside the header's own code, same reasoning #1014/#1015
             // already established). The residual Obj-vs-header conflict is
-            // left for the host compiler to report; see man/COVERAGE.md.
-            if (obj_collision && groups[idx].header_exposed)
+            // genuinely unrepresentable in flat C (neither name can be
+            // renamed without breaking something else) and is left for the
+            // host compiler to report; see man/COVERAGE.md. #1017: at
+            // least point at it first, since the host compiler's own
+            // diagnostic names a deleted /tmp temp file under -c=native
+            // with no indication cccc's renamer is involved. Guard
+            // colliding_obj->tok != NULL -- a comptime-synthesized Obj
+            // need not carry a token, and warn_tok() dereferences
+            // tok->file->name unconditionally.
+            if (obj_collision && groups[idx].header_exposed) {
+                if (colliding_obj->tok) {
+                    if (groups[idx].header_path)
+                        warn_tok(vm, colliding_obj->tok, CCCC_WARN_NATIVE_NAME_COLLISION,
+                                "enumerator '%s' is declared by an enum reached through a "
+                                "replayed #include ('%s') and cannot be renamed; the "
+                                "file-scope '%s' declared here cannot be renamed either, "
+                                "so the generated C will not compile",
+                                name, groups[idx].header_path, name);
+                    else
+                        warn_tok(vm, colliding_obj->tok, CCCC_WARN_NATIVE_NAME_COLLISION,
+                                "enumerator '%s' is declared by an enum reached through a "
+                                "replayed #include and cannot be renamed; the file-scope "
+                                "'%s' declared here cannot be renamed either, so the "
+                                "generated C will not compile",
+                                name, name);
+                }
                 continue;
+            }
             char *new_name = arena_format(vm, "%s__cccc_dup%d", name,
                                           ctx->anon_global_counter++);
             if (ctx->enum_renames_len >= ctx->enum_renames_cap) {

@@ -974,6 +974,7 @@ typedef enum {
     CCCC_WARN_SENTINEL         = (1ULL << 57), // missing/non-literal NULL terminator in a call to a sentinel-marked variadic function (#658)
     CCCC_WARN_DESIGNATED_INIT  = (1ULL << 58), // positional member initializer of a struct declared __attribute__((designated_init)); opt-in, not in -Wall/-Wextra (#659)
     CCCC_WARN_INT_CONVERSION  = (1ULL << 59), // implicit integer <-> pointer conversion with no cast
+    CCCC_WARN_NATIVE_NAME_COLLISION = (1ULL << 60), // -m/-c=native/-c=generated: a colliding name reaches the serializer's rename passes but can't be renamed (e.g. a header-exposed enumerator vs. a file-scope identifier, #1017)
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
@@ -1016,7 +1017,8 @@ CCCC_WARN_ALL = CCCC_WARN_UNUSED |
                    CCCC_WARN_OVERRIDE_INIT |
                    CCCC_WARN_NONNULL |
                    CCCC_WARN_SENTINEL |
-                   CCCC_WARN_INT_CONVERSION,
+                   CCCC_WARN_INT_CONVERSION |
+                   CCCC_WARN_NATIVE_NAME_COLLISION,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW |
                       CCCC_WARN_SIGN_COMPARE |
                       CCCC_WARN_CONVERSION |

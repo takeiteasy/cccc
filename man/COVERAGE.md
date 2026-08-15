@@ -1445,8 +1445,37 @@ Tier 1 stays a hard rule even here: a header-exposed enum group's
 enumerators are still never renamed. One case remains genuinely
 unrepresentable and is not fixed: a header-exposed enum group's enumerator
 colliding with a file-scope Obj in a `.c` that doesn't include that header —
-neither side can be renamed without breaking something else, so the
-collision is left for the host compiler to report (filed as #1017).
+neither side can be renamed without breaking something else. See below
+(#1017) for how this residual is now at least diagnosed.
+
+A header-exposed enum group's enumerator colliding with a file-scope Obj in a
+`.c` that doesn't include that header (the residual #1016 left open, above)
+remains genuinely unrepresentable in flat C by any renaming — the replayed
+`#include` binds the enumerator's spelling textually inside the header
+itself, and the Obj can't be renamed either (external linkage makes that
+unsafe in general; a unique `static` renamed here would widen #1002's
+"only rename dups" contract). The collision is still left in the generated
+output for the host compiler to report, but it is no longer silent: `-m`/
+`-c=native`/`-c=generated` now emit a `-Wnative-name-collision` warning
+(part of `-Wall`, category `CCCC_WARN_NATIVE_NAME_COLLISION`) pointing at
+the colliding declaration and naming both the enumerator and the header
+that exposes it (#1017). This matters most under `-c=native`, where the
+host compiler's own diagnostic otherwise names a temp file (deleted before
+the invocation returns) with no indication which of the user's own source
+files was responsible, or that a cccc renaming limitation — rather than an
+ordinary naming mistake — is involved. Emitted (not a hard error) at the
+exact point `rename_colliding_enum_constants()` (`src/serialize.c`)
+already decides tier 1 forbids the rename, so it needed no new analysis;
+kept as a warning rather than promoted to a compile error because the Obj
+set that check consults has no `is_defining`/header-supplied filter, so an
+Obj later excluded by `function_is_header_supplied()`'s narrower logic
+could in principle produce a false positive — for a hard error that would
+mean rejecting a program that currently compiles, which #1014 already
+rejected as a design for this same class of residual. The warning covers
+only this one case today; the #1014/#1015 tag-vs-tag and
+enumerator-vs-enumerator unrepresentable cases described above do not yet
+emit it, though the category is deliberately generic enough to extend to
+them later.
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
