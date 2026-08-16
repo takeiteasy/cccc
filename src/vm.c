@@ -22,6 +22,7 @@
 
 #include "./internal.h"
 #include <fenv.h> // host fenv.h -- #832, cc_run()'s pre-execution reset
+#include <getopt.h> // host getopt.h -- #1041, cccc_reset_getopt_state()
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <pthread.h>
 #endif
@@ -2479,7 +2480,30 @@ static void cc_run_atexit_entries(VirtualMachine *vm) {
     }
 }
 
+// #1041: see the declaration comment in internal.h. optind=1 alone is
+// sufficient on glibc (it resets getopt's internal scan-state cursor the
+// moment it notices optind went backwards) but not on the BSD/macOS
+// getopt(), which needs the separate optreset flag to actually restart a
+// scan already in progress (e.g. mid-cluster on "-Iinclude"); optreset
+// exists only on BSD-derived <getopt.h>/<unistd.h>, not glibc, hence the
+// #ifdef. opterr is reset to 1 (the C library default -- prints its own
+// "unrecognized option" diagnostics) since cccc's own arg parsing
+// (main.c) deliberately sets opterr=0 to suppress those and handle errors
+// itself; a guest program has no such special handling and expects the
+// default.
+void cccc_reset_getopt_state(void) {
+    optind = 1;
+    opterr = 1;
+    optopt = 0;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+    defined(__NetBSD__)
+    optreset = 1;
+#endif
+}
+
 int cc_run(VirtualMachine *vm, int argc, char **argv) {
+    cccc_reset_getopt_state();
+
     // #832: guarantee the guest program observes ISO C's startup contract
     // (round-to-nearest, no pending FP exceptions) regardless of what the
     // *compile* phase left in the host FP environment. This is a real,

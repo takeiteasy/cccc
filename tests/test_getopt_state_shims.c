@@ -6,10 +6,13 @@
 #include <string.h>
 
 int main(void) {
-    // optind is real host process state (shared with cccc's own CLI
-    // argument parsing, which itself calls the host's getopt_long() --
-    // src/main.c:1225) -- reset it before parsing this test's own synthetic
-    // argv, the same way any program re-parsing argv mid-process must.
+    // optind is real host process state. cc_run() resets it fresh before
+    // every guest run now (#1041; see test_getopt_fresh_state.c for the
+    // regression test that exercises that reset with no explicit reset of
+    // its own), but this test's own synthetic argv below is unrelated to
+    // whatever cccc's own CLI parsing left behind -- reset explicitly
+    // before parsing it, the same way any program re-parsing a *second*,
+    // different argv mid-process must.
     optind = 1;
     char *argv[] = {"prog", "-x", "val", "-y"};
     int argc = 4;

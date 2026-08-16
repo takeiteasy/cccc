@@ -1450,6 +1450,7 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->debug_vm = 0;
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
+    cccc_reset_getopt_state(); // #1041
     int eval_rc = vm_eval(vm);
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;
@@ -2033,6 +2034,7 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     vm->debug_vm = 0; // Disable debug output during macro execution
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
+    cccc_reset_getopt_state(); // #1041
     int eval_rc = vm_eval(vm);
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;

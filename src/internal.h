@@ -977,6 +977,13 @@ int cccc_vm_eval_dispatch(VirtualMachine *vm, volatile Pc *current_pc);
 #define CCCC_HOST_SIGNAL_RC (-4096)
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action);
 void cc_vm_profile_reset(VirtualMachine *vm);
+// #1041: reset the host's process-global getopt() state (optind/opterr/
+// optopt, and optreset where available) right before guest code starts
+// running -- cccc's own CLI parsing (main.c) shares that same state via
+// include/getopt.h's __cccc_optind_ptr() etc accessor shims, so a guest
+// program calling getopt() as its first action would otherwise see
+// whatever cccc's own argument parsing left behind.
+void cccc_reset_getopt_state(void);
 
 typedef struct ExecState {
     long long regs[32];

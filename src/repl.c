@@ -555,6 +555,11 @@ void cc_run_repl(VirtualMachine *vm) {
     cc_repl_compile_new(vm, NULL);
     repl_init_stack(vm);
 
+    // #1041: reset getopt() state once for the whole REPL session, not per
+    // statement (cc_expr_exec_wrapper below runs once per input line) --
+    // same "once per program run" reasoning as cc_run()'s own call.
+    cccc_reset_getopt_state();
+
     printf("CCCC interactive REPL. Type :help for session commands, :quit to exit.\n");
 
     LineSource src = { .next = repl_read_stdin_line, .ctx = NULL };
