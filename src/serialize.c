@@ -2445,16 +2445,17 @@ static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeConte
 // (unverified) hypothesis about the root cause.
 static void serialize_function_signature(FILE *f, SerializeContext *ctx,
                                          Obj *fn) {
-    // #1025: an asm("symbol")-labeled block-scope declaration (`Put
+    // #1025/#1039: an asm("symbol")-labeled block-scope declaration (`Put
     // local_puts asm("puts");`) aliases an *external* symbol -- internal
     // linkage on the declaration is meaningless for it and, since the
     // symbol is never defined under the local name, actively wrong (the
     // native compiler emits an internal-linkage reference nothing ever
-    // defines, and the link fails). parse_decl.c forces is_static on every
-    // block-scope function declaration regardless of an asm label (a
-    // separate parse-level imprecision, not fixed here); suppress `static`
-    // here whenever an asm label is present instead.
-    if (fn->is_static && !fn->asm_label)
+    // defines, and the link fails). Originally worked around here by
+    // suppressing `static` whenever an asm label was present despite
+    // fn->is_static being forced true regardless (#1025); parse_decl.c now
+    // only forces is_static on a nested/block-scope function when no asm
+    // label is present (#1039), so fn->is_static alone is accurate here.
+    if (fn->is_static)
         fprintf(f, "static ");
 
     // #1026: a function returning a function pointer (`int (*f(void))(int,

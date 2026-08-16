@@ -278,7 +278,16 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
         fn->parent_fn = parent_fn;
         fn->is_nested = true;
         fn->nesting_depth = vm->compiler.fn_nesting_depth + 1;
-        fn->is_static = true;
+        // #1039: nested/block-scope functions are implicitly static (not
+        // visible outside) -- except when an asm("symbol") label is
+        // present, which names a real *external* symbol; internal linkage
+        // on the declaration referring to it is meaningless. serialize.c's
+        // serialize_function_signature used to compensate for this by
+        // suppressing "static " whenever asm_label was set (#1025); fixed
+        // at the source instead so fn->is_static is accurate wherever else
+        // it's inspected (e.g. fn->is_root below).
+        if (!fn->asm_label)
+            fn->is_static = true;
     } else {
         fn->parent_fn = NULL;
         fn->is_nested = false;
@@ -526,8 +535,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->parent_fn = parent_fn;
         fn->is_nested = true;
         fn->nesting_depth = vm->compiler.fn_nesting_depth + 1;
-        // Nested functions are implicitly static (not visible outside)
-        fn->is_static = true;
+        // #1039: nested functions are implicitly static (not visible
+        // outside) -- except when an asm("symbol") label is present; see
+        // the matching comment in declare_function_prototype above.
+        if (!fn->asm_label)
+            fn->is_static = true;
     } else {
         fn->parent_fn = NULL;
         fn->is_nested = false;
