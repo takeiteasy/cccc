@@ -2906,11 +2906,99 @@ def case_unsigned_int64_literal_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     UNSIGNED_INT64_LITERAL_PROGRAM)
 
 
+VECTOR_SPLAT_AND_SELECT_PROGRAM = """
+typedef int v4si __attribute__((vector_size(16)));
+typedef float v4sf __attribute__((vector_size(16)));
+
+int main(void) {
+    v4si vi = {2, 4, 6, 8};
+    v4si vi2 = vi / 2;
+    if (vi2[0] != 1 || vi2[3] != 4) return 1;
+
+    v4sf vf = {1.0f, 2.0f, 3.0f, 4.0f};
+    v4sf vf2 = vf * 2.0f;
+    if (vf2[0] != 2.0f || vf2[3] != 8.0f) return 2;
+
+    v4si a = {1, 2, 3, 4};
+    v4si b = {10, 20, 30, 40};
+    v4si cond = (a < (v4si){3, 3, 3, 3});
+    v4si sel = cond ? a : b;
+    if (sel[0] != 1 || sel[2] != 30) return 3;
+
+    v4si weird_cond = {1, 0, 5, 0};
+    v4si sel2 = weird_cond ? a : b;
+    if (sel2[1] != 20 || sel2[2] != 3) return 4;
+
+    int flag = 1;
+    v4si whole = flag ? a : b;
+    if (whole[0] != 1) return 5;
+
+    return 42;
+}
+"""
+
+
+def case_vector_splat_and_select_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  83: -c=native, GNU vector_size expressions (tracker #715) "
+          "serialize to portable C instead of a literal AST replay (#1019). "
+          "Two gaps: (1) `vector op scalar`'s implicit scalar-broadcast "
+          "ND_CAST (usual_arith_conv's internal marker, type.c) used to "
+          "print as a real explicit cast (`a / (v4si)5`), which GCC/clang "
+          "reject ('invalid conversion between vector type and integer "
+          "type of different size') -- they only accept the broadcast "
+          "performed implicitly inside the operator. (2) GNU per-lane `?:` "
+          "(a vector-typed condition) used to re-emit verbatim as `cond ? "
+          "a : b`, a GCC-only extension clang rejects ('used type ... "
+          "where arithmetic or pointer type is required') -- now lowered "
+          "to portable mask arithmetic. A scalar-condition ternary with "
+          "vector arms (standard C, not this extension) still emits as a "
+          "plain `?:`. Asserts VM 42 -> native 42")
+    return _vm_and_native_run_case(cccc, tmp, "vector_splat_select_1019",
+                                    VECTOR_SPLAT_AND_SELECT_PROGRAM)
+
+
+COMMA_ARG_PROGRAM = """
+#define TWO_THEN_INC(x) ((x), (x) + 1)
+
+static int add2(int a, int b) {
+    return a + b;
+}
+
+int main(void) {
+    int r = add2(TWO_THEN_INC(5), 10);
+    if (r != 16) return 1;
+
+    int total = 0;
+    for (int i = (1, 2, 3), j = 100; i < 6; i++, j += 100) {
+        total += i + j;
+    }
+    if (total != (3 + 100) + (4 + 200) + (5 + 300)) return 2;
+
+    return 42;
+}
+"""
+
+
+def case_comma_arg_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  84: -c=native, a comma-expression re-emitted into a "
+          "function-call argument position (e.g. a macro like minilua's "
+          "`ivalue(r)` expanding to one, #1042(b)) used to split into "
+          "extra arguments ('too many arguments to function call') -- "
+          "get_precedence(ND_COMMA) is the lowest of any node kind "
+          "(serialize.c) but the call sites at a funcall's argument list, "
+          "a multi-declarator for-init clause, and a handful of manually-"
+          "printed 'X = ...;' initializers outside serialize_expr's own "
+          "ND_ASSIGN case all passed parent_prec 0, so the wrapping parens "
+          "never fired. Asserts VM 42 -> native 42")
+    return _vm_and_native_run_case(cccc, tmp, "comma_arg_1042",
+                                    COMMA_ARG_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3000,6 +3088,8 @@ def main() -> int:
             case_anon_member_access_native_round_trip,
             case_typedef_order_native_round_trip,
             case_unsigned_int64_literal_native_round_trip,
+            case_vector_splat_and_select_native_round_trip,
+            case_comma_arg_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
