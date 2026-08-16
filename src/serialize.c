@@ -1451,17 +1451,55 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                 if (!serialize_flonum_special(f, node->fval, ""))
                     fprintf(f, "%.17g", (double)node->fval);
             }
+        } else if (node->ty && is_integer(node->ty)) {
+            // #1031: the old unconditional `%lld` of the raw bit pattern
+            // had two failures for a folded integer literal. (1) An
+            // unsigned 64-bit value >= 2^63 (e.g. 18446744073709551615ULL,
+            // ULLONG_MAX) prints its reinterpreted-as-signed text with no
+            // `U`/`ULL` suffix, so a real host compiler reads it back as a
+            // negative `int` -- a later implicit conversion (e.g. to
+            // double) then produces the wrong value. Confirmed via
+            // test_unsigned_int_to_float_conversion.c. (2) INT64_MIN
+            // itself (-9223372036854775808) isn't a valid signed literal
+            // token at all -- the host warns "integer literal is too
+            // large to be represented in a signed integer type,
+            // interpreting as unsigned" and silently reinterprets it.
+            // Emitting a width/sign-accurate suffix always (not only when
+            // the value would otherwise misparse) also matters for a
+            // partially folded expression: `sizeof(x) - 1` folding to
+            // `8ULL` vs. plain `8` changes a later subtraction from
+            // unsigned-huge to signed -2.
+            //
+            // A negative node->val can only reach here via constant
+            // folding -- a literal `-1` as written in source parses as
+            // ND_NEG(ND_NUM(1)), not a single ND_NUM with val == -1 (see
+            // the #1031-adjacent note near line 1677 below).
+            if (node->ty->is_unsigned) {
+                uint64_t uv = (uint64_t)node->val;
+                // Mask to the type's true width first -- a narrow
+                // unsigned value may have arrived here sign-extended
+                // (serialize_init_bytes does the same narrow-type
+                // sign-extension at its own ND_NUM-adjacent site), and
+                // 1ULL << 64 is UB so the size==8 case must skip the mask
+                // entirely.
+                if (node->ty->size < 8)
+                    uv &= (1ULL << (node->ty->size * 8)) - 1;
+                fprintf(f, "%llu%s", (unsigned long long)uv,
+                        node->ty->size == 8 ? "ULL" : "U");
+            } else if (node->val == INT64_MIN) {
+                // The only spelling a host compiler accepts for the most
+                // negative signed 64-bit value -- a bare
+                // "-9223372036854775808" token is parsed as unary minus
+                // applied to a positive literal one past LLONG_MAX.
+                fprintf(f, "(-9223372036854775807LL - 1)");
+            } else {
+                fprintf(f, "%lld%s", (long long)node->val,
+                        node->ty->size == 8 ? "LL" : "");
+            }
         } else
-            // #1031: an unsigned 64-bit integer literal >= 2^63 round-trips
-            // its bit pattern here (%lld of the reinterpreted signed value)
-            // but loses its U/UL/ULL suffix and sign -- a real host
-            // compiler reads the unsuffixed decimal text as a negative
-            // `int` literal, which then behaves differently under a
-            // subsequent implicit conversion (e.g. to double) than the
-            // original unsigned value would. Confirmed via
-            // test_unsigned_int_to_float_conversion.c, still in
-            // NATIVE_SKIP_TESTS pending this fix; out of scope here (this
-            // is #1038's float-literal fix, not #1031's integer one).
+            // A folded null-pointer constant (TY_PTR/TY_NULLPTR_T) or a
+            // node with no type reaches here -- plain decimal text (e.g.
+            // "0") is valid C in either context, no suffix needed.
             fprintf(f, "%lld", (long long)node->val);
         break;
 
@@ -3596,6 +3634,22 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
             provenance_source->from_include && !provenance_source->always_emit &&
             (!ctx->generated_only ||
              path_is_captured(ctx, provenance_source->file_path)))
+            // #1031: this is correct for member *access* -- the replayed
+            // `#include` (auto-capture, preprocess.c) hands member
+            // resolution to the host header's real layout, which is often
+            // more accurate than CCCC's own minimal projection (e.g.
+            // `struct statfs`, ~56 bytes here vs. ~2100 on real macOS).
+            // But it does NOT retroactively fix any `sizeof`/`offsetof`
+            // of `ty` that guest-side constant folding already baked into
+            // a plain integer literal elsewhere in this TU -- those still
+            // reflect CCCC's projection, not the host's real layout, and
+            // the host is none the wiser once the type body itself is
+            // suppressed here. test_sys_mount_statfs.c is the confirmed
+            // case: a `malloc(sizeof(struct statfs) + tail)` sized against
+            // the guest's ~56-byte struct hands the real, much larger host
+            // `statfs()` an undersized buffer. General soundness class,
+            // not statfs-specific; sibling to the FP_* constant-folding
+            // note in native_accessor_shims below. Still open.
             continue;
         // #1027: pull forward any scalar typedef this type's own direct
         // members (or, for an enum, its C23 underlying type) will spell by

@@ -154,20 +154,17 @@ NATIVE_SKIP_TESTS = {
     # --- singleton bugs, one ticket each ---
     "test_minilua.c": "4 unrelated native-compile bugs found post-#1027 (#1042)",
     "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
-    "test_sys_mount_statfs.c": "runtime divergence under native (#1031)",
-    "test_edge_void_main_stray_block.c": "runtime divergence under native (#1031)",
-    # #1038 fixed this file's *float*-literal divergence (see the comment
-    # above), but it still fails under native for a second, unrelated
-    # reason: an unsigned 64-bit integer literal >= 2^63 (e.g.
-    # 18446744073709551615ULL) constant-folds to a plain ND_NUM whose
-    # serializer prints `(long long)node->val` with no U/UL/ULL suffix and
-    # no sign check -- the bit pattern round-trips, but a real host
-    # compiler reads the unsuffixed decimal text as a negative `int`
-    # literal, changing what a subsequent (double) cast produces. Same
-    # literal-serialization gap class as this ticket's own
-    # `-9223372036854775808` INT64_MIN sub-finding; not an #1038 float
-    # fix, still #1031's to do.
-    "test_unsigned_int_to_float_conversion.c": "unsigned 64-bit integer literal >= 2^63 serializes without a suffix, sign-flips under a real host compiler (#1031)",
+    # The emitted C replays `#include <sys/mount.h>` verbatim, so the host
+    # header supplies the real ~2100-byte struct statfs and member access
+    # re-resolves correctly against it -- but `sizeof(struct statfs)` was
+    # already constant-folded guest-side against CCCC's ~56-byte
+    # projection and is baked into the emitted TU as a plain integer
+    # literal, so the malloc'd buffer is undersized and the real host
+    # statfs() overruns it (the canary is clobbered). General soundness
+    # class -- any folded sizeof/offsetof over a CCCC-projected system
+    # struct, not statfs-specific -- sibling to the FP_* constant-folding
+    # note at src/serialize.c's native_accessor_shims comment. Still open.
+    "test_sys_mount_statfs.c": "guest-side folded sizeof(struct statfs) disagrees with the host header's real layout, host statfs() overruns the buffer (#1031)",
 
     # --- #1034: comptime/macro-generated declarations fail to serialize ---
     "test_ast_builders_296.c": "comptime-generated decl fails to serialize (#1034)",
@@ -188,6 +185,15 @@ NATIVE_SKIP_TESTS = {
     "test_c4.c": "old-style implicit-int main() -- VM leniency the host "
                  "compiler doesn't share, see COVERAGE.md Serialized-output "
                  "divergences",
+    "test_edge_void_main_stray_block.c": "asserts a `void main()` that "
+                 "falls off its end -- codegen unconditionally loads 0 "
+                 "into the return register at the end of the entry "
+                 "function regardless of return type, so the VM always "
+                 "exits 0; the host compiler leaves a void main's exit "
+                 "status undefined (the test's own header already calls "
+                 "this UB), so native inherits whatever the ABI left in "
+                 "the return register, see COVERAGE.md Serialized-output "
+                 "divergences (#1031)",
     "test_sys_ioctl_standalone.c": "asserts CCCC's VM-side wrap_ioctl() "
                  "request-code allowlist (#795) rejects an unverified raw "
                  "ioctl request; -c=native calls the real host ioctl() "

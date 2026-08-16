@@ -1155,7 +1155,7 @@ layout or serialized output.
 
 `-c=native`, `-m` and `-c=generated` re-emit the program as C and hand it to a
 host compiler. The rule everywhere else in this document is that the emitted C
-behaves as the VM behaves. Six constructs cannot fully honour that, and they
+behaves as the VM behaves. Seven constructs cannot fully honour that, and they
 are listed here rather than left to be discovered:
 
 | Construct | VM | Serialized output |
@@ -1166,6 +1166,7 @@ are listed here rather than left to be discovered:
 | `__builtin_unreachable()` / `__builtin_trap()` / `__builtin_debugtrap()` | all three trap (one `BTRAP` opcode) | all three emit `__builtin_trap()`. The original spelling is not recoverable after lowering, and emitting `__builtin_unreachable()` would be undefined behaviour the host optimizer deletes — trapping is what matches the VM |
 | `ioctl(fd, request, ...)` | `wrap_ioctl()` (#795) rejects any request code not on an explicit allowlist, regardless of `--posix-emulation` | the real host `ioctl()`, with no allowlist — any request code the host kernel itself accepts succeeds |
 | `__builtin_alloca(n)` in a loop body that shares its block with a genuine VLA | each call gets its own address, live until the *frame* returns (`ALLOC_KIND_ALLOCA`), distinct from the VLA's own per-block storage (#981) | the host compiler's own stack-allocation lifetime, which is implementation-defined for multiple calls before the enclosing function returns — confirmed on clang -O0: a VLA sharing the block inserts a stacksave/stack-restore pair scoped to that block, so a bare `__builtin_alloca` call inside it gets the *same* address every iteration instead of a fresh one |
+| a `void`-returning entry function that falls off its end | codegen unconditionally loads 0 into the return register at the end of the entry function, regardless of its declared return type, so the process always exits 0 (#1031) | no equivalent injection — the host compiler leaves a `void main`'s exit status undefined, so it is whatever the ABI happened to leave in the return register (observed values are not stable across hosts/compilers) |
 
 `_Decimal` is a hard error rather than a divergence: `__builtin_decimal_to_chars`
 has no host equivalent, so a `CCCC_HAS_DECIMAL=1` build refuses to serialize it

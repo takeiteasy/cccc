@@ -76,6 +76,15 @@ All notable changes to CCCC are documented here. Format loosely follows
     non-prefixed (Linux/ELF) targets; a `static` prefix is also suppressed
     for an asm-labeled declaration, since internal linkage is meaningless
     for a symbol the label aliases externally.
+- `src/serialize.c`: a folded `ND_NUM` integer literal (e.g. constant
+  folding through a `(double)` cast) serialized as a bare `%lld` of its
+  raw bit pattern with no sign or width suffix — an unsigned 64-bit value
+  ≥ 2^63 (e.g. `ULLONG_MAX`) printed as the unsuffixed text `-1`, which a
+  real host compiler reads back as a negative `int`, changing the result
+  of a later implicit conversion; `INT64_MIN` printed as the bare token
+  `-9223372036854775808`, not a valid signed literal at all. Both now
+  serialize with a sign/width-accurate `U`/`ULL`/`LL` suffix, or as
+  `(-9223372036854775807LL - 1)` for `INT64_MIN` (#1031).
 
 ## [0.2.15] - 2026-08-15
 
