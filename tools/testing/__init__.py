@@ -133,12 +133,12 @@ NATIVE_SKIP_TESTS = {
     # test_fenv.c (#1035, RESOLVED: serialize.c's ND_CAST case now
     # recognizes the FE_DFL_ENV sentinel cast and emits the bare
     # identifier, which resolves via <fenv.h>'s #include_next to the host's
-    # real header) no longer needs an entry here.
-    "test_float_to_int_conversion.c": "saturating float->int64/uint64 cast "
-                   "diverges from the host's raw C cast (#1036)",
-    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
-                   "totalorder/etc family -- link failure, not a compile "
-                   "error (#1037)",
+    # real header) and test_float_to_int_conversion.c (#1036, RESOLVED as a
+    # duplicate of #1038 -- the "divergence" was #1038's unsuffixed/
+    # low-precision float-literal printer producing the wrong expected
+    # value in the *test*, not a real saturating-cast semantics gap; once
+    # #1038 fixed the literal, VM and native agree) no longer need an entry
+    # here.
     "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
                    "totalorder/etc family -- link failure, not a compile "
                    "error (#1037)",
@@ -156,7 +156,18 @@ NATIVE_SKIP_TESTS = {
     "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
     "test_sys_mount_statfs.c": "runtime divergence under native (#1031)",
     "test_edge_void_main_stray_block.c": "runtime divergence under native (#1031)",
-    "test_unsigned_int_to_float_conversion.c": "runtime divergence under native (#1031)",
+    # #1038 fixed this file's *float*-literal divergence (see the comment
+    # above), but it still fails under native for a second, unrelated
+    # reason: an unsigned 64-bit integer literal >= 2^63 (e.g.
+    # 18446744073709551615ULL) constant-folds to a plain ND_NUM whose
+    # serializer prints `(long long)node->val` with no U/UL/ULL suffix and
+    # no sign check -- the bit pattern round-trips, but a real host
+    # compiler reads the unsuffixed decimal text as a negative `int`
+    # literal, changing what a subsequent (double) cast produces. Same
+    # literal-serialization gap class as this ticket's own
+    # `-9223372036854775808` INT64_MIN sub-finding; not an #1038 float
+    # fix, still #1031's to do.
+    "test_unsigned_int_to_float_conversion.c": "unsigned 64-bit integer literal >= 2^63 serializes without a suffix, sign-flips under a real host compiler (#1031)",
 
     # --- #1034: comptime/macro-generated declarations fail to serialize ---
     "test_ast_builders_296.c": "comptime-generated decl fails to serialize (#1034)",

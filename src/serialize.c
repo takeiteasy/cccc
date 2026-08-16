@@ -879,6 +879,23 @@ static void format_float_literal(char *buf, size_t cap, double v) {
     }
 }
 
+// #1038: long-double counterpart of format_float_literal, same "force a
+// decimal point before the suffix lands" reasoning -- %.21Lg of an
+// integral long double like 1.0L prints "1" with no '.'/'e', and "1"
+// followed directly by an "L" suffix is a valid (and wrong) *integer*
+// literal token, not the intended floating one. 21 significant digits is
+// enough to round-trip an 80-bit x86 extended-precision long double (64
+// bits of mantissa, ~19.2 decimal digits) with margin; a narrower
+// long double (e.g. aarch64, where long double == double) round-trips
+// exactly with fewer digits, %.21Lg just prints trailing zeros for it.
+static void format_ldouble_literal(char *buf, size_t cap, long double v) {
+    int n = snprintf(buf, cap, "%.21Lg", v);
+    if (n > 0 && (size_t)n < cap
+        && !strpbrk(buf, ".eEnN")) {
+        snprintf(buf + n, cap - (size_t)n, ".0");
+    }
+}
+
 // --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
 // (+ count()/byte_count()/bounds() bounds form, if any) qualifier for
 // re-emission in the post-'*' declarator position it was originally written
@@ -1402,9 +1419,49 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                                                                  : "dl";
             fprintf(f, "%s%s", node->dec_digits ? node->dec_digits : "0", suffix);
         } else if (node->ty && is_flonum(node->ty)) {
-            if (!serialize_flonum_special(f, node->fval, ""))
-                fprintf(f, "%Lg", node->fval);
+            // #1038: this used to funnel every flonum type -- TY_FLOAT,
+            // TY_DOUBLE and TY_LDOUBLE alike -- through a single unsuffixed
+            // `%Lg` (default 6 significant digits), losing both precision
+            // (e.g. DBL_MAX round-tripped as the text "1.79769e+308") and,
+            // for TY_FLOAT/TY_LDOUBLE, the type entirely (a `1.0f` or
+            // `1.0L` literal re-emitted as a plain double constant).
+            // node->fval is always long double; TY_DOUBLE's %g conversion
+            // needs an explicit (double) cast -- passing a long double to a
+            // non-L conversion is undefined varargs behavior, harmless on
+            // platforms where long double == double (aarch64) but wrong on
+            // x86_64. Mirrors serialize_init_bytes's TY_FLOAT/TY_DOUBLE
+            // arms (this is the ND_NUM/expression-literal counterpart of
+            // that global-initializer path).
+            if (node->ty->kind == TY_FLOAT) {
+                if (!serialize_flonum_special(f, node->fval, "f")) {
+                    char buf[64];
+                    format_float_literal(buf, sizeof buf, (double)node->fval);
+                    fprintf(f, "%sf", buf);
+                }
+            } else if (node->ty->kind == TY_LDOUBLE) {
+                // Builtin family name suffix ("l") and the literal suffix
+                // ("L") are cased differently -- __builtin_infl/__builtin_nanl
+                // vs. the `L` token suffix -- don't conflate them.
+                if (!serialize_flonum_special(f, node->fval, "l")) {
+                    char buf[64];
+                    format_ldouble_literal(buf, sizeof buf, node->fval);
+                    fprintf(f, "%sL", buf);
+                }
+            } else { // TY_DOUBLE
+                if (!serialize_flonum_special(f, node->fval, ""))
+                    fprintf(f, "%.17g", (double)node->fval);
+            }
         } else
+            // #1031: an unsigned 64-bit integer literal >= 2^63 round-trips
+            // its bit pattern here (%lld of the reinterpreted signed value)
+            // but loses its U/UL/ULL suffix and sign -- a real host
+            // compiler reads the unsuffixed decimal text as a negative
+            // `int` literal, which then behaves differently under a
+            // subsequent implicit conversion (e.g. to double) than the
+            // original unsigned value would. Confirmed via
+            // test_unsigned_int_to_float_conversion.c, still in
+            // NATIVE_SKIP_TESTS pending this fix; out of scope here (this
+            // is #1038's float-literal fix, not #1031's integer one).
             fprintf(f, "%lld", (long long)node->val);
         break;
 
@@ -2957,7 +3014,10 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
         // TY_LDOUBLE shares TY_DOUBLE's 8-byte read and unsuffixed %g here,
         // matching this function's pre-#918 behavior exactly -- a latent
         // long-double-precision/suffix gap, but pre-existing and unrelated
-        // to #918's scope.
+        // to #918's scope. Still present after #1038 (which fixed the
+        // ND_NUM/expression-literal counterpart of this same gap, not this
+        // global-initializer path) -- left alone here for the same reason:
+        // out of scope, tracked separately, not touched incidentally.
         double dv; memcpy(&dv, var->init_data + offset, 8);
         if (!serialize_flonum_special(f, (long double)dv, ""))
             fprintf(f, "%.17g", dv);
