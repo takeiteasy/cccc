@@ -3333,10 +3333,110 @@ static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
     alias->ty = real_ty;
 }
 
+static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
+                                  Obj *owner_fn, bool *typedef_done);
+
+// #1027: walks the same PTR/ARRAY/VLA/FUNC declarator shape collect_type()
+// peels, but instead of collecting aggregate completeness dependencies
+// (already correctly ordered by collect_type's own post-order into
+// ctx->defs), looks for a scalar typedef alias serialize_type() would
+// spell for whatever leaf type this one bottoms out at -- e.g. a struct
+// member declared `lu_byte tt;`. Nothing tracked this dependency before:
+// collect_type() only ever walks toward a TY_STRUCT/TY_UNION/TY_ENUM
+// member's own nested aggregate members, never toward a scalar typedef's
+// declaring record, so every struct/union/enum definition used to print
+// ahead of every typedef alias unconditionally (two independent loops
+// below, aggregates first) -- correct only when no aggregate's member
+// happened to spell a not-yet-emitted typedef name, which a large,
+// realistic third-party source (tests/test_minilua.c) hits within the
+// first handful of struct definitions.
+//
+// A tagged/aliased struct/union/enum member needs no typedef dependency
+// tracked here: a tagged aggregate's pointer/array member spells via
+// "struct Tag"/"union Tag", valid even before that tag's own definition (C
+// implicitly forward-declares a struct/union tag on first mention) or, by
+// value, is already correctly ordered by collect_type()'s own post-order;
+// an untagged, alias-only aggregate member is likewise already walked into
+// ctx->defs ahead of its container by that same existing recursion (see
+// aggregate_typedef_is_definition -- its own combined `typedef struct {...}
+// Name;` line is printed by serialize_struct_def itself, from ctx->defs,
+// not by the separate typedef loop at all).
+static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
+                                            Type *ty, Obj *owner_fn,
+                                            bool *typedef_done) {
+    if (!ty)
+        return;
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        ensure_typedef_for_type_emitted(f, ctx, ty->base, owner_fn, typedef_done);
+        return;
+    }
+    if (ty->kind == TY_FUNC) {
+        ensure_typedef_for_type_emitted(f, ctx, ty->return_ty, owner_fn, typedef_done);
+        for (Type *p = ty->params; p; p = p->next)
+            ensure_typedef_for_type_emitted(f, ctx, p, owner_fn, typedef_done);
+        return;
+    }
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        // An anonymous, alias-less aggregate (e.g. a `union { struct {
+        // ... } l; ... } u;` member) is inlined at its point of use
+        // (serialize_anon_aggregate) rather than getting its own standalone
+        // definition -- the caller's own top-level ctx->defs loop skips
+        // exactly this case (no tag, no alias, nothing to refer back to it
+        // by), so it never gets its own turn to pull its members' typedefs
+        // forward. Chase the dependency through here instead, into
+        // whichever member of THIS aggregate will actually need it.
+        if (!find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
+            !find_anonymous_typedef_name(ctx, ty))
+            for (Member *m = ty->members; m; m = m->next)
+                ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn, typedef_done);
+        return;
+    }
+    if (ty->kind == TY_ENUM)
+        return;
+
+    TypeName *alias = find_typedef_name_exact(ctx, ty);
+    if (!alias)
+        return;
+    int idx = (int)(alias - ctx->typedefs);
+    emit_typedef_and_deps(f, ctx, idx, owner_fn, typedef_done);
+}
+
+static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
+                                  Obj *owner_fn, bool *typedef_done) {
+    if (typedef_done[idx])
+        return;
+    typedef_done[idx] = true;
+
+    TypeName *td = &ctx->typedefs[idx];
+    // A typedef belonging to a different owner_fn scope than the one this
+    // pass is currently emitting isn't this call's job to print (mirrors
+    // the existing owner_fn filters on both loops below) -- structurally
+    // this shouldn't arise (a file-scope aggregate can't reference a
+    // function-local typedef), but matched defensively rather than assumed.
+    if (td->owner_fn != owner_fn)
+        return;
+
+    // #999-style self-hide (see serialize_typedef_alias's own matching
+    // comment): temporarily blank this record so a typedef-of-typedef's own
+    // right-hand-side lookup (below) can't match itself, then pull in
+    // whatever OTHER typedef this one's own spelling depends on (a chain
+    // like `typedef lu_byte TStatus;`) before this one.
+    Type *real_ty = td->ty;
+    td->ty = NULL;
+    ensure_typedef_for_type_emitted(f, ctx, real_ty, owner_fn, typedef_done);
+    td->ty = real_ty;
+
+    serialize_typedef_alias(f, ctx, td);
+}
+
 static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                           Obj *owner_fn) {
     Obj *saved_fn = ctx->current_fn;
     ctx->current_fn = owner_fn;
+
+    bool *typedef_done = ctx->typedefs_len > 0
+        ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
+        : NULL;
 
     for (int i = 0; i < ctx->defs.len; i++) {
         Type *ty = ctx->defs.data[i];
@@ -3389,6 +3489,22 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
             (!ctx->generated_only ||
              path_is_captured(ctx, provenance_source->file_path)))
             continue;
+        // #1027: pull forward any scalar typedef this type's own direct
+        // members (or, for an enum, its C23 underlying type) will spell by
+        // name, before printing the body that references it -- see
+        // ensure_typedef_for_type_emitted's comment. generated_only mode
+        // skips this (and the typedef loop below) for the same reason it
+        // skips typedefs entirely: the consumer's own headers already
+        // define them.
+        if (!ctx->generated_only && typedef_done) {
+            if (ty->kind == TY_ENUM)
+                ensure_typedef_for_type_emitted(f, ctx, ty->enum_base_type,
+                                                owner_fn, typedef_done);
+            else
+                for (Member *m = ty->members; m; m = m->next)
+                    ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
+                                                    typedef_done);
+        }
         if (ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, ty);
         else
@@ -3400,10 +3516,11 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
     if (!ctx->generated_only) {
         for (int i = ctx->typedefs_len - 1; i >= 0; i--) {
             if (ctx->typedefs[i].owner_fn == owner_fn)
-                serialize_typedef_alias(f, ctx, &ctx->typedefs[i]);
+                emit_typedef_and_deps(f, ctx, i, owner_fn, typedef_done);
         }
     }
 
+    free(typedef_done);
     ctx->current_fn = saved_fn;
 }
 

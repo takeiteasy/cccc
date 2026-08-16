@@ -148,7 +148,7 @@ NATIVE_SKIP_TESTS = {
     "test_pthread_recursive_mutex.c": "threads fail under native (#1022)",
 
     # --- singleton bugs, one ticket each ---
-    "test_minilua.c": "typedef ordering fails under native (#1027)",
+    "test_minilua.c": "4 unrelated native-compile bugs found post-#1027 (#1042)",
     "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
     "test_sys_mount_statfs.c": "runtime divergence under native (#1031)",
     "test_edge_void_main_stray_block.c": "runtime divergence under native (#1031)",

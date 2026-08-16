@@ -2822,6 +2822,56 @@ def case_anon_member_access_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "anon_member_967", ANON_MEMBER_ACCESS_PROGRAM)
 
 
+TYPEDEF_ORDER_PROGRAM = """
+typedef unsigned char lu_byte;
+typedef lu_byte TStatus;
+
+struct GCHeader {
+    struct GCHeader *next;
+    lu_byte tt;
+    lu_byte marked;
+};
+
+union Value {
+    struct {
+        lu_byte tag;
+        TStatus st;
+    } tagged;
+    int plain;
+};
+
+int main(void) {
+    struct GCHeader h;
+    h.next = 0;
+    h.tt = 1;
+    h.marked = 2;
+
+    union Value v;
+    v.tagged.tag = 3;
+    v.tagged.st = 4;
+
+    return h.tt + h.marked + v.tagged.tag + v.tagged.st + 32;
+}
+"""
+
+
+def case_typedef_order_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  81: -c=native, a struct/union member spelling a scalar typedef "
+          "name (e.g. `lu_byte tt;`) no longer serializes ahead of that "
+          "typedef's own declaration -- serialize_type_defs_for_owner used "
+          "to print every struct/union/enum definition before any typedef "
+          "alias unconditionally, two independent passes with no ordering "
+          "between them (#1027; tests/test_minilua.c, a real-world corpus, "
+          "hit this within its first handful of struct definitions, "
+          "'unknown type name lu_byte'). Covers a typedef-of-typedef chain "
+          "(TStatus -> lu_byte) and a typedef needed only inside an "
+          "anonymous nested struct member, which never gets its own turn "
+          "in the top-level struct/union/enum loop at all (no tag, no "
+          "alias, nothing to refer back to it by). Asserts VM 42 -> "
+          "native 42")
+    return _vm_and_native_run_case(cccc, tmp, "typedef_order_1027", TYPEDEF_ORDER_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -2914,6 +2964,7 @@ def main() -> int:
             case_dup_enum_obj_1016_native_round_trip,
             case_float_global_init_native_round_trip,
             case_anon_member_access_native_round_trip,
+            case_typedef_order_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
