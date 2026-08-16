@@ -337,32 +337,50 @@ macros only CCCC's own preprocessor injects (`fenv.h`'s
 host compiler reprocessing that text from scratch has never heard of them
 and fails outright (#1021).
 
-`include/fenv.h` and `include/errno.h` handle this by guarding their whole
-CCCC-flavored body behind `#ifdef __CCCC__` (a macro CCCC's own preprocessor
-always defines before parsing any header, guest-side) and `#include_next`ing
-the host's own, self-contained header in the `#else` branch — taken only
-when a genuine, non-CCCC compiler reprocesses this exact physical file,
-which only happens during `-c=native`/`-c=generated` serializer replay with
-`-I` pointed at this directory. `#include_next` works correctly here because
-the file *was* reached via a real filesystem `#include` search (the `-I`
-that found it), so continuing the search *after* that directory lands on
-the real system header.
+`include/fenv.h`, `include/errno.h`, `include/stdio.h`, `include/getopt.h`,
+and `include/stdint.h` handle this by guarding their whole CCCC-flavored
+body behind `#ifdef __CCCC__` (a macro CCCC's own preprocessor always
+defines before parsing any header, guest-side) and `#include_next`ing the
+host's own, self-contained header in the `#else` branch — taken only when a
+genuine, non-CCCC compiler reprocesses this exact physical file, which only
+happens during `-c=native`/`-c=generated` serializer replay with `-I`
+pointed at this directory. `#include_next` works correctly here because the
+file *was* reached via a real filesystem `#include` search (the `-I` that
+found it), so continuing the search *after* that directory lands on the
+real system header. Pick this treatment whenever there's no portable
+`__builtin_*` (or literal constant) that can stand in for the real thing —
+`stdout`/`stderr`/`optarg`/`errno`/`fenv_t` all bottom out in a
+platform-specific real symbol or type with no such substitute, so the shim
+genuinely needs the host's own header in scope (#1040: guarding only the
+`extern` shim declarations, with no `#include_next`, still leaves the
+`#define stdout __cccc_stdout()` macro live for the host compiler, so the
+shim body `return stdout;` expands right back into a call to itself). Watch
+for transitive fallout once `#include_next` is added to a *new* header:
+`stdio.h`'s real host header transitively defines the actual fixed-width
+integer typedefs (e.g. real macOS `int64_t` is `long long`, not this
+codebase's guest `long`), which collided with `include/stdint.h`'s own,
+until-then-unconditional `typedef long int64_t;` the moment both got pulled
+into the same translation unit (`test_ffi.c`, `test_ffi_variadic_fnptr.c`)
+— caught by the full native suite, not by `tools/comptime_native_smoke.py`,
+which is why both must be run before trusting a header-guard change like
+this one.
 
 A narrower version of the same problem hits any bundled header that
 declares an `extern` prototype for a name `serialize.c`'s
 `native_accessor_shims` table (see below) also gives a `static` definition
-to once it's used (`__cccc_errno_ptr`, `__cccc_isnan_f`/etc, and — as a
-still-open gap, #1040 — `__cccc_stdin`/`stdout`/`stderr` and the `getopt.h`
-accessors): the replayed extern and the emitted static definition disagree
-on linkage, and the host compiler rejects the redeclaration outright. Where
-the rest of the header doesn't need the full `#include_next` treatment
-(`include/math.h`'s `__cccc_isnan_f`/etc, `include/float.h`'s
-`__cccc_flt_rounds`), guarding just that one redundant `extern` declaration
-behind `#ifdef __CCCC__` is enough — the shim's own `static` definition,
-always emitted ahead of any use, serves as its own prototype. **Any new
-bundled header declaring a name that gets a `native_accessor_shims` entry
-needs one of these two treatments**, or it silently reintroduces this bug
-class the next time something exercises it under `-c=native`.
+to once it's used (`__cccc_errno_ptr`, `__cccc_isnan_f`/etc): the replayed
+extern and the emitted static definition disagree on linkage, and the host
+compiler rejects the redeclaration outright. Where the rest of the header
+doesn't need the full `#include_next` treatment — because the shim body can
+be written in terms of a portable `__builtin_*` intrinsic instead of the
+macro name it's standing in for (`include/math.h`'s `__cccc_isnan_f`/etc,
+`include/float.h`'s `__cccc_flt_rounds`) — guarding just that one redundant
+`extern` declaration behind `#ifdef __CCCC__` is enough: the shim's own
+`static` definition, always emitted ahead of any use, serves as its own
+prototype. **Any new bundled header declaring a name that gets a
+`native_accessor_shims` entry needs one of these two treatments**, or it
+silently reintroduces this bug class the next time something exercises it
+under `-c=native`.
 
 `tools/audit_ffi.py`'s guard-presence check (`GUEST_ONLY_DECL_GUARDS`)
 whitelists `__CCCC__` as a condition that only means something to CCCC's own

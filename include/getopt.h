@@ -7,13 +7,19 @@
 #error "<getopt.h> is only available on POSIX targets in CCCC"
 #endif
 
+// #1040: same header-shadow trap as include/stdio.h's __cccc_stdin/etc --
+// see that header's comment for the full reasoning (a bare extern-only
+// guard still leaves `#define optarg (*__cccc_optarg_ptr())` live, which
+// would loop the shim body back into itself once a real host compiler
+// re-lexes this same physical file during -c=native/-c=generated replay).
+// Whole CCCC-flavored body guarded on __CCCC__, handing off to the host's
+// own <getopt.h> via #include_next otherwise.
+#ifdef __CCCC__
+
 /* These alias the host's real getopt() state (via accessor functions, same
  * pattern as stdin/stdout/stderr in stdio.h) so they reflect what the host's
  * getopt()/getopt_long() actually parsed instead of being inert, always-zero
- * guest globals (#736).
- * LIMITATION (#1040): same unconditional-`extern`-vs-`static`-shim conflict
- * as stdio.h's __cccc_stdin/etc under -c=native/-c=generated -- see that
- * header's comment. */
+ * guest globals (#736). */
 extern char **__cccc_optarg_ptr(void);
 extern int *__cccc_optind_ptr(void);
 extern int *__cccc_opterr_ptr(void);
@@ -37,5 +43,9 @@ struct option {
 extern int getopt(int argc, char *const argv[], const char *optstring);
 extern int getopt_long(int argc, char *const argv[], const char *optstring,
                        const struct option *longopts, int *longindex);
+
+#else
+#include_next <getopt.h>
+#endif /* __CCCC__ */
 
 #endif /* __GETOPT_H */

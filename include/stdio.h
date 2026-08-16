@@ -5,6 +5,29 @@
 #ifndef __STDIO_H
 #define __STDIO_H
 
+// #1040: this exact file is also what a native/generated re-emission's
+// replayed `#include <stdio.h>` resolves to (run_native_backend forwards
+// -I./include straight through to the host cc, and -I paths are searched
+// ahead of system directories). Guarding only the __cccc_stdin/stdout/
+// stderr `extern`s below (the fix direction the ticket originally
+// proposed) is not enough: the #define stdout __cccc_stdout() macros stay
+// live either way, so a real host compiler re-lexing this same physical
+// text would still expand `stdout` inside the shim body
+// serialize.c's native_accessor_shims later emits
+// (`static FILE *__cccc_stdout(void) { return stdout; }`) right back into
+// a call to itself -- the identical infinite-recursion trap
+// include/float.h's FLT_ROUNDS shim comment documents, and confirmed with
+// a minimal `fprintf(stdout, ...)` repro. Guarding the whole CCCC-flavored
+// body instead (same shape as include/fenv.h/include/errno.h/
+// include/math.h/include/float.h, #1021) and handing off to the host's own
+// <stdio.h> via #include_next avoids the self-reference entirely, since
+// the host's real `stdout` is a plain object/macro with no such loop.
+// __CCCC__ is defined unconditionally by CCCC's own preprocessor before any
+// header is read, so its absence here means a genuine host compiler is
+// reprocessing this file -- only possible during -c=native/-c=generated
+// serializer replay.
+#ifdef __CCCC__
+
 #include "stdarg.h"
 #include "stddef.h"
 
@@ -12,14 +35,6 @@
 typedef void FILE;
 
 // Standard streams (accessed via getter functions)
-// LIMITATION (#1040): this unconditional `extern` collides with the
-// `static` definition serialize.c's native_accessor_shims emits, once
-// stdout/stdin/stderr is actually used, under -c=native/-c=generated --
-// same #1023 bug class include/math.h's __cccc_isnan_f/etc had (fixed via
-// an #ifdef __CCCC__ guard, #1021). Not fixed here: dormant in today's
-// corpus (no test currently triggers it), and stdio.h is pervasive enough
-// to deserve its own careful pass rather than a rushed fix riding along on
-// an unrelated ticket.
 extern FILE* __cccc_stdin(void);
 extern FILE* __cccc_stdout(void);
 extern FILE* __cccc_stderr(void);
@@ -138,5 +153,9 @@ extern void clearerr(FILE* stream);
 extern int feof(FILE* stream);
 extern int ferror(FILE* stream);
 extern void perror(const char* s);
+
+#else
+#include_next <stdio.h>
+#endif /* __CCCC__ */
 
 #endif // __STDIO_H
