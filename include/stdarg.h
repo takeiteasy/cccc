@@ -26,8 +26,8 @@
  * when to switch from the register-spill area to the stack args area.
  */
 
-#ifndef _STDARG_H
-#define _STDARG_H
+#ifndef __STDARG_H
+#define __STDARG_H
 
 // #1040 follow-on: this header is also what a real host cc resolves
 // `#include <stdarg.h>` to while compiling under --build (push_compile_flags
@@ -44,6 +44,17 @@
 // way, handing off to the host's own <stdarg.h> via #include_next whenever
 // a genuine host compiler (not CCCC's own preprocessor, which always
 // defines __CCCC__ before any header is read) is the one reading this file.
+//
+// The guard macro itself had to change too, from _STDARG_H to __STDARG_H
+// (same double-underscore convention include/stdio.h/getopt.h/stdint.h
+// already use): GCC's own real <stdarg.h> guards its body with the exact
+// same single-underscore `_STDARG_H` name. #include_next still correctly
+// resolves to that real file, but its own `#ifndef _STDARG_H` then sees
+// the guard our file already defined and skips its entire body, leaving
+// __gnuc_va_list undefined regardless of the #include_next hand-off --
+// confirmed against sr.ht's actual runner (gcc-15 as /usr/bin/cc; the
+// local container repro used clang, whose <stdarg.h> guards under a
+// different name and didn't expose this).
 #ifdef __CCCC__
 
 /*
@@ -203,4 +214,4 @@ typedef struct {
 #include_next <stdarg.h>
 #endif /* __CCCC__ */
 
-#endif /* _STDARG_H */
+#endif /* __STDARG_H */
