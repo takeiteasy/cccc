@@ -1179,6 +1179,17 @@ comma-joined assignments and C forbids mixing a declaration with expressions
 there, so it is rejected with a diagnostic rather than emitted as broken C
 (#964).
 
+A function-local `static` array initialized with computed-goto label
+addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual
+dispatch-table idiom for a `goto *disptab[i]` interpreter loop) is a hard
+error under `-c=native`: the VM's own `BTRAP`/label-value machinery resolves
+`&&L0` to a bytecode offset with no equivalent in C source, and a real C
+static initializer cannot reference a label's address at all (GNU labels-
+as-values only permit `&&label` inside ordinary expression code, not in an
+initializer) — `serialize.c` rejects it with "cannot serialize initializer
+for global '...' in native mode: unresolved relocation target" rather than
+emitting output the host compiler would reject anyway (#1044).
+
 `__builtin_pc_function_name(pc)` and `__builtin_pc_source_location(pc, &file,
 &line)` are also a hard error under `-m`/`-c=native`/`-c=generated`, rather
 than a divergence — the opposite direction from the `__builtin_return_address`
