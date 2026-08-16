@@ -110,7 +110,6 @@ NATIVE_SKIP_TESTS = {
     # --- #1019: vector_size arithmetic/select fails or misbehaves ---
     "test_attr_vector_size.c": "vector_size fails/misbehaves under native (#1019)",
     "test_attr_vector_size_bitwise.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_brace_init.c": "vector_size fails/misbehaves under native (#1019)",
     "test_attr_vector_size_compare_select_opt.c": "vector_size fails/misbehaves under native (#1019)",
     "test_attr_vector_size_fusion.c": "vector_size fails/misbehaves under native (#1019)",
     "test_attr_vector_size_intdiv.c": "vector_size fails/misbehaves under native (#1019)",
