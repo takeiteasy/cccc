@@ -29,7 +29,24 @@
 #ifndef _STDARG_H
 #define _STDARG_H
 
-/* 
+// #1040 follow-on: this header is also what a real host cc resolves
+// `#include <stdarg.h>` to while compiling under --build (push_compile_flags
+// forwards cccc's own -I./include to every target's real compile command)
+// or while re-lexing a -c=native/-c=generated serializer replay -- same
+// header-shadow trap as include/stdio.h/getopt.h/stdint.h (#1040), just not
+// noticed there because it doesn't collide on its own; it only surfaces
+// transitively: glibc's own <stdio.h> does `#include <stdarg.h>` to pick up
+// __gnuc_va_list, and since -I./include is searched first, it got this
+// file's CCCC-only struct va_list instead, which doesn't define
+// __gnuc_va_list -- "unknown type name '__gnuc_va_list'" throughout glibc's
+// stdio.h the moment any real project source under --build includes
+// <stdio.h> (confirmed: examples/build_demo/src/greet.c). Guarded the same
+// way, handing off to the host's own <stdarg.h> via #include_next whenever
+// a genuine host compiler (not CCCC's own preprocessor, which always
+// defines __CCCC__ before any header is read) is the one reading this file.
+#ifdef __CCCC__
+
+/*
  * va_list type: struct tracking position in two memory regions
  * - reg_ptr: current position in spilled register area (bp[-1...-8])
  * - stack_ptr: current position in stack args area (bp[+2...])
@@ -181,5 +198,9 @@ typedef struct {
 #define __builtin_va_end(ap)         va_end(ap)
 #define __builtin_va_copy(d, s)      va_copy(d, s)
 #define __builtin_va_arg(ap, type)   va_arg(ap, type)
+
+#else
+#include_next <stdarg.h>
+#endif /* __CCCC__ */
 
 #endif /* _STDARG_H */
