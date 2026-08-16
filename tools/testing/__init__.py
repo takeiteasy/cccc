@@ -107,16 +107,22 @@ NATIVE_SKIP_TESTS = {
     "test_use_system_headers_fallback.c": "variadic serialization gives wrong result (#1018)",
     "test_aligned_alloc_vmheap.c": "variadic serialization gives wrong result (#1018)",
 
-    # --- #1019: vector_size arithmetic/select fails or misbehaves ---
-    "test_attr_vector_size.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_bitwise.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_compare_select_opt.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_fusion.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_intdiv.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_select.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_wide256.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_wide512.c": "vector_size fails/misbehaves under native (#1019)",
-    "test_attr_vector_size_variadic.c": "vector_size fails/misbehaves under native (#1019)",
+    # --- #1019: RESOLVED. Was: vector_size arithmetic/select fails or
+    # misbehaves under -c=native. Two root causes, both in serialize.c:
+    # (1) a scalar operand of `vector op scalar` was re-emitted with an
+    # explicit `(v4si)scalar` cast -- the type checker's internal
+    # broadcast marker, not source-level C; GCC/clang perform that
+    # broadcast implicitly inside the operator and reject it spelled as a
+    # cast. (2) GNU per-lane `?:` (a vector-typed condition) re-emitted
+    # verbatim as `cond ? a : b` -- a GCC-only extension clang rejects;
+    # now lowered to portable mask arithmetic. test_attr_vector_size_
+    # variadic.c compiles now (unaffected by either fix) but still gives a
+    # wrong runtime result -- that is #1018's variadic-marshalling class,
+    # not a vector one, so its skip entry moved there instead of closing.
+
+    # --- #1018: variadic-function serialization gives wrong runtime
+    # results (see the block at the top of this dict for the rest) ---
+    "test_attr_vector_size_variadic.c": "variadic serialization gives wrong result (#1018)",
 
     # --- #1020: constructor/destructor ordering wrong under native ---
     "test_constructor_basic.c": "constructor/destructor ordering wrong under native (#1020)",
