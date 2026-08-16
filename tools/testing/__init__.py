@@ -130,10 +130,15 @@ NATIVE_SKIP_TESTS = {
     # --- split out of #1021 (fenv.h/math.h identifiers fail to compile),
     # now RESOLVED -- three distinct files that compile cleanly now but each
     # fail for a different, unrelated reason discovered while fixing it ---
-    "test_fenv.c": "fenv_t FE_DFL_ENV sentinel (-1 pointer) dereferenced by "
-                   "the real host libm -- SIGSEGV (#1035)",
+    # test_fenv.c (#1035, RESOLVED: serialize.c's ND_CAST case now
+    # recognizes the FE_DFL_ENV sentinel cast and emits the bare
+    # identifier, which resolves via <fenv.h>'s #include_next to the host's
+    # real header) no longer needs an entry here.
     "test_float_to_int_conversion.c": "saturating float->int64/uint64 cast "
                    "diverges from the host's raw C cast (#1036)",
+    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
+                   "totalorder/etc family -- link failure, not a compile "
+                   "error (#1037)",
     "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
                    "totalorder/etc family -- link failure, not a compile "
                    "error (#1037)",

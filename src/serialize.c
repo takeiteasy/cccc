@@ -1592,6 +1592,53 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         break;
 
     case ND_CAST: {
+        // #1035: include/fenv.h's FE_DFL_ENV sentinel is spelled
+        // `((const fenv_t *)-1)` -- a value src/stdlib/fenv.c's wrap_fe*()
+        // functions recognize and substitute the real host FE_DFL_ENV for
+        // under the VM, but under -c=native the literal -1 pointer reaches
+        // the real host libm directly and gets dereferenced (SIGSEGV). The
+        // generated C's own re-included <fenv.h> falls through to the
+        // host's real header via #include_next (see that file's own
+        // comment), so the bare identifier FE_DFL_ENV resolves in the
+        // output -- emit it instead of the sentinel's numeric encoding.
+        // The AST for a guest `FE_DFL_ENV` use is a *doubled* cast
+        // (`(const fenv_t *)(const fenv_t *)-1`, once from the macro's own
+        // cast and once from however the guest expression casts it again,
+        // e.g. fesetenv's implicit-const-add), so peel through as many
+        // nested casts-to-fenv_t-pointer as present down to the underlying
+        // -1 constant, then swallow the whole outer node.
+        if (node->ty && node->ty->kind == TY_PTR) {
+            Node *inner = node;
+            while (inner->kind == ND_CAST && inner->ty &&
+                   inner->ty->kind == TY_PTR) {
+                TypeName *pointee = find_typedef_name(ctx, inner->ty->base);
+                if (!pointee || pointee->name_len != 6 ||
+                    strncmp(pointee->name, "fenv_t", 6) != 0)
+                    break;
+                inner = inner->lhs;
+            }
+            // A literal -1 parses as ND_NEG(ND_NUM(1)), not a single
+            // ND_NUM with val == -1 -- unwrap one more level.
+            bool matched = false;
+            if (inner != node) {
+                Node *lit = inner;
+                if (lit->kind == ND_NEG && lit->lhs) {
+                    // The literal `1` being negated arrives wrapped in its
+                    // own (implicit int-promotion) ND_CAST(s) -- peel
+                    // those too before checking for ND_NUM(1).
+                    Node *n = lit->lhs;
+                    while (n->kind == ND_CAST && n->lhs)
+                        n = n->lhs;
+                    matched = n->kind == ND_NUM && n->val == 1;
+                } else {
+                    matched = lit->kind == ND_NUM && lit->val == -1;
+                }
+            }
+            if (matched) {
+                fprintf(f, "FE_DFL_ENV");
+                break;
+            }
+        }
         // Suppress widening integer casts — these are always implicit in C.
         // Only emit a cast if it crosses a type category or narrows/changes signedness.
         Type *dst = node->ty;
