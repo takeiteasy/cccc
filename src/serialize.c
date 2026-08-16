@@ -1750,7 +1750,21 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         bool widening = dst_int && src_int &&
                         dst->is_unsigned == src->is_unsigned &&
                         int_rank[dst->kind] >= int_rank[src->kind];
-        if (widening) {
+        // #1019: a scalar operand of a `vector op scalar` binary op gets an
+        // implicit ND_CAST(vector_ty, scalar) inserted by usual_arith_conv
+        // (type.c) as its internal marker for "broadcast this scalar across
+        // the vector's lanes" -- it is not source-level C. GCC/clang perform
+        // that broadcast themselves inside the operator and reject the same
+        // thing spelled as an explicit cast ("invalid conversion between
+        // vector type and integer type of different size"). Emit the bare
+        // scalar operand instead and let the host compiler's own vector
+        // extension do the broadcast, exactly as real vector_size source
+        // would. Only the scalar-source case is suppressed here -- a
+        // vector-to-vector cast (same-type no-op, or a genuine bitcast
+        // between differently-shaped vectors) still needs to print.
+        bool scalar_splat = dst && dst->kind == TY_VECTOR &&
+                            src && src->kind != TY_VECTOR;
+        if (widening || scalar_splat) {
             serialize_expr(f, vm, ctx, node->lhs, parent_prec);
         } else {
             fprintf(f, "(");
@@ -1762,6 +1776,46 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
     }
 
     case ND_COND:
+        // #1019: GNU per-lane vector select -- the condition is itself a
+        // vector (typically a comparison mask), and each lane independently
+        // picks its then/els element (type.c's ND_COND type-checking, which
+        // requires the arms to be identically-typed vectors here, and
+        // codegen_expr.c's gen_vector_expr both dispatch on this same
+        // is_vector(node->cond->ty) check). GCC accepts `cond ? a : b` with
+        // a vector cond directly; clang rejects it ("used type '...' where
+        // arithmetic or pointer type is required"). Lower to portable mask
+        // arithmetic instead of relying on the GCC-only extension: the
+        // condition's own vector type is guaranteed (type.c) to have the
+        // same lane count/width as the arms, so it doubles as the mask type
+        // and casting an arm to/from it is a same-size bitcast. `!= 0`
+        // implements GCC's "nonzero", not "all-bits-set", per-lane
+        // truthiness rule. Each of cond/then/els is evaluated exactly once.
+        //
+        // An ordinary C ternary with a *scalar* condition and vector arms
+        // (standard C, not this GNU extension) falls through to the plain
+        // `?:` below unchanged -- real clang already accepts that form.
+        if (is_vector(node->cond->ty)) {
+            fprintf(f, "__extension__ ({ ");
+            serialize_type(f, ctx, node->cond->ty);
+            fprintf(f, " __cccc_vsel_m = (");
+            serialize_expr(f, vm, ctx, node->cond, 0);
+            fprintf(f, ") != 0; ");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, " __cccc_vsel_t = (");
+            serialize_expr(f, vm, ctx, node->then, 0);
+            fprintf(f, "); ");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, " __cccc_vsel_f = (");
+            serialize_expr(f, vm, ctx, node->els, 0);
+            fprintf(f, "); (");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, ")((__cccc_vsel_m & (");
+            serialize_type(f, ctx, node->cond->ty);
+            fprintf(f, ")__cccc_vsel_t) | (~__cccc_vsel_m & (");
+            serialize_type(f, ctx, node->cond->ty);
+            fprintf(f, ")__cccc_vsel_f)); })");
+            break;
+        }
         serialize_expr(f, vm, ctx, node->cond, 0);
         fprintf(f, " ? ");
         serialize_expr(f, vm, ctx, node->then, 0);
@@ -1804,7 +1858,14 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, "(");
         for (Node *arg = node->args; arg; arg = arg->next) {
-            serialize_expr(f, vm, ctx, arg, 0);
+            // #1042(b): a comma-expression argument (e.g. from a macro like
+            // ivalue(r) that expands to one) must stay parenthesized here --
+            // the comma is the argument separator in this context, so an
+            // unparenthesized ND_COMMA silently splits into extra arguments
+            // ("too many arguments to function call"). parent_prec 2 is
+            // above get_precedence(ND_COMMA)'s 1 but below every other node
+            // kind's precedence, so only a bare top-level comma gets wrapped.
+            serialize_expr(f, vm, ctx, arg, 2);
             if (arg->next)
                 fprintf(f, ", ");
         }
@@ -1931,19 +1992,23 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         };
         const char *name = (node->val >= 0 && node->val <= 2) ? names[node->val]
                                                                : "__builtin_add_overflow";
+        // #1042(b): every comma below is a real argument separator to a
+        // fixed-arity builtin, same comma-in-arg-position hazard as
+        // ND_FUNCALL.
         fprintf(f, "%s(", name);
-        serialize_expr(f, vm, ctx, node->lhs, 0);
+        serialize_expr(f, vm, ctx, node->lhs, 2);
         fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->rhs, 0);
+        serialize_expr(f, vm, ctx, node->rhs, 2);
         fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->cas_addr, 0);
+        serialize_expr(f, vm, ctx, node->cas_addr, 2);
         fprintf(f, ")");
         break;
     }
 
     case ND_DYNOBJ_SIZE:
         fprintf(f, "__builtin_dynamic_object_size(");
-        serialize_expr(f, vm, ctx, node->lhs, 0);
+        // #1042(b): see ND_OVERFLOW_ARITH above.
+        serialize_expr(f, vm, ctx, node->lhs, 2);
         fprintf(f, ", %lld)", (long long)node->val);
         break;
 
@@ -1954,7 +2019,8 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // and the VM is not being atomic there either.
         if (atomic_serializable_pointee(node->lhs)) {
             fprintf(f, "__atomic_load_n(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
+            // #1042(b): see ND_OVERFLOW_ARITH above.
+            serialize_expr(f, vm, ctx, node->lhs, 2);
             fprintf(f, ", __ATOMIC_SEQ_CST)");
         } else {
             fprintf(f, "(*(");
@@ -1976,13 +2042,18 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             fprintf(f, ")) __cccc_astore_v = (");
             serialize_expr(f, vm, ctx, node->rhs, 0);
             fprintf(f, "); __atomic_store_n(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
+            // #1042(b): real argument separator to the builtin.
+            serialize_expr(f, vm, ctx, node->lhs, 2);
             fprintf(f, ", __cccc_astore_v, __ATOMIC_SEQ_CST); __cccc_astore_v; })");
         } else {
             fprintf(f, "(*(");
             serialize_expr(f, vm, ctx, node->lhs, 0);
             fprintf(f, ") = ");
-            serialize_expr(f, vm, ctx, node->rhs, 0);
+            // #1042(b): rhs sits after `=` inside one shared enclosing
+            // paren, not its own -- an unparenthesized top-level ND_COMMA
+            // here would bind looser than `=` and change which value the
+            // whole parenthesized expression yields.
+            serialize_expr(f, vm, ctx, node->rhs, 2);
             fprintf(f, ")");
         }
         break;
@@ -1991,9 +2062,10 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // codegen rejects float/odd-size pointees outright for exchange and
         // compare-and-swap, so these two map 1:1 with no fallback arm.
         fprintf(f, "__atomic_exchange_n(");
-        serialize_expr(f, vm, ctx, node->lhs, 0);
+        // #1042(b): see ND_OVERFLOW_ARITH above.
+        serialize_expr(f, vm, ctx, node->lhs, 2);
         fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->rhs, 0);
+        serialize_expr(f, vm, ctx, node->rhs, 2);
         fprintf(f, ", __ATOMIC_SEQ_CST)");
         break;
 
@@ -2002,11 +2074,12 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // cas_old is a *pointer* to the expected value, as __atomic_compare_
         // exchange_n also takes. weak = 0.
         fprintf(f, "__atomic_compare_exchange_n(");
-        serialize_expr(f, vm, ctx, node->cas_addr, 0);
+        // #1042(b): see ND_OVERFLOW_ARITH above.
+        serialize_expr(f, vm, ctx, node->cas_addr, 2);
         fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->cas_old, 0);
+        serialize_expr(f, vm, ctx, node->cas_old, 2);
         fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->cas_new, 0);
+        serialize_expr(f, vm, ctx, node->cas_new, 2);
         fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
         break;
 
@@ -2043,7 +2116,9 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                              : (node->val == 2) ? "cimag"
                                                 : "conj";
             fprintf(f, "__builtin_%s%s(", name, suffix);
-            serialize_expr(f, vm, ctx, node->lhs, 0);
+            // #1042(b): single-argument builtin -- a bare top-level comma
+            // in the operand would still misparse as an extra argument.
+            serialize_expr(f, vm, ctx, node->lhs, 2);
             fprintf(f, ")");
         }
         break;
@@ -2051,7 +2126,9 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 
     case ND_CONVERTVECTOR:
         fprintf(f, "__builtin_convertvector(");
-        serialize_expr(f, vm, ctx, node->lhs, 0);
+        // #1042(b): the builtin's own ", " separates the operand from the
+        // target type, same comma-in-arg-position hazard as ND_FUNCALL.
+        serialize_expr(f, vm, ctx, node->lhs, 2);
         fprintf(f, ", ");
         serialize_type(f, ctx, node->ty);
         fprintf(f, ")");
@@ -2184,7 +2261,9 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         fprintf(f, "))__cccc_blk->__invoke)(__cccc_blk");
         for (Node *arg = node->args; arg; arg = arg->next) {
             fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, arg, 0);
+            // #1042(b): same comma-in-arg-position hazard as ND_FUNCALL's
+            // argument loop above.
+            serialize_expr(f, vm, ctx, arg, 2);
         }
         fprintf(f, "); })");
         break;
@@ -2293,7 +2372,13 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             print_indent_level(f, indent);
             serialize_type_decl(f, ctx, var->ty, var->name);
             fprintf(f, " = ");
-            serialize_expr(f, vm, ctx, node->lhs->rhs, 0);
+            // #1042(b): this `=` is printed manually, outside
+            // serialize_expr's own ND_ASSIGN case (which already protects
+            // its rhs via node_prec + 1) -- an unparenthesized top-level
+            // ND_COMMA here would bind looser than `=` and initialize the
+            // declaration with the comma's first operand instead of its
+            // value.
+            serialize_expr(f, vm, ctx, node->lhs->rhs, 2);
             fprintf(f, ";\n");
             break;
         }
@@ -2376,7 +2461,12 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                     if (!first_init)
                         fprintf(f, ", ");
                     first_init = false;
-                    serialize_expr(f, vm, ctx, s->lhs, 0);
+                    // #1042(b): this loop already comma-joins multiple
+                    // declarator inits itself (the ", " above) -- an
+                    // unparenthesized ND_COMMA inside one declarator's own
+                    // initializer would be indistinguishable from another
+                    // separator comma.
+                    serialize_expr(f, vm, ctx, s->lhs, 2);
                 }
             } else if (node->init->kind == ND_EXPR_STMT) {
                 if (!is_noop_expr(node->init->lhs))
@@ -2512,15 +2602,22 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         print_indent_level(f, indent);
         if (atomic_serializable_pointee(node->lhs)) {
             fprintf(f, "__atomic_store_n(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
+            // #1042(b): real argument separator to the builtin.
+            serialize_expr(f, vm, ctx, node->lhs, 2);
             fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->rhs, 0);
+            serialize_expr(f, vm, ctx, node->rhs, 2);
             fprintf(f, ", __ATOMIC_SEQ_CST);\n");
         } else {
             fprintf(f, "*(");
             serialize_expr(f, vm, ctx, node->lhs, 0);
             fprintf(f, ") = ");
-            serialize_expr(f, vm, ctx, node->rhs, 0);
+            // #1042(b): `= rhs;` here is not wrapped in any enclosing
+            // parens (unlike the expression-position ND_ASTORE case) -- an
+            // unparenthesized top-level ND_COMMA in rhs would bind looser
+            // than `=`, assigning the comma's *first* operand instead of
+            // its value (the last operand), a silent wrong-answer bug, not
+            // merely a compile error.
+            serialize_expr(f, vm, ctx, node->rhs, 2);
             fprintf(f, ";\n");
         }
         break;
