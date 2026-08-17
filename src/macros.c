@@ -2816,19 +2816,6 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                             scope_before->next = saved_scope_next;
                         vm->compiler.scope = scope_before;
 
-                        // Drain newly prepended objects into macro_globals using
-                        // a saved-next walk so we never overwrite a next pointer
-                        // we still need to follow (which would create a cycle).
-                        Obj *o = vm->compiler.globals;
-                        while (o && o != globals_before) {
-                            Obj *next_obj = o->next;
-                            cc_record_emit_object(vm, o);
-                            o->next = vm->compiler.macro_globals;
-                            vm->compiler.macro_globals = o;
-                            o = next_obj;
-                        }
-                        vm->compiler.globals = globals_before;
-
                         // Ticket #233: if the macro returned an ND_BLOCK, splice
                         // its body tokens into the stream so they are re-parsed
                         // at global scope instead of being silently discarded.
@@ -2839,6 +2826,22 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                         // starting at 0, stopping just before the outer '}'.
                         // Note: compound_stmt adds declarations as side effects
                         // so block->body may be NULL; use tok-level injection.
+                        //
+                        // #1034: the splice decision must be made *before* the
+                        // globals drain below, not after -- the objects this
+                        // macro call just built while evaluating block_result
+                        // (globals_before..vm->compiler.globals) are the *same*
+                        // declarations the re-parse below is about to produce
+                        // again from source text. Draining them into
+                        // macro_globals unconditionally (the old order) left
+                        // both copies in the merged program (main.c), so
+                        // -c=native/-c=generated emitted two conflicting
+                        // prototypes/bodies per generated function -- the VM
+                        // silently tolerated the duplicate Obj chain, so this
+                        // only ever showed up downstream. When splicing,
+                        // discard this call's generated objects entirely
+                        // (rewind vm->compiler.globals, skip the drain) and
+                        // let the re-parse be the sole source of truth.
                         if (block_result &&
                             block_result->kind == ND_BLOCK &&
                             block_result->tok &&
@@ -2860,6 +2863,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                                 body_last = t;
                             }
                             if (body_last) {
+                                vm->compiler.globals = globals_before;
                                 body_last->next = next_tok;
                                 if (prev)
                                     prev->next = body_first;
@@ -2869,6 +2873,19 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                                 continue;
                             }
                         }
+
+                        // Drain newly prepended objects into macro_globals using
+                        // a saved-next walk so we never overwrite a next pointer
+                        // we still need to follow (which would create a cycle).
+                        Obj *o = vm->compiler.globals;
+                        while (o && o != globals_before) {
+                            Obj *next_obj = o->next;
+                            cc_record_emit_object(vm, o);
+                            o->next = vm->compiler.macro_globals;
+                            vm->compiler.macro_globals = o;
+                            o = next_obj;
+                        }
+                        vm->compiler.globals = globals_before;
 
                         // Remove the call tokens from the stream
                         if (prev) {

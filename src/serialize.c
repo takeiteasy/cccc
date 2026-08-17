@@ -2830,6 +2830,20 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 // be declared and referenced as valid C identifiers.
                 var->name = arena_format(vm, "__cccc_tmp%d",
                                           ctx->anon_local_counter++);
+            else if (var->name[0] == '.')
+                // #1034: a local named via new_unique_name() (parse_core.c)
+                // -- a macro/comptime-generated compound literal or block
+                // temp given the same ".L..N" dotted scheme as an anonymous
+                // *global* (rename_anon_globals(), further down this file)
+                // -- is not a legal C identifier either, and unlike the
+                // empty-name case above was never renamed here. Same
+                // display_name-or-"anon" tag rule rename_anon_globals()
+                // uses, sharing anon_local_counter so it still can't
+                // collide with the __cccc_tmp%d case above.
+                var->name = arena_format(vm, "__cccc_%s_%d",
+                                          (var->display_name && var->display_name[0] != '.')
+                                              ? var->display_name : "anon",
+                                          ctx->anon_local_counter++);
 
             // #926: rename on collision against every *other* local/param
             // in the function -- not just those before it in the raw list,

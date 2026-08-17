@@ -566,7 +566,24 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
     // own TU's directives were never replayed either -- see the matching
     // preprocess.c fix). cc_file_is_command_line_input() is the same test
     // #1002 already established for serialize.c's function passes.
-    rec->from_include = decl_tok && decl_tok->file &&
+    // #1034: __builtin_quote's Quote() wrapper (reflection.c) tokenizes its
+    // template string under the fixed pseudo-filename "<quote>" -- unlike
+    // tokenize_private_header()'s "<implicit-reflection.h>"/"<building.h>"/
+    // "<testing.h>" (a real on-disk header, just re-tokenized under a tag
+    // instead of resolved by path; genuinely from_include, must stay
+    // suppressed here) there is no backing file at all for a Quote()d
+    // template -- no downstream #include could ever supply this
+    // definition. A struct/union/enum whose tag is only ever declared
+    // inside a Quote()d template (the file-scope ND_BLOCK splice path,
+    // macros.c) was wrongly treated as from_include and its definition
+    // suppressed entirely, leaving every reference to the tag an
+    // incomplete-type error. Matched by exact name, not a "<...>" prefix
+    // (tried first; wrongly caught tokenize_private_header's real headers
+    // too and undid #892's AttrTarget/opaque-handle-collision fix).
+    bool is_quote_pseudo_file = decl_tok && decl_tok->file &&
+                                decl_tok->file->name &&
+                                strcmp(decl_tok->file->name, "<quote>") == 0;
+    rec->from_include = decl_tok && decl_tok->file && !is_quote_pseudo_file &&
                         !cc_file_is_command_line_input(vm, decl_tok->file->name) &&
                         !cc_file_is_cccc_only(vm, decl_tok->file->name);
     rec->file_path = decl_tok && decl_tok->file ? decl_tok->file->name : NULL;
