@@ -733,6 +733,19 @@ static const struct { const char *name; const char *header; } synth_libc_headers
 static void register_synth_libc_call(VirtualMachine *vm, Obj *obj) {
     if (!obj || !obj->is_function)
         return;
+    // A program's own file-scope declaration of one of these five names
+    // (however unusual -- shadowing a libc name is legal C, more so
+    // `static`) is a real, command-line-input Obj with its own token: it
+    // needs no synthesized #include at all, and forcing one in would
+    // collide with its own, possibly incompatible signature (e.g. a
+    // 'static declaration follows non-static declaration' error once
+    // <string.h>'s real prototype is also in scope). Only register an Obj
+    // that is NOT written in one of the user's own command-line input
+    // files -- CCCC's own synthesized (no token) or bundled-header-sourced
+    // (reflection.h's internal #include <string.h>) shapes both pass this.
+    if (obj->tok && obj->tok->file &&
+        cc_file_is_command_line_input(vm, obj->tok->file->name))
+        return;
     const char *header = NULL;
     for (size_t i = 0; i < sizeof(synth_libc_headers) / sizeof(synth_libc_headers[0]); i++) {
         if (!strcmp(obj->name, synth_libc_headers[i].name)) {

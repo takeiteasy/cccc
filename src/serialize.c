@@ -4845,6 +4845,36 @@ static bool node_calls_obj(Node *node, Obj *target) {
 // (generated_only returns earlier in cc_serialize_program, replaying
 // includes via CCCC_EMIT_SOURCE events instead) -- residual, not this
 // ticket's scope.
+// #1050: true if `prog` contains a *different* Obj, written in one of the
+// user's own command-line input files, sharing `name` -- i.e. the program
+// declares its own memcpy/strlen/strcmp/etc (however unusual; shadowing a
+// libc name at file scope is legal C). register_synth_libc_call()
+// (reflection.c) already skips registering such an Obj directly, but the
+// reflection API's own identifier resolution can still resolve a call to a
+// *different*, CCCC-injected Obj of the same name first (var_ref_lookup's
+// scope search finds whichever declaration is nearer, and reflection.h's
+// own implicit `#include <string.h>` parse can sit ahead of the user's
+// own declaration) -- so the registered entry's Obj identity alone isn't
+// enough to rule this out. Forcing `#include <string.h>` in on top of the
+// user's own real declaration is worse than the gap this ticket fixes (a
+// straight 'static declaration follows non-static declaration' compile
+// failure that didn't exist before); skip the header entirely when the
+// user has their own colliding declaration; the ordinary auto-capture/
+// forward-declare-every-function machinery already covers *that* Obj.
+static bool has_colliding_user_decl(VirtualMachine *vm, Obj *prog,
+                                    const char *name, Obj *registered_obj) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj == registered_obj || !obj->is_function)
+            continue;
+        if (strcmp(obj->name, name) != 0)
+            continue;
+        if (obj->tok && obj->tok->file &&
+            cc_file_is_command_line_input(vm, obj->tok->file->name))
+            return true;
+    }
+    return false;
+}
+
 static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog) {
     SynthLibcDeclArray *reg = &vm->compiler.synth_libc_decls;
     const char *emitted[32];
@@ -4859,6 +4889,8 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog
             called = node_calls_obj(obj->body, entry->obj);
         }
         if (!called)
+            continue;
+        if (has_colliding_user_decl(vm, prog, entry->obj->name, entry->obj))
             continue;
         bool already = false;
         for (int j = 0; j < emitted_len; j++)
