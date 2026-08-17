@@ -651,6 +651,14 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     fn->alloca_bottom =
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
 
+    // #1043: for a K&R-form definition, is_definition was set from
+    // equal(tok, "{") back at :494/:526 -- before the K&R declaration-list
+    // loop above ran, when tok was still sitting on that list's leading
+    // type, not "{". Re-set it now that the body is confirmed to be next;
+    // the bodyless-declaration early-out above (consume(tok, ";")) means
+    // only a real definition ever reaches this point, so this can't
+    // wrongly mark a prototype.
+    fn->is_definition = true;
     tok = skip(vm, tok, "{");
 
     // Reset cleanup-scope ancestry for this function body. The ++/-- pairs in
