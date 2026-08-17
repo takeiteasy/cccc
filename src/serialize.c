@@ -2836,11 +2836,18 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 // temp given the same ".L..N" dotted scheme as an anonymous
                 // *global* (rename_anon_globals(), further down this file)
                 // -- is not a legal C identifier either, and unlike the
-                // empty-name case above was never renamed here. Same
-                // display_name-or-"anon" tag rule rename_anon_globals()
-                // uses, sharing anon_local_counter so it still can't
-                // collide with the __cccc_tmp%d case above.
-                var->name = arena_format(vm, "__cccc_%s_%d",
+                // empty-name case above was never renamed here. Deliberately
+                // a distinct "__cccc_local_" prefix, not rename_anon_globals()'s
+                // own "__cccc_%s_%d" scheme (which draws from a *different*
+                // counter, anon_global_counter) -- reusing that scheme here
+                // would let a renamed global and a renamed local collide on
+                // the identical spelling (e.g. both landing on
+                // "__cccc_anon_0", one per counter) and silently shadow each
+                // other in this function's scope. Same display_name-or-
+                // "anon" tag rule rename_anon_globals() uses, but sharing
+                // anon_local_counter with the __cccc_tmp%d case above (whose
+                // own prefix keeps it out of this collision class too).
+                var->name = arena_format(vm, "__cccc_local_%s_%d",
                                           (var->display_name && var->display_name[0] != '.')
                                               ? var->display_name : "anon",
                                           ctx->anon_local_counter++);
