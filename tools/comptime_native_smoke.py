@@ -3253,11 +3253,52 @@ def case_comptime_ptr_shadow_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     COMPTIME_PTR_SHADOW_PROGRAM)
 
 
+def case_header_global_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  91: -c=native, a header-sourced global (a `static int x = 40;` "
+          "reached only through a plain #include) used to be re-emitted "
+          "THREE times -- the replayed #include (which already defines "
+          "it), the #918 forward-declare-every-global pass, and "
+          "serialize_global_var()'s own definition -- a host "
+          "'redefinition' compile failure. Functions already had an "
+          "include-provenance gate (function_is_header_supplied(), "
+          "src/serialize.c); globals had none. Fixed by adding "
+          "global_is_header_supplied(), the global-side mirror, consulted "
+          "from both suppression sites. Asserts VM 42 -> native 42 (#1047)")
+    hdr = Path(tmp) / "header_global_1047_smoke.h"
+    src = Path(tmp) / "header_global_1047_smoke.c"
+    write(hdr, "static int header_global_1047_smoke = 40;\n")
+    write(src,
+          "#include \"header_global_1047_smoke.h\"\n"
+          "int main(void) {\n"
+          "    if (header_global_1047_smoke != 40) return 1;\n"
+          "    return header_global_1047_smoke + 2;\n"
+          "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "header_global_1047_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3355,6 +3396,7 @@ def main() -> int:
             case_native_always_links_lm,
             case_const_ptr_native_round_trip,
             case_comptime_ptr_shadow_native_round_trip,
+            case_header_global_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

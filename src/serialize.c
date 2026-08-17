@@ -549,6 +549,12 @@ static bool same_type_strong(Type *a, Type *b) {
 // much later in this file.
 static const char *enum_const_spelling(SerializeContext *ctx, Type *ty, const char *name);
 
+// #1047: forward-declared here since serialize_global_var() (below) needs
+// it but its definition, next to function_is_header_supplied() (the
+// function-side counterpart it mirrors), comes much later in this file.
+static bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
+                                      Obj *obj);
+
 static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
         return NULL;
@@ -3295,6 +3301,12 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
     if (var->is_string_literal)
         return;
 
+    // #1047: a global whose declaration lives entirely in a replayed
+    // header is already supplied by that header's own #include text --
+    // see global_is_header_supplied()'s comment.
+    if (global_is_header_supplied(vm, ctx, var))
+        return;
+
     // #1011: the #918/#928 forward-declaration pass (cc_serialize_program,
     // further down this file) already emitted a line for this global ahead
     // of every definition -- `static T name;` for a static with no
@@ -5088,6 +5100,35 @@ static bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ct
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
 }
 
+// #1047: the global-variable counterpart to function_is_header_supplied()
+// just above. Unlike functions, globals had no include-provenance gate at
+// all -- the #918 forward-declare-every-global pass and serialize_global_var
+// both only checked is_function/is_string_literal/init_data-presence, so a
+// header declaring `static int x = 0;` produced three copies of `x` in
+// -c=native output: the replayed `#include`, the forward declaration, and
+// the definition -- a hard "redefinition" from the host compiler. Same
+// safe-default guards as the function version (no token/file -> emit
+// rather than silently drop; macro-generated -> emit, it has no header of
+// its own to collide with), and the same `!generated_only ||
+// path_is_captured(...)` tail, but without the is_static/body checks
+// (function_is_header_supplied only suppresses a *definition*, since a
+// bodyless declaration is handled by its own from_input branch further
+// down; an ordinary global's replayed header line is its only
+// declaration+definition either way, so there's no separate case to split
+// out here).
+static bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
+                                      Obj *obj) {
+    if (obj->is_macro_generated)
+        return false;
+    Token *t = obj->tok;
+    if (!t || !t->file)
+        return false;
+    if (file_is_command_line_input(vm, t->file->name) ||
+        cc_file_is_cccc_only(vm, t->file->name))
+        return false;
+    return !ctx->generated_only || path_is_captured(ctx, t->file->name);
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -5331,6 +5372,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         // copy of the type, so nothing is lost except the (here,
         // impossible) forward reference this pass exists to support.
         if (type_needs_anon_aggregate(&ctx, obj->ty))
+            continue;
+        // #1047: a header-supplied global is already forward-visible via
+        // the replayed #include -- see global_is_header_supplied()'s
+        // comment.
+        if (global_is_header_supplied(vm, &ctx, obj))
             continue;
         fprintf(f, obj->is_static ? "static " : "extern ");
         serialize_type_decl(f, &ctx, obj->ty, obj->name);
