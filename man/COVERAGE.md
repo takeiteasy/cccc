@@ -1545,19 +1545,28 @@ actual symbols, so the native *link* fails ("symbol(s) not found"). Decided
 (#1037): same reasoning as #1028 — no CCCC-owned runtime ships alongside a
 `-c=native` binary, so left as a documented platform gap on macOS.
 
-This one doesn't fully round-trip on Linux/glibc either, though — a second,
-independent blocker: `-c=native`'s native `cc` invocation never passes
-`-lm` to the host linker (confirmed by reading the flag-assembly code that
-builds that command line — there is no `-lm` anywhere in it, only whatever
-`-l`/`#pragma comment(lib, ...)` the guest source itself requested). This
-stayed invisible until now because glibc 2.34+ folded the *common* math
-functions (`sin`/`sqrt`/etc., confirmed linking fine with no `-lm`) into
-`libc.so.6` directly, but this newer C23 family is still libm-only there
-(confirmed: undefined reference without `-lm`, links and runs correctly
-with it) — every other native math test in the corpus happens to only use
-already-libc-merged functions, so nothing else has hit this yet. Filed as
-#1051, a general `-c=native` gap independent of #1037; `test_math_c23_ieee.c`
-stays skipped on every platform (`NATIVE_SKIP_TESTS`) until it closes.
+This one didn't fully round-trip on Linux/glibc either, for a second,
+independent reason (RESOLVED, #1051): `-c=native`'s native `cc` invocation
+never passed `-lm` to the host linker at all. This stayed invisible until
+now because glibc 2.34+ folded the *common* math functions (`sin`/`sqrt`/
+etc., confirmed linking fine with no `-lm`) into `libc.so.6` directly, but
+this newer C23 family is still libm-only there (confirmed: undefined
+reference without `-lm`, links and runs correctly with it) — every other
+native math test in the corpus happens to only use already-libc-merged
+functions, so nothing else had hit this yet. Fixed by always appending
+`-lm` to the native `cc` invocation (`src/main.c`) — harmless everywhere
+else, since an unused `-lm` is simply dropped by the linker.
+
+With that fixed, a third and unrelated blocker surfaces on Linux:
+`__cccc_issignaling_d`/`__cccc_iseqsig_d` (backing the `issignaling()`/
+`iseqsig()` macros) are CCCC-internal names with no real host libc/libm
+equivalent to link against at all — in VM mode they route to software
+bit-pattern implementations (`src/stdlib/math.c`), but `-c=native` only
+*declares* them (via the header replay) and never emits a *definition*,
+unlike `stdin`/`stdout`/`errno`/etc., which `native_accessor_shims`
+(`src/serialize.c`) already handles the same way. Filed as #1052.
+`test_math_c23_ieee.c` stays skipped on every platform
+(`NATIVE_SKIP_TESTS`) until it closes too.
 
 ---
 

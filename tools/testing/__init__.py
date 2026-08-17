@@ -145,25 +145,28 @@ NATIVE_SKIP_TESTS = {
     # value in the *test*, not a real saturating-cast semantics gap; once
     # #1038 fixed the literal, VM and native agree) no longer need an entry
     # here.
-    # test_math_c23_ieee.c: two independent blockers, both confirmed through
-    # the real -I./include native.py-shaped compile in the cccc-linux-amd64
-    # container -- not a single macOS-only gap as first thought. (1) macOS's
-    # libm genuinely lacks the whole C23 fmaximum/fminimum/totalorder/etc
-    # family (#1037, RESOLVED WONT_FIX -- permanent platform gap, same
-    # reasoning as #1028/reallocarray). (2) On Linux/glibc, cccc's own
-    # bundled math.h declares the family fine via -I./include, but the
-    # *link* still fails there too: src/main.c's native `cc` invocation
-    # never passes -lm, and glibc 2.34+ only folded the *common* math
-    # symbols (sin/sqrt/etc, confirmed linking fine with no -lm) into
-    # libc.so.6, not this newer C23 family (confirmed still libm-only,
-    # undefined reference without -lm, links and runs with it) -- filed as
-    # #1051, a general -c=native gap, not specific to this test. Stays
-    # skipped on every platform until #1051 closes.
+    # test_math_c23_ieee.c: two distinct, now-resolved-differently blockers,
+    # plus a third still open, all confirmed through the real -I./include
+    # native.py-shaped compile in the cccc-linux-amd64 container -- not a
+    # single macOS-only gap as first thought. (1) macOS's libm genuinely
+    # lacks the whole C23 fmaximum/fminimum/totalorder/etc family (#1037,
+    # RESOLVED WONT_FIX -- permanent platform gap, same reasoning as
+    # #1028/reallocarray). (2) -c=native's native `cc` invocation never
+    # passed -lm at all -- glibc 2.34+ only folded the *common* math
+    # symbols (sin/sqrt/etc) into libc.so.6, not this newer C23 family
+    # (still libm-only there) -- RESOLVED (#1051, src/main.c now always
+    # appends -lm). (3) With (2) fixed, a third and unrelated blocker
+    # surfaces on Linux: __cccc_issignaling_d/__cccc_iseqsig_d (backing the
+    # issignaling()/iseqsig() macros) are CCCC-internal names with no real
+    # libc equivalent to link against and no serializer-emitted definition
+    # either -- filed as #1052 (same shape as native_accessor_shims'
+    # existing stdin/stdout/errno entries, src/serialize.c:3931, just not
+    # yet extended to these). Stays skipped on every platform until #1052
+    # closes.
     "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
                    "totalorder/etc family (#1037, WONT_FIX, permanent "
-                   "platform gap); separately, -c=native never passes -lm "
-                   "to the host linker so even Linux/glibc fails to link "
-                   "this libm-only-there family (#1051)",
+                   "platform gap); on Linux, __cccc_issignaling_d/"
+                   "__cccc_iseqsig_d have no native definition (#1052)",
 
     # --- #1022: pthread/threads native support gaps ---
     "test_thread_local_isolation.c": "threads fail under native (#1022)",

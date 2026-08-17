@@ -217,6 +217,21 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
         snprintf(flag, sizeof(flag), "-l%s", libs[i]);
         argv_push(&cc_args, flag);
     }
+    // #1051: libm is never linked otherwise -- a guest program calling any
+    // math.h function CCCC's own bundled header declares (fmaximum/
+    // totalorder/etc, the whole C23 IEC 60559:2020 family CCCC implements
+    // in software) fails to *link* on a host where those specific symbols
+    // haven't been folded into libc itself. This stayed invisible until
+    // #1037's math test hit it, because glibc >= 2.34 already folds the
+    // *common* math functions (sin/sqrt/etc.) into libc.so.6, so most
+    // native programs linked fine with no -lm at all. Appended last (after
+    // every other -l flag) so it can satisfy an unresolved libm symbol left
+    // by a preceding static archive on a linker that resolves strictly
+    // left-to-right; harmless everywhere else -- an unused -lm is dropped
+    // by the linker, and on a host where libm is already folded into libc
+    // (glibc's newer functions aside) or into libSystem (macOS), the flag
+    // is simply a no-op.
+    argv_push(&cc_args, "-lm");
 
     int rc = run_argv((char *const *)cc_args.data);
 

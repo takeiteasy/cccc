@@ -146,6 +146,7 @@ Exit codes: 0 = all cases pass, 1 = any failure.
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -3097,6 +3098,56 @@ int main(void) {
 """
 
 
+NATIVE_LM_PROGRAM = (
+    "int main(void) { return 42; }\n"
+)
+
+
+def case_native_always_links_lm(cccc: Path, tmp: str) -> bool:
+    print("  88: -c=native's native `cc` invocation used to never pass "
+          "-lm at all -- invisible on most hosts because glibc >= 2.34 "
+          "folds the common math functions into libc.so.6 directly and "
+          "macOS's libm is folded into libSystem unconditionally, but a "
+          "libm-only symbol (the C23 fmaximum/fminimum/totalorder/etc "
+          "family, #774) failed to *link* on Linux/glibc as a result "
+          "(#1037/#1051). Fixed by always appending -lm to the native cc "
+          "invocation (src/main.c). Asserted here by pointing "
+          "CCCC_NATIVE_CC at a logging wrapper script and checking -lm "
+          "appears in the recorded argv, rather than depending on a "
+          "libm-only symbol that isn't available on every host this suite "
+          "runs on")
+    src = Path(tmp) / "native_lm_1051.c"
+    write(src, NATIVE_LM_PROGRAM)
+    out = Path(tmp) / "native_lm_1051_out"
+    log = Path(tmp) / "native_lm_1051_argv.log"
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_lm_1051_cc_wrapper.sh"
+    write(wrapper, f"#!/bin/sh\nprintf '%s\\n' \"$@\" >> {log}\nexec {real_cc} \"$@\"\n")
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+    result = subprocess.run(
+        [str(cccc), "-c=native", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    if not log.exists() or "-lm" not in log.read_text().splitlines():
+        print(f"    FAIL: -lm not found in recorded native cc argv "
+              f"({log.read_text() if log.exists() else '<no log>'})")
+        return False
+    run_result = subprocess.run([f"./{out.name}"], capture_output=True, text=True, cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_anon_aggregate_typedef_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  87: -c=native, a typedef whose right-hand side is an "
           "anonymous struct/union/enum (`typedef struct { ... } P, *Pp;`) "
@@ -3123,7 +3174,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3218,6 +3269,7 @@ def main() -> int:
             case_dotted_local_native_round_trip,
             case_global_block_splice_native_round_trip,
             case_anon_aggregate_typedef_native_round_trip,
+            case_native_always_links_lm,
         ]
         results = [case(cccc, tmp) for case in cases]
 
