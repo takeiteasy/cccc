@@ -3975,6 +3975,51 @@ static const struct {
     // Signature matches float.h's own `extern int __cccc_flt_rounds(void);`
     // (:72), not src/stdlib/fenv.c's VM-side long long version.
     {"__cccc_flt_rounds",   "static int __cccc_flt_rounds(void) { return __builtin_flt_rounds(); }\n"},
+    // #1052: issignaling(x)/iseqsig(x,y) (include/math.h:530-541) are
+    // CCCC-internal _Generic-dispatched macros with no real libc/libm
+    // symbol behind them -- same shape as isnan/isinf/etc above, needing a
+    // synthesized definition here too. The bit-pattern logic mirrors
+    // cccc_issignaling_{f,d}/cccc_iseqsig_{f,d} (src/stdlib/math.c) exactly:
+    // a signaling NaN is identified by its raw bit pattern, not via
+    // isnan()/arithmetic, either of which would quiet it before it could be
+    // observed. iseqsig's own shim inlines that same bit-pattern check
+    // rather than calling __cccc_issignaling_{f,d} -- a program can use
+    // iseqsig() without ever calling issignaling() directly, in which case
+    // this loop (keyed off is_used) would never emit that other shim's own
+    // definition, leaving an undefined reference to a name math.h only
+    // declares, not defines. feraiseexcept()/FE_INVALID need <fenv.h>,
+    // which -- unlike stdin/stdout/errno/optarg's already-guaranteed
+    // headers above -- iseqsig()'s own call site has no guarantee already
+    // reached; #include it directly in the shim text (legal mid-file,
+    // harmless if repeated thanks to the header's own include guard).
+    {"__cccc_issignaling_f", "static int __cccc_issignaling_f(float x) {\n"
+                              "    union { float f; unsigned int u; } __v; __v.f = x;\n"
+                              "    unsigned int u = __v.u;\n"
+                              "    return ((u & 0x7F800000U) == 0x7F800000U) && (u & 0x003FFFFFU) != 0 && !(u & 0x00400000U);\n"
+                              "}\n"},
+    {"__cccc_issignaling_d", "static int __cccc_issignaling_d(double x) {\n"
+                              "    union { double d; unsigned long long u; } __v; __v.d = x;\n"
+                              "    unsigned long long u = __v.u;\n"
+                              "    return ((u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (u & 0x0007FFFFFFFFFFFFULL) != 0 && !(u & 0x0008000000000000ULL);\n"
+                              "}\n"},
+    {"__cccc_iseqsig_f", "#include <fenv.h>\n"
+                          "static int __cccc_iseqsig_f(float x, float y) {\n"
+                          "    union { float f; unsigned int u; } __vx, __vy; __vx.f = x; __vy.f = y;\n"
+                          "    unsigned int ux = __vx.u, uy = __vy.u;\n"
+                          "    int sx = ((ux & 0x7F800000U) == 0x7F800000U) && (ux & 0x003FFFFFU) != 0 && !(ux & 0x00400000U);\n"
+                          "    int sy = ((uy & 0x7F800000U) == 0x7F800000U) && (uy & 0x003FFFFFU) != 0 && !(uy & 0x00400000U);\n"
+                          "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
+                          "    return x == y;\n"
+                          "}\n"},
+    {"__cccc_iseqsig_d", "#include <fenv.h>\n"
+                          "static int __cccc_iseqsig_d(double x, double y) {\n"
+                          "    union { double d; unsigned long long u; } __vx, __vy; __vx.d = x; __vy.d = y;\n"
+                          "    unsigned long long ux = __vx.u, uy = __vy.u;\n"
+                          "    int sx = ((ux & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (ux & 0x0007FFFFFFFFFFFFULL) != 0 && !(ux & 0x0008000000000000ULL);\n"
+                          "    int sy = ((uy & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (uy & 0x0007FFFFFFFFFFFFULL) != 0 && !(uy & 0x0008000000000000ULL);\n"
+                          "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
+                          "    return x == y;\n"
+                          "}\n"},
 };
 
 static void serialize_native_accessor_shims(FILE *f, Obj *prog) {

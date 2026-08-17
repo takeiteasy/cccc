@@ -1557,16 +1557,28 @@ functions, so nothing else had hit this yet. Fixed by always appending
 `-lm` to the native `cc` invocation (`src/main.c`) — harmless everywhere
 else, since an unused `-lm` is simply dropped by the linker.
 
-With that fixed, a third and unrelated blocker surfaces on Linux:
-`__cccc_issignaling_d`/`__cccc_iseqsig_d` (backing the `issignaling()`/
-`iseqsig()` macros) are CCCC-internal names with no real host libc/libm
-equivalent to link against at all — in VM mode they route to software
-bit-pattern implementations (`src/stdlib/math.c`), but `-c=native` only
-*declares* them (via the header replay) and never emits a *definition*,
-unlike `stdin`/`stdout`/`errno`/etc., which `native_accessor_shims`
-(`src/serialize.c`) already handles the same way. Filed as #1052.
-`test_math_c23_ieee.c` stays skipped on every platform
-(`NATIVE_SKIP_TESTS`) until it closes too.
+With that fixed, a third and unrelated blocker surfaced on Linux (RESOLVED,
+#1052): `__cccc_issignaling_d`/`__cccc_iseqsig_d` (backing the
+`issignaling()`/`iseqsig()` macros) are CCCC-internal names with no real
+host libc/libm equivalent to link against at all — in VM mode they route
+to software bit-pattern implementations (`src/stdlib/math.c`), but
+`-c=native` only *declared* them (via the header replay) and never emitted
+a *definition*, unlike `stdin`/`stdout`/`errno`/etc. Fixed by extending
+`native_accessor_shims` (`src/serialize.c`) with four more entries —
+`issignaling_{f,d}` mirror the VM's own bit-pattern check inline (not by
+calling the other's shim, since a program can use `iseqsig()` without ever
+calling `issignaling()` directly, which would leave that separate shim's
+own definition unemitted and an undefined reference behind); `iseqsig_{f,d}`
+additionally `#include <fenv.h>` directly in the shim text before calling
+`feraiseexcept(FE_INVALID)`, since — unlike the existing shim entries,
+which only reference names their own triggering macro's already-replayed
+header guarantees — a program using `iseqsig()` has no guarantee `<fenv.h>`
+was ever included.
+
+With all three resolved, `test_math_c23_ieee.c` now round-trips VM 42 →
+native 42 on Linux; only macOS's own permanent libm gap (#1037) remains,
+so it moved from the general `NATIVE_SKIP_TESTS` table to the
+macOS-specific `NATIVE_SKIP_TESTS_MACOS` one.
 
 ---
 

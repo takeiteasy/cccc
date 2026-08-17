@@ -145,29 +145,6 @@ NATIVE_SKIP_TESTS = {
     # value in the *test*, not a real saturating-cast semantics gap; once
     # #1038 fixed the literal, VM and native agree) no longer need an entry
     # here.
-    # test_math_c23_ieee.c: two distinct, now-resolved-differently blockers,
-    # plus a third still open, all confirmed through the real -I./include
-    # native.py-shaped compile in the cccc-linux-amd64 container -- not a
-    # single macOS-only gap as first thought. (1) macOS's libm genuinely
-    # lacks the whole C23 fmaximum/fminimum/totalorder/etc family (#1037,
-    # RESOLVED WONT_FIX -- permanent platform gap, same reasoning as
-    # #1028/reallocarray). (2) -c=native's native `cc` invocation never
-    # passed -lm at all -- glibc 2.34+ only folded the *common* math
-    # symbols (sin/sqrt/etc) into libc.so.6, not this newer C23 family
-    # (still libm-only there) -- RESOLVED (#1051, src/main.c now always
-    # appends -lm). (3) With (2) fixed, a third and unrelated blocker
-    # surfaces on Linux: __cccc_issignaling_d/__cccc_iseqsig_d (backing the
-    # issignaling()/iseqsig() macros) are CCCC-internal names with no real
-    # libc equivalent to link against and no serializer-emitted definition
-    # either -- filed as #1052 (same shape as native_accessor_shims'
-    # existing stdin/stdout/errno entries, src/serialize.c:3931, just not
-    # yet extended to these). Stays skipped on every platform until #1052
-    # closes.
-    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
-                   "totalorder/etc family (#1037, WONT_FIX, permanent "
-                   "platform gap); on Linux, __cccc_issignaling_d/"
-                   "__cccc_iseqsig_d have no native definition (#1052)",
-
     # --- #1022: pthread/threads native support gaps ---
     "test_thread_local_isolation.c": "threads fail under native (#1022)",
     "test_threads_basic.c": "threads fail under native (#1022)",
@@ -276,12 +253,26 @@ NATIVE_SKIP_TESTS = {
 NATIVE_SKIP_TESTS_MACOS = {
     "test_reallocarray.c": "reallocarray undefined on macOS libc, permanent "
                             "platform gap (#1028), still exercised on Linux",
-    # test_math_c23_ieee.c is NOT listed here even though #1037 (macOS's
-    # libm lacking the C23 fmaximum/fminimum/etc family) is a genuine
-    # permanent platform gap -- a second, independent blocker (#1051,
-    # -c=native never passes -lm to the host linker) means it still fails
-    # to link on Linux too, so it stays in the general NATIVE_SKIP_TESTS
-    # table above rather than this platform-specific one.
+    # test_math_c23_ieee.c: three distinct blockers, all confirmed through
+    # the real -I./include native.py-shaped compile in the cccc-linux-amd64
+    # container -- not a single macOS-only gap as first thought. (1) macOS's
+    # libm genuinely lacks the whole C23 fmaximum/fminimum/totalorder/etc
+    # family (#1037, RESOLVED WONT_FIX -- permanent platform gap, same
+    # reasoning as #1028/reallocarray). (2) -c=native's native `cc`
+    # invocation never passed -lm at all -- glibc 2.34+ only folded the
+    # *common* math symbols (sin/sqrt/etc) into libc.so.6, not this newer
+    # C23 family (still libm-only there) -- RESOLVED (#1051, src/main.c now
+    # always appends -lm). (3) With (2) fixed, a third and unrelated blocker
+    # surfaced on Linux: __cccc_issignaling_d/__cccc_iseqsig_d (backing the
+    # issignaling()/iseqsig() macros) were CCCC-internal names with no real
+    # libc equivalent to link against and no serializer-emitted definition
+    # either -- RESOLVED (#1052, native_accessor_shims,
+    # src/serialize.c:3931, extended to these four names). Only (1) remains,
+    # and it's macOS-only -- moved here from the general NATIVE_SKIP_TESTS
+    # table now that Linux round-trips cleanly.
+    "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
+                             "totalorder/etc family (#1037, WONT_FIX, "
+                             "permanent platform gap)",
 }
 
 # CLI flags that -c=native drops with a warning rather than enforcing
