@@ -172,20 +172,17 @@ NATIVE_SKIP_TESTS = {
     # note at src/serialize.c's native_accessor_shims comment. Still open.
     "test_sys_mount_statfs.c": "guest-side folded sizeof(struct statfs) disagrees with the host header's real layout, host statfs() overruns the buffer (#1031)",
 
-    # --- #1034: comptime/macro-generated declarations fail to serialize ---
-    "test_ast_builders_296.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_comptime_and_runtime_fn_ptr_tables_309.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_comptime_decl_index_anon_array_951.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_comptime_decl_index_unused_894.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_comptime_include_boundary_890.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_comptime_ptr_303.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_custom_attributes_serialize_235.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_global_block_expansion.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_macros_generate_constructor_235.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_macros_local_var.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_macros_quote_multi_stmt_global.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_macros_stdlib_memcpy_strlen_strcmp_235.c": "comptime-generated decl fails to serialize (#1034)",
-    "test_macros_quote_args_splice.c": "comptime-generated decl fails to serialize (#1034)",
+    # --- #1034 survivors: 6 distinct causes, retagged (5 of the original
+    # 13 files fixed and dropped from this table entirely -- see #1034's
+    # own close comment for what landed and where) ---
+    "test_comptime_and_runtime_fn_ptr_tables_309.c": "const-qualified function-pointer array initializer mismatch (#1045)",
+    "test_comptime_decl_index_anon_array_951.c": "segment_declarator_name() misindexes an array member inside an anonymous struct/union (#1046)",
+    "test_comptime_decl_index_unused_894.c": "header-sourced global redeclared/redefined when a comptime body never references it (#1047)",
+    "test_comptime_include_boundary_890.c": "cccc-only header text reaches the host compiler verbatim (#1048)",
+    "test_comptime_ptr_303.c": "comptime-shadow global (.L.comptime.N) never linked into the merged program (#1049)",
+    "test_custom_attributes_serialize_235.c": "comptime-generated code calls a libc function with no #include reaching the output (#1050)",
+    "test_macros_stdlib_memcpy_strlen_strcmp_235.c": "comptime-generated code calls a libc function with no #include reaching the output (#1050)",
+    "test_macros_quote_args_splice.c": "CCCC's internal va_list layout leaks into native output via __builtin_quote arg-splicing -- same class as #1018, different repro path (#1018)",
 
     # --- by-design divergence, not a bug: see COVERAGE.md ---
     "test_c4.c": "old-style implicit-int main() -- VM leniency the host "
