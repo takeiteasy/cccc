@@ -3421,11 +3421,112 @@ def case_comptime_header_not_replayed_native_round_trip(cccc: Path, tmp: str) ->
     return True
 
 
+SYNTH_TYPEDEF_INCLUDE_PROGRAM = (
+    "[[cccc::comptime]]\n"
+    "void generate_typedef_wrappers_1057(void) {\n"
+    "    Obj *sz = MakeFunction(\"get_size_1057\", GetType(\"size_t\"));\n"
+    "    WithFn(sz) {\n"
+    "        FunctionSetBody(sz, MakeReturn(MakeIntLiteral(1057)));\n"
+    "    }\n"
+    "\n"
+    "    Obj *pd = MakeFunction(\"get_ptrdiff_1057\", GetType(\"ptrdiff_t\"));\n"
+    "    WithFn(pd) {\n"
+    "        FunctionSetBody(pd, MakeReturn(MakeIntLiteral(-7)));\n"
+    "    }\n"
+    "\n"
+    "    Obj *wc = MakeFunction(\"get_wchar_1057\", GetType(\"wchar_t\"));\n"
+    "    WithFn(wc) {\n"
+    "        FunctionSetBody(wc, MakeReturn(MakeIntLiteral(97)));\n"
+    "    }\n"
+    "}\n"
+    "\n"
+    "generate_typedef_wrappers_1057();\n"
+    "\n"
+    "int main(void) {\n"
+    "    if (get_size_1057() != 1057) return 1;\n"
+    "    if (get_ptrdiff_1057() != -7) return 2;\n"
+    "    if (get_wchar_1057() != 97) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_synth_typedef_include_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  94: a comptime builder folding a standard scalar typedef name "
+          "-- GetType(\"size_t\")/\"ptrdiff_t\"/\"wchar_t\" -- into a "
+          "generated function's signature has no #include reaching "
+          "-c=native output for it, split off from #1050 as the type-name "
+          "sibling of that ticket's call-resolution fix. "
+          "cc_comptime_resolve_type_name() (src/macros.c) demand-splices "
+          "the name out of CCCC's own bundled include/stddef.h, so record_"
+          "type_name() marks it from_include=true and typedef_alias_header_"
+          "suppressed() (src/serialize.c) drops its alias line under the "
+          "assumption a user #include supplies it -- but nothing here ever "
+          "does. Reaches the host compiler as 'unknown type name'. Fixed by "
+          "serialize_synth_typedef_includes(), the type-name sibling of "
+          "#1050's serialize_synth_libc_includes(): a small {name, header} "
+          "table (size_t/ptrdiff_t/wchar_t -> <stddef.h>, verified to match "
+          "the real host's own typedef on every supported combo) plus a "
+          "usage walk emitting the real #include on demand, never a "
+          "printed typedef. Asserts VM 42 -> native 42 and that -m output "
+          "contains '#include <stddef.h>' (#1057)")
+    src = Path(tmp) / "synth_typedef_include_1057.c"
+    write(src, SYNTH_TYPEDEF_INCLUDE_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "#include <stddef.h>" not in m_result.stdout:
+        print(f"    FAIL: -m output missing '#include <stddef.h>'\n"
+              f"    {m_result.stdout}")
+        return False
+
+    if not _native_run_case(cccc, tmp, "synth_typedef_include_1057",
+                             SYNTH_TYPEDEF_INCLUDE_PROGRAM):
+        return False
+
+    # Negative case (the plan's own hazard): a program that already
+    # declares its own top-level `size_t` must not get a forced, possibly-
+    # conflicting <stddef.h> on top of it -- has_colliding_user_typedef()
+    # (src/serialize.c) defers to the user's own declaration instead.
+    collide_src = Path(tmp) / "synth_typedef_include_1057_collide.c"
+    write(collide_src,
+          "typedef unsigned long size_t;\n"
+          "\n"
+          "[[cccc::comptime]]\n"
+          "void generate_size_1057_collide(void) {\n"
+          "    Obj *fn = MakeFunction(\"get_size_1057_collide\", GetType(\"size_t\"));\n"
+          "    WithFn(fn) {\n"
+          "        FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));\n"
+          "    }\n"
+          "}\n"
+          "\n"
+          "generate_size_1057_collide();\n"
+          "\n"
+          "int main(void) { return (int)get_size_1057_collide(); }\n")
+    collide_m = run([str(cccc), "-m", collide_src.name], cwd=tmp)
+    if "#include <stddef.h>" in collide_m.stdout:
+        print("    FAIL: -m output forced #include <stddef.h> on top of "
+              "the program's own size_t typedef\n"
+              f"    {collide_m.stdout}")
+        return False
+    collide_vm = run([str(cccc), collide_src.name], cwd=tmp)
+    if collide_vm.returncode != 42:
+        print(f"    FAIL: collide VM exit {collide_vm.returncode}\n"
+              f"    {collide_vm.stderr}")
+        return False
+    return _native_run_case(cccc, tmp, "synth_typedef_include_1057_collide",
+                            collide_src.read_text())
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3526,6 +3627,7 @@ def main() -> int:
             case_header_global_native_round_trip,
             case_synth_libc_include_native_round_trip,
             case_comptime_header_not_replayed_native_round_trip,
+            case_synth_typedef_include_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

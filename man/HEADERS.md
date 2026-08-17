@@ -222,6 +222,26 @@ by default). Two things follow from that:
   deliberately loose and a printed prototype could conflict with the real
   declaration if `<string.h>` is also reached some other way in the same TU
   (#1050).
+- The type-name sibling of the above: a comptime builder can fold a
+  standard *scalar typedef name* — `GetType("size_t")`/`"ptrdiff_t"`/
+  `"wchar_t"` — into a generated function's signature or body via
+  `cc_comptime_resolve_type_name()`'s demand-driven splice (`src/macros.c`),
+  which re-parses the typedef out of CCCC's own bundled `include/stddef.h`
+  with no `#include` of it ever appearing in the TU. `record_type_name()`
+  therefore marks the record `from_include=true`, so `typedef_alias_header_
+  suppressed()` correctly drops its alias line under the ordinary
+  assumption that a user `#include` supplies it — except nothing here ever
+  does, leaving a bare, undeclared name. `serialize_synth_typedef_includes()`
+  (`src/serialize.c`) emits the real `<stddef.h>` on demand, mirroring
+  `serialize_synth_libc_includes()`'s shape: a small `{name, header}` table
+  scoped to exactly the trio verified to match the real host's own typedef
+  on every supported combo (LP64 macOS/Linux × aarch64/x86_64), plus a
+  usage walk (`obj_needs_synth_typedef_header()`) rather than a printed
+  typedef, for the same collision-avoidance reason. A program that already
+  declares its own top-level typedef of one of these names is deferred to
+  instead (`has_colliding_user_typedef()`) — forcing the header in on top of
+  it can turn a harmless redundant redeclaration into a hard "typedef
+  redefinition with different types" (#1057).
 
 `-c=generated` (without `-c=native`) is a separate code path: its output is
 meant to be compiled *alongside* normal headers, so it has never re-emitted

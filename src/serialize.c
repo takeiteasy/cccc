@@ -4909,6 +4909,199 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog
         fprintf(f, "\n");
 }
 
+// #1057: type-name sibling of #1050's synth-libc-call mechanism just above.
+// A comptime builder can fold a standard scalar typedef name -- GetType(
+// "size_t")/"ptrdiff_t"/"wchar_t" -- into a generated function's signature
+// or body via cc_comptime_resolve_type_name()'s demand-driven splice
+// (macros.c), which re-parses the typedef out of CCCC's own bundled
+// include/stddef.h with no #include of it ever appearing in the TU. That
+// leaves the recorded TypeNameRecord marked from_include=true (record_type_
+// name, parse_core.c), so typedef_alias_header_suppressed() drops its alias
+// line under -c=native/-m -- correctly, since the ordinary assumption is
+// that the user's own #include supplies it -- but nothing here ever does,
+// leaving a bare, undeclared name. Scoped to exactly the trio verified to
+// match the real host's own typedef on every supported combo (LP64 macOS/
+// Linux x aarch64/x86_64): long/unsigned long/int respectively (include/
+// stddef.h). nullptr_t excluded (C23-only, typeof(nullptr)-defined, no
+// repro); stdint.h's fixed-width names left for their own ticket if a repro
+// turns up.
+static const struct { const char *name; const char *header; } synth_typedef_headers[] = {
+    {"size_t", "stddef.h"},
+    {"ptrdiff_t", "stddef.h"},
+    {"wchar_t", "stddef.h"},
+};
+
+static const char *synth_typedef_header_for_name(const char *name, int name_len) {
+    for (size_t i = 0; i < sizeof(synth_typedef_headers) / sizeof(synth_typedef_headers[0]); i++) {
+        const char *cand = synth_typedef_headers[i].name;
+        if ((int)strlen(cand) == name_len && !strncmp(cand, name, name_len))
+            return synth_typedef_headers[i].header;
+    }
+    return NULL;
+}
+
+// #1057: pointer-identity lookup mirroring find_typedef_name_exact()'s #999
+// ->origin-chain walk, deliberately *without* its name_visible() gate. That
+// gate answers "would this name resolve inside function X's own scope" --
+// the right question when deciding what to *print*, but the wrong one here:
+// a comptime-spliced typedef's TypeNameRecord.owner_fn can point at whatever
+// scratch/comptime context was current_fn when the splice ran, unrelated to
+// which ordinary function's Type this is being checked against. This is only
+// asking "does *any* recorded typedef, anywhere, identify this exact Type,"
+// which is scope-independent.
+static TypeName *find_typedef_record_any_scope(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].ty == ty)
+                return &ctx->typedefs[i];
+    return NULL;
+}
+
+// #1057: skip the compensating #include when the program already declares
+// its own top-level typedef of the same name, however it's shaped -- type-
+// side analogue of #1050's has_colliding_user_decl(). An *identical*-shape
+// user redeclaration is legal C either way (C11 6.7p3, confirmed: `typedef
+// unsigned long size_t;` alongside CCCC's own comptime-resolved size_t
+// compiles fine with or without this guard), but a differently-shaped one
+// (e.g. a user `typedef struct {...} size_t;`) turns the forced #include
+// into a hard "typedef redefinition with different types" that didn't exist
+// before this fix -- confirmed directly, not just by analogy to #1050.
+// Deliberately doesn't try to tell the two apart: any user declaration of
+// the name is enough to defer to it and skip the header, matching #1050's
+// own "skip entirely" choice for the same shape of risk.
+static bool has_colliding_user_typedef(SerializeContext *ctx, const char *name,
+                                       int name_len) {
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        TypeName *tn = &ctx->typedefs[i];
+        if (tn->from_include || tn->always_emit)
+            continue;
+        if (tn->name_len == name_len && !strncmp(tn->name, name, name_len))
+            return true;
+    }
+    return false;
+}
+
+// #1057: does `ty` (or anything structurally reachable from it) resolve to
+// one of synth_typedef_headers' names whose alias line is being suppressed
+// -- i.e. reached the program only through the comptime splice described
+// above, with no user #include for serialize_synth_typedef_includes()
+// (below) to piggyback on. Mirrors type_mentions_block()'s PTR/ARRAY/VLA/
+// FUNC traversal shape, plus struct/union member recursion (guarded by
+// `seen`, since unlike type_mentions_block a self-referential struct is a
+// realistic shape to hit here, e.g. a linked-list node with a `size_t`
+// field alongside a `struct node *next`).
+static bool type_needs_synth_typedef_header(SerializeContext *ctx, Type *ty,
+                                            const char *header, TypeVec *seen) {
+    if (!ty)
+        return false;
+    TypeName *tn = find_typedef_record_any_scope(ctx, ty);
+    if (tn && typedef_alias_header_suppressed(ctx, tn)) {
+        const char *want = synth_typedef_header_for_name(tn->name, tn->name_len);
+        if (want && !strcmp(want, header) &&
+            !has_colliding_user_typedef(ctx, tn->name, tn->name_len))
+            return true;
+    }
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_needs_synth_typedef_header(ctx, ty->base, header, seen);
+    if (ty->kind == TY_FUNC) {
+        if (type_needs_synth_typedef_header(ctx, ty->return_ty, header, seen))
+            return true;
+        for (Type *p = ty->params; p; p = p->next)
+            if (type_needs_synth_typedef_header(ctx, p, header, seen))
+                return true;
+        return false;
+    }
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        if (type_vec_contains(seen, ty))
+            return false;
+        type_vec_push(seen, ty);
+        for (Member *m = ty->members; m; m = m->next)
+            if (type_needs_synth_typedef_header(ctx, m->ty, header, seen))
+                return true;
+    }
+    return false;
+}
+
+// #1057: mirrors collect_node_types()'s traversal shape (see also #990/#993's
+// node_mentions_block, the same pattern for TY_BLOCK).
+static bool node_needs_synth_typedef_header(SerializeContext *ctx, Node *node,
+                                            const char *header, TypeVec *seen) {
+    if (!node)
+        return false;
+    if (type_needs_synth_typedef_header(ctx, node->ty, header, seen))
+        return true;
+    if (node->var && type_needs_synth_typedef_header(ctx, node->var->ty, header, seen))
+        return true;
+    if (node->member && type_needs_synth_typedef_header(ctx, node->member->ty, header, seen))
+        return true;
+    if (node->func_ty && type_needs_synth_typedef_header(ctx, node->func_ty, header, seen))
+        return true;
+
+    return node_needs_synth_typedef_header(ctx, node->lhs, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->rhs, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->cond, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->then, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->els, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->init, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->inc, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->body, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->args, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node->next, header, seen);
+}
+
+// #1057: mirrors collect_obj_types()'s traversal shape.
+static bool obj_needs_synth_typedef_header(SerializeContext *ctx, Obj *obj,
+                                           const char *header, TypeVec *seen) {
+    if (type_needs_synth_typedef_header(ctx, obj->ty, header, seen))
+        return true;
+    if (node_needs_synth_typedef_header(ctx, obj->init_expr, header, seen))
+        return true;
+    for (Obj *param = obj->params; param; param = param->next)
+        if (type_needs_synth_typedef_header(ctx, param->ty, header, seen))
+            return true;
+    for (Obj *local = obj->locals; local; local = local->next)
+        if (type_needs_synth_typedef_header(ctx, local->ty, header, seen))
+            return true;
+    return node_needs_synth_typedef_header(ctx, obj->body, header, seen);
+}
+
+static void serialize_synth_typedef_includes(FILE *f, SerializeContext *ctx, Obj *prog) {
+    const char *emitted[8];
+    int emitted_len = 0;
+    bool any = false;
+    for (size_t i = 0; i < sizeof(synth_typedef_headers) / sizeof(synth_typedef_headers[0]); i++) {
+        const char *header = synth_typedef_headers[i].header;
+        bool already = false;
+        for (int j = 0; j < emitted_len; j++)
+            if (!strcmp(emitted[j], header)) {
+                already = true;
+                break;
+            }
+        if (already)
+            continue;
+
+        bool needed = false;
+        for (Obj *obj = prog; obj && !needed; obj = obj->next) {
+            if (obj->is_function && !obj->is_definition && !obj->body)
+                continue;
+            TypeVec seen = {0};
+            needed = obj_needs_synth_typedef_header(ctx, obj, header, &seen);
+            free(seen.data);
+        }
+        if (!needed)
+            continue;
+
+        fprintf(f, "#include <%s>\n", header);
+        any = true;
+        if (emitted_len < (int)(sizeof(emitted) / sizeof(emitted[0])))
+            emitted[emitted_len++] = header;
+    }
+    if (any)
+        fprintf(f, "\n");
+}
+
 // #990/#993: does `ty` (or anything reachable from it) mention TY_BLOCK --
 // used to decide whether `struct __cccc_block` itself needs a definition
 // even when the TU declares no block *literal* (e.g. a function that only
@@ -5417,6 +5610,15 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     // libc-declared types).
     if (!generated_only)
         serialize_synth_libc_includes(f, vm, prog);
+
+    // #1057: headers for comptime-folded standard typedef names (size_t/
+    // ptrdiff_t/wchar_t) with no #include of their own to auto-capture --
+    // see serialize_synth_typedef_includes's own comment. Same placement
+    // rationale as the synth-libc-call pass just above; ctx->typedefs is
+    // already populated by collect_scope_names() near the top of this
+    // function.
+    if (!generated_only)
+        serialize_synth_typedef_includes(f, &ctx, prog);
 
     // #904: real symbols for internal host-accessor shims (stdout/errno/
     // etc) -- only meaningful once the real headers above are visible, and
