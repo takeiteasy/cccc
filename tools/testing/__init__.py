@@ -145,9 +145,25 @@ NATIVE_SKIP_TESTS = {
     # value in the *test*, not a real saturating-cast semantics gap; once
     # #1038 fixed the literal, VM and native agree) no longer need an entry
     # here.
+    # test_math_c23_ieee.c: two independent blockers, both confirmed through
+    # the real -I./include native.py-shaped compile in the cccc-linux-amd64
+    # container -- not a single macOS-only gap as first thought. (1) macOS's
+    # libm genuinely lacks the whole C23 fmaximum/fminimum/totalorder/etc
+    # family (#1037, RESOLVED WONT_FIX -- permanent platform gap, same
+    # reasoning as #1028/reallocarray). (2) On Linux/glibc, cccc's own
+    # bundled math.h declares the family fine via -I./include, but the
+    # *link* still fails there too: src/main.c's native `cc` invocation
+    # never passes -lm, and glibc 2.34+ only folded the *common* math
+    # symbols (sin/sqrt/etc, confirmed linking fine with no -lm) into
+    # libc.so.6, not this newer C23 family (confirmed still libm-only,
+    # undefined reference without -lm, links and runs with it) -- filed as
+    # #1051, a general -c=native gap, not specific to this test. Stays
+    # skipped on every platform until #1051 closes.
     "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
-                   "totalorder/etc family -- link failure, not a compile "
-                   "error (#1037)",
+                   "totalorder/etc family (#1037, WONT_FIX, permanent "
+                   "platform gap); separately, -c=native never passes -lm "
+                   "to the host linker so even Linux/glibc fails to link "
+                   "this libm-only-there family (#1051)",
 
     # --- #1022: pthread/threads native support gaps ---
     "test_thread_local_isolation.c": "threads fail under native (#1022)",
@@ -158,7 +174,15 @@ NATIVE_SKIP_TESTS = {
     "test_pthread_recursive_mutex.c": "threads fail under native (#1022)",
 
     # --- singleton bugs, one ticket each ---
-    "test_minilua.c": "4 unrelated native-compile bugs found post-#1027 (#1042)",
+    "test_minilua.c": "3 unrelated native-compile bugs remain: by-value "
+                   "struct member ordering for an in-place-mutated Type "
+                   "(#1042a), a static-function/host-libc symbol collision "
+                   "manufactured by include-hoisting (#1042c), a VLA-length "
+                   "expression with no type-name dependency tracking "
+                   "(#1042d), plus a computed-goto dispatch-table global "
+                   "initializer with no C spelling for a label's address "
+                   "(#1044) -- (b), the comma-expression-in-funcall-argument "
+                   "bug, is fixed",
     "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
     # The emitted C replays `#include <sys/mount.h>` verbatim, so the host
     # header supplies the real ~2100-byte struct statfs and member access
@@ -249,6 +273,12 @@ NATIVE_SKIP_TESTS = {
 NATIVE_SKIP_TESTS_MACOS = {
     "test_reallocarray.c": "reallocarray undefined on macOS libc, permanent "
                             "platform gap (#1028), still exercised on Linux",
+    # test_math_c23_ieee.c is NOT listed here even though #1037 (macOS's
+    # libm lacking the C23 fmaximum/fminimum/etc family) is a genuine
+    # permanent platform gap -- a second, independent blocker (#1051,
+    # -c=native never passes -lm to the host linker) means it still fails
+    # to link on Linux too, so it stays in the general NATIVE_SKIP_TESTS
+    # table above rather than this platform-specific one.
 }
 
 # CLI flags that -c=native drops with a warning rather than enforcing

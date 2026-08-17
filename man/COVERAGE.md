@@ -1182,13 +1182,21 @@ there, so it is rejected with a diagnostic rather than emitted as broken C
 A function-local `static` array initialized with computed-goto label
 addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual
 dispatch-table idiom for a `goto *disptab[i]` interpreter loop) is a hard
-error under `-c=native`: the VM's own `BTRAP`/label-value machinery resolves
-`&&L0` to a bytecode offset with no equivalent in C source, and a real C
-static initializer cannot reference a label's address at all (GNU labels-
-as-values only permit `&&label` inside ordinary expression code, not in an
-initializer) — `serialize.c` rejects it with "cannot serialize initializer
-for global '...' in native mode: unresolved relocation target" rather than
-emitting output the host compiler would reject anyway (#1044).
+error under `-c=native`, but — unlike the `for`-loop VLA case above — this
+one is a genuine `-c=native` gap, not a divergence forced by C's grammar:
+both GCC (documented in its manual) and clang accept exactly this
+construct, verified directly against real clang on this repro. The real
+cause is CCCC's own lowering: `-c=native` hoists a function-local `static`
+out to file scope as a synthetic global (`__cccc_disptab_N`) before
+serializing its initializer, and at file scope `&&L0` genuinely has no C
+spelling — but had the array stayed inside its defining function, the
+construct would serialize fine. Compounding this, the label survives as
+only a bytecode relocation target (`.L..N`) by the time serialization sees
+it, with no path back to its source name (`L0`) even if the hoist were
+avoided. `serialize.c` correctly refuses to emit broken C rather than
+silently producing an unresolved relocation — "cannot serialize initializer
+for global '...' in native mode: unresolved relocation target" — but the
+underlying gap remains open, tracked as #1044.
 
 `__builtin_pc_function_name(pc)` and `__builtin_pc_source_location(pc, &file,
 &line)` are also a hard error under `-m`/`-c=native`/`-c=generated`, rather
@@ -1523,6 +1531,33 @@ not fixed — `-c=native` links directly against the host's own libc with no
 CCCC-owned runtime shipped alongside the binary, so there is nowhere to
 place an inline polyfill without adding exactly the kind of runtime
 dependency `-c=native` exists to avoid.
+
+The C23 `fmaximum`/`fminimum`/`fmaximum_num`/`fminimum_num`/`fmaximum_mag`/
+`fminimum_mag`/`fmaximumf`/`totalorder`/`totalorderf`/`totalordermag`/
+`canonicalize`/`getpayload`/`setpayload`/`setpayloadsig`/`llogb`/`llogbf`/
+`fromfpx`/`ufromfp` family is the same class of platform gap as
+`reallocarray()` above on macOS, not a serializer bug there: CCCC's VM
+implements the whole family directly, and its own `math.h` declares them
+(so the emitted C *compiles* cleanly, unlike an earlier `intmax_t`-
+provenance symptom this ticket also carried — resolved as a side effect of
+#1021's header-guard fix), but nothing in macOS's libm *provides* the
+actual symbols, so the native *link* fails ("symbol(s) not found"). Decided
+(#1037): same reasoning as #1028 — no CCCC-owned runtime ships alongside a
+`-c=native` binary, so left as a documented platform gap on macOS.
+
+This one doesn't fully round-trip on Linux/glibc either, though — a second,
+independent blocker: `-c=native`'s native `cc` invocation never passes
+`-lm` to the host linker (confirmed by reading the flag-assembly code that
+builds that command line — there is no `-lm` anywhere in it, only whatever
+`-l`/`#pragma comment(lib, ...)` the guest source itself requested). This
+stayed invisible until now because glibc 2.34+ folded the *common* math
+functions (`sin`/`sqrt`/etc., confirmed linking fine with no `-lm`) into
+`libc.so.6` directly, but this newer C23 family is still libm-only there
+(confirmed: undefined reference without `-lm`, links and runs correctly
+with it) — every other native math test in the corpus happens to only use
+already-libc-merged functions, so nothing else has hit this yet. Filed as
+#1051, a general `-c=native` gap independent of #1037; `test_math_c23_ieee.c`
+stays skipped on every platform (`NATIVE_SKIP_TESTS`) until it closes.
 
 ---
 
