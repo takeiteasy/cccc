@@ -1118,7 +1118,34 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         return;
     }
 
-    if (ty->is_const)
+    // #1045: a const-qualified *pointer* (`int *const p`, is_const lives on
+    // the TY_PTR Type itself, not its base) used to print this leading
+    // `const ` unconditionally, then fall through to the switch's TY_PTR
+    // case below, which recurses into serialize_type_decl() -- whose own
+    // TY_PTR branch has never emitted pointer-level const at all (it only
+    // ever prints `*name`, never `*const name`). The leading `const ` above
+    // therefore ended up qualifying the *pointee* instead: `const int *`
+    // (pointer to const int) rather than `int *const` (const pointer to
+    // int) -- a genuinely incompatible type the host compiler rejects
+    // ("incompatible function pointer types") wherever a const-pointer
+    // value is cast to or declared alongside its non-const-pointer
+    // counterpart. Same bug, latent: TY_FUNC's parameter list
+    // (serialize_type_decl below) prints each param through this same
+    // function, so a `void f(int *const p)` parameter's prototype and
+    // definition could disagree the same way. Fixed by normalizing rather
+    // than relocating the qualifier: a bare (non-typedef'd) pointer never
+    // gets pointer-level const printed here either, matching what
+    // declarator position already does -- dropping a top-level qualifier
+    // is always type-compatible C, and CCCC's own parser already enforced
+    // constness before this point. A *typedef'd* pointer (`const MyPtrT`,
+    // where MyPtrT's underlying type is itself a pointer) is a different
+    // case and untouched: `const MyPtrT` correctly spells "const-qualify
+    // the whole aliased type", i.e. exactly `T *const`, so that alias arm
+    // below still needs the leading `const` -- only the un-aliased,
+    // structurally-printed TY_PTR fallthrough drops it.
+    bool suppress_ptr_const = ty->kind == TY_PTR &&
+                              !find_typedef_name_exact(ctx, ty);
+    if (ty->is_const && !suppress_ptr_const)
         fprintf(f, "const ");
 
     // Deliberately no output for ty->checked_kind (#770/#482-484): a

@@ -3170,11 +3170,53 @@ def case_anon_aggregate_typedef_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     ANON_AGGREGATE_TYPEDEF_PROGRAM)
 
 
+CONST_PTR_PROGRAM = (
+    "int rhandler_a(void) { return 100; }\n"
+    "int rhandler_b(void) { return 200; }\n"
+    "static int (*const rtable[])(void) = {rhandler_a, rhandler_b};\n"
+    "static int read_const(int *const p);\n"
+    "static int read_const(int *const p) {\n"
+    "    return *p;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    if (rtable[0]() != 100) return 1;\n"
+    "    if (rtable[1]() != 200) return 2;\n"
+    "    int x = 7;\n"
+    "    int *const cp = &x;\n"
+    "    void *vp = (void *)cp;\n"
+    "    int *back = (int *)vp;\n"
+    "    if (*back != 7) return 3;\n"
+    "    int y = 9;\n"
+    "    if (read_const(&y) != 9) return 4;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_const_ptr_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  89: a const-qualified *pointer* (`int *const p`, is_const on "
+          "the TY_PTR Type itself) used to serialize with its leading "
+          "`const` misplaced onto the pointee -- serialize_type() "
+          "(src/serialize.c) printed `const ` unconditionally, then fell "
+          "through to the TY_PTR case, which recurses into "
+          "serialize_type_decl() -- whose TY_PTR branch never emits "
+          "pointer-level const at all. Result: `const int (*)(void)` "
+          "(pointer to const int) instead of `int (*const)(void)` (const "
+          "pointer to int), rejected by the host compiler as an "
+          "incompatible function pointer type; same bug latent in a "
+          "function parameter's prototype vs. definition. Fixed by "
+          "normalizing: a bare (non-typedef'd) pointer no longer prints "
+          "pointer-level const here, matching what declarator position "
+          "already did. Asserts VM 42 -> native 42 (#1045)")
+    return _vm_and_native_run_case(cccc, tmp, "const_ptr_1045",
+                                    CONST_PTR_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3270,6 +3312,7 @@ def main() -> int:
             case_global_block_splice_native_round_trip,
             case_anon_aggregate_typedef_native_round_trip,
             case_native_always_links_lm,
+            case_const_ptr_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
