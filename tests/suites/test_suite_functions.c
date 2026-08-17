@@ -395,17 +395,15 @@ int test_negative(void) {
 
 // test_nested_func_basic
 // Named add_nested, not add -- this file's own file-scope add() (from
-// test_knr_funcdef, above) is a K&R-form definition, and #1043 fixed
-// K&R definitions to correctly set is_definition=true. A non-static
-// nested function definition looks up its name via find_func(), which
-// walks up the scope chain to file scope (same as an ordinary block-scope
-// prototype must, to bind against an enclosing declaration) -- so an
-// unqualified `add` here would now hit the existing is_definition-gated
-// "redefinition of add" diagnostic (src/parse_decl.c:485), a real name
-// collision this aggregated file accidentally introduced, not a compiler
-// bug. See #1043's own ticket comment for the separate, still-open
-// question of whether nested function definitions should look up
-// file scope at all.
+// test_knr_funcdef, above) is unrelated, but a nested `add` here would
+// collide with it: this aggregated file merged two originally-separate
+// test files that each independently picked the name `add`, and #1043's
+// fix (K&R definitions now correctly set is_definition=true) turned that
+// latent collision into a hard "redefinition of add" compile error. Pure
+// naming accident, not compiler-bug coverage -- renamed to sidestep it.
+// A real, separate compiler defect in this area (a block-scope
+// declaration of an already-defined function corrupts that function's
+// calling convention) is tracked as #1056; not related to this rename.
 [[cccc::test(return = 42)]]
 int test_nested_func_basic(void) {
     int add_nested(int a, int b) {
