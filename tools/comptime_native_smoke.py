@@ -2994,11 +2994,85 @@ def case_comma_arg_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     COMMA_ARG_PROGRAM)
 
 
+DOTTED_LOCAL_PROGRAM = """
+[[cccc::comptime]]
+Node *doubled(Node *arg) {
+    Type *ty_int = __builtin_ast_get_type("int");
+    Node *tmp = __builtin_ast_local_var_unique(ty_int);
+    Node *two = __builtin_ast_int_literal(2);
+    Node *mul = __builtin_ast_binary(NK_MUL, arg, two);
+    return __builtin_ast_assign(tmp, mul);
+}
+
+int main(void) {
+    int r1 = doubled(7);
+    if (r1 != 14) return 1;
+    int r2 = doubled(20);
+    if (r2 != 40) return 2;
+    return 42;
+}
+"""
+
+
+def case_dotted_local_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  85: -c=native, a local created via "
+          "__builtin_ast_local_var_unique (new_unique_name()'s dotted "
+          "\".L..N\" scheme, the same one an anonymous global uses) used "
+          "to serialize its dotted name verbatim at both its declaration "
+          "and every reference (e.g. `int .L..29;`) -- not a legal C "
+          "identifier. The local-hoist loop's existing empty-name rename "
+          "now covers the dotted case too (#1034). Asserts VM 42 -> "
+          "native 42")
+    return _vm_and_native_run_case(cccc, tmp, "dotted_local_1034",
+                                    DOTTED_LOCAL_PROGRAM)
+
+
+GLOBAL_BLOCK_SPLICE_PROGRAM = """
+[[cccc::comptime]]
+Node *emit_counter_helpers(void) {
+    return Quote("{ struct Counter { int n; }; void counter_init(struct Counter *c) { c->n = 0; } void counter_bump(struct Counter *c, int by) { c->n += by; } }");
+}
+
+emit_counter_helpers();
+
+int main(void) {
+    struct Counter c;
+    counter_init(&c);
+    if (c.n != 0)
+        return 1;
+    counter_bump(&c, 5);
+    counter_bump(&c, 37);
+    if (c.n != 42)
+        return 2;
+    return 42;
+}
+"""
+
+
+def case_global_block_splice_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  86: -c=native, a file-scope macro call whose returned "
+          "ND_BLOCK is spliced into the token stream for re-parse at "
+          "global scope (#233) used to ALSO drain its just-built Objs "
+          "into macro_globals -- two copies of every generated function "
+          "reaching the merged program, so -c=native printed two "
+          "prototypes/bodies per function ('conflicting types'). Fixed by "
+          "discarding the drain when the splice path is taken. Separately, "
+          "the surviving struct tag (parsed from Quote()'s synthetic "
+          "\"<quote>\" pseudo-file) was still wrongly treated as "
+          "from_include (record_type_name(), parse_core.c) and its "
+          "definition suppressed -- fixed by recognizing exactly the "
+          "\"<quote>\" pseudo-file as never from_include, distinct from "
+          "tokenize_private_header()'s own \"<...>\" real-header tags "
+          "(#1034). Asserts VM 42 -> native 42")
+    return _vm_and_native_run_case(cccc, tmp, "global_block_splice_1034",
+                                    GLOBAL_BLOCK_SPLICE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3090,6 +3164,8 @@ def main() -> int:
             case_unsigned_int64_literal_native_round_trip,
             case_vector_splat_and_select_native_round_trip,
             case_comma_arg_native_round_trip,
+            case_dotted_local_native_round_trip,
+            case_global_block_splice_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
