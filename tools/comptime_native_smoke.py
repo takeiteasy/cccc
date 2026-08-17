@@ -3294,11 +3294,69 @@ def case_header_global_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+SYNTH_LIBC_INCLUDE_PROGRAM = (
+    "[[cccc::comptime]]\n"
+    "void generate_wrappers_1050(void) {\n"
+    "    Obj *cpy = MakeFunction(\"wrap_memcpy_1050\", MakePointer(GetType(\"void\")));\n"
+    "    FunctionAddParam(cpy, \"dst\", MakePointer(GetType(\"void\")));\n"
+    "    FunctionAddParam(cpy, \"src\", MakePointer(GetType(\"void\")));\n"
+    "    FunctionAddParam(cpy, \"n\", GetType(\"long\"));\n"
+    "    WithFn(cpy) {\n"
+    "        FunctionSetBody(cpy, MakeReturn(Memcpy(MakeParamRef(cpy, \"dst\"),\n"
+    "                                                  MakeParamRef(cpy, \"src\"),\n"
+    "                                                  MakeParamRef(cpy, \"n\"))));\n"
+    "    }\n"
+    "\n"
+    "    Obj *cmp = MakeFunction(\"wrap_strcmp_1050\", GetType(\"int\"));\n"
+    "    FunctionAddParam(cmp, \"a\", MakePointer(GetType(\"char\")));\n"
+    "    FunctionAddParam(cmp, \"b\", MakePointer(GetType(\"char\")));\n"
+    "    WithFn(cmp) {\n"
+    "        FunctionSetBody(cmp, MakeReturn(Strcmp(MakeParamRef(cmp, \"a\"),\n"
+    "                                                  MakeParamRef(cmp, \"b\"))));\n"
+    "    }\n"
+    "}\n"
+    "\n"
+    "generate_wrappers_1050();\n"
+    "\n"
+    "int main(void) {\n"
+    "    char src[6] = \"hello\";\n"
+    "    char dst[6] = {0};\n"
+    "    wrap_memcpy_1050(dst, src, 6);\n"
+    "    if (wrap_strcmp_1050(dst, \"hello\") != 0)\n"
+    "        return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_synth_libc_include_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  92: a reflection-API comptime builder (Serialize()'s memcpy, "
+          "or the Memcpy()/Strcmp() macros here) can resolve a call to "
+          "memcpy/strlen/strcmp/etc with no #include of the declaring "
+          "header ever reaching -c=native output -- either a fresh Obj "
+          "ensure_libc_fn_decl() (src/reflection.c) synthesizes with no "
+          "token/file at all, or a genuine Obj reflection.h's own internal "
+          "#include <string.h> parse leaves in scope (compile_macro_"
+          "program()'s unconditional implicit_reflection_tokens() call, "
+          "not gated on custom-attribute usage) -- never a captured user "
+          "#include either way, so auto-capture has nothing to replay. "
+          "Both shapes reach 'call to undeclared library function' from "
+          "the host compiler. Fixed by register_synth_libc_call() "
+          "(reflection.c), reached centrally via var_ref_lookup(), "
+          "recording {Obj, header} into vm->compiler.synth_libc_decls; "
+          "serialize_synth_libc_includes() (serialize.c) emits the real "
+          "header for whichever entries a program's emitted functions "
+          "actually call, rather than a prototype that could conflict "
+          "with the real declaration. Asserts VM 42 -> native 42 (#1050)")
+    return _vm_and_native_run_case(cccc, tmp, "synth_libc_include_1050",
+                                    SYNTH_LIBC_INCLUDE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3397,6 +3455,7 @@ def main() -> int:
             case_const_ptr_native_round_trip,
             case_comptime_ptr_shadow_native_round_trip,
             case_header_global_native_round_trip,
+            case_synth_libc_include_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -202,6 +202,26 @@ by default). Two things follow from that:
   the real symbol immediately after the real header is re-emitted — e.g.
   `static FILE *__cccc_stdout(void) { return stdout; }` — rather than
   leaving the call to an undeclared function in the generated C.
+- A reflection-API comptime builder can resolve a call to a handful of
+  well-known libc functions (`memcpy`/`memmove`/`memcmp`/`strlen`/`strcmp`,
+  via `Serialize()`/`Deserialize()` or the `Memcpy()`/`Strlen()`/`Strcmp()`
+  reflection.h macros directly) with no `#include` of the declaring header
+  ever reaching -c=native output — either `ensure_libc_fn_decl()`
+  (`src/reflection.c`) synthesizes a fresh `Obj` with no token/file at all
+  because nothing else has declared the name yet, or the call resolves to a
+  genuine `Obj` that reflection.h's own internal `#include <string.h>`
+  leaves in scope (parsed for real by every comptime program, not gated on
+  custom-attribute usage) — never a captured user `#include` either way, so
+  auto-capture has nothing to replay. `register_synth_libc_call()`
+  (`src/reflection.c`), reached centrally from `var_ref_lookup()` so both
+  shapes are covered uniformly, records `{Obj, header}` into
+  `vm->compiler.synth_libc_decls`; `serialize_synth_libc_includes()`
+  (`src/serialize.c`) emits the real header once for whichever entries a
+  program's emitted functions actually call (`node_calls_obj()`, an
+  identity match), rather than a prototype — the synthesized signatures are
+  deliberately loose and a printed prototype could conflict with the real
+  declaration if `<string.h>` is also reached some other way in the same TU
+  (#1050).
 
 `-c=generated` (without `-c=native`) is a separate code path: its output is
 meant to be compiled *alongside* normal headers, so it has never re-emitted

@@ -703,6 +703,63 @@ Node *__builtin_ast_string_literal(const char *str) {
     return node;
 }
 
+// #1050: names reflection.h's Memcpy()/Strlen()/Strcmp() macros (and
+// reflect_serialize_members/__builtin_ast_serialize's own direct
+// __builtin_ast_var_ref("memcpy") calls, for @serialize/@deserialize) can
+// resolve to, and the real host header that declares each. Two distinct,
+// independently-discovered ways an Obj for one of these names can end up
+// resolved with no #include of its own reaching -c=native output:
+//   (1) ensure_libc_fn_decl() (below) synthesizes a fresh Obj with no
+//       token/file at all, when nothing else already declares the name.
+//   (2) reflection.h itself #includes <string.h> (so these macros "just
+//       work" without the TU writing its own #include) -- compile_macro_
+//       program()'s unconditional implicit_reflection_tokens() call (not
+//       gated on custom-attribute usage the way ensure_reflection_attrs_
+//       registered()/__builtin_ensure_string_h_decls() is) parses that
+//       #include for real, leaving a genuine Obj in scope whose token
+//       names CCCC's own bundled include/string.h -- never a captured
+//       user #include, so auto-capture has nothing to replay for it
+//       either.
+// Both shapes funnel through var_ref_lookup() below (the scope branch for
+// (2), the __builtin_ast_find_global() branch for (1)), so registering
+// there covers both centrally instead of duplicating the check at every
+// call site. See vm->compiler.synth_libc_decls / serialize_synth_libc_
+// includes (serialize.c).
+static const struct { const char *name; const char *header; } synth_libc_headers[] = {
+    {"memcpy", "string.h"}, {"memmove", "string.h"}, {"memcmp", "string.h"},
+    {"strlen", "string.h"}, {"strcmp", "string.h"},
+};
+
+static void register_synth_libc_call(VirtualMachine *vm, Obj *obj) {
+    if (!obj || !obj->is_function)
+        return;
+    const char *header = NULL;
+    for (size_t i = 0; i < sizeof(synth_libc_headers) / sizeof(synth_libc_headers[0]); i++) {
+        if (!strcmp(obj->name, synth_libc_headers[i].name)) {
+            header = synth_libc_headers[i].header;
+            break;
+        }
+    }
+    if (!header)
+        return;
+
+    SynthLibcDeclArray *reg = &vm->compiler.synth_libc_decls;
+    for (int i = 0; i < reg->len; i++)
+        if (reg->data[i].obj == obj)
+            return; // already registered
+
+    if (reg->len == reg->capacity) {
+        int new_capacity = reg->capacity ? reg->capacity * 2 : 8;
+        SynthLibcDecl *new_data = arena_alloc(&vm->compiler.parser_arena,
+                                              sizeof(SynthLibcDecl) * new_capacity);
+        if (reg->data)
+            memcpy(new_data, reg->data, sizeof(SynthLibcDecl) * reg->len);
+        reg->data = new_data;
+        reg->capacity = new_capacity;
+    }
+    reg->data[reg->len++] = (SynthLibcDecl){.obj = obj, .header = header};
+}
+
 // Scope-then-globals lookup behind __builtin_ast_var_ref. Factored out so
 // it can be retried once after a #894 demand-driven splice attempt.
 static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_len) {
@@ -712,6 +769,7 @@ static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_le
                 strncmp(node->name, name, name_len) == 0) {
                 if (node->var) {
                     node->var->is_used = true;
+                    register_synth_libc_call(vm, node->var); // #1050
                     Node *n = alloc_node(vm, ND_VAR);
                     n->var = node->var;
                     n->ty = node->var->ty;
@@ -725,6 +783,7 @@ static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_le
     Obj *global = __builtin_ast_find_global(name);
     if (global) {
         global->is_used = true;
+        register_synth_libc_call(vm, global); // #1050
         Node *n = alloc_node(vm, ND_VAR);
         n->var = global;
         n->ty = global->ty;
@@ -1728,6 +1787,11 @@ Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
 // A real parameter list is required (not just the return type): without it,
 // __builtin_ast_funcall() skips arg-casting (no fresh nodes), so a reused arg
 // node's ->next gets overwritten by each successive call built from it.
+// #1050: no longer records native-header provenance itself -- that's now
+// centralized in register_synth_libc_call() (above), reached uniformly via
+// var_ref_lookup() regardless of whether a name resolves through this
+// synthesis path or through reflection.h's own #include <string.h> (see
+// that function's comment for why both shapes exist).
 static void ensure_libc_fn_decl(VirtualMachine *vm, const char *name, Type *return_ty,
                                  Type **params, int nparams) {
     if (__builtin_ast_find_global(name))

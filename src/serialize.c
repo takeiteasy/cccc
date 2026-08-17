@@ -4829,6 +4829,54 @@ static bool node_calls_obj(Node *node, Obj *target) {
            node_calls_obj(node->next, target);
 }
 
+// #1050: a comptime builder (e.g. Serialize's Memcpy()) can call
+// memcpy/strlen/strcmp/etc via a synthetic Obj that ensure_libc_fn_decl()
+// (reflection.c) creates on the fly, with no #include of its own in the
+// TU (the whole point -- it works even when the TU never #includes
+// <string.h>). That Obj has no token/file, so the ordinary auto-capture
+// machinery has nothing to replay for it, and -c=native would otherwise
+// print a bare, undeclared call. Emit the real header instead of a
+// prototype (a prototype's necessarily-loose signature -- void* args,
+// unsigned long size -- could conflict with the exact one <string.h>
+// itself brings in, transitively, elsewhere in the same TU); reuses
+// node_calls_obj's identity match, same as the Block_copy/free check just
+// above, so a program that never calls a given synthesized decl doesn't
+// get its header either. Deliberately not attempted for -c=generated
+// (generated_only returns earlier in cc_serialize_program, replaying
+// includes via CCCC_EMIT_SOURCE events instead) -- residual, not this
+// ticket's scope.
+static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog) {
+    SynthLibcDeclArray *reg = &vm->compiler.synth_libc_decls;
+    const char *emitted[32];
+    int emitted_len = 0;
+    bool any = false;
+    for (int i = 0; i < reg->len; i++) {
+        SynthLibcDecl *entry = &reg->data[i];
+        bool called = false;
+        for (Obj *obj = prog; obj && !called; obj = obj->next) {
+            if (!obj->is_function || !obj->body)
+                continue;
+            called = node_calls_obj(obj->body, entry->obj);
+        }
+        if (!called)
+            continue;
+        bool already = false;
+        for (int j = 0; j < emitted_len; j++)
+            if (!strcmp(emitted[j], entry->header)) {
+                already = true;
+                break;
+            }
+        if (already)
+            continue;
+        fprintf(f, "#include <%s>\n", entry->header);
+        any = true;
+        if (emitted_len < (int)(sizeof(emitted) / sizeof(emitted[0])))
+            emitted[emitted_len++] = entry->header;
+    }
+    if (any)
+        fprintf(f, "\n");
+}
+
 // #990/#993: does `ty` (or anything reachable from it) mention TY_BLOCK --
 // used to decide whether `struct __cccc_block` itself needs a definition
 // even when the TU declares no block *literal* (e.g. a function that only
@@ -5329,6 +5377,14 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     }
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
+
+    // #1050: headers for comptime-synthesized libc calls with no #include
+    // of their own to auto-capture -- see serialize_synth_libc_includes's
+    // own comment. Placed after the replayed user includes (so it can't
+    // shadow them) and before the accessor shims (some of which reference
+    // libc-declared types).
+    if (!generated_only)
+        serialize_synth_libc_includes(f, vm, prog);
 
     // #904: real symbols for internal host-accessor shims (stdout/errno/
     // etc) -- only meaningful once the real headers above are visible, and

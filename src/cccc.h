@@ -1090,6 +1090,31 @@ typedef struct StringArray {
 } StringArray;
 
 /*!
+ @brief #1050: one entry per libc Obj a reflection-API comptime builder
+        (Serialize/Deserialize's memcpy, Memcpy()/Strlen()/Strcmp() et al)
+        resolved a call to, with no #include of the real host header
+        reaching -c=native output on its own -- either a fresh Obj
+        ensure_libc_fn_decl() (reflection.c) synthesized because nothing
+        else declared the name, or a genuine Obj reflection.h's own
+        internal `#include <string.h>` parse left in scope (never a
+        captured user #include either way). Both shapes are registered
+        centrally by register_synth_libc_call() (reflection.c), reached
+        via var_ref_lookup(), so -c=native can emit the real header on
+        demand (serialize.c) instead of printing a prototype that could
+        collide with the real one. See vm->compiler.synth_libc_decls.
+*/
+typedef struct SynthLibcDecl {
+    struct Obj *obj;     /**< The Obj a call resolved to (identity match against ND_VAR callees). */
+    const char *header;  /**< Header name providing it, e.g. "string.h". */
+} SynthLibcDecl;
+
+typedef struct SynthLibcDeclArray {
+    SynthLibcDecl *data;
+    int capacity;
+    int len;
+} SynthLibcDeclArray;
+
+/*!
  @brief Represents an enumerator constant within an enum type.
 */
 typedef struct EnumConstant {
@@ -3268,6 +3293,16 @@ typedef struct Compiler {
                                  // on-disk path, so run_native_backend's re-emission filter
                                  // can test cc_file_is_cccc_only() against the path a line
                                  // in emit_directives actually resolved to
+
+    // #1050: Obj -> host-header records for libc functions a comptime
+    // reflection-API builder called (e.g. memcpy()/strlen() via Serialize()
+    // or the Memcpy()/Strlen()/Strcmp() macros) without the TU #include-ing
+    // the declaring header itself. -c=native has no #include to auto-
+    // capture for these, so serialize.c emits the header on demand for
+    // whichever entries are actually called, keyed off this registry
+    // rather than a prototype (which could conflict with the real
+    // declaration the header would bring in elsewhere in the same TU).
+    SynthLibcDeclArray synth_libc_decls;
 
     // Code generation state
     int label_counter; // For generating unique labels

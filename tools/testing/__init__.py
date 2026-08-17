@@ -185,8 +185,6 @@ NATIVE_SKIP_TESTS = {
     # fixed separately under #1047 -- see #1034's own close comment for what
     # landed and where) ---
     "test_comptime_include_boundary_890.c": "cccc-only header text reaches the host compiler verbatim (#1048)",
-    "test_custom_attributes_serialize_235.c": "comptime-generated code calls a libc function with no #include reaching the output (#1050)",
-    "test_macros_stdlib_memcpy_strlen_strcmp_235.c": "comptime-generated code calls a libc function with no #include reaching the output (#1050)",
     "test_macros_quote_args_splice.c": "CCCC's internal va_list layout leaks into native output via __builtin_quote arg-splicing -- same class as #1018, different repro path (#1018)",
 
     # --- by-design divergence, not a bug: see COVERAGE.md ---
