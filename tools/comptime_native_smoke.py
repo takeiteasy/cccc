@@ -3068,11 +3068,62 @@ def case_global_block_splice_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     GLOBAL_BLOCK_SPLICE_PROGRAM)
 
 
+ANON_AGGREGATE_TYPEDEF_PROGRAM = """
+typedef struct { int a[2]; } P, *Pp;
+typedef struct { char n[8]; } A;
+struct UsesA { A m; };
+
+[[cccc::comptime]]
+int check(void) {
+    Type *tp = GetType("P");
+    Type *tpp = GetType("Pp");
+    Type *ta = GetType("A");
+    Type *tuses_a = GetType("UsesA");
+    if (tp && tpp && ta && tuses_a)
+        return 42;
+    return 0;
+}
+
+[[cccc::comptime]]
+void gen(void) {
+    Obj *fn = MakeFunction("result", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(check())));
+}
+gen();
+
+int main(void) {
+    return result();
+}
+"""
+
+
+def case_anon_aggregate_typedef_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  87: -c=native, a typedef whose right-hand side is an "
+          "anonymous struct/union/enum (`typedef struct { ... } P, *Pp;`) "
+          "used to serialize `typedef P *Pp;` referring to a `P` that was "
+          "never printed at all when P itself is never used by value -- "
+          "serialize_typedef_alias() deliberately skips an anonymous "
+          "aggregate's own combined `typedef struct {...} P;` line, on the "
+          "assumption serialize_struct_def() already printed the body while "
+          "walking the usage-collected ctx->defs, which is empty here "
+          "('unknown type name P', a host compile failure). "
+          "emit_typedef_and_deps() now emits the aggregate body itself when "
+          "reached this way, gated by a shared emitted_defs dedup set so a "
+          "comptime re-parse's duplicate TypeName record for the same "
+          "declaration doesn't print it twice ('typedef redefinition with "
+          "different types') -- which in turn needed same_type_or_origin() "
+          "to gain a structural TY_ARRAY case, since two independently- "
+          "parsed occurrences of an array member (e.g. `char n[8]`) never "
+          "shared pointer identity (#1046). Asserts VM 42 -> native 42")
+    return _vm_and_native_run_case(cccc, tmp, "anon_aggregate_typedef_1046",
+                                    ANON_AGGREGATE_TYPEDEF_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3166,6 +3217,7 @@ def main() -> int:
             case_comma_arg_native_round_trip,
             case_dotted_local_native_round_trip,
             case_global_block_splice_native_round_trip,
+            case_anon_aggregate_typedef_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

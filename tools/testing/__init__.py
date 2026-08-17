@@ -172,11 +172,12 @@ NATIVE_SKIP_TESTS = {
     # note at src/serialize.c's native_accessor_shims comment. Still open.
     "test_sys_mount_statfs.c": "guest-side folded sizeof(struct statfs) disagrees with the host header's real layout, host statfs() overruns the buffer (#1031)",
 
-    # --- #1034 survivors: 6 distinct causes, retagged (5 of the original
-    # 13 files fixed and dropped from this table entirely -- see #1034's
-    # own close comment for what landed and where) ---
+    # --- #1034 survivors: 5 distinct causes remaining, retagged (6 of the
+    # original 13 files fixed and dropped from this table entirely -- 5 in
+    # #1034's own pass plus test_comptime_decl_index_anon_array_951.c fixed
+    # separately under #1046 -- see #1034's own close comment for what
+    # landed and where) ---
     "test_comptime_and_runtime_fn_ptr_tables_309.c": "const-qualified function-pointer array initializer mismatch (#1045)",
-    "test_comptime_decl_index_anon_array_951.c": "segment_declarator_name() misindexes an array member inside an anonymous struct/union (#1046)",
     "test_comptime_decl_index_unused_894.c": "header-sourced global redeclared/redefined when a comptime body never references it (#1047)",
     "test_comptime_include_boundary_890.c": "cccc-only header text reaches the host compiler verbatim (#1048)",
     "test_comptime_ptr_303.c": "comptime-shadow global (.L.comptime.N) never linked into the merged program (#1049)",

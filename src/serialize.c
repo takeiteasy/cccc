@@ -240,6 +240,15 @@ typedef struct {
     // a definition the preamble already wrote out.
     TypeVec hoisted;
     int hoisted_type_counter; // names renamed/synthesized hoisted tags, parallel to anon_global_counter
+    // #1046: struct/union/enum bodies actually printed so far, across BOTH
+    // emitters that can print one -- the usage-driven ctx->defs loop in
+    // serialize_type_defs_for_owner() and the typedef-dependency-driven
+    // emit_typedef_and_deps() below (an anonymous aggregate whose only
+    // spelling is a typedef alias, e.g. `typedef struct { int a[2]; } P,
+    // *Pp;`, is never pushed into ctx->defs at all when P itself is never
+    // used by value -- see emit_typedef_and_deps's own comment). Shared
+    // dedup set so neither emitter re-prints what the other already did.
+    TypeVec emitted_defs;
     // #1005: current break/continue target stack (innermost first) and the
     // innermost enclosing ND_SWITCH (for ND_CASE to test default_case
     // against) -- both NULL outside any loop/switch, pushed/popped around
@@ -384,6 +393,25 @@ static bool same_type_or_origin(Type *a, Type *b) {
     // from the host compiler. Mirrors the TY_STRUCT/TY_UNION shape exactly:
     // tag mismatch is conclusive when both are tagged; otherwise (or when
     // tags match) fall back to comparing enumerators by name and value.
+    // #1046: an array member's element type (e.g. `char n[32]` inside a
+    // tagless struct) had no structural fallback at all -- only the
+    // pointer-identity origin-chain check above applied, which two
+    // independently-parsed occurrences of the same declaration (comptime's
+    // re-parse of a `[[cccc::comptime]] gen()`-visible file-scope
+    // declaration, same mechanism #1006's TY_ENUM case above was added for)
+    // never share. Without this, a duplicate anonymous struct/union whose
+    // difference is buried inside an array member's dimension+base (as
+    // opposed to a scalar member, which TY_ARRAY's own recursion into a
+    // non-array base already reaches once THIS TY_ARRAY case exists) always
+    // compared unequal, so callers relying on this function to dedup two
+    // structurally-identical re-parsed declarations (#1046's
+    // ctx->emitted_defs) printed the same aggregate body twice -- a hard
+    // "typedef redefinition with different types" from the host compiler
+    // even though the two types are, by every measure other than pointer
+    // identity, identical.
+    if (a && b && a->kind == TY_ARRAY && b->kind == TY_ARRAY)
+        return a->array_len == b->array_len && same_type_or_origin(a->base, b->base);
+
     if (a && b && a->kind == TY_ENUM && b->kind == TY_ENUM) {
         if (a->struct_tag && b->struct_tag) {
             bool tag_match = a->struct_tag->len == b->struct_tag->len &&
@@ -3554,20 +3582,28 @@ static bool aggregate_typedef_is_definition(SerializeContext *ctx,
     return !type_has_tag_for_owner(ctx, alias->ty, alias->owner_fn);
 }
 
+// #891: in !generated_only mode (-c=native, -m without -c=generated), a
+// header-sourced typedef would collide with the consumer's own #include of
+// the same header (auto-capture re-emits that #include verbatim) -- e.g.
+// `typedef void FILE;` from CCCC's own stdio.h polyfill alongside a real
+// `#include <stdio.h>`. Comptime/reflection-synthesized aliases
+// (always_emit) are exempt: they have no header of their own to collide
+// with, and dropping them would silently delete macro-generated typedefs
+// from the output. Shared by serialize_typedef_alias and (#1046)
+// emit_typedef_and_deps's own aggregate-body emission, so both places gate
+// on the exact same rule -- a divergent copy here is how #892's AttrTarget
+// regression happened.
+static bool typedef_alias_header_suppressed(SerializeContext *ctx,
+                                            TypeName *alias) {
+    return !ctx->generated_only && !ctx->emit_strict && alias->from_include &&
+           !alias->always_emit;
+}
+
 static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
                                     TypeName *alias) {
     if (!alias || aggregate_typedef_is_definition(ctx, alias))
         return;
-    // #891: in !generated_only mode (-c=native, -m without -c=generated), a
-    // header-sourced typedef would collide with the consumer's own
-    // #include of the same header (auto-capture re-emits that #include
-    // verbatim) -- e.g. `typedef void FILE;` from CCCC's own stdio.h
-    // polyfill alongside a real `#include <stdio.h>`. Comptime/reflection-
-    // synthesized aliases (always_emit) are exempt: they have no header of
-    // their own to collide with, and dropping them would silently delete
-    // macro-generated typedefs from the output.
-    if (!ctx->generated_only && !ctx->emit_strict && alias->from_include &&
-        !alias->always_emit)
+    if (typedef_alias_header_suppressed(ctx, alias))
         return;
 
     char name[256];
@@ -3641,6 +3677,27 @@ static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
         return;
     }
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        // #1046: `ty` may itself be an untagged aggregate whose only
+        // spelling is a typedef alias (e.g. `typedef struct { int a[2]; }
+        // P, *Pp;`, `ty` here being the anonymous struct behind `Pp`'s
+        // pointee) -- find_typedef_name() below would already match that
+        // alias, so the "chase into members" branch further down never
+        // runs for it, but nothing had ever chased forward to make sure the
+        // alias's own aggregate BODY (not just its name) gets emitted before
+        // this one. Do that explicitly: find_anonymous_typedef_name (#952,
+        // not the broader find_typedef_name, so an unrelated same-shape
+        // tagless typedef like va_list can't be matched instead) resolves
+        // the defining record, and emit_typedef_and_deps prints its
+        // `typedef struct {...} P;` line (idempotent via ctx->emitted_defs)
+        // ahead of whatever depends on it.
+        if (!find_tag_name(ctx, ty)) {
+            TypeName *anon = find_anonymous_typedef_name(ctx, ty);
+            if (anon) {
+                int idx = (int)(anon - ctx->typedefs);
+                emit_typedef_and_deps(f, ctx, idx, owner_fn, typedef_done);
+                return;
+            }
+        }
         // An anonymous, alias-less aggregate (e.g. a `union { struct {
         // ... } l; ... } u;` member) is inlined at its point of use
         // (serialize_anon_aggregate) rather than getting its own standalone
@@ -3655,8 +3712,20 @@ static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
                 ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn, typedef_done);
         return;
     }
-    if (ty->kind == TY_ENUM)
+    if (ty->kind == TY_ENUM) {
+        // #1046: same reasoning as the TY_STRUCT/TY_UNION case just above --
+        // a tagless `typedef enum { ... } E;` reached only via some other
+        // typedef's dependency chase (an enum has no member types of its
+        // own to chase further, so this is the whole fix for TY_ENUM).
+        if (!find_tag_name(ctx, ty)) {
+            TypeName *anon = find_anonymous_typedef_name(ctx, ty);
+            if (anon) {
+                int idx = (int)(anon - ctx->typedefs);
+                emit_typedef_and_deps(f, ctx, idx, owner_fn, typedef_done);
+            }
+        }
         return;
+    }
 
     TypeName *alias = find_typedef_name_exact(ctx, ty);
     if (!alias)
@@ -3689,6 +3758,32 @@ static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
     td->ty = NULL;
     ensure_typedef_for_type_emitted(f, ctx, real_ty, owner_fn, typedef_done);
     td->ty = real_ty;
+
+    // #1046: when `td` is itself the defining alias of an anonymous
+    // struct/union/enum (aggregate_typedef_is_definition -- the combined
+    // `typedef struct {...} P;` shape), serialize_typedef_alias() below
+    // deliberately does NOT print it, on the assumption that
+    // serialize_struct_def()/serialize_enum_def() already did while walking
+    // ctx->defs (that's the ordinary case: `P` used by value somewhere).
+    // But ctx->defs is usage-collected -- if `P` is never used by value,
+    // only ever reached through another typedef's pointer/array/function
+    // indirection (e.g. `Pp` here), nothing in that loop ever visits it, and
+    // this call -- reached via ensure_typedef_for_type_emitted's dependency
+    // chase -- is the only place that still knows the body needs printing.
+    // Emit it here, gated by the same emitted_defs dedup the ctx->defs loop
+    // uses (a real test file can produce two independent TypeName records
+    // for the same declaration -- comptime re-parse -- so this must be
+    // idempotent) and the same header-suppression rule
+    // serialize_typedef_alias applies to the alias line itself.
+    if (aggregate_typedef_is_definition(ctx, td) &&
+        !type_vec_contains(&ctx->emitted_defs, real_ty) &&
+        !typedef_alias_header_suppressed(ctx, td)) {
+        type_vec_push(&ctx->emitted_defs, real_ty);
+        if (real_ty->kind == TY_ENUM)
+            serialize_enum_def(f, ctx, real_ty);
+        else
+            serialize_struct_def(f, ctx, real_ty);
+    }
 
     serialize_typedef_alias(f, ctx, td);
 }
@@ -3785,6 +3880,16 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                     ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
                                                     typedef_done);
         }
+        // #1046: the ensure_typedef_for_type_emitted() calls just above can,
+        // via emit_typedef_and_deps(), already have printed THIS type's own
+        // body -- e.g. `ty` is a tagless aggregate also reachable as some
+        // other member's typedef dependency, chased and printed ahead of
+        // this iteration reaching it directly. type_vec_push returns false
+        // (a no-op) when already present, so this is the same emitted_defs
+        // dedup emit_typedef_and_deps itself uses, just applied here too.
+        if (type_vec_contains(&ctx->emitted_defs, ty))
+            continue;
+        type_vec_push(&ctx->emitted_defs, ty);
         if (ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, ty);
         else
@@ -5070,6 +5175,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         free(ctx.captured_paths);
         free(ctx.block_envs);
         free(ctx.hoisted.data);
+        free(ctx.emitted_defs.data);
         return;
     }
 
@@ -5286,6 +5392,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.captured_paths);
     free(ctx.block_envs);
     free(ctx.hoisted.data);
+    free(ctx.emitted_defs.data);
     free(ctx.enum_renames); // #1016: was missing from this list
 }
 
