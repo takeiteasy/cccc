@@ -1408,16 +1408,6 @@ static Obj *make_comptime_shadow_obj(VirtualMachine *vm, Obj *src) {
     return dst;
 }
 
-static void link_comptime_shadow_objs(VirtualMachine *vm) {
-    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
-        Obj *obj = cv->ptr_obj;
-        if (!obj || obj->next)
-            continue;
-        obj->next = vm->compiler.globals;
-        vm->compiler.globals = obj;
-    }
-}
-
 // Execute the synthesized __builtin_comptime_init function (if present) to
 // evaluate scalar comptime variable initializers that call comptime
 // functions. Must be called after gen_function + patch_macro_call_addresses
@@ -1860,7 +1850,17 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
     vm->compiler.has_macro_snapshot = false;
     hashmap_restore(&vm->compiler.macros, saved_macros);
-    link_comptime_shadow_objs(vm);
+    // #1049: each ComptimeVar's shadow Obj (cv->ptr_obj,
+    // make_comptime_shadow_obj above) used to be prepended here onto
+    // vm->compiler.globals -- the *scratch* per-TU list, not the durable
+    // macro_globals chain main.c splices into merged_prog before this ever
+    // runs (cc_expand_macros -> compile_all_macros -> compile_macro_program
+    // is the only caller, and it fires after that splice). The shadow
+    // therefore never reached codegen's data-segment offset-allocation
+    // loop (codegen_func.c, which walks `prog`), so its offset stayed 0
+    // and every GetComptimePtr() result silently aliased the same address
+    // -- a wrong answer on the plain VM path, not just a -c=native gap.
+    // Linking now happens in cc_expand_macros() itself, once prog is known.
 
     if (vm->debug_vm) {
         for (int i = 0; i < count; i++) {
@@ -3135,6 +3135,33 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
     // Now that all macros are compiled and all symbols are defined, we can
     // safely expand and serialize those pending initializers (#613).
     cc_finalize_macro_gvar_inits(vm, prog);
+
+    // #1049: append every comptime variable's shadow Obj (cv->ptr_obj,
+    // make_comptime_shadow_obj in compile_macro_program above) onto the end
+    // of `prog` -- this is the first point after compile_macro_program runs
+    // where `prog` is both known and still mutable in place (cc_compile,
+    // which allocates data-segment offsets by walking `prog`, hasn't run
+    // yet). Appended rather than prepended so callers holding onto `prog`'s
+    // head (e.g. main.c's merged_prog) stay valid. `obj->next` doubles as
+    // the "already linked" sentinel, same idiom the old
+    // link_comptime_shadow_objs used -- a freshly made shadow always has
+    // next == NULL (make_comptime_shadow_obj memsets it), and it is only
+    // ever spliced in here, so this is unambiguous as long as
+    // cc_expand_macros runs at most once per vm (true of every current
+    // caller, main.c and fuzzing.c, and enforced indirectly by the
+    // macro_fns-empty early return above).
+    if (vm->compiler.comptime_vars) {
+        Obj *tail = prog;
+        while (tail->next)
+            tail = tail->next;
+        for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
+            Obj *obj = cv->ptr_obj;
+            if (!obj || obj->next)
+                continue;
+            tail->next = obj;
+            tail = obj;
+        }
+    }
 
     vm->compiler.in_macro_expansion = false;
 

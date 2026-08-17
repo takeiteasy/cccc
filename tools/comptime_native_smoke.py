@@ -3212,11 +3212,52 @@ def case_const_ptr_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     CONST_PTR_PROGRAM)
 
 
+COMPTIME_PTR_SHADOW_PROGRAM = (
+    "int sentinel = 99;\n"
+    "[[cccc::comptime]]\n"
+    "int a = 7;\n"
+    "[[cccc::comptime]]\n"
+    "int b = 35;\n"
+    "[[cccc::comptime]]\n"
+    "Node *a_ptr(void) { return GetComptimePtr(\"a\"); }\n"
+    "[[cccc::comptime]]\n"
+    "Node *b_ptr(void) { return GetComptimePtr(\"b\"); }\n"
+    "int main(void) {\n"
+    "    int *x = a_ptr();\n"
+    "    int *y = b_ptr();\n"
+    "    if (x == y) return 1;\n"
+    "    if (*x != 7) return 2;\n"
+    "    if (*y != 35) return 3;\n"
+    "    if (sentinel != 99) return 4;\n"
+    "    return *x + *y;\n"
+    "}\n"
+)
+
+
+def case_comptime_ptr_shadow_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  90: a GetComptimePtr() shadow Obj (make_comptime_shadow_obj, "
+          "src/macros.c) used to be linked onto vm->compiler.globals -- a "
+          "scratch per-TU list -- by link_comptime_shadow_objs(), running "
+          "*after* main.c had already snapshotted merged_prog. The shadow "
+          "never reached codegen_func.c's data-segment offset-allocation "
+          "loop (which walks `prog`), so its offset stayed 0 and every "
+          "GetComptimePtr() result silently aliased data_seg[0] -- a wrong "
+          "answer on the plain VM path, not just a -c=native gap. Fixed by "
+          "appending each shadow onto `prog`'s own tail at the end of "
+          "cc_expand_macros(), which both codegen and the serializer's "
+          "rename/definition passes already walk. Asserts VM 42 -> native "
+          "42, with a sentinel global and distinct per-shadow values so a "
+          "regression to shared-address aliasing can't coincidentally sum "
+          "to 42 again (#1049)")
+    return _vm_and_native_run_case(cccc, tmp, "comptime_ptr_shadow_1049",
+                                    COMPTIME_PTR_SHADOW_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3313,6 +3354,7 @@ def main() -> int:
             case_anon_aggregate_typedef_native_round_trip,
             case_native_always_links_lm,
             case_const_ptr_native_round_trip,
+            case_comptime_ptr_shadow_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
