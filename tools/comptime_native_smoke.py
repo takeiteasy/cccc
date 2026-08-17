@@ -3352,11 +3352,80 @@ def case_synth_libc_include_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     SYNTH_LIBC_INCLUDE_PROGRAM)
 
 
+def case_comptime_header_not_replayed_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  93: a header reached only via a plain #include, but containing "
+          "its own [[cccc::comptime]] declarations (not routed via "
+          "'#include @comptime'), used to replay verbatim into -c=native "
+          "output -- the host compiler got past the harmlessly-ignored "
+          "unknown-attribute warning and then hit the comptime-only body "
+          "text (Obj/MakeFunction/GetType, reflection-API constructs with "
+          "no host meaning) as 'undeclared identifier'. #896's own marking "
+          "only covered directive-level routing (#include @comptime "
+          "\"x.h\"); there was no equivalent for the [[cccc::comptime]]/ "
+          "__attribute__((comptime)) attribute form itself. Fixed by "
+          "marking the containing file cccc-only the moment such a "
+          "declaration is recognized (try_extract_attr_macro, "
+          "src/preprocess.c) -- excluding tokenize_private_header()'s own "
+          "synthetic tags (<implicit-reflection.h>/<building.h>/"
+          "<testing.h>) and __builtin_quote's <quote> pseudo-file by exact "
+          "match, the same #1034/#892 trap a broader prefix match hit "
+          "before. Once suppressed, the header's own typedef and statics "
+          "(plan_fn/plan_value/plan_ptr) are re-derived by the existing "
+          "from_include compensation machinery instead of relying on the "
+          "(now-suppressed) replay. Asserts VM 42 -> native 42 (#1048)")
+    hdr = Path(tmp) / "comptime_header_1048_smoke.h"
+    src = Path(tmp) / "comptime_header_1048_smoke.c"
+    write(hdr,
+          "#ifndef COMPTIME_HEADER_1048_SMOKE_H\n"
+          "#define COMPTIME_HEADER_1048_SMOKE_H\n"
+          "typedef int (*plan_fn_1048)(int);\n"
+          "static int plan_value_1048;\n"
+          "static plan_fn_1048 plan_ptr_1048;\n"
+          "\n"
+          "[[cccc::comptime]]\n"
+          "static void set_plan_1048(void) {\n"
+          "    plan_value_1048 = 14 * 3;\n"
+          "}\n"
+          "\n"
+          "[[cccc::comptime]]\n"
+          "void generate_result_1048(void) {\n"
+          "    set_plan_1048();\n"
+          "    Obj *fn = MakeFunction(\"result_1048\", GetType(\"int\"));\n"
+          "    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(plan_value_1048)));\n"
+          "}\n"
+          "#endif\n")
+    write(src,
+          "#include \"comptime_header_1048_smoke.h\"\n"
+          "generate_result_1048();\n"
+          "int main(void) {\n"
+          "    return result_1048();\n"
+          "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "comptime_header_1048_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3456,6 +3525,7 @@ def main() -> int:
             case_comptime_ptr_shadow_native_round_trip,
             case_header_global_native_round_trip,
             case_synth_libc_include_native_round_trip,
+            case_comptime_header_not_replayed_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

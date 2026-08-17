@@ -330,6 +330,35 @@ static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
     return true;
 }
 
+// #1048: true for one of tokenize_private_header()'s own synthetic file
+// tags (reflection.h/testing.h/building.h, injected under
+// "<implicit-reflection.h>"/"<testing.h>"/"<building.h>" -- see
+// src/macros.c, src/testing.c, src/build.c) or reflect.c's own "<quote>"
+// pseudo-file (__builtin_quote's template tokenization). Neither is ever
+// reached through the ordinary #include auto-capture path
+// (emit_include_paths), so marking them cccc-only would never actually
+// suppress a real replayed #include -- but cc_file_is_cccc_only() also
+// gates record_type_name()'s from_include check (parse_core.c), where
+// marking would wrongly flip an internal reflection-API type (Obj, Node,
+// ...) to "must be re-derived", producing output that references
+// CCCC-internal comptime-only constructs with no host equivalent (the
+// exact #1034/#892 regression this exact exclusion list was written to
+// prevent -- ticket #1034's own investigation found a broader "<...>"
+// prefix match caught these too). Exact match, matching that precedent,
+// not a prefix.
+static bool is_private_header_tag(const char *filename) {
+    if (!filename)
+        return false;
+    static const char *tags[] = {
+        "<implicit-reflection.h>", "<building.h>", "<testing.h>", "<quote>",
+        NULL,
+    };
+    for (int i = 0; tags[i]; i++)
+        if (!strcmp(filename, tags[i]))
+            return true;
+    return false;
+}
+
 // #896: mark `filename` as containing cccc-only preprocessor routing syntax
 // (@comptime/@shared/@emit/@build/@test, or the [[cccc::...]]/
 // __attribute__((...)) spellings) -- never valid to hand to a downstream
@@ -3667,6 +3696,27 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
          !is_setup_kind && !is_teardown_kind && !is_build_kind &&
          !is_build_target_kind) || !attr_end)
         return false;
+
+    // #1048: a `[[cccc::comptime]]`/`__attribute__((comptime))` declaration
+    // (function or variable, body or bodyless) is cccc-only syntax -- its
+    // extraction below removes it from the normal token stream entirely,
+    // and any comptime *body* can reference reflection-API constructs
+    // (Obj/MakeFunction/GetType/...) with no meaning to a host compiler.
+    // Unlike #896's directive-level routing (`#include @comptime "x.h"`,
+    // marked where the *directive* is written), there was previously no
+    // marking at all for this attribute form, so a header reached only via
+    // a plain `#include` -- never routed -- but containing its own
+    // `[[cccc::comptime]]` declarations replayed verbatim into -c=native
+    // output, and the host compiler choked on the comptime-only body text
+    // past the (harmlessly ignored) unknown-attribute warning. `[[cccc::
+    // test]]`/`build`/etc are deliberately not marked here -- those leave
+    // an ordinary, portable function definition in the token stream (only
+    // the attribute itself is stripped elsewhere), so replaying their
+    // header verbatim is safe. tok->file, not attr_end->file: the
+    // attribute's own opening token is where this declaration was
+    // *written*, same granularity #896 already uses.
+    if (is_comptime_kind && tok->file && !is_private_header_tag(tok->file->name))
+        mark_cccc_only_file(vm, tok->file->name);
 
     // #886: [[cccc::comptime]] typedef ...; -- a typedef is neither a
     // function nor a variable. Drop the attribute and let the typedef

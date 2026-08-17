@@ -339,6 +339,27 @@ positional arguments to `cccc` (`cccc -c=native -o out lib.c main.c`, no
 file is then preprocessed and merged by CCCC itself before native
 serialization.
 
+This tracking (`mark_cccc_only_file()`/`cc_file_is_cccc_only()`,
+`src/preprocess.c`) also covers a `[[cccc::comptime]]`/`__attribute__
+((comptime))`-attributed declaration, not just a routed directive — a
+header reached only through a plain `#include`, with no `@comptime`-routed
+directive anywhere in it, but declaring its own comptime function or
+variable, is marked the moment that declaration is recognized
+(`try_extract_attr_macro`). Its body can reference reflection-API
+constructs (`Obj`/`MakeFunction`/`GetType`/...) with no meaning to a host
+compiler, so replaying it verbatim would fail the same way a routed
+directive's file would — the unknown `[[cccc::comptime]]` attribute itself
+is only ever a harmlessly-ignored warning on a real compiler, but the
+comptime body text past it is not valid C at all (#1048). This marking
+deliberately excludes `tokenize_private_header()`'s own synthetic tags
+(`<implicit-reflection.h>`/`<building.h>`/`<testing.h>`, used to inject
+CCCC's own reflection/testing/build headers) and `__builtin_quote`'s
+`<quote>` pseudo-file by exact match — neither is ever reached through the
+ordinary `#include` auto-capture path in the first place, but marking them
+would still wrongly flip an internal reflection-API type's `from_include`
+status elsewhere (`record_type_name()`, `src/parse_core.c`), the same
+#1034/#892 regression a broader `"<...>"` prefix match hit before.
+
 ### Passing `-I` at CCCC's own bundled headers
 
 The first bullet above notes that CCCC's own bundled include directory
