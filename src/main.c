@@ -90,6 +90,92 @@ static int push_input_dir_i(char *key, int keylen, void *val, void *user_data) {
     return 0;
 }
 
+// #1065: argv_push() (src/exec.c) stores the pointer it's given, it does
+// not copy the string -- so a flag assembled into a stack buffer (as
+// run_native_backend() used to do for -std/-D/-U/-l) is either out of
+// scope by exec() time, or -- for a buffer declared inside a loop body --
+// reused across iterations, silently collapsing "-DA=1 -DB=2" into two
+// identical "-DB=2" entries. Heap-allocate instead and track the
+// allocation in `owned` so it survives to exec() and gets freed
+// afterward, mirroring push_compile_flags()'s own StringArray pattern
+// (src/build.c).
+static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
+                             const char *prefix, const char *value) {
+    size_t len = strlen(prefix) + strlen(value) + 1;
+    char *flag = malloc(len);
+    if (!flag)
+        error("failed to allocate native cc flag");
+    snprintf(flag, len, "%s%s", prefix, value);
+    strarray_push(owned, flag);
+    argv_push(cc_args, flag);
+}
+
+// #1053: CCCC's own internal default standard is gnu23 (src/vm.c), but
+// -c=native only ever forwarded -std= when the user passed --std=
+// explicitly on the CCCC command line -- a plain `cccc foo.c -c=native`
+// relied entirely on the host cc's own default standard, which can be
+// older (e.g. Ubuntu's plain `cc` -> gcc defaults to gnu17, see
+// man/TESTING.md), silently rejecting any C23 construct the serializer
+// legitimately emitted even though the VM run succeeded. Forwarding
+// CCCC's resolved default unconditionally isn't safe either -- a host cc
+// that doesn't recognize "-std=gnu23" at all would then fail *every*
+// -c=native compile outright, trading a narrow failure for a total one.
+// Instead, probe the host cc (quietly -- a rejected rung's diagnostic
+// isn't the user's business) down a ladder from CCCC's resolved default
+// toward older standards, and forward the newest rung it actually
+// accepts. "2x" is its own separate rung from "23": gcc 13 accepts
+// "-std=gnu2x" but rejects "-std=gnu23" outright. If nothing in the
+// ladder is accepted, forward nothing -- exactly today's behaviour, so
+// this can never make a native compile that used to succeed fail.
+static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc) {
+    static bool probed = false;
+    static bool found = false;
+    static char cached[16];
+    if (probed)
+        return found ? cached : NULL;
+    probed = true;
+
+    const char *prefix = vm->compiler.c_std_gnu ? "gnu" : "c";
+    const char *suffixes[4];
+    int n = 0;
+    switch (vm->compiler.c_std) {
+    case CCCC_STD_C23:
+        suffixes[n++] = "23";
+        suffixes[n++] = "2x";
+        suffixes[n++] = "17";
+        suffixes[n++] = "11";
+        break;
+    case CCCC_STD_C17:
+        suffixes[n++] = "17";
+        suffixes[n++] = "11";
+        break;
+    case CCCC_STD_C11:
+        suffixes[n++] = "11";
+        break;
+    case CCCC_STD_C99:
+        suffixes[n++] = "99";
+        break;
+    case CCCC_STD_C89:
+        suffixes[n++] = "89";
+        break;
+    }
+
+    for (int i = 0; i < n; i++) {
+        char cand[16];
+        snprintf(cand, sizeof(cand), "%s%s", prefix, suffixes[i]);
+        char probe_flag[24];
+        snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand);
+        char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag,
+                               "-x", "c", "/dev/null", NULL};
+        if (run_argv_quiet(probe_argv) == 0) {
+            snprintf(cached, sizeof(cached), "%s", cand);
+            found = true;
+            return cached;
+        }
+    }
+    return NULL;
+}
+
 static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
                               const char **inc_paths, int inc_paths_count,
                               const char **sys_inc_paths,
@@ -171,15 +257,14 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     }
 
     ArgVec cc_args = {0};
+    StringArray owned = {0}; // #1065: heap-backed flags freed after the spawn
     argv_push(&cc_args, cc);
     argv_push(&cc_args, source_path);
     argv_push(&cc_args, "-o");
     argv_push(&cc_args, exe_path);
-    if (std_arg) {
-        char std_flag[256];
-        snprintf(std_flag, sizeof(std_flag), "-std=%s", std_arg);
-        argv_push(&cc_args, std_flag);
-    }
+    const char *resolved_std = std_arg ? std_arg : native_resolve_std_ladder(vm, cc);
+    if (resolved_std)
+        push_owned_flag(&cc_args, &owned, "-std=", resolved_std);
     // #891/#1006: cccc auto-captures each command-line input file's own
     // #include directives (preprocess.c) and re-emits them verbatim into
     // source_path, which lives in a temp directory -- so a quoted
@@ -198,25 +283,16 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
         argv_push(&cc_args, "-isystem");
         argv_push(&cc_args, sys_inc_paths[i]);
     }
-    for (int i = 0; i < defines_count; i++) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-D%s", defines[i]);
-        argv_push(&cc_args, flag);
-    }
-    for (int i = 0; i < undefs_count; i++) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-U%s", undefs[i]);
-        argv_push(&cc_args, flag);
-    }
+    for (int i = 0; i < defines_count; i++)
+        push_owned_flag(&cc_args, &owned, "-D", defines[i]);
+    for (int i = 0; i < undefs_count; i++)
+        push_owned_flag(&cc_args, &owned, "-U", undefs[i]);
     for (int i = 0; i < lib_paths_count; i++) {
         argv_push(&cc_args, "-L");
         argv_push(&cc_args, lib_paths[i]);
     }
-    for (int i = 0; i < libs_count; i++) {
-        char flag[256];
-        snprintf(flag, sizeof(flag), "-l%s", libs[i]);
-        argv_push(&cc_args, flag);
-    }
+    for (int i = 0; i < libs_count; i++)
+        push_owned_flag(&cc_args, &owned, "-l", libs[i]);
     // #1051: libm is never linked otherwise -- a guest program calling any
     // math.h function CCCC's own bundled header declares (fmaximum/
     // totalorder/etc, the whole C23 IEC 60559:2020 family CCCC implements
@@ -243,6 +319,9 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     for (int i = 0; i < incdir_ctx.seen_len; i++)
         free(incdir_ctx.seen[i]);
     free(incdir_ctx.seen);
+    for (int i = 0; i < owned.len; i++)
+        free(owned.data[i]);
+    free(owned.data);
     return rc;
 }
 
@@ -766,10 +845,24 @@ static char *read_stdin_to_tmp(void) {
 }
 
 static void parse_define(VirtualMachine *vm, char *arg) {
+    // #1065: used to split in place (`*eq = '\0'`), permanently truncating
+    // the `defines[]` entry this is called on at its '=' -- harmless the
+    // first time (cc_define()/define_macro() copy what they're given), but
+    // that same `defines[]` array is reused later by run_native_backend()
+    // to build -D flags for the host cc, which then saw a bare "-DA"
+    // instead of "-DA=1" for every defines entry with a value. Split via a
+    // bounded copy instead so the original string survives for that later
+    // reuse.
     char *eq = strchr(arg, '=');
     if (eq) {
-        *eq = '\0';
-        cc_define(vm, arg, eq + 1);
+        size_t name_len = (size_t)(eq - arg);
+        char *name = malloc(name_len + 1);
+        if (!name)
+            error("failed to allocate -D name");
+        memcpy(name, arg, name_len);
+        name[name_len] = '\0';
+        cc_define(vm, name, eq + 1);
+        free(name);
     } else
         cc_define(vm, arg, "1");
 }

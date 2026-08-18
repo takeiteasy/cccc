@@ -1190,6 +1190,7 @@ typedef struct {
 void argv_push(ArgVec *args, const char *arg);
 int  run_argv(char *const argv[]);
 int  run_argv_env(char *const argv[], char *const envp[]);
+int  run_argv_quiet(char *const argv[]);
 
 // Preprocess include/cccc/building.h; see cc_inject_build_header's
 // definition (src/build.c) for the full contract.

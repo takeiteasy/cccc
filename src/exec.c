@@ -19,6 +19,7 @@
 
 #include "./internal.h"
 #if !defined(_WIN32)
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -151,4 +152,35 @@ int run_argv_env(char *const argv[], char *const envp[]) {
 
 int run_argv(char *const argv[]) {
     return run_argv_env(argv, NULL);
+}
+
+// #1053: used to probe a host cc for which -std= spelling it accepts,
+// without spilling the (expected, often-rejected) diagnostic from a
+// rejected rung onto the user's terminal -- stdout/stderr are redirected
+// to /dev/null in the child before exec, unlike run_argv_env().
+int run_argv_quiet(char *const argv[]) {
+#if defined(_WIN32)
+    (void)argv;
+    return 1;
+#else
+    pid_t pid = fork();
+    if (pid < 0)
+        return 1;
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0)
+        return 1;
+    if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+    return 1;
+#endif
 }
