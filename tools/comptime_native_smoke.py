@@ -3956,6 +3956,96 @@ def case_issignaling_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_std_ladder(cccc: Path, tmp: str) -> bool:
+    print("  102: -c=native used to only forward -std= to the host cc when "
+          "the user passed --std= explicitly on the CCCC command line -- a "
+          "plain 'cccc foo.c -c=native' relied entirely on the host cc's "
+          "own default standard, which can be older than CCCC's own "
+          "resolved default (gnu23) and silently reject a legitimately-"
+          "emitted C23 construct (#1053). Fixed by probing the host cc "
+          "(src/main.c's native_resolve_std_ladder()) down a ladder from "
+          "the resolved default toward older standards and forwarding the "
+          "newest rung actually accepted. Asserted here by pointing "
+          "CCCC_NATIVE_CC at a logging wrapper script and checking a "
+          "'-std=gnu' flag appears in the recorded argv even with no "
+          "--std on the CCCC command line -- not a specific year, since "
+          "the accepted rung is host-dependent by design.")
+    src = Path(tmp) / "native_std_ladder_1053.c"
+    write(src, NATIVE_LM_PROGRAM)
+    out = Path(tmp) / "native_std_ladder_1053_out"
+    log = Path(tmp) / "native_std_ladder_1053_argv.log"
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_std_ladder_1053_cc_wrapper.sh"
+    write(wrapper, f"#!/bin/sh\nprintf '%s\\n' \"$@\" >> {log}\nexec {real_cc} \"$@\"\n")
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+    result = subprocess.run(
+        [str(cccc), "-c=native", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    lines = log.read_text().splitlines() if log.exists() else []
+    if not any(l.startswith("-std=gnu") for l in lines):
+        print(f"    FAIL: no '-std=gnu...' flag found in recorded native cc "
+              f"argv ({lines})")
+        return False
+    run_result = subprocess.run([f"./{out.name}"], capture_output=True, text=True, cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_native_defines_survive_argv(cccc: Path, tmp: str) -> bool:
+    print("  103: two -D flags used to reach the host cc mangled two "
+          "different ways (#1065): parse_define() (src/main.c) split each "
+          "defines[] entry in place at its '=' the first time it ran "
+          "(before -c=native's own argv assembly ever sees the array "
+          "again), permanently truncating '-DA=1' down to 'A' -- and "
+          "separately, run_native_backend() pushed each -D/-U/-l/-std "
+          "flag's address from a reused stack buffer straight into the "
+          "argv, rather than a copy. Fixed by having parse_define() split "
+          "via a bounded copy instead of mutating in place, and by giving "
+          "run_native_backend() its own heap-backed StringArray (mirroring "
+          "src/build.c's push_compile_flags()). Asserted here via the "
+          "logging-wrapper pattern: both '-DA=1' and '-DB=2' must appear "
+          "verbatim (not truncated, not duplicated) in the recorded argv.")
+    src = Path(tmp) / "native_defines_1065.c"
+    write(src, NATIVE_LM_PROGRAM)
+    out = Path(tmp) / "native_defines_1065_out"
+    log = Path(tmp) / "native_defines_1065_argv.log"
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_defines_1065_cc_wrapper.sh"
+    write(wrapper, f"#!/bin/sh\nprintf '%s\\n' \"$@\" >> {log}\nexec {real_cc} \"$@\"\n")
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+    result = subprocess.run(
+        [str(cccc), "-c=native", "-D", "A=1", "-D", "B=2", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    lines = log.read_text().splitlines() if log.exists() else []
+    if "-DA=1" not in lines or "-DB=2" not in lines:
+        print(f"    FAIL: expected '-DA=1' and '-DB=2' both in recorded "
+              f"native cc argv, got {lines}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -4069,6 +4159,8 @@ def main() -> int:
             case_va_arg_promotion_native_round_trip,
             case_stdarg_guard_native_round_trip,
             case_issignaling_native_round_trip,
+            case_native_std_ladder,
+            case_native_defines_survive_argv,
         ]
         results = [case(cccc, tmp) for case in cases]
 

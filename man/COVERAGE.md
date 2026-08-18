@@ -1600,6 +1600,63 @@ declares the name (rather than only defining the macro that calls it),
 that declaration must be `#ifdef __CCCC__`-guarded — this is the third
 time the same trap has been hit (#1021, #1023, #1052/#1063).
 
+**Correction (#1066, open):** the "round-trips VM 42 → native 42 on
+Linux" claim two paragraphs above didn't hold for every check in the
+file — `fromfp(10000000000.0, FP_INT_TONEAREST, 8)` (the width-8
+overflow case) returns a wrong result under `-c=native` on real Linux
+(confirmed via the `cccc-linux-amd64` container, clang 18, the real
+`-I./include`-forwarding harness shape; independent of which `-std` is
+forwarded). `test_math_c23_ieee.c` is therefore not a clean round-trip
+yet — filed as its own ticket rather than fixed, since it needs its own
+investigation into whether the `fromfp`/`ufromfp` `native_accessor_shims`
+entry replicates the VM's own overflow-clamping or a real host libm
+`fromfp` is being called directly with different overflow semantics.
+
+Every `-c=native` compile used to only forward `-std=` to the host `cc`
+when the user passed `--std=` explicitly on the CCCC command line — a
+plain `cccc foo.c -c=native` relied entirely on the host `cc`'s own
+default standard, which can be older than CCCC's own resolved default
+(`gnu23`) and silently reject a legitimately-emitted C23 construct
+(`true`/`false` keywords, `enum : T`, …) even though the VM run
+succeeded (#1053). Forwarding CCCC's resolved default unconditionally
+isn't safe either: a host `cc` that rejects `-std=gnu23` outright (e.g.
+Ubuntu's plain `cc` → gcc 13, see man/TESTING.md's CI notes) would then
+fail *every* `-c=native` compile, not just ones using C23 syntax. Fixed
+by probing the host `cc` quietly (`run_argv_quiet()`, `src/exec.c` —
+redirects the child's stdout/stderr to `/dev/null` so a rejected rung's
+diagnostic isn't the user's business) down a ladder from CCCC's resolved
+default toward older standards (`gnu23` → `gnu2x` → `gnu17` → `gnu11`,
+or the `c*` spellings under `--std=c…`), forwarding the newest rung
+actually accepted (`native_resolve_std_ladder()`, `src/main.c`). `gnu2x`
+is its own separate rung, not an alias tried together with `gnu23`: gcc
+13 accepts `-std=gnu2x` but rejects `-std=gnu23` outright (confirmed in
+the `cccc-linux-amd64` container). If nothing in the ladder is accepted,
+nothing is forwarded — identical to the pre-#1053 behaviour, so this
+can never turn a native compile that used to succeed into a failure. An
+explicit `--std=` on the CCCC command line is still forwarded verbatim,
+unprobed — a host rejection there is the user's own stated intent.
+
+While implementing #1053, a second, unrelated bug (#1065) was found and
+fixed in the same pass: `run_native_backend()` built each `-std`/`-D`/
+`-U`/`-l` flag into a `char [256]` stack buffer and pushed the buffer's
+address straight into the native `cc`'s argv — `argv_push()`
+(`src/exec.c`) stores the pointer it's given, it does not copy. The
+`-std` buffer was out of scope by `exec()` time, and each `-D`/`-U`/`-l`
+loop's buffer was a fresh per-iteration local that (in practice) reused
+one stack address across iterations, so e.g. `-DA=1 -DB=2` reached the
+host `cc` as two copies of whichever define was assembled last. Fixed by
+giving `run_native_backend()` its own heap-backed `StringArray`, freed
+after the spawn — the same pattern `src/build.c`'s
+`push_compile_flags()` already used correctly for the identical shape. A
+second, independent bug in the same area was found while writing a test
+for this: `parse_define()` (`src/main.c`) split each `-D` argument *in
+place* at its `=` the first time it ran (to register the macro with the
+VM's own preprocessor) — permanently truncating the very same string
+`run_native_backend()` later reuses to build the native `cc`'s `-D`
+flags, well before the pointer-aliasing bug above ever got a chance to
+duplicate it. Fixed by having `parse_define()` split via a bounded copy
+instead.
+
 `aligned_alloc()` with a `size` that is not an integral multiple of
 `alignment` is the same class of platform gap as `reallocarray()` and the
 C23 libm family above, on macOS only (#1061). C11 originally required

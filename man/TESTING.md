@@ -673,7 +673,11 @@ parallel-load timing sensitivity is exactly what surfaced #853.
 
 `CC=clang` and `CCCC_NATIVE_CC=clang` must both be set explicitly for the
 `linux-aarch64` job (and are, in `.github/workflows/release.yml`'s `env:`):
-Ubuntu's plain `cc` resolves to gcc, which rejects `-std=c23`. These are two
+Ubuntu's plain `cc` resolves to gcc, which rejects `-std=c23` (though a
+plain `-c=native` compile with no explicit `--std=` no longer *fails*
+outright on such a host as of #1053 — see COVERAGE.md's "Serialized-
+output divergences" section for the `-std` ladder it falls back through
+instead). These are two
 separate compiler-selection mechanisms — `CC` for `make bootstrap`'s
 recursive `make cccc` steps (plain `CC ?= cc` in the Makefile), `CCCC_NATIVE_CC` for `./cccc
 --build build.c`'s own internal compiler probe (`cccc_find_native_cc()` in

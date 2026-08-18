@@ -85,6 +85,24 @@ All notable changes to CCCC are documented here. Format loosely follows
   `-9223372036854775808`, not a valid signed literal at all. Both now
   serialize with a sign/width-accurate `U`/`ULL`/`LL` suffix, or as
   `(-9223372036854775807LL - 1)` for `INT64_MIN` (#1031).
+- `-c=native`: a plain `cccc foo.c -c=native` with no explicit `--std=`
+  used to forward no `-std=` to the host `cc` at all, relying entirely on
+  its own default standard — which can be older than CCCC's resolved
+  default (`gnu23`) and silently reject a legitimately-emitted C23
+  construct. `run_native_backend()` (`src/main.c`) now quietly probes the
+  host `cc` down a ladder from CCCC's resolved default toward older
+  standards (`gnu23` → `gnu2x` → `gnu17` → `gnu11`) and forwards the
+  newest rung actually accepted; an explicit `--std=` is still forwarded
+  verbatim, unprobed (#1053).
+- `src/main.c`: `run_native_backend()` built each `-std`/`-D`/`-U`/`-l`
+  flag it hands the host `cc` into a stack buffer and pushed the buffer's
+  address into the argv rather than a copy — the `-std` flag was
+  dangling by `exec()` time, and each `-D`/`-U`/`-l` loop's buffer
+  reused one stack address across iterations, silently collapsing
+  distinct defines (e.g. `-DA=1 -DB=2`) into duplicates. Now heap-backed,
+  freed after the spawn. Separately, `parse_define()` used to split a
+  `-D` argument's `NAME=VALUE` in place, permanently truncating the same
+  string this reuses later — now splits via a bounded copy (#1065).
 
 ## [0.2.15] - 2026-08-15
 
