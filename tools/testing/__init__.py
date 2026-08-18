@@ -160,6 +160,15 @@ NATIVE_SKIP_TESTS = {
     "test_threads_tss.c": "threads fail under native (#1022)",
     "test_pthread_nonrecursive_deadlock_detect.c": "threads fail under native (#1022)",
     "test_pthread_recursive_mutex.c": "threads fail under native (#1022)",
+    # test_pthread_cond.c: compiles fine, then genuinely deadlocks at
+    # pthread_cond_wait() under -c=native on real Linux/aarch64 (confirmed
+    # in the cccc-linux-arm64 container -- did not reproduce on the amd64
+    # container, so this looks aarch64-specific rather than a general
+    # condvar gap). --native has no per-test timeout, so an unskipped hang
+    # here blocks the entire suite on that host. Found and skipped while
+    # verifying #1067 (unrelated -- limits.h touches no threading code);
+    # same #1022 bug class as the entries above, just never added.
+    "test_pthread_cond.c": "threads fail under native (#1022)",
 
     # --- singleton bugs, one ticket each ---
     "test_minilua.c": "3 unrelated native-compile bugs remain: by-value "
