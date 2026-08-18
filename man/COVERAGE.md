@@ -1600,6 +1600,29 @@ declares the name (rather than only defining the macro that calls it),
 that declaration must be `#ifdef __CCCC__`-guarded — this is the third
 time the same trap has been hit (#1021, #1023, #1052/#1063).
 
+`aligned_alloc()` with a `size` that is not an integral multiple of
+`alignment` is the same class of platform gap as `reallocarray()` and the
+C23 libm family above, on macOS only (#1061). C11 originally required
+`size` to be a multiple of `alignment` ("otherwise, the behavior is
+undefined"); DR 460/N2072 removed that constraint in C17, so a call like
+`aligned_alloc(256, 128)` is fully defined by C17/C23 and simply returns a
+256-aligned 128-byte block. glibc 2.38+ implements the C17 wording and
+accepts it; CCCC's own VM-heap `aligned_alloc` (`MALCA` /
+`cccc_vm_heap_malloc_aligned`, `src/ops.c`) always has too, matching C23
+(CCCC's default standard). macOS libc still enforces the pre-DR-460 C11
+rule and returns `NULL` (`errno == EINVAL`) for the same call — confirmed
+directly (both x86_64 and aarch64 glibc containers accept it, macOS
+rejects it). A program relying on the now-conforming form gives the right
+answer on the VM and under `-c=native` on Linux, and `NULL` under
+`-c=native` on macOS. This applies to `--no-vm-heap` too:
+`cccc_ffi_aligned_alloc` (`src/stdlib/stdlib.c`) falls through to the real
+host `aligned_alloc` there, so the same macOS/glibc split shows up even
+without the VM heap. Decided (#1061): documented platform gap, no VM
+change — tightening the VM to match macOS would make CCCC's own reference
+semantics non-conforming to the C23 standard it defaults to, just to match
+one host libc that hasn't caught up to a six-year-old defect report; the
+divergence belongs to macOS libc, not to CCCC.
+
 ---
 
 ## Standard Library and Built-in Functions

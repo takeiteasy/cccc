@@ -106,11 +106,13 @@ NATIVE_SKIP_TESTS = {
     # va_start/va_arg macros), which has no host equivalent by construction
     # -- expected to keep diverging, not a bug.
     #
-    # test_c4_argv.c and test_aligned_alloc_vmheap.c were retagged here by
-    # #967's original corpus sweep despite not using variadic functions at
-    # all -- re-triaged and retagged to their own tickets, #1060 (argv[0]
-    # naming-convention divergence) and #1061 (aligned_alloc leniency gap),
-    # neither a variadic bug. test_use_system_headers_fallback.c now
+    # test_c4_argv.c was retagged here by #967's original corpus sweep
+    # despite not using variadic functions at all -- re-triaged and
+    # retagged to its own ticket, #1060 (argv[0] naming-convention
+    # divergence), not a variadic bug. test_aligned_alloc_vmheap.c was
+    # retagged the same way to #1061, but that turned out to be a macOS-only
+    # platform gap rather than a general bug -- see NATIVE_SKIP_TESTS_MACOS
+    # below, not this table. test_use_system_headers_fallback.c now
     # round-trips correctly and is un-skipped.
 
     # --- #1019: RESOLVED. Was: vector_size arithmetic/select fails or
@@ -252,10 +254,6 @@ NATIVE_SKIP_TESTS = {
 
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
-
-    # --- retagged out of #1018 (its own residue sweep) -- not a variadic
-    # bug, see NATIVE_1018_PLAN.md ---
-    "test_aligned_alloc_vmheap.c": "aligned_alloc leniency gap, not variadic (#1061)",
 }
 
 # Platform-specific -c=native skips, checked only when the running host
@@ -288,6 +286,28 @@ NATIVE_SKIP_TESTS_MACOS = {
     "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
                              "totalorder/etc family (#1037, WONT_FIX, "
                              "permanent platform gap)",
+    # test_aligned_alloc_vmheap.c: calls aligned_alloc(alignment, 128) for
+    # alignment in {8,16,32,64,256} -- 128 is not a multiple of 256. C11
+    # originally required size to be an integral multiple of alignment, but
+    # DR 460/N2072 removed that constraint in C17; glibc 2.38+ implements
+    # the C17 wording and accepts it (confirmed directly this pass, both
+    # arches, in the cccc-linux-amd64/cccc-linux-arm64 containers: errno==0,
+    # a valid pointer back). macOS libc still implements the pre-DR-460 C11
+    # rule and returns NULL/EINVAL for the same call. CCCC's VM-heap
+    # aligned_alloc (MALCA, src/ops.c) implements the C17/C23 wording, same
+    # as glibc -- so this is macOS libc lagging the standard CCCC targets
+    # (defaults to C23), not VM leniency to tighten (#1061, RESOLVED
+    # WONT_FIX -- an earlier triage pass's premise that "glibc and macOS
+    # both reject it" didn't hold up under direct measurement). Round-trips
+    # VM 42 -> native 42 on Linux, confirmed through the real
+    # -I./include-forwarding container shape -- un-skipped there, only
+    # macOS-skipped here.
+    "test_aligned_alloc_vmheap.c": "macOS libc still enforces the pre-C17 "
+                                    "aligned_alloc size-must-be-a-multiple "
+                                    "rule that DR 460 removed; glibc 2.38+ "
+                                    "and the VM heap both implement C17/C23 "
+                                    "(#1061, WONT_FIX, permanent platform "
+                                    "gap)",
 }
 
 # CLI flags that -c=native drops with a warning rather than enforcing
