@@ -241,13 +241,20 @@ NATIVE_SKIP_TESTS = {
                  "leaves an unterminated '#pragma clang assume_nonnull' "
                  "open across the file to test pragma-noise suppression; "
                  "the host compiler's own pragma balance check rejects it",
+    "test_c4_argv.c": "asserts argv[0]/argv[1] against the VM's own "
+                 "bytecode-mode naming convention (argv[0] ending in "
+                 "'.c4', mimicking the bytecode file `cccc file.c` would "
+                 "have produced); a natively-compiled binary's argv[0] is "
+                 "whatever the OS execve() gives it, with no bytecode file "
+                 "involved and no host equivalent to translate the "
+                 "convention to, see COVERAGE.md Serialized-output "
+                 "divergences (#1060)",
 
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
 
-    # --- retagged out of #1018 (its own residue sweep) -- neither is a
-    # variadic bug, see NATIVE_1018_PLAN.md ---
-    "test_c4_argv.c": "argv[0] naming-convention divergence, not variadic (#1060)",
+    # --- retagged out of #1018 (its own residue sweep) -- not a variadic
+    # bug, see NATIVE_1018_PLAN.md ---
     "test_aligned_alloc_vmheap.c": "aligned_alloc leniency gap, not variadic (#1061)",
 }
 
