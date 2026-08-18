@@ -3549,6 +3549,22 @@ SETJMP_PROGRAM = (
     "}\n"
 )
 
+DOUBLE_LITERAL_PROGRAM = (
+    "#include <stdio.h>\n"
+    "#include <string.h>\n"
+    "\n"
+    "int main(void) {\n"
+    "    char buf[64];\n"
+    "    snprintf(buf, sizeof buf, \"%g\", 55.0);\n"
+    "    if (strcmp(buf, \"55\") != 0)\n"
+    "        return 1;\n"
+    "    snprintf(buf, sizeof buf, \"%g %g %g\", 0.0, 100.0, -58.0);\n"
+    "    if (strcmp(buf, \"0 100 -58\") != 0)\n"
+    "        return 2;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 
 def case_setjmp_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  95: -c=native, setjmp()/longjmp()/_setjmp/_longjmp used to "
@@ -3603,11 +3619,45 @@ def case_setjmp_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "setjmp_1054", SETJMP_PROGRAM)
 
 
+def case_double_literal_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  96: -c=native, serialize_expr's ND_NUM TY_DOUBLE arm printed a "
+          "bare `%.17g` of the folded value with no \".0\"-if-integral "
+          "fixup -- unlike the TY_FLOAT/TY_LDOUBLE arms right next to it, "
+          "which already apply exactly that fixup (#1038). An integral "
+          "double like 55.0 serialized as the bare text \"55\", read back "
+          "by a real host compiler as an *integer* literal. Harmless under "
+          "an enclosing (double) cast, a real wrong answer at a variadic "
+          "call site, where the argument expression's own printed type "
+          "(not its C-level static type) decides which register/slot the "
+          "host compiler places it in -- found while root-causing #1018 "
+          "(tests/repro_varargs.c). Fixed by routing the TY_DOUBLE arm "
+          "through the same fixup format_float_literal/"
+          "format_ldouble_literal already use (#1058). Asserts -m output "
+          "prints '55.0' (not bare '55') for a folded integral double "
+          "literal, and VM 42 -> native 42 for a program that would "
+          "silently misdirect a variadic host-libc call otherwise.")
+    src = Path(tmp) / "double_literal_1058.c"
+    write(src, DOUBLE_LITERAL_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "55.0" not in m_result.stdout:
+        print(f"    FAIL: -m output doesn't print the integral double "
+              f"literal as '55.0'\n    {m_result.stdout}")
+        return False
+
+    return _native_run_case(cccc, tmp, "double_literal_1058", DOUBLE_LITERAL_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3710,6 +3760,7 @@ def main() -> int:
             case_comptime_header_not_replayed_native_round_trip,
             case_synth_typedef_include_native_round_trip,
             case_setjmp_native_round_trip,
+            case_double_literal_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

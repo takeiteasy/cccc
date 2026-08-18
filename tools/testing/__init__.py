@@ -101,8 +101,6 @@ NATIVE_SKIP_TESTS = {
     "repro_vasize.c": "variadic serialization gives wrong result (#1018)",
     "repro_withr.c": "variadic serialization gives wrong result (#1018)",
     "repro_znames.c": "variadic serialization gives wrong result (#1018)",
-    "test_float_arg_marshalling.c": "variadic serialization gives wrong result (#1018)",
-    "test_math_ffi_signatures.c": "variadic serialization gives wrong result (#1018)",
     "test_c4_argv.c": "variadic serialization gives wrong result (#1018)",
     "test_use_system_headers_fallback.c": "variadic serialization gives wrong result (#1018)",
     "test_aligned_alloc_vmheap.c": "variadic serialization gives wrong result (#1018)",

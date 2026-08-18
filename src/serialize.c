@@ -1509,8 +1509,22 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                     fprintf(f, "%sL", buf);
                 }
             } else { // TY_DOUBLE
-                if (!serialize_flonum_special(f, node->fval, ""))
-                    fprintf(f, "%.17g", (double)node->fval);
+                // #1058: same "force a decimal point" fixup
+                // format_float_literal/format_ldouble_literal already apply
+                // for TY_FLOAT/TY_LDOUBLE -- this arm used to print a bare
+                // %.17g with no fixup at all, so an integral value like
+                // 55.0 serialized as "55", read back by a real host
+                // compiler as an *integer* literal. Harmless under an
+                // enclosing (double) cast, a wrong answer wherever the
+                // literal's own text is what supplies its type (e.g. a
+                // double vararg passed positionally, #1018).
+                if (!serialize_flonum_special(f, node->fval, "")) {
+                    char buf[64];
+                    int n = snprintf(buf, sizeof buf, "%.17g", (double)node->fval);
+                    if (n > 0 && (size_t)n < sizeof buf && !strpbrk(buf, ".eEnN"))
+                        snprintf(buf + n, sizeof(buf) - (size_t)n, ".0");
+                    fprintf(f, "%s", buf);
+                }
             }
         } else if (node->ty && is_integer(node->ty)) {
             // #1031: the old unconditional `%lld` of the raw bit pattern
