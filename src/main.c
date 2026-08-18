@@ -308,6 +308,22 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     // (glibc's newer functions aside) or into libSystem (macOS), the flag
     // is simply a no-op.
     argv_push(&cc_args, "-lm");
+    // #1064: plain `char` is signed under every one of CCCC's own type
+    // rules (ty_char, src/type.c), but a real host's plain `char` isn't
+    // universally signed -- measured directly in the cccc-linux-arm64
+    // container: glibc/aarch64 defines __CHAR_UNSIGNED__ (x86_64 does not).
+    // A GNU vector_size lane read as `*((char *)&v + i)` and compared
+    // against a signed constant (-1, -11, ...) silently gave the wrong
+    // answer there with no compile error -- confirmed by hand-compiling
+    // -m output with -funsigned-char and reproducing the ticket's exact
+    // exit codes. Forwarded unconditionally and unprobed, unlike #1053's
+    // -std ladder: -fsigned-char has existed in both gcc and clang for
+    // decades on every target, so a run_argv_quiet() probe would only add
+    // a spawn per native compile with nothing plausible to fall back to.
+    // Scope: this only covers the compile -c=native drives itself -- -m/
+    // -c=generated output compiled by hand still needs the flag passed
+    // explicitly (documented in man/COVERAGE.md).
+    argv_push(&cc_args, "-fsigned-char");
 
     int rc = run_argv((char *const *)cc_args.data);
 

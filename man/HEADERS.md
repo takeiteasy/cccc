@@ -102,6 +102,21 @@ by default). Two things follow from that:
   otherwise be unresolvable to the native compiler, since the generated
   `.c` lives in a temp directory — so `run_native_backend` also forwards
   `-I<the primary file's own directory>` automatically.
+- A captured conditional-group directive (`#if`/`#ifdef`/`#ifndef`/`#elif`/
+  `#else`/`#endif`) is captured verbatim like any other top-level directive,
+  but is **not** replayed into `-m`/`-c=native`/`-c=generated` output — it
+  would always be an empty shell there anyway, since CCCC's own preprocessor
+  has already resolved which branch was taken and captured only that
+  branch's own content as its own separate lines/directives. Replaying the
+  shell would hand the *evaluation* to the host compiler a second time, for
+  no benefit and two real hazards: a host lacking a feature-test macro CCCC
+  already resolved on its own (e.g. `#if __has_embed(...)`, which a real
+  compiler predating that C23 feature rejects outright even though CCCC
+  evaluated it fine), and a captured `#ifdef __CCCC__` shell being silently
+  false at the host (which never defines that macro), dropping whatever a
+  taken branch inside it captured (#1064). `--emit-cccc` is exempted, like
+  the loop's other filters — dialect-fidelity output expects a cccc-aware
+  reader.
 - Because the real header is re-emitted via auto-capture, CCCC does **not**
   also re-emit type definitions it collected from that same header
   (`TypeNameRecord.from_include` in `src/cccc.h`, used by

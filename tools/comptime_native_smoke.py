@@ -4046,11 +4046,108 @@ def case_native_defines_survive_argv(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_signed_char_argv(cccc: Path, tmp: str) -> bool:
+    print("  104: -c=native never told the host cc that plain 'char' should "
+          "be signed -- CCCC's own ty_char (src/type.c) is signed on every "
+          "platform, but a real host's plain 'char' isn't universally so "
+          "(glibc/aarch64 defines __CHAR_UNSIGNED__; measured directly in "
+          "the cccc-linux-arm64 container). A GNU vector_size lane read as "
+          "*((char *)&v + i) and compared against a signed constant (-1, "
+          "-11, ...) silently gave the wrong answer there with no compile "
+          "error -- reproduced by hand-compiling -m output with "
+          "-funsigned-char and matching #1064's exact reported exits (19, "
+          "20) (#1064). Fixed by unconditionally forwarding -fsigned-char "
+          "to the host cc, unprobed (unlike #1053's -std ladder) since the "
+          "flag has existed in both gcc and clang for decades on every "
+          "target. Asserted here via the logging-wrapper pattern: "
+          "'-fsigned-char' must appear in the recorded argv.")
+    src = Path(tmp) / "native_signed_char_1064.c"
+    write(src, NATIVE_LM_PROGRAM)
+    out = Path(tmp) / "native_signed_char_1064_out"
+    log = Path(tmp) / "native_signed_char_1064_argv.log"
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_signed_char_1064_cc_wrapper.sh"
+    write(wrapper, f"#!/bin/sh\nprintf '%s\\n' \"$@\" >> {log}\nexec {real_cc} \"$@\"\n")
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+    result = subprocess.run(
+        [str(cccc), "-c=native", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    lines = log.read_text().splitlines() if log.exists() else []
+    if "-fsigned-char" not in lines:
+        print(f"    FAIL: expected '-fsigned-char' in recorded native cc "
+              f"argv, got {lines}")
+        return False
+    print("    ok")
+    return True
+
+
+COND_DIRECTIVE_PROGRAM = (
+    "#ifdef __CCCC__\n"
+    "#define TOOK_TAKEN_BRANCH 1\n"
+    "#endif\n"
+    "#if 1\n"
+    "#define ALSO_TAKEN 1\n"
+    "#endif\n"
+    "#ifndef TOOK_TAKEN_BRANCH\n"
+    "#error \"taken-branch #define was lost\"\n"
+    "#endif\n"
+    "#ifndef ALSO_TAKEN\n"
+    "#error \"taken #if 1 branch was lost\"\n"
+    "#endif\n"
+    "int main(void) {\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_native_cond_directive_not_replayed(cccc: Path, tmp: str) -> bool:
+    print("  105: a captured conditional-group directive line "
+          "(#if/#ifdef/.../#endif) used to replay verbatim into -m/"
+          "-c=native/-c=generated output as an always-empty shell -- CCCC's "
+          "own preprocessor had already resolved the guarded content, so "
+          "the shell carried no information but still handed a second, "
+          "independent evaluation to the host compiler. Two real hazards: "
+          "a host lacking a feature-test macro CCCC's own preprocessor "
+          "already resolved (clang 18 rejecting a captured "
+          "'#if __has_embed(...)' shell outright, test_has_embed.c), and a "
+          "captured '#ifdef __CCCC__' shell being silently false at the "
+          "host (which never defines that macro), dropping whatever a "
+          "taken branch captured (#1064). Fixed by dropping conditional-"
+          "group directive lines from cc_serialize_program()'s "
+          "emit_directives replay loop (src/serialize.c), gated off "
+          "under --emit-cccc like the two existing filters in that loop. "
+          "Asserts -m output contains no '#if'/'#ifdef'/'#endif' line, and "
+          "VM 42 -> native 42 for a program whose taken branches define "
+          "macros the guarded #ifndef/#error checks below them depend on.")
+    src = Path(tmp) / "cond_directive_1064.c"
+    write(src, COND_DIRECTIVE_PROGRAM)
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    for line in m_result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#if") or stripped.startswith("#ifdef") or \
+           stripped.startswith("#ifndef") or stripped.startswith("#endif") or \
+           stripped.startswith("#else") or stripped.startswith("#elif"):
+            print(f"    FAIL: -m output still replays a conditional "
+                  f"directive line: {line!r}")
+            return False
+    return _vm_and_native_run_case(cccc, tmp, "cond_directive_1064",
+                                    COND_DIRECTIVE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4161,6 +4258,8 @@ def main() -> int:
             case_issignaling_native_round_trip,
             case_native_std_ladder,
             case_native_defines_survive_argv,
+            case_native_signed_char_argv,
+            case_native_cond_directive_not_replayed,
         ]
         results = [case(cccc, tmp) for case in cases]
 

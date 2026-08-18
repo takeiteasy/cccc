@@ -1680,6 +1680,47 @@ semantics non-conforming to the C23 standard it defaults to, just to match
 one host libc that hasn't caught up to a six-year-old defect report; the
 divergence belongs to macOS libc, not to CCCC.
 
+**Plain `char` signedness (#1064, RESOLVED).** CCCC's own `ty_char`
+(`src/type.c`) is signed on every platform, but a real host's plain `char`
+isn't universally so — measured directly: `glibc`/aarch64 defines
+`__CHAR_UNSIGNED__` (confirmed in the `cccc-linux-arm64` container),
+`glibc`/x86_64 and every supported macOS arch do not. A GNU
+`vector_size` lane read back as `*((char *)&v + i)` and compared against a
+signed constant (`-1`, `-11`, …) — the pattern `-c=native` emits for a
+`v16qi`/similar narrow-lane vector, e.g. `test_attr_vector_size_compare.c`/
+`test_attr_vector_size_intdiv.c` — silently produced the wrong answer on
+Linux/aarch64, with no compile error, since the divergence is purely in how
+the two sides interpret the same bit pattern. Reproduced by hand-compiling
+`-m` output with `-funsigned-char` on macOS and matching the exact reported
+exit codes. Fixed by unconditionally forwarding `-fsigned-char` to the host
+`cc` in `run_native_backend()` (`src/main.c`) — unprobed, unlike #1053's
+`-std` ladder, since the flag has existed in both gcc and clang for decades
+on every target. **Scope**: this only covers the compile `-c=native` drives
+itself — `-m`/`-c=generated` output compiled by hand still needs
+`-fsigned-char` passed explicitly to match CCCC's own signed-`char`
+semantics on a host where plain `char` is unsigned.
+
+**Captured conditional-group directives, not replayed (#1064, RESOLVED).**
+`cc_serialize_program()`'s `emit_directives` replay loop (`src/serialize.c`)
+used to replay a captured `#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`
+directive line verbatim into `-m`/`-c=native`/`-c=generated` output — always
+an *empty shell* by the time it reaches that loop, since CCCC's own
+preprocessor has already resolved which branch was taken and captured only
+that branch's own content as its own separate lines/directives. Replaying
+the shell anyway handed the *evaluation* to the host compiler a second time,
+with two real hazards: (1) a host lacking a feature-test macro CCCC's own
+preprocessor already resolved — clang 18 rejected a captured
+`#if __has_embed(...)` shell outright (`test_has_embed.c`,
+"function-like macro '__has_embed' is not defined"), even though CCCC
+evaluated it fine and the shell carried no content; (2) a captured
+`#ifdef __CCCC__` shell being silently false at the host (which never
+defines that macro), which would drop whatever a taken branch inside it
+captured. Fixed by dropping conditional-group directive lines from the
+replay loop, gated off (i.e. still replayed) under `--emit-cccc`, matching
+the loop's two existing per-line filters (cccc-only headers, `setjmp.h`) —
+dialect-fidelity output expects a cccc-aware reader that understands the
+routing syntax anyway.
+
 ---
 
 ## Standard Library and Built-in Functions

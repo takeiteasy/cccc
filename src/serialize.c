@@ -5581,6 +5581,40 @@ static bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
 }
 
+// #1064: true if `line` (a raw captured directive line, `#...`, from
+// copy_raw_directive_line()/copy_routed_directive_line() in preprocess.c) is
+// one of the conditional-group directives -- see the call site in
+// cc_serialize_program()'s emit_directives loop for why these are dropped
+// from ordinary replay. Matches on the directive word after `#` and
+// optional whitespace; deliberately textual rather than pp_directive()
+// (token-level, not available on this already-flattened string).
+static bool line_is_conditional_directive(const char *line) {
+    if (!line || line[0] != '#')
+        return false;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    static const char *const kw[] = {
+        "if", "ifdef", "ifndef", "elif", "elifdef", "elifndef", "else", "endif",
+    };
+    for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
+        size_t len = strlen(kw[i]);
+        if (strncmp(p, kw[i], len) == 0) {
+            char c = p[len];
+            // Require a word boundary so "ifdef" doesn't also match a
+            // (nonexistent) directive starting "ifdefine" etc, and "if"
+            // doesn't wrongly match "ifdef"/"ifndef" as a prefix hit --
+            // checked longest-first below via the table order isn't
+            // relied on; the boundary check alone is sufficient since "if"
+            // followed by 'd'/'n' fails the boundary test and falls
+            // through to the next table entry.
+            if (c == '\0' || c == ' ' || c == '\t' || c == '(')
+                return true;
+        }
+    }
+    return false;
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
     if (!f || !prog)
         return;
@@ -5788,6 +5822,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         // and a cccc reader understands this header directly.
         if (!vm->compiler.emit_cccc && resolved &&
             path_basename_is(resolved, "setjmp.h"))
+            continue;
+        // #1064: a captured conditional-group directive line
+        // (#if/#ifdef/#ifndef/#elif/#elifdef/#elifndef/#else/#endif) is
+        // always an empty shell here -- CCCC's own preprocessor has already
+        // resolved the guarded content (a skipped branch's body is never
+        // captured at all; a taken branch's content is captured as its own
+        // separate lines/directives), so the shell carries no information.
+        // Replaying it anyway hands the *evaluation* to the host compiler a
+        // second time, for no benefit and two real hazards: a host that
+        // lacks a feature-test macro CCCC's own preprocessor already
+        // resolved (e.g. clang 18 rejecting a captured
+        // `#if __has_embed(...)` shell outright, "function-like macro
+        // '__has_embed' is not defined" -- CCCC evaluated it fine, the
+        // empty shell is the only thing reaching the host), and a captured
+        // `#ifdef __CCCC__` shell being silently false at the host (which
+        // never defines that macro), dropping whatever a taken branch
+        // inside it captured. `--emit-cccc` is exempted like the two
+        // filters above -- dialect-fidelity output expects a cccc-aware
+        // reader.
+        if (!vm->compiler.emit_cccc && line_is_conditional_directive(line))
             continue;
         fprintf(f, "%s\n", line);
     }
