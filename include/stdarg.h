@@ -26,9 +26,6 @@
  * when to switch from the register-spill area to the stack args area.
  */
 
-#ifndef __STDARG_H
-#define __STDARG_H
-
 // #1040 follow-on: this header is also what a real host cc resolves
 // `#include <stdarg.h>` to while compiling under --build (push_compile_flags
 // forwards cccc's own -I./include to every target's real compile command)
@@ -45,6 +42,26 @@
 // a genuine host compiler (not CCCC's own preprocessor, which always
 // defines __CCCC__ before any header is read) is the one reading this file.
 //
+// #1018 follow-up: the guard macro this comment originally settled on,
+// `__STDARG_H` (changed from `_STDARG_H` specifically to avoid colliding
+// with GCC's own single-underscore guard -- see the paragraph below,
+// preserved for history), turned out to *itself* collide with clang's own
+// real <stdarg.h>, which also guards under the exact double-underscore
+// spelling `__STDARG_H` (confirmed directly in the cccc-linux-amd64
+// container, clang 18: `grep __STDARG_H
+// $(clang -print-resource-dir)/include/stdarg.h`). This was invisible
+// until #1018 actually made a variadic function *definition* compile
+// natively at all -- before that, every -c=native build of a variadic
+// function failed on the VM-ABI leak long before reaching this header's
+// own #include_next hand-off, so the collision never got exercised. Same
+// failure shape as the GCC collision below (guard already defined -> real
+// header's body entirely skipped -> `va_list` left undeclared), just a
+// different host compiler. Renamed the guard to `__CCCC_STDARG_H`, a
+// spelling no real host's own <stdarg.h> is likely to also pick (verified
+// against both glibc's `_STDARG_H` and clang's `__STDARG_H` directly, not
+// just by absence of a hit) -- rather than chasing a third guard rename if
+// some future host also happens to collide.
+//
 // The guard macro itself had to change too, from _STDARG_H to __STDARG_H
 // (same double-underscore convention include/stdio.h/getopt.h/stdint.h
 // already use): GCC's own real <stdarg.h> guards its body with the exact
@@ -54,8 +71,36 @@
 // __gnuc_va_list undefined regardless of the #include_next hand-off --
 // confirmed against sr.ht's actual runner (gcc-15 as /usr/bin/cc; the
 // local container repro used clang, whose <stdarg.h> guards under a
-// different name and didn't expose this).
+// different name and didn't expose this -- that "different name" claim
+// itself turned out to be clang-version-dependent, see above).
+//
+// #1018 follow-up 2: the outer guard (whatever it's spelled) must NOT
+// wrap the `#include_next` hand-off below -- confirmed directly (cccc-
+// linux-amd64 container) with a program that includes <stdio.h> before
+// <stdarg.h>: glibc's real <stdio.h> issues its own PARTIAL stdarg.h
+// request first (`#define __need___va_list` then `#include <stdarg.h>`,
+// glibc's standard idiom for wanting only __gnuc_va_list, not the full
+// va_start/va_arg machinery) to pick up __gnuc_va_list for its own
+// prototypes. Clang's real <stdarg.h> handles a partial request
+// correctly -- it does NOT set its own `__STDARG_H` guard on a
+// __need_*-restricted pass, specifically so a later *full* `#include
+// <stdarg.h>` (this program's own explicit one, or any other TU-level
+// one) still runs to completion. But when the outer guard here wrapped
+// the whole file including this #include_next, CCCC's own guard was
+// already permanently set by that FIRST partial pass -- so the later,
+// full `#include <stdarg.h>` line hit `#ifndef <guard>` already false and
+// skipped the #include_next entirely, leaving va_start/va_arg/va_end
+// never macro-defined at all ("call to undeclared library function
+// 'va_start'"). Fixed by moving the guard to wrap only the `#ifdef
+// __CCCC__` branch's own body (CCCC's own struct/macros only need
+// defining once per TU, ordinary header-guard reasoning) and leaving the
+// `#else` branch's `#include_next <stdarg.h>` unconditional -- every
+// #include <stdarg.h>, partial or full, now always reaches the real host
+// header, which already has its own correct guard/partial-request logic
+// designed for exactly this repeated-inclusion pattern.
 #ifdef __CCCC__
+#ifndef __CCCC_STDARG_H
+#define __CCCC_STDARG_H
 
 /*
  * va_list type: struct tracking position in two memory regions
@@ -261,8 +306,7 @@ typedef struct {
 #define __builtin_va_copy(d, s)      va_copy(d, s)
 #define __builtin_va_arg(ap, type)   va_arg(ap, type)
 
+#endif /* __CCCC_STDARG_H */
 #else
 #include_next <stdarg.h>
 #endif /* __CCCC__ */
-
-#endif /* __STDARG_H */

@@ -3622,6 +3622,29 @@ VA_ARG_PROMOTION_PROGRAM = (
     "}\n"
 )
 
+STDARG_GUARD_PROGRAM = (
+    "#include <stdio.h>\n"
+    "#include <stdarg.h>\n"
+    "\n"
+    "static int sum_ints(int n, ...) {\n"
+    "    va_list ap;\n"
+    "    va_start(ap, n);\n"
+    "    int total = 0;\n"
+    "    for (int i = 0; i < n; i++)\n"
+    "        total += va_arg(ap, int);\n"
+    "    va_end(ap);\n"
+    "    return total;\n"
+    "}\n"
+    "\n"
+    "int main(void) {\n"
+    "    FILE *f = 0;\n"
+    "    (void)f;\n"
+    "    if (sum_ints(3, 10, 12, 20) != 42)\n"
+    "        return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 DOUBLE_LITERAL_PROGRAM = (
     "#include <stdio.h>\n"
     "#include <string.h>\n"
@@ -3839,6 +3862,37 @@ def case_va_arg_promotion_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "va_arg_promotion_1018", VA_ARG_PROMOTION_PROGRAM)
 
 
+def case_stdarg_guard_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  100: -c=native, include/stdarg.h's own outer include guard "
+          "used to wrap the ENTIRE file, including the '#else "
+          "#include_next <stdarg.h> #endif' hand-off to the real host "
+          "header -- found on real Linux (clang 18) while verifying "
+          "#1018's translation there, every prior pass in this batch "
+          "having been macOS-only. glibc's real <stdio.h> issues its own "
+          "PARTIAL stdarg.h request first ('#define __need___va_list' "
+          "then '#include <stdarg.h>', wanting only __gnuc_va_list) to "
+          "pick up its own prototypes; clang's real <stdarg.h> handles a "
+          "partial request correctly (it doesn't set its own guard, so a "
+          "later full request still runs) but CCCC's own outer guard was "
+          "already permanently set by that first partial pass, so a "
+          "LATER, full '#include <stdarg.h>' skipped the #include_next "
+          "hand-off entirely -- va_start/va_arg/va_end never got "
+          "macro-defined at all ('call to undeclared library function "
+          "va_start'). Fixed by moving the guard to wrap only the "
+          "'#ifdef __CCCC__' branch's own body, leaving the '#else' "
+          "branch's #include_next unconditional. Asserts VM 42 -> native "
+          "42 for <stdio.h> included before <stdarg.h>.")
+    src = Path(tmp) / "stdarg_guard_1018.c"
+    write(src, STDARG_GUARD_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    return _native_run_case(cccc, tmp, "stdarg_guard_1018", STDARG_GUARD_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -3950,6 +4004,7 @@ def main() -> int:
             case_va_list_size_native_round_trip,
             case_va_list_translation_native_round_trip,
             case_va_arg_promotion_native_round_trip,
+            case_stdarg_guard_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
