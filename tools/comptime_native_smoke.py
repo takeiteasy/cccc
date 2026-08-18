@@ -3522,11 +3522,92 @@ def case_synth_typedef_include_native_round_trip(cccc: Path, tmp: str) -> bool:
                             collide_src.read_text())
 
 
+SETJMP_PROGRAM = (
+    "#include <setjmp.h>\n"
+    "\n"
+    "struct canary_layout {\n"
+    "    jmp_buf env;\n"
+    "    unsigned long canary;\n"
+    "};\n"
+    "\n"
+    "static struct canary_layout g;\n"
+    "\n"
+    "static void unwind(void) {\n"
+    "    longjmp(g.env, 42);\n"
+    "}\n"
+    "\n"
+    "int main(void) {\n"
+    "    g.canary = 0xC0FFEE1054UL;\n"
+    "    int rv = setjmp(g.env);\n"
+    "    if (rv == 0) {\n"
+    "        unwind();\n"
+    "        return 1;\n"
+    "    }\n"
+    "    if (g.canary != 0xC0FFEE1054UL)\n"
+    "        return 2;\n"
+    "    return rv;\n"
+    "}\n"
+)
+
+
+def case_setjmp_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  95: -c=native, setjmp()/longjmp()/_setjmp/_longjmp used to "
+          "print as ordinary calls with the env argument cast to `long *` "
+          "-- these builtins' VM-side parameter type (parse_decl.c) -- and "
+          "relied on the auto-captured `#include <setjmp.h>` line "
+          "resolving to the real host header at native-compile time, which "
+          "is fragile (a user -I path that happens to also contain CCCC's "
+          "own bundled headers, e.g. this repo's own test harness's own "
+          "`-I./include`, shadows the real header with CCCC's declaration-"
+          "free copy -- 'call to undeclared library function'). Separately, "
+          "CCCC's historical `long long[5]` jmp_buf (40 bytes) is far "
+          "smaller than every supported host's real jmp_buf (up to 312 "
+          "bytes, glibc aarch64), so the real host setjmp() silently "
+          "overran the buffer -- confirmed with a struct canary placed "
+          "immediately after jmp_buf, which the pre-fix binary clobbers "
+          "deterministically. Fixed by (1) widening jmp_buf to "
+          "long long[40] (include/setjmp.h) -- storage stays CCCC's own "
+          "structural type, never the host's jmp_buf alias, so guest-"
+          "folded sizeof/offsetof still agrees with what native writes; "
+          "(2) never replaying the captured `#include <setjmp.h>` line "
+          "into native/-m output at all, and instead always lowering all "
+          "four builtins to calls to exactly `_setjmp`/`_longjmp` -- plain "
+          "`extern`-declared functions on every supported host, unlike "
+          "`setjmp` itself, a macro on glibc -- with an explicit "
+          "`extern int _setjmp(void *); extern void _longjmp(void *, int) "
+          "...;` declaration serialize_synth_setjmp_decls() emits on "
+          "demand, and the env arg cast to `(void *)` rather than the "
+          "implicit `(long *)`. Asserts VM 42 -> native 42, the canary "
+          "survives, and -m output uses '_setjmp'/'_longjmp'/'(void *)' "
+          "rather than 'setjmp'/'longjmp'/'(long *)', with no "
+          "'#include <setjmp.h>' at all (#1054/#1030)")
+    src = Path(tmp) / "setjmp_1054.c"
+    write(src, SETJMP_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "(long *)" in m_result.stdout or "#include <setjmp.h>" in m_result.stdout:
+        print(f"    FAIL: -m output still casts the env arg to '(long *)' "
+              f"or replays '#include <setjmp.h>'\n    {m_result.stdout}")
+        return False
+    if "(void *)" not in m_result.stdout or "_setjmp" not in m_result.stdout \
+            or "_longjmp" not in m_result.stdout:
+        print(f"    FAIL: -m output missing the expected '(void *)' cast "
+              f"or '_setjmp'/'_longjmp' calls\n    {m_result.stdout}")
+        return False
+
+    return _native_run_case(cccc, tmp, "setjmp_1054", SETJMP_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3628,6 +3709,7 @@ def main() -> int:
             case_synth_libc_include_native_round_trip,
             case_comptime_header_not_replayed_native_round_trip,
             case_synth_typedef_include_native_round_trip,
+            case_setjmp_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

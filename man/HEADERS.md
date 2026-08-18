@@ -242,6 +242,25 @@ by default). Two things follow from that:
   instead (`has_colliding_user_typedef()`) — forcing the header in on top of
   it can turn a harmless redundant redeclaration into a hard "typedef
   redefinition with different types" (#1057).
+- `setjmp.h` is one of the few owned headers (`is_compiler_owned_header`)
+  that also declares real functions, not just VM-only types — but relying
+  on its auto-captured `#include <setjmp.h>` line to resolve to the real
+  host header at native-compile time turned out to be fragile: a user `-I`
+  path that happens to also contain CCCC's own bundled headers (this
+  repo's own test harness's `-I./include` is exactly that) shadows the real
+  header with CCCC's declaration-free copy — "call to undeclared library
+  function". `cc_serialize_program` never replays the captured `#include
+  <setjmp.h>` line at all, and instead always lowers `setjmp`/`longjmp`/
+  `_setjmp`/`_longjmp` to calls to exactly `_setjmp`/`_longjmp` — plain
+  `extern`-declared functions on every supported host, unlike `setjmp`
+  itself (a macro on glibc, `#define setjmp(env) _setjmp(env)`) —
+  declaring them itself (`serialize_synth_setjmp_decls()`, `void *`
+  parameters, needing no `jmp_buf` type at all) whenever any of the four
+  are actually called. `jmp_buf` (`include/setjmp.h`) is `long long[40]`
+  (320 bytes), sized to cover every supported host's own real `jmp_buf`
+  too, so a guest-folded `sizeof(jmp_buf)`/`offsetof` stays correct even
+  though native storage is always CCCC's own structural type, never the
+  host's `jmp_buf` alias (#1054/#1030).
 
 `-c=generated` (without `-c=native`) is a separate code path: its output is
 meant to be compiled *alongside* normal headers, so it has never re-emitted

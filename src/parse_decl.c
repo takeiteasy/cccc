@@ -1210,9 +1210,17 @@ static void declare_builtin_functions(VirtualMachine *vm) {
         new_private_func_obj(vm, "__cccc_pc_to_source", pc_to_src_ty);
 
     // setjmp(jmp_buf) -> int
-    // jmp_buf is an array type, but we'll treat it as a pointer for now
+    // jmp_buf is an array type, but we'll treat it as a pointer for now.
+    // The pointee type here (long) is just the VM-side parameter shape;
+    // it does not need to (and, under -c=native, must not -- see #1054)
+    // agree with the real host jmp_buf ABI. serialize.c suppresses the
+    // implicit cast to `long *` at each of these four call sites and
+    // prints `(void *)` instead, so the emitted C never claims the arg is
+    // a `long *` there. jmp_buf itself is include/setjmp.h's
+    // `long long[40]` -- sized to cover every supported host's real
+    // sizeof(jmp_buf) (see that header's comment).
     Type *setjmp_ty = func_type(vm, ty_int);
-    setjmp_ty->params = pointer_to(vm, ty_long); // jmp_buf is long long[5]
+    setjmp_ty->params = pointer_to(vm, ty_long);
     vm->compiler.builtin_setjmp = new_gvar(vm, "setjmp", 6, setjmp_ty);
     vm->compiler.builtin_setjmp->is_definition = false;
 

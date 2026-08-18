@@ -18,7 +18,26 @@
  * [1] - saved sp (stack pointer)
  * [2] - saved bp (base pointer)
  * [3] - CFI shadow-stack offset: (char*)shadow_sp - (char*)shadow_stack, or -1 if CFI disabled
- * [4] - reserved for future use
+ * [4..] - reserved for future use / native-backend headroom (see below)
+ *
+ * Sizing under -c=native (#1054/#1030):
+ * Under -c=native, setjmp()/longjmp() are emitted as calls to the *real*
+ * host libc setjmp()/longjmp() (setjmp.h is on is_compiler_owned_header's
+ * list, but there is no VM-equivalent host ABI to translate to -- the VM's
+ * own [0..3] layout above has no meaning outside VM bytecode). The host
+ * writes/reads its own, differently-shaped jmp_buf into whatever pointer
+ * it's given (serialize.c passes `(void *)env`, not a typed jmp_buf*), so
+ * this array must be at least as large as every supported host's real
+ * sizeof(jmp_buf) or the host call overruns it. Measured directly (not
+ * from memory, see feedback_verify_libc_signatures_linux):
+ *   - macOS arm64:     int[48]                         = 192 bytes
+ *   - macOS x86_64:    int[37]                         = 148 bytes
+ *   - glibc x86_64:    long[8] + int + sigset_t(128)    = 200 bytes
+ *   - glibc aarch64:   ulonglong[22] + int + sigset_t   = 312 bytes  (max)
+ * 40 long longs (320 bytes) covers the measured max with headroom. The VM
+ * itself only ever indexes slots [0]-[3] (src/ops.c SETJMP/LONGJMP) --
+ * the rest exists solely so a -c=native build's real host setjmp/longjmp
+ * has somewhere safe to write.
  *
  * Implementation Strategy:
  * setjmp and longjmp are implemented using dedicated VM instructions:
@@ -59,11 +78,13 @@
 /*
  * jmp_buf type: execution context buffer
  *
- * Array of 5 long long values to hold VM state:
+ * Array of 40 long long values:
  * - Alignment: 8 bytes (natural alignment of long long)
- * - Size: 40 bytes total (5 * 8 bytes)
+ * - Size: 320 bytes total (40 * 8 bytes)
+ * - Only [0]-[3] are VM state (see the file header comment above); the
+ *   rest is headroom for -c=native's real host setjmp()/longjmp().
  */
-typedef long long jmp_buf[5];
+typedef long long jmp_buf[40];
 
 /*
  * setjmp(env) - Save execution context

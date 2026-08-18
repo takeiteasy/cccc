@@ -163,7 +163,6 @@ NATIVE_SKIP_TESTS = {
                    "initializer with no C spelling for a label's address "
                    "(#1044) -- (b), the comma-expression-in-funcall-argument "
                    "bug, is fixed",
-    "test_use_system_headers_setjmp.c": "jmp_buf mismatch under --use-system-headers (#1030)",
     # The emitted C replays `#include <sys/mount.h>` verbatim, so the host
     # header supplies the real ~2100-byte struct statfs and member access
     # re-resolves correctly against it -- but `sizeof(struct statfs)` was

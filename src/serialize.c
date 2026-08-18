@@ -1916,6 +1916,47 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                           "which does not exist natively", pc_builtin);
             }
         }
+        // #1054/#1030: setjmp/longjmp/_setjmp/_longjmp all print as calls to
+        // exactly `_setjmp`/`_longjmp` -- real, plain `extern`-declared
+        // functions on every supported host (unlike plain `setjmp`, a
+        // macro on glibc) -- with the env argument cast to `(void *)`
+        // rather than the implicit `long *` these builtins' VM-side
+        // parameter type would otherwise print (parse_decl.c). See
+        // serialize_synth_setjmp_decls()'s own comment (this file) for why:
+        // it declares exactly these two names, and never replays the
+        // captured `#include <setjmp.h>` line, so nothing else may spell
+        // the callee any other way here.
+        if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+            ((vm->compiler.builtin_setjmp &&
+              node->lhs->var == vm->compiler.builtin_setjmp) ||
+             (vm->compiler.builtin_longjmp &&
+              node->lhs->var == vm->compiler.builtin_longjmp) ||
+             (vm->compiler.builtin__setjmp &&
+              node->lhs->var == vm->compiler.builtin__setjmp) ||
+             (vm->compiler.builtin__longjmp &&
+              node->lhs->var == vm->compiler.builtin__longjmp))) {
+            bool is_longjmp =
+                (vm->compiler.builtin_longjmp &&
+                 node->lhs->var == vm->compiler.builtin_longjmp) ||
+                (vm->compiler.builtin__longjmp &&
+                 node->lhs->var == vm->compiler.builtin__longjmp);
+            fprintf(f, is_longjmp ? "_longjmp(" : "_setjmp(");
+            Node *arg = node->args;
+            if (arg) {
+                Node *env = arg;
+                while (env->kind == ND_CAST && env->lhs)
+                    env = env->lhs;
+                fprintf(f, "(void *)");
+                serialize_expr(f, vm, ctx, env, node_prec);
+                arg = arg->next;
+            }
+            for (; arg; arg = arg->next) {
+                fprintf(f, ", ");
+                serialize_expr(f, vm, ctx, arg, 2);
+            }
+            fprintf(f, ")");
+            break;
+        }
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, "(");
         for (Node *arg = node->args; arg; arg = arg->next) {
@@ -4909,6 +4950,51 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog
         fprintf(f, "\n");
 }
 
+// #1054/#1030: setjmp/longjmp (and their _setjmp/_longjmp POSIX-variant
+// aliases, parse_decl.c) are on is_compiler_owned_header's list -- CCCC's
+// own jmp_buf is a VM-bytecode-specific 5-slot layout with no host ABI
+// equivalent (include/setjmp.h) -- but unlike every *other* owned header
+// (stdbool.h/stdint.h/etc, type-only, nothing to call), setjmp.h also
+// declares real functions that -c=native's generated C needs to actually
+// *call* into the real host libc. Relying on the auto-captured `#include
+// <setjmp.h>` line to resolve to the real host header at native-compile
+// time is fragile: it depends on include search-path ordering the
+// generated C has no control over (a user -I path that happens to also
+// contain CCCC's own bundled headers -- e.g. the whole test suite's own
+// `-I./include` -- shadows the real header with CCCC's declaration-free
+// copy, "call to undeclared library function"). Sidestep entirely: never
+// replay `#include <setjmp.h>` into -c=native/-m output (see this
+// function's caller), and instead declare exactly the two symbols these
+// four builtins are unconditionally lowered to (see the ND_FUNCALL case
+// below) ourselves, with a signature (`void *`) that needs no jmp_buf type
+// at all. `_setjmp`/`_longjmp` are chosen over plain `setjmp`/`longjmp`
+// deliberately: on macOS both pairs are ordinary exported functions, but
+// on glibc `setjmp` is a *macro* (`#define setjmp(env) _setjmp(env)`,
+// verified against the real glibc header) while `_setjmp`/`_longjmp`
+// remain plain `extern` declarations on both platforms -- so declaring and
+// calling them directly needs nothing from any header, on either host.
+// This also matches VM semantics exactly: the VM's own SETJMP/LONGJMP
+// opcodes never touch a signal mask (ops.c), the same behavior `_setjmp`/
+// `_longjmp` document (parse_decl.c's own comment on this).
+static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm, Obj *prog) {
+    Obj *family[4] = {
+        vm->compiler.builtin_setjmp, vm->compiler.builtin_longjmp,
+        vm->compiler.builtin__setjmp, vm->compiler.builtin__longjmp,
+    };
+    bool used = false;
+    for (Obj *obj = prog; obj && !used; obj = obj->next) {
+        if (!obj->is_function || !obj->body)
+            continue;
+        for (int i = 0; i < 4 && !used; i++)
+            if (family[i] && node_calls_obj(obj->body, family[i]))
+                used = true;
+    }
+    if (!used)
+        return;
+    fprintf(f, "extern int _setjmp(void *);\n");
+    fprintf(f, "extern void _longjmp(void *, int) __attribute__((noreturn));\n\n");
+}
+
 // #1057: type-name sibling of #1050's synth-libc-call mechanism just above.
 // A comptime builder can fold a standard scalar typedef name -- GetType(
 // "size_t")/"ptrdiff_t"/"wchar_t" -- into a generated function's signature
@@ -5598,6 +5684,18 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
                       "no host definition)");
             continue;
         }
+        // #1054/#1030: setjmp.h is *owned* (VM-specific jmp_buf ABI), not
+        // cccc-only, so it doesn't take the branch above -- but it still
+        // must never reach native/-m output verbatim, for a different
+        // reason: relying on this replayed line to resolve to the real
+        // host <setjmp.h> at native-compile time is exactly the fragile
+        // include-search-path dependency serialize_synth_setjmp_decls()'s
+        // own comment (below) explains. `--emit-cccc` is exempted like the
+        // cccc-only branch above -- its whole point is dialect fidelity,
+        // and a cccc reader understands this header directly.
+        if (!vm->compiler.emit_cccc && resolved &&
+            path_basename_is(resolved, "setjmp.h"))
+            continue;
         fprintf(f, "%s\n", line);
     }
     if (vm->compiler.emit_directives.len > 0)
@@ -5608,8 +5706,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     // own comment. Placed after the replayed user includes (so it can't
     // shadow them) and before the accessor shims (some of which reference
     // libc-declared types).
-    if (!generated_only)
+    if (!generated_only) {
         serialize_synth_libc_includes(f, vm, prog);
+        if (!vm->compiler.emit_cccc)
+            serialize_synth_setjmp_decls(f, vm, prog);
+    }
 
     // #1057: headers for comptime-folded standard typedef names (size_t/
     // ptrdiff_t/wchar_t) with no #include of their own to auto-capture --
