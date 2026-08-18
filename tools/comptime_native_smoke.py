@@ -4143,11 +4143,55 @@ def case_native_cond_directive_not_replayed(cccc: Path, tmp: str) -> bool:
                                     COND_DIRECTIVE_PROGRAM)
 
 
+FLT_ROUNDS_PROGRAM = (
+    "#include <fenv.h>\n"
+    "#include <float.h>\n"
+    "int main(void) {\n"
+    "    if (fesetround(FE_TOWARDZERO) != 0) return 1;\n"
+    "    if (FLT_ROUNDS != 0) return 2;\n"
+    "    if (fesetround(FE_TONEAREST) != 0) return 3;\n"
+    "    if (FLT_ROUNDS != 1) return 4;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_flt_rounds_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  106: -c=native's __cccc_flt_rounds shim (native_accessor_shims, "
+          "src/serialize.c) used to call __builtin_flt_rounds() -- clang "
+          "implements this builtin, but GCC 13 does not, so a program using "
+          "FLT_ROUNDS failed to link natively on real GCC with an undefined "
+          "reference (#1071; found via tests/test_fenv.c in the "
+          "cccc-linux-arm64 container). On clang the pre-fix shim works "
+          "fine, so a plain VM 42 -> native 42 round-trip alone would pass "
+          "vacuously here -- also asserts the -m output text directly: the "
+          "shim must call fegetround() (the same mapping src/stdlib/fenv.c's "
+          "own VM-side __cccc_flt_rounds() already uses) and must not call "
+          "__builtin_flt_rounds at all. Deliberately uses only <fenv.h>/"
+          "<float.h>, not <math.h>, so this case is unaffected by #1070's "
+          "still-open, unrelated <stdint.h> #include_next gap.")
+    src = Path(tmp) / "flt_rounds_1071.c"
+    write(src, FLT_ROUNDS_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "__builtin_flt_rounds" in m_result.stdout:
+        print("    FAIL: -m output still calls __builtin_flt_rounds "
+              "(clang-only, GCC 13 lacks it)")
+        return False
+    if "fegetround" not in m_result.stdout:
+        print("    FAIL: -m output's __cccc_flt_rounds shim doesn't call "
+              f"fegetround()\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "flt_rounds_1071",
+                                    FLT_ROUNDS_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4260,6 +4304,7 @@ def main() -> int:
             case_native_defines_survive_argv,
             case_native_signed_char_argv,
             case_native_cond_directive_not_replayed,
+            case_flt_rounds_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -4143,11 +4143,41 @@ static const struct {
     // this shim (`#define FLT_ROUNDS (__cccc_flt_rounds())`) -- so a body
     // reading FLT_ROUNDS would textually expand right back into a call to
     // itself (infinite recursion) once float.h's replayed #include is in
-    // scope. __builtin_flt_rounds() is the portable clang/gcc intrinsic for
-    // exactly this value, with no macro indirection to loop through.
-    // Signature matches float.h's own `extern int __cccc_flt_rounds(void);`
-    // (:72), not src/stdlib/fenv.c's VM-side long long version.
-    {"__cccc_flt_rounds",   "static int __cccc_flt_rounds(void) { return __builtin_flt_rounds(); }\n"},
+    // scope. Signature matches float.h's own
+    // `extern int __cccc_flt_rounds(void);` (:72), not src/stdlib/fenv.c's
+    // VM-side long long version.
+    //
+    // #1071: this used to call __builtin_flt_rounds(), which clang
+    // implements but GCC 13 does not ("implicit declaration of function
+    // '__builtin_flt_rounds'", an undefined-symbol link error) -- not "the
+    // portable clang/gcc intrinsic" it was previously documented as.
+    // Replaced with the exact fegetround()-based mapping
+    // src/stdlib/fenv.c's own __cccc_flt_rounds() already uses on the VM
+    // side, so both paths agree by construction. The #include <fenv.h>
+    // here follows the __cccc_iseqsig_{f,d} precedent just above (legal
+    // mid-file, harmless if repeated thanks to the header's own include
+    // guard) -- confirmed it resolves to the real host <fenv.h> under real
+    // GCC too (angle-bracket #include from this synthetic shim body, found
+    // at -I position 0, so include/fenv.h's own #include_next hand-off
+    // resumes the search at position 1 and reaches /usr/include/fenv.h;
+    // this is a different shape from #1070's still-open gap, which is a
+    // *quoted* #include issued from another CCCC-owned header). The
+    // switch is over the *host's* FE_* (host compiler, host header); the
+    // returned 0/1/2/3/-1 are CCCC's own fixed encoding, spelled as bare
+    // literals rather than any host macro name, since guest comparisons
+    // against FLT_ROUNDS were already folded against that encoding at
+    // guest compile time -- same asymmetry the __cccc_fpclassify_* shims
+    // above already document for FP_*.
+    {"__cccc_flt_rounds",   "#include <fenv.h>\n"
+                             "static int __cccc_flt_rounds(void) {\n"
+                             "    switch (fegetround()) {\n"
+                             "    case FE_TOWARDZERO: return 0;\n"
+                             "    case FE_TONEAREST:  return 1;\n"
+                             "    case FE_UPWARD:     return 2;\n"
+                             "    case FE_DOWNWARD:   return 3;\n"
+                             "    default:            return -1;\n"
+                             "    }\n"
+                             "}\n"},
     // #1052: issignaling(x)/iseqsig(x,y) (include/math.h:530-541) are
     // CCCC-internal _Generic-dispatched macros with no real libc/libm
     // symbol behind them -- same shape as isnan/isinf/etc above, needing a
