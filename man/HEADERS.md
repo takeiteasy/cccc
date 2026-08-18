@@ -493,7 +493,11 @@ macro name it's standing in for (`include/math.h`'s `__cccc_isnan_f`/etc,
 prototype. **Any new bundled header declaring a name that gets a
 `native_accessor_shims` entry needs one of these two treatments**, or it
 silently reintroduces this bug class the next time something exercises it
-under `-c=native`.
+under `-c=native`. This isn't hypothetical: #1052 added four new
+`native_accessor_shims` entries (`__cccc_issignaling_{f,d}`,
+`__cccc_iseqsig_{f,d}`) right alongside the already-guarded `__cccc_isnan_f`
+block in `include/math.h`, but didn't guard their own declarations —
+invisible until a real `-I./include` native run hit it (#1063).
 
 `tools/audit_ffi.py`'s guard-presence check (`GUEST_ONLY_DECL_GUARDS`)
 whitelists `__CCCC__` as a condition that only means something to CCCC's own

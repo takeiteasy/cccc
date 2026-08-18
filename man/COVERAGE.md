@@ -1580,6 +1580,25 @@ native 42 on Linux; only macOS's own permanent libm gap (#1037) remains,
 so it moved from the general `NATIVE_SKIP_TESTS` table to the
 macOS-specific `NATIVE_SKIP_TESTS_MACOS` one.
 
+#1052's four new `native_accessor_shims` entries above missed a step
+`isnan`/`isinf`/`signbit`/`fpclassify`'s own entries had already needed
+(#1021): `include/math.h`'s `__cccc_issignaling_f`/`_d` and
+`__cccc_iseqsig_f`/`_d` **declarations** stayed unconditional `extern`s,
+never guarded on `__CCCC__` like the block right above them. Once a
+program calling `issignaling()`/`iseqsig()` reached `-c=native` with
+CCCC's own `include/` on the search path (the test harness's own
+`-I./include`, same shadowing hazard #1054 documented for `setjmp.h`), the
+host compiler saw the unconditional `extern` declaration first and then
+`native_accessor_shims`'s `static` definition — "static declaration
+follows non-static declaration". Only surfaced on a real Linux run
+(#1063); #1052's own verification never went through the real harness's
+`-I` shape. Fixed by wrapping the four declarations in `#ifdef __CCCC__`,
+matching the `isnan`/`isinf`/`signbit`/`fpclassify` block. **Invariant for
+any future `native_accessor_shims` entry:** if CCCC's own header also
+declares the name (rather than only defining the macro that calls it),
+that declaration must be `#ifdef __CCCC__`-guarded — this is the third
+time the same trap has been hit (#1021, #1023, #1052/#1063).
+
 ---
 
 ## Standard Library and Built-in Functions

@@ -3645,6 +3645,24 @@ STDARG_GUARD_PROGRAM = (
     "}\n"
 )
 
+ISSIGNALING_PROGRAM = (
+    "#include <math.h>\n"
+    "\n"
+    "int main(void) {\n"
+    "    float sf = 0.0f / 0.0f;\n"
+    "    double sd = 0.0 / 0.0;\n"
+    "    int a = issignaling(sf);\n"
+    "    int b = issignaling(sd);\n"
+    "    int c = iseqsig(1.0f, 1.0f);\n"
+    "    int d = iseqsig(1.0, 1.0);\n"
+    "    if (a != 0 && a != 1) return 1;\n"
+    "    if (b != 0 && b != 1) return 2;\n"
+    "    if (!c) return 3;\n"
+    "    if (!d) return 4;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 DOUBLE_LITERAL_PROGRAM = (
     "#include <stdio.h>\n"
     "#include <string.h>\n"
@@ -3893,11 +3911,56 @@ def case_stdarg_guard_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "stdarg_guard_1018", STDARG_GUARD_PROGRAM)
 
 
+def case_issignaling_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  101: -c=native, include/math.h's own issignaling_f/issignaling_d/"
+          "iseqsig_f/iseqsig_d externs (:535-541) used to stay unguarded "
+          "while the matching isnan_f/isinf_f/signbit_f/fpclassify_f block "
+          "right above them (:56-67) was already guarded on __CCCC__ since "
+          "#1021 -- #1052 added these four native_accessor_shims entries "
+          "(src/serialize.c) but missed guarding their declarations here, "
+          "found only on a real Linux run since the collision needs "
+          "CCCC's own header (via -I./include) to win the search over the "
+          "real host <math.h>. A real host compiler rejects the resulting "
+          "static-after-non-static redeclaration outright. Fixed by "
+          "wrapping the four declarations in #ifdef __CCCC__, matching "
+          "the block above them. Unlike every other case in this file, "
+          "this one deliberately passes an explicit -I<repo>/include "
+          "itself (not _native_run_case's plain invocation) -- without "
+          "it, the replayed #include <math.h> would resolve to the real "
+          "host header, which declares none of these names, and the case "
+          "would pass vacuously whether or not the guard is present.")
+    src = Path(tmp) / "issignaling_1063.c"
+    write(src, ISSIGNALING_PROGRAM)
+    include_dir = cccc.parent / "include"
+
+    vm_result = run([str(cccc), "-I", str(include_dir), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out = Path(tmp) / "issignaling_1063_out"
+    compile_result = run(
+        [str(cccc), "-I", str(include_dir), "-c=native", "-o", out.name, src.name],
+        cwd=tmp,
+    )
+    if compile_result.returncode != 0:
+        print(f"    FAIL: native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4005,6 +4068,7 @@ def main() -> int:
             case_va_list_translation_native_round_trip,
             case_va_arg_promotion_native_round_trip,
             case_stdarg_guard_native_round_trip,
+            case_issignaling_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -531,13 +531,29 @@ uintmax_t ufromfpxl(long double, int, unsigned int);
  * cannot be implemented via isnan()). iseqsig(x, y) is an equality compare
  * that raises FE_INVALID for a signaling NaN operand (unlike ==, which
  * only does so for quiet-vs-quiet). iscanonical is always true for
- * IEEE-754 binary formats (see canonicalize above). */
+ * IEEE-754 binary formats (see canonicalize above).
+ *
+ * #1063: same trap as the isnan_f/isinf_f/signbit_f/fpclassify_f block
+ * above (:56-67) -- an unconditional extern here conflicts with the
+ * `static` definition serialize.c's native_accessor_shims emits once the
+ * issignaling/iseqsig shim functions are actually used ("static
+ * declaration follows non-static declaration"). #1052 added these four
+ * shim entries but missed guarding their declarations here; only found on
+ * a real Linux run (-I./include forwarded to the native cc, so this
+ * header wins the search over the real host <math.h>). Guarded on
+ * __CCCC__ for the same reason as :68: the shim's own static body (always
+ * emitted ahead of every use) is a complete definition that also serves
+ * as its own prototype, so no #include_next fallback is needed either. */
+#ifdef __CCCC__
 int __cccc_issignaling_f(float);
 int __cccc_issignaling_d(double);
+#endif
 #define issignaling(x) _Generic((x), float: __cccc_issignaling_f, default: __cccc_issignaling_d)(x)
 
+#ifdef __CCCC__
 int __cccc_iseqsig_f(float, float);
 int __cccc_iseqsig_d(double, double);
+#endif
 #define iseqsig(x, y) _Generic((x), float: __cccc_iseqsig_f, default: __cccc_iseqsig_d)((x), (y))
 
 #define iscanonical(x) ((void)(x), 1)
