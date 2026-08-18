@@ -3549,6 +3549,18 @@ SETJMP_PROGRAM = (
     "}\n"
 )
 
+VA_LIST_SIZE_PROGRAM = (
+    "#include <stdarg.h>\n"
+    "\n"
+    "int main(void) {\n"
+    "    if (sizeof(va_list) < 32)\n"
+    "        return 1;\n"
+    "    if (sizeof(va_list) != 64)\n"
+    "        return 2;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 DOUBLE_LITERAL_PROGRAM = (
     "#include <stdio.h>\n"
     "#include <string.h>\n"
@@ -3653,11 +3665,42 @@ def case_double_literal_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "double_literal_1058", DOUBLE_LITERAL_PROGRAM)
 
 
+def case_va_list_size_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  97: -c=native, guest-folded sizeof(va_list) used to fold "
+          "against CCCC's own 24-byte struct va_list layout (include/"
+          "stdarg.h), while the replayed `#include <stdarg.h>` resolves to "
+          "the real host's own, larger va_list at native-compile time -- "
+          "same soundness class #1054 documented for jmp_buf/setjmp.h. "
+          "Measured the real host va_list size directly on every "
+          "supported platform x arch combo: macOS arm64 8 bytes, macOS "
+          "x86_64 24, glibc x86_64 32, glibc aarch64 32. Fixed by padding "
+          "CCCC's struct va_list to 64 bytes (a trailing char __reserved"
+          "[40]) so the folded constant over-allocates on every one of "
+          "them, mirroring #1054's jmp_buf widening (#1059). Asserts -m "
+          "output folds sizeof(va_list) to exactly 64, and VM 42 -> "
+          "native 42.")
+    src = Path(tmp) / "va_list_size_1059.c"
+    write(src, VA_LIST_SIZE_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "64ULL" not in m_result.stdout and "64" not in m_result.stdout:
+        print(f"    FAIL: -m output doesn't fold sizeof(va_list) to "
+              f"64\n    {m_result.stdout}")
+        return False
+
+    return _native_run_case(cccc, tmp, "va_list_size_1059", VA_LIST_SIZE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3761,6 +3804,7 @@ def main() -> int:
             case_synth_typedef_include_native_round_trip,
             case_setjmp_native_round_trip,
             case_double_literal_native_round_trip,
+            case_va_list_size_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

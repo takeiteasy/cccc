@@ -261,6 +261,23 @@ by default). Two things follow from that:
   too, so a guest-folded `sizeof(jmp_buf)`/`offsetof` stays correct even
   though native storage is always CCCC's own structural type, never the
   host's `jmp_buf` alias (#1054/#1030).
+- `stdarg.h` is the same owned-header shape as `setjmp.h` above, but only
+  half-fixed so far. `struct va_list` (`include/stdarg.h`) is padded to 64
+  bytes (a trailing `char __reserved[40]`) so a guest-folded
+  `sizeof(va_list)`/`offsetof` stays correct against every supported
+  host's own real, larger `va_list` (measured: macOS arm64 8B, macOS
+  x86_64 24B, glibc x86_64/aarch64 32B) — same reasoning as `jmp_buf`
+  (#1059). Unlike `setjmp.h`, though, `cc_serialize_program` does **not**
+  yet translate `va_start`/`va_arg`/`va_copy`/`va_end` to the host's own
+  `stdarg.h` forms: those macros still expand to VM-ABI pointer arithmetic
+  over CCCC's own struct fields and `__builtin_frame_address(0)`, and the
+  serializer prints that expansion verbatim while the replayed
+  `#include <stdarg.h>` resolves to the real host header — so a variadic
+  function *definition* fails to compile natively with "member reference
+  base type 'va_list' ... is not a structure or union" (a call to an
+  already-declared host variadic function like `printf` is unaffected,
+  since that's an ordinary ABI call with no `va_list` struct access
+  involved). Tracked as [#1018](https://todo.sr.ht/~takeiteasy/cccc/1018).
 
 `-c=generated` (without `-c=native`) is a separate code path: its output is
 meant to be compiled *alongside* normal headers, so it has never re-emitted

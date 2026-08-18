@@ -62,11 +62,25 @@
  * - reg_ptr: current position in spilled register area (bp[-1...-8])
  * - stack_ptr: current position in stack args area (bp[+2...])
  * - reg_count: number of register-spill slots remaining before switching
+ *
+ * #1059: the real fields above total 20 bytes (24 with reg_count's
+ * trailing pad). -c=native folds sizeof(va_list)/offsetof(...) against
+ * *this* layout at guest compile time, but replays the user's own
+ * `#include <stdarg.h>` verbatim, which resolves to the real host's own
+ * <stdarg.h> at native-compile time (see the #include_next guard below) --
+ * same soundness class as #1054's jmp_buf. Measured the real host size
+ * directly on every supported platform x arch combo (not recalled): macOS
+ * arm64 8 bytes (a bare `char *`), macOS x86_64 24, glibc x86_64 32, glibc
+ * aarch64 32 (both glibc targets: an array of one `struct __va_list_tag`).
+ * `__reserved` pads this struct to 64 bytes so any guest-folded
+ * sizeof/offsetof over-allocates real storage on every one of them,
+ * mirroring #1054's jmp_buf widening rather than diagnosing the fold.
  */
 typedef struct {
     char *reg_ptr;      /* Current position in register spill area */
     char *stack_ptr;    /* Current position in stack overflow area */
     int reg_count;      /* Remaining slots in register spill area */
+    char __reserved[40]; /* #1059: headroom for the real host va_list size */
 } va_list;
 
 /*
