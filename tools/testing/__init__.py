@@ -71,39 +71,47 @@ LEAKS_VM_HEAP_DEPENDENT_FLAGS = {
 # every entry here compiled and ran correctly through the VM but diverged
 # under -c=native (wrong compile, wrong link, or wrong runtime result).
 NATIVE_SKIP_TESTS = {
-    # --- #1018: variadic-function serialization gives wrong runtime results ---
+    # --- #1018: RESOLVED. Was: variadic-function serialization gives wrong
+    # runtime results. Root cause: <stdarg.h>'s va_start/va_arg/va_copy/
+    # va_end macros expanded directly into VM-ABI pointer arithmetic over
+    # CCCC's own struct va_list (reg_ptr/stack_ptr/reg_count) and
+    # __builtin_frame_address(0) -- the serializer printed that expansion
+    # verbatim, which a real host compiler rejects outright ("member
+    # reference base type 'va_list' (aka 'char *') is not a structure or
+    # union") since the replayed `#include <stdarg.h>` resolves to the real,
+    # differently-shaped host va_list at native-compile time. Fixed by
+    # wrapping each macro's existing VM-ABI expansion (unchanged) as the
+    # trailing argument to a new internal __cccc_va_start/_arg/_copy/_end
+    # builtin (src/parse_postfix.c) that parses ap/last/type/src a second,
+    # independent time purely to stamp them as serializer annotation
+    # (Node.va_form, src/cccc.h) on the returned (otherwise identical) impl
+    # node -- VM codegen/comptime/reflection/inlining see byte-identical
+    # AST throughout; only serialize_expr (src/serialize.c) reads the
+    # annotation, printing the real host `va_start(ap, last)`/`va_arg(ap,
+    # type)`/`va_copy(dest, src)`/`va_end(ap)` form instead of walking the
+    # VM-internal subtree. No new #include machinery was needed (unlike
+    # #1050/#1057): these four only exist as macros, so reaching one at all
+    # already requires the user's own `#include <stdarg.h>` in the TU,
+    # auto-captured and replayed like any ordinary header.
+    #
     # The repro_*.c entries below are dead weight for --native specifically
     # (discover_tests only globs "test_*.c", so repro_*.c is never part of
     # any tools/tests.py corpus, --native included) -- kept here anyway as a
     # record of what #1018's sweep found, since deleting them would lose
     # that trail. Harmless either way: a key discover_tests never produces
-    # is never looked up.
-    "repro_1to5.c": "variadic serialization gives wrong result (#1018)",
-    "repro_basic_var.c": "variadic serialization gives wrong result (#1018)",
-    "repro_debug.c": "variadic serialization gives wrong result (#1018)",
-    "repro_exact.c": "variadic serialization gives wrong result (#1018)",
-    "repro_inner_vararg.c": "variadic serialization gives wrong result (#1018)",
-    "repro_longname.c": "variadic serialization gives wrong result (#1018)",
-    "repro_minvar.c": "variadic serialization gives wrong result (#1018)",
-    "repro_mixed_args.c": "variadic serialization gives wrong result (#1018)",
-    "repro_namesize.c": "variadic serialization gives wrong result (#1018)",
-    "repro_nested2.c": "variadic serialization gives wrong result (#1018)",
-    "repro_nested3.c": "variadic serialization gives wrong result (#1018)",
-    "repro_nested4.c": "variadic serialization gives wrong result (#1018)",
-    "repro_nested5.c": "variadic serialization gives wrong result (#1018)",
-    "repro_nested_vararg.c": "variadic serialization gives wrong result (#1018)",
-    "repro_nested_varargs.c": "variadic serialization gives wrong result (#1018)",
-    "repro_only_nested.c": "variadic serialization gives wrong result (#1018)",
-    "repro_onlytest5.c": "variadic serialization gives wrong result (#1018)",
-    "repro_short.c": "variadic serialization gives wrong result (#1018)",
-    "repro_simple_loop.c": "variadic serialization gives wrong result (#1018)",
-    "repro_va_copy.c": "variadic serialization gives wrong result (#1018)",
-    "repro_vasize.c": "variadic serialization gives wrong result (#1018)",
-    "repro_withr.c": "variadic serialization gives wrong result (#1018)",
-    "repro_znames.c": "variadic serialization gives wrong result (#1018)",
-    "test_c4_argv.c": "variadic serialization gives wrong result (#1018)",
-    "test_use_system_headers_fallback.c": "variadic serialization gives wrong result (#1018)",
-    "test_aligned_alloc_vmheap.c": "variadic serialization gives wrong result (#1018)",
+    # is never looked up. All but repro_debug.c now round-trip VM->native
+    # correctly (confirmed by hand, not through this dict, since none of
+    # them are ever looked up); repro_debug.c reads CCCC's own internal
+    # va_list.reg_count member directly from user source (not through the
+    # va_start/va_arg macros), which has no host equivalent by construction
+    # -- expected to keep diverging, not a bug.
+    #
+    # test_c4_argv.c and test_aligned_alloc_vmheap.c were retagged here by
+    # #967's original corpus sweep despite not using variadic functions at
+    # all -- re-triaged and retagged to their own tickets, #1060 (argv[0]
+    # naming-convention divergence) and #1061 (aligned_alloc leniency gap),
+    # neither a variadic bug. test_use_system_headers_fallback.c now
+    # round-trips correctly and is un-skipped.
 
     # --- #1019: RESOLVED. Was: vector_size arithmetic/select fails or
     # misbehaves under -c=native. Two root causes, both in serialize.c:
@@ -236,6 +244,11 @@ NATIVE_SKIP_TESTS = {
 
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
+
+    # --- retagged out of #1018 (its own residue sweep) -- neither is a
+    # variadic bug, see NATIVE_1018_PLAN.md ---
+    "test_c4_argv.c": "argv[0] naming-convention divergence, not variadic (#1060)",
+    "test_aligned_alloc_vmheap.c": "aligned_alloc leniency gap, not variadic (#1061)",
 }
 
 # Platform-specific -c=native skips, checked only when the running host

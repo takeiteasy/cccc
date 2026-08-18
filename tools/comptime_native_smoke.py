@@ -3561,6 +3561,35 @@ VA_LIST_SIZE_PROGRAM = (
     "}\n"
 )
 
+VA_LIST_TRANSLATION_PROGRAM = (
+    "#include <stdarg.h>\n"
+    "\n"
+    "static double sum_doubles(int count, ...) {\n"
+    "    va_list args;\n"
+    "    va_start(args, count);\n"
+    "    va_list copy;\n"
+    "    va_copy(copy, args);\n"
+    "    double copy_total = 0.0;\n"
+    "    for (int i = 0; i < count; i++)\n"
+    "        copy_total += va_arg(copy, double);\n"
+    "    va_end(copy);\n"
+    "    double total = 0.0;\n"
+    "    for (int i = 0; i < count; i++)\n"
+    "        total += va_arg(args, double);\n"
+    "    va_end(args);\n"
+    "    if (copy_total != total)\n"
+    "        return -1.0;\n"
+    "    return total;\n"
+    "}\n"
+    "\n"
+    "int main(void) {\n"
+    "    double d = sum_doubles(4, 1.0, 2.0, 3.0, 4.0);\n"
+    "    if (d != 10.0)\n"
+    "        return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 DOUBLE_LITERAL_PROGRAM = (
     "#include <stdio.h>\n"
     "#include <string.h>\n"
@@ -3696,11 +3725,54 @@ def case_va_list_size_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "va_list_size_1059", VA_LIST_SIZE_PROGRAM)
 
 
+def case_va_list_translation_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  98: -c=native, <stdarg.h>'s va_start/va_arg/va_copy/va_end "
+          "macros used to expand directly into VM-ABI pointer arithmetic "
+          "over CCCC's own struct va_list (reg_ptr/stack_ptr/reg_count) "
+          "and __builtin_frame_address(0) -- the serializer printed that "
+          "expansion verbatim, which a real host compiler rejects outright "
+          "('member reference base type va_list (aka char *) is not a "
+          "structure or union') since the replayed #include <stdarg.h> "
+          "resolves to the real, differently-shaped host va_list at "
+          "native-compile time (#1018). Fixed by wrapping each macro's "
+          "existing VM-ABI expansion (unchanged) as the trailing argument "
+          "to a new internal __cccc_va_start/_arg/_copy/_end builtin "
+          "(src/parse_postfix.c) that parses ap/last/type/src a second, "
+          "independent time purely to stamp them as serializer annotation "
+          "(Node.va_form, src/cccc.h) on the returned, otherwise-identical "
+          "impl node -- VM codegen/comptime/reflection/inlining see "
+          "byte-identical AST throughout; only serialize_expr prints the "
+          "real host form instead of walking the VM-internal subtree. "
+          "Asserts -m output contains 'va_start('/'va_arg('/'va_copy('/"
+          "'va_end(' and none of 'reg_ptr'/'reg_count'/'stack_ptr', and "
+          "VM 42 -> native 42 including a va_copy independent-walk check.")
+    src = Path(tmp) / "va_list_translation_1018.c"
+    write(src, VA_LIST_TRANSLATION_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    for needed in ("va_start(", "va_arg(", "va_copy(", "va_end("):
+        if needed not in m_result.stdout:
+            print(f"    FAIL: -m output missing '{needed}'\n    {m_result.stdout}")
+            return False
+    for leaked in ("reg_ptr", "reg_count", "stack_ptr"):
+        if leaked in m_result.stdout:
+            print(f"    FAIL: -m output still leaks VM-internal '{leaked}'\n"
+                  f"    {m_result.stdout}")
+            return False
+
+    return _native_run_case(cccc, tmp, "va_list_translation_1018", VA_LIST_TRANSLATION_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -3805,6 +3877,7 @@ def main() -> int:
             case_setjmp_native_round_trip,
             case_double_literal_native_round_trip,
             case_va_list_size_native_round_trip,
+            case_va_list_translation_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

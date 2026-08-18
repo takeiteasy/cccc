@@ -1463,6 +1463,56 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         return;
     }
 
+    // #1018: a va_start/va_arg/va_copy/va_end node (Node.va_form, src/
+    // cccc.h) always prints as the real host <stdarg.h> call instead of
+    // walking its own VM-ABI impl subtree -- checked before node_prec is
+    // computed from node->kind, since that kind (whatever the impl
+    // expression's own root operator happens to be -- ND_STMT_EXPR,
+    // ND_COND, ND_ASSIGN, ...) has nothing to do with this call's own
+    // precedence (highest, like any other function call). No on-demand
+    // #include is needed the way #1050/#1057 needed one: unlike a
+    // reflection-API builder resolving memcpy/size_t with no source-level
+    // #include at all, va_start/va_arg/va_copy/va_end only exist as macros
+    // -- reaching this node at all requires the user's own
+    // `#include <stdarg.h>`/`"stdarg.h"` to already be in the TU (for the
+    // macro expansion to have happened), and that line is auto-captured
+    // and replayed like any ordinary header; include/stdarg.h's own
+    // `#include_next` hand-off (the #1040 follow-on) already resolves it
+    // to the real host header whenever a genuine host compiler (not
+    // CCCC's own preprocessor) is the one reading it.
+    if (node->va_form != VA_NONE) {
+        switch (node->va_form) {
+        case VA_START:
+            fprintf(f, "va_start(");
+            serialize_expr(f, vm, ctx, node->va_ap, 2);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->va_last, 2);
+            fprintf(f, ")");
+            return;
+        case VA_ARG:
+            fprintf(f, "va_arg(");
+            serialize_expr(f, vm, ctx, node->va_ap, 2);
+            fprintf(f, ", ");
+            serialize_type(f, ctx, node->va_type);
+            fprintf(f, ")");
+            return;
+        case VA_COPY:
+            fprintf(f, "va_copy(");
+            serialize_expr(f, vm, ctx, node->va_ap, 2);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->va_src, 2);
+            fprintf(f, ")");
+            return;
+        case VA_END:
+            fprintf(f, "va_end(");
+            serialize_expr(f, vm, ctx, node->va_ap, 2);
+            fprintf(f, ")");
+            return;
+        default:
+            break;
+        }
+    }
+
     int node_prec = get_precedence(node->kind);
     bool need_parens = (node_prec < parent_prec);
 

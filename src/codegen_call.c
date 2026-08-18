@@ -448,6 +448,18 @@ static Node *clone_expr(VirtualMachine *vm, Node *src) {
     n->cas_old = clone_expr(vm, src->cas_old);
     n->cas_new = clone_expr(vm, src->cas_new);
     n->atomic_expr = clone_expr(vm, src->atomic_expr);
+    // #1018: va_ap/va_last/va_src are pure serializer annotation (see
+    // Node.va_form's comment, src/cccc.h) but are themselves Node*, so a
+    // scalar `*n = *src` alone would leave them pointing at the
+    // *original* tree's subexpressions -- fine for VM codegen (which never
+    // reads these fields), but wrong once the clone's own va_ap/va_last/
+    // va_src get independently mutated or freed relative to the original.
+    // Clone them in step with everything else so a comptime/macro clone
+    // never silently degrades an annotated node back to unannotated
+    // (today's broken) native output.
+    n->va_ap = clone_expr(vm, src->va_ap);
+    n->va_last = clone_expr(vm, src->va_last);
+    n->va_src = clone_expr(vm, src->va_src);
     n->goto_next = NULL;
     n->case_next = NULL;
     n->default_case = NULL;
@@ -484,6 +496,11 @@ Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args) {
     n->cas_old = clone_subst(vm, src->cas_old, params, args);
     n->cas_new = clone_subst(vm, src->cas_new, params, args);
     n->atomic_expr = clone_subst(vm, src->atomic_expr, params, args);
+    // #1018: see clone_expr's own comment above -- va_ap/va_last/va_src
+    // need the same param-substitution pass as any other child field.
+    n->va_ap = clone_subst(vm, src->va_ap, params, args);
+    n->va_last = clone_subst(vm, src->va_last, params, args);
+    n->va_src = clone_subst(vm, src->va_src, params, args);
     n->goto_next = NULL;
     n->case_next = NULL;
     n->default_case = NULL;

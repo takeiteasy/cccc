@@ -1324,6 +1324,79 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return cond ? e1 : e2;
     }
 
+    // __cccc_va_start(ap, last, impl) / __cccc_va_arg(ap, type, impl) /
+    // __cccc_va_copy(dest, src, impl) / __cccc_va_end(ap, impl) (ticket
+    // #1018): internal-only builtins <stdarg.h>'s va_start/va_arg/va_copy/
+    // va_end macros desugar to, alongside their existing VM-ABI expansion
+    // (now passed as the trailing `impl` argument, unchanged from before
+    // this ticket -- still the sole thing VM codegen/comptime/reflection
+    // ever walk). `ap`/`last`/`type`/`src` are parsed a second,
+    // independent time here purely so the returned `impl` node can be
+    // stamped with enough annotation (Node.va_form et al, src/cccc.h) for
+    // the serializer (serialize_stmt/serialize_expr, src/serialize.c) to
+    // print the real host <stdarg.h> form instead of walking `impl`'s
+    // VM-internal subtree under -c=native. Never reached directly from
+    // user source -- only from these four macros' own expansion -- so no
+    // diagnostic-quality error text is needed for malformed input.
+    if (equal(tok, "__cccc_va_start")) {
+        tok = skip(vm, tok->next, "(");
+        Node *ap = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *last = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *impl = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, ap);
+        add_type(vm, last);
+        impl->va_form = VA_START;
+        impl->va_ap = ap;
+        impl->va_last = last;
+        return impl;
+    }
+
+    if (equal(tok, "__cccc_va_arg")) {
+        tok = skip(vm, tok->next, "(");
+        Node *ap = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Type *type = typename(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *impl = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, ap);
+        impl->va_form = VA_ARG;
+        impl->va_ap = ap;
+        impl->va_type = type;
+        return impl;
+    }
+
+    if (equal(tok, "__cccc_va_copy")) {
+        tok = skip(vm, tok->next, "(");
+        Node *dest = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *src = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *impl = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, dest);
+        add_type(vm, src);
+        impl->va_form = VA_COPY;
+        impl->va_ap = dest;
+        impl->va_src = src;
+        return impl;
+    }
+
+    if (equal(tok, "__cccc_va_end")) {
+        tok = skip(vm, tok->next, "(");
+        Node *ap = assign(vm, &tok, tok);
+        tok = skip(vm, tok, ",");
+        Node *impl = assign(vm, &tok, tok);
+        *rest = skip(vm, tok, ")");
+        add_type(vm, ap);
+        impl->va_form = VA_END;
+        impl->va_ap = ap;
+        return impl;
+    }
+
     if (equal(tok, "__builtin_reg_class")) {
         tok = skip(vm, tok->next, "(");
         Type *ty = typename(vm, &tok, tok);

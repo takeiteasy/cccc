@@ -1822,6 +1822,29 @@ struct Node {
     // *object* expression, not the assigned variable -- unrelated to this
     // flag's purpose.
     bool is_rmw_temp_addr;
+
+    // #1018: which <stdarg.h> macro (if any) this node is the parsed
+    // __builtin_va_*() wrapper for. The node itself is always the
+    // *existing* VM-ABI impl expression, parsed and returned completely
+    // unchanged (same lhs/rhs/args/etc as before this ticket) -- va_form
+    // and the fields below are pure annotation, read only by the
+    // serializer (serialize_expr/serialize_stmt, src/serialize.c) to print
+    // the real host <stdarg.h> form (`va_start(ap, last)`, `va_arg(ap,
+    // type)`, ...) instead of walking the VM-internal subtree. VM codegen,
+    // comptime, reflection and inlining all see byte-identical AST to
+    // before this ticket, since nothing reads these fields but the
+    // serializer. VA_NONE (0) for every ordinary node.
+    enum {
+        VA_NONE = 0,
+        VA_START,
+        VA_ARG,
+        VA_COPY,
+        VA_END,
+    } va_form;
+    struct Node *va_ap;    // the `ap` argument expression (all four forms)
+    struct Node *va_last;  // VA_START only: the `last` fixed-parameter expression
+    struct Node *va_src;   // VA_COPY only: the `src` argument expression
+    Type *va_type;         // VA_ARG only: the requested type argument
 };
 
 /*!

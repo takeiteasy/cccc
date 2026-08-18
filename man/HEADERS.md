@@ -261,23 +261,39 @@ by default). Two things follow from that:
   too, so a guest-folded `sizeof(jmp_buf)`/`offsetof` stays correct even
   though native storage is always CCCC's own structural type, never the
   host's `jmp_buf` alias (#1054/#1030).
-- `stdarg.h` is the same owned-header shape as `setjmp.h` above, but only
-  half-fixed so far. `struct va_list` (`include/stdarg.h`) is padded to 64
-  bytes (a trailing `char __reserved[40]`) so a guest-folded
-  `sizeof(va_list)`/`offsetof` stays correct against every supported
-  host's own real, larger `va_list` (measured: macOS arm64 8B, macOS
-  x86_64 24B, glibc x86_64/aarch64 32B) — same reasoning as `jmp_buf`
-  (#1059). Unlike `setjmp.h`, though, `cc_serialize_program` does **not**
-  yet translate `va_start`/`va_arg`/`va_copy`/`va_end` to the host's own
-  `stdarg.h` forms: those macros still expand to VM-ABI pointer arithmetic
-  over CCCC's own struct fields and `__builtin_frame_address(0)`, and the
-  serializer prints that expansion verbatim while the replayed
-  `#include <stdarg.h>` resolves to the real host header — so a variadic
-  function *definition* fails to compile natively with "member reference
-  base type 'va_list' ... is not a structure or union" (a call to an
-  already-declared host variadic function like `printf` is unaffected,
-  since that's an ordinary ABI call with no `va_list` struct access
-  involved). Tracked as [#1018](https://todo.sr.ht/~takeiteasy/cccc/1018).
+- `stdarg.h` is the same owned-header shape as `setjmp.h` above. `struct
+  va_list` (`include/stdarg.h`) is padded to 64 bytes (a trailing `char
+  __reserved[40]`) so a guest-folded `sizeof(va_list)`/`offsetof` stays
+  correct against every supported host's own real, larger `va_list`
+  (measured: macOS arm64 8B, macOS x86_64 24B, glibc x86_64/aarch64 32B)
+  — same reasoning as `jmp_buf` (#1059). Unlike `jmp_buf`, though,
+  `va_start`/`va_arg`/`va_copy`/`va_end` are genuine macros usable in
+  arbitrary expression/statement position, not a pair of plain function
+  calls -- so the translation approach differs: rather than lowering to a
+  fixed pair of `extern`-declared functions the way `setjmp`/`longjmp`
+  lower to `_setjmp`/`_longjmp`, each macro in `include/stdarg.h` now
+  wraps its existing (unchanged) VM-ABI expansion as the trailing argument
+  to a new internal `__cccc_va_start`/`_arg`/`_copy`/`_end` builtin
+  (`src/parse_postfix.c`). That builtin parses `ap`/`last`/`type`/`src` a
+  *second*, independent time, purely to stamp them as serializer
+  annotation (`Node.va_form` plus `va_ap`/`va_last`/`va_src`/`va_type`,
+  `src/cccc.h`) onto the returned impl node -- the impl node itself,
+  parsed and returned completely unchanged, is still the only thing VM
+  codegen/comptime/reflection/inlining ever walk (`clone_expr`/
+  `clone_subst`/`quote_substitute`/`transform_node` were all extended to
+  clone/substitute/transform the three new `Node*` annotation fields too,
+  so a macro or comptime clone of an annotated node can't silently
+  degrade back to unannotated VM-ABI output). `serialize_expr`
+  (`src/serialize.c`) checks the annotation before dispatching on
+  `node->kind` at all, and when present prints the real host
+  `va_start(ap, last)`/`va_arg(ap, type)`/`va_copy(dest, src)`/`va_end(ap)`
+  form instead of walking the VM-internal subtree. No on-demand `#include`
+  machinery was needed the way #1050/#1057 needed one for a
+  reflection-API-resolved libc call: these four only exist as macros, so
+  reaching one at all already requires the user's own
+  `#include <stdarg.h>`/`"stdarg.h"` in the TU, auto-captured and replayed
+  like any ordinary header, resolving via `include/stdarg.h`'s own
+  `#include_next` hand-off (#1018).
 
 `-c=generated` (without `-c=native`) is a separate code path: its output is
 meant to be compiled *alongside* normal headers, so it has never re-emitted

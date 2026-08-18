@@ -2365,6 +2365,13 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
     node->els = transform_node(vm, node->els, depth);
     node->init = transform_node(vm, node->init, depth);
     node->inc = transform_node(vm, node->inc, depth);
+    // #1018: va_ap/va_last/va_src (Node.va_form's annotation trees,
+    // src/cccc.h) are independently-parsed subtrees, not aliases into this
+    // node's own lhs/rhs/etc -- a macro call inside one of them needs the
+    // same expansion pass as any other child field.
+    node->va_ap = transform_node(vm, node->va_ap, depth);
+    node->va_last = transform_node(vm, node->va_last, depth);
+    node->va_src = transform_node(vm, node->va_src, depth);
 
     // For ND_BLOCK, body is a chain of statements linked via ->next
     // We need to transform each statement in the chain

@@ -3314,6 +3314,15 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
     node->els  = quote_substitute(s, node->els);
     node->init = quote_substitute(s, node->init);
     node->inc  = quote_substitute(s, node->inc);
+    // #1018: va_ap/va_last/va_src are the parsed __builtin_va_*() annotation
+    // trees (Node.va_form, src/cccc.h) -- independently-parsed subtrees, not
+    // aliases into node's own lhs/rhs/etc, so they need the same
+    // placeholder substitution as any other child field or a quoted
+    // variadic function body would keep a stale $k placeholder in its
+    // serializer annotation after substitution.
+    node->va_ap   = quote_substitute(s, node->va_ap);
+    node->va_last = quote_substitute(s, node->va_last);
+    node->va_src  = quote_substitute(s, node->va_src);
 
     // body is a statement chain linked via ->next.
     // Splice placeholders in body position expand to N statements.

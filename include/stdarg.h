@@ -116,8 +116,25 @@ typedef struct {
  * last fixed parameter itself was stack-passed, ENT3 has copied it into a local
  * slot, so the first stack variadic argument is after those stack-passed fixed
  * arguments in the caller's frame.
+ *
+ * #1018: -c=native used to print this expansion verbatim -- CCCC-internal
+ * struct-member/pointer-arithmetic text with no meaning to a real host
+ * compiler, and no relation to the real host va_start()/its own va_list
+ * layout -- while replaying the user's own `#include <stdarg.h>` line,
+ * which resolves to the real host header at native-compile time. Fixed by
+ * wrapping this exact expansion (unchanged, now a GNU statement expression
+ * so it can be passed as an argument rather than used as a standalone
+ * statement) as the third argument to __cccc_va_start(), a compiler
+ * builtin (src/parse_postfix.c) that parses `ap`/`last` a second,
+ * independent time purely to stamp them as serializer annotation
+ * (Node.va_form, src/cccc.h) on the returned impl node -- VM codegen
+ * always sees exactly this impl expression, unchanged; only the
+ * serializer (serialize_stmt, src/serialize.c) reads the annotation, to
+ * print the real host `va_start(ap, last)` form instead of walking this
+ * subtree.
  */
-#define va_start(ap, last) do { \
+#define va_start(ap, last) \
+    __cccc_va_start(ap, last, ({ \
     long long *__bp = (long long *)__builtin_frame_address(0); \
     (ap).reg_ptr = (char *)((long long *)&(last) - 1); \
     /* Count remaining reg slots: last is at __bp[-(N+1)], reg area ends at __bp[-8] */ \
@@ -132,7 +149,8 @@ typedef struct {
     if ((ap).reg_count < 0) (ap).reg_count = 0; \
     int __stack_fixed = __param_slot > 8 ? __param_slot - 8 : 0; \
     (ap).stack_ptr = (char *)(__bp + 2 + __stack_fixed); \
-} while(0)
+    (void)0; \
+    }))
 
 /*
  * va_arg(ap, type) - Retrieve next argument
@@ -172,8 +190,18 @@ typedef struct {
  * width, since the reading side's width comes from the %Hf/%Df/%DDf
  * modifier in a format string the compiler generally can't correlate with
  * the argument's declared type.
+ *
+ * #1018: __cccc_va_arg() (src/parse_postfix.c) parses `ap` and `type` a
+ * second, independent time to stamp them as serializer annotation onto
+ * the returned impl node -- the __builtin_choose_expr chain below is
+ * parsed and returned completely unchanged (already reduced to a single
+ * arm by the time __cccc_va_arg sees it, since __builtin_choose_expr
+ * itself discards its unchosen arm at parse time), so VM codegen is
+ * unaffected; only the serializer prints the real host `va_arg(ap, type)`
+ * form using the annotation instead of walking this subtree.
  */
 #define va_arg(ap, type) \
+    __cccc_va_arg(ap, type, \
     __builtin_choose_expr( \
         __builtin_types_compatible_p(type, double) || __builtin_types_compatible_p(type, float), \
         (((ap).reg_count > 0) \
@@ -187,15 +215,21 @@ typedef struct {
                 : (*(type *)(*(void **)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)))), \
             (((ap).reg_count > 0) \
                 ? (--((ap).reg_count), (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
-                : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)))))
+                : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))))))
 
 /*
  * va_end(ap) - Cleanup va_list
  * @ap: va_list to cleanup
- * 
+ *
  * No-op in this implementation. Included for C standard compliance.
+ *
+ * #1018: still a no-op VM-side (__cccc_va_end() just stamps the
+ * annotation and returns ((void)0) unchanged) -- the real host va_end()
+ * is also a no-op on every supported host, but the serializer prints it
+ * anyway for source fidelity, in case a future host ever needs it to do
+ * real work.
  */
-#define va_end(ap) ((void)0)
+#define va_end(ap) __cccc_va_end(ap, ((void)0))
 
 /*
  * va_copy(dest, src) - Copy va_list (C99)
@@ -203,8 +237,11 @@ typedef struct {
  * @src:  source va_list
  *
  * Struct assignment copies all fields.
+ *
+ * #1018: __cccc_va_copy() stamps the annotation; the struct assignment
+ * itself is unchanged.
  */
-#define va_copy(dest, src) ((dest) = (src))
+#define va_copy(dest, src) __cccc_va_copy(dest, src, ((dest) = (src)))
 
 /*
  * __builtin_va_* aliases
