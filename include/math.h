@@ -6,7 +6,18 @@
 #include "stddef.h"
 #include "float.h"
 #include "limits.h"
-#include "stdint.h"
+// #1070: must be angle-bracket, not quoted -- stdint.h's own #else branch
+// hands off to the real system header via `#include_next <stdint.h>` under a
+// real host compiler, but real GCC (confirmed: 13.3.0) resumes that search
+// from position 0 of the -I list when the including file (this one) was
+// itself found via a *quoted* include whose directory is also an -I entry --
+// so it re-finds this same include/ dir and loops back to CCCC's own
+// stdint.h, which the include guard then silently no-ops. intmax_t/uintmax_t
+// (used below by fromfp/ufromfp) end up undeclared. Angle-bracket sidesteps
+// GCC's ambiguity entirely (own repro confirmed); clang was never affected
+// either way. stdint.h is on is_compiler_owned_header, so this is behaviour-
+// neutral for CCCC itself -- force_cccc always wins regardless of spelling.
+#include <stdint.h>
 
 /* Floating-point constants */
 #define HUGE_VAL (__builtin_huge_val())

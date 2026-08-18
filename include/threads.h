@@ -7,7 +7,14 @@
 
 #include "pthread.h"
 #include "time.h"
-#include "errno.h"
+// #1070: angle-bracket for a correct #include_next hand-off under real GCC
+// (ETIMEDOUT was otherwise left undeclared). errno.h is NOT on
+// is_compiler_owned_header, so unlike the stdint.h/stdarg.h sites elsewhere
+// in this batch this is not behaviour-neutral: under --use-system-headers,
+// search_include_paths() now prefers system_include_paths first for this
+// spelling, same as any other non-owned std header reached by <...> --
+// verified against tests/test_use_system_headers_*.c.
+#include <errno.h>
 
 /* C11 thread type backed by the existing pthread VM implementation */
 typedef pthread_t thrd_t;

@@ -4,7 +4,7 @@
 #define __WCHAR_H
 
 #include "stddef.h"
-#include "stdarg.h"
+#include <stdarg.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
 #include "time.h"
 
 #ifndef WEOF

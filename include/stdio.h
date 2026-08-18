@@ -28,7 +28,7 @@
 // serializer replay.
 #ifdef __CCCC__
 
-#include "stdarg.h"
+#include <stdarg.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
 #include "stddef.h"
 
 // FILE type (opaque pointer to host FILE)

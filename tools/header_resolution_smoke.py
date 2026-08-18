@@ -24,10 +24,24 @@ Cases:
      (`#include "local.h"`): exercises the `-I<primary file's dirname>`
      forwarded to the native compiler, since cccc auto-captures and
      re-emits the quoted #include into a temp-directory source file.
+  7. Static audit (#1070): a bundled header with its own `#include_next`
+     hand-off (stdint.h/stdarg.h/errno.h/fenv.h/getopt.h/stdio.h/cdefs.h)
+     must never be *quoted*-included from another bundled header. Under a
+     real host compiler reading these via `-I./include`, a quoted include
+     resolves by the "same directory as the including file" rule; real GCC
+     (confirmed: 13.3.0) then resumes its own #include_next search from
+     position 0 of the -I list rather than from where the quoted include
+     actually resolved, looping back to CCCC's own copy instead of handing
+     off to the real system header -- the include guard silently no-ops it
+     and nothing gets defined. Angle-bracket sidesteps GCC's ambiguity
+     entirely; this case can't reproduce on a clang-only host (clang
+     resolves it correctly), so it has to be a static check, not a
+     round-trip.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -141,6 +155,37 @@ def case_native_quoted_include(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_owned_header_include_form(cccc: Path, tmp: str) -> bool:
+    print("  7: no bundled header quote-includes an #include_next header (#1070)")
+    root = Path(__file__).parent.parent
+    include_dir = root / "include"
+    # Anchored at line-start (allowing only leading whitespace) so a comment
+    # merely *mentioning* "#include_next" (as several of these headers' own
+    # explanatory comments do) doesn't get mistaken for the real directive.
+    handoff_re = re.compile(r'^\s*#\s*include_next\b', re.MULTILINE)
+    quote_re = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.MULTILINE)
+    handoff_names = set()
+    for h in include_dir.rglob("*.h"):
+        if handoff_re.search(h.read_text(errors="ignore")):
+            handoff_names.add(h.name)
+    if not handoff_names:
+        print("    FAIL: no #include_next headers found -- audit is stale")
+        return False
+    bad = []
+    for h in include_dir.rglob("*.h"):
+        for m in quote_re.finditer(h.read_text(errors="ignore")):
+            name = Path(m.group(1)).name
+            if name in handoff_names:
+                bad.append(f"{h.relative_to(root)}: quotes \"{m.group(1)}\"")
+    if bad:
+        print("    FAIL: quoted include(s) of an #include_next header:")
+        for line in bad:
+            print(f"      {line}")
+        return False
+    print("    ok")
+    return True
+
+
 def sysroot() -> str:
     # xcrun is macOS-only; on any other platform (e.g. the Linux CI
     # container) it doesn't exist at all, and subprocess.run() raises
@@ -172,6 +217,7 @@ def main() -> int:
             case_no_builtin_includes_owned,
             case_native_stdio,
             case_native_quoted_include,
+            case_owned_header_include_form,
         ]
         results = [case(cccc, tmp) for case in cases]
 

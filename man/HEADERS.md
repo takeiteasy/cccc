@@ -493,6 +493,34 @@ into the same translation unit (`test_ffi.c`, `test_ffi_variadic_fnptr.c`)
 which is why both must be run before trusting a header-guard change like
 this one.
 
+**A bundled header with an `#include_next` hand-off must only ever be
+`<...>`-included from another bundled header, never `"..."`-quoted** (#1070).
+`include/math.h` used to reach `stdint.h` via `#include "stdint.h"` — under
+`-c=native`'s `-I./include`-forwarding shape, a real host compiler resolves a
+*quoted* include by the "same directory as the including file" rule, and real
+GCC (confirmed: 13.3.0) then resumes its own `#include_next` search from
+position 0 of the `-I` list rather than from where that quoted include
+actually resolved — looping back to `./include`'s own `stdint.h` a second
+time instead of continuing on to the real system header. The include guard
+silently no-ops that second pass, so nothing gets defined at all
+(`intmax_t`/`uintmax_t`, used by `math.h`'s own C23 `fromfp`/`ufromfp`
+declarations, end up undeclared). clang resolves the identical scenario
+correctly, which is why this stayed invisible through every prior
+verification pass in this batch (all clang, either macOS or the amd64
+container). Angle-bracket resolution sidesteps GCC's ambiguity entirely and
+is otherwise free for any header on `is_compiler_owned_header`'s list
+(`stdint.h`/`stdarg.h` here) — `force_cccc` in `search_include_paths()`
+(`src/preprocess.c`) already forces CCCC's own copy for those regardless of
+spelling. A non-owned `#include_next` header (`errno.h`, reached this way
+from `include/threads.h`) is the one case where the switch is *not*
+behaviour-neutral: under `--use-system-headers`, an angle-bracket include now
+prefers the host SDK first, same as it would for any other non-owned header
+reached by `<...>` — verified against `tests/test_use_system_headers_*.c`.
+`tools/header_resolution_smoke.py`'s case 7 statically audits every bundled
+header for a stray quoted include of an `#include_next` header, since the bug
+class can't reproduce at all on a clang-only host and a round-trip test would
+pass vacuously there.
+
 A narrower version of the same problem hits any bundled header that
 declares an `extern` prototype for a name `serialize.c`'s
 `native_accessor_shims` table (see below) also gives a `static` definition

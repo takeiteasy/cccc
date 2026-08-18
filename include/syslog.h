@@ -12,7 +12,7 @@
 #error "<syslog.h> is only available on POSIX targets in CCCC"
 #endif
 
-#include "stdarg.h"
+#include <stdarg.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
 
 /* Priorities */
 #define LOG_EMERG   0
