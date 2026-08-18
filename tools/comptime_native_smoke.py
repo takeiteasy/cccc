@@ -3590,6 +3590,38 @@ VA_LIST_TRANSLATION_PROGRAM = (
     "}\n"
 )
 
+VA_ARG_PROMOTION_PROGRAM = (
+    "#include <stdarg.h>\n"
+    "\n"
+    "static float sum_floats(int n, ...) {\n"
+    "    va_list ap;\n"
+    "    va_start(ap, n);\n"
+    "    float total = 0.0f;\n"
+    "    for (int i = 0; i < n; i++)\n"
+    "        total += va_arg(ap, float);\n"
+    "    va_end(ap);\n"
+    "    return total;\n"
+    "}\n"
+    "\n"
+    "static int sum_chars(int n, ...) {\n"
+    "    va_list ap;\n"
+    "    va_start(ap, n);\n"
+    "    int total = 0;\n"
+    "    for (int i = 0; i < n; i++)\n"
+    "        total += va_arg(ap, char);\n"
+    "    va_end(ap);\n"
+    "    return total;\n"
+    "}\n"
+    "\n"
+    "int main(void) {\n"
+    "    if (sum_floats(2, 1.5f, 2.5f) != 4.0f)\n"
+    "        return 1;\n"
+    "    if (sum_chars(2, (char)20, (char)22) != 42)\n"
+    "        return 2;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
 DOUBLE_LITERAL_PROGRAM = (
     "#include <stdio.h>\n"
     "#include <string.h>\n"
@@ -3768,6 +3800,45 @@ def case_va_list_translation_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "va_list_translation_1018", VA_LIST_TRANSLATION_PROGRAM)
 
 
+def case_va_arg_promotion_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  99: -c=native, va_arg(ap, T) printed T verbatim from the "
+          "user's own macro argument text -- but C's default argument "
+          "promotions (C17 6.5.2.2p6/7) mean a real variadic call site "
+          "never actually places a bare float/char/short/bool in a "
+          "variadic slot, so a real host compiler's own <stdarg.h> "
+          "diagnoses an unpromoted promotable T as undefined behavior "
+          "('second argument to va_arg is of promotable type float/char/"
+          "...'). CCCC's own VM-ABI read always reads a full 8-byte slot "
+          "regardless of the requested width, so this had no VM-visible "
+          "symptom -- only a native compiler diagnostic, found during a "
+          "post-#1018 self-check. Fixed by va_arg_promoted_type() (src/"
+          "serialize.c): the VA_ARG print site now maps TY_FLOAT -> double "
+          "and any integer type narrower than int -> int before printing, "
+          "mirroring type.c's own integer_promotion() for the integer "
+          "half. Asserts -m output prints 'va_arg(ap, double)'/'va_arg(ap, "
+          "int)', never the bare 'float'/'char' spelling, and VM 42 -> "
+          "native 42.")
+    src = Path(tmp) / "va_arg_promotion_1018.c"
+    write(src, VA_ARG_PROMOTION_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "va_arg(ap, float)" in m_result.stdout or "va_arg(ap, char)" in m_result.stdout:
+        print(f"    FAIL: -m output still prints an unpromoted va_arg "
+              f"type\n    {m_result.stdout}")
+        return False
+    if "va_arg(ap, double)" not in m_result.stdout or "va_arg(ap, int)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing the expected promoted va_arg "
+              f"forms\n    {m_result.stdout}")
+        return False
+
+    return _native_run_case(cccc, tmp, "va_arg_promotion_1018", VA_ARG_PROMOTION_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -3878,6 +3949,7 @@ def main() -> int:
             case_double_literal_native_round_trip,
             case_va_list_size_native_round_trip,
             case_va_list_translation_native_round_trip,
+            case_va_arg_promotion_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

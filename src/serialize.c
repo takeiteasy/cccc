@@ -1447,6 +1447,35 @@ static bool atomic_serializable_pointee(Node *addr) {
     return base->size == 1 || base->size == 2 || base->size == 4 || base->size == 8;
 }
 
+// #1018 follow-up: C's default argument promotions (C17 6.5.2.2p6/7,
+// applied to a variadic call's own trailing arguments) mean a real
+// `va_arg(ap, T)` may never spell a promotable T -- clang/gcc both
+// diagnose it explicitly ("second argument to 'va_arg' is of promotable
+// type 'float'/'char'/...; this va_arg has undefined behavior because
+// arguments will be promoted to 'double'/'int'"). CCCC's own VM-ABI
+// va_arg macro reads exactly `type`'s own width from the slot (its
+// __builtin_choose_expr's fp arm already special-cases float, but only to
+// pick the 8-byte double-read path -- the *printed* type argument still
+// came from the user's literal `type` text, unpromoted) and happens to
+// work regardless, since the VM's own calling convention always writes a
+// full 8-byte slot -- so this had no VM-visible symptom, only a native
+// diagnostic (confirmed against real clang: unpromoted `char`/`float`
+// both actually round-trip correctly here since clang's promotion and
+// CCCC's slot width agree, but printing the promoted type is what a real
+// host compiler's own <stdarg.h> expects and is the only way to silence
+// the UB warning). Mirrors integer_promotion (type.c, static) for the
+// integer half; float is the one additional case that helper doesn't
+// cover, since it's scoped to is_integer().
+static Type *va_arg_promoted_type(Type *ty) {
+    if (!ty)
+        return ty;
+    if (ty->kind == TY_FLOAT)
+        return ty_double;
+    if (is_integer(ty) && ty->kind != TY_BITINT && ty->size < 4)
+        return ty_int;
+    return ty;
+}
+
 // Print indentation
 static void print_indent_level(FILE *f, int indent) {
     for (int i = 0; i < indent; i++)
@@ -1493,7 +1522,7 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             fprintf(f, "va_arg(");
             serialize_expr(f, vm, ctx, node->va_ap, 2);
             fprintf(f, ", ");
-            serialize_type(f, ctx, node->va_type);
+            serialize_type(f, ctx, va_arg_promoted_type(node->va_type));
             fprintf(f, ")");
             return;
         case VA_COPY:
