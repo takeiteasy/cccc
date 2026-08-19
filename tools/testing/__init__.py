@@ -132,14 +132,14 @@ NATIVE_SKIP_TESTS = {
     # results (see the block at the top of this dict for the rest) ---
     "test_attr_vector_size_variadic.c": "variadic serialization gives wrong result (#1018)",
 
-    # --- #1020: constructor/destructor ordering wrong under native ---
-    "test_constructor_basic.c": "constructor/destructor ordering wrong under native (#1020)",
-    "test_constructor_c23.c": "constructor/destructor ordering wrong under native (#1020)",
-    "test_constructor_priority.c": "constructor/destructor ordering wrong under native (#1020)",
-    "test_constructor_destructor_static_opt.c": "constructor/destructor ordering wrong under native (#1020)",
-    "test_destructor_exit_atexit_order.c": "constructor/destructor ordering wrong under native (#1020)",
-    "test_destructor_exit_reentrant.c": "constructor/destructor ordering wrong under native (#1020)",
-    "test_destructor_on_exit.c": "constructor/destructor ordering wrong under native (#1020)",
+    # --- #1020, closed: constructor/destructor attribute lowering fixed for
+    # 6 of its 7 files. The 7th, this one, hits an unrelated pre-existing
+    # bug it happens to be the only one of the 7 to trigger: CCCC's own
+    # Availability.h stub (#define __attribute__(x)) leaks past the first
+    # <stdio.h>-pulled-in sys/cdefs.h and strips every later __attribute__
+    # in the TU, including the constructor/destructor ones the serializer
+    # just started emitting -- filed as #1083, not attempted here ---
+    "test_constructor_c23.c": "CCCC's own Availability.h stub strips __attribute__ after the first <stdio.h> #include (#1083)",
 
     # --- split out of #1021 (fenv.h/math.h identifiers fail to compile),
     # now RESOLVED -- three distinct files that compile cleanly now but each

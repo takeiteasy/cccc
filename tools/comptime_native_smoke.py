@@ -4595,11 +4595,56 @@ def case_f2i_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "f2i_native_1068", F2I_NATIVE_PROGRAM)
 
 
+CTOR_DTOR_NATIVE_PROGRAM = (
+    "int ctor_ran;\n"
+    "int ctor_prio_ran;\n"
+    "int order[1];\n"
+    "int order_idx;\n"
+    "__attribute__((constructor)) void plain_ctor(void) { ctor_ran = 1; }\n"
+    "__attribute__((constructor(150))) void prio_ctor(void) { ctor_prio_ran = 1; }\n"
+    "static __attribute__((constructor)) void static_ctor(void) { order[order_idx++] = 1; }\n"
+    "__attribute__((destructor)) void plain_dtor(void) { (void)0; }\n"
+    "int main(void) {\n"
+    "    if (!ctor_ran) return 1;\n"
+    "    if (!ctor_prio_ran) return 2;\n"
+    "    if (order_idx != 1 || order[0] != 1) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_ctor_dtor_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  114: __attribute__((constructor[(priority)]))/((destructor"
+          "[(priority)])) was never lowered by serialize_function_"
+          "signature() at all -- grep -n \"constructor\" src/serialize.c "
+          "returned nothing but an unrelated comment, so under -c=native a "
+          "marked function was emitted as an ordinary function nothing "
+          "calls and simply never ran (no ordering bug -- no ordering at "
+          "all). Fixed by emitting the attribute as a *prefix* on the "
+          "declarator (not appended after it the way asm_label is: GCC "
+          "rejects a trailing attribute on a function *definition*, clang "
+          "accepts it -- the macOS-passes/Linux-fails shape this batch "
+          "keeps relearning). Asserts -m output has "
+          "__attribute__((constructor)) and __attribute__((constructor(150))) "
+          "as prefixes on their declarators, plus VM 42 -> native 42 (#1020).")
+    src = Path(tmp) / "ctor_dtor_native_1020.c"
+    write(src, CTOR_DTOR_NATIVE_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    for want in ("__attribute__((constructor)) void plain_ctor",
+                 "__attribute__((constructor(150))) void prio_ctor"):
+        if want not in m_result.stdout:
+            print(f"    FAIL: -m output missing '{want}'\n    {m_result.stdout}")
+            return False
+
+    return _vm_and_native_run_case(cccc, tmp, "ctor_dtor_native_1020", CTOR_DTOR_NATIVE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4720,6 +4765,7 @@ def main() -> int:
             case_struct_byval_param_copy,
             case_nested_fn_shadow_native_round_trip,
             case_f2i_native_round_trip,
+            case_ctor_dtor_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

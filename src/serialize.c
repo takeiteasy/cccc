@@ -3082,6 +3082,27 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
     // fn->is_static being forced true regardless (#1025); parse_decl.c now
     // only forces is_static on a nested/block-scope function when no asm
     // label is present (#1039), so fn->is_static alone is accurate here.
+
+    // #1020: __attribute__((constructor[(priority)]))/((destructor[(priority)]))
+    // was never lowered here at all -- under -c=native the function was
+    // emitted as an ordinary function nothing calls, so it simply never
+    // ran. Emitted as a *prefix* attribute (not appended after the
+    // declarator the way asm_label is below): GCC rejects a trailing
+    // attribute on a function *definition* while clang accepts it, so a
+    // suffix form would pass on macOS and fail to compile on Linux.
+    if (fn->is_constructor) {
+        if (fn->init_priority == CCCC_NO_INIT_PRIORITY)
+            fprintf(f, "__attribute__((constructor)) ");
+        else
+            fprintf(f, "__attribute__((constructor(%d))) ", fn->init_priority);
+    }
+    if (fn->is_destructor) {
+        if (fn->init_priority == CCCC_NO_INIT_PRIORITY)
+            fprintf(f, "__attribute__((destructor)) ");
+        else
+            fprintf(f, "__attribute__((destructor(%d))) ", fn->init_priority);
+    }
+
     if (fn->is_static)
         fprintf(f, "static ");
 

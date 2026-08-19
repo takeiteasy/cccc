@@ -665,6 +665,21 @@ semantics.
 
 **`__has_attribute`:** returns `1` for `constructor` and `destructor`.
 
+**`-c=native`:** the attribute is lowered verbatim (as a prefix on the
+declarator, both on the forward declaration and the definition) — the real
+host `cc`'s own libc startup/exit machinery drives it there, not CCCC's own
+`cc_run_at` ordering code. The VM's documented ordering above was checked
+directly against real GNU/clang semantics and already matches. One residual
+gap, unrelated to the lowering itself: any translation unit whose first
+`#include <stdio.h>` (or any other host header pulling in `sys/cdefs.h`) is
+followed later by *any* `__attribute__(...)` — including one the serializer
+itself emits for a constructor/destructor — silently loses that attribute
+under a real host preprocessor, because CCCC's own `Availability.h` stub
+`#define __attribute__(x)` (needed only for the VM's own header
+polyfilling) leaks past that `#include` when forwarded verbatim to the
+native `cc`. Filed as **#1083**, not yet fixed; `test_constructor_c23.c` is
+the one test that trips it and stays in `NATIVE_SKIP_TESTS`.
+
 ---
 
 #### `__attribute__((nonnull))` / `__attribute__((nonnull(N,...)))` / `[[gnu::nonnull]]` and `__attribute__((returns_nonnull))` / `[[gnu::returns_nonnull]]`
