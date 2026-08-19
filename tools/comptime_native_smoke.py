@@ -4704,11 +4704,73 @@ def case_attribute_survives_after_stdio_include(cccc: Path, tmp: str) -> bool:
     return True
 
 
+VA_LIST_PARAM_PROGRAM = (
+    "#include <stdarg.h>\n"
+    "static int consume_one(int n, va_list ap) {\n"
+    "    (void)n;\n"
+    "    return va_arg(ap, int);\n"
+    "}\n"
+    "static int forward(int count, ...) {\n"
+    "    va_list ap;\n"
+    "    va_start(ap, count);\n"
+    "    int first = va_arg(ap, int);\n"
+    "    int consumed = consume_one(1, ap);\n"
+    "    int next = va_arg(ap, int);\n"
+    "    va_end(ap);\n"
+    "    if (first != 10) return 1;\n"
+    "    if (consumed != 20) return 2;\n"
+    "    if (next != 20) return 3;\n"
+    "    return 0;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    return forward(2, 10, 20) == 0 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_va_list_param_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  116: a va_list forwarded as an ordinary function *parameter* "
+          "used to disagree between VM and native on glibc -- CCCC's own "
+          "va_list is a plain struct, genuinely by-value on the VM (#1078), "
+          "and matches by coincidence on macOS (a bare char *), but glibc's "
+          "own va_list is `typedef struct __va_list_tag va_list[1]`, an "
+          "array type that decays to a pointer in parameter position (C17 "
+          "6.7.6.3p7) and aliases the caller's own va_list -- the callee's "
+          "va_arg calls silently advanced the *caller's* va_list on glibc "
+          "only, no build failure, no diagnostic (#1062). Fixed with a "
+          "callee-side va_copy shim: the emitted parameter is renamed to "
+          "__cccc_va_param_<name>, and the body gets an injected "
+          "`va_list <name>; va_copy(<name>, __cccc_va_param_<name>);` so "
+          "the body's own references restore by-value semantics on every "
+          "host. Asserts -m output renames the parameter and carries the "
+          "va_copy prologue, leaks none of reg_ptr/reg_count/stack_ptr, "
+          "plus VM 42 -> native 42 (the aliasing itself is invisible on "
+          "macOS by construction -- this only guards the emitted shape, "
+          "the behavioral divergence needs a real glibc host, see "
+          "tests/test_serialize_va_list_param_1062.c under the container).")
+    src = Path(tmp) / "va_list_param_1062.c"
+    write(src, VA_LIST_PARAM_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "va_list __cccc_va_param_ap" not in m_result.stdout:
+        print(f"    FAIL: -m output missing renamed shim parameter\n    {m_result.stdout}")
+        return False
+    if "va_copy(ap, __cccc_va_param_ap)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing va_copy shim prologue\n    {m_result.stdout}")
+        return False
+    for leak in ("reg_ptr", "reg_count", "stack_ptr"):
+        if leak in m_result.stdout:
+            print(f"    FAIL: -m output leaks CCCC-internal va_list member '{leak}'\n    {m_result.stdout}")
+            return False
+
+    return _vm_and_native_run_case(cccc, tmp, "va_list_param_1062_rt", VA_LIST_PARAM_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4831,6 +4893,7 @@ def main() -> int:
             case_f2i_native_round_trip,
             case_ctor_dtor_native_round_trip,
             case_attribute_survives_after_stdio_include,
+            case_va_list_param_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

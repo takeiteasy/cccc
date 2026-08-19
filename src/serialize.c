@@ -3062,6 +3062,89 @@ static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeConte
     serialize_stmt(f, vm, ctx, node, indent);
 }
 
+// #1062: does `ty` name CCCC's own struct va_list (include/stdarg.h --
+// reg_ptr/stack_ptr/reg_count/__reserved)? Matched structurally (member
+// names/kinds), not by typedef spelling -- a user's own `typedef va_list
+// mylist;` still forwards through this the same way a bare `va_list`
+// parameter does, where a name-based match would silently miss it.
+static bool member_named(Member *m, const char *name) {
+    if (!m || !m->name)
+        return false;
+    size_t len = strlen(name);
+    return m->name->len == (int)len && strncmp(m->name->loc, name, len) == 0;
+}
+
+static bool type_is_cccc_va_list(Type *ty) {
+    if (!ty || ty->kind != TY_STRUCT || !ty->members)
+        return false;
+    Member *m = ty->members;
+    if (!member_named(m, "reg_ptr") || !m->ty || m->ty->kind != TY_PTR)
+        return false;
+    m = m->next;
+    if (!m || !member_named(m, "stack_ptr") || !m->ty || m->ty->kind != TY_PTR)
+        return false;
+    m = m->next;
+    if (!m || !member_named(m, "reg_count") || !m->ty || m->ty->kind != TY_INT)
+        return false;
+    m = m->next;
+    if (!m || !member_named(m, "__reserved") || !m->ty || m->ty->kind != TY_ARRAY)
+        return false;
+    return m->next == NULL;
+}
+
+// #1062: CCCC's own va_list (a plain struct, always genuinely by-value
+// since #1078) is forwarded verbatim as a function parameter's *type* under
+// -c=native -- the type name resolves correctly (the user's own `#include
+// <stdarg.h>` is replayed and picks up the real host header), but the real
+// host's own va_list has different by-value semantics depending on host:
+// macOS's is a bare `char *` (an ordinary scalar, genuinely by-value,
+// matching the VM), while glibc's is `typedef struct __va_list_tag
+// va_list[1]` -- an array type, which decays to a pointer in parameter
+// position (C17 6.7.6.3p7), aliasing the caller's own va_list. A callee
+// that does `va_arg(ap, T)` on such a parameter silently advances the
+// *caller's* va_list on glibc, never on macOS or on the VM -- the same
+// program gives two different answers depending on backend, no build
+// failure, no diagnostic.
+//
+// Fixed with a callee-side va_copy shim rather than either alternative
+// considered: (a) making CCCC's own va_list an array-of-one-struct on
+// Linux specifically, to alias like glibc's -- a real, platform-divergent
+// change to the VM's own variadic ABI for no benefit, since the VM's
+// current by-value semantics are the parity target (this batch's own
+// scope: native must match the VM, not match a native gcc build of the
+// same source); or (b) diagnosing/rejecting a va_list parameter under
+// -c=native on Linux -- the batch's own policy reserves rejection for "no
+// cheap translation available", which isn't true here.
+//
+// The shim changes only the emitted parameter's *name*, never the
+// function's type, so address-taken calls and calls through function
+// pointers are unaffected (a pointer-parameter rewrite would need
+// call-site changes and would break those). It's applied uniformly on
+// every host (no #ifdef __linux__): `va_copy` of a scalar `char *` on
+// Darwin is a trivial, harmless copy.
+//
+// Deliberately does NOT touch the parameter's own Obj (no rename, no new
+// state) -- only the *printed* name in the signature differs from what the
+// body's own ND_VAR references print (both read the same Obj->name). Only
+// applied when fn->body is set: a bodiless prototype has no body to inject
+// the shim into, and C doesn't require declaration/definition parameter
+// names to match anyway, so a plain `va_list ap` prototype (unmodified) and
+// a shimmed `va_list __cccc_va_param_ap` definition for the same function
+// are both legal, compatible declarations of the same function type.
+//
+// Known residual, not closed by this fix: host libc `v*`-family consumers
+// (vprintf/vsnprintf/vfprintf/vsscanf/vsyslog/...) are the *host's own*
+// functions -- passing `ap` to one of them still aliases on glibc, since
+// there's no callee prologue of ours to inject the shim into. The standard
+// leaves `ap` indeterminate after such a call, so no conforming program can
+// observe the difference; tracked as a follow-up, not attempted here (see
+// man/COVERAGE.md's <stdarg.h> row).
+static const char *va_list_shim_param_name(char *buf, size_t bufsz,
+                                            const char *orig) {
+    snprintf(buf, bufsz, "__cccc_va_param_%s", orig ? orig : "ap");
+    return buf;
+}
+
 // KNOWN ISSUE (#897): a struct/union-by-value parameter's type is
 // mis-serialized here as "struct <param-name>" instead of its real tag --
 // e.g. `int helper(struct Point q)` emits "struct q" in the generated
@@ -3124,7 +3207,18 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
             if (!first)
                 fprintf(df, ", ");
             first = false;
-            serialize_type_decl(df, ctx, param->ty, param->name);
+            // #1062: only when this signature is for a body-having
+            // definition (see va_list_shim_param_name's own comment) --
+            // fn->body's own local-decl emission (serialize_function)
+            // injects the matching `va_list <param->name>; va_copy(...)`
+            // shim right after this signature is printed.
+            if (fn->body && type_is_cccc_va_list(param->ty)) {
+                char shimbuf[64];
+                serialize_type_decl(df, ctx, param->ty,
+                    va_list_shim_param_name(shimbuf, sizeof shimbuf, param->name));
+            } else {
+                serialize_type_decl(df, ctx, param->ty, param->name);
+            }
         }
     } else if (fn->ty) {
         // #901: a bodiless declaration (e.g. `int abs(int x);`) never runs
@@ -3195,6 +3289,33 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
         // Function-local typedefs/tags are emitted at the top of the function,
         // matching the serializer's existing local declaration hoisting.
         serialize_type_defs_for_owner(f, ctx, fn);
+
+        // #1062: for each va_list parameter, pair the shim-named parameter
+        // serialize_function_signature() just printed (see its own comment
+        // and va_list_shim_param_name()) with a genuinely independent local
+        // under the *original* parameter name, initialized via va_copy.
+        // Every ND_VAR reference inside the body still reads Obj->name
+        // (unchanged, still the original name) and now resolves to this
+        // local instead of the parameter -- restoring the VM's own
+        // by-value va_list semantics under -c=native on every host,
+        // including glibc (whose real va_list is an array type that would
+        // otherwise decay to a pointer in parameter position and alias the
+        // caller's va_list, C17 6.7.6.3p7). va_end is deliberately not
+        // called on the shim copy: verified directly (both the macOS SDK
+        // and, via the cccc-linux-amd64/cccc-linux-arm64 containers, real
+        // glibc) that va_end expands to nothing observable for either
+        // va_list representation (a no-op on Darwin's, a no-op on glibc's
+        // struct-tag array), so skipping it costs nothing and avoids
+        // needing to track an extra cleanup point for a function that may
+        // return from multiple places.
+        for (Obj *param = fn->params; param; param = param->next) {
+            if (!type_is_cccc_va_list(param->ty))
+                continue;
+            char shimbuf[64];
+            va_list_shim_param_name(shimbuf, sizeof shimbuf, param->name);
+            fprintf(f, "    va_list %s; va_copy(%s, %s);\n",
+                    param->name, param->name, shimbuf);
+        }
 
         // Local variable declarations
         //
