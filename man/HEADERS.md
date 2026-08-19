@@ -519,6 +519,60 @@ into the same translation unit (`test_ffi.c`, `test_ffi_variadic_fnptr.c`)
 which is why both must be run before trusting a header-guard change like
 this one.
 
+**Audit (#1084): `Availability.h`/`sys/cdefs.h` were the only two bundled
+headers with the #1083 leak shape.** The class is narrow: a bundled
+(non-owned) header reachable by the real host compiler under `-c=native`'s
+`-I./include` forwarding — either directly, or implicitly via another real
+system header's own `#include` — that unconditionally `#define`s something
+whose effect reaches past its own file into later, unrelated code. Checked
+directly, not assumed:
+
+- Every bundled header's own macro surface was grepped for the
+  keyword-shadowing spellings a real preprocessor could silently strip from
+  later code the way `__attribute__` was (`__restrict`, `__inline`,
+  `__asm`, `__volatile`, `__extension__`, `__typeof`, `__const`, `__signed`,
+  `__unaligned`, `__nonnull`, `__always_inline`, bare `asm`/`inline`/
+  `restrict`) — only `Availability.h` defined any of them, and only the two
+  already fixed for #1083.
+- Every hand-off header's own `#ifdef __CCCC__` … `#else #include_next`
+  body was checked for internal `#include`s that could fire *before* the
+  real host compiler reaches the `#else` branch: only `include/stdio.h`
+  has any (`<stdarg.h>`, `"stddef.h"`), and both are inside its own
+  `#ifdef __CCCC__` region — never reached when a real compiler is doing
+  the reading. The rest (`errno.h`, `fenv.h`, `stdarg.h`, `getopt.h`,
+  `stdint.h`) have no internal includes at all in their CCCC-flavored body.
+- `math.h`/`float.h` (partially guarded — a real accessor-shim `extern`
+  under `#ifdef __CCCC__`, but their own macros like `HUGE_VAL`/`isgreater`/
+  `FLT_ROUNDS` are unconditional) are not hand-off headers themselves (no
+  `#include_next <math.h>`/`<float.h>` anywhere): under `-c=native`, a real
+  host compiler reads CCCC's own `math.h`/`float.h` as the *complete*,
+  self-contained implementation, the same content the VM parsed — there is
+  no second, genuinely-different real header for anything to leak into.
+  Every other non-owned bundled header (`pthread.h`, `unistd.h`,
+  `sys/socket.h`, `time.h`, `signal.h`, `stdlib.h`, `string.h`, `dirent.h`,
+  `fcntl.h`, `netdb.h`, …) is the same shape: a complete polyfill, never
+  handed off, so there's no real-vs-CCCC collision to leak across — and any
+  of the already-heavily-exercised full `--native` suite would have caught
+  a silent behavior change in one of these long before this audit.
+- `assert.h` unconditionally `#include <stdio.h>` (angle-bracket, outside
+  any guard) — confirmed harmless directly (`cc -I<repo>/include -E` on
+  `#include <assert.h>` followed by an `__attribute__`): `stdio.h` resolves
+  itself correctly either way (CCCC's own content under CCCC's own
+  preprocessing, hand-off to the real header otherwise), so an unconditional
+  include of an already-self-guarding header is not itself a hazard.
+- One unrelated, pre-existing, and *loud* (not silent — out of this
+  audit's own scope, noted for completeness) `-Wmacro-redefined` warning:
+  `include/stddef.h`'s `NULL` (an "owned" header, deliberately never handed
+  off, so CCCC's own `NULL` always wins for the VM) gets redefined again by
+  the real host's own `sys/_types/_null.h` once a hand-off chain (e.g.
+  `assert.h` → `stdlib.h` → real `stdlib.h` → …) reaches it under
+  `-c=native`. Both definitions are value-compatible and CCCC does not
+  forward `-Werror` to the host `cc` by default, so this doesn't fail a
+  build — flagged here only in case a future change makes it worth
+  silencing.
+
+No further action taken — no live bug found beyond #1083 itself.
+
 **A bundled header with an `#include_next` hand-off must only ever be
 `<...>`-included from another bundled header, never `"..."`-quoted** (#1070).
 `include/math.h` used to reach `stdint.h` via `#include "stdint.h"` — under
