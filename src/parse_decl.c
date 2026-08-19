@@ -216,9 +216,14 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
     if (attr->is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
 
-    Obj *parent_fn = vm->compiler.current_fn;
-    bool is_nested = (parent_fn != NULL);
-
+    // #1056: declare_function_prototype() is only ever reached from
+    // function_declaration_list(), which is always bodyless (loops to ';')
+    // -- so unlike function(), there is no definition case here that could
+    // legitimately need nested-function tracking. A block-scope function
+    // declaration with no storage-class specifier has *external* linkage
+    // (C17 6.2.2p5): it must never be marked is_nested/is_static here just
+    // because the current parse happens to be inside another function's
+    // body (see the matching, larger comment in function()).
     Obj *fn = attr->is_static
                   ? find_func_in_current_scope(vm, name_str, ty->name->len)
                   : find_func(vm, name_str, ty->name->len);
@@ -272,26 +277,6 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
         fn->asm_label = ty->asm_label;
-    }
-
-    if (is_nested) {
-        fn->parent_fn = parent_fn;
-        fn->is_nested = true;
-        fn->nesting_depth = vm->compiler.fn_nesting_depth + 1;
-        // #1039: nested/block-scope functions are implicitly static (not
-        // visible outside) -- except when an asm("symbol") label is
-        // present, which names a real *external* symbol; internal linkage
-        // on the declaration referring to it is meaningless. serialize.c's
-        // serialize_function_signature used to compensate for this by
-        // suppressing "static " whenever asm_label was set (#1025); fixed
-        // at the source instead so fn->is_static is accurate wherever else
-        // it's inspected (e.g. fn->is_root below).
-        if (!fn->asm_label)
-            fn->is_static = true;
-    } else {
-        fn->parent_fn = NULL;
-        fn->is_nested = false;
-        fn->nesting_depth = 0;
     }
 
     fn->is_root = !(fn->is_static && fn->is_inline);
@@ -530,7 +515,28 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->asm_label = ty->asm_label;
     }
 
-    // Set up nested function tracking
+    fn->is_root = !(fn->is_static && fn->is_inline);
+
+    if (consume(vm, &tok, tok, ";")) {
+        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
+                              fn->ty, fn, fn->tok);
+        return tok;
+    }
+
+    // #1056: nested-function tracking must only apply when a body actually
+    // follows (checked above, via the early "no body" return) -- not to a
+    // bare block-scope declaration/prototype. A block-scope function
+    // declaration with no storage-class specifier has *external* linkage
+    // (C17 6.2.2p5); it names the enclosing file-scope function, it does not
+    // introduce a nested one. Running this unconditionally on whatever `fn`
+    // find_func()/find_func_in_current_scope() returned above used to
+    // retroactively flip an already-defined, already-codegen'd file-scope
+    // function to is_nested/is_static merely because the current parse
+    // happens to be inside another function's body -- corrupting the ABI of
+    // every call site emitted afterward (codegen_expr.c's calling_nested
+    // path starts passing a static link the callee's body was never
+    // compiled to expect). Recompute is_root after this, since is_static may
+    // just have changed.
     if (is_nested) {
         fn->parent_fn = parent_fn;
         fn->is_nested = true;
@@ -547,12 +553,6 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     }
 
     fn->is_root = !(fn->is_static && fn->is_inline);
-
-    if (consume(vm, &tok, tok, ";")) {
-        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
-                              fn->ty, fn, fn->tok);
-        return tok;
-    }
 
     // -Wmissing-declarations / -Wmissing-prototypes for external function definitions.
     if (!vm->compiler.in_type_lookahead && !fn->is_static && !fn->is_nested) {

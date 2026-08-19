@@ -261,6 +261,25 @@ NATIVE_SKIP_TESTS = {
                  "convention to, see COVERAGE.md Serialized-output "
                  "divergences (#1060)",
 
+    # --- #1074: OPEN. serialize.c has no nested-function-aware call-site
+    # logic at all (grep -n "is_nested" src/serialize.c returns nothing) --
+    # a genuine GNU nested function (Obj.is_nested, not an Apple block) is
+    # hoisted to file scope with a synthesized `void *__static_link` first
+    # parameter matching the VM ABI shape, but no call site is ever taught
+    # to actually pass it, so every native call to a nested function fails
+    # to compile ("too few arguments to function call"). Pre-existing and
+    # more general than #1056 (found while writing #1056's own native
+    # regression case): tests/suites/test_suite_functions.c's
+    # add_nested/update_outer already hit the identical error, just never
+    # exercised by --native since that file carries `--testing`, itself
+    # --native-skipped by #1033. See #1074 for the fix shape (needs
+    # serialize.c to synthesize the actual static-link value, mirroring
+    # codegen_expr.c's calling_nested logic).
+    "test_nested_decl_binding_1056.c": "genuine nested-function call site "
+                 "never gets the required __static_link argument under "
+                 "-c=native (#1074) -- case (d), a VM-only regression guard "
+                 "for #1039's static-link path",
+
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
 }

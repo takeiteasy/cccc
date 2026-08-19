@@ -4245,11 +4245,50 @@ def case_flt_rounds_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     FLT_ROUNDS_PROGRAM)
 
 
+NESTED_DECL_BINDING_PROGRAM = (
+    "int helper(int x) { return x + 1; }\n"
+    "int main(void) {\n"
+    "    int helper(int); // redundant block-scope prototype\n"
+    "    return helper(41);\n"
+    "}\n"
+)
+
+
+def case_nested_decl_binding_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  108: a bodyless block-scope function declaration used to "
+          "retroactively flip an already-defined, already-codegen'd "
+          "file-scope function to is_nested/is_static -- src/parse_decl.c's "
+          "\"Set up nested function tracking\" block ran on whatever Obj "
+          "find_func() returned before checking whether a body follows, and "
+          "is_nested is just current_fn != NULL. A block-scope declaration "
+          "with no storage-class specifier has external linkage (C17 "
+          "6.2.2p5): it names the outer helper, it isn't a nested one. "
+          "Wrong on the VM (the call site starts passing a static link the "
+          "callee's body was never compiled to expect -- args shift by one, "
+          "a silent wrong answer, #1056) and on -c=native (the spurious "
+          "is_static made the serializer print `static int helper(int)` for "
+          "a function with external linkage). Asserts the -m output has no "
+          "`static` on helper's definition, in addition to the VM 42 -> "
+          "native 42 round-trip.")
+    src = Path(tmp) / "nested_decl_binding_1056.c"
+    write(src, NESTED_DECL_BINDING_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "static int helper(int x)" in m_result.stdout:
+        print("    FAIL: -m output still marks helper() static -- the "
+              "block-scope prototype retroactively flipped it\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "nested_decl_binding_1056",
+                                    NESTED_DECL_BINDING_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4364,6 +4403,7 @@ def main() -> int:
             case_native_cond_directive_not_replayed,
             case_flt_rounds_native_round_trip,
             case_native_explicit_std_probed,
+            case_nested_decl_binding_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

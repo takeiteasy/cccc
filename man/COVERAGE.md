@@ -1211,6 +1211,15 @@ faithfully to a real host return address — there is no meaningful native
 behaviour to fall back to. Rejected with a diagnostic naming the builtin
 (#969).
 
+A genuine GNU nested function (a function defined inside another function's
+body, not an Apple block literal) fails to *compile* under `-c=native`, not
+just diverge: its signature is hoisted to file scope with a synthesized
+`void *__static_link` first parameter, matching the VM's own ABI shape for a
+nested call, but no call site is ever taught to actually pass that argument
+— `serialize.c` has no nested-function-aware call-site logic at all. A real
+host compiler rejects the resulting call outright ("too few arguments to
+function call"). Open, tracked as #1074.
+
 Blocks `^{ ... }` serialize by lowering to a plain C function plus an explicit
 environment struct (#965) — not by emitting `^{ }` verbatim, so no
 `-fblocks`/libBlocksRuntime dependency is introduced. A block value becomes a
