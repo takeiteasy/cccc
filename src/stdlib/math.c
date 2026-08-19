@@ -325,6 +325,18 @@ static float cccc_getpayloadf(long long xp) {
 static double cccc_getpayloadl(long long xp) { return cccc_getpayload(xp); }
 
 static long long cccc_setpayload_impl(long long xp, double payload, int quiet) {
+    // LIMITATION (#1079): on failure, this leaves *xp completely untouched
+    // -- real glibc instead zeroes the destination ("if the payload was
+    // not successfully installed, zero is stored in *cx", per the
+    // documented behavior, matching what was measured directly against
+    // real glibc x86_64 in the cccc-linux-amd64 container). Found via
+    // test_math_c23_ieee.c: a failed setpayloadsig() call left ssig as its
+    // still-signaling prior value under the VM, while native's real glibc
+    // zeroed it -- a genuine VM-side spec-conformance bug, not
+    // -c=native-specific, just never caught before since no existing test
+    // inspects the destination after a failed call. Not fixed yet; should
+    // zero *(double *)(intptr_t)xp on both early-return paths below before
+    // returning 1.
     if (payload < 0.0 || payload != (double)(uint64_t)payload ||
         (uint64_t)payload > CCCC_DBL_PAYLOAD_MAX)
         return 1;
@@ -339,6 +351,8 @@ static long long cccc_setpayload(long long xp, double payload) { return cccc_set
 static long long cccc_setpayloadsig(long long xp, double payload) { return cccc_setpayload_impl(xp, payload, 0); }
 
 static long long cccc_setpayloadf_impl(long long xp, float payload, int quiet) {
+    // LIMITATION (#1079): same untouched-on-failure gap as
+    // cccc_setpayload_impl above -- see its own comment.
     if (payload < 0.0f || payload != (float)(uint32_t)payload ||
         (uint32_t)payload > CCCC_FLT_PAYLOAD_MAX)
         return 1;

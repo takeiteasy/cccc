@@ -1652,17 +1652,24 @@ declares the name (rather than only defining the macro that calls it),
 that declaration must be `#ifdef __CCCC__`-guarded — this is the third
 time the same trap has been hit (#1021, #1023, #1052/#1063).
 
-**Correction (#1066, open):** the "round-trips VM 42 → native 42 on
-Linux" claim two paragraphs above didn't hold for every check in the
-file — `fromfp(10000000000.0, FP_INT_TONEAREST, 8)` (the width-8
-overflow case) returns a wrong result under `-c=native` on real Linux
-(confirmed via the `cccc-linux-amd64` container, clang 18, the real
-`-I./include`-forwarding harness shape; independent of which `-std` is
-forwarded). `test_math_c23_ieee.c` is therefore not a clean round-trip
-yet — filed as its own ticket rather than fixed, since it needs its own
-investigation into whether the `fromfp`/`ufromfp` `native_accessor_shims`
-entry replicates the VM's own overflow-clamping or a real host libm
-`fromfp` is being called directly with different overflow semantics.
+**Correction (#1066, closed — not a bug, the check was over-specified.)**
+A first read of `-c=native`'s `fromfp(10000000000.0, FP_INT_TONEAREST, 8)`
+(the width-8 overflow case) via the `cccc-linux-amd64` container looked
+like a wrong result — the returned *value* differs from the VM's. Checked
+against real glibc directly before filing a fix (this batch's own
+recurring lesson): C23 7.12.9.6 only guarantees `FE_INVALID` is raised
+when the correctly-rounded value doesn't fit in `width` bits — the
+returned value itself is implementation-defined. CCCC's VM returns 0;
+real glibc instead saturates to the widest representable magnitude (127
+here). Both are conforming C23 implementations disagreeing on an
+unspecified value, not a native-vs-VM divergence in anything CCCC
+controls. `test_math_c23_ieee.c`'s two value-checking assertions were
+over-specified against this implementation detail — relaxed to check only
+`FE_INVALID`, matching what the file already did two lines below for the
+identical case. `include/math.h`'s own `fromfp`/`ufromfp` block comment
+corrected to state this explicitly rather than "else 0". No `-c=native`
+serializer or VM change; `native_accessor_shims` calls the real host
+`fromfp` directly, as intended by this header's polyfill scope.
 
 Every `-c=native` compile used to only forward `-std=` to the host `cc`
 when the user passed `--std=` explicitly on the CCCC command line — a
@@ -1986,7 +1993,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<inttypes.h>` | ✓ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | |
-| `<fenv.h>` | ✓ | `FE_*` constants and `fexcept_t`/`fenv_t` sizes are injected from the real host `<fenv.h>` this binary was compiled against (not hardcoded), so rounding-mode and exception-flag calls are correct on whatever platform is running; `FLT_ROUNDS` (`<float.h>`) tracks the dynamic mode via `fegetround()`, on both the VM and `-c=native` paths (the native `__cccc_flt_rounds` shim mirrors the VM's own mapping — it used to call the clang-only `__builtin_flt_rounds()`, which fails to link on real GCC). `#pragma STDC FENV_ACCESS` / `FP_CONTRACT` are accepted and ignored (no scoped in-source toggle; `FP_CONTRACT` behaves correctly by default since contraction only happens when `--fma` is passed). Float-to-integer conversion (`(long long)some_double`, both explicit casts and implicit ones from constant folding) is defined and saturating rather than a bare UB host cast: NaN → 0, out-of-range → `LLONG_MIN`/`LLONG_MAX` matching the sign, `FE_INVALID` raised in all three cases; a cast to an *unsigned* 64-bit destination (`(unsigned long long)some_double`) saturates against its own `[0, 2^64)` range instead (NaN → 0, ≥2⁶⁴ → `ULLONG_MAX`, ≤-1 → `0`, `FE_INVALID` raised in all three — but a value in `(-1, 0)` truncates to `0` with no exception, since that's a well-defined conversion). The reverse direction (`(double)some_u64`) also converts unsigned 64-bit sources correctly rather than reinterpreting the register as signed |
+| `<fenv.h>` | ✓ | `FE_*` constants and `fexcept_t`/`fenv_t` sizes are injected from the real host `<fenv.h>` this binary was compiled against (not hardcoded), so rounding-mode and exception-flag calls are correct on whatever platform is running; `FLT_ROUNDS` (`<float.h>`) tracks the dynamic mode via `fegetround()`, on both the VM and `-c=native` paths (the native `__cccc_flt_rounds` shim mirrors the VM's own mapping — it used to call the clang-only `__builtin_flt_rounds()`, which fails to link on real GCC). `#pragma STDC FENV_ACCESS` / `FP_CONTRACT` are accepted and ignored (no scoped in-source toggle; `FP_CONTRACT` behaves correctly by default since contraction only happens when `--fma` is passed). Float-to-integer conversion (`(long long)some_double`, both explicit casts and implicit ones from constant folding) is defined and saturating rather than a bare UB host cast: NaN → 0, out-of-range → `LLONG_MIN`/`LLONG_MAX` matching the sign, `FE_INVALID` raised in all three cases; a cast to an *unsigned* 64-bit destination (`(unsigned long long)some_double`) saturates against its own `[0, 2^64)` range instead (NaN → 0, ≥2⁶⁴ → `ULLONG_MAX`, ≤-1 → `0`, `FE_INVALID` raised in all three — but a value in `(-1, 0)` truncates to `0` with no exception, since that's a well-defined conversion). The reverse direction (`(double)some_u64`) also converts unsigned 64-bit sources correctly rather than reinterpreting the register as signed. This is a VM/`-c=native` parity guarantee, not just a VM one (#1068): every real-floating → non-floating `ND_CAST` serializes as a call to one of four on-demand helpers (`__cccc_f2i64`/`__cccc_f2i64_f32`/`__cccc_f2u64`/`__cccc_f2u64_f32`, `serialize_synth_f2i_helpers`, `src/serialize.c`) that are near-verbatim ports of the VM's own `cccc_f64_to_i64`/etc (`src/internal.h`), rather than a bare native cast — needed because a real host compiler's own lowering isn't merely "implementation-defined" here but actively wrong on x86_64: clang/GCC's common branchless `double`/`float` → `uint64` sequence spuriously raises `FE_INVALID` even for a value proven in `[0, 2^64)` (measured directly; aarch64's `FCVTZU` has no such issue) |
 | `<tgmath.h>` | ~ | Type-generic macros for real floating types and complex absolute value |
 | `<wchar.h>` / `<wctype.h>` | ~ | Common wide-character APIs registered |
 | `<iso646.h>` | ✓ | |

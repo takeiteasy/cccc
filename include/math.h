@@ -509,7 +509,11 @@ long llogbl(long double);
 
 /* fromfp/ufromfp family: round x to an integer per rounding direction
  * `rnd`, returned as intmax_t (fromfp/fromfpx) or uintmax_t (ufromfp/
- * ufromfpx) if it fits in `width` bits, else 0 with FE_INVALID raised.
+ * ufromfpx) if it fits in `width` bits. If it doesn't fit, C23 7.12.9.6
+ * only guarantees FE_INVALID is raised -- the returned value is
+ * implementation-defined, NOT specifically 0 (#1066: CCCC's VM returns 0;
+ * real glibc instead saturates to the widest representable magnitude for
+ * `width`). Don't rely on a specific out-of-range value across hosts.
  * The x variants also raise FE_INEXACT if the rounded value differs from
  * x. Note the return type is an integer type, not the source floating
  * type -- these generalize lround/llround with a configurable rounding

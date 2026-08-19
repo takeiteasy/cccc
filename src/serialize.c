@@ -2005,6 +2005,51 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         // Only emit a cast if it crosses a type category or narrows/changes signedness.
         Type *dst = node->ty;
         Type *src = node->lhs ? node->lhs->ty : NULL;
+        // #1068: a bare "(dst_type)float_expr" cast is UB in the *host*
+        // compiler for NaN/out-of-range values, same reason cccc_f64_to_i64
+        // et al exist in src/internal.h for the VM's own F2I3/F2U3 opcodes
+        // (#775/#780) -- the VM defines this conversion as saturating with
+        // FE_INVALID raised, but a real host compiler is free to do
+        // anything, and x86_64 clang/gcc both demonstrably do worse than
+        // "anything": the common branchless double/float->uint64 lowering
+        // spuriously raises FE_INVALID even for an in-range value (measured
+        // directly, x86_64 only -- aarch64's FCVTZS/FCVTZU already saturate
+        // correctly and never raise it, so this is a no-op there). Route
+        // every real-floating -> non-floating cast through one of four
+        // on-demand helpers (serialize_synth_f2i_helpers below) that are a
+        // near-verbatim port of internal.h's own VM helpers, so native
+        // output agrees with the VM by construction. Mirrors codegen_expr.c's
+        // own opcode selection exactly: F2U3 (unsigned helper) only for an
+        // unsigned 64-bit integer destination (matching is_u64_int(),
+        // codegen_emit.c -- narrower unsigned destinations are already
+        // correct via F2I3's signed saturation plus an ordinary truncating
+        // narrow cast, which the outer "(dst_type)" below still supplies),
+        // F2I3 (signed helper) for everything else including TY_BOOL. A
+        // destination wider than 64 bits (an over-64-bit _BitInt) takes a
+        // completely different VM codegen path (raw bit-copy, not this
+        // numeric conversion) and is excluded here to match. A TY_VECTOR
+        // destination is also excluded: that's #1019's own scalar-broadcast
+        // ND_CAST marker just below (usual_arith_conv's "vector op scalar"
+        // internal annotation, not a genuine value conversion) -- without
+        // this exclusion a float scalar broadcast into a vector op wrongly
+        // got routed through the integer-saturating helper instead of
+        // staying a plain float, corrupting the vector arithmetic itself.
+        bool f2i_native = src && dst && is_flonum(src) && !is_flonum(dst) &&
+                          dst->kind != TY_VECTOR &&
+                          !(dst->kind == TY_BITINT && dst->bit_width > 64);
+        if (f2i_native) {
+            bool u64_dst = is_integer(dst) && dst->is_unsigned && dst->size == 8;
+            bool f32_src = src->kind == TY_FLOAT;
+            const char *fn = u64_dst
+                ? (f32_src ? "__cccc_f2u64_f32" : "__cccc_f2u64")
+                : (f32_src ? "__cccc_f2i64_f32" : "__cccc_f2i64");
+            fprintf(f, "(");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, ")%s(", fn);
+            serialize_expr(f, vm, ctx, node->lhs, 2);
+            fprintf(f, ")");
+            break;
+        }
         bool dst_int = dst && (dst->kind == TY_BOOL || dst->kind == TY_CHAR ||
                                dst->kind == TY_SHORT || dst->kind == TY_INT ||
                                dst->kind == TY_LONG);
@@ -5369,6 +5414,130 @@ static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm, Obj *prog)
     fprintf(f, "extern void _longjmp(void *, int) __attribute__((noreturn));\n\n");
 }
 
+// #1068: real-floating -> non-floating cast helpers, emitted on demand for
+// -c=native/-m output -- see the ND_CAST case in serialize_expr (above in
+// this file) for the full rationale. Near-verbatim ports of
+// cccc_f64_to_i64/cccc_f32_to_i64/cccc_f64_to_u64/cccc_f32_to_u64
+// (src/internal.h, #775/#780) so native output agrees with the VM's own
+// F2I3/F2U3 opcodes by construction. Deliberately avoid <math.h>/<limits.h>:
+// <math.h> is a bundled header whose own polyfill content (isnan() among
+// it) would need the identical #include_next hand-off <fenv.h>/<setjmp.h>
+// already need (see include/fenv.h's own comment) to resolve correctly
+// under the real -I./include-forwarding harness, and there is no reason to
+// take on that dependency here when a bit-pattern NaN test needs nothing
+// from any header -- `x != x` is a reliable IEEE-754 NaN test (NaN is the
+// only value unequal to itself) as long as the host isn't built with
+// -ffast-math, which -c=native's own invocation never passes. The 2^63/2^64
+// bounds and INT64_MIN/UINT64_MAX values are spelled as literals for the
+// same reason internal.h's own versions are: `(double)LLONG_MAX` rounds
+// *up* to exactly 2^63, so a "<=" guard against it would wrongly admit
+// x == 2^63. `#pragma STDC FENV_ACCESS ON` is block-scoped to each
+// function body (verified in-container to survive -O2/-O3 there; a
+// file-scope pragma placed just once before all four would also work but
+// would needlessly extend to the rest of the generated TU) -- without it,
+// clang can fold the u64 helpers' guard back into the branchless
+// double/float->uint64 lowering that spuriously raises FE_INVALID on
+// x86_64 even for a proven in-range value, defeating the whole point of
+// the trailing feclearexcept(FE_INVALID) below.
+static const char *const f2i64_def =
+    "static long long __cccc_f2i64(double x) {\n"
+    "#pragma STDC FENV_ACCESS ON\n"
+    "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
+    "    if (x >= 9223372036854775808.0) { feraiseexcept(FE_INVALID); return 9223372036854775807LL; }\n"
+    "    if (x < -9223372036854775808.0) { feraiseexcept(FE_INVALID); return (-9223372036854775807LL - 1); }\n"
+    "    return (long long)x;\n"
+    "}\n";
+static const char *const f2i64_f32_def =
+    "static long long __cccc_f2i64_f32(float x) {\n"
+    "#pragma STDC FENV_ACCESS ON\n"
+    "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
+    "    if (x >= 9223372036854775808.0f) { feraiseexcept(FE_INVALID); return 9223372036854775807LL; }\n"
+    "    if (x < -9223372036854775808.0f) { feraiseexcept(FE_INVALID); return (-9223372036854775807LL - 1); }\n"
+    "    return (long long)x;\n"
+    "}\n";
+static const char *const f2u64_def =
+    "static unsigned long long __cccc_f2u64(double x) {\n"
+    "#pragma STDC FENV_ACCESS ON\n"
+    "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
+    "    if (x >= 18446744073709551616.0) { feraiseexcept(FE_INVALID); return 0xFFFFFFFFFFFFFFFFULL; }\n"
+    "    if (x <= -1.0) { feraiseexcept(FE_INVALID); return 0; }\n"
+    "    unsigned long long r = (unsigned long long)x;\n"
+    "    feclearexcept(FE_INVALID);\n"
+    "    return r;\n"
+    "}\n";
+static const char *const f2u64_f32_def =
+    "static unsigned long long __cccc_f2u64_f32(float x) {\n"
+    "#pragma STDC FENV_ACCESS ON\n"
+    "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
+    "    if (x >= 18446744073709551616.0f) { feraiseexcept(FE_INVALID); return 0xFFFFFFFFFFFFFFFFULL; }\n"
+    "    if (x <= -1.0f) { feraiseexcept(FE_INVALID); return 0; }\n"
+    "    unsigned long long r = (unsigned long long)x;\n"
+    "    feclearexcept(FE_INVALID);\n"
+    "    return r;\n"
+    "}\n";
+
+typedef struct {
+    bool want_i64, want_i64_f32, want_u64, want_u64_f32;
+} F2ISynthNeed;
+
+// Same recursive-field traversal shape as node_calls_obj (above) --
+// exhaustive over every child-pointing field Node has, not just the ones
+// this particular predicate happens to reach in this repo's own test
+// corpus.
+static void node_scan_f2i_native(Node *node, F2ISynthNeed *need) {
+    if (!node)
+        return;
+    if (node->kind == ND_CAST && node->lhs) {
+        Type *dst = node->ty;
+        Type *src = node->lhs->ty;
+        if (src && dst && is_flonum(src) && !is_flonum(dst) &&
+            dst->kind != TY_VECTOR &&
+            !(dst->kind == TY_BITINT && dst->bit_width > 64)) {
+            bool u64_dst = is_integer(dst) && dst->is_unsigned && dst->size == 8;
+            bool f32_src = src->kind == TY_FLOAT;
+            if (u64_dst && f32_src)
+                need->want_u64_f32 = true;
+            else if (u64_dst)
+                need->want_u64 = true;
+            else if (f32_src)
+                need->want_i64_f32 = true;
+            else
+                need->want_i64 = true;
+        }
+    }
+    node_scan_f2i_native(node->lhs, need);
+    node_scan_f2i_native(node->rhs, need);
+    node_scan_f2i_native(node->cond, need);
+    node_scan_f2i_native(node->then, need);
+    node_scan_f2i_native(node->els, need);
+    node_scan_f2i_native(node->init, need);
+    node_scan_f2i_native(node->inc, need);
+    node_scan_f2i_native(node->body, need);
+    node_scan_f2i_native(node->args, need);
+    node_scan_f2i_native(node->next, need);
+}
+
+static void serialize_synth_f2i_helpers(FILE *f, Obj *prog) {
+    F2ISynthNeed need = {0};
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->body)
+            continue;
+        node_scan_f2i_native(obj->body, &need);
+    }
+    if (!need.want_i64 && !need.want_i64_f32 && !need.want_u64 && !need.want_u64_f32)
+        return;
+    fprintf(f, "#include <fenv.h>\n\n");
+    if (need.want_i64)
+        fprintf(f, "%s", f2i64_def);
+    if (need.want_i64_f32)
+        fprintf(f, "%s", f2i64_f32_def);
+    if (need.want_u64)
+        fprintf(f, "%s", f2u64_def);
+    if (need.want_u64_f32)
+        fprintf(f, "%s", f2u64_f32_def);
+    fprintf(f, "\n");
+}
+
 // #1057: type-name sibling of #1050's synth-libc-call mechanism just above.
 // A comptime builder can fold a standard scalar typedef name -- GetType(
 // "size_t")/"ptrdiff_t"/"wchar_t" -- into a generated function's signature
@@ -6413,6 +6582,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         serialize_synth_libc_includes(f, vm, prog);
         if (!vm->compiler.emit_cccc)
             serialize_synth_setjmp_decls(f, vm, prog);
+        // #1068: unlike serialize_synth_setjmp_decls, NOT gated on
+        // emit_cccc -- the ND_CAST rewrite these helpers back are emitted
+        // unconditionally (see serialize_expr's ND_CAST case), so
+        // --emit-cccc output needs them defined too, or it calls an
+        // undefined function.
+        serialize_synth_f2i_helpers(f, prog);
     }
 
     // #1057: headers for comptime-folded standard typedef names (size_t/

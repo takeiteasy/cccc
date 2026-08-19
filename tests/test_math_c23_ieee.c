@@ -93,11 +93,22 @@ int main(void) {
     // intmax_t/uintmax_t (NOT the source floating type -- these
     // generalize lround/llround with configurable rounding + width,
     // matching glibc's real intmax_t fromfp(double, int, unsigned int)
-    // signature). 0 (+ FE_INVALID) if it doesn't fit.
+    // signature). Per C23 7.12.9.6, when the correctly-rounded value isn't
+    // representable in `width` bits the return is an *implementation-
+    // defined* value with FE_INVALID raised -- NOT specifically 0. CCCC's
+    // VM chooses 0; measured directly against real glibc (x86_64/aarch64,
+    // #1066), it instead saturates to the widest representable magnitude
+    // (127 for fromfp(1e10, ..., 8)). Both are conforming, so only the
+    // FE_INVALID guarantee is asserted below -- don't tighten this back to
+    // a specific value, it was tried and is host-dependent by design.
     if (fromfp(3.7, FP_INT_TONEAREST, 8) != 4) return 32;
-    if (fromfp(10000000000.0, FP_INT_TONEAREST, 8) != 0) return 33; // overflow
+    feclearexcept(FE_ALL_EXCEPT);
+    (void)fromfp(10000000000.0, FP_INT_TONEAREST, 8); // overflow
+    if (!fetestexcept(FE_INVALID)) return 33;
     if (ufromfp(3.7, FP_INT_UPWARD, 8) != 4) return 34;
-    if (ufromfp(-1.0, FP_INT_TONEAREST, 8) != 0) return 35; // negative -> invalid
+    feclearexcept(FE_ALL_EXCEPT);
+    (void)ufromfp(-1.0, FP_INT_TONEAREST, 8); // negative -> invalid
+    if (!fetestexcept(FE_INVALID)) return 35;
 
     feclearexcept(FE_ALL_EXCEPT);
     (void)fromfp(10000000000.0, FP_INT_TONEAREST, 8);

@@ -4540,11 +4540,66 @@ def case_nested_fn_shadow_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     NESTED_FN_SHADOW_PROGRAM)
 
 
+F2I_NATIVE_PROGRAM = (
+    "#include <fenv.h>\n"
+    "int main(void) {\n"
+    "    volatile double d_in_range = 1.5e19;\n"
+    "    volatile double d_neg_inf = -1.0 / 0.0;\n"
+    "    volatile float f_in_range = 1.5e19f;\n"
+    "\n"
+    "    feclearexcept(FE_ALL_EXCEPT);\n"
+    "    unsigned long long u = (unsigned long long)d_in_range;\n"
+    "    if (u != 15000000000000000000ULL) return 1;\n"
+    "    if (fetestexcept(FE_INVALID)) return 2; // must NOT raise: in-range\n"
+    "\n"
+    "    long long r = (long long)d_neg_inf;\n"
+    "    if (r != (-9223372036854775807LL - 1)) return 3; // saturates\n"
+    "\n"
+    "    unsigned long long uf = (unsigned long long)f_in_range;\n"
+    "    if (uf != 15000000520515485696ULL) return 4;\n"
+    "\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_f2i_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  113: -c=native's bare \"(dst_type)float_expr\" cast is UB in "
+          "the host compiler for NaN/out-of-range values -- the VM defines "
+          "it as saturating with FE_INVALID raised (F2I3/F2U3, #775/#780), "
+          "but a real host compiler is free to do anything, and x86_64 "
+          "clang/gcc's common branchless double/float->uint64 lowering "
+          "does worse than \"anything\": it spuriously raises FE_INVALID "
+          "for a proven in-range value (measured directly; aarch64's "
+          "FCVTZS/FCVTZU already saturate correctly, so this case round-"
+          "trips there even pre-fix and can't catch a regression on its "
+          "own -- the -m text assertion below is what actually guards "
+          "it). Fixed by routing every real-floating -> non-floating cast "
+          "through one of four on-demand helpers "
+          "(serialize_synth_f2i_helpers, src/serialize.c), near-verbatim "
+          "ports of internal.h's own cccc_f64_to_i64/cccc_f32_to_i64/"
+          "cccc_f64_to_u64/cccc_f32_to_u64, so native output agrees with "
+          "the VM by construction (#1068). Asserts -m output calls "
+          "__cccc_f2u64/__cccc_f2i64/__cccc_f2u64_f32, never a bare "
+          "\"(unsigned long long)\"/\"(long long)\" cast of a float "
+          "expression, plus VM 42 -> native 42.")
+    src = Path(tmp) / "f2i_native_1068.c"
+    write(src, F2I_NATIVE_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    for want in ("__cccc_f2u64(", "__cccc_f2i64(", "__cccc_f2u64_f32("):
+        if want not in m_result.stdout:
+            print(f"    FAIL: -m output missing '{want}'\n    {m_result.stdout}")
+            return False
+
+    return _vm_and_native_run_case(cccc, tmp, "f2i_native_1068", F2I_NATIVE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4664,6 +4719,7 @@ def main() -> int:
             case_nested_fn_native_round_trip,
             case_struct_byval_param_copy,
             case_nested_fn_shadow_native_round_trip,
+            case_f2i_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
