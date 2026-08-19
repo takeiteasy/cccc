@@ -4482,11 +4482,69 @@ def case_struct_byval_param_copy(cccc: Path, tmp: str) -> bool:
                              STRUCT_BYVAL_PARAM_COPY_PROGRAM)
 
 
+NESTED_FN_SHADOW_PROGRAM = (
+    "int add(int a, int b) { return a + b; }\n"
+    "int uses_outer_add(void) { return add(10, 5); }\n"
+    "int main(void) {\n"
+    "    int add(int a, int b) { return a + b + 1; }\n"
+    "    if (add(40, 1) != 42) return 1;\n"
+    "    if (uses_outer_add() != 15) return 2;\n"
+    "    if (add(40, 2) != 43) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_nested_fn_shadow_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  112: a nested (non-static) function DEFINITION whose name "
+          "matched an enclosing file-scope function bound to -- and then "
+          "\"redefined\" -- that outer function, instead of C block scope "
+          "introducing a distinct declaration (C17 6.2.1p4: scope and "
+          "linkage are separate axes; #1039 already established nested "
+          "functions are implicitly static). function() (src/parse_decl.c) "
+          "looked the name up via find_func(), which walks the ENTIRE "
+          "enclosing scope chain -- correct for a bodyless block-scope "
+          "prototype (#1056: external linkage, must bind to the outer "
+          "function) but wrong for a nested definition, which must never "
+          "merge with an outer Obj. Fixed by using "
+          "find_func_in_current_scope() (already used for `static`) "
+          "whenever a nested function DEFINITION is parsed, distinguished "
+          "from a bodyless declaration the same way the existing early "
+          "return already does (consume(';'), not equal(tok, '{'), to "
+          "still catch a K&R definition -- #1043's lesson). A second, "
+          "independent gap: once two same-named Objs could legally "
+          "coexist, -c=native's hoisted-to-file-scope nested function "
+          "(#1074) collided with the outer, non-static function of the "
+          "same name -- rename_colliding_static_names() (src/serialize.c) "
+          "only tracked `is_static` names and skipped every same-file "
+          "collision on the now-stale assumption that one was always a "
+          "parse-time redefinition error. Fixed by giving every "
+          "non-static defining Obj's name an anchor entry, built in its "
+          "own pass ahead of prog's own list order (a nested function's "
+          "Obj is always pushed ahead of its enclosing function's own), "
+          "that a same-named static/nested Obj must always yield to. "
+          "Asserts the -m output actually renames the hoisted nested "
+          "`add` rather than colliding with the outer one, in addition to "
+          "the VM 42 -> native 42 round-trip.")
+    src = Path(tmp) / "nested_fn_shadow_1075.c"
+    write(src, NESTED_FN_SHADOW_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "__cccc_dup" not in m_result.stdout:
+        print("    FAIL: -m output doesn't rename the hoisted nested "
+              "`add` -- it collides with the outer, non-static `add`\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "nested_fn_shadow_1075",
+                                    NESTED_FN_SHADOW_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4605,6 +4663,7 @@ def main() -> int:
             case_mb_cur_max_native_round_trip,
             case_nested_fn_native_round_trip,
             case_struct_byval_param_copy,
+            case_nested_fn_shadow_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

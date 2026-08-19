@@ -1248,6 +1248,21 @@ local) is not — confirmed to already be an unrelated, pre-existing VM
 miscompile independent of native, not a new native-only gap, so it is
 rejected rather than designed around. Closed, #1074.
 
+A nested (non-`static`) function *definition* whose name matches an
+enclosing file-scope function is supported (#1075): C17 6.2.1p4 treats scope
+and linkage as separate axes, so the block-scope definition introduces a
+distinct function rather than "redefining" the outer one — the parser gives
+it its own `Obj` (the same lookup already used for an explicit `static`
+nested definition), leaving the outer function's own callers, and any
+bodyless block-scope *prototype* of it elsewhere (which does still bind to
+the outer function, per #1056's own guarantee — a declaration with no
+storage-class specifier has external linkage), unaffected. Serialization
+hoists the nested definition to file scope under its original name like any
+other nested function, so `rename_colliding_static_names()` (`src/serialize.c`)
+now also treats a non-static defining `Obj`'s name as a fixed anchor that a
+same-named nested (or otherwise `static`) `Obj` always yields to, renaming the
+nested copy rather than colliding with it.
+
 Blocks `^{ ... }` serialize by lowering to a plain C function plus an explicit
 environment struct (#965) — not by emitting `^{ }` verbatim, so no
 `-fblocks`/libBlocksRuntime dependency is introduced. A block value becomes a

@@ -4588,9 +4588,35 @@ static bool files_are_same(const char *a, const char *b) {
 // over vm->compiler.globals -- that scan runs after this pass too, so it
 // resolves a relocation's label against the (possibly already renamed)
 // Obj it actually points at, not a stale name.
+// #1075: a nested function is always Obj.is_static (#1039), but its name
+// may now legally collide with an ordinary, non-static, SAME-FILE outer
+// function (distinct scope+linkage, C17 6.2.1p4) -- something this pass
+// previously assumed could never happen (see the "same-file same-name
+// would already be a parse-time redefinition error" comment below, still
+// true for two ordinary statics). Handled with two hashmaps: `anchors`
+// captures every non-static defining Obj's name in its own pass, up
+// front, so a static/nested Obj can detect the collision regardless of
+// prog's own ordering -- a nested function's Obj is always pushed ahead of
+// its enclosing function's own (see codegen_func.c's "nested functions are
+// compiled before their parents" comment), so a single combined pass would
+// see the nested name registered FIRST and rename the wrong (non-static)
+// side. A non-static name is never a rename candidate, so `anchors` is
+// populated once and never mutated again.
 static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
                                           SerializeContext *ctx) {
-    HashMap first_seen = {0}; // name -> first Obj* claiming it
+    HashMap anchors = {0}; // name -> the non-static Obj* that owns it
+    HashMap claimed = {0}; // name -> first static Obj* claiming it (old semantics)
+
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
+            continue;
+        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        if (!is_defining)
+            continue;
+        if (!hashmap_get(&anchors, obj->name))
+            hashmap_put_borrowed(&anchors, obj->name, obj);
+    }
+
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
             continue;
@@ -4601,24 +4627,41 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining)
             continue;
-        Obj *first = hashmap_get(&first_seen, obj->name);
+
+        if (hashmap_get(&anchors, obj->name)) {
+            // Collides with a non-static name -- the non-static side must
+            // keep it; always rename this one (covers #1075's nested
+            // function shadowing a same-named outer function, same file or
+            // not).
+            obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
+                                     ctx->anon_global_counter++);
+            continue;
+        }
+
+        Obj *first = hashmap_get(&claimed, obj->name);
         if (!first) {
-            hashmap_put_borrowed(&first_seen, obj->name, obj);
+            hashmap_put_borrowed(&claimed, obj->name, obj);
             continue;
         }
         // Only a genuine cross-TU collision -- two Objs of the same name
         // declared in different files -- needs renaming; same-file
-        // same-name would already be a parse-time redefinition error long
-        // before serialization is reached, but check explicitly rather
-        // than assume.
+        // same-name would already be a parse-time redefinition error for
+        // two ordinary statics, EXCEPT when at least one is a nested
+        // function's own hoisted Obj (#1075's other shape: two distinct
+        // same-named nested functions, or a nested one colliding with an
+        // outer static of the same name -- both now legal same-file C).
         const char *first_file = first->tok && first->tok->file ? first->tok->file->name : NULL;
         const char *this_file = obj->tok && obj->tok->file ? obj->tok->file->name : NULL;
-        if (files_are_same(first_file, this_file))
+        bool same_file = files_are_same(first_file, this_file);
+        bool nested_involved = (obj->is_nested && !obj->is_block) ||
+                                (first->is_nested && !first->is_block);
+        if (same_file && !nested_involved)
             continue;
         obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
                                  ctx->anon_global_counter++);
     }
-    hashmap_deinit_borrowed(&first_seen);
+    hashmap_deinit_borrowed(&anchors);
+    hashmap_deinit_borrowed(&claimed);
 }
 
 // #1014: does `ty` (or anything reachable through a PTR/ARRAY/VLA/FUNC

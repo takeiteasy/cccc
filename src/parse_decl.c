@@ -450,7 +450,20 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->compiler.objsize_queries = NULL;
     }
 
-    Obj *fn = attr->is_static
+    // #1075: a nested function *definition* must never merge with an
+    // outer, same-named file-scope function -- C17 6.2.1p4 treats scope and
+    // linkage as separate axes, and #1039 already established nested
+    // functions are implicitly static (invisible outside their own scope).
+    // #1056's own fix (the `attr->is_static` arm's sibling reasoning)
+    // established the opposite requirement for a *bodyless* block-scope
+    // declaration: it has external linkage (C17 6.2.2p5) and must still
+    // resolve through the whole-chain find_func() to bind to the outer
+    // function. `defines_body` distinguishes the two: checked the same way
+    // as the existing bodyless early-return below (consume(";")), not
+    // equal(tok, "{"), since that would miss a K&R definition (#1043's
+    // lesson, called out in #1056's own comment on this same function).
+    bool defines_body = !equal(tok, ";");
+    Obj *fn = (attr->is_static || (is_nested && defines_body))
                   ? find_func_in_current_scope(vm, name_str, ty->name->len)
                   : find_func(vm, name_str, ty->name->len);
     // Save prototype state before the if/else can mutate fn->is_implicit.

@@ -394,28 +394,29 @@ int test_negative(void) {
 }
 
 // test_nested_func_basic
-// Named add_nested, not add -- this file's own file-scope add() (from
-// test_knr_funcdef, above) is unrelated, but a nested `add` here would
-// collide with it: this aggregated file merged two originally-separate
-// test files that each independently picked the name `add`, and #1043's
-// fix (K&R definitions now correctly set is_definition=true) turned that
-// latent collision into a hard "redefinition of add" compile error. Pure
-// naming accident, not compiler-bug coverage -- renamed to sidestep it.
-// A real, separate compiler defect in this area (a block-scope
-// declaration of an already-defined function corrupts that function's
-// calling convention) is tracked as #1056; not related to this rename.
+// This file's own file-scope add() (from test_knr_funcdef, above) used to
+// collide with a nested `add` defined here -- this aggregated file merged
+// two originally-separate test files that each independently picked the
+// name `add`, and #1043's fix (K&R definitions now correctly set
+// is_definition=true) turned that latent collision into a hard
+// "redefinition of add" compile error, worked around by renaming this
+// one to add_nested. The real underlying defect -- a nested function
+// *definition* incorrectly binding to a same-named outer file-scope
+// function instead of C block scope introducing a distinct declaration
+// (C17 6.2.1p4) -- is now fixed (#1075), so the rename is no longer
+// needed.
 [[cccc::test(return = 42)]]
 int test_nested_func_basic(void) {
-    int add_nested(int a, int b) {
+    int add(int a, int b) {
         return a + b;
     }
 
-    int result = add_nested(40, 2);
+    int result = add(40, 2);
     if (result != 42) return 1;
 
     // Test calling nested function multiple times
-    if (add_nested(10, 20) != 30) return 2;
-    if (add_nested(0, 0) != 0) return 3;
+    if (add(10, 20) != 30) return 2;
+    if (add(0, 0) != 0) return 3;
 
     return 42;
 }
