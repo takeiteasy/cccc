@@ -127,7 +127,18 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
 // "-std=gnu2x" but rejects "-std=gnu23" outright. If nothing in the
 // ladder is accepted, forward nothing -- exactly today's behaviour, so
 // this can never make a native compile that used to succeed fail.
-static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc) {
+// #1073: when the user passes --std= explicitly, the equivalent-spelling
+// rungs (e.g. "23"/"2x", both CCCC_STD_C23) are tried, but the ladder never
+// descends to an OLDER standard -- a user who named C23 must never
+// silently get C17 semantics on the native half while the VM half stayed
+// C23. explicit_std selects between that narrower probe and the full
+// best-effort descend-to-older ladder the implicit-default path already
+// used (nothing was named there, so falling back is fine). Every spelling
+// below is probe-verified, not guessed: Apple clang 17 accepts all of
+// them; Ubuntu GCC 13.3.0 rejects "23"/"gnu23" outright but accepts
+// "2x"/"gnu2x" and every other listed spelling.
+static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
+                                               bool explicit_std) {
     static bool probed = false;
     static bool found = false;
     static char cached[16];
@@ -136,27 +147,34 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc)
     probed = true;
 
     const char *prefix = vm->compiler.c_std_gnu ? "gnu" : "c";
-    const char *suffixes[4];
+    const char *suffixes[6];
     int n = 0;
     switch (vm->compiler.c_std) {
     case CCCC_STD_C23:
         suffixes[n++] = "23";
         suffixes[n++] = "2x";
-        suffixes[n++] = "17";
-        suffixes[n++] = "11";
+        if (!explicit_std) {
+            suffixes[n++] = "17";
+            suffixes[n++] = "11";
+        }
         break;
     case CCCC_STD_C17:
         suffixes[n++] = "17";
-        suffixes[n++] = "11";
+        suffixes[n++] = "18";
+        if (!explicit_std)
+            suffixes[n++] = "11";
         break;
     case CCCC_STD_C11:
         suffixes[n++] = "11";
+        suffixes[n++] = "1x";
         break;
     case CCCC_STD_C99:
         suffixes[n++] = "99";
+        suffixes[n++] = "9x";
         break;
     case CCCC_STD_C89:
         suffixes[n++] = "89";
+        suffixes[n++] = "90";
         break;
     }
 
@@ -262,7 +280,17 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     argv_push(&cc_args, source_path);
     argv_push(&cc_args, "-o");
     argv_push(&cc_args, exe_path);
-    const char *resolved_std = std_arg ? std_arg : native_resolve_std_ladder(vm, cc);
+    // #1073: an explicit --std= used to be forwarded byte-for-byte,
+    // bypassing the ladder entirely and hitting the exact spelling
+    // asymmetry it exists to route around (e.g. GCC rejects "-std=c23"
+    // but accepts "-std=c2x"). Route it through the same probe, restricted
+    // to spellings of the SAME standard (explicit_std=true) -- falling
+    // back to the user's literal spelling, unprobed, only if none of that
+    // standard's own spellings are accepted (today's pre-fix behaviour,
+    // so this can never turn a working compile into a failing one).
+    const char *resolved_std = native_resolve_std_ladder(vm, cc, std_arg != NULL);
+    if (!resolved_std)
+        resolved_std = std_arg;
     if (resolved_std)
         push_owned_flag(&cc_args, &owned, "-std=", resolved_std);
     // #891/#1006: cccc auto-captures each command-line input file's own

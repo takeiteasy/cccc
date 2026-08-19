@@ -4003,6 +4003,64 @@ def case_native_std_ladder(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_explicit_std_probed(cccc: Path, tmp: str) -> bool:
+    print("  107: an explicit --std= used to be forwarded to the host cc "
+          "verbatim, bypassing #1053's own ladder probe entirely -- hitting "
+          "the exact spelling asymmetry the ladder exists to route around "
+          "(real GCC 13 rejects '-std=c23'/'-std=gnu23' outright but "
+          "accepts '-std=c2x'/'-std=gnu2x'; measured directly in the "
+          "cccc-linux-arm64 container, not recalled) (#1073). Fixed by "
+          "routing an explicit --std= through the same probe, restricted "
+          "to spellings of the SAME standard only (never descending to an "
+          "older one -- a user who named C23 must never silently get C17 "
+          "semantics on the native half). Asserted here via a wrapper that "
+          "rejects '-std=c23' specifically (simulating GCC's asymmetry on "
+          "any host, including clang-only ones) and exec's the real cc for "
+          "every other flag: the recorded argv must contain '-std=c2x' "
+          "exactly, not merely some '-std=' flag -- a presence-only check "
+          "would pass even against the pre-fix binary, which also forwards "
+          "some '-std=' (just the rejected spelling).")
+    src = Path(tmp) / "native_explicit_std_1073.c"
+    write(src, NATIVE_LM_PROGRAM)
+    out = Path(tmp) / "native_explicit_std_1073_out"
+    log = Path(tmp) / "native_explicit_std_1073_argv.log"
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_explicit_std_1073_cc_wrapper.sh"
+    write(wrapper, (
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" >> {log}\n"
+        "for a in \"$@\"; do\n"
+        "  if [ \"$a\" = \"-std=c23\" ]; then exit 1; fi\n"
+        "done\n"
+        f"exec {real_cc} \"$@\"\n"
+    ))
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+    result = subprocess.run(
+        [str(cccc), "--std=c23", "-c=native", "-o", out.name, src.name],
+        capture_output=True, text=True, cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    lines = log.read_text().splitlines() if log.exists() else []
+    if "-std=c2x" not in lines:
+        print(f"    FAIL: expected '-std=c2x' in recorded native cc argv "
+              f"(the rung the ladder falls back to when '-std=c23' is "
+              f"rejected), got {lines}")
+        return False
+    run_result = subprocess.run([f"./{out.name}"], capture_output=True, text=True, cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_native_defines_survive_argv(cccc: Path, tmp: str) -> bool:
     print("  103: two -D flags used to reach the host cc mangled two "
           "different ways (#1065): parse_define() (src/main.c) split each "
@@ -4305,6 +4363,7 @@ def main() -> int:
             case_native_signed_char_argv,
             case_native_cond_directive_not_replayed,
             case_flt_rounds_native_round_trip,
+            case_native_explicit_std_probed,
         ]
         results = [case(cccc, tmp) for case in cases]
 

@@ -1632,9 +1632,20 @@ is its own separate rung, not an alias tried together with `gnu23`: gcc
 13 accepts `-std=gnu2x` but rejects `-std=gnu23` outright (confirmed in
 the `cccc-linux-amd64` container). If nothing in the ladder is accepted,
 nothing is forwarded — identical to the pre-#1053 behaviour, so this
-can never turn a native compile that used to succeed into a failure. An
-explicit `--std=` on the CCCC command line is still forwarded verbatim,
-unprobed — a host rejection there is the user's own stated intent.
+can never turn a native compile that used to succeed into a failure.
+
+An explicit `--std=` on the CCCC command line is probed too (#1073), but
+through a narrower ladder than the implicit default: only spellings of
+the *same* standard the user named (`c23` → `c2x`, `c17` → `c18`, `c11` →
+`c1x`, `c99` → `c9x`, `c89` → `c90`), never descending to an older one — a
+user who wrote `--std=c23` must never silently get C17 semantics on the
+native half while the VM half stayed C23. If no spelling of the requested
+standard is accepted, the user's literal spelling is forwarded unprobed,
+letting the host emit its own diagnostic — the same "host rejection is
+the user's own stated intent" behaviour the pre-#1073 code always had.
+Both ladders' spellings are confirmed against real Apple clang 17 and
+Ubuntu GCC 13.3.0, not assumed to transfer from one compiler to the
+other.
 
 While implementing #1053, a second, unrelated bug (#1065) was found and
 fixed in the same pass: `run_native_backend()` built each `-std`/`-D`/
