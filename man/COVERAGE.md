@@ -1242,11 +1242,26 @@ direct callee of a call to it (e.g. `int (*fp)(int) = inner;`, or passing
 `__static_link` parameter has no portable function-pointer type. A nested
 function defined *inside* an Apple block literal is supported (the block's
 own env chains via `->__up` exactly like an ordinary nested-in-nested case);
-a block literal defined inside a nested function that captures a variable
+a block literal defined *inside* a nested function that captures a variable
 owned by that function's *own* ancestor (not the nested function's own
-local) is not — confirmed to already be an unrelated, pre-existing VM
-miscompile independent of native, not a new native-only gap, so it is
-rejected rather than designed around. Closed, #1074.
+local) is rejected too, for a different reason than the other three: the VM
+itself silently miscompiled this exact shape until #1076 fixed it (a
+parse-time capture-collection gap plus a missing codegen source arm — see
+that ticket's own resolution comment) — a *native* lowering for it is real,
+unstarted work (chaining the block's own env through the nested env's
+`->__up`, tracked as **#1080**), not merely un-rejecting what #1074 already
+rejects. Closed, #1074.
+
+A nested function defined *inside* a block literal, reading a variable
+captured by that *block's own* enclosing function (the opposite nesting
+order from the paragraph above), is a separate, still-open gap — **#1081** —
+found while fixing #1076: a block's own `__static_link` slot holds a
+descriptor pointer, not a plain frame base pointer, which breaks the VM's
+own multi-hop static-link chase the moment an intermediate ancestor is a
+block rather than a genuine nested function (a single hop, reading the
+block's own local/param directly, is unaffected). Native serialization
+never reaches this case in the first place today, since the VM path itself
+gives a wrong answer for it.
 
 A nested (non-`static`) function *definition* whose name matches an
 enclosing file-scope function is supported (#1075): C17 6.2.1p4 treats scope

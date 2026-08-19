@@ -559,6 +559,13 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // the matching comment in declare_function_prototype above.
         if (!fn->asm_label)
             fn->is_static = true;
+        // #1076: record the parent's locals snapshot the same way a block
+        // literal does (parse_blocks.c) so a block literal defined *inside*
+        // this nested function can climb past it to capture a variable
+        // owned by one of its own ancestors -- see the matching ancestor
+        // walk in block_literal() (parse_blocks.c) that now keys off
+        // is_nested rather than is_block.
+        fn->block_outer_locals = saved_locals;
     } else {
         fn->parent_fn = NULL;
         fn->is_nested = false;

@@ -336,6 +336,39 @@ static int calculate_chain_depth(Obj *current_fn, Obj *owner_fn) {
     return depth;
 }
 
+// Emit dest_reg = address of `var`, owned by `owner_fn`, an ancestor of
+// `current_fn` reached by walking the static-link chain. `current_fn` must be
+// genuinely nested (have a __static_link local). #1076: factored out of
+// gen_addr's own ND_VAR case (below) so the block-literal capture-population
+// loop (codegen_expr.c's ND_BLOCK_LITERAL case) can reuse the exact same
+// chase for a capture owned by the enclosing *nested function's* own
+// ancestor, rather than a second hand-written copy drifting from this one --
+// the same failure mode #994 already warned about for the capture-offset
+// layout.
+void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
+                                 Obj *owner_fn, Obj *var, int dest_reg) {
+    Obj *static_link = find_static_link_var(current_fn);
+    if (!static_link)
+        error("nested function missing __static_link");
+    // Compiler-internal chase (#676): every intermediate address here feeds
+    // an immediate load, never escapes as a user-visible pointer.
+    emit_lea3_internal(vm, dest_reg, static_link->offset); // &__static_link
+    emit_rr(vm, LDR_D, dest_reg, dest_reg); // load static_link (parent's bp)
+
+    int depth = calculate_chain_depth(current_fn, owner_fn);
+    // First link already loaded above, so start from 1.
+    for (int i = 1; i < depth; i++) {
+        // Each parent also has __static_link at offset -1 (8 bytes below bp):
+        // parent's __static_link is at parent_bp + (-1 * 8) = parent_bp - 8.
+        emit_addi3(vm, dest_reg, dest_reg, -8);
+        emit_rr(vm, LDR_D, dest_reg, dest_reg); // load grandparent's bp
+    }
+
+    // dest_reg now holds owner_fn's bp; add the variable's offset. Variable
+    // offsets are in slots, so multiply by 8 bytes.
+    emit_addi3(vm, dest_reg, dest_reg, var->offset * 8);
+}
+
 // Returns true when a ND_VAR node can be loaded/stored with a fused
 // LDR_LOCAL/STR_LOCAL opcode instead of a LEA3+LDR/STR pair.
 // Requires: node->kind == ND_VAR.
@@ -655,36 +688,11 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     belongs_to_outer_function(current_fn, node->var);
 
                 if (owner_fn) {
-                    // Accessing outer function's variable via static chain
-                    // 1. Load __static_link from current function's frame
-                    Obj *static_link = find_static_link_var(current_fn);
-                    if (!static_link) {
-                        error("nested function missing __static_link");
-                    }
-                    // Compiler-internal: slot address only feeds the
-                    // immediate load below (#676).
-                    emit_lea3_internal(vm, dest_reg,
-                              static_link->offset); // &__static_link
-                    emit_rr(vm, LDR_D, dest_reg,
-                            dest_reg); // Load static_link (parent's bp)
-
-                    // 2. Walk the chain for multi-level nesting
-                    int depth = calculate_chain_depth(current_fn, owner_fn);
-                    // First link already loaded above, so start from 1
-                    for (int i = 1; i < depth; i++) {
-                        // Each parent also has __static_link at offset -1 (8
-                        // bytes below bp) parent's __static_link is at
-                        // parent_bp + (-1 * 8) = parent_bp - 8
-                        emit_addi3(vm, dest_reg, dest_reg,
-                                   -8); // parent's __static_link slot
-                        emit_rr(vm, LDR_D, dest_reg,
-                                dest_reg); // Load grandparent's bp
-                    }
-
-                    // 3. Now dest_reg contains owner_fn's bp, add variable's
-                    // offset Variable offsets are in slots, so multiply by 8
-                    // bytes
-                    emit_addi3(vm, dest_reg, dest_reg, node->var->offset * 8);
+                    // Accessing outer function's variable via static chain.
+                    // #1076: shared with the block-literal capture loop
+                    // (codegen_expr.c) via emit_static_chain_var_addr.
+                    emit_static_chain_var_addr(vm, current_fn, owner_fn,
+                                                node->var, dest_reg);
                 } else {
                     // Normal local variable access
                     // For struct/union (and vector, #714) parameters, the

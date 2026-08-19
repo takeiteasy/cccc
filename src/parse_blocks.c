@@ -359,8 +359,17 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     if (saved_locals)
         collect_captures_in_node(vm, block_fn->body, saved_locals, &captures,
                                  &num_captures, &cap_capacity);
-    // Levels 1+: walk block ancestor chain via block_outer_locals snapshots
-    for (Obj *anc = outer_fn; anc && anc->is_block && anc->block_outer_locals;
+    // Levels 1+: walk the ancestor chain via block_outer_locals snapshots.
+    // #1076: keyed off is_nested rather than is_block deliberately -- a
+    // block literal defined inside a *genuine* nested function must still
+    // climb past it to reach a variable owned by that function's own
+    // ancestor (parse_decl.c now records block_outer_locals for nested
+    // functions too, mirroring what block_literal() already does for
+    // blocks). This is the one ancestor-walk in the compiler where
+    // is_block/is_nested should NOT be narrowed to is_block alone -- unlike
+    // #1074's fix, which deliberately excluded is_block from every "is this
+    // genuinely nested" check it added.
+    for (Obj *anc = outer_fn; anc && anc->is_nested && anc->block_outer_locals;
          anc = anc->parent_fn)
         collect_captures_in_node(vm, block_fn->body, anc->block_outer_locals,
                                  &captures, &num_captures, &cap_capacity);

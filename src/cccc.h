@@ -2022,7 +2022,13 @@ struct Obj {
     bool is_block;            // True if this is a block's synthetic function
     Obj **captures;           // Array of captured outer variables
     int num_captures;         // Number of captured variables
-    struct Obj *block_outer_locals; // Parent scope's locals at block creation time (for transitive capture)
+    struct Obj *block_outer_locals; // Parent scope's locals at definition time
+                        // (for transitive capture). Set for block literals
+                        // (parse_blocks.c) and, since #1076, for genuine
+                        // nested functions too (parse_decl.c) -- both feed
+                        // the same ancestor climb in block_literal() so a
+                        // block defined inside a nested function can reach a
+                        // variable owned by that function's own ancestor.
     bool is_block_var;        // True if declared with __block storage qualifier
     Obj *block_desc_of; // #965: for a block literal's descriptor local
                         // (Node.block_desc_var), the block function it

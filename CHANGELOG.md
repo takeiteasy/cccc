@@ -113,6 +113,18 @@ All notable changes to CCCC are documented here. Format loosely follows
   at the copy (`gen_function`, `src/codegen_func.c`). This was also the
   actual root cause behind a previously-filed `va_list`-forwarding
   divergence report, whose stated premise had it backwards (#1078).
+- A block literal defined inside a genuinely nested function, capturing a
+  variable owned by one of that function's own ancestors (not the nested
+  function's own local), silently miscompiled -- the variable's address was
+  chased through the block's own `__static_link`, which holds a descriptor
+  pointer rather than a frame base pointer, reading garbage bytes. Fixed in
+  two parts: the block's capture-collection ancestor climb now walks
+  through a genuinely nested enclosing function the same way it already
+  walked through an enclosing block (`parse_blocks.c`/`parse_decl.c`), and
+  the block's descriptor-population codegen gained the matching
+  static-link-chase source arm it was missing (`codegen_expr.c`, sharing
+  `gen_addr`'s own chase via a new `emit_static_chain_var_addr()` helper in
+  `codegen_addr.c`) (#1076).
 
 ## [0.2.15] - 2026-08-15
 

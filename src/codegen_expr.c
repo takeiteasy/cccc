@@ -3531,6 +3531,16 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
             int enc_cap_idx = (enc_fn && enc_fn->is_block)
                               ? find_capture_index(enc_fn, cap) : -1;
+            // #1076: when the enclosing function is itself genuinely nested
+            // (not a block -- a block ancestor's own transitive captures are
+            // already covered by enc_cap_idx above), this capture may be
+            // owned by one of *its* ancestors rather than living directly in
+            // its own frame, reachable only by chasing enc_fn's own
+            // __static_link, not a plain bp+offset of enc_fn's frame. Mirrors
+            // gen_addr's identical ND_VAR case (codegen_addr.c) via the
+            // shared emit_static_chain_var_addr.
+            Obj *outer_owner = (enc_cap_idx < 0 && cap->is_local && enc_fn)
+                                ? belongs_to_outer_function(enc_fn, cap) : NULL;
             bool wide_copy = !cap->is_block_var && cap->ty->kind != TY_VLA &&
                               block_capture_needs_mcpy(cap->ty);
 
@@ -3553,15 +3563,25 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // holds the aggregate's bytes inline, same as any other
                 // capture source.
             } else if (cap->is_block_var) {
-                // __block var directly in enclosing stack: copy heap pointer.
-                // Slot address only feeds the immediate load (#676).
-                emit_lea3_internal(vm, r_val, cap->offset);
+                // __block var: copy heap pointer. Either directly in the
+                // enclosing frame (slot address only feeds the immediate
+                // load, #676) or, per #1076, owned by one of enc_fn's own
+                // ancestors -- reached via the static-link chase instead.
+                if (outer_owner)
+                    emit_static_chain_var_addr(vm, enc_fn, outer_owner, cap, r_val);
+                else
+                    emit_lea3_internal(vm, r_val, cap->offset);
                 emit_rr(vm, LDR_D, r_val, r_val);
             } else if (cap->is_local) {
-                // Regular local directly in enclosing stack: copy value.
-                // Slot address only feeds the immediate load (#676) unless
-                // it's the MCPY source address itself (wide_copy).
-                emit_lea3_internal(vm, r_val, cap->offset);
+                // Regular local: copy value. Either directly in the
+                // enclosing stack (slot address only feeds the immediate
+                // load, #676, unless it's the MCPY source address itself,
+                // wide_copy) or, per #1076, owned by one of enc_fn's own
+                // ancestors -- reached via the static-link chase instead.
+                if (outer_owner)
+                    emit_static_chain_var_addr(vm, enc_fn, outer_owner, cap, r_val);
+                else
+                    emit_lea3_internal(vm, r_val, cap->offset);
                 // #994: a struct/union/vector/wide-_BitInt/_Decimal
                 // *parameter*'s frame slot holds a pointer to the value,
                 // not the value's own bytes -- same ABI fact gen_addr's

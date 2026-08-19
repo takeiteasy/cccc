@@ -113,6 +113,8 @@ typedef struct {
 
 bool addr_is_local_frame(VirtualMachine *vm, Node *node);
 Obj *belongs_to_outer_function(Obj *current_fn, Obj *var);
+void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
+                                 Obj *owner_fn, Obj *var, int dest_reg);
 void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr, bool dangling_check);
 void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg);
 bool block_capture_needs_mcpy(Type *ty);
