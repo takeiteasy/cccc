@@ -4354,11 +4354,93 @@ def case_nested_decl_binding_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     NESTED_DECL_BINDING_PROGRAM)
 
 
+NESTED_FN_PROGRAM = (
+    "static int outer_no_upvar(int base) {\n"
+    "    int inner_no_upvar(int x) { return x * 2; }\n"
+    "    return inner_no_upvar(base);\n"
+    "}\n"
+    "static int outer_rw_local(void) {\n"
+    "    double v = 3.14;\n"
+    "    void set_v(double val) { v = val; }\n"
+    "    set_v(99.9);\n"
+    "    return (v == 99.9) ? 1 : 0;\n"
+    "}\n"
+    "static int outer_multilevel(void) {\n"
+    "    int g = 5;\n"
+    "    int mid(int m) {\n"
+    "        int inner_multilevel(int n) { return n + g; }\n"
+    "        return inner_multilevel(m) * 2;\n"
+    "    }\n"
+    "    return mid(10);\n"
+    "}\n"
+    "static int outer_recursive(void) {\n"
+    "    int fact(int n) {\n"
+    "        if (n <= 1) return 1;\n"
+    "        return n * fact(n - 1);\n"
+    "    }\n"
+    "    return fact(5);\n"
+    "}\n"
+    "static int outer_siblings(void) {\n"
+    "    int a = 1, b = 2;\n"
+    "    int get_a(void) { return a; }\n"
+    "    int get_b(void) { return b; }\n"
+    "    int sum_siblings(void) { return get_a() + get_b(); }\n"
+    "    return sum_siblings();\n"
+    "}\n"
+    "int main(void) {\n"
+    "    if (outer_no_upvar(21) != 42) return 1;\n"
+    "    if (outer_rw_local() != 1) return 2;\n"
+    "    if (outer_multilevel() != 30) return 3;\n"
+    "    if (outer_recursive() != 120) return 4;\n"
+    "    if (outer_siblings() != 3) return 5;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_nested_fn_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  110: -c=native had no nested-function-aware call-site logic "
+          "at all (grep -n is_nested src/serialize.c returned nothing) -- "
+          "a genuine GNU nested function (Obj.is_nested, not an Apple "
+          "block) is hoisted to file scope with a synthesized `void "
+          "*__static_link` first parameter (the parser already puts a "
+          "real param Obj there, parse_decl.c), but no call site ever "
+          "passed it, and a reference to an enclosing function's local "
+          "from inside a nested body printed as a bare identifier that "
+          "doesn't exist at file scope (#1074). Fixed by lowering nested "
+          "functions the same way Apple blocks already are (#965): one "
+          "`struct __cccc_nenv_<name>` env struct per function that "
+          "directly parents a nested function, an instance declared and "
+          "populated at the top of its own body, every direct call "
+          "passing the right env pointer as the static link (its own env "
+          "for a direct child, a chase through ->__up -- mirroring "
+          "codegen_expr.c's calling_nested walk exactly -- for a sibling "
+          "or an ancestor's nested function), and an outer local/param "
+          "reference rewritten to `(*env->__uvK)`. Exercises: no upvars "
+          "at all; read+write of an outer *local* (not a global, which "
+          "needs no static-link help); two-level nesting (the ->__up "
+          "chase); recursion (forwarding one's own static link "
+          "unchanged); and sibling nested functions calling each other. "
+          "Asserts the -m output actually threads a static-link argument "
+          "through, not just that the program happens to still run.")
+    src = Path(tmp) / "nested_fn_1074.c"
+    write(src, NESTED_FN_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "__static_link" not in m_result.stdout or "__cccc_nenv" not in m_result.stdout:
+        print("    FAIL: -m output doesn't thread a static-link argument "
+              "through nested-function call sites\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "nested_fn_1074", NESTED_FN_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4475,6 +4557,7 @@ def main() -> int:
             case_native_explicit_std_probed,
             case_nested_decl_binding_native_round_trip,
             case_mb_cur_max_native_round_trip,
+            case_nested_fn_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

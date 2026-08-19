@@ -169,6 +169,25 @@ typedef struct {
     char *env_struct_name; // includes the leading "struct " keyword
 } BlockEnvEntry;
 
+// #1074: the native-serializer mirror of a GNU nested function's static
+// link. One entry per function that directly parents at least one
+// Obj.is_nested function -- even a function whose own locals are never
+// referenced by a descendant still needs an entry (with an empty upvars
+// list) purely to carry `__up` for an intervening level of a multi-level
+// nest. `upvars` holds `owner_fn`'s own locals/params that some nested
+// descendant (at any depth) reads or writes, in first-seen order -- that
+// order is also each var's field index (`__uv<index>`). Built once in
+// serialize_nested_preamble(), read-only afterward; mirrors BlockEnvEntry/
+// serialize_block_preamble()'s shape exactly, just keyed by the parent
+// function instead of the block literal.
+typedef struct {
+    Obj *owner_fn;
+    char *env_struct_name; // includes the leading "struct " keyword
+    Obj **upvars;
+    int upvars_len;
+    int upvars_cap;
+} NestedEnvEntry;
+
 // #1005: break/continue lower to an ND_GOTO with only `unique_label` set (a
 // non-C-identifier ".L..N" string, parse.c's new_unique_name()) -- a source
 // `goto` sets `label` instead. Serializing such an ND_GOTO back to a literal
@@ -232,6 +251,16 @@ typedef struct {
     BlockEnvEntry *block_envs;
     int block_envs_len;
     int block_envs_cap;
+    // #1074: nested-function env structs -- see NestedEnvEntry and
+    // serialize_nested_preamble(). Built (and every illegal non-call
+    // reference to a nested function rejected) entirely during that one
+    // preamble pass, before any function body is actually emitted -- so
+    // serialize_expr's own ND_VAR/ND_FUNCALL arms never need to re-derive
+    // "is this reference legal", only "what does a known-legal one print
+    // as".
+    NestedEnvEntry *nested_envs;
+    int nested_envs_len;
+    int nested_envs_cap;
     // #989: types promoted from function-local to file scope (a block
     // capture's own struct/union/enum type declared inside a function,
     // needed because its lifted environment struct is emitted at file
@@ -1433,6 +1462,87 @@ static bool serialize_block_capture_ref(FILE *f, SerializeContext *ctx, Obj *var
     return true;
 }
 
+// #1074: the env struct name serialize_nested_preamble() paired with
+// `owner_fn`, or a defensive placeholder if somehow missing (every function
+// that directly parents a nested function gets an entry -- see
+// NestedEnvEntry's comment).
+static const char *find_nested_env_name(SerializeContext *ctx, Obj *owner_fn) {
+    for (int i = 0; i < ctx->nested_envs_len; i++)
+        if (ctx->nested_envs[i].owner_fn == owner_fn)
+            return ctx->nested_envs[i].env_struct_name;
+    return "struct __cccc_nenv_?";
+}
+
+// #1074: builds a C expression, of type `<target>'s own env struct> *`,
+// giving the address of `target`'s env struct instance as seen from inside
+// `from_fn`'s own serialized body -- `from_fn` must be nested and `target`
+// must be `from_fn`'s immediate parent or a stricter ancestor of it (never
+// `from_fn` itself; callers already special-case that, since it just means
+// "my own env", `&__cccc_nenv`, with nothing to chase).
+//
+// Mirrors codegen_expr.c's calling_nested static-link chase
+// (:2938-2960) exactly: `from_fn`'s own `__static_link` parameter already
+// *is* a pointer to its immediate parent's env (untyped `void *`, so it
+// only needs a cast); reaching a stricter ancestor means walking that
+// env's own `__up` field once per intervening level, casting at each hop.
+static char *nested_env_ptr_expr(VirtualMachine *vm, SerializeContext *ctx,
+                                 Obj *from_fn, Obj *target) {
+    Obj *p = from_fn->parent_fn;
+    char *expr = arena_format(vm, "((%s *)__static_link)",
+                              find_nested_env_name(ctx, p));
+    while (p != target) {
+        p = p->parent_fn;
+        expr = arena_format(vm, "((%s *)%s->__up)",
+                            find_nested_env_name(ctx, p), expr);
+    }
+    return expr;
+}
+
+// #1074: when `var` is an upvar of the nested function currently being
+// serialized (ctx->current_fn) -- i.e. a local/param owned by one of its
+// ancestors, recorded by serialize_nested_preamble()'s analysis pass --
+// print the env-chase expression that reaches it and return true;
+// otherwise print nothing and return false so the caller falls back to the
+// variable's plain name (its own local/param, or a block capture, handled
+// separately above). Every legal upvar reference was already validated
+// (VLA/deferred-VLA-pointer/__block-storage locals rejected, see
+// serialize_nested_preamble()) by the time this ever runs.
+static bool serialize_nested_upvar_ref(FILE *f, VirtualMachine *vm,
+                                       SerializeContext *ctx, Obj *var) {
+    // is_block reuses is_nested for VM codegen purposes (parse_blocks.c) --
+    // a block's own outer-local reference is already fully handled by
+    // serialize_block_capture_ref() above, a distinct, already-correct
+    // mechanism; excluded here so it's never double-handled.
+    if (!ctx->current_fn || !ctx->current_fn->is_nested || ctx->current_fn->is_block)
+        return false;
+    for (Obj *v = ctx->current_fn->locals; v; v = v->next)
+        if (v == var)
+            return false; // owned by the nested function itself, not an upvar
+    Obj *owner = NULL;
+    for (Obj *anc = ctx->current_fn->parent_fn; anc; anc = anc->parent_fn) {
+        for (Obj *v = anc->locals; v; v = v->next)
+            if (v == var) { owner = anc; break; }
+        if (owner)
+            break;
+    }
+    if (!owner)
+        return false; // defensive only -- see the identical scan below
+    NestedEnvEntry *e = NULL;
+    for (int i = 0; i < ctx->nested_envs_len; i++)
+        if (ctx->nested_envs[i].owner_fn == owner) { e = &ctx->nested_envs[i]; break; }
+    if (!e)
+        return false; // defensive only -- owner must already have an entry
+    int idx = -1;
+    for (int i = 0; i < e->upvars_len; i++)
+        if (e->upvars[i] == var) { idx = i; break; }
+    if (idx < 0)
+        return false; // defensive only
+
+    fprintf(f, "(*%s->__uv%d)",
+            nested_env_ptr_expr(vm, ctx, ctx->current_fn, owner), idx);
+    return true;
+}
+
 // True when an ND_ALOAD/ND_ASTORE address expression has a pointee the
 // __atomic_* builtins accept. Mirrors codegen's ALDR/ASTR guard (1/2/4/8-byte
 // non-float pointee); anything else takes codegen's plain load/store fallback,
@@ -1678,6 +1788,9 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
                 serialize_string_n(f, node->var->init_data, len);
             } else if (serialize_block_capture_ref(f, ctx, node->var)) {
                 // #965: handled -- var is captured by the block literal
+                // currently being serialized.
+            } else if (serialize_nested_upvar_ref(f, vm, ctx, node->var)) {
+                // #1074: handled -- var is an upvar of the nested function
                 // currently being serialized.
             } else if (node->var->is_block_var) {
                 // #965: a __block local's stack slot now holds a heap box
@@ -2052,6 +2165,41 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
         }
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, "(");
+        // #1074: a direct call to a nested function needs its hidden
+        // __static_link argument supplied explicitly -- the parser already
+        // gave the callee's own signature a leading `void *__static_link`
+        // parameter (parse_decl.c), but nothing else ever passed it. Mirrors
+        // codegen_expr.c's calling_nested value selection exactly: calling
+        // one's own direct child passes that child's own env (declared as
+        // `__cccc_nenv` at the top of the function currently being
+        // serialized, ctx->current_fn -- see serialize_function); calling a
+        // sibling or an ancestor's nested function (only reachable from
+        // inside that ancestor's own nest, so ctx->current_fn must itself be
+        // nested) chases ->__up via nested_env_ptr_expr(). serialize_nested_
+        // preamble() has already rejected, at compile time, every reference
+        // to a nested function that ISN'T a direct callee, so `node->lhs`
+        // here is guaranteed to be exactly this shape whenever the check
+        // below matches.
+        if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+            node->lhs->var->is_function && node->lhs->var->is_nested &&
+            !node->lhs->var->is_block) {
+            Obj *callee_parent = node->lhs->var->parent_fn;
+            Obj *current_fn = ctx->current_fn;
+            fprintf(f, "(void *)");
+            if (callee_parent == current_fn)
+                fprintf(f, "&__cccc_nenv");
+            else if (current_fn && current_fn->is_nested && !current_fn->is_block)
+                fprintf(f, "%s",
+                        nested_env_ptr_expr(vm, ctx, current_fn, callee_parent));
+            else
+                // Unreachable in valid C (a nested function's name has block
+                // scope, only visible inside its own parent's nest) -- mirror
+                // codegen_expr.c's identical fallback rather than emit
+                // nothing.
+                fprintf(f, "&__cccc_nenv");
+            if (node->args)
+                fprintf(f, ", ");
+        }
         for (Node *arg = node->args; arg; arg = arg->next) {
             // #1042(b): a comma-expression argument (e.g. from a macro like
             // ivalue(r) that expands to one) must stay parenthesized here --
@@ -3149,6 +3297,30 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 serialize_type_decl(f, ctx, var->ty, var->name);
             }
             fprintf(f, ";\n");
+        }
+
+        // #1074: if `fn` directly parents at least one nested function,
+        // declare and initialize its env struct instance here -- after
+        // every ordinary local above so `&x` for an upvar field is always
+        // already-declared storage, and before the body so a call to a
+        // direct nested child (which reads `&__cccc_nenv`, see ND_FUNCALL's
+        // own #1074 comment) always finds it initialized first. `__up`
+        // carries `fn`'s own static link along for a deeper nest level to
+        // chase; a non-nested `fn` (there's nothing to chase further) still
+        // needs the field to exist so `struct __cccc_nenv_X`'s layout is
+        // fixed regardless of which level owns it, but its value there is
+        // never read.
+        for (int __ne_i = 0; __ne_i < ctx->nested_envs_len; __ne_i++) {
+            NestedEnvEntry *__ne = &ctx->nested_envs[__ne_i];
+            if (__ne->owner_fn != fn)
+                continue;
+            fprintf(f, "    %s __cccc_nenv;\n", __ne->env_struct_name);
+            fprintf(f, "    __cccc_nenv.__up = %s;\n",
+                    fn->is_nested ? "__static_link" : "(void *)0");
+            for (int __uv_i = 0; __uv_i < __ne->upvars_len; __uv_i++)
+                fprintf(f, "    __cccc_nenv.__uv%d = &%s;\n", __uv_i,
+                        __ne->upvars[__uv_i]->name);
+            break;
         }
 
         // Function body — unpack a single ND_BLOCK to avoid double-brace wrapping.
@@ -5412,6 +5584,279 @@ static bool obj_uses_block_type(Obj *obj) {
     return node_mentions_block(obj->body);
 }
 
+// #1074: does `var` belong to `fn`'s own locals list (which, for a
+// function Obj, always includes its params and __static_link too -- see
+// parse_decl.c's `fn->params = vm->compiler.locals;`)? Independent copy of
+// parse_analysis.c's identically-shaped (and identically-named-in-spirit)
+// var_in_fn_locals() -- that one is `static` in a different translation
+// unit, so it isn't reachable from here.
+static bool nested_var_is_own(Obj *fn, Obj *var) {
+    for (Obj *v = fn->locals; v; v = v->next)
+        if (v == var)
+            return true;
+    return false;
+}
+
+// #1074: find (or, on first use, create) `owner`'s NestedEnvEntry.
+static NestedEnvEntry *find_or_create_nested_env(VirtualMachine *vm,
+                                                 SerializeContext *ctx,
+                                                 Obj *owner) {
+    for (int i = 0; i < ctx->nested_envs_len; i++)
+        if (ctx->nested_envs[i].owner_fn == owner)
+            return &ctx->nested_envs[i];
+    if (ctx->nested_envs_len == ctx->nested_envs_cap) {
+        ctx->nested_envs_cap = ctx->nested_envs_cap ? ctx->nested_envs_cap * 2 : 8;
+        ctx->nested_envs = realloc(ctx->nested_envs,
+                                   sizeof(NestedEnvEntry) * ctx->nested_envs_cap);
+    }
+    NestedEnvEntry *e = &ctx->nested_envs[ctx->nested_envs_len++];
+    e->owner_fn = owner;
+    e->env_struct_name = arena_format(vm, "struct __cccc_nenv_%s", owner->name);
+    e->upvars = NULL;
+    e->upvars_len = 0;
+    e->upvars_cap = 0;
+    return e;
+}
+
+// #1074: record `var` (owned by `e`'s function) as an upvar if it isn't
+// already, returning its field index either way.
+static int add_nested_upvar(Obj ***upvars_out, int *len, int *cap, Obj *var) {
+    Obj **upvars = *upvars_out;
+    for (int i = 0; i < *len; i++)
+        if (upvars[i] == var)
+            return i;
+    if (*len == *cap) {
+        *cap = *cap ? *cap * 2 : 4;
+        upvars = realloc(upvars, sizeof(Obj *) * (*cap));
+        *upvars_out = upvars;
+    }
+    upvars[*len] = var;
+    return (*len)++;
+}
+
+// #1074: `node` (inside nested function `fn`'s own body) reads/writes
+// `var`, which -- per the caller's own scan -- belongs to some ancestor of
+// `fn`, not to `fn` itself. Reject the three shapes serialize_nested_
+// preamble()'s env-struct lowering cannot represent (each needs `&var` to
+// be a stable, already-valid address at the point the owning function's env
+// is initialized -- serialize_function's hoist loop, mirrored in the
+// comments below, is exactly what can't supply one for these), otherwise
+// find `var`'s owning ancestor and register it as an upvar of that
+// ancestor's env.
+static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
+                                Obj *fn, Node *node, Obj *var) {
+    Obj *owner = NULL;
+    for (Obj *anc = fn->parent_fn; anc; anc = anc->parent_fn) {
+        if (nested_var_is_own(anc, var)) { owner = anc; break; }
+    }
+    if (!owner)
+        return; // defensive only -- the real scope chain guarantees this
+
+    // #964: a VLA's declaration can't be hoisted ahead of the point it
+    // reads its own length expression -- serialize_function's hoist loop
+    // skips it for exactly this reason (see its own #964 comment), so no
+    // `&var` is available yet when the owning function's env would need to
+    // be initialized.
+    if (var->ty && var->ty->kind == TY_VLA) {
+        error_tok(vm, node->tok ? node->tok : fn->tok,
+                  "cannot serialize to native code: variable-length-array "
+                  "local '%s', read by a nested function, has no fixed "
+                  "address to hand across the static link (#1074)",
+                  var->name);
+        return;
+    }
+    // #973: same reasoning, for a pointer-to-VLA local whose own declarator
+    // reads a runtime variable and is likewise emitted in place rather than
+    // hoisted.
+    if (var->deferred_vla_ptr_init) {
+        error_tok(vm, node->tok ? node->tok : fn->tok,
+                  "cannot serialize to native code: pointer-to-VLA local "
+                  "'%s', read by a nested function, is declared too late "
+                  "for the static-link environment to capture its address "
+                  "(#1074)", var->name);
+        return;
+    }
+    // #965: a __block-storage local's own C storage is already a pointer
+    // (its slot holds the shared heap box), so `&var` here would be a
+    // pointer-to-pointer -- one level too many for the env field's plain
+    // `T *` type (which assumes ordinary storage).
+    if (var->is_block_var || var->block_desc_of) {
+        error_tok(vm, node->tok ? node->tok : fn->tok,
+                  "cannot serialize to native code: __block-storage local "
+                  "'%s' cannot also be captured by a nested function's "
+                  "static link (#1074)", var->name);
+        return;
+    }
+
+    NestedEnvEntry *e = find_or_create_nested_env(vm, ctx, owner);
+    add_nested_upvar(&e->upvars, &e->upvars_len, &e->upvars_cap, var);
+}
+
+// #1074: walks `fn`'s own body (a nested function) looking for two things:
+// a reference to a local/param owned by an ancestor (an "upvar", handed to
+// record_nested_upvar()), and a bare reference to another nested function's
+// Obj that ISN'T the direct callee of a call to it -- e.g. `int (*p)(int) =
+// inner;` or passing `inner` itself as a callback argument. The latter has
+// no portable spelling: the hoisted signature carries a leading
+// `__static_link` parameter no real function-pointer type can express, so
+// it's rejected here rather than serialized wrong. The one legal bare
+// reference (a direct call's own callee, handled by ND_FUNCALL's own
+// emission -- see the #1074 comment there) is a leaf ND_VAR node with
+// nothing beneath it to walk, so it's simply never descended into below,
+// rather than needing its own exemption flag.
+static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
+                                Obj *fn, Node *node) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_VAR && node->var) {
+            // #1074: the "is this an upvar of an ancestor" question only
+            // makes sense when `fn` is itself a nested function -- pass 2
+            // now walks EVERY function's body (including ordinary
+            // top-level functions and Apple block literals, is_block,
+            // which are their own separate Obj too) so the reference-check
+            // below reaches every context a bad reference could appear in,
+            // but a block's own capture of an outer local (block_fn's
+            // locals never include what it captures either, by the same
+            // shape) is a completely different, already-correct mechanism
+            // (serialize_block_capture_ref) -- not an upvar, and must not
+            // be misdetected as one here.
+            if (fn->is_nested && !fn->is_block && node->var->is_local &&
+                !nested_var_is_own(fn, node->var))
+                record_nested_upvar(vm, ctx, fn, node, node->var);
+            else if (node->var->is_function && node->var->is_nested &&
+                     !node->var->is_block)
+                error_tok(vm, node->tok ? node->tok : fn->tok,
+                          "cannot serialize to native code: a reference to "
+                          "nested function '%s' is only supported as the "
+                          "direct callee of a call to it -- its native "
+                          "signature carries a hidden static-link "
+                          "parameter, so it has no portable function-"
+                          "pointer type (#1074)", node->var->name);
+        }
+
+        // #1074 follow-up: a block literal directly inside a genuinely
+        // nested function (fn->is_nested && !fn->is_block) that captures a
+        // variable belonging to one of THAT function's own ancestors (an
+        // upvar of `fn`, not `fn`'s own local) has no correct native
+        // lowering here -- the block's own capture-copy code (ND_BLOCK_
+        // LITERAL's case in serialize_expr) prints a plain `cap->name`,
+        // which isn't nameable at file scope for a var owned outside `fn`.
+        // Confirmed empirically to already be a pre-existing, unrelated VM
+        // miscompile independent of native (wrong answer, not just a
+        // native-side gap) -- filed as a follow-up rather than designed
+        // around here; reject with a diagnostic instead of letting native
+        // silently emit it (segfaults in practice: an uninitialized/
+        // out-of-scope identifier reference).
+        if (node->kind == ND_BLOCK_LITERAL && fn->is_nested && !fn->is_block) {
+            for (int __bc_i = 0; __bc_i < node->num_block_captures; __bc_i++) {
+                Obj *cap = node->block_captures[__bc_i];
+                if (cap->is_local && !nested_var_is_own(fn, cap))
+                    error_tok(vm, node->tok ? node->tok : fn->tok,
+                              "cannot serialize to native code: a block "
+                              "literal inside a nested function capturing "
+                              "'%s', a variable owned by one of that "
+                              "function's own ancestors, is not supported "
+                              "(#1074 follow-up)", cap->name);
+            }
+        }
+
+        bool lhs_is_direct_nested_call =
+            node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
+            node->lhs->var && node->lhs->var->is_function &&
+            node->lhs->var->is_nested && !node->lhs->var->is_block;
+        if (!lhs_is_direct_nested_call)
+            collect_nested_refs(vm, ctx, fn, node->lhs);
+        collect_nested_refs(vm, ctx, fn, node->rhs);
+        collect_nested_refs(vm, ctx, fn, node->cond);
+        collect_nested_refs(vm, ctx, fn, node->then);
+        collect_nested_refs(vm, ctx, fn, node->els);
+        collect_nested_refs(vm, ctx, fn, node->init);
+        collect_nested_refs(vm, ctx, fn, node->inc);
+        collect_nested_refs(vm, ctx, fn, node->body);
+        collect_nested_refs(vm, ctx, fn, node->cas_addr);
+        collect_nested_refs(vm, ctx, fn, node->cas_old);
+        collect_nested_refs(vm, ctx, fn, node->cas_new);
+        for (Node *a = node->args; a; a = a->next)
+            collect_nested_refs(vm, ctx, fn, a);
+    }
+}
+
+// #1074: emits one `struct __cccc_nenv_<name> { void *__up; T0 *__uv0; ...
+// };` for every function that directly parents at least one nested
+// function -- even one with an empty upvars list still needs `__up`, to
+// carry an intervening level of a multi-level nest chain. Must run after
+// serialize_type_defs_for_owner(f, ctx, NULL) (file-scope types) so an
+// upvar whose own struct/union/enum type was declared inside a function can
+// be hoisted ahead of it here, mirroring #989's identical reasoning for a
+// block capture's type -- see hoist_local_type_to_file_scope()'s own
+// comment. Called from cc_serialize_program next to serialize_block_
+// preamble(), in both branches, at the same point in the emission order.
+static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
+                                      SerializeContext *ctx, Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        // is_block reuses is_nested for VM codegen purposes (parse_blocks.c)
+        // -- a block literal is not one of "our" nested functions (it has
+        // its own complete, separate lowering, #965) and must not trigger
+        // creating an env for its parent here.
+        if (!obj->is_function || !obj->is_nested || obj->is_block || !obj->body)
+            continue;
+        bool reachable = !ctx->generated_only || obj->is_macro_generated;
+        if (!reachable)
+            continue;
+        // Pass 1: guarantee obj->parent_fn has an entry regardless of
+        // whether it turns out to own any upvars -- an intervening level of
+        // a multi-level nest needs one purely to carry __up.
+        find_or_create_nested_env(vm, ctx, obj->parent_fn);
+    }
+    if (ctx->nested_envs_len == 0)
+        return;
+
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->body)
+            continue;
+        bool reachable = !ctx->generated_only || obj->is_macro_generated;
+        if (!reachable)
+            continue;
+        // Pass 2: collect each owner's upvars, and reject an unsupported
+        // bare reference to a nested function's value -- run over EVERY
+        // function's body, not just nested ones. The bad-reference check
+        // has no dependency on `obj` itself being nested (a nested
+        // function's own *enclosing* function, or an unrelated sibling, can
+        // just as easily write `int (*fp)(int) = inner;` or pass `inner` as
+        // a callback); nested_var_is_own()'s climb up `obj->parent_fn`
+        // naturally no-ops for a non-nested `obj` (parent_fn is NULL, the
+        // loop never runs, `owner` stays NULL, record_nested_upvar()
+        // returns immediately) so this is safe to run unconditionally.
+        collect_nested_refs(vm, ctx, obj, obj->body);
+    }
+
+    for (int i = 0; i < ctx->nested_envs_len; i++)
+        for (int j = 0; j < ctx->nested_envs[i].upvars_len; j++)
+            hoist_local_type_to_file_scope(f, vm, ctx,
+                                           ctx->nested_envs[i].upvars[j]->ty);
+
+    for (int i = 0; i < ctx->nested_envs_len; i++) {
+        NestedEnvEntry *e = &ctx->nested_envs[i];
+        fprintf(f, "%s {\n    void *__up;\n", e->env_struct_name);
+        for (int j = 0; j < e->upvars_len; j++) {
+            char field_name[16];
+            snprintf(field_name, sizeof(field_name), "__uv%d", j);
+            fprintf(f, "    ");
+            serialize_type_decl(f, ctx, pointer_to(vm, e->upvars[j]->ty), field_name);
+            fprintf(f, ";\n");
+        }
+        fprintf(f, "};\n\n");
+    }
+}
+
+// #1074: frees every NestedEnvEntry's own upvars array before freeing the
+// table itself -- the table's realloc'd blocks (env_struct_name is
+// arena-allocated, not heap) are the only per-entry heap allocation.
+static void free_nested_envs(SerializeContext *ctx) {
+    for (int i = 0; i < ctx->nested_envs_len; i++)
+        free(ctx->nested_envs[i].upvars);
+    free(ctx->nested_envs);
+}
+
 // #965: emits, once, everything a lowered block literal needs at file
 // scope: the common-initial-sequence `struct __cccc_block` every env
 // struct shares (so a block value's pointer type is well-defined
@@ -5750,6 +6195,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     if (generated_only && vm->compiler.emit_events_head) {
         serialize_type_defs_for_owner(f, &ctx, NULL);
         serialize_block_preamble(f, vm, &ctx, prog);
+        serialize_nested_preamble(f, vm, &ctx, prog); // #1074
         // #928: forward-declare every macro-generated global before any
         // definition, mirroring the #918 pass below (serialize_global_var's
         // sibling loop, further down this function) and for the same
@@ -5839,6 +6285,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         free(ctx.typedefs);
         free(ctx.captured_paths);
         free(ctx.block_envs);
+        free_nested_envs(&ctx);
         free(ctx.hoisted.data);
         free(ctx.emitted_defs.data);
         return;
@@ -5950,6 +6397,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     // type-def pass just above, so a capture's type (however it reaches the
     // output) is already visible.
     serialize_block_preamble(f, vm, &ctx, prog);
+    serialize_nested_preamble(f, vm, &ctx, prog); // #1074
 
     // #918: forward-declare every global before any definition, mirroring
     // the function-prototype pass below and for the same reason -- a
@@ -6113,6 +6561,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.typedefs);
     free(ctx.captured_paths);
     free(ctx.block_envs);
+    free_nested_envs(&ctx);
     free(ctx.hoisted.data);
     free(ctx.emitted_defs.data);
     free(ctx.enum_renames); // #1016: was missing from this list

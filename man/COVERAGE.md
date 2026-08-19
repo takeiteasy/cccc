@@ -193,7 +193,7 @@ language coverage figures apply.
 | Switch case ranges `case 1 ... 5:` | ✓ | A range overlapping another case label (range or scalar) is a compile error, same as a duplicate scalar case value |
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Empty structs and unions | ✓ | GNU extension; empty aggregates have size 0 |
-| Nested functions | ✓ | Access to parent-scope variables via static link |
+| Nested functions | ✓ | Access to parent-scope variables via static link. Serializes under `-c=native`/`-m`/`-c=generated` too (#1074) — see [Serialized-output divergences](#serialized-output-divergences) for the lowering shape and its residual gaps |
 | Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy. Serializes under `-c=native`/`-m`/`-c=generated` too (#965) — see [Serialized-output divergences](#serialized-output-divergences) for the lowering shape and its residual gaps |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) below |
 | `__thread` storage class | ✓ | TLS segment; per-thread private storage |
@@ -1212,13 +1212,41 @@ behaviour to fall back to. Rejected with a diagnostic naming the builtin
 (#969).
 
 A genuine GNU nested function (a function defined inside another function's
-body, not an Apple block literal) fails to *compile* under `-c=native`, not
-just diverge: its signature is hoisted to file scope with a synthesized
-`void *__static_link` first parameter, matching the VM's own ABI shape for a
-nested call, but no call site is ever taught to actually pass that argument
-— `serialize.c` has no nested-function-aware call-site logic at all. A real
-host compiler rejects the resulting call outright ("too few arguments to
-function call"). Open, tracked as #1074.
+body, not an Apple block literal) serializes by lowering to a plain C
+function plus an explicit environment struct, the same shape blocks already
+use (#965/#1074): every function that directly parents a nested function gets
+a `struct __cccc_nenv_<name> { void *__up; T0 *__uv0; ... }` at file scope
+(one pointer field per enclosing local/param any of its nested descendants,
+at any depth, actually reads or writes — `serialize_nested_preamble()`,
+`src/serialize.c`), an instance (`__cccc_nenv`) declared and populated at the
+top of its own body, and every direct call to a nested function passes the
+right env pointer as its (already-parser-synthesized) `void *__static_link`
+first parameter — its own env for a direct child, or a chase through
+`->__up` (mirroring `codegen_expr.c`'s `calling_nested` static-link walk
+exactly) for a sibling or an ancestor's nested function. An outer
+local/param reference from inside a nested body is rewritten to
+`(*env->__uvK)` instead of the bare (otherwise out-of-scope-at-file-scope)
+identifier.
+
+Three shapes have no portable lowering and are rejected with a diagnostic
+naming the construct, rather than serialized wrong, per this file's own
+"explicit diagnosed rejection, never silent divergence" rule: a
+variable-length-array local (or a not-yet-declared-at-that-point
+pointer-to-VLA local) read by a nested function, since its declaration can't
+be hoisted ahead of the point that would need `&var`; a `__block`-storage
+local likewise captured by a nested function, since its own C storage is
+already a pointer (one level too many for the env field's plain `T *`);
+and any bare reference to a nested function's own value that ISN'T the
+direct callee of a call to it (e.g. `int (*fp)(int) = inner;`, or passing
+`inner` as a callback) — the hoisted signature's extra leading
+`__static_link` parameter has no portable function-pointer type. A nested
+function defined *inside* an Apple block literal is supported (the block's
+own env chains via `->__up` exactly like an ordinary nested-in-nested case);
+a block literal defined inside a nested function that captures a variable
+owned by that function's *own* ancestor (not the nested function's own
+local) is not — confirmed to already be an unrelated, pre-existing VM
+miscompile independent of native, not a new native-only gap, so it is
+rejected rather than designed around. Closed, #1074.
 
 Blocks `^{ ... }` serialize by lowering to a plain C function plus an explicit
 environment struct (#965) — not by emitting `^{ }` verbatim, so no
