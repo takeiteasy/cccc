@@ -1,13 +1,30 @@
 /*
  * CCCC stub for Apple's Availability.h
- * 
+ *
  * This header provides empty definitions for Apple's availability macros.
  * These macros are used in macOS/iOS SDK headers to mark API availability
  * but are not needed for actual compilation - they just add metadata.
- * 
+ *
  * Since CCCC doesn't support the __attribute__((availability(...))) syntax,
  * we define all the macros as empty.
+ *
+ * #1083: this whole CCCC-flavored body (including the empty `#define
+ * __attribute__(x)` below) is only for CCCC's own preprocessing -- CCCC's
+ * tokenizer parses `__attribute__` as a builtin construct itself, so the
+ * macro only matters for the user's own system-header text. Under
+ * -c=native, run_native_backend() forwards -I./include to the real host cc
+ * verbatim (like any other non-owned header, see man/HEADERS.md), and a
+ * *real* preprocessor -- unlike CCCC's own tokenizer -- keeps that empty
+ * macro live for the rest of the translation unit: once a real SDK header
+ * chain (e.g. <stdio.h> -> sys/cdefs.h -> this file) pulls it in, every
+ * later __attribute__(...) in the user's own TU silently vanishes, no
+ * error, no warning. __CCCC__ is defined unconditionally by CCCC's own
+ * preprocessor before any header is read, so its absence here means a
+ * genuine host compiler is reprocessing this physical file -- hand off to
+ * the host's own real Availability.h in that case (guarded so this stays
+ * inert on hosts, e.g. Linux, with no such header at all).
  */
+#ifdef __CCCC__
 
 #ifndef __AVAILABILITY__
 #define __AVAILABILITY__
@@ -189,7 +206,23 @@
 #define __AVAILABILITY_INTERNAL__MAC_14_0
 #define __AVAILABILITY_INTERNAL__MAC_15_0
 
-/* Include AvailabilityMacros.h for MAC_OS_X_VERSION_* constants */
-/* We provide a stub for this too */
-
 #endif /* __AVAILABILITY__ */
+
+#else /* !__CCCC__: a genuine host compiler is reading this physical file --
+       * only possible during -c=native/-c=generated serializer replay via
+       * -I./include. Hand off to the host's own real Availability.h: macOS
+       * SDK headers reference __API_AVAILABLE(...) etc., which would
+       * otherwise be undefined function-like macros (a syntax error), and
+       * the empty `#define __attribute__(x)` above would otherwise strip
+       * every later __attribute__(...) in the user's own TU (#1083).
+       * Guarded on __has_include_next since a host with no real
+       * Availability.h at all (e.g. Linux) has nothing to hand off to --
+       * this branch is then simply empty, matching the pre-#1083 shape for
+       * a host that never defined __attribute__ away in the first place. */
+#ifdef __has_include_next
+#  if __has_include_next(<Availability.h>)
+#    include_next <Availability.h>
+#  endif
+#endif
+
+#endif /* __CCCC__ */

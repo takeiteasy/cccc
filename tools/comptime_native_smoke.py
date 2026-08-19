@@ -4640,11 +4640,75 @@ def case_ctor_dtor_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "ctor_dtor_native_1020", CTOR_DTOR_NATIVE_PROGRAM)
 
 
+ATTR_AFTER_STDIO_PROGRAM = (
+    "#include <stdio.h>\n"
+    "int ctor_ran;\n"
+    "int dtor_ran;\n"
+    "__attribute__((constructor)) void ctor(void) { ctor_ran = 1; }\n"
+    "__attribute__((destructor)) void dtor(void) { dtor_ran = 1; }\n"
+    "int main(void) {\n"
+    "    if (!ctor_ran) return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_attribute_survives_after_stdio_include(cccc: Path, tmp: str) -> bool:
+    print("  115: CCCC's own include/Availability.h stub did `#define "
+          "__attribute__(x)` (empty) unconditionally -- correct for CCCC's "
+          "own preprocessing (its tokenizer parses __attribute__ as a "
+          "builtin construct, never via macro expansion), but -c=native "
+          "forwards -I./include to the real host cc verbatim, and a *real* "
+          "preprocessor keeps that empty macro live for the rest of the "
+          "translation unit. Once <stdio.h> pulled in sys/cdefs.h -> "
+          "Availability.h, every later __attribute__(...) in the user's own "
+          "TU silently vanished -- no error, no warning -- including the "
+          "constructor/destructor attributes #1020 taught serialize.c to "
+          "emit. Confirmed directly: `cc -I<repo>/include -E` on a plain "
+          "__attribute__((noinline)) repro after #include <stdio.h> reduced "
+          "the attribute to nothing. Fixed by guarding both "
+          "include/Availability.h's own CCCC-flavored body and "
+          "include/sys/cdefs.h's Availability.h include on #ifdef __CCCC__, "
+          "handing off to the real host Availability.h (via "
+          "__has_include_next) otherwise (#1083). Deliberately passes an "
+          "explicit -I<repo>/include, like case 101 -- without it the "
+          "replayed #include <stdio.h> wouldn't resolve through CCCC's own "
+          "bundled headers at all and the case would pass vacuously. Makes "
+          "the stripping *observable*: the constructor sets a flag main's "
+          "return value depends on, so a stripped attribute means a "
+          "non-42 exit, not a silently-identical binary.")
+    src = Path(tmp) / "attr_after_stdio_1083.c"
+    write(src, ATTR_AFTER_STDIO_PROGRAM)
+    include_dir = cccc.parent / "include"
+
+    vm_result = run([str(cccc), "-I", str(include_dir), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out = Path(tmp) / "attr_after_stdio_1083_out"
+    compile_result = run(
+        [str(cccc), "-I", str(include_dir), "-c=native", "-o", out.name, src.name],
+        cwd=tmp,
+    )
+    if compile_result.returncode != 0:
+        print(f"    FAIL: native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4766,6 +4830,7 @@ def main() -> int:
             case_nested_fn_shadow_native_round_trip,
             case_f2i_native_round_trip,
             case_ctor_dtor_native_round_trip,
+            case_attribute_survives_after_stdio_include,
         ]
         results = [case(cccc, tmp) for case in cases]
 

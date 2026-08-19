@@ -466,13 +466,39 @@ host compiler reprocessing that text from scratch has never heard of them
 and fails outright (#1021).
 
 `include/fenv.h`, `include/errno.h`, `include/stdio.h`, `include/getopt.h`,
-and `include/stdint.h` handle this by guarding their whole CCCC-flavored
-body behind `#ifdef __CCCC__` (a macro CCCC's own preprocessor always
-defines before parsing any header, guest-side) and `#include_next`ing the
-host's own, self-contained header in the `#else` branch — taken only when a
-genuine, non-CCCC compiler reprocesses this exact physical file, which only
-happens during `-c=native`/`-c=generated` serializer replay with `-I`
-pointed at this directory. `#include_next` works correctly here because the
+`include/stdint.h`, `include/Availability.h`, and `include/sys/cdefs.h`
+handle this by guarding their whole CCCC-flavored body behind `#ifdef
+__CCCC__` (a macro CCCC's own preprocessor always defines before parsing
+any header, guest-side) and `#include_next`ing the host's own,
+self-contained header in the `#else` branch — taken only when a genuine,
+non-CCCC compiler reprocesses this exact physical file, which only happens
+during `-c=native`/`-c=generated` serializer replay with `-I` pointed at
+this directory.
+
+`Availability.h`/`sys/cdefs.h` are a distinct hazard within the same
+guard-shape family, worth calling out because the failure mode is silent
+rather than a compile error (#1083): `Availability.h`'s `#define
+__attribute__(x)` (empty — needed so a real macOS SDK header's
+`__attribute__((availability(...)))` calls don't choke CCCC's own tokenizer)
+is fine under CCCC's own preprocessing, since CCCC parses `__attribute__` as
+a builtin construct rather than expanding it as a macro. But a *real*
+preprocessor keeps an object/function-like macro definition live for the
+rest of the translation unit once it's seen — so once a real host header
+chain (`<stdio.h>` → `sys/cdefs.h` → this file, the common case) pulls this
+stub in, every later `__attribute__(...)` in the *user's own* source
+silently reduces to nothing, no error, no warning — including attributes
+`serialize.c` itself emits (constructor/destructor, #1020). Guarding the
+whole stub body on `__CCCC__` and handing off to the real host
+`Availability.h` (behind `#ifdef __has_include_next` / `#if
+__has_include_next(<Availability.h>)`, nested rather than a single `&&`
+condition — GCC has historically choked on the combined form, the same
+macOS-clang-passes/Linux-GCC-fails shape this batch keeps relearning, #1020/
+#1070/#1071) avoids the leak entirely; the `__has_include_next` guard keeps
+the hand-off inert on a host with no real `Availability.h` at all (e.g.
+Linux), where the branch is simply empty, matching the pre-fix shape for
+such a host. `sys/cdefs.h`'s own `#include <Availability.h>` line is guarded
+the same way, since that's the actual implicit pull-in path from real SDK
+headers. `#include_next` works correctly here because the
 file *was* reached via a real filesystem `#include` search (the `-I` that
 found it), so continuing the search *after* that directory lands on the
 real system header. Pick this treatment whenever there's no portable
