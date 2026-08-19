@@ -4245,6 +4245,76 @@ def case_flt_rounds_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     FLT_ROUNDS_PROGRAM)
 
 
+MB_CUR_MAX_PROGRAM = (
+    "#include <limits.h>\n"
+    "#include <locale.h>\n"
+    "#include <stdlib.h>\n"
+    "\n"
+    "int main(void) {\n"
+    "    setlocale(LC_ALL, \"C\");\n"
+    "    if (MB_CUR_MAX != 1) return 1;\n"
+    "    if (MB_CUR_MAX < 1 || MB_CUR_MAX > MB_LEN_MAX) return 2;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_mb_cur_max_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  109: -c=native, include/stdlib.h had no MB_CUR_MAX at all "
+          "(C17 7.22.1) -- unlike MB_LEN_MAX (limits.h, #1067, a "
+          "compile-time upper bound), MB_CUR_MAX is genuinely runtime/"
+          "locale-dependent (glibc: a function call, __ctype_get_mb_cur_"
+          "max(); macOS: a plain global, __mb_cur_max), so it needed an "
+          "accessor shim like errno/stdout/FLT_ROUNDS, not a plain macro "
+          "constant. CCCC never calls setlocale() itself and the guest's "
+          "own setlocale()/mblen()/mbtowc()/etc are all real host FFI "
+          "passthroughs, so the host process's locale already is the "
+          "guest's -- no separate locale model needed (#1069). Fixed by "
+          "__cccc_mb_cur_max (native_accessor_shims, src/serialize.c; "
+          "wrap_mb_cur_max, src/stdlib/stdlib.c for the VM side). Unlike "
+          "the errno/stdout/FLT_ROUNDS shims, this one does NOT resolve "
+          "the infinite-recursion trap by re-#include-ing <stdlib.h> a "
+          "second time -- a first attempt at giving stdlib.h its own "
+          "#include_next hand-off (the stdio.h/errno.h/fenv.h/math.h "
+          "pattern) chased the real host's own header chain deep enough "
+          "to hit a second, unrelated instance of #1054's own "
+          "-I./include shadowing hazard (a bundled sys/time.h -> "
+          "time.h -> clock_t collision with the real host's sys/types.h, "
+          "found via the real glibc container) -- no clean stopping "
+          "point, so the shim instead spells the host's own internal "
+          "accessor directly (verified against the real headers on both "
+          "hosts) and never touches <stdlib.h> a second time. Deliberately "
+          "passes an explicit -I<repo>/include itself, like case 101, so "
+          "both CCCC's own bundled stdlib.h AND (implicitly, since the "
+          "shim no longer depends on which one wins) the host's own get "
+          "exercised.")
+    src = Path(tmp) / "mb_cur_max_1069.c"
+    write(src, MB_CUR_MAX_PROGRAM)
+    include_dir = cccc.parent / "include"
+
+    vm_result = run([str(cccc), "-I", str(include_dir), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out = Path(tmp) / "mb_cur_max_1069_out"
+    compile_result = run(
+        [str(cccc), "-I", str(include_dir), "-c=native", "-o", out.name, src.name],
+        cwd=tmp,
+    )
+    if compile_result.returncode != 0:
+        print(f"    FAIL: native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+
+    print("    ok")
+    return True
+
+
 NESTED_DECL_BINDING_PROGRAM = (
     "int helper(int x) { return x + 1; }\n"
     "int main(void) {\n"
@@ -4288,7 +4358,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4404,6 +4474,7 @@ def main() -> int:
             case_flt_rounds_native_round_trip,
             case_native_explicit_std_probed,
             case_nested_decl_binding_native_round_trip,
+            case_mb_cur_max_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

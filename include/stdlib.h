@@ -3,7 +3,7 @@
 // that are registered in the VM's FFI and can be called directly
 
 #ifndef __STDLIB_H
-#define __STDLIB_H 
+#define __STDLIB_H
 
 #include "stddef.h"
 
@@ -111,5 +111,54 @@ extern int wctomb(char* s, wchar_t wc);
 extern size_t mbstowcs(wchar_t* pwcs, const char* s, size_t n);
 extern size_t wcstombs(char* s, const wchar_t* pwcs, size_t n);
 extern size_t memalignment(const void* p);
+
+// MB_CUR_MAX (C17 7.22.1, #1069): the max multibyte-char length for the
+// *current* locale -- unlike MB_LEN_MAX (limits.h, #1067, a compile-time
+// upper bound), this is genuinely runtime/locale-dependent, so it can't be
+// a plain macro constant. mblen/mbtowc/wctomb/mbstowcs/wcstombs above are
+// already real host FFI passthroughs (src/stdlib/stdlib.c), and setlocale
+// (locale.h) is too (src/stdlib/locale.c) -- CCCC itself never calls
+// setlocale, so the host process's locale already is the guest's, and
+// reading the host's own MB_CUR_MAX through an accessor shim (same
+// __cccc_stdout/__cccc_errno_ptr pattern as stdio.h/errno.h) is correct
+// with no separate locale model needed.
+//
+// Unlike stdout/errno/FLT_ROUNDS, the shim's own definition
+// (native_accessor_shims, src/serialize.c) does NOT reach the real
+// MB_CUR_MAX by `#include`-ing this header a second time: an earlier
+// attempt gave this header its own #ifdef __CCCC__ / #include_next
+// hand-off (the #1018/stdio.h/errno.h/fenv.h/math.h pattern) so the
+// shim's body could see the real host's own MB_CUR_MAX -- but that
+// #include_next chain, followed all the way down through the real host's
+// own <stdlib.h>, reaches other system headers (sys/types.h, and via it
+// sys/time.h) that CCCC also bundles its own unconditional (non-hand-off)
+// copies of, still shadowed by this same -I./include forwarding (#1054's
+// exact hazard, just one level deeper) -- e.g. real macOS's own
+// <_stdlib.h> pulls in <sys/time.h>, CCCC's own copy of which
+// unconditionally #includes CCCC's own top-level time.h and defines its
+// own `clock_t`, later colliding with the real host's `clock_t` once
+// sys/types.h's own hand-off reaches it too ("typedef redefinition").
+// Widening the hand-off to every header transitively reachable this way
+// has no clear stopping point, so the shim instead spells the host's
+// internal accessor directly (glibc: __ctype_get_mb_cur_max(), a function
+// call; macOS: __mb_cur_max, a plain global) rather than pulling in a
+// second copy of <stdlib.h> at all -- see native_accessor_shims for both
+// declarations, verified against the real headers on both hosts.
+//
+// #1063: this exact file is also what a native re-emission's replayed
+// `#include <stdlib.h>` resolves to (-I./include is searched ahead of the
+// system dirs) -- an unconditional `extern` here would conflict with the
+// `static` definition native_accessor_shims emits once the shim is
+// actually used ("static declaration follows non-static declaration"),
+// the same trap __cccc_errno_ptr/issignaling_f/etc already document.
+// Guarded on __CCCC__ (always defined while CCCC's own preprocessor
+// parses guest source; its absence means a genuine host compiler is
+// reprocessing this file during serializer replay) -- no #include_next
+// fallback needed, since the shim's own static body is a complete
+// definition that also serves as its own prototype.
+#ifdef __CCCC__
+extern size_t __cccc_mb_cur_max(void);
+#define MB_CUR_MAX (__cccc_mb_cur_max())
+#endif
 
 #endif

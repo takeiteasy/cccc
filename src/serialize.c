@@ -4223,6 +4223,42 @@ static const struct {
                           "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
                           "    return x == y;\n"
                           "}\n"},
+    // #1069: include/stdlib.h defines MB_CUR_MAX itself as a call to this
+    // shim (`#define MB_CUR_MAX (__cccc_mb_cur_max())`) -- same
+    // infinite-recursion trap as FLT_ROUNDS/isnan/etc above, since a
+    // replayed `#include <stdlib.h>` is what brings that macro into scope
+    // in the first place. Unlike those, this shim does NOT resolve the
+    // trap by re-#include-ing <stdlib.h> a second time: a first attempt at
+    // exactly that (giving stdlib.h its own #include_next hand-off, same
+    // shape as stdio.h/errno.h/fenv.h/math.h) chased the real host's own
+    // <stdlib.h> chain deep enough to hit an unrelated, pre-existing class
+    // of the SAME -I./include shadowing hazard #1054 first documented for
+    // setjmp.h -- e.g. real macOS's own <_stdlib.h> pulls in <sys/time.h>,
+    // and CCCC's own bundled (non-hand-off) copy of THAT header
+    // unconditionally #includes CCCC's own top-level time.h, defining a
+    // `clock_t` that later collides with the real one once sys/types.h's
+    // own chain reaches it too ("typedef redefinition"). That hand-off
+    // has no clean stopping point (fixing it would mean auditing every
+    // header transitively reachable from <stdlib.h> on every supported
+    // host), so instead this shim spells the host's own internal
+    // accessor directly, verified against the real headers on both hosts:
+    // glibc declares `extern size_t __ctype_get_mb_cur_max(void);`
+    // (/usr/include/stdlib.h, MB_CUR_MAX's own macro expansion); macOS
+    // declares `extern int __mb_cur_max;`, a plain global
+    // (/usr/include/_stdlib.h). src/stdlib/stdlib.c's wrap_mb_cur_max
+    // (the VM-side shim) instead just reads the VM's own host libc's
+    // MB_CUR_MAX macro directly -- no -I./include shadowing exists there,
+    // since it's compiled by the real host cc as part of CCCC itself, not
+    // reached through this serializer's own replay machinery.
+    {"__cccc_mb_cur_max",
+#if defined(__linux__)
+     "extern size_t __ctype_get_mb_cur_max(void);\n"
+     "static size_t __cccc_mb_cur_max(void) { return __ctype_get_mb_cur_max(); }\n"
+#else
+     "extern int __mb_cur_max;\n"
+     "static size_t __cccc_mb_cur_max(void) { return (size_t)__mb_cur_max; }\n"
+#endif
+    },
 };
 
 static void serialize_native_accessor_shims(FILE *f, Obj *prog) {

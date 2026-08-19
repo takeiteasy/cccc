@@ -530,17 +530,39 @@ compiler rejects the redeclaration outright. Where the rest of the header
 doesn't need the full `#include_next` treatment — because the shim body can
 be written in terms of a portable `__builtin_*` intrinsic instead of the
 macro name it's standing in for (`include/math.h`'s `__cccc_isnan_f`/etc,
-`include/float.h`'s `__cccc_flt_rounds`) — guarding just that one redundant
-`extern` declaration behind `#ifdef __CCCC__` is enough: the shim's own
-`static` definition, always emitted ahead of any use, serves as its own
-prototype. **Any new bundled header declaring a name that gets a
-`native_accessor_shims` entry needs one of these two treatments**, or it
-silently reintroduces this bug class the next time something exercises it
-under `-c=native`. This isn't hypothetical: #1052 added four new
-`native_accessor_shims` entries (`__cccc_issignaling_{f,d}`,
-`__cccc_iseqsig_{f,d}`) right alongside the already-guarded `__cccc_isnan_f`
-block in `include/math.h`, but didn't guard their own declarations —
-invisible until a real `-I./include` native run hit it (#1063).
+`include/float.h`'s `__cccc_flt_rounds`), or in terms of the *host's own*
+internal accessor spelled directly (`include/stdlib.h`'s `MB_CUR_MAX`
+shim, #1069: `__ctype_get_mb_cur_max()` on glibc, the plain global
+`__mb_cur_max` on macOS, verified against both hosts' real headers) —
+guarding just that one redundant `extern` declaration behind `#ifdef
+__CCCC__` is enough either way: the shim's own `static` definition, always
+emitted ahead of any use, serves as its own prototype. **Any new bundled
+header declaring a name that gets a `native_accessor_shims` entry needs
+one of these two treatments**, or it silently reintroduces this bug class
+the next time something exercises it under `-c=native`. This isn't
+hypothetical: #1052 added four new `native_accessor_shims` entries
+(`__cccc_issignaling_{f,d}`, `__cccc_iseqsig_{f,d}`) right alongside the
+already-guarded `__cccc_isnan_f` block in `include/math.h`, but didn't
+guard their own declarations — invisible until a real `-I./include` native
+run hit it (#1063).
+
+`MB_CUR_MAX`'s shim (#1069) is also a worked example of the full
+`#include_next` hand-off treatment turning out to be the *wrong* choice,
+worth recording since every other case in this file picked it: a first
+attempt gave `include/stdlib.h` its own hand-off (matching
+`stdio.h`/`errno.h`/`fenv.h`/`math.h`) so the shim body could read the real
+host's `MB_CUR_MAX` by `#include`-ing `<stdlib.h>` a second time — but that
+chased the real host's own `<stdlib.h>` deep enough to hit a *second,
+unrelated* instance of the same `-I./include`-shadowing hazard `setjmp.h`
+first documented (above): real macOS's own `<_stdlib.h>` pulls in
+`<sys/time.h>`, and CCCC's own bundled (non-hand-off) copy of that header
+unconditionally `#include`s CCCC's own top-level `time.h`, defining a
+`clock_t` that then collides with the real host's `clock_t` once
+`sys/types.h`'s own chain reaches it too ("typedef redefinition"). Widening
+the hand-off to cover every header transitively reachable this way has no
+clean stopping point — the shim spelling the host's internal accessor
+directly avoids the whole chain, and `include/stdlib.h` itself stays a
+plain, non-hand-off bundled header.
 
 `tools/audit_ffi.py`'s guard-presence check (`GUEST_ONLY_DECL_GUARDS`)
 whitelists `__CCCC__` as a condition that only means something to CCCC's own

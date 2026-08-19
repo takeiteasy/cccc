@@ -379,6 +379,16 @@ static long long wrap_putenv(long long string)                { return (long lon
 static long long wrap_mblen(long long s, long long n)        { return (long long)mblen((const char *)s, (size_t)n); }
 static long long wrap_mbtowc(long long pwc, long long s, long long n) { return (long long)mbtowc((wchar_t *)pwc, (const char *)s, (size_t)n); }
 static long long wrap_wctomb(long long s, long long wc)      { return (long long)wctomb((char *)s, (wchar_t)wc); }
+// #1069: MB_CUR_MAX (include/stdlib.h) reads the real host's own
+// MB_CUR_MAX -- glibc spells it as a function call
+// (__ctype_get_mb_cur_max()), macOS as a plain global (__mb_cur_max);
+// this wrapper hides that split from the guest exactly the way
+// __cccc_flt_rounds hides fegetround()'s FE_* mapping. CCCC never calls
+// setlocale() itself and the guest's own setlocale()/mblen()/mbtowc()/
+// etc are all real host passthroughs (this file, above; src/stdlib/
+// locale.c), so the host process's locale already is the guest's -- no
+// separate locale model needed.
+static long long wrap_mb_cur_max(void)                       { return (long long)MB_CUR_MAX; }
 
 // C23: free_sized/free_aligned_sized - a conforming implementation may
 // simply call free(), ignoring the size/alignment hints. Taken as a
@@ -544,4 +554,5 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "wctomb", (void*)wrap_wctomb, 2, 0);
     cc_register_cfunc(vm, "mbstowcs", (void*)mbstowcs, 3, 0);
     cc_register_cfunc(vm, "wcstombs", (void*)wcstombs, 3, 0);
+    cc_register_cfunc(vm, "__cccc_mb_cur_max", (void*)wrap_mb_cur_max, 0, 0);
 }
