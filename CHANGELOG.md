@@ -103,6 +103,16 @@ All notable changes to CCCC are documented here. Format loosely follows
   freed after the spawn. Separately, `parse_define()` used to split a
   `-D` argument's `NAME=VALUE` in place, permanently truncating the same
   string this reuses later — now splits via a bounded copy (#1065).
+- The VM's calling convention passed a struct/union by-value function
+  parameter as a raw pointer to the caller's own object, with no copy — a
+  write through the parameter inside the callee silently mutated the
+  caller's argument. Every real host C compiler, and `-c=native`, already
+  copied the argument; only the VM's own convention didn't. Fixed by
+  copying each struct/union parameter into a fresh frame-local scratch
+  slot in the callee's own prologue and rebinding the parameter to point
+  at the copy (`gen_function`, `src/codegen_func.c`). This was also the
+  actual root cause behind a previously-filed `va_list`-forwarding
+  divergence report, whose stated premise had it backwards (#1078).
 
 ## [0.2.15] - 2026-08-15
 

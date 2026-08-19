@@ -4436,11 +4436,57 @@ def case_nested_fn_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "nested_fn_1074", NESTED_FN_PROGRAM)
 
 
+STRUCT_BYVAL_PARAM_COPY_PROGRAM = (
+    "struct s1078 { long a; long b; char pad[24]; };\n"
+    "static void mutate(struct s1078 b) { b.a = 99; b.pad[0] = 1; }\n"
+    "int main(void) {\n"
+    "    struct s1078 s;\n"
+    "    s.a = 1;\n"
+    "    s.b = 2;\n"
+    "    s.pad[0] = 0;\n"
+    "    mutate(s);\n"
+    "    return (s.a == 1 && s.pad[0] == 0) ? 42 : 7;\n"
+    "}\n"
+)
+
+
+def case_struct_byval_param_copy(cccc: Path, tmp: str) -> bool:
+    print("  111: the VM's own calling convention passed a struct/union "
+          "by-value parameter as a raw pointer to the CALLER's own object, "
+          "with no copy -- a write through the parameter inside the callee "
+          "silently mutated the caller's argument (VM exit 7 on the repro "
+          "below, wrong; every real host C compiler, and -c=native, copies "
+          "the argument and would exit 42). This was also the actual root "
+          "cause behind #1062's inverted premise (va_list forwarded as a "
+          "parameter): the VM's aliasing behavior matched glibc's array-"
+          "decay semantics, not macOS's genuine by-value va_list, the "
+          "opposite of what #1062 assumed (#1078). Fixed in the callee's "
+          "own prologue (gen_function, src/codegen_func.c): each struct/"
+          "union param is copied into a fresh frame-local scratch slot "
+          "(alloc_wide_bitint_temp's per-function pool, the same one "
+          "vectors/decimals already use) via MCPY, and the param's own "
+          "slot is rebound to point at the copy instead of the caller's "
+          "object -- one site, no caller-side scratch-copy/CALLT-exclusion "
+          "complexity needed. Asserts the VM alone now returns 42 (not "
+          "just VM 42 -> native 42, since native was already correct).")
+    src = Path(tmp) / "struct_byval_param_copy_1078.c"
+    write(src, STRUCT_BYVAL_PARAM_COPY_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode} (parameter write "
+              f"leaked back into the caller's object)\n    {vm_result.stderr}")
+        return False
+
+    return _native_run_case(cccc, tmp, "struct_byval_param_copy_1078",
+                             STRUCT_BYVAL_PARAM_COPY_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4558,6 +4604,7 @@ def main() -> int:
             case_nested_decl_binding_native_round_trip,
             case_mb_cur_max_native_round_trip,
             case_nested_fn_native_round_trip,
+            case_struct_byval_param_copy,
         ]
         results = [case(cccc, tmp) for case in cases]
 

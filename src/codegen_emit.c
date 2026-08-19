@@ -179,7 +179,7 @@ Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
 
 // STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch,
 // for interior dangling-pointer resolution (#675). See man/SAFETY.md.
-static Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
+Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
     emit_word(vm, STKTAG);
     emit_word(vm, 0); // unused (no register operand)
     emit_i64(vm, offset);

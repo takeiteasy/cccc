@@ -171,6 +171,10 @@ Pc emit_lta3(VirtualMachine *vm, int rd, long long offset);
 Pc emit_ri(VirtualMachine *vm, int op, int rd, long long imm);
 Pc emit_rri(VirtualMachine *vm, int op, int rd, int rs, long long imm);
 Pc emit_rrrs_i(VirtualMachine *vm, int op, int rd, int base, int index, int scale, long long offset);
+// STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch
+// (#675/#1078). See emit_lea3_var's own comment for the escaping-aggregate
+// rationale; codegen_func.c's struct/union-by-value param copy shares it.
+Pc emit_stktag(VirtualMachine *vm, long long offset, long long size);
 Pc emit_word_ptr(VirtualMachine *vm);
 SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases, long *min_case, long *max_case, long *covered_values);
 SwitchCasePatch *find_switch_case(SwitchCasePatch *cases, int num_cases, Node *node);

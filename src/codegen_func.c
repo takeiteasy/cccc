@@ -152,6 +152,63 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         }
     }
 
+    // #1078: a struct/union-by-value parameter's slot holds a pointer to
+    // the CALLER's own addressable storage (gen_addr's by-pointer aggregate
+    // param branch, codegen_addr.c) -- nothing ever copied it, so a write
+    // through the parameter inside this function silently aliased the
+    // caller's argument for this function's whole lifetime. Every real
+    // host C compiler, and -c=native, copies the argument; only the VM's
+    // own calling convention didn't. Fixed here, once, in the callee's own
+    // prologue (rather than at each caller-side arg-passing site, #714's
+    // vector/decimal shape): copy each struct/union param into a fresh
+    // frame-local scratch slot and rebind the param's own slot to point at
+    // the copy instead of the caller's object. Every downstream reader
+    // (gen_addr's by-pointer param branch, addr_is_local_frame, the
+    // serializer, debug metadata) already treats the slot as "a pointer to
+    // the value" and is unaffected -- only the pointee moves into this
+    // frame. Safe to clobber A0-A2 for the MCPY here: ENT3 has already
+    // spilled every argument register into its own slot by this point.
+    for (Obj *param = fn->params; param; param = param->next) {
+        if ((param->ty->kind != TY_STRUCT && param->ty->kind != TY_UNION) ||
+            param->ty->size <= 0)
+            continue;
+        long long copy_off = alloc_wide_bitint_temp(
+            vm, (param->ty->size + 7) / 8);
+        int r_src = alloc_temp_reg();
+        // Slot address only feeds the immediate pointer load below (#676).
+        emit_lea3_internal(vm, r_src, param->offset);
+        emit_rr(vm, LDR_D, r_src, r_src); // caller's object address
+        emit_lea3_internal(vm, REG_A0, copy_off);   // copy dest
+        emit_mov3(vm, REG_A1, r_src);               // copy src
+        emit_li3(vm, REG_A2, param->ty->size);       // copy count
+        emit(vm, MCPY); // clobbers A0-A2
+        free_temp_reg(r_src);
+        // The copy is a genuine new object living at [copy_off,
+        // copy_off+size) in this frame -- if the original param's address
+        // was ever observed to escape (Obj->addr_escapes, set by
+        // mark_addr_escapes() over the whole function body before codegen
+        // runs, params included), mirror emit_lea3_var's own STKTAG
+        // treatment of an escaping aggregate local so an interior pointer
+        // derived from &param (e.g. __builtin_dynamic_object_size, #648) can
+        // still resolve against this frame's epoch. Without this, the copy
+        // is invisible to stack_interval_stab even though &param now points
+        // squarely inside it.
+        if (param->addr_escapes) {
+            emit_stktag(vm, copy_off, param->ty->size);
+            vm->compiler.frame_has_esc_agg = true;
+        }
+        // Rebind the param's slot to point at the copy, not the caller's
+        // object. emit_lea3_internal(copy_off) is recomputed since MCPY
+        // clobbered A0.
+        int r_dst = alloc_temp_reg();
+        emit_lea3_internal(vm, r_dst, copy_off);
+        int r_slot = alloc_temp_reg();
+        emit_lea3_internal(vm, r_slot, param->offset);
+        emit_rr(vm, STR_D, r_dst, r_slot);
+        free_temp_reg(r_slot);
+        free_temp_reg(r_dst);
+    }
+
     // Generate function body
     gen_stmt(vm, fn->body);
 
