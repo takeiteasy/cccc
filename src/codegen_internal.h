@@ -158,6 +158,7 @@ long long alloc_wide_bitint_temp(VirtualMachine *vm, int words);
 Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args);
 Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target);
 Obj *find_static_link_var(Obj *fn);
+int static_link_hop_bytes(VirtualMachine *vm);
 Obj *promoted_deref_target(VirtualMachine *vm, Node *node);
 Pc emit_addi3(VirtualMachine *vm, int rd, int rs, long long imm);
 Pc emit_i64(VirtualMachine *vm, long long val);

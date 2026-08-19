@@ -291,6 +291,20 @@ Obj *find_static_link_var(Obj *fn) {
     return NULL;
 }
 
+// Byte delta from a frame's bp to its own __static_link slot. It is always
+// the first param (new_lvar prepends -> head of the locals list -> receives
+// A0, src/parse_decl.c), so its slot is structurally -1, shifted one lower
+// (-2) when ENT3 reserves bp[-1] for the stack canary (#445,
+// assign_lvar_offsets's canary_bias, src/codegen_stmt.c). Identical to what
+// that frame's own static_link->offset carries, without depending on any
+// particular ancestor's codegen order -- #1082: every ancestor beyond the
+// first used to hardcode -8 here, which silently read the wrong slot (and
+// corrupted the chase, SIGSEGV) whenever --stack-canaries/-3 shifted every
+// frame one slot lower.
+int static_link_hop_bytes(VirtualMachine *vm) {
+    return -(1 + ((vm->flags & CCCC_STACK_CANARIES) ? 1 : 0)) * 8;
+}
+
 // Return the index of var in block_fn->captures (0-based), or -1 if not captured.
 // Descriptor slot = (index + 1) * 8 so that slot 0 (offset 0) stays the invoke ptr.
 int find_capture_index(Obj *block_fn, Obj *var) {
@@ -357,10 +371,13 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
 
     int depth = calculate_chain_depth(current_fn, owner_fn);
     // First link already loaded above, so start from 1.
+    int hop = static_link_hop_bytes(vm);
     for (int i = 1; i < depth; i++) {
-        // Each parent also has __static_link at offset -1 (8 bytes below bp):
-        // parent's __static_link is at parent_bp + (-1 * 8) = parent_bp - 8.
-        emit_addi3(vm, dest_reg, dest_reg, -8);
+        // Each parent also has its own __static_link, at hop bytes below its
+        // own bp (#1082: bp-1 without canaries, bp-2 with them -- a bare -8
+        // here silently read the wrong slot under --stack-canaries/-3 once
+        // depth reached 2).
+        emit_addi3(vm, dest_reg, dest_reg, hop);
         emit_rr(vm, LDR_D, dest_reg, dest_reg); // load grandparent's bp
     }
 

@@ -2951,11 +2951,14 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 if (static_link) {
                     emit_lea3_internal(vm, REG_A0, static_link->offset);
                     emit_rr(vm, LDR_D, REG_A0, REG_A0);
-                    // Walk chain if needed
+                    // Walk chain if needed. #1082: a bare -8 here silently
+                    // read the wrong slot under --stack-canaries/-3, which
+                    // shifts every frame's __static_link one slot lower
+                    // (static_link_hop_bytes, src/codegen_addr.c).
+                    int hop = static_link_hop_bytes(vm);
                     for (Obj *fn = current_fn->parent_fn;
                          fn && fn != callee_parent; fn = fn->parent_fn) {
-                        emit_addi3(vm, REG_A0, REG_A0,
-                                   -8); // static_link offset
+                        emit_addi3(vm, REG_A0, REG_A0, hop);
                         emit_rr(vm, LDR_D, REG_A0, REG_A0);
                     }
                 } else {
