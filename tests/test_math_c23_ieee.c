@@ -84,6 +84,8 @@ int main(void) {
     if (setpayloadsig(&ssig, 7.0) != 0) return 27;
     if (!issignaling(ssig)) return 28;
     if (setpayloadsig(&ssig, 0.0) == 0) return 29; // payload 0 -> would be Inf, must fail
+    if (ssig != 0.0) return 53; // #1079: failure must zero the destination (glibc-conforming)
+    if (setpayloadsig(&ssig, 7.0) != 0) return 54; // re-establish a signaling NaN for iseqsig below
 
     // llogb: like ilogb but returns long.
     if (llogb(8.0) != 3) return 30;

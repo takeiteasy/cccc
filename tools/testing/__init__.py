@@ -263,26 +263,6 @@ NATIVE_SKIP_TESTS = {
 
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
-
-    # test_math_c23_ieee.c: on top of NATIVE_SKIP_TESTS_MACOS's own
-    # macOS-only libm gap (#1037) below, #1066's fix unblocked forward
-    # progress far enough on Linux to expose a fourth, distinct blocker
-    # (#1079): cccc_setpayload_impl (src/stdlib/math.c) returns failure on
-    # setpayloadsig(&ssig, 0.0) without zeroing *ssig, unlike real glibc
-    # (spec-required: "if the payload was not successfully installed, zero
-    # is stored in *cx") -- ssig is left as the still-signaling NaN from
-    # the prior successful call, so the file's later iseqsig(ssig, ssig)
-    # check reads stale VM-only-conforming state and gets a different
-    # answer than real glibc would from the same call sequence. A VM-side
-    # correctness bug, not -c=native-specific, found only through native
-    # verification since no existing VM-only test inspects the destination
-    # after a failed setpayload*/setpayloadsig* call. Needed here (not just
-    # in NATIVE_SKIP_TESTS_MACOS) because this blocks the Linux round-trip
-    # too, for a reason unrelated to #1037's macOS-only libm gap.
-    "test_math_c23_ieee.c": "setpayload_impl doesn't zero the destination "
-                 "on a failed setpayload/setpayloadsig call, unlike real "
-                 "glibc (spec-required); a later iseqsig() check reads "
-                 "stale VM-only-conforming state, see COVERAGE.md (#1079)",
 }
 
 # Platform-specific -c=native skips, checked only when the running host
@@ -318,12 +298,26 @@ NATIVE_SKIP_TESTS_MACOS = {
     # and real glibc's choice (saturate) differs from CCCC's VM (return 0)
     # while both conform. RESOLVED (#1066, the test's over-specified value
     # checks relaxed to check FE_INVALID only; see include/math.h's
-    # fromfp/ufromfp comment and COVERAGE.md for the corrected contract).
-    # Only (1) remains, and it's macOS-only -- kept here (not the general
+    # fromfp/ufromfp comment and COVERAGE.md for the corrected contract). A
+    # fifth blocker (#1079) surfaced once (1)-(4) were fixed:
+    # cccc_setpayload_impl/cccc_setpayloadf_impl (src/stdlib/math.c) left
+    # the destination untouched on a failed setpayload*/setpayloadsig*
+    # call instead of zeroing it, unlike real glibc -- RESOLVED (#1079,
+    # both impls now zero the destination on every failure path). Only (1)
+    # remains, and it's macOS-only -- kept here (not the general
     # NATIVE_SKIP_TESTS table) now that Linux round-trips cleanly.
     "test_math_c23_ieee.c": "macOS libm lacks the C23 fmaximum/fminimum/"
                              "totalorder/etc family (#1037, WONT_FIX, "
                              "permanent platform gap)",
+    # test_setpayload_zero_1079.c: same #1037 platform gap as
+    # test_math_c23_ieee.c above -- Darwin's libm declares no setpayload/
+    # setpayloadf/setpayloadl/setpayloadsig/setpayloadsigf/setpayloadsigl
+    # at all, so the replayed real host <math.h> leaves every one of them
+    # an undeclared identifier under -c=native on macOS. Round-trips
+    # cleanly on Linux (glibc >= 2.35).
+    "test_setpayload_zero_1079.c": "macOS libm lacks setpayload/"
+                             "setpayloadsig and family entirely (#1037, "
+                             "WONT_FIX, permanent platform gap)",
     # test_aligned_alloc_vmheap.c: calls aligned_alloc(alignment, 128) for
     # alignment in {8,16,32,64,256} -- 128 is not a multiple of 256. C11
     # originally required size to be an integral multiple of alignment, but
