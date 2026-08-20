@@ -883,16 +883,10 @@ static bool member_needs_own_def(Type *mty) {
 // and constrains nothing, so it's not a useful edge target); if only an
 // incomplete match exists, report no edge at all.
 static int find_complete_def_index(TypeVec *defs, Type *ty) {
-    int incomplete_idx = -1;
-    for (int i = 0; i < defs->len; i++) {
-        if (!same_type_or_origin(defs->data[i], ty))
-            continue;
-        if (type_is_complete_tagged(defs->data[i]))
+    for (int i = 0; i < defs->len; i++)
+        if (same_type_or_origin(defs->data[i], ty) &&
+            type_is_complete_tagged(defs->data[i]))
             return i;
-        if (incomplete_idx < 0)
-            incomplete_idx = i;
-    }
-    (void)incomplete_idx;
     return -1;
 }
 
@@ -5339,6 +5333,12 @@ static void *open_libc_handle_for_probe(void) {
 #elif defined(__linux__)
         "/lib64/libc.so.6",
         "/lib/x86_64-linux-gnu/libc.so.6",
+        "/lib/aarch64-linux-gnu/libc.so.6", // glibc's aarch64 multiarch dir --
+                                            // find_libc() (src/vm.c) is
+                                            // missing this one too, but the
+                                            // trailing bare "libc.so.6" below
+                                            // still resolves it there via the
+                                            // dynamic linker's own search path
         "/lib/libc.so.6",
         "/usr/lib64/libc.so.6",
         "/usr/lib/libc.so.6",
@@ -5359,6 +5359,40 @@ static void *open_libc_handle_for_probe(void) {
     }
     return NULL;
 #endif
+}
+
+// #1042(c) regression found on Linux/glibc 2.39 (Ubuntu 24.04): glibc has
+// started exporting real symbols for some of the newer C23 <stdbit.h>
+// functions (confirmed directly -- `dlsym` finds `stdc_leading_zeros_ui`
+// there), so the probe below fired against a name that could never
+// actually collide -- `<stdbit.h>` is `is_cccc_supplied_only_header`, its
+// own `#include` is deliberately NEVER replayed to the host compiler
+// (test_serialize_polyfill_header_not_replayed.c's own point), so no real
+// declaration of that name ever reaches the emitted C for the host to see
+// a "static declaration follows non-static declaration" collision against
+// in the first place. Gate the whole probe on there being at least one
+// ACTUALLY-replayed (non-cccc-only, non-setjmp.h, non-conditional-shell)
+// `#include` anywhere in the program -- mirrors exactly the filter the
+// `#include`-replay loop itself applies (`cc_serialize_program`, below in
+// this file) -- so a program that never hands the host compiler a real
+// header at all (this test; also any program with zero `#include`s) can
+// never trip the probe, matching the actual hazard's own precondition.
+static bool line_is_conditional_directive(const char *line); // forward decl
+static bool any_real_include_replayed(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
+        char *line     = vm->compiler.emit_directives.data[i];
+        char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
+        if (!vm->compiler.emit_cccc && resolved &&
+            cc_file_is_cccc_only(vm, resolved))
+            continue;
+        if (!vm->compiler.emit_cccc && resolved &&
+            path_basename_is(resolved, "setjmp.h"))
+            continue;
+        if (!vm->compiler.emit_cccc && line_is_conditional_directive(line))
+            continue;
+        return true;
+    }
+    return false;
 }
 
 static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
@@ -5388,7 +5422,8 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
     // never actually a libc symbol collision candidate (dlsym would find
     // the process's own libc startup glue, not a real hazard), and renaming
     // it would break the emitted binary's entry point.
-    void *libc_handle = open_libc_handle_for_probe();
+    void *libc_handle =
+        any_real_include_replayed(vm) ? open_libc_handle_for_probe() : NULL;
 
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_static || obj->is_macro_generated || obj->name[0] == '.')

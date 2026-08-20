@@ -3681,20 +3681,36 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
             // shape reflection.h's own @generate_constructor hit) still
             // arrives here as separate TK_STR tokens. Concatenate any run of
             // them the same way, narrow-string only (an attribute name has
-            // no legitimate use for a wide/unicode literal).
-            size_t len  = strlen(p->str);
+            // no legitimate use for a wide/unicode literal, rejected below).
+            // Length comes from each token's own ty->array_len (the same
+            // source join_adjacent_string_literals() itself trusts), not
+            // strlen(str) -- str is the unescaped content and may legally
+            // contain an embedded NUL, which strlen would silently
+            // truncate at.
+            if (p->ty->base->size != 1)
+                error_tok(vm, p,
+                          "comptime(attribute(...)) attribute name must be a "
+                          "plain (narrow) string literal");
+            size_t len  = (size_t)p->ty->array_len - 1;
             Token *last = p;
             for (Token *t = p->next; t->kind == TK_STR; t = t->next) {
-                len  += strlen(t->str);
+                if (t->ty->base->size != 1)
+                    error_tok(vm, t,
+                              "comptime(attribute(...)) attribute name must "
+                              "be a plain (narrow) string literal");
+                len  += (size_t)t->ty->array_len - 1;
                 last  = t;
             }
-            char *name = arena_alloc(&vm->compiler.parser_arena, len + 1);
-            name[0]    = '\0';
+            char  *name = arena_alloc(&vm->compiler.parser_arena, len + 1);
+            size_t off  = 0;
             for (Token *t = p;; t = t->next) {
-                strcat(name, t->str);
+                size_t piece = (size_t)t->ty->array_len - 1;
+                memcpy(name + off, t->str, piece);
+                off += piece;
                 if (t == last)
                     break;
             }
+            name[off]       = '\0';
             *attribute_name = name;
             p               = skip(vm, last->next, ")");
             continue;

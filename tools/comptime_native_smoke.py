@@ -5038,6 +5038,8 @@ def case_offsetof_array_len_native_round_trip(cccc: Path, tmp: str) -> bool:
 
 
 STATIC_LIBC_COLLISION_PROGRAM = """
+#include <stdio.h>
+
 static int index(int base, int step) {
     return base + step * 2;
 }
@@ -5068,14 +5070,21 @@ def case_static_libc_collision_native_round_trip(cccc: Path, tmp: str) -> bool:
           "cc_load_libc()/find_libc() already use, deliberately never "
           "RTLD_DEFAULT/dlopen(NULL) (those also see the compiler process "
           "itself, making output depend on which cccc binary ran it) -- "
-          "gets the pass's existing '%s__cccc_dupN' rename. 'index' (a "
-          "legacy BSD function CCCC's own bundled string.h does not "
-          "declare, unlike getmode/<unistd.h> which this case deliberately "
-          "does NOT pass -I<repo>/include for, since the real repro needs "
-          "no header at all -- only a real host libc symbol) is used here "
-          "since it exists on every host this project supports. Asserts "
-          "-m output renames the static to 'index__cccc_dup', not a bare "
-          "'index' definition, plus VM 42 -> native 42.")
+          "gets the pass's existing '%s__cccc_dupN' rename. Gated on the "
+          "program actually replaying at least one real #include to the "
+          "host at all (any_real_include_replayed(), src/serialize.c) -- "
+          "found necessary after a Linux/glibc 2.39 regression where a "
+          "-c=native-only, never-replayed CCCC polyfill header's own "
+          "re-derived function collided with a newer real glibc symbol of "
+          "the same name with zero actual hazard, since nothing ever "
+          "declared it to the host in that case. This program's "
+          "'#include <stdio.h>' exists purely to satisfy that gate. "
+          "'index' (a legacy BSD function CCCC's own bundled string.h does "
+          "not declare, unlike getmode/<unistd.h>) is used as the "
+          "colliding name since it exists on every host this project "
+          "supports. Asserts -m output renames the static to "
+          "'index__cccc_dup', not a bare 'index' definition, plus "
+          "VM 42 -> native 42.")
     src = Path(tmp) / "static_libc_collision_1042.c"
     write(src, STATIC_LIBC_COLLISION_PROGRAM)
 

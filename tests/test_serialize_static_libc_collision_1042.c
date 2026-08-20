@@ -29,6 +29,22 @@
 // symbol in every host libc this project supports (glibc, macOS
 // libSystem), so the dlsym probe fires under the harness's default
 // invocation with no extra flags needed.
+//
+// The probe itself is gated on the program actually replaying at least one
+// real `#include` to the host compiler at all (any_real_include_replayed(),
+// src/serialize.c) -- found necessary after a Linux/glibc 2.39 regression:
+// a program with NO replayed include can never see this class of collision
+// in the first place (nothing ever declares the name to the host), so the
+// gate must stay off there or it churns unrelated output for no reason
+// (test_serialize_polyfill_header_not_replayed.c hit exactly this, its own
+// re-derived <stdbit.h> polyfill function colliding with a real, newer
+// glibc symbol despite <stdbit.h>'s own #include never being replayed at
+// all). This `#include <stdio.h>` is deliberately present, even though
+// nothing in this file's own body needs it, purely to satisfy that gate --
+// it's an ordinary, always-replayed header, matching the real minilua
+// repro's own shape (a real #include genuinely reaches the host compiler).
+
+#include <stdio.h>
 
 static int index(int base, int step) {
     return base + step * 2;
