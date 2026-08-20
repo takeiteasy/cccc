@@ -592,6 +592,13 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
 bool is_flonum(Type *ty);
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
+// #1095: const_expr()'s own body, but surfacing sizeof/_Alignof-of-a-
+// from_include-type provenance (Node.layout_ty/layout_is_align, #1031) to
+// the caller instead of discarding it with the node -- see
+// node_layout_const()/const_expr_layout()'s own comments (parse_analysis.c).
+bool node_layout_const(Node *node, Type **out_ty, bool *out_align);
+int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
+                          Type **out_ty, bool *out_align);
 // #815/#816: shared duplicate/overlapping case-label check -- used by the
 // switch-statement epilogue here and by the comptime reflection switch
 // builders in reflection.c.

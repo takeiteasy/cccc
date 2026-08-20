@@ -2820,6 +2820,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 // Use the enum's own type so size/signedness are correct for
                 // enums with a C23 underlying type (e.g. unsigned long).
                 num->ty = sc->enum_ty;
+                // #1095: propagate layout provenance from the enumerator's
+                // own `= sizeof(T)` (see VarScope.enum_layout_ty's own
+                // comment) so this USE, not just the enum body, flows
+                // through #1031's ND_NUM re-materialization in
+                // serialize_expr -- without this the body would print
+                // "N = sizeof(struct statfs)" while every reference to N
+                // printed the guest-folded literal.
+                num->layout_ty       = sc->enum_layout_ty;
+                num->layout_is_align = sc->enum_layout_is_align;
                 return num;
             }
         }

@@ -1189,6 +1189,16 @@ typedef struct EnumConstant {
                       wide underlying types). */
     struct EnumConstant
         *next;     /**< Pointer to the next enumerator in the linked list. */
+    // #1095: set alongside value (enum-specifier parsing, parse_types.c)
+    // when the enumerator's own `= expr` was a bare sizeof/_Alignof of a
+    // from_include type -- mirrors Type.array_len_layout_ty's own comment.
+    // value itself stays CCCC's own folded projection regardless; only
+    // serialize_enum_def() (the enum body) and a *use* of the enumerator
+    // (see VarScope.enum_layout_ty, parse_internal.h) read these.
+    // `struct Type *`, not the `Type` typedef -- that typedef isn't in
+    // scope yet this early in the file (Type itself is defined below).
+    struct Type *layout_ty;
+    bool         layout_is_align;
 } EnumConstant;
 
 /*!
@@ -1389,6 +1399,17 @@ struct Type {
     // Array
     int array_len;
     int static_min; // [static N] minimum required elements; 0 = no constraint
+    // #1095: set alongside array_len (by array_dimensions(), parse_types.c)
+    // when the dimension expression was a bare sizeof/_Alignof of a
+    // from_include type -- serialization-only, mirroring Node.layout_ty/
+    // layout_is_align (#1031). array_len/size themselves stay CCCC's own
+    // folded projection regardless (the VM path is byte-identical whether
+    // or not these are set); only serialize_type_decl's TY_ARRAY arm reads
+    // them, and only for the two declaration sites #1095 opted into
+    // (locals, and globals with no byte-image initializer -- see
+    // SerializeContext.allow_layout_dims's own comment).
+    Type *array_len_layout_ty;
+    bool  array_len_layout_is_align;
 
     // GNU vector_size vector (TY_VECTOR): lane count. `base` is the element
     // type, `size` is the total byte size (element size * vec_len).
@@ -1758,6 +1779,18 @@ struct Node {
     // Case
     long begin;
     long end;
+    // #1095: set alongside begin/end (stmt()'s "case" arm, parse_stmt.c)
+    // when the label's own value expression was a bare sizeof/_Alignof of a
+    // from_include type -- serialization-only, mirroring
+    // Type.array_len_layout_ty (#1031's own Node.layout_ty/layout_is_align
+    // pair, this is the case-label analog). begin/end themselves stay
+    // CCCC's own folded values regardless -- the switch dispatch itself
+    // (codegen, and this node's own case_next/default_case chain) always
+    // reads those, never these.
+    Type *case_begin_layout_ty;
+    Type *case_end_layout_ty;
+    bool  case_begin_layout_is_align;
+    bool  case_end_layout_is_align;
 
     // "asm" string literal
     char *asm_str;
@@ -3479,10 +3512,10 @@ typedef struct Compiler {
                           // compiles pay no extra overhead
     Node *gotos;          // Goto statements in current function
     Node *labels;         // Labels in current function
-    struct ObjSizeQuery *
-        objsize_queries;  // Pending __builtin_object_size(ptr,...)
+    struct ObjSizeQuery
+        *objsize_queries; // Pending __builtin_object_size(ptr,...)
                           // queries on malloc-tracked pointers in current
-                         // function; resolved by resolve_objsize_queries (#642)
+    // function; resolved by resolve_objsize_queries (#642)
     char *brk_label;           // Current break jump target
     char *cont_label;          // Current continue jump target
     int   cleanup_scope_depth; // number of active cleanup scopes (blocks with
@@ -3553,12 +3586,25 @@ typedef struct Compiler {
     HashMap cccc_only_files;  // filename -> (void*)1
     HashMap include_children; // filename -> StringArray* of #include'd child
                               // filenames
+    // #1096: files whose declarations came from one of CCCC's own bundled
+    // headers (get_std_header()'s embedded table, resolved either via the
+    // embedded fallback or an on-disk `-I./include` hit) -- as opposed to a
+    // real host header reached transitively through a replayed #include.
+    // The distinction matters for the bodiless-declaration prototype pass
+    // (serialize.c, #901): a declaration sourced from a *real* host header
+    // is genuinely supplied once that header's own #include is replayed,
+    // but one sourced from CCCC's bundled chain (e.g. bundled fcntl.h's own
+    // `#include "unistd.h"` declaring close()) is not -- the replayed
+    // `#include <fcntl.h>` resolves to the *host's* fcntl.h under
+    // -c=native, which may not declare it. See
+    // cc_file_is_cccc_bundled()/mark_cccc_bundled_file() in preprocess.c.
+    HashMap cccc_bundled_files; // filename/embedded-key -> (void*)1
     HashMap
-        emit_include_paths;   // auto-captured #include directive line text ->
-                              // resolved on-disk path, so run_native_backend's
-                              // re-emission filter can test
-                            // cc_file_is_cccc_only() against the path a line in
-                            // emit_directives actually resolved to
+        emit_include_paths;     // auto-captured #include directive line text ->
+                            // resolved on-disk path, so run_native_backend's
+                            // re-emission filter can test
+    // cc_file_is_cccc_only() against the path a line in
+    // emit_directives actually resolved to
 
     // #1050: Obj -> host-header records for libc functions a comptime
     // reflection-API builder called (e.g. memcpy()/strlen() via Serialize()
@@ -4683,6 +4729,8 @@ bool cc_is_source_define_name(VirtualMachine *vm, const char *name, int len);
 bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name,
                                    int len);                         // #893
 bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename); // #896
+bool cc_file_is_cccc_bundled(VirtualMachine *vm,
+                             const char     *filename);              // #1096
 bool cc_file_is_command_line_input(VirtualMachine *vm,
                                    const char     *name);            // #1006
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm);    // #1001

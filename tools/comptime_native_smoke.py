@@ -5238,11 +5238,157 @@ def case_static_label_table_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     STATIC_LABEL_TABLE_PROGRAM)
 
 
+CLOSE_NO_INCLUDE_DIR_PROGRAM = (
+    "#include <fcntl.h>\n"
+    "extern int close(int fd);\n"
+    "int main(void) {\n"
+    "    int f = 0;\n"
+    "    if (f)\n"
+    "        f = close(1);\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_bundled_header_bodiless_decl_no_include_dir(cccc: Path, tmp: str) -> bool:
+    print("  124: a bodiless `extern int close(int);` written in a primary "
+          "source file was silently dropped from -c=native/-m output "
+          "whenever the file also #include's a CCCC-bundled header -- "
+          "bundled fcntl.h's own `#include \"unistd.h\"` (the header that "
+          "actually declares close()) made the #901 bodiless-declaration "
+          "gate think the auto-captured `#include <fcntl.h>` already "
+          "supplied it, but the replayed #include resolves to the HOST's "
+          "own fcntl.h under -c=native, which never declares close() -- "
+          "'use of undeclared identifier close' (#1096). This case runs "
+          "with no -I./include (unlike this file's own default cccc, "
+          "which always has a repo ./include alongside it) so the "
+          "embedded src/std.c header table resolves fcntl.h, exactly the "
+          "invocation shape a copied binary with no include/ directory "
+          "hits -- the test harness's own tools/testing/native.py:87 "
+          "always passes -I./include, which is what let this ship "
+          "unnoticed. Fixed via Compiler.cccc_bundled_files "
+          "(cc_file_is_cccc_bundled()/mark_cccc_bundled_file(), "
+          "src/preprocess.c): a declaration sourced from CCCC's own "
+          "bundled header chain (not a real host header reached "
+          "transitively, which genuinely IS supplied once its own "
+          "#include replays) is emitted when its own header was never "
+          "itself replayed, gated on obj->is_used so an unrelated "
+          "unistd.h declaration the program never calls isn't also "
+          "dumped. Asserts -m output declares close(), plus VM 42 -> "
+          "native 42 with no -I./include on the compile step.")
+    src = Path(tmp) / "close_no_include_dir_1096.c"
+    write(src, CLOSE_NO_INCLUDE_DIR_PROGRAM)
+
+    # Deliberately no -I./include here -- see the case's own printed
+    # rationale. -m alone is enough to observe the emitted declaration.
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "close(" not in m_result.stdout:
+        print(f"    FAIL: -m output missing a 'close' prototype\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "close_no_include_dir_1096_rt",
+                                    CLOSE_NO_INCLUDE_DIR_PROGRAM)
+
+
+LAYOUT_CONST_SITES_PROGRAM = """
+#include <sys/mount.h>
+
+// A tagged enum with a variable actually declared of that type forces its
+// own body to be serialized -- a tagless enum used only for its constant's
+// VALUE (N below would otherwise never need its type's own definition
+// emitted at all) wouldn't exercise serialize_enum_def()'s own
+// re-materialization, only the propagated-to-every-USE half.
+enum Layout1095 { N = sizeof(struct statfs) };
+static enum Layout1095 g_enum_dummy;
+
+static char g_init[sizeof(struct statfs)] = {1};
+
+int main(void) {
+    char buf[sizeof(struct statfs)];
+    (void)buf;
+
+    unsigned long n = sizeof(struct statfs);
+    switch (n) {
+        case sizeof(struct statfs):
+            break;
+        default:
+            return 1;
+    }
+
+    if (N != (int)sizeof(struct statfs))
+        return 2;
+
+    (void)g_init;
+    (void)g_enum_dummy;
+    return 42;
+}
+"""
+
+
+def case_layout_const_sites_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  125: #1031's own residual -- a sizeof/_Alignof of a "
+          "from_include type re-materializes textually under -c=native "
+          "only when it survives as a bare expression node by the time "
+          "serialize_expr() runs; every other const_expr()/eval() "
+          "consumer kept only the folded int64_t and stayed folded "
+          "against CCCC's own (possibly stale) guest projection (#1095). "
+          "Closes three of those sites, sharing serialize_layout_const() "
+          "(factored out of #1031's own ND_NUM arm) rather than a "
+          "parallel copy: array dimensions (a LOCAL or an uninitialized "
+          "global only -- an initialized global's dimension stays folded "
+          "on purpose, since serialize_init_bytes' own byte image is "
+          "still sized off the folded value and the two must not "
+          "disagree), case labels, and enum values (propagated to every "
+          "USE of the enumerator too, not just its own declaration in "
+          "the enum body, via VarScope.enum_layout_ty -- and NOT "
+          "propagated to a later auto-incrementing enumerator that "
+          "depends on this one's value, which stays folded instead, the "
+          "same 'leave the inconsistent case folded' rule as the "
+          "initialized-global exclusion). Bitfield widths, "
+          "_Static_assert, and an initialized global's byte image remain "
+          "open -- see man/COVERAGE.md's own entry for why those three "
+          "are not merely deferred. Asserts -m output prints "
+          "'buf[sizeof(struct statfs)]', 'case sizeof(struct statfs)', "
+          "and 'N = sizeof(struct statfs)' rather than a folded literal "
+          "in each of the three sites, that the initialized global's own "
+          "dimension is DELIBERATELY still folded (the negative half of "
+          "this case), plus VM 42 -> native 42.")
+    src = Path(tmp) / "layout_const_sites_1095.c"
+    write(src, LAYOUT_CONST_SITES_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = m_result.stdout
+    if "buf[sizeof(struct statfs)]" not in out:
+        print(f"    FAIL: -m output missing re-materialized array "
+              f"dimension\n    {out}")
+        return False
+    if "case sizeof(struct statfs)" not in out:
+        print(f"    FAIL: -m output missing re-materialized case label\n"
+              f"    {out}")
+        return False
+    if "N = sizeof(struct statfs)" not in out:
+        print(f"    FAIL: -m output missing re-materialized enum value\n"
+              f"    {out}")
+        return False
+    # Negative half: an initialized global's own array dimension must stay
+    # folded -- its emitted byte image (serialize_init_bytes) is still
+    # sized off the folded value, so re-materializing only the dimension
+    # would make the two disagree (#1095's own scoping decision).
+    if "g_init[sizeof(struct statfs)]" in out:
+        print(f"    FAIL: an INITIALIZED global's dimension was "
+              f"re-materialized -- must stay folded\n    {out}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "layout_const_sites_1095_rt",
+                                    LAYOUT_CONST_SITES_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -5373,6 +5519,8 @@ def main() -> int:
             case_static_libc_collision_native_round_trip,
             case_layout_const_native_round_trip,
             case_static_label_table_native_round_trip,
+            case_bundled_header_bodiless_decl_no_include_dir,
+            case_layout_const_sites_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

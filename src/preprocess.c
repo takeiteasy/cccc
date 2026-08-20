@@ -433,6 +433,25 @@ bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename) {
     return result;
 }
 
+// #1096: mark `filename` (an embedded-header key or an on-disk path) as
+// resolving to one of CCCC's own bundled headers -- see
+// Compiler.cccc_bundled_files' own comment (src/cccc.h) for why this is a
+// distinct question from cc_file_is_cccc_only() above. No transitive
+// closure needed here (unlike cccc-only routing, "declared in a bundled
+// header" doesn't need to chase through further #includes) -- a straight
+// hashmap lookup keyed by the exact File.name the declaration's own token
+// carries is sufficient.
+static void mark_cccc_bundled_file(VirtualMachine *vm, const char *filename) {
+    if (!filename)
+        return;
+    hashmap_put(&vm->compiler.cccc_bundled_files, filename, (void *)1);
+}
+
+bool cc_file_is_cccc_bundled(VirtualMachine *vm, const char *filename) {
+    return filename &&
+           hashmap_get(&vm->compiler.cccc_bundled_files, filename) != NULL;
+}
+
 // #1006 (investigation, filed as part of #1005/#1006's fix): true when
 // `name` is the exact path of one of the files the user listed on the
 // command line, as opposed to a header any of them #included. This used to
@@ -5416,6 +5435,21 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         if (ac_include_line) // #896
                             hashmap_put(&vm->compiler.emit_include_paths,
                                         ac_include_line, path);
+                        // #1096: a bundled header quote-#including another
+                        // bundled header by relative path (fcntl.h's own
+                        // `#include "unistd.h"`) takes this early branch,
+                        // not the general search_include_paths() branch
+                        // further down that also marks bundled headers --
+                        // without this, `close()`'s Obj.tok would still
+                        // point at unistd.h and the #901 gate below would
+                        // still treat it as "supplied by the replayed
+                        // #include" even though it isn't (real bug this
+                        // ticket is about: `#include <fcntl.h>` replays to
+                        // the *host's* fcntl.h, which never declares
+                        // close()). get_std_header() identifies the target
+                        // by name, same test the on-disk branch below uses.
+                        if (get_std_header(filename))
+                            mark_cccc_bundled_file(vm, path);
                         tok = include_file(vm, tok, path, start->next->next,
                                            filename,
                                            start->file->is_system_header);
@@ -5489,6 +5523,16 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         if (is_cccc_supplied_only_header(filename))
                             mark_cccc_only_file(
                                 vm, embedded_header_key(vm, filename));
+                        // #1096: this whole branch is CCCC's own embedded
+                        // header table (try_embedded_std_header, above) --
+                        // unconditionally mark it bundled so a bodiless
+                        // declaration sourced from it (e.g. bundled
+                        // fcntl.h's own `#include "unistd.h"` declaring
+                        // close()) isn't mistaken for "supplied by the
+                        // user's own replayed #include" by the #901
+                        // prototype-suppression gate in serialize.c.
+                        mark_cccc_bundled_file(
+                            vm, embedded_header_key(vm, filename));
                         tok = include_embedded_header(
                             vm, tok, filename, embedded_src, start->next->next);
                         break;
@@ -5507,6 +5551,17 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // case the ticket described.
                 if (is_cccc_supplied_only_header(filename))
                     mark_cccc_only_file(vm, path ? path : filename);
+                // #1096: an on-disk hit (e.g. `-I./include`) for a name
+                // CCCC also bundles (get_std_header() != NULL, independent
+                // of wants_builtin_header()'s "prefer host" policy) is
+                // CCCC's own copy, not a real host header -- mark it the
+                // same way the embedded branch above does, so the #901
+                // prototype-suppression gate can tell the two apart
+                // regardless of which of the two resolution paths a given
+                // invocation took (this on-disk path is what the test
+                // harness's standard -I./include invocation always uses).
+                if (get_std_header(filename))
+                    mark_cccc_bundled_file(vm, path ? path : filename);
                 tok = include_file(vm, tok, path ? path : filename,
                                    start->next->next, filename,
                                    !is_dquote || found_in_sys);

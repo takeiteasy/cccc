@@ -409,24 +409,35 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_node(vm, ND_NULL_EXPR, tok);
         }
 
-        Node *node  = new_node(vm, ND_CASE, tok);
-        int   begin = const_expr(vm, &tok, tok->next);
+        Node *node                  = new_node(vm, ND_CASE, tok);
+        Type *begin_layout_ty       = NULL;
+        bool  begin_layout_is_align = false;
+        int   begin = const_expr_layout(vm, &tok, tok->next, &begin_layout_ty,
+                                        &begin_layout_is_align);
         int   end;
+        Type *end_layout_ty       = begin_layout_ty;
+        bool  end_layout_is_align = begin_layout_is_align;
 
         if (equal(tok, "...")) {
             // [GNU] Case ranges, e.g. "case 1 ... 5:"
-            end = const_expr(vm, &tok, tok->next);
+            end = const_expr_layout(vm, &tok, tok->next, &end_layout_ty,
+                                    &end_layout_is_align);
             if (end < begin)
                 error_tok(vm, tok, "empty case range specified");
         } else {
             end = begin;
         }
 
-        tok             = skip(vm, tok, ":");
-        node->label     = new_unique_name(vm);
-        node->lhs       = stmt_or_decl(vm, rest, tok);
-        node->begin     = begin;
-        node->end       = end;
+        tok         = skip(vm, tok, ":");
+        node->label = new_unique_name(vm);
+        node->lhs   = stmt_or_decl(vm, rest, tok);
+        node->begin = begin;
+        node->end   = end;
+        // #1095: see Node.case_begin_layout_ty's own comment.
+        node->case_begin_layout_ty       = begin_layout_ty;
+        node->case_end_layout_ty         = end_layout_ty;
+        node->case_begin_layout_is_align = begin_layout_is_align;
+        node->case_end_layout_is_align   = end_layout_is_align;
         node->case_next = vm->compiler.current_switch->case_next;
         vm->compiler.current_switch->case_next = node;
         return node;

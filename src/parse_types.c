@@ -781,7 +781,16 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
                      "variable-length arrays are a C99 extension");
         return vla_of(vm, ty, expr);
     }
-    Type *arr = array_of(vm, ty, eval(vm, expr));
+    // #1095: capture layout provenance from the *unfolded* node before
+    // array_of()'s own eval(vm, expr) discards it -- see
+    // node_layout_const()'s own comment (parse_analysis.c). Serialization-
+    // only: arr->array_len below is still the plain folded int, unchanged.
+    Type *layout_ty       = NULL;
+    bool  layout_is_align = false;
+    node_layout_const(expr, &layout_ty, &layout_is_align);
+    Type *arr                      = array_of(vm, ty, eval(vm, expr));
+    arr->array_len_layout_ty       = layout_ty;
+    arr->array_len_layout_is_align = layout_is_align;
     if (saw_static)
         arr->static_min = arr->array_len;
     if (saw_const)
@@ -1279,6 +1288,12 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     int                  i         = 0;
     int64_t              val       = 0;
     struct EnumConstant *enum_tail = NULL;
+    // #1095: the previous iteration's own VarScope (NULL before the first,
+    // and for a duplicate re-declaration that reused an existing one) --
+    // kept around so an auto-incrementing enumerator that turns out to
+    // depend on the previous one's value can retroactively clear that
+    // previous one's layout provenance too, see the had_eq check below.
+    VarScope *prev_sc = NULL;
     while (!consume_end(rest, tok)) {
         if (i++ > 0)
             tok = skip(vm, tok, ",");
@@ -1291,8 +1306,38 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         tok               = attribute_list(vm, tok, NULL, &enum_attr);
         tok               = c23_attribute_list(vm, tok, NULL, &enum_attr);
 
-        if (equal(tok, "="))
-            val = const_expr(vm, &tok, tok->next);
+        // #1095: reset every iteration -- an enumerator with no `= expr`
+        // (auto-incrementing off the previous `val`) never carries layout
+        // provenance of its own, regardless of what the previous
+        // enumerator's `=` may have set.
+        bool  had_eq              = equal(tok, "=");
+        Type *val_layout_ty       = NULL;
+        bool  val_layout_is_align = false;
+        if (had_eq)
+            val = const_expr_layout(vm, &tok, tok->next, &val_layout_ty,
+                                    &val_layout_is_align);
+
+        // #1095: this enumerator has no `=` of its own, so its value is
+        // CCCC's own folded `<previous val> + 1` -- if the *previous*
+        // enumerator was slated to re-materialize as sizeof/_Alignof, its
+        // host-time value would then disagree with this one's still-folded
+        // successor (`enum { N = sizeof(struct statfs), M };` -- M stays a
+        // plain literal derived from the GUEST's sizeof, but N would print
+        // the HOST's real sizeof, so `M == N + 1` could go false). Not a
+        // hypothetical: caught by this exact repro during implementation.
+        // Clear the previous one's provenance instead of re-materializing
+        // it, the same "leave the inconsistent case folded" rule array
+        // dimensions apply to an initialized global (see
+        // SerializeContext.allow_layout_dims's own comment) -- both the
+        // EnumConstant (the body) and its VarScope (every USE) must agree.
+        if (!had_eq && enum_tail && enum_tail->layout_ty) {
+            enum_tail->layout_ty       = NULL;
+            enum_tail->layout_is_align = false;
+            if (prev_sc) {
+                prev_sc->enum_layout_ty       = NULL;
+                prev_sc->enum_layout_is_align = false;
+            }
+        }
 
         bool      duplicate_from_same_enum = false;
         VarScope *old_sc = find_var_in_current_scope(vm, name, name_len);
@@ -1305,21 +1350,28 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
                 error_tok(vm, tok, "redeclaration of enumerator '%s'", name);
         }
 
+        VarScope *this_sc = old_sc;
         if (!duplicate_from_same_enum) {
-            VarScope *sc       = push_scope(vm, name, name_len);
-            sc->enum_ty        = ty;
-            sc->enum_val       = val;
-            sc->is_deprecated  = enum_attr.is_deprecated;
-            sc->deprecated_msg = enum_attr.deprecated_msg;
+            VarScope *sc             = push_scope(vm, name, name_len);
+            sc->enum_ty              = ty;
+            sc->enum_val             = val;
+            sc->enum_layout_ty       = val_layout_ty; // #1095
+            sc->enum_layout_is_align = val_layout_is_align;
+            sc->is_deprecated        = enum_attr.is_deprecated;
+            sc->deprecated_msg       = enum_attr.deprecated_msg;
+            this_sc                  = sc;
         }
+        prev_sc = this_sc;
 
         // Store enum constant in Type structure for code emission
         struct EnumConstant *ec = arena_alloc(&vm->compiler.parser_arena,
                                               sizeof(struct EnumConstant));
         memset(ec, 0, sizeof(struct EnumConstant));
-        ec->name  = name;
-        ec->value = val;
-        ec->next  = NULL;
+        ec->name            = name;
+        ec->value           = val;
+        ec->layout_ty       = val_layout_ty; // #1095
+        ec->layout_is_align = val_layout_is_align;
+        ec->next            = NULL;
 
         if (enum_tail) {
             enum_tail->next = ec;

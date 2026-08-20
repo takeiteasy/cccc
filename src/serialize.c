@@ -346,6 +346,22 @@ typedef struct {
     // ND_FUNCALL below) so nested/repeated occurrences in one TU each get
     // their own __cccc_va_fwd_N local instead of shadowing.
     int va_fwd_seq;
+    // #1095: true only while serialize_type_decl() is emitting the
+    // declarator for a local, or a global with no byte-image initializer
+    // (var->init_data == NULL) -- the two shapes where re-materializing a
+    // host-owned sizeof/_Alignof array dimension (Type.array_len_layout_ty)
+    // can't disagree with anything else CCCC also emits for the same
+    // object. False everywhere else on purpose: a struct/union MEMBER's
+    // array dimension must stay folded (the containing aggregate's layout,
+    // and every other member's offset, is computed from that folded value
+    // -- re-materializing would desync them, the same reasoning that rules
+    // out bitfield widths, see man/COVERAGE.md), an INITIALIZED global's
+    // dimension must stay folded (serialize_init_bytes' own byte image is
+    // still sized off the folded value -- re-materializing only the
+    // dimension would make the array declaration and its initializer
+    // disagree), and a typedef/cast/type-name spelling must stay folded
+    // (reused across every context, including the two excluded above).
+    bool allow_layout_dims;
 } SerializeContext;
 
 // Forward declaration
@@ -1101,6 +1117,15 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 static bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty,
                                       int depth);
 static bool type_has_printable_name(SerializeContext *ctx, Type *ty);
+// #1095: factored out of serialize_expr's own ND_NUM arm below so array
+// dimensions/case labels/enum values (none of which have a Node to walk by
+// the time serialization runs -- see const_expr_layout(), parse_analysis.c)
+// can share the exact same host-owned/printable-name gate rather than a
+// parallel copy. Prints "sizeof(T)"/"_Alignof(T)" and returns true when
+// `layout_ty` qualifies; otherwise prints nothing and returns false, so
+// every caller's own fallback (the plain folded literal) still applies.
+static bool serialize_layout_const(FILE *f, SerializeContext *ctx,
+                                   Type *layout_ty, bool is_align);
 
 // Emit a float initializer value as a C `f`-suffixed floating constant.
 // `%.9g` of an integral value like 1.0f prints "1" with no '.'/'e' -- append
@@ -1208,11 +1233,34 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
 
     if (ty->kind == TY_ARRAY) {
         char buf[1024];
+        // #1095: re-materialize the dimension as "sizeof(T)"/"_Alignof(T)"
+        // rather than the folded int, but only when the caller has opted
+        // in (ctx->allow_layout_dims -- see its own comment) and this
+        // dimension really was such a fold (array_len_layout_ty, set by
+        // array_dimensions(), parse_types.c). serialize_layout_const()
+        // itself still declines (returns false, prints nothing) when the
+        // type isn't actually from_include-suppressed or has no printable
+        // name, so this falls through to the plain folded literal exactly
+        // as before whenever re-materializing wouldn't be sound/possible.
+        char  *dimbuf       = NULL;
+        size_t dimsz        = 0;
+        bool   wrote_layout = false;
+        if (ty->array_len >= 0 && ctx->allow_layout_dims &&
+            ty->array_len_layout_ty) {
+            FILE *df = open_memstream(&dimbuf, &dimsz);
+            wrote_layout =
+                serialize_layout_const(df, ctx, ty->array_len_layout_ty,
+                                       ty->array_len_layout_is_align);
+            fclose(df);
+        }
         if (ty->array_len < 0)
             snprintf(buf, sizeof(buf), "%s[]", name ? name : "");
+        else if (wrote_layout)
+            snprintf(buf, sizeof(buf), "%s[%s]", name ? name : "", dimbuf);
         else
             snprintf(buf, sizeof(buf), "%s[%d]", name ? name : "",
                      ty->array_len);
+        free(dimbuf);
         serialize_type_decl(f, ctx, ty->base, buf);
         return;
     }
@@ -1943,8 +1991,8 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     }
                 }
             } else if (node->layout_ty &&
-                       type_layout_is_host_owned(ctx, node->layout_ty, 0) &&
-                       type_has_printable_name(ctx, node->layout_ty)) {
+                       serialize_layout_const(f, ctx, node->layout_ty,
+                                              node->layout_is_align)) {
                 // #1031: this ND_NUM was folded from sizeof/_Alignof of a
                 // type whose own definition is suppressed elsewhere in
                 // this TU (a from_include struct/union, or something that
@@ -1956,29 +2004,26 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // test_sys_mount_statfs.c is the confirmed case: a
                 // `malloc(sizeof(struct statfs) + tail)` sized against the
                 // guest's ~56-byte projection hands the real, much larger
-                // host `statfs()` an undersized buffer. Re-emit the
-                // operator textually instead, so the *host's* sizeof/
-                // _Alignof is what the emitted C actually evaluates --
-                // primary-precedence, so no parenthesization is needed at
-                // any parent_prec. type_has_printable_name() is the
-                // fallback guard: an anonymous from_include aggregate with
-                // no tag/typedef would otherwise force serialize_type() to
-                // print a re-derived body right here, reinstating CCCC's
-                // own projection -- strictly worse than the literal this
-                // is trying to fix, so that case falls through to the
-                // ordinary folded-literal path below instead.
+                // host `statfs()` an undersized buffer. serialize_layout_
+                // const() re-emits the operator textually instead, so the
+                // *host's* sizeof/_Alignof is what the emitted C actually
+                // evaluates -- primary-precedence, so no parenthesization
+                // is needed at any parent_prec. Its own internal
+                // type_has_printable_name() check is the fallback guard: an
+                // anonymous from_include aggregate with no tag/typedef
+                // would otherwise force serialize_type() to print a
+                // re-derived body right here, reinstating CCCC's own
+                // projection -- strictly worse than the literal this is
+                // trying to fix, so that case falls through to the
+                // ordinary folded-literal path below instead (nothing was
+                // printed; serialize_layout_const() returned false).
                 //
-                // Residual: any *other* context that consumes
-                // const_expr()/eval() and discards the node entirely
-                // (array dimensions, _Static_assert, case labels, bitfield
-                // widths, enum values, serialize_init_bytes' global-
-                // initializer byte images) has no node here to re-
-                // materialize from, and stays folded -- tracked as a
-                // follow-up, not attempted by this fix.
-                fprintf(f, "%s(",
-                        node->layout_is_align ? "_Alignof" : "sizeof");
-                serialize_type(f, ctx, node->layout_ty);
-                fprintf(f, ")");
+                // #1095 closed three more of this same residual: array
+                // dimensions, case labels, and enum values now share this
+                // exact helper (see their own call sites). Bitfield widths,
+                // _Static_assert, and a global initializer's byte image
+                // remain -- see man/COVERAGE.md's own entry for why those
+                // three are not merely deferred.
             } else if (node->ty && is_integer(node->ty)) {
                 // #1031: the old unconditional `%lld` of the raw bit pattern
                 // had two failures for a folded integer literal. (1) An
@@ -3344,10 +3389,31 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             if (ctx->cur_switch && ctx->cur_switch->default_case == node) {
                 fprintf(f, "default:\n");
             } else if (node->begin == node->end) {
-                fprintf(f, "case %ld:\n", node->begin);
+                // #1095: re-materialize a host-owned sizeof/_Alignof label
+                // the same way #1031's ND_NUM arm does -- a case label is
+                // only ever compared against a runtime value, never fed
+                // into a layout CCCC itself emits, so there's no
+                // consistency hazard to guard here the way array
+                // dimensions/initializers have. serialize_layout_const()
+                // itself still declines (prints nothing, returns false)
+                // when re-materializing isn't sound/possible, so the plain
+                // folded value is the fallback exactly as before.
+                fprintf(f, "case ");
+                if (!serialize_layout_const(f, ctx, node->case_begin_layout_ty,
+                                            node->case_begin_layout_is_align))
+                    fprintf(f, "%ld", node->begin);
+                fprintf(f, ":\n");
             } else {
                 // [GNU] Case ranges, e.g. "case 1 ... 5:"
-                fprintf(f, "case %ld ... %ld:\n", node->begin, node->end);
+                fprintf(f, "case ");
+                if (!serialize_layout_const(f, ctx, node->case_begin_layout_ty,
+                                            node->case_begin_layout_is_align))
+                    fprintf(f, "%ld", node->begin);
+                fprintf(f, " ... ");
+                if (!serialize_layout_const(f, ctx, node->case_end_layout_ty,
+                                            node->case_end_layout_is_align))
+                    fprintf(f, "%ld", node->end);
+                fprintf(f, ":\n");
             }
             serialize_stmt(f, vm, ctx, node->lhs, indent);
             break;
@@ -3905,6 +3971,13 @@ static void serialize_function(FILE *f, VirtualMachine *vm,
             // pointer-level const on the pointee (`const char *p`) lives on
             // the base type, one step down `var->ty->base`, and is
             // untouched by this.
+            // #1095: a hoisted local has no byte-image initializer here --
+            // any initializer was already split into a separate assignment
+            // statement in the body (see #1029's own comment just above)
+            // -- so re-materializing a host-owned sizeof/_Alignof array
+            // dimension can't disagree with anything else emitted for this
+            // object. See SerializeContext.allow_layout_dims's own comment.
+            ctx->allow_layout_dims = true;
             if (var->ty->is_const) {
                 Type *mutable_ty     = copy_type(vm, var->ty);
                 mutable_ty->is_const = false;
@@ -3912,6 +3985,7 @@ static void serialize_function(FILE *f, VirtualMachine *vm,
             } else {
                 serialize_type_decl(f, ctx, var->ty, var->name);
             }
+            ctx->allow_layout_dims = false;
             fprintf(f, ";\n");
         }
 
@@ -4391,7 +4465,13 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm,
     if (var->is_tls)
         fprintf(f, "_Thread_local ");
 
+    // #1095: only when no byte-image initializer follows -- an initialized
+    // global's array dimension must stay folded so it can't disagree with
+    // serialize_init_bytes' own byte image below, sized off the same
+    // folded value. See SerializeContext.allow_layout_dims's own comment.
+    ctx->allow_layout_dims = !var->init_data;
     serialize_type_decl(f, ctx, var->ty, var->name);
+    ctx->allow_layout_dims = false;
 
     if (var->init_data) {
         fprintf(f, " = ");
@@ -4487,8 +4567,16 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     fprintf(f, " {\n");
     for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
-        fprintf(f, "    %s = %lld", enum_const_spelling(ctx, ty, ec->name),
-                (long long)ec->value);
+        fprintf(f, "    %s = ", enum_const_spelling(ctx, ty, ec->name));
+        // #1095: re-materialize a host-owned sizeof/_Alignof enumerator
+        // value the same way #1031's ND_NUM arm does -- see
+        // serialize_layout_const()'s own comment. Every *use* of this
+        // enumerator elsewhere in the TU carries the same provenance (see
+        // parse_postfix.c's primary(), sc->enum_layout_ty), so the body and
+        // its uses can't disagree the way an array's declaration and
+        // initializer could -- no consistency hazard to guard here.
+        if (!serialize_layout_const(f, ctx, ec->layout_ty, ec->layout_is_align))
+            fprintf(f, "%lld", (long long)ec->value);
         if (ec->next)
             fprintf(f, ",");
         fprintf(f, "\n");
@@ -4778,6 +4866,25 @@ static bool type_has_printable_name(SerializeContext *ctx, Type *ty) {
         return true; // scalars, enums (fall back to "int"), etc. always print
     return find_tag_name(ctx, ty) || find_typedef_name(ctx, ty) ||
            find_anonymous_typedef_name(ctx, ty);
+}
+
+// #1095: the gate + emission serialize_expr's own ND_NUM arm used before
+// this was factored out (see #1031's own comment there, and this
+// function's callers for the three sites #1095 added: array dimensions,
+// case labels, enum values). Prints "sizeof(T)"/"_Alignof(T)" and returns
+// true when `layout_ty`'s own definition is from_include-suppressed
+// (type_layout_is_host_owned()) and nameable (type_has_printable_name());
+// prints nothing and returns false otherwise, so every call site's own
+// fallback -- the plain folded literal -- still applies unchanged.
+static bool serialize_layout_const(FILE *f, SerializeContext *ctx,
+                                   Type *layout_ty, bool is_align) {
+    if (!layout_ty || !type_layout_is_host_owned(ctx, layout_ty, 0) ||
+        !type_has_printable_name(ctx, layout_ty))
+        return false;
+    fprintf(f, "%s(", is_align ? "_Alignof" : "sizeof");
+    serialize_type(f, ctx, layout_ty);
+    fprintf(f, ")");
+    return true;
 }
 
 static bool aggregate_typedef_is_definition(SerializeContext *ctx,
@@ -7759,9 +7866,17 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                             .emit_strict    = vm->compiler.emit_strict != 0,
                             .emit_cccc      = vm->compiler.emit_cccc,
                             .vm             = vm};
-    if (generated_only)
-        hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path,
-                        &ctx);
+    // #1096: populated unconditionally now, not only under generated_only --
+    // the bodiless-declaration prototype pass below needs path_is_captured()
+    // to tell a *replayed* bundled-header #include (already supplying the
+    // declaration) apart from an unreplayed one (which does not) in plain
+    // -m/-c=native output too. Safe for every existing caller:
+    // type_def_is_from_include_suppressed()'s own path_is_captured() call is
+    // still gated `!ctx->generated_only || path_is_captured(...)`, so it
+    // short-circuits before ever consulting captured_paths whenever
+    // generated_only is false, exactly as before this change.
+    hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path,
+                    &ctx);
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
     rename_colliding_static_names(vm, prog, &ctx);   // #1002
@@ -7854,7 +7969,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             fprintf(f, obj->is_static ? "static " : "extern ");
             if (obj->is_tls) // #1022: see serialize_global_var's own comment
                 fprintf(f, "_Thread_local ");
+            // #1095: same rule as serialize_global_var's own -- only when
+            // no byte-image initializer will follow for this object.
+            ctx.allow_layout_dims = !obj->init_data;
             serialize_type_decl(f, &ctx, obj->ty, obj->name);
+            ctx.allow_layout_dims = false;
             fprintf(f, ";\n");
         }
         // #956: forward-declare a macro-generated function's callees the
@@ -8080,7 +8199,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         fprintf(f, obj->is_static ? "static " : "extern ");
         if (obj->is_tls) // #1022: see serialize_global_var's own comment
             fprintf(f, "_Thread_local ");
+        // #1095: same rule as serialize_global_var's own -- only when no
+        // byte-image initializer will follow for this object, so the
+        // forward declaration and the real definition further down never
+        // disagree on how the dimension is spelled.
+        ctx.allow_layout_dims = !obj->init_data;
         serialize_type_decl(f, &ctx, obj->ty, obj->name);
+        ctx.allow_layout_dims = false;
         fprintf(f, ";\n");
     }
 
@@ -8189,7 +8314,34 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                     t && t->file &&
                     (file_is_command_line_input(vm, t->file->name) ||
                      cc_file_is_cccc_only(vm, t->file->name));
-                if (!from_input)
+                // #1096: a declaration sourced from one of CCCC's own
+                // bundled headers (e.g. bundled fcntl.h's own
+                // `#include "unistd.h"` declaring close()) is NOT supplied
+                // by the auto-captured #include the way a real host
+                // header's transitively-reached declaration is -- the
+                // replayed `#include <fcntl.h>` resolves to the *host's*
+                // fcntl.h under -c=native, which may not declare it (the
+                // real bug this whole branch is scoped to catch: see
+                // is_compiler_owned_header's own scope note and
+                // test_sys_mount_statfs.c). Only applies when that bundled
+                // header's own #include was never replayed
+                // (path_is_captured()) -- when it was replayed, the usual
+                // from_include suppression is correct and this declaration
+                // really is already supplied by that replay. Also gated on
+                // obj->is_used: a bundled header like unistd.h declares
+                // dozens of functions the primary file never references --
+                // emitting every one of them (rather than just the handful
+                // the program actually calls) would needlessly bloat the
+                // output and risk a real conflict for some declaration
+                // whose signature the host's own header spells slightly
+                // differently. is_used is set by the parser on any
+                // identifier lookup (see its own doc comment on Obj), which
+                // is exactly "does this TU actually reference it".
+                bool cccc_bundled_uncaptured =
+                    obj->is_used && t && t->file &&
+                    cc_file_is_cccc_bundled(vm, t->file->name) &&
+                    !path_is_captured(&ctx, t->file->name);
+                if (!from_input && !cccc_bundled_uncaptured)
                     continue;
             }
         }

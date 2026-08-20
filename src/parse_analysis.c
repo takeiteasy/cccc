@@ -349,6 +349,43 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     return eval(vm, node);
 }
 
+// #1095: true when `node` is (possibly wrapped in one or more ND_CAST, the
+// same tolerance serialize_expr's own recursive tree walk gets for free
+// when a sizeof/_Alignof survives as a bare ND_NUM elsewhere in an
+// expression, e.g. `(int)sizeof(struct statfs)`) a bare sizeof/_Alignof
+// fold of a from_include type -- i.e. an ND_NUM carrying Node.layout_ty
+// (set at the four fold sites in src/parse_postfix.c, #1031). A compound
+// expression (`sizeof(T) + 1`) does not qualify -- eval() has already
+// combined it with something else by the time any of this batch's callers
+// would use this, and there is no single Type left to re-materialize
+// against. Mirrors #1031's own limitation for the bare-expression path;
+// the const_expr()/eval() consumers this feeds (array dimensions, case
+// labels, enum values -- see const_expr_layout() below) inherit it rather
+// than attempting anything broader.
+bool node_layout_const(Node *node, Type **out_ty, bool *out_align) {
+    while (node && node->kind == ND_CAST)
+        node = node->lhs;
+    if (!node || node->kind != ND_NUM || !node->layout_ty)
+        return false;
+    if (out_ty)
+        *out_ty = node->layout_ty;
+    if (out_align)
+        *out_align = node->layout_is_align;
+    return true;
+}
+
+// #1095: const_expr()'s own body, but keeping the parsed Node around long
+// enough to test node_layout_const() on it before eval() discards it --
+// every const_expr()/eval() consumer that wants to re-materialize a
+// sizeof/_Alignof of a from_include type (array dimensions, case labels,
+// enum values) needs this instead of a plain const_expr() call.
+int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
+                          Type **out_ty, bool *out_align) {
+    Node *node = conditional(vm, rest, tok);
+    node_layout_const(node, out_ty, out_align);
+    return eval(vm, node);
+}
+
 // static_branch_value — decide whether a condition node is a compile-time
 // constant or an unsigned tautology, without a full range analysis.
 //

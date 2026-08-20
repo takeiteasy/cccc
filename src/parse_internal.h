@@ -62,6 +62,18 @@ typedef struct {
     int64_t enum_val;
     bool    is_deprecated;
     char   *deprecated_msg;
+    // #1095: mirrors EnumConstant.layout_ty/layout_is_align (cccc.h) --
+    // copied here (enum-specifier parsing, parse_types.c) so that a later
+    // *use* of the enumerator (an ND_NUM primary() synthesizes from this
+    // scope entry) also carries the provenance, and flows through #1031's
+    // own ND_NUM re-materialization in serialize_expr exactly like a bare
+    // sizeof/_Alignof would. Without this, the enum body would print
+    // "N = sizeof(struct statfs)" while every *use* of N still printed the
+    // guest-folded literal -- the exact internal inconsistency #1095's own
+    // ticket warns about, just between the body and its uses instead of
+    // between a declaration and its initializer.
+    Type *enum_layout_ty;
+    bool  enum_layout_is_align;
 } VarScope;
 
 // Variable attributes such as typedef or extern.

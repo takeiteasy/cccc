@@ -166,6 +166,38 @@ All notable changes to CCCC are documented here. Format loosely follows
   (`tests/test_minilua.c`) surfaced a stack-overflow/DAG-blowup hazard in
   this fix's own AST walker, now a proper explicit heap-backed stack with
   pointer-identity deduplication instead of recursion.
+- `-c=native`: a bodiless declaration (`extern int close(int fd);`) written
+  in a primary source file that also `#include`s a CCCC-bundled header
+  (e.g. `<fcntl.h>`) was silently dropped from the emitted C — bundled
+  `fcntl.h` itself `#include`s bundled `unistd.h`, which is what actually
+  declares `close()`, so the bodiless-declaration gate (`#901`) saw the
+  declaration's own token pointing at `unistd.h` and assumed the replayed
+  `#include <fcntl.h>` already supplied it. True for a real host header
+  reached transitively, but not for CCCC's own bundled chain: the replayed
+  `#include` resolves to the *host's* `fcntl.h` under `-c=native`, which
+  does not declare `close()` — `use of undeclared identifier 'close'`. Not
+  caught by the test suite (`tools/testing/native.py` always passes
+  `-I./include`, which masks it), but a real gap for a plain
+  `cccc -c=native foo.c -o foo` invocation. Fixed via a new
+  `cc_file_is_cccc_bundled()` marker (`src/preprocess.c`) distinguishing a
+  CCCC-bundled header from a real host one; the `#901` gate now also emits
+  a declaration sourced from a bundled-but-unreplayed header, gated on
+  `obj->is_used` (#1096).
+- `-c=native`: `#1031`'s own fix (a `sizeof`/`_Alignof` of a `from_include`
+  type re-materializing textually against the real host layout) only
+  covered a bare expression node; three more contexts that fold such a
+  constant into a plain integer and discard the node now carry the same
+  provenance through instead — an array dimension (local, or an
+  uninitialized global only — an initialized global's dimension stays
+  folded so it can't disagree with its own byte-image initializer, and
+  a struct/union member's dimension stays folded for the same reason a
+  bitfield width does, see below), a `case` label, and an enum value
+  (propagated to every *use* of the enumerator too, not just its own
+  declaration — except a later enumerator that auto-increments from it,
+  which stays folded rather than risk disagreeing with a re-materialized
+  predecessor). A bitfield width and a global initializer's own byte image
+  remain open — not merely deferred, actively unsound to fix the same way,
+  since both feed a layout CCCC itself also emits (#1095).
 
 ## [0.2.15] - 2026-08-15
 

@@ -817,14 +817,102 @@ confirmed necessary the hard way: `tools/comptime_native_smoke.py`'s own
 case 97 (`sizeof(va_list)` folds to exactly 64) regressed without it.
 
 A folded layout constant reached through any context other than a bare
-`sizeof`/`_Alignof` **expression** node — an array dimension
-(`char buf[sizeof(struct statfs)]`), `_Static_assert`, a `case` label, a
-bitfield width, an enum value, `serialize_init_bytes`'s global-initializer
-byte image — has no node left by the time serialization runs to
-re-materialize from (each of those contexts calls `const_expr()`/`eval()`
-and keeps only the resulting `int64_t`), so it stays folded. Documented as
-the residual in `man/COVERAGE.md`'s Serialized-output divergences table;
-not attempted by #1031.
+`sizeof`/`_Alignof` **expression** node has no node left by the time
+serialization runs to re-materialize from by default — each such context
+calls `const_expr()`/`eval()` and keeps only the resulting `int64_t`, so it
+stays folded. #1095 closed three of those: an array dimension
+(`char buf[sizeof(struct statfs)]`, local or uninitialized-global only — see
+below), a `case` label, and an enum value, sharing `const_expr_layout()`/
+`node_layout_const()` (`src/parse_analysis.c`) to carry the same
+`Type`/`is_align` provenance #1031's own `Node.layout_ty`/`layout_is_align`
+pair does, and `serialize_layout_const()` (`src/serialize.c`, factored out
+of #1031's own `ND_NUM` re-materialization arm) to emit it. An enum
+constant's provenance also has to reach every *use* of the enumerator, not
+just its own `NAME = ...` line in the body — `VarScope.enum_layout_ty`
+carries it from the enum-specifier parse into `primary()`'s enum-constant
+`ND_NUM` synthesis, the same way a `sizeof`/`_Alignof` expression's own node
+would.
+
+Two consistency hazards `#1095` had to guard against, both instances of the
+same rule — "leave the inconsistent case folded rather than let two
+serialized quantities disagree about the same value":
+
+- **An array dimension on an *initialized* global** (`static char
+  buf[sizeof(struct statfs)] = {...};`) stays folded: `serialize_init_bytes`
+  sizes the byte image off the folded value, and re-materializing only the
+  declared dimension would leave the two disagreeing (`SerializeContext.
+  allow_layout_dims`, set only around a local's or an uninitialized global's
+  own declarator). The same reasoning excludes an array dimension on a
+  struct/union **member** — the enclosing aggregate's other member offsets
+  are folded against it, matching the bitfield-width reasoning just below.
+- **An enum constant that a later enumerator auto-increments from**
+  (`enum { N = sizeof(struct statfs), M };`) also stays folded: `M`'s own
+  value is `N`'s folded value plus one, computed once at parse time — if `N`
+  alone re-materialized, `M == N + 1` could go false under `-c=native` (the
+  real host's `sizeof` vs. the still-guest-folded `M`). Detected per
+  enumerator during parsing (an enumerator with no `=` of its own clears the
+  *previous* one's provenance, both on its `EnumConstant` and its
+  `VarScope`) rather than assumed away.
+
+**Still open, and not merely deferred — both are unsound to fix, not just
+incomplete:**
+
+- A **bitfield width** (`int x : sizeof(struct statfs);`) determines the
+  *containing struct's own layout*, and CCCC emits that struct's body with
+  member offsets it computed from the folded width. Re-materializing the
+  width would make the host lay the aggregate out differently from every
+  other folded offset CCCC already emitted for it — this is not a
+  narrower version of the array-dimension fix above, it is actively wrong
+  to attempt the same way.
+- `serialize_init_bytes`'s own global-initializer byte image (the excluded
+  initialized-global case above) has no independent fix within this
+  scope — closing it would mean re-deriving the byte image itself against
+  the real host layout, not just the declared dimension.
+
+`_Static_assert(sizeof(struct statfs) == N, "...")` is a different problem
+from the two above, not a residual of this same fix: the serializer never
+emits `_Static_assert` at all, so there is no *divergence* in the emitted
+C — the gap is that a host whose real layout would fail the same check is
+never re-checked. Closing it means genuinely emitting the assert for the
+host to re-verify, a small feature rather than a re-materialization fix.
+
+Documented in `man/COVERAGE.md`'s Serialized-output divergences table.
+
+**A bodiless declaration (`extern int close(int fd);`) sourced from one of
+CCCC's own bundled headers, rather than the primary source file, is now
+emitted too (#1096)** — found verifying #1031's own fix against
+`tests/test_sys_mount_statfs.c`, and a real gap a plain
+`cccc -c=native foo.c -o foo` user (no `-I./include`) could hit: bundled
+`fcntl.h` itself `#include`s bundled `unistd.h`, which is what actually
+declares `close()`, so the `#901` bodiless-declaration gate (`src/
+serialize.c`) saw `close()`'s own token pointing at `unistd.h`, judged that
+"not the primary file", and — on the assumption that whichever header
+declared it must be the one the auto-captured `#include` replays — dropped
+the prototype. That assumption holds for a **real host** header reached
+transitively (the host compiler replaying the top-level `#include` walks
+the identical chain, so the declaration genuinely is supplied) but not for
+one of CCCC's own bundled headers, whose chain can differ from the host's:
+the replayed `#include <fcntl.h>` resolves to the *host's* `fcntl.h` under
+`-c=native`, and macOS's/glibc's own `fcntl.h` does not declare `close()`
+("use of undeclared identifier 'close'"). The test suite's own
+`tools/testing/native.py:87` always passes `-I./include`, which happens to
+mask this (see below), so it shipped unnoticed.
+
+Fixed via a new `Compiler.cccc_bundled_files` marker
+(`cc_file_is_cccc_bundled()`/`mark_cccc_bundled_file()`, `src/
+preprocess.c`) — the bundled-header analog of the existing `cccc_only_files`
+marker (#896), registered at every place a header resolves to one of
+CCCC's own (the embedded `src/std.c` table, an on-disk `-I./include` hit,
+*and* a bundled header quote-including another bundled header by relative
+path — `fcntl.h`'s own `#include "unistd.h"` takes a distinct early-return
+branch in the `PP_INCLUDE` handler that none of the other two paths cover,
+and missing it left the fix a no-op under the exact invocation shape this
+ticket's own repro uses). The `#901` gate now also emits a bodiless
+declaration when its own header is bundled-but-**not** itself replayed
+(`path_is_captured()`, extended to populate outside `generated_only` mode
+for exactly this) — gated on `obj->is_used` so an unrelated, unused
+declaration from the same bundled header (`unistd.h` declares dozens of
+functions besides `close()`) isn't also dumped into the output.
 
 ## Private headers
 
