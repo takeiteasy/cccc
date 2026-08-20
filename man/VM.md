@@ -856,6 +856,21 @@ compilers can honour them.
 |--------|-------------|
 | `RETBUF` | Return the next buffer from the rotating pool (for non-scalar returns) |
 
+A registered FFI cfunc (`cc_register_cfunc`) must honor this convention on
+both ends, not just the host C ABI's own: a struct/union argument arrives as
+a pointer to the *caller's own* storage (#714/#1078 — no scratch copy is
+made for a struct/union the way there is for a vector/decimal arg, see the
+by-value ABI writeups above), and a struct/union return must go back as a
+pointer, not the host ABI's in-register struct return. Registering a raw
+host symbol whose own C ABI takes or returns an aggregate by value (rather
+than a small `wrap_*` marshalling function) silently breaks this — a guest
+argument's address gets read as if it were the struct's own first word, or
+REG_A0 gets treated as a struct pointer when it's actually raw return-register
+bytes. Found auditing #1087: `inet_ntoa(struct in_addr)` (by-value argument)
+and `div`/`ldiv`/`lldiv` (by-value return) were both registered raw; fixed
+with wrapper functions (`wrap_inet_ntoa`, `wrap_div`/`wrap_ldiv`/`wrap_lldiv`)
+that marshal explicitly, `src/stdlib/posix_net.c`/`stdlib.c` (#1090).
+
 ### Trap / Debugger
 
 | Opcode | Description |

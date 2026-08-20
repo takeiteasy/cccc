@@ -11,11 +11,14 @@
 // void (*)(const void *, VISIT, int) action gets its own trampoline.
 //
 // hsearch() takes ENTRY (a 2-pointer struct) by value; CCCC marshals a
-// guest struct-by-value FFI argument as a pointer to a caller-side
-// scratch copy (the same convention #714 established for vector args,
-// confirmed here empirically), so wrap_hsearch's first parameter is a
-// pointer to that copy, which it dereferences to build a real host ENTRY
-// before making a normal, compiler-generated call to the real hsearch().
+// guest struct-by-value FFI argument as a pointer to the *caller's own*
+// storage (#714/#1078, confirmed here empirically and by #1085's own
+// writeup -- unlike a vector/decimal arg, #714 does NOT make a
+// compiler-synthesized scratch copy for a struct/union arg), so
+// wrap_hsearch's first parameter is a pointer to the caller's own ENTRY,
+// which it dereferences to build a real host ENTRY (never writes through
+// the pointer -- see #1087's audit) before making a normal,
+// compiler-generated call to the real hsearch().
 static _Thread_local long long g_search_compar_value;
 static _Thread_local int g_search_faulted;
 
@@ -32,11 +35,9 @@ static int search_compar_trampoline(const void *a, const void *b) {
 
 static long long wrap_hsearch(long long entry_ptr, long long action) {
     // ENTRY is passed by value from the guest, which CCCC marshals as a
-    // pointer to a caller-side scratch copy of the struct (the same
-    // struct-by-value FFI convention #714 established for vector args),
-    // not decomposed into separate key/data scalar slots -- confirmed
-    // empirically, since a 3-scalar-arg registration silently shifted
-    // action into the data slot.
+    // pointer to the caller's own storage (not decomposed into separate
+    // key/data scalar slots) -- confirmed empirically, since a 3-scalar-arg
+    // registration silently shifted action into the data slot.
     ENTRY *guest_entry = (ENTRY *)(void *)entry_ptr;
     ENTRY item;
     item.key = guest_entry->key;

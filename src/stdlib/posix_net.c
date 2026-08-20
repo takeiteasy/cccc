@@ -582,6 +582,17 @@ static long long wrap_htons(long long hostshort) { return (long long)htons((uint
 static long long wrap_ntohl(long long netlong) { return (long long)ntohl((uint32_t)netlong); }
 static long long wrap_ntohs(long long netshort) { return (long long)ntohs((uint16_t)netshort); }
 static long long wrap_inet_addr(long long cp) { return (long long)inet_addr((const char *)cp); }
+// inet_ntoa(struct in_addr in) takes a struct by value; CCCC marshals a
+// guest struct-by-value FFI argument as a pointer to the *caller's own*
+// storage (#714/#1078/#1085's own writeup), not a scalar copy of the
+// struct's single member -- confirmed empirically (a raw registration read
+// the low 32 bits of that pointer as s_addr, producing a garbage address
+// string). wrap_inet_ntoa copies the guest struct out of the pointer first,
+// same pattern as wrap_hsearch (posix_search.c) for its own by-value ENTRY.
+static long long wrap_inet_ntoa(long long in_ptr) {
+    struct in_addr in = *(struct in_addr *)(void *)(intptr_t)in_ptr;
+    return (long long)(intptr_t)inet_ntoa(in);
+}
 static long long wrap_bzero(long long s, long long n) { bzero((void *)s, (size_t)n); return 0; }
 static long long wrap_bcopy(long long src, long long dst, long long n) { bcopy((const void *)src, (void *)dst, (size_t)n); return 0; }
 static long long wrap_freeaddrinfo(long long res) { freeaddrinfo((struct addrinfo *)res); return 0; }
@@ -612,7 +623,7 @@ void register_posix_net_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "ntohl",   (void*)wrap_ntohl,  1, 0);
     cc_register_cfunc(vm, "ntohs",   (void*)wrap_ntohs,  1, 0);
     cc_register_cfunc(vm, "inet_addr",(void*)wrap_inet_addr, 1, 0);
-    cc_register_cfunc(vm, "inet_ntoa",(void*)inet_ntoa,    1, 0);
+    cc_register_cfunc(vm, "inet_ntoa",(void*)wrap_inet_ntoa, 1, 0);
     cc_register_cfunc(vm, "inet_ntop",(void*)inet_ntop,    4, 0);
     cc_register_cfunc(vm, "inet_pton",(void*)inet_pton,    3, 0);
     cc_register_cfunc(vm, "bzero",   (void*)wrap_bzero, 2, 0);

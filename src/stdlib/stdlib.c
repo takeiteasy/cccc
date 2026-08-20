@@ -390,6 +390,58 @@ static long long wrap_wctomb(long long s, long long wc)      { return (long long
 // separate locale model needed.
 static long long wrap_mb_cur_max(void)                       { return (long long)MB_CUR_MAX; }
 
+// div()/ldiv()/lldiv() return div_t/ldiv_t/lldiv_t by value. CCCC's own
+// calling convention treats every struct/union return as a pointer in
+// REG_A0 (the RETBUF convention -- see codegen_expr.c's ND_FUNCALL result
+// handling, and internal.h's "ival *is* the address" comment for
+// TY_STRUCT), not the host C ABI's in-register struct return. Registering
+// the real div/ldiv/lldiv symbols raw (#1090, found auditing #1087) let a
+// guest caller read whatever REG_A0 happened to contain as a pointer to a
+// div_t -- garbage for div(), and a wild dereference (SIGSEGV) for
+// ldiv()/lldiv() once the layout is 16 bytes instead of 8.
+//
+// Fixed the same way the VM's own RETBUF opcode handles a CCCC-emitted
+// struct-returning call: copy the host result into a small thread-local
+// rotating pool and return a pointer to the current slot. A single static
+// (rather than a pool) would break a chained call like
+// f(div(a,b), div(c,d)) -- both div() calls complete, and their arguments
+// are read, before either result is used, so the second call's write would
+// silently clobber the first's result out from under the first argument.
+// Pool size (4) mirrors the VM's own RETBUF rotation depth for the same
+// reason. include/stdlib.h's div_t/ldiv_t/lldiv_t member types
+// (int/int, long/long, long long/long long) match the host layout
+// byte-for-byte on every supported target, so a plain struct-copy is safe
+// -- no field-by-field remap needed the way #1054/#1059's ABI-diverging
+// cases needed.
+#define CCCC_DIV_POOL_SLOTS 4
+
+static _Thread_local div_t g_div_pool[CCCC_DIV_POOL_SLOTS];
+static _Thread_local int g_div_pool_idx;
+static long long wrap_div(long long numer, long long denom) {
+    div_t *slot = &g_div_pool[g_div_pool_idx];
+    g_div_pool_idx = (g_div_pool_idx + 1) % CCCC_DIV_POOL_SLOTS;
+    *slot = div((int)numer, (int)denom);
+    return (long long)(intptr_t)slot;
+}
+
+static _Thread_local ldiv_t g_ldiv_pool[CCCC_DIV_POOL_SLOTS];
+static _Thread_local int g_ldiv_pool_idx;
+static long long wrap_ldiv(long long numer, long long denom) {
+    ldiv_t *slot = &g_ldiv_pool[g_ldiv_pool_idx];
+    g_ldiv_pool_idx = (g_ldiv_pool_idx + 1) % CCCC_DIV_POOL_SLOTS;
+    *slot = ldiv((long)numer, (long)denom);
+    return (long long)(intptr_t)slot;
+}
+
+static _Thread_local lldiv_t g_lldiv_pool[CCCC_DIV_POOL_SLOTS];
+static _Thread_local int g_lldiv_pool_idx;
+static long long wrap_lldiv(long long numer, long long denom) {
+    lldiv_t *slot = &g_lldiv_pool[g_lldiv_pool_idx];
+    g_lldiv_pool_idx = (g_lldiv_pool_idx + 1) % CCCC_DIV_POOL_SLOTS;
+    *slot = lldiv((long long)numer, (long long)denom);
+    return (long long)(intptr_t)slot;
+}
+
 // C23: free_sized/free_aligned_sized - a conforming implementation may
 // simply call free(), ignoring the size/alignment hints. Taken as a
 // function-pointer value and called indirectly, these have the exact same
@@ -544,9 +596,9 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "abs", (void*)abs, 1, 0);     // returns int (#777: was incorrectly 1/double)
     cc_register_cfunc(vm, "labs", (void*)labs, 1, 0);   // returns long
     cc_register_cfunc(vm, "llabs", (void*)llabs, 1, 0); // returns long long
-    cc_register_cfunc(vm, "div", (void*)div, 2, 0);
-    cc_register_cfunc(vm, "ldiv", (void*)ldiv, 2, 0);
-    cc_register_cfunc(vm, "lldiv", (void*)lldiv, 2, 0);
+    cc_register_cfunc(vm, "div", (void*)wrap_div, 2, 0);
+    cc_register_cfunc(vm, "ldiv", (void*)wrap_ldiv, 2, 0);
+    cc_register_cfunc(vm, "lldiv", (void*)wrap_lldiv, 2, 0);
 
     // Multibyte/wide character conversion
     cc_register_cfunc(vm, "mblen", (void*)wrap_mblen, 2, 0);
