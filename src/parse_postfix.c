@@ -1340,6 +1340,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
         Node *sn               = new_ulong(vm, ty->size, start);
         sn->is_sizeof_ptr_expr = (ty->kind == TY_PTR);
+        sn->layout_ty          = ty; // #1031
         return sn;
     }
 
@@ -1350,20 +1351,27 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_var_node(vm, node->ty->vla_size, tok);
         Node *sn               = new_ulong(vm, node->ty->size, tok);
         sn->is_sizeof_ptr_expr = (node->ty->kind == TY_PTR);
+        sn->layout_ty          = node->ty; // #1031
         return sn;
     }
 
     if (equal(tok, "_Alignof") && equal(tok->next, "(") &&
         is_typename(vm, tok->next->next)) {
-        Type *ty = typename(vm, &tok, tok->next->next);
-        *rest    = skip(vm, tok, ")");
-        return new_ulong(vm, ty->align, tok);
+        Type *ty            = typename(vm, &tok, tok->next->next);
+        *rest               = skip(vm, tok, ")");
+        Node *sn            = new_ulong(vm, ty->align, tok);
+        sn->layout_ty       = ty; // #1031
+        sn->layout_is_align = true;
+        return sn;
     }
 
     if (equal(tok, "_Alignof")) {
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
-        return new_ulong(vm, node->ty->align, tok);
+        Node *sn            = new_ulong(vm, node->ty->align, tok);
+        sn->layout_ty       = node->ty; // #1031
+        sn->layout_is_align = true;
+        return sn;
     }
 
     if (equal(tok, "_Generic")) {

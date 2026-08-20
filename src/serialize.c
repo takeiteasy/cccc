@@ -1057,6 +1057,14 @@ static void collect_generated_call_targets(Node *node, ObjVec *out) {
 }
 
 static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
+// #1031: defined near serialize_type_defs_for_owner (which shares
+// type_layout_is_host_owned's own from_include-suppression logic via
+// type_def_is_from_include_suppressed), forward-declared here so
+// serialize_expr's ND_NUM case -- much earlier in this file -- can call
+// them.
+static bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty,
+                                      int depth);
+static bool type_has_printable_name(SerializeContext *ctx, Type *ty);
 
 // Emit a float initializer value as a C `f`-suffixed floating constant.
 // `%.9g` of an integral value like 1.0f prints "1" with no '.'/'e' -- append
@@ -1898,6 +1906,43 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         fprintf(f, "%s", buf);
                     }
                 }
+            } else if (node->layout_ty &&
+                       type_layout_is_host_owned(ctx, node->layout_ty, 0) &&
+                       type_has_printable_name(ctx, node->layout_ty)) {
+                // #1031: this ND_NUM was folded from sizeof/_Alignof of a
+                // type whose own definition is suppressed elsewhere in
+                // this TU (a from_include struct/union, or something that
+                // transitively contains one -- see
+                // type_layout_is_host_owned()) in favor of the replayed
+                // #include's real host layout. The folded literal here
+                // (CCCC's own, possibly smaller, projection) would go
+                // stale the moment that suppression takes effect --
+                // test_sys_mount_statfs.c is the confirmed case: a
+                // `malloc(sizeof(struct statfs) + tail)` sized against the
+                // guest's ~56-byte projection hands the real, much larger
+                // host `statfs()` an undersized buffer. Re-emit the
+                // operator textually instead, so the *host's* sizeof/
+                // _Alignof is what the emitted C actually evaluates --
+                // primary-precedence, so no parenthesization is needed at
+                // any parent_prec. type_has_printable_name() is the
+                // fallback guard: an anonymous from_include aggregate with
+                // no tag/typedef would otherwise force serialize_type() to
+                // print a re-derived body right here, reinstating CCCC's
+                // own projection -- strictly worse than the literal this
+                // is trying to fix, so that case falls through to the
+                // ordinary folded-literal path below instead.
+                //
+                // Residual: any *other* context that consumes
+                // const_expr()/eval() and discards the node entirely
+                // (array dimensions, _Static_assert, case labels, bitfield
+                // widths, enum values, serialize_init_bytes' global-
+                // initializer byte images) has no node here to re-
+                // materialize from, and stays folded -- tracked as a
+                // follow-up, not attempted by this fix.
+                fprintf(f, "%s(",
+                        node->layout_is_align ? "_Alignof" : "sizeof");
+                serialize_type(f, ctx, node->layout_ty);
+                fprintf(f, ")");
             } else if (node->ty && is_integer(node->ty)) {
                 // #1031: the old unconditional `%lld` of the raw bit pattern
                 // had two failures for a folded integer literal. (1) An
@@ -4500,6 +4545,109 @@ static bool path_is_captured(SerializeContext *ctx, const char *path) {
     return false;
 }
 
+// #1031: true when `ty`'s own standalone definition is suppressed because
+// a replayed `#include` (auto-capture) supplies it instead -- the single-
+// type predicate factored out of serialize_type_defs_for_owner's own
+// from_include check below, so that function and
+// type_layout_is_host_owned() (which recurses through it) can never
+// disagree by parallel edit -- same discipline
+// typedef_alias_header_suppressed() already applies for typedef aliases,
+// and the shape #892's AttrTarget regression showed a divergent copy here
+// can break.
+static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
+                                                Type             *ty) {
+    if (!ty || ctx->emit_strict)
+        return false;
+    TypeName *tag   = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+    TypeName *provenance_source =
+        tag ? find_tag_name_for_provenance(ctx, ty) : alias;
+    return provenance_source && provenance_source->from_include &&
+           !provenance_source->always_emit &&
+           (!ctx->generated_only ||
+            path_is_captured(ctx, provenance_source->file_path));
+}
+
+// #1031: true when `ty`'s from_include-suppressed definition is owned by
+// one of is_compiler_owned_header()'s fixed list (stdarg.h/setjmp.h/etc,
+// src/preprocess.c) -- excluded from type_layout_is_host_owned() below
+// even though its body IS suppressed the same way an ordinary from_include
+// type's is (confirmed: `struct va_list`'s body does not appear in -m
+// output either). stdarg.h's va_list and setjmp.h's jmp_buf specifically
+// use the *opposite* strategy from an ordinary from_include type: CCCC's
+// own layout is deliberately widened to cover every supported host's real
+// one (see their own man/COVERAGE.md entries), so the *guest-folded*
+// sizeof/_Alignof is already a safe, correct-by-construction upper bound
+// on purpose -- re-materializing the operator would replace that safe
+// padded literal with whatever the real host's own (possibly smaller, via
+// the header's own #include_next hand-off) va_list/jmp_buf size happens
+// to be, defeating the padding #1054/#1059 built specifically to avoid
+// depending on that. (Found via comptime_native_smoke.py's own case 97
+// regressing when this exclusion was missing -- its "-m folds
+// sizeof(va_list) to exactly 64" assertion is exactly this invariant.)
+static bool type_header_is_compiler_owned(SerializeContext *ctx, Type *ty) {
+    TypeName *tag   = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+    TypeName *provenance_source =
+        tag ? find_tag_name_for_provenance(ctx, ty) : alias;
+    if (!provenance_source || !provenance_source->file_path)
+        return false;
+    const char *path = provenance_source->file_path;
+    const char *base = strrchr(path, '/');
+    return is_compiler_owned_header(base ? base + 1 : path);
+}
+
+// #1031: true when a folded `sizeof`/`_Alignof` of `ty` can no longer be
+// trusted under -c=native -- either `ty` itself is a from_include struct/
+// union whose body serialize_type_defs_for_owner() suppresses (member
+// access re-resolves correctly against the replayed #include's real host
+// layout, but a value guest-side parsing already folded into a plain
+// integer literal does not), or `ty` transitively contains such a type
+// (an array of it, or a struct/union with it as a direct or nested
+// member) -- recursion stops at TY_PTR: a pointer's own size is uniform
+// across every supported platform x arch combination regardless of what
+// it points to, and following pointee types would risk a cycle through a
+// self-referential struct. depth guards against a pathological type
+// graph; the real-world nesting this addresses is at most a few levels.
+static bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty,
+                                      int depth) {
+    if (!ty || depth > 32)
+        return false;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_layout_is_host_owned(ctx, ty->base, depth + 1);
+    if (ty->kind == TY_PTR)
+        return false;
+    if (type_def_is_from_include_suppressed(ctx, ty) &&
+        !type_header_is_compiler_owned(ctx, ty))
+        return true;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            if (type_layout_is_host_owned(ctx, m->ty, depth + 1))
+                return true;
+    return false;
+}
+
+// #1031: true when serialize_type() can spell `ty` by a real name (tag,
+// typedef alias, or anonymous-typedef alias) rather than falling through
+// to serialize_anon_aggregate() and printing a re-derived *body* -- which
+// for a from_include type would reinstate CCCC's own (possibly wrong)
+// projection right where re-materializing `sizeof(ty)` is trying to avoid
+// exactly that. Recurses through TY_ARRAY the same way
+// type_layout_is_host_owned() does, since `sizeof(some_array_type)`
+// re-materializes as `sizeof(<element type name>) * N`-shaped only
+// indirectly -- serialize_type() on the array type itself already handles
+// element naming, so this only needs to confirm the base is nameable.
+static bool type_has_printable_name(SerializeContext *ctx, Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_has_printable_name(ctx, ty->base);
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return true; // scalars, enums (fall back to "int"), etc. always print
+    return find_tag_name(ctx, ty) || find_typedef_name(ctx, ty) ||
+           find_anonymous_typedef_name(ctx, ty);
+}
+
 static bool aggregate_typedef_is_definition(SerializeContext *ctx,
                                             TypeName         *alias) {
     if (!alias->ty)
@@ -4867,29 +5015,31 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // when a tag exists -- see that function's comment. A tagless
         // typedef alias has exactly one record and no such ambiguity, so
         // `alias` (from find_typedef_name() above) is used unchanged.
-        TypeName *provenance_source =
-            tag ? find_tag_name_for_provenance(ctx, ty) : alias;
-        if (!ctx->emit_strict && provenance_source &&
-            provenance_source->from_include &&
-            !provenance_source->always_emit &&
-            (!ctx->generated_only ||
-             path_is_captured(ctx, provenance_source->file_path)))
-            // #1031: this is correct for member *access* -- the replayed
-            // `#include` (auto-capture, preprocess.c) hands member
-            // resolution to the host header's real layout, which is often
-            // more accurate than CCCC's own minimal projection (e.g.
-            // `struct statfs`, ~56 bytes here vs. ~2100 on real macOS).
-            // But it does NOT retroactively fix any `sizeof`/`offsetof`
-            // of `ty` that guest-side constant folding already baked into
-            // a plain integer literal elsewhere in this TU -- those still
-            // reflect CCCC's projection, not the host's real layout, and
-            // the host is none the wiser once the type body itself is
-            // suppressed here. test_sys_mount_statfs.c is the confirmed
-            // case: a `malloc(sizeof(struct statfs) + tail)` sized against
-            // the guest's ~56-byte struct hands the real, much larger host
-            // `statfs()` an undersized buffer. General soundness class,
-            // not statfs-specific; sibling to the FP_* constant-folding
-            // note in native_accessor_shims below. Still open.
+        // type_def_is_from_include_suppressed() (factored out so this and
+        // the ND_NUM re-materialization it enables, in serialize_expr,
+        // can never disagree by parallel edit) folds in exactly this same
+        // tag/alias/provenance/generated_only logic.
+        //
+        // #1031: suppressing this body is correct for member *access* --
+        // the replayed `#include` (auto-capture, preprocess.c) hands
+        // member resolution to the host header's real layout, which is
+        // often more accurate than CCCC's own minimal projection (e.g.
+        // `struct statfs`, ~56 bytes here vs. ~2100 on real macOS). It does
+        // NOT retroactively fix a `sizeof`/`_Alignof` of `ty` that guest-
+        // side parsing already folded into a plain integer literal
+        // elsewhere in this TU (`offsetof` is unaffected -- it lowers to
+        // an address expression, stddef.h, which re-resolves against the
+        // replayed header like any other member access) -- that residual
+        // gap is closed by ND_NUM re-materializing the operator textually
+        // when type_layout_is_host_owned() says so, see that function and
+        // its own caller in serialize_expr. A folded layout constant
+        // reached through a context other than a bare `sizeof`/`_Alignof`
+        // expression node (array dimensions, `_Static_assert`, case
+        // labels, bitfield widths, enum values, global-initializer byte
+        // images -- anything that consumes const_expr()/eval() and
+        // discards the node) is still open; sibling to the FP_*
+        // constant-folding note in native_accessor_shims below.
+        if (type_def_is_from_include_suppressed(ctx, ty))
             continue;
         // #1027: pull forward any scalar typedef this type's own direct
         // members (or, for an enum, its C23 underlying type) will spell by

@@ -202,19 +202,6 @@ NATIVE_SKIP_TESTS = {
     # from current source): compiles and round-trips VM 42 -> native 42,
     # 8/8 repeated runs clean, no flakiness. No separate ticket needed.
 
-    # --- singleton bugs, one ticket each ---
-    # The emitted C replays `#include <sys/mount.h>` verbatim, so the host
-    # header supplies the real ~2100-byte struct statfs and member access
-    # re-resolves correctly against it -- but `sizeof(struct statfs)` was
-    # already constant-folded guest-side against CCCC's ~56-byte
-    # projection and is baked into the emitted TU as a plain integer
-    # literal, so the malloc'd buffer is undersized and the real host
-    # statfs() overruns it (the canary is clobbered). General soundness
-    # class -- any folded sizeof/offsetof over a CCCC-projected system
-    # struct, not statfs-specific -- sibling to the FP_* constant-folding
-    # note at src/serialize.c's native_accessor_shims comment. Still open.
-    "test_sys_mount_statfs.c": "guest-side folded sizeof(struct statfs) disagrees with the host header's real layout, host statfs() overruns the buffer (#1031)",
-
     # --- #1034 survivors: 1 distinct cause remaining, retagged (10 of the
     # original 13 files fixed and dropped from this table entirely -- 5 in
     # #1034's own pass, test_comptime_decl_index_anon_array_951.c fixed

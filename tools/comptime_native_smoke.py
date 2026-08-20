@@ -5100,6 +5100,85 @@ def case_static_libc_collision_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     STATIC_LIBC_COLLISION_PROGRAM)
 
 
+LAYOUT_CONST_PROGRAM = """
+#include <pthread.h>
+
+extern void *malloc(unsigned long size);
+extern void  free(void *ptr);
+extern void *memset(void *s, int c, unsigned long n);
+
+int main(void) {
+    unsigned long guest_size = sizeof(pthread_mutex_t);
+    unsigned long align      = _Alignof(pthread_mutex_t);
+    if (align == 0 || (align & (align - 1)) != 0)
+        return 1;
+
+    unsigned long  tail = 64;
+    unsigned char *buf  = (unsigned char *)malloc(guest_size + tail);
+    if (!buf)
+        return 2;
+    memset(buf, 0, guest_size);
+    memset(buf + guest_size, 0xAA, tail);
+
+    pthread_mutex_t *m = (pthread_mutex_t *)buf;
+    if (pthread_mutex_init(m, 0) != 0) {
+        free(buf);
+        return 3;
+    }
+    if (pthread_mutex_lock(m) != 0) {
+        pthread_mutex_destroy(m);
+        free(buf);
+        return 4;
+    }
+    if (pthread_mutex_unlock(m) != 0) {
+        pthread_mutex_destroy(m);
+        free(buf);
+        return 5;
+    }
+    pthread_mutex_destroy(m);
+
+    for (unsigned long i = guest_size; i < guest_size + tail; i++) {
+        if (buf[i] != 0xAA) {
+            free(buf);
+            return 6;
+        }
+    }
+    free(buf);
+
+    unsigned long combined = sizeof(pthread_mutex_t) + 8;
+    if (combined != guest_size + 8)
+        return 7;
+
+    return 42;
+}
+"""
+
+
+def case_layout_const_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  122: -c=native re-materializes sizeof/_Alignof of a "
+          "from_include type (e.g. pthread_mutex_t, struct statfs) "
+          "textually instead of emitting guest-side folded literal, so "
+          "the host header's own real layout wins on both the member-"
+          "access side (already correct) and the sizeof/_Alignof side "
+          "(#1031). Asserts -m output prints 'sizeof(pthread_mutex_t)' "
+          "rather than a bare folded literal (e.g. '24ULL'), plus "
+          "VM 42 -> native 42 -- pre-fix, the native run's real "
+          "pthread_mutex_init()/lock() overran a buffer malloc'd off the "
+          "stale guest-folded size (see tests/test_serialize_layout_"
+          "const_1031.c's own pre-fix-verified canary).")
+    src = Path(tmp) / "layout_const_1031.c"
+    write(src, LAYOUT_CONST_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "sizeof(pthread_mutex_t)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing re-materialized "
+              f"'sizeof(pthread_mutex_t)'\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "layout_const_1031_rt",
+                                    LAYOUT_CONST_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -5233,6 +5312,7 @@ def main() -> int:
             case_byval_member_order_native_round_trip,
             case_offsetof_array_len_native_round_trip,
             case_static_libc_collision_native_round_trip,
+            case_layout_const_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

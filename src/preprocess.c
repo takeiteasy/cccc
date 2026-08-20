@@ -2119,7 +2119,18 @@ static char *format_relative_path(VirtualMachine *vm, char *base_file,
 //   the same way.
 //
 // These are never overridden even when --use-system-headers is active.
-static bool is_compiler_owned_header(const char *name) {
+//
+// #1031: not static -- src/serialize.c's type_layout_is_host_owned() also
+// needs this list, to exclude stdarg.h's va_list/setjmp.h's jmp_buf from
+// -c=native's general sizeof/_Alignof re-materialization. Those two
+// deliberately use the opposite strategy from an ordinary from_include
+// type (widen CCCC's own layout to cover every supported host's real one,
+// so the *guest-folded* constant stays a safe upper bound on purpose --
+// see their own man/COVERAGE.md entries) -- re-materializing the operator
+// for them would defeat that, replacing the safe padded literal with
+// whatever the real host's own (possibly smaller, via the header's own
+// #include_next hand-off) va_list/jmp_buf size happens to be.
+bool is_compiler_owned_header(const char *name) {
     static const char *owned[] = {
         "stdarg.h",   "setjmp.h",  "stdbool.h",   "stddef.h",    "stdint.h",
         "inttypes.h", "complex.h", "stdatomic.h", "stdckdint.h", NULL,

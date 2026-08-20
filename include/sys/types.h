@@ -29,6 +29,38 @@ typedef unsigned int       fsfilcnt_t;
 typedef int                nl_item;
 /* timer_t (POSIX timer_create/timer_settime API) intentionally omitted:
    macOS does not implement this API, so there is no host type to alias. */
+// #1031: BSD legacy short-name aliases (u_char/u_short/u_int/u_long/
+// u_int{8,16,32,64}_t) -- needed once a `-I./include`-shadowed real header
+// (e.g. <sys/attr.h>/<bsm/audit.h>, reached via <sys/mount.h>'s
+// #include_next hand-off) is reprocessed by the host compiler: since
+// -I./include shadows the real <sys/types.h> for every #include in the
+// TU, not just this file's own, these never reach the host compiler any
+// other way. Plain typedefs (not macros), so co-existing with any real
+// header that also defines them (C11+, CCCC defaults to C23) is legal.
+typedef unsigned char      u_char;
+typedef unsigned short     u_short;
+typedef unsigned int       u_int;
+typedef unsigned long      u_long;
+typedef unsigned char      u_int8_t;
+typedef unsigned short     u_int16_t;
+typedef unsigned int       u_int32_t;
+typedef unsigned long long u_int64_t;
+// #1031: size_t/time_t, same reasoning as the u_* aliases just above --
+// a shadowed real header chain (<sys/attr.h>/<bsm/audit.h>) expects
+// <sys/types.h> alone to supply these (real macOS <sys/types.h> reaches
+// them via <sys/_types/_size_t.h>/<sys/_types/_time_t.h>), which CCCC's
+// own <sys/types.h> never did. Identical underlying types to
+// include/stddef.h's/include/time.h's own typedefs, so redeclaring here
+// is always legal (C11+, CCCC defaults to C23) regardless of #include
+// order in the TU.
+typedef unsigned long size_t;
+typedef long          time_t;
+#ifndef NGROUPS
+#define NGROUPS 16
+#endif
+#ifndef MAXHOSTNAMELEN
+#define MAXHOSTNAMELEN 256
+#endif
 #else
 /* Linux / generic POSIX */
 typedef unsigned long dev_t;

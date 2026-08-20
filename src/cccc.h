@@ -1710,7 +1710,18 @@ struct Node {
     bool         is_fallthrough;     // [[fallthrough]] on a null statement
     bool         is_sizeof_ptr_expr; // ND_NUM from sizeof(pointer_type) — for
                                      // -Wsizeof-pointer-memaccess
-    int cleanup_target_depth;        // for ND_GOTO (break/continue):
+    // #1031: ND_NUM folded from sizeof/_Alignof of this type -- -c=native
+    // re-materializes the operator textually (`sizeof(struct statfs)`
+    // rather than the folded literal `56ULL`) when the type's layout is
+    // host-owned (a from_include struct whose body serialize.c suppresses
+    // in favor of the replayed #include), so the emitted value tracks
+    // whichever layout the host header actually supplies rather than
+    // CCCC's own possibly-smaller projection. NULL/unset for every other
+    // ND_NUM (ordinary literals, constant-folded arithmetic, etc). See
+    // serialize.c's ND_NUM integer arm and type_layout_is_host_owned().
+    Type *layout_ty;
+    bool  layout_is_align;           // layout_ty came from _Alignof, not sizeof
+    int   cleanup_target_depth;      // for ND_GOTO (break/continue):
                                      // cleanup_scope_depth of target
     CleanupChainNode *cleanup_chain; // ND_GOTO/ND_LABEL: innermost active
                                      // cleanup scope (NULL if none)

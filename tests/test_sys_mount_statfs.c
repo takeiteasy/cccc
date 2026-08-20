@@ -22,6 +22,19 @@
 // subprocess chain that doesn't explicitly wire a real file to stdin --
 // RunCustom's vendored shell, most CI runners, `foo | tee log`, ...; see
 // #847). Open "." explicitly instead, which is always mount-backed.
+//
+// #1031: `sizeof(struct statfs)`/`_Alignof(struct statfs)` used to fold
+// guest-side against CCCC's own ~56-byte projection and stay that way in
+// -c=native's emitted C, so the malloc() below undersized the buffer for
+// the real host statfs()/fstatfs() (~2100 bytes on macOS) -- this test's
+// own canary is what caught it (see man/HEADERS.md's writeup for the
+// general fix: type_layout_is_host_owned()/serialize_expr's ND_NUM case,
+// src/serialize.c). include/sys/mount.h also needed a real
+// #ifdef __CCCC__ / #include_next hand-off to the real host header
+// (same #1022-style shape as pthread.h) -- without it, -I./include (the
+// test harness's own tools/testing/native.py invocation) shadowed the
+// real <sys/mount.h> with CCCC's own copy again, defeating the fix the
+// same way #1022 found for pthread.h.
 #include <sys/mount.h>
 #include <fcntl.h>
 

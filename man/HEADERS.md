@@ -764,6 +764,68 @@ concrete cases:
   match would need a host-conditional `pthread_t`, more machinery than a
   cosmetic, harmless warning justifies.
 
+**`include/sys/mount.h`'s bundled `struct statfs` was the same struct-layout
+divergence class as `pthread.h`'s above, and the ticket that closes it
+(#1031) also generalizes the fix** — this is the invariant to check first
+whenever a new bundled header's `#include_next` hand-off is being added.
+Before: any guest-folded `sizeof`/`_Alignof` of a `from_include` type
+(`serialize_type_defs_for_owner`'s own suppression of the type's *body*, in
+favor of the replayed `#include`) stayed CCCC's own possibly-stale literal
+even once the real host layout won at native-compile time —
+`test_sys_mount_statfs.c`'s canary caught exactly this: `sizeof(struct
+statfs)` folded to CCCC's ~56-byte projection, so a `malloc()`'d buffer was
+undersized once the real host `statfs()` (~2100 bytes on macOS) wrote into
+it. Fixed generally, not just for `struct statfs`: a `sizeof`/`_Alignof`
+node now carries the operand `Type` it was folded from
+(`Node.layout_ty`/`layout_is_align`, `src/cccc.h`, set at the four fold
+sites in `src/parse_postfix.c`), and `serialize_expr`'s `ND_NUM` case
+re-materializes the operator textually — `sizeof(struct statfs)` rather
+than a bare `56ULL` — whenever `type_layout_is_host_owned()`
+(`src/serialize.c`) says the type's own definition is from_include-
+suppressed (recursing through an array base or a struct/union's members,
+stopping at a pointer) **and** `type_has_printable_name()` confirms
+`serialize_type()` can spell it by a real tag/typedef rather than falling
+through to a re-derived anonymous body (which would reinstate CCCC's own
+projection right where this is trying to avoid exactly that — falls back
+to the folded literal in that case). `include/sys/mount.h` itself needed
+the same `#ifdef __CCCC__` … `#else #include_next <sys/mount.h>` hand-off
+`pthread.h` has, plus the same `-I./include`-shadowing chain repair: real
+macOS `<sys/mount.h>` reaches `<sys/attr.h>` → `<bsm/audit.h>`, which need
+`u_char`/`u_short`/`u_int`/`u_long`/`u_int{8,16,32,64}_t` (BSD legacy
+aliases), `size_t`/`time_t`, and the `NGROUPS`/`MAXHOSTNAMELEN` macros —
+none of which CCCC's own (non-hand-off) `include/sys/types.h` supplied,
+since `-I./include` shadows the real `<sys/types.h>` for every `#include`
+in the TU, not just this file's own (the same shape `setjmp.h`'s
+`_STRUCT_TIMESPEC`/`__clockid_t` paragraph above documents). Added
+narrowly to `include/sys/types.h`'s `__APPLE__` branch — a short, closed
+set confirmed by compiling the real chain to exhaustion (`clang
+-ferror-limit=0`) rather than assumed, unlike the `time.h` full hand-off
+attempt above, this one did **not** keep growing.
+
+**`stdarg.h`'s `va_list` and `setjmp.h`'s `jmp_buf` are deliberately
+excluded from this re-materialization** — both use the *opposite* strategy
+(widen CCCC's own layout to cover every supported host's real one, so the
+guest-folded constant is already a safe, correct-by-construction upper
+bound on purpose, see their own paragraphs above) — re-materializing the
+operator for them would replace that safe padded literal with whatever the
+real host's own (possibly smaller) size happens to be, defeating the
+padding #1054/#1059 built specifically to avoid depending on that.
+`type_layout_is_host_owned()` excludes any type whose owning header is on
+`is_compiler_owned_header()`'s fixed list (now shared between
+`src/preprocess.c` and `src/serialize.c` for exactly this reason) —
+confirmed necessary the hard way: `tools/comptime_native_smoke.py`'s own
+case 97 (`sizeof(va_list)` folds to exactly 64) regressed without it.
+
+A folded layout constant reached through any context other than a bare
+`sizeof`/`_Alignof` **expression** node — an array dimension
+(`char buf[sizeof(struct statfs)]`), `_Static_assert`, a `case` label, a
+bitfield width, an enum value, `serialize_init_bytes`'s global-initializer
+byte image — has no node left by the time serialization runs to
+re-materialize from (each of those contexts calls `const_expr()`/`eval()`
+and keeps only the resulting `int64_t`), so it stays folded. Documented as
+the residual in `man/COVERAGE.md`'s Serialized-output divergences table;
+not attempted by #1031.
+
 ## Private headers
 
 `include/cccc/reflection.h`, `testing.h`, and `building.h` are CCCC's own

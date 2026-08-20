@@ -580,6 +580,7 @@ void init_macros(VirtualMachine *vm);
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);
+bool is_compiler_owned_header(const char *name);
 void isolate_comptime_macros(VirtualMachine *vm);
 bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                             bool emit_scan);
