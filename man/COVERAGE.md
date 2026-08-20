@@ -1199,22 +1199,24 @@ there, so it is rejected with a diagnostic rather than emitted as broken C
 
 A function-local `static` array initialized with computed-goto label
 addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual
-dispatch-table idiom for a `goto *disptab[i]` interpreter loop) is a hard
-error under `-c=native`, but — unlike the `for`-loop VLA case above — this
-one is a genuine `-c=native` gap, not a divergence forced by C's grammar:
-both GCC (documented in its manual) and clang accept exactly this
-construct, verified directly against real clang on this repro. The real
-cause is CCCC's own lowering: `-c=native` hoists a function-local `static`
-out to file scope as a synthetic global (`__cccc_disptab_N`) before
-serializing its initializer, and at file scope `&&L0` genuinely has no C
-spelling — but had the array stayed inside its defining function, the
-construct would serialize fine. Compounding this, the label survives as
-only a bytecode relocation target (`.L..N`) by the time serialization sees
-it, with no path back to its source name (`L0`) even if the hoist were
-avoided. `serialize.c` correctly refuses to emit broken C rather than
-silently producing an unresolved relocation — "cannot serialize initializer
-for global '...' in native mode: unresolved relocation target" — but the
-underlying gap remains open, tracked as #1044.
+dispatch-table idiom for a `goto *disptab[i]` interpreter loop) serializes
+correctly under `-c=native` — unlike the `for`-loop VLA case above, GNU
+labels-as-values in a `static` initializer is not a divergence forced by
+C's grammar: both GCC (documented in its manual) and clang accept exactly
+this construct at function scope. `-c=native` ordinarily hoists a
+function-local `static` out to file scope as a synthetic global
+(`__cccc_disptab_N`), where `&&L0` has no C spelling at all — so instead,
+whenever a `static`'s initializer relocation resolves against a label
+rather than another global, its real definition is deferred and emitted
+inside the one function that owns the label
+(`collect_deferred_static_labels()`, `src/serialize.c`), the only place the
+address is legal to spell. A candidate referenced from more than one
+function (a block literal or nested function lexically inside the owner,
+which `-c=native` lifts to its own separate file-scope C function) is left
+undeferred, and still hits the diagnostic below rather than emitting
+broken C — the general fail-loudly policy this file follows throughout:
+"cannot serialize initializer for global '...' in native mode: unresolved
+relocation target" (#1044).
 
 Three general `-c=native` serializer gaps found auditing `tests/test_minilua.c`
 (#1042) are fixed, not divergences: (1) a struct/union first reached only

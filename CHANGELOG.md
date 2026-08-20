@@ -139,6 +139,33 @@ All notable changes to CCCC are documented here. Format loosely follows
   static-link-chase source arm it was missing (`codegen_expr.c`, sharing
   `gen_addr`'s own chase via a new `emit_static_chain_var_addr()` helper in
   `codegen_addr.c`) (#1076).
+- `src/preprocess.c`: `add_macro()` stored a `-D` command-line macro's
+  caller-freed name pointer directly as `Macro.name` instead of copying
+  it — every other caller passes arena/token-backed storage, so this was
+  a silent, heap-layout-dependent use-after-free (confirmed via
+  AddressSanitizer, reproducible on top of any commit) until an unrelated
+  allocation-pattern change happened to make it crash. Now always copies
+  via `arena_strndup()` (#1097).
+- `-c=native`: a function-local `static` initialized with a
+  [GNU] labels-as-values address (`static const void *disptab[] = { &&L0,
+  &&L1 };`, the usual dispatch-table idiom for a `goto *disptab[i]`
+  interpreter loop) hard-errored ("unresolved relocation target") — real
+  GCC/clang both accept this construct, but only at function scope,
+  and `-c=native` unconditionally hoisted such a `static` to file scope,
+  where a label's address has no C spelling. Such a global's real
+  definition is now deferred into its owning function's own body instead
+  (`collect_deferred_static_labels()`, `src/serialize.c`), the only place
+  the address is legal; a candidate is left undeferred (still hits the
+  original diagnostic, rather than emitting broken C) whenever it's read
+  from more than one function (a nested function or block literal), or
+  whenever another global's own initializer takes its address (e.g.
+  `static void **p = tab;` sitting next to `static void *tab[] = {&&L};`
+  — deferring `tab` would otherwise leave `p`'s own file-scope reference
+  naming a symbol that no longer exists there) (#1044). Verifying this
+  fix against a real-world, deeply nested/heavily-shared program
+  (`tests/test_minilua.c`) surfaced a stack-overflow/DAG-blowup hazard in
+  this fix's own AST walker, now a proper explicit heap-backed stack with
+  pointer-identity deduplication instead of recursion.
 
 ## [0.2.15] - 2026-08-15
 

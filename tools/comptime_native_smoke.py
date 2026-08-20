@@ -5179,11 +5179,70 @@ def case_layout_const_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     LAYOUT_CONST_PROGRAM)
 
 
+STATIC_LABEL_TABLE_PROGRAM = """
+static int dispatch(int idx) {
+    static const void *tab[] = {&&zero, &&ten, &&twenty};
+    goto                    *tab[idx];
+zero:
+    return 0;
+ten:
+    return 10;
+twenty:
+    return 20;
+}
+
+int main(void) {
+    return dispatch(0) + dispatch(1) + dispatch(2) + 12;
+}
+"""
+
+
+def case_static_label_table_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  123: a function-local `static` initialized with a label's "
+          "address ([GNU] labels-as-values, `&&label`) used to hard-error "
+          "under -c=native ('cannot serialize initializer for global "
+          "... unresolved relocation target') -- rename_anon_globals() "
+          "hoists such a static to file scope like any other anonymous "
+          "global, but a label's address has no C spelling there, only "
+          "inside the function that defines the label (verified directly "
+          "against real clang/GCC, which both accept the identical idiom "
+          "as long as it stays function-local) (#1044). Fixed by deferring "
+          "such a global's real definition into its owning function's own "
+          "body (collect_deferred_static_labels(), src/serialize.c) "
+          "instead of hoisting it. Asserts -m output declares the static "
+          "table inside dispatch()'s own body (not at file scope) with its "
+          "`&&label` initializers intact, never the old diagnostic, plus "
+          "VM 42 -> native 42 -- this was the sole remaining blocker for "
+          "tests/test_minilua.c's own computed-goto dispatch table.")
+    src = Path(tmp) / "static_label_table_1044.c"
+    write(src, STATIC_LABEL_TABLE_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "unresolved relocation" in m_result.stdout + m_result.stderr:
+        print(f"    FAIL: -m still hard-errors on the label relocation\n"
+              f"    {m_result.stdout}{m_result.stderr}")
+        return False
+    if "&&zero" not in m_result.stdout:
+        print(f"    FAIL: -m output missing '&&zero' initializer\n"
+              f"    {m_result.stdout}")
+        return False
+    # The deferred definition must be indented (inside dispatch()'s body),
+    # not sitting at file-scope column 0 the way an ordinary hoisted
+    # anonymous global would.
+    if "\nstatic const void *__cccc_tab_0" in m_result.stdout:
+        print(f"    FAIL: static table was hoisted to file scope, not kept "
+              f"inside dispatch()'s own body\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "static_label_table_1044_rt",
+                                    STATIC_LABEL_TABLE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -5313,6 +5372,7 @@ def main() -> int:
             case_offsetof_array_len_native_round_trip,
             case_static_libc_collision_native_round_trip,
             case_layout_const_native_round_trip,
+            case_static_label_table_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

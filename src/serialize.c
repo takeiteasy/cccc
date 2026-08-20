@@ -188,6 +188,32 @@ typedef struct {
     int   upvars_cap;
 } NestedEnvEntry;
 
+// #1044: one function-local `static` (or block-scope compound literal)
+// whose initializer takes a label's address (`&&label`, GNU labels-as-
+// values) and so cannot be hoisted to file scope the way rename_anon_
+// globals() ordinarily hoists an anonymous global -- labels-as-values are
+// only legal inside the function that defines the label (verified directly
+// against real clang/GCC). Emitted instead inside owner_fn's own body by
+// serialize_function(), right after the flat local-declaration hoist. See
+// collect_deferred_static_labels()'s own comment.
+typedef struct {
+    Obj *var;
+    Obj *owner_fn;
+} DeferredStaticLabel;
+
+// #1044: one `ND_LABEL` reachable from some function's body, recording both
+// spellings a Relocation might need to resolve against: `unique_label` (a
+// `.L..N` string, matched by pointer identity -- resolve_goto_labels(),
+// parse_decl.c, hands the identical pointer to a label and to every
+// reference that resolves against it, exactly like SerJumpFrame's
+// brk_label/cont_label matching above) and `label` (the real source
+// spelling a `&&L0` reference must print).
+typedef struct {
+    char *unique_label;
+    char *label;
+    Obj  *owner_fn;
+} LabelOwner;
+
 // #1005: break/continue lower to an ND_GOTO with only `unique_label` set (a
 // non-C-identifier ".L..N" string, parse.c's new_unique_name()) -- a source
 // `goto` sets `label` instead. Serializing such an ND_GOTO back to a literal
@@ -264,6 +290,16 @@ typedef struct {
     NestedEnvEntry *nested_envs;
     int             nested_envs_len;
     int             nested_envs_cap;
+    // #1044: every ND_LABEL reachable from any function's body (built by
+    // collect_deferred_static_labels()), and the anonymous globals whose
+    // relocations resolve against that table -- see DeferredStaticLabel/
+    // LabelOwner's own comments.
+    LabelOwner          *label_owners;
+    int                  label_owners_len;
+    int                  label_owners_cap;
+    DeferredStaticLabel *deferred_label_statics;
+    int                  deferred_label_statics_len;
+    int                  deferred_label_statics_cap;
     // #989: types promoted from function-local to file scope (a block
     // capture's own struct/union/enum type declared inside a function,
     // needed because its lifted environment struct is emitted at file
@@ -3621,6 +3657,40 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
     free(decl);
 }
 
+// #1044: forward declaration -- serialize_function() (immediately below)
+// needs to print a deferred static's own initializer inside the owning
+// function's body, but serialize_init_bytes() isn't defined until further
+// down this file (it recurses through serialize_reloc_init(), which itself
+// needs find_label_owner() just below). Mirrors the existing forward
+// declaration ahead of serialize_reloc_init()'s own definition.
+static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Obj *var, Type *ty,
+                                 int offset);
+
+// #1044: look up a label by the same pointer-identity key a Relocation's
+// `*rel->label` carries (see LabelOwner's own comment). NULL if `name`
+// doesn't match any label collect_deferred_static_labels() found -- the
+// ordinary case for every relocation target that resolves to a real Obj.
+static const LabelOwner *find_label_owner(SerializeContext *ctx,
+                                          const char       *name) {
+    for (int i = 0; i < ctx->label_owners_len; i++)
+        if (ctx->label_owners[i].unique_label == name)
+            return &ctx->label_owners[i];
+    return NULL;
+}
+
+// #1044: true iff `var` was deferred into its owning function's own body by
+// collect_deferred_static_labels() -- serialize_global_var() and the #918
+// forward-declaration passes (both above and below this point in the file)
+// must all skip it, since it has no file-scope declaration to forward-
+// declare or definition to emit at all.
+static bool var_is_deferred_label_static(SerializeContext *ctx, Obj *var) {
+    for (int i = 0; i < ctx->deferred_label_statics_len; i++)
+        if (ctx->deferred_label_statics[i].var == var)
+            return true;
+    return false;
+}
+
 // Serialize a function
 static void serialize_function(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Obj *fn) {
@@ -3845,6 +3915,30 @@ static void serialize_function(FILE *f, VirtualMachine *vm,
             fprintf(f, ";\n");
         }
 
+        // #1044: a static (or compound-literal) global deferred here by
+        // collect_deferred_static_labels() because its initializer takes
+        // the address of one of `fn`'s own labels -- print its real
+        // definition now, inside the one function whose labels it's legal
+        // to reference. Ordinary anonymous-global naming already gave it a
+        // legal C identifier (rename_anon_globals()); every reference to it
+        // elsewhere in this function's body already reads that name via its
+        // Obj pointer (ND_VAR), unaffected by where the declaration itself
+        // ends up.
+        for (int __dl_i = 0; __dl_i < ctx->deferred_label_statics_len;
+             __dl_i++) {
+            DeferredStaticLabel *__dl = &ctx->deferred_label_statics[__dl_i];
+            if (__dl->owner_fn != fn)
+                continue;
+            print_indent_level(f, 1);
+            fprintf(f, "static ");
+            serialize_type_decl(f, ctx, __dl->var->ty, __dl->var->name);
+            if (__dl->var->init_data) {
+                fprintf(f, " = ");
+                serialize_init_bytes(f, vm, ctx, __dl->var, __dl->var->ty, 0);
+            }
+            fprintf(f, ";\n");
+        }
+
         // #1074: if `fn` directly parents at least one nested function,
         // declare and initialize its env struct instance here -- after
         // every ordinary local above so `&x` for an upvar field is always
@@ -3934,10 +4028,42 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm,
 
     const char *target_name = *rel->label;
     Obj        *target      = serialize_find_global(vm, target_name);
-    if (!target)
-        error("cccc: cannot serialize initializer for global '%s' in native "
-              "mode: unresolved relocation target '%s'",
-              var->name, target_name);
+    if (!target) {
+        // #1044: no Obj was ever created for a label -- codegen.c's own
+        // text-segment label map is the only thing that ordinarily
+        // resolves a `&&label` relocation, and that state never reaches
+        // this file (see this function's own comment, further up, on why).
+        // find_label_owner() rebuilds just enough of that mapping (built by
+        // collect_deferred_static_labels()) to spell the label's address
+        // back out as real C: `var` must already be one of ctx->deferred_
+        // label_statics (only those globals' relocations are checked
+        // against the label table, and only when serialize_function() is
+        // about to print `var`'s own definition inside its owning
+        // function's body, where the label is legal to name).
+        const LabelOwner *label = find_label_owner(ctx, target_name);
+        // Only spell `&&label` when `var` itself is one of ctx->deferred_
+        // label_statics -- i.e. this call is reached from serialize_
+        // function(), printing `var`'s definition inside its owning
+        // function's body, where the address is legal. `var` can still
+        // reach this arm un-deferred (collect_deferred_static_labels()
+        // declines a candidate another global's own relocation points at,
+        // e.g. `static void **p = tab;` sitting next to `static void
+        // *tab[] = {&&L};`) -- falling through to the diagnostic below
+        // for that case is correct: emitting `&&L` at file scope here
+        // would be invalid C the host compiler would (and, pre-#1044,
+        // did) reject anyway, so failing loudly here keeps the fail-
+        // loudly policy intact rather than deferring to the host's own,
+        // less specific error.
+        if (!label || !var_is_deferred_label_static(ctx, var))
+            error("cccc: cannot serialize initializer for global '%s' in "
+                  "native mode: unresolved relocation target '%s'",
+                  var->name, target_name);
+        fprintf(f, "(");
+        serialize_type(f, ctx, ty);
+        fprintf(f, ")((char *)&&%s + %lld)", label->label,
+                (long long)rel->addend);
+        return;
+    }
 
     // Anonymous string-literal global -- serialize_global_var() never
     // emits these on their own (see is_string_literal skip below), so
@@ -4216,6 +4342,12 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm,
     // runs, so it falls through and is serialized like any other global
     // (#925).
     if (var->is_string_literal)
+        return;
+
+    // #1044: deferred into its owning function's own body instead --
+    // serialize_function() emits its real definition; see
+    // collect_deferred_static_labels()'s own comment.
+    if (var_is_deferred_label_static(ctx, var))
         return;
 
     // #1047: a global whose declaration lives entirely in a replayed
@@ -5400,6 +5532,267 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog,
         // tentative-definition pair instead of `extern` plus an external
         // definition.
         obj->is_static = true;
+    }
+}
+
+// #1044: best-effort descent over every statement/expression child field a
+// Node can have, used by collect_deferred_static_labels() below for two
+// purposes -- finding every ND_LABEL reachable from a function body, and
+// checking whether a given Obj is referenced from outside its supposed
+// owner. A node kind this doesn't know to visit through (there is no
+// exhaustive list of Node's child fields, unlike serialize_stmt/
+// serialize_expr's own kind-by-kind switches) just means a label or
+// reference goes unnoticed -- which only ever makes collect_deferred_
+// static_labels() more conservative, falling back to today's existing
+// "unresolved relocation target" hard error rather than emitting broken C.
+// A node reachable through more than one field (e.g. a switch's case_next
+// list overlaps its body's next-chain) is visited only once -- see the
+// dedup set below, load-bearing rather than an optimization.
+//
+// Deliberately an explicit heap-backed work stack, not recursion: a real-
+// world program's AST (tests/test_minilua.c, a ~30k-line single-file Lua
+// interpreter) both chains thousands of statements through `next` and
+// nests expressions (long `lhs`/`rhs` chains from deeply parenthesized or
+// chained-operator source) deep enough to overflow the C call stack either
+// way -- confirmed by AddressSanitizer during development (SIGSEGV/stack-
+// overflow at what looked, from the outside, like an unrelated later
+// function, since the corrupted-vs-overflowed stack's actual fault site is
+// disconnected from which AST this walk was ever asked to cover).
+//
+// A dedup set (open-addressed, keyed by pointer identity) is load-bearing,
+// not an optimization: a node reachable through more than one of these
+// fields (the same case_next/body overlap noted above) would otherwise get
+// its *entire* subtree re-pushed once per incoming path -- for a large,
+// heavily-shared DAG this is exponential, not merely wasteful, and blew up
+// into an integer-overflowing allocation request during development on
+// this exact file. Marking a node visited the moment it's popped, before
+// its children are ever pushed, bounds total work to one push per (node,
+// field) pair regardless of how many paths reach that node.
+typedef struct {
+    Node **slots;
+    int    cap; // power of two, 0 means not yet allocated
+    int    count;
+} NodeSet;
+
+static bool node_set_add(NodeSet *set, Node *n) {
+    if (set->count * 4 >= set->cap * 3) { // grow at 75% load (also the
+                                          // initial 0/0 case)
+        int    old_cap = set->cap;
+        Node **old     = set->slots;
+        set->cap       = old_cap ? old_cap * 2 : 1024;
+        set->slots     = calloc(set->cap, sizeof(*set->slots));
+        set->count     = 0;
+        for (int i = 0; i < old_cap; i++)
+            if (old[i])
+                node_set_add(set, old[i]); // reinsert into the new table
+        free(old);
+    }
+    uintptr_t h = (uintptr_t)n >> 4;       // Node* is always more than 16-byte
+                                           // aligned in practice; spreads bits
+    int idx = (int)(h & (uintptr_t)(set->cap - 1));
+    while (set->slots[idx] && set->slots[idx] != n)
+        idx = (idx + 1) & (set->cap - 1);
+    if (set->slots[idx] == n)
+        return false; // already present
+    set->slots[idx] = n;
+    set->count++;
+    return true;
+}
+
+static void ast_walk_1044(Node *root, void (*visit)(Node *, void *),
+                          void *ctx) {
+    Node  **stack = NULL;
+    int     len = 0, cap = 0;
+    NodeSet seen = {0};
+#define AST_WALK_1044_PUSH(child)                                              \
+    do {                                                                       \
+        Node *__c = (child);                                                   \
+        if (__c) {                                                             \
+            if (len == cap) {                                                  \
+                cap   = cap ? cap * 2 : 256;                                   \
+                stack = realloc(stack, cap * sizeof(*stack));                  \
+            }                                                                  \
+            stack[len++] = __c;                                                \
+        }                                                                      \
+    } while (0)
+
+    AST_WALK_1044_PUSH(root);
+    while (len > 0) {
+        Node *n = stack[--len];
+        if (!node_set_add(&seen, n))
+            continue; // already visited via another path
+        visit(n, ctx);
+        AST_WALK_1044_PUSH(n->lhs);
+        AST_WALK_1044_PUSH(n->rhs);
+        AST_WALK_1044_PUSH(n->cond);
+        AST_WALK_1044_PUSH(n->then);
+        AST_WALK_1044_PUSH(n->els);
+        AST_WALK_1044_PUSH(n->init);
+        AST_WALK_1044_PUSH(n->inc);
+        AST_WALK_1044_PUSH(n->body);
+        AST_WALK_1044_PUSH(n->args);
+        AST_WALK_1044_PUSH(n->case_next);
+        AST_WALK_1044_PUSH(n->default_case);
+        AST_WALK_1044_PUSH(n->next);
+    }
+#undef AST_WALK_1044_PUSH
+    free(stack);
+    free(seen.slots);
+}
+
+typedef struct {
+    SerializeContext *ctx;
+    Obj              *owner_fn;
+} LabelCollectCtx;
+
+static void collect_label_visit(Node *n, void *vctx) {
+    if (n->kind != ND_LABEL || !n->unique_label)
+        return;
+    LabelCollectCtx *lc = vctx;
+    if (find_label_owner(lc->ctx, n->unique_label))
+        return; // already recorded (e.g. reached twice via case_next)
+    if (lc->ctx->label_owners_len == lc->ctx->label_owners_cap) {
+        lc->ctx->label_owners_cap =
+            lc->ctx->label_owners_cap ? lc->ctx->label_owners_cap * 2 : 8;
+        lc->ctx->label_owners =
+            realloc(lc->ctx->label_owners,
+                    lc->ctx->label_owners_cap * sizeof(*lc->ctx->label_owners));
+    }
+    LabelOwner *entry   = &lc->ctx->label_owners[lc->ctx->label_owners_len++];
+    entry->unique_label = n->unique_label;
+    entry->label        = n->label;
+    entry->owner_fn     = lc->owner_fn;
+}
+
+typedef struct {
+    Obj *var;
+    bool found;
+} VarRefCtx;
+
+static void var_ref_visit(Node *n, void *vctx) {
+    VarRefCtx *vr = vctx;
+    if (n->var == vr->var)
+        vr->found = true;
+}
+
+// #1044: an anonymous global whose relocation(s) resolve only against a
+// label (never against a real Obj -- see serialize_reloc_init()'s own
+// comment) must be defined inside the one function that owns that label
+// instead of at file scope. Builds ctx->label_owners (every label in the
+// program) and then ctx->deferred_label_statics (the subset of globals that
+// actually need this treatment), run once from cc_serialize_program()
+// immediately after the renaming passes above and before anything else
+// reads obj->name/rel. A candidate referenced from more than one function
+// (a block literal or nested function lexically inside the owner, which
+// -c=native lifts to its own separate file-scope C function, #965/#1074) is
+// deliberately left undeferred -- deferring it would only trade today's
+// clean "unresolved relocation target" diagnostic for a "use of undeclared
+// identifier" one from the host compiler, the opposite of the #918
+// fail-loudly policy this file follows throughout.
+static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
+                                           SerializeContext *ctx) {
+    // Cheap early-out for the common case: this whole pass (two full-
+    // program AST walks below, one per candidate) only matters when at
+    // least one non-function global has a Relocation that doesn't resolve
+    // to a real Obj -- true only for a labels-as-values dispatch table, a
+    // vanishingly rare construct. Every other program (the overwhelming
+    // majority compiled with `-m`/`-c=native`) skips straight past this
+    // function for free.
+    bool any_unresolved_reloc = false;
+    for (Obj *var = prog; var && !any_unresolved_reloc; var = var->next) {
+        if (var->is_function || !var->rel)
+            continue;
+        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+            if (rel->label && *rel->label &&
+                !serialize_find_global(vm, *rel->label)) {
+                any_unresolved_reloc = true;
+                break;
+            }
+        }
+    }
+    if (!any_unresolved_reloc)
+        return;
+
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (!fn->is_function || !fn->body)
+            continue;
+        LabelCollectCtx lc = {.ctx = ctx, .owner_fn = fn};
+        ast_walk_1044(fn->body, collect_label_visit, &lc);
+    }
+
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function || !var->rel)
+            continue;
+        Obj *owner = NULL;
+        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+            if (!rel->label || !*rel->label)
+                continue;
+            if (serialize_find_global(vm, *rel->label))
+                continue; // resolves to a real Obj -- not a label reference
+            const LabelOwner *lo = find_label_owner(ctx, *rel->label);
+            if (lo)
+                owner = lo->owner_fn;
+        }
+        if (!owner)
+            continue;
+
+        // Cross-function reference guard -- see this function's own
+        // comment above.
+        bool referenced_elsewhere = false;
+        for (Obj *fn = prog; fn; fn = fn->next) {
+            if (!fn->is_function || !fn->body || fn == owner)
+                continue;
+            VarRefCtx vr = {.var = var, .found = false};
+            ast_walk_1044(fn->body, var_ref_visit, &vr);
+            if (vr.found) {
+                referenced_elsewhere = true;
+                break;
+            }
+        }
+        // Another global's own initializer taking `var`'s address (e.g.
+        // `static void **p = tab;` reading a `static void *tab[] = {&&L};`
+        // declared alongside it) is legal C, and `p` itself has nothing
+        // wrong with its own relocation -- it resolves to a real Obj, so
+        // it is never itself a deferral candidate and keeps its ordinary
+        // file-scope definition. But once `var` moves inside its owner
+        // function's body, that file-scope reference to it would name a
+        // symbol that no longer exists at file scope ("use of undeclared
+        // identifier"). Declining the deferral here falls back to the
+        // pre-existing "unresolved relocation target" diagnostic for `var`
+        // itself, same fail-loudly policy as the cross-function guard
+        // above.
+        if (!referenced_elsewhere) {
+            for (Obj *other = prog; other && !referenced_elsewhere;
+                 other      = other->next) {
+                if (other == var || other->is_function || !other->rel)
+                    continue;
+                for (Relocation *rel = other->rel; rel; rel = rel->next) {
+                    if (rel->label && *rel->label &&
+                        serialize_find_global(vm, *rel->label) == var) {
+                        referenced_elsewhere = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (referenced_elsewhere)
+            continue;
+
+        if (ctx->deferred_label_statics_len ==
+            ctx->deferred_label_statics_cap) {
+            ctx->deferred_label_statics_cap =
+                ctx->deferred_label_statics_cap
+                    ? ctx->deferred_label_statics_cap * 2
+                    : 8;
+            ctx->deferred_label_statics =
+                realloc(ctx->deferred_label_statics,
+                        ctx->deferred_label_statics_cap *
+                            sizeof(*ctx->deferred_label_statics));
+        }
+        DeferredStaticLabel *entry =
+            &ctx->deferred_label_statics[ctx->deferred_label_statics_len++];
+        entry->var      = var;
+        entry->owner_fn = owner;
     }
 }
 
@@ -7374,6 +7767,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     rename_colliding_static_names(vm, prog, &ctx);   // #1002
     rename_colliding_type_tags(vm, prog, &ctx);      // #1014
     rename_colliding_enum_constants(vm, prog, &ctx); // #1015
+    collect_deferred_static_labels(vm, prog, &ctx);  // #1044
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
@@ -7452,6 +7846,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             // can't be forward-declared at all without re-deriving a
             // structurally distinct anonymous type.
             if (type_needs_anon_aggregate(&ctx, obj->ty))
+                continue;
+            // #1044: deferred into its owning function's own body -- see
+            // collect_deferred_static_labels()'s own comment.
+            if (var_is_deferred_label_static(&ctx, obj))
                 continue;
             fprintf(f, obj->is_static ? "static " : "extern ");
             if (obj->is_tls) // #1022: see serialize_global_var's own comment
@@ -7669,6 +8067,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // copy of the type, so nothing is lost except the (here,
         // impossible) forward reference this pass exists to support.
         if (type_needs_anon_aggregate(&ctx, obj->ty))
+            continue;
+        // #1044: deferred into its owning function's own body -- see
+        // collect_deferred_static_labels()'s own comment.
+        if (var_is_deferred_label_static(&ctx, obj))
             continue;
         // #1047: a header-supplied global is already forward-visible via
         // the replayed #include -- see global_is_header_supplied()'s

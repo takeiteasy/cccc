@@ -1672,7 +1672,23 @@ static Macro *add_macro(VirtualMachine *vm, char *name, int name_len,
                         bool is_objlike, Token *body, Token *define_tok) {
     Macro *m = arena_alloc(&vm->compiler.parser_arena, sizeof(Macro));
     memset(m, 0, sizeof(Macro));
-    m->name       = name;
+    // #1097: pre-existing bug found (not introduced) while verifying #1044
+    // against tests/test_minilua.c's own `-DLUA_USE_JUMPTABLE=0`
+    // CCCC_FLAGS: every other caller passes a `name` backed by arena/token
+    // storage that outlives this Macro, but define_macro() (below) is
+    // reachable from main.c's parse_define(), which heap-allocates `name`
+    // for a `-DFOO=bar` command-line define and frees it right after
+    // cc_define() returns -- storing that raw pointer here left `m->name`
+    // (read by, among others, hideset_union()) dangling the instant the
+    // caller freed it. Confirmed via AddressSanitizer (heap-use-after-free,
+    // preprocess.c:hideset_union) against unmodified trunk, not just this
+    // branch -- a nondeterministic, heap-layout-dependent bug, silent until
+    // something else's allocation pattern (here, #1044's own new serializer
+    // arrays) shifted enough to land on freed memory. A copy here is safe
+    // for every caller (the arena never frees), so always duplicate rather
+    // than special-case the one caller that doesn't already own long-lived
+    // storage.
+    m->name       = arena_strndup(vm, name, name_len);
     m->is_objlike = is_objlike;
     m->body       = body;
     m->define_tok = define_tok;
