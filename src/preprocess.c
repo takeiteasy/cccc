@@ -3672,8 +3672,31 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
                 error_tok(vm, p,
                           "comptime(attribute(...)) expects a string literal "
                           "attribute name");
-            *attribute_name = arena_strdup(vm, p->str);
-            p               = skip(vm, p->next, ")");
+            // Adjacent string literals ("a" "b" -> "ab") are a plain
+            // expression-context concern normally handled once, late, by
+            // join_adjacent_string_literals() (translation phase 6) -- but
+            // this runs during preprocessing, well before that pass, so an
+            // attribute name split across adjacent literals (e.g. by a
+            // formatter's line-length wrapping of a long single string, the
+            // shape reflection.h's own @generate_constructor hit) still
+            // arrives here as separate TK_STR tokens. Concatenate any run of
+            // them the same way, narrow-string only (an attribute name has
+            // no legitimate use for a wide/unicode literal).
+            size_t len  = strlen(p->str);
+            Token *last = p;
+            for (Token *t = p->next; t->kind == TK_STR; t = t->next) {
+                len  += strlen(t->str);
+                last  = t;
+            }
+            char *name = arena_alloc(&vm->compiler.parser_arena, len + 1);
+            name[0]    = '\0';
+            for (Token *t = p;; t = t->next) {
+                strcat(name, t->str);
+                if (t == last)
+                    break;
+            }
+            *attribute_name = name;
+            p               = skip(vm, last->next, ")");
             continue;
         }
         error_tok(vm, p, "unknown comptime attribute option '%.*s'", p->len,

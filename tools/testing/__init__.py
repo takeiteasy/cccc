@@ -203,15 +203,6 @@ NATIVE_SKIP_TESTS = {
     # 8/8 repeated runs clean, no flakiness. No separate ticket needed.
 
     # --- singleton bugs, one ticket each ---
-    "test_minilua.c": "3 unrelated native-compile bugs remain: by-value "
-                   "struct member ordering for an in-place-mutated Type "
-                   "(#1042a), a static-function/host-libc symbol collision "
-                   "manufactured by include-hoisting (#1042c), a VLA-length "
-                   "expression with no type-name dependency tracking "
-                   "(#1042d), plus a computed-goto dispatch-table global "
-                   "initializer with no C spelling for a label's address "
-                   "(#1044) -- (b), the comma-expression-in-funcall-argument "
-                   "bug, is fixed",
     # The emitted C replays `#include <sys/mount.h>` verbatim, so the host
     # header supplies the real ~2100-byte struct statfs and member access
     # re-resolves correctly against it -- but `sizeof(struct statfs)` was

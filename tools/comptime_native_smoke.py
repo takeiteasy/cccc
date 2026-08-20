@@ -4919,6 +4919,178 @@ def case_pthread_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+BYVAL_MEMBER_ORDER_PROGRAM = """
+typedef int (*EarlyFn)(struct Early *);
+
+struct Early {
+    int tag;
+    long value;
+};
+
+struct Holder {
+    char prefix[8];
+    struct Early e;
+};
+
+static int use_early(struct Early *e) { return e->tag; }
+
+int main(void) {
+    EarlyFn fn = use_early;
+    (void)fn;
+    struct Holder h;
+    h.e.tag = 7;
+    h.e.value = 123456789L;
+    if (h.e.tag != 7) return 1;
+    if (h.e.value != 123456789L) return 2;
+    return 42;
+}
+"""
+
+
+def case_byval_member_order_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  119: a struct first reached only through a POINTER reference "
+          "(e.g. a function-pointer typedef parameter, minilua's own "
+          "lua_CFunction == int (*)(struct lua_State *)) pushed a then-"
+          "incomplete Type into -c=native's ctx->defs at that early "
+          "position; a BY-VALUE member of some other struct, collected in "
+          "between, then needed the full body before it was available -- "
+          "'field has incomplete type' (#1042a). The #1010 repromotion "
+          "swap in collect_type() (src/serialize.c) fires once the real "
+          "definition is reached but re-pushes at the TAIL of ctx->defs, "
+          "after every entry collected since. Fixed with a stable "
+          "topological reorder pass over ctx->defs: an edge for every "
+          "by-value member forces its type's own definition ahead of its "
+          "user, without disturbing any pair whose order was already "
+          "legal. Asserts -m output prints 'struct Early {' before "
+          "'struct Holder {', plus VM 42 -> native 42.")
+    src = Path(tmp) / "byval_member_order_1042.c"
+    write(src, BYVAL_MEMBER_ORDER_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    early_idx = m_result.stdout.find("struct Early {")
+    holder_idx = m_result.stdout.find("struct Holder {")
+    if early_idx < 0 or holder_idx < 0:
+        print(f"    FAIL: -m output missing struct Early/Holder body\n    {m_result.stdout}")
+        return False
+    if early_idx > holder_idx:
+        print(f"    FAIL: struct Early printed after struct Holder (wrong order)\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "byval_member_order_1042_rt",
+                                    BYVAL_MEMBER_ORDER_PROGRAM)
+
+
+OFFSETOF_ARRAY_LEN_PROGRAM = """
+#include <stddef.h>
+
+typedef struct {
+    int a;
+    long b;
+    char c;
+} Aux;
+
+typedef union {
+    long lastfree;
+    char padding[offsetof(Aux, c)];
+} Boxed;
+
+int main(void) {
+    if (sizeof(Boxed) != offsetof(Aux, c)) return 1;
+    if (offsetof(Aux, c) <= sizeof(long)) return 2;
+    return 42;
+}
+"""
+
+
+def case_offsetof_array_len_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  120: offsetof(T, member)'s expansion (include/stddef.h: "
+          "'(size_t)&(((type *)0)->member)') is a genuine integer constant "
+          "expression per C11 6.6p9, but is_const_expr() "
+          "(src/parse_analysis.c) had no ND_ADDR/ND_DEREF arm at all, so "
+          "array_dimensions() (src/parse_types.c) misclassified "
+          "'char padding[offsetof(T, m)]' as a VLA -- vla_of() (src/type.c) "
+          "hard-codes VLA objects to size 8, a live VM sizeof bug "
+          "independent of -c=native, and the VLA-length replay path "
+          "(serialize_type_decl's TY_VLA case) re-emitted the raw "
+          "expression -- including the referenced type's name -- with no "
+          "forward-dependency tracking, 'use of undeclared identifier' "
+          "(#1042d). Fixed with a structural (not 'whatever eval_rval() "
+          "accepts', which also admits '&global') ND_ADDR arm: exactly "
+          "ND_ADDR -> (ND_MEMBER|ND_DEREF)* -> ND_CAST-of-ND_NUM(0), so the "
+          "member folds to a plain TY_ARRAY at parse time. Asserts -m "
+          "output prints 'char padding[16];' (a plain integer, matching "
+          "the union's real offsetof value on every 64-bit target this "
+          "project supports), not a raw expression naming 'Aux' inside the "
+          "array brackets, plus VM 42 -> native 42.")
+    src = Path(tmp) / "offsetof_array_len_1042.c"
+    write(src, OFFSETOF_ARRAY_LEN_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "char padding[16];" not in m_result.stdout:
+        print(f"    FAIL: -m output missing folded 'char padding[16];'\n    {m_result.stdout}")
+        return False
+    if "padding[(" in m_result.stdout or "padding[&" in m_result.stdout:
+        print(f"    FAIL: -m output still replays a raw expression as the array length\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "offsetof_array_len_1042_rt",
+                                    OFFSETOF_ARRAY_LEN_PROGRAM)
+
+
+STATIC_LIBC_COLLISION_PROGRAM = """
+static int index(int base, int step) {
+    return base + step * 2;
+}
+
+int main(void) {
+    int r = index(10, 16);
+    if (r != 42) return 1;
+    return 42;
+}
+"""
+
+
+def case_static_libc_collision_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  121: tests/test_minilua.c's own 'static int getmode(...)' is "
+          "legal C in the source's own declaration order (its "
+          "'#include <unistd.h>' comes AFTER the static definition -- a "
+          "later, weaker declaration of an already-defined static doesn't "
+          "redefine it) -- confirmed directly, clang -fsyntax-only on the "
+          "real source compiles clean. -c=native's own #include-replay "
+          "block hoists every captured include to the top of the output, "
+          "unconditionally, ahead of every prototype/definition, "
+          "inverting that legal order and manufacturing a collision "
+          "against macOS libc's real getmode() the user's program never "
+          "actually has (#1042c). Fixed with a host-symbol probe added to "
+          "rename_colliding_static_names() (src/serialize.c, #1002): any "
+          "static, defining Obj whose name resolves in the host libc's own "
+          "symbol namespace -- probed via dlsym on the SAME handle "
+          "cc_load_libc()/find_libc() already use, deliberately never "
+          "RTLD_DEFAULT/dlopen(NULL) (those also see the compiler process "
+          "itself, making output depend on which cccc binary ran it) -- "
+          "gets the pass's existing '%s__cccc_dupN' rename. 'index' (a "
+          "legacy BSD function CCCC's own bundled string.h does not "
+          "declare, unlike getmode/<unistd.h> which this case deliberately "
+          "does NOT pass -I<repo>/include for, since the real repro needs "
+          "no header at all -- only a real host libc symbol) is used here "
+          "since it exists on every host this project supports. Asserts "
+          "-m output renames the static to 'index__cccc_dup', not a bare "
+          "'index' definition, plus VM 42 -> native 42.")
+    src = Path(tmp) / "static_libc_collision_1042.c"
+    write(src, STATIC_LIBC_COLLISION_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "index__cccc_dup" not in m_result.stdout:
+        print(f"    FAIL: -m output did not rename the colliding static 'index'\n    {m_result.stdout}")
+        return False
+    if "static int index(int base" in m_result.stdout:
+        print(f"    FAIL: -m output still prints the unrenamed 'index' definition\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "static_libc_collision_1042_rt",
+                                    STATIC_LIBC_COLLISION_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -5049,6 +5221,9 @@ def main() -> int:
             case_va_list_param_native_round_trip,
             case_va_list_libc_call_native_round_trip,
             case_pthread_native_round_trip,
+            case_byval_member_order_native_round_trip,
+            case_offsetof_array_len_native_round_trip,
+            case_static_libc_collision_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

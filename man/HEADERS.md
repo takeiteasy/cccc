@@ -117,6 +117,30 @@ by default). Two things follow from that:
   taken branch inside it captured (#1064). `--emit-cccc` is exempted, like
   the loop's other filters — dialect-fidelity output expects a cccc-aware
   reader.
+- Every captured `#include` is replayed as one block, unconditionally, at
+  the very top of the emitted C — ahead of every prototype and definition
+  — regardless of where it actually appeared in the source. This can
+  invert a legal declaration order: `tests/test_minilua.c` (#1042) defines
+  `static int getmode(...)` and only *later* writes `#include <unistd.h>`
+  — legal C (a later, weaker declaration of an already-defined `static`
+  doesn't redefine it; `clang -fsyntax-only` on the real source confirms
+  this) — but the hoisted include now sees macOS libc's real `mode_t
+  getmode(const void *, mode_t)` *before* the static definition, "static
+  declaration of 'getmode' follows non-static declaration", a collision
+  that isn't in the user's own program. Fixed defensively rather than by
+  tracking per-directive source position: `rename_colliding_static_names()`
+  (`src/serialize.c`, #1002) now also probes the host libc's own symbol
+  namespace (`dlsym` on the same handle `cc_load_libc()`/`find_libc()`
+  already use for the VM's own FFI path — deliberately never
+  `RTLD_DEFAULT`/`dlopen(NULL)`, which would also see the compiler process
+  itself and make output depend on which `cccc` binary happened to run it)
+  and renames any `static` whose name resolves there, the same
+  `"%s__cccc_dupN"` rename already used for an ordinary cross-TU
+  collision. A known, deliberate over-approximation: `dlsym` proves a
+  *definition* exists in the host's symbol namespace, not that a replayed
+  header actually *declares* it — harmless, since renaming a `static` never
+  changes observable behavior (it's file-local, and every reference
+  resolves through the same `Obj`).
 - Because the real header is re-emitted via auto-capture, CCCC does **not**
   also re-emit type definitions it collected from that same header
   (`TypeNameRecord.from_include` in `src/cccc.h`, used by

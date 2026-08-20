@@ -271,10 +271,41 @@ static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label) {
     }
 }
 
+// #1042(d): is offsetof(T, member)'s expansion (include/stddef.h:
+// `(size_t)&(((type *)0)->member)`, `->` already desugared to `(*x).y` by
+// parse_postfix.c) -- a chain of ND_MEMBER/ND_DEREF hops (any depth, for a
+// nested member) bottoming out at a null-pointer constant, itself optionally
+// wrapped in casts. This is exactly the shape eval_rval()'s ND_MEMBER/
+// ND_DEREF arms (above) already fold without needing a `label`, so anything
+// this admits is something eval() can actually compute -- deliberately much
+// narrower than "whatever eval_rval() accepts" (which also allows `&global`,
+// admitting that here would make an address-valued expression pass
+// is_const_expr at every other caller, e.g. parse_expr.c/
+// static_branch_value, which then call eval() with no label and hard-error).
+static bool is_offsetof_null_base(Node *node) {
+    while (node->kind == ND_CAST)
+        node = node->lhs;
+    return node->kind == ND_NUM && node->val == 0;
+}
+
+static bool is_offsetof_chain(Node *node) {
+    switch (node->kind) {
+        case ND_MEMBER:
+        case ND_DEREF:
+            return is_offsetof_chain(node->lhs);
+        case ND_CAST:
+            return is_offsetof_chain(node->lhs);
+        default:
+            return is_offsetof_null_base(node);
+    }
+}
+
 bool is_const_expr(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
 
     switch (node->kind) {
+        case ND_ADDR:
+            return is_offsetof_chain(node->lhs);
         case ND_ADD:
         case ND_SUB:
         case ND_MUL:

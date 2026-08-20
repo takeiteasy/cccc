@@ -46,7 +46,11 @@ extern char *(strstr)(const char *haystack, const char *needle);
         char *: (strpbrk)((s), (accept)))
 extern char *(strpbrk)(const char *s, const char *accept);
 
+extern long strspn(const char *s, const char *accept);
+extern long strcspn(const char *s, const char *reject);
+
 extern long strxfrm(char *dest, const char *src, long n);
+extern int strcoll(const char *s1, const char *s2);
 extern char *strerror(int errnum);
 
 // extern char* strcpy_s(char *dest, long destsz, const char *src);

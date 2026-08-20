@@ -1215,6 +1215,36 @@ silently producing an unresolved relocation — "cannot serialize initializer
 for global '...' in native mode: unresolved relocation target" — but the
 underlying gap remains open, tracked as #1044.
 
+Three general `-c=native` serializer gaps found auditing `tests/test_minilua.c`
+(#1042) are fixed, not divergences: (1) a struct/union first reached only
+through a *pointer* reference (e.g. a function-pointer typedef parameter)
+could still print its *by-value* user's definition first, "field has
+incomplete type" — a stable topological reorder pass over the collected type
+list now moves a type's own body ahead of any by-value user, without
+disturbing pairs whose order was already legal. Relatedly, a struct/union
+tag named only inside a function-pointer parameter's own *prototype scope*
+(C11 6.2.1p4) is now forward-declared at file scope ahead of the type-def
+block, so it resolves against the same tag as the type's own later,
+file-scope definition instead of manufacturing an "incompatible function
+pointer types" error between two identically-spelled but distinct types.
+(2) `offsetof(T, member)` is a genuine integer constant expression (C11
+6.6p9), but was misclassified as a variable-length array — a live VM bug
+independent of `-c=native` (`sizeof` of the containing aggregate was simply
+wrong), on top of the `-c=native` symptom (the VLA-length replay path had no
+dependency tracking for a type named only inside the length expression,
+"use of undeclared identifier"). (3) an `#include` auto-captured from the
+user's own source can legally appear, in the source, *after* a `static`
+declaration whose name happens to match a real host libc symbol — legal C,
+since a later, weaker declaration of an already-defined `static` doesn't
+redefine it — but the include-replay block hoists every captured `#include`
+to the very top of the emitted C, unconditionally, manufacturing a
+collision the user's program never actually has. `rename_colliding_static_
+names()` now probes the host libc's own symbol namespace (via `dlsym` on
+the same handle the VM's own FFI loader uses, never `RTLD_DEFAULT`/
+`dlopen(NULL)`, which would also see the compiler process itself) and
+renames a colliding `static` the same way it already renames a cross-TU
+collision.
+
 `__builtin_pc_function_name(pc)` and `__builtin_pc_source_location(pc, &file,
 &line)` are also a hard error under `-m`/`-c=native`/`-c=generated`, rather
 than a divergence — the opposite direction from the `__builtin_return_address`
@@ -2013,7 +2043,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stddef.h>` | ✓ | |
 | `<stdio.h>` | ✓ | |
 | `<stdlib.h>` | ✓ | `MB_CUR_MAX` (C17 7.22.1, #1069) is genuinely runtime/locale-dependent, unlike `<limits.h>`'s compile-time `MB_LEN_MAX` above, so it's implemented as an accessor shim (`__cccc_mb_cur_max`, same `__cccc_stdout`/`__cccc_errno_ptr` pattern) rather than a macro constant. CCCC never calls `setlocale()` itself, and the guest's own `setlocale`/`mblen`/`mbtowc`/`wctomb`/`mbstowcs`/`wcstombs` are all real host FFI passthroughs, so the host process's locale already is the guest's -- no separate locale model needed. Under `-c=native`, the shim reads the host's own internal accessor directly (glibc: `__ctype_get_mb_cur_max()`, a function call; macOS: `__mb_cur_max`, a plain global) rather than resolving it by replaying a second `#include <stdlib.h>` -- an `#include_next` hand-off was tried first (the `<stdio.h>`/`<errno.h>`/`<fenv.h>`/`<math.h>` pattern) but chased the real host's own `<stdlib.h>` chain deep enough to hit a second, unrelated instance of `<setjmp.h>`'s own `-I./include`-shadowing hazard (a bundled `<sys/time.h>` colliding with the real host's `<sys/types.h>` over `clock_t`) with no clean stopping point, so `<stdlib.h>` itself stays a plain, non-hand-off bundled header like before |
-| `<string.h>` | ✓ | `strchr`, `strrchr`, `strstr`, `strpbrk` are const-correct via `_Generic` dispatch macros: return type matches const-ness of the input pointer. `strpbrk` added in C23. `memchr` returns `void *` (no const dispatch — accepts any pointer type). |
+| `<string.h>` | ✓ | `strchr`, `strrchr`, `strstr`, `strpbrk` are const-correct via `_Generic` dispatch macros: return type matches const-ness of the input pointer. `strpbrk` added in C23. `memchr` returns `void *` (no const dispatch — accepts any pointer type). `strspn`, `strcspn`, `strcoll` are registered VM cfuncs but had no `<string.h>` declaration at all, found auditing `tests/test_minilua.c` (#1042) -- harmless on the VM itself (registration alone is enough to call them), but a hard compile error under `-c=native`'s `-I./include` forwarding, where the real host `cc` sees only an implicit declaration (a C99+ error) or nothing. Fixed. |
 | `<time.h>` | ✓ | Time/date (`time`, `mktime`, `timegm`, `localtime`/`localtime_r`, `gmtime`/`gmtime_r`, `strftime`, `difftime`, `clock`, `nanosleep`), `struct tm`, `struct timespec` |
 
 #### C99

@@ -848,6 +848,150 @@ static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
     collect_node_types(ctx, obj->body);
 }
 
+// #1042(a): ctx->defs is populated in first-collected order -- a post-order
+// walk per collect_type()'s member recursion -- which is a legal declaration
+// order UNLESS a struct/union's own body is first reached only through an
+// early POINTER reference (e.g. a function-pointer typedef parameter, the
+// minilua repro's `lua_CFunction` == `int (*)(struct lua_State *)`), pushing
+// its (then-incomplete) Type into ctx->defs at that early position, and a
+// BY-VALUE member of some other struct collected in between then needs the
+// full body before it's available. The #1010 swap in collect_type() above
+// repromotes the incomplete entry to the complete Type once collection
+// reaches it, but re-pushes at the TAIL of ctx->defs, after every entry
+// collected since -- including a later by-value user of the same type, e.g.
+// minilua's `struct LX { ...; struct lua_State l; };`, which still lands
+// ahead of `struct lua_State`'s own body. serialize_type_defs_for_owner()
+// just walks ctx->defs in order, so the by-value user prints first and the
+// host compiler sees "field has incomplete type".
+//
+// Fixed with a stable topological reorder pass over ctx->defs, run once
+// after collection: an edge M -> E for every struct/union def E and every
+// by-value (non-pointer) member of E whose own type resolves to another
+// entry M. Kahn's algorithm, always picking the lowest-index ready node, so
+// an entry only moves when an edge actually forces it -- output stays
+// byte-identical wherever the existing order was already legal.
+static bool member_needs_own_def(Type *mty) {
+    while (mty && mty->kind == TY_ARRAY)
+        mty = mty->base;
+    return mty && (mty->kind == TY_STRUCT || mty->kind == TY_UNION);
+}
+
+// Resolve a by-value member's type to its ctx->defs index. same_type_or_
+// origin() deliberately treats an incomplete tagged aggregate as equal to
+// the complete one sharing its tag (#892/#1010) -- prefer a match passing
+// type_is_complete_tagged() (an incomplete entry prints a bare `struct X;`
+// and constrains nothing, so it's not a useful edge target); if only an
+// incomplete match exists, report no edge at all.
+static int find_complete_def_index(TypeVec *defs, Type *ty) {
+    int incomplete_idx = -1;
+    for (int i = 0; i < defs->len; i++) {
+        if (!same_type_or_origin(defs->data[i], ty))
+            continue;
+        if (type_is_complete_tagged(defs->data[i]))
+            return i;
+        if (incomplete_idx < 0)
+            incomplete_idx = i;
+    }
+    (void)incomplete_idx;
+    return -1;
+}
+
+// Records one M -> container_idx edge per by-value member, recursing through
+// a TAGLESS member's own members instead of stopping: a tagless aggregate
+// has no standalone ctx->defs entry serialize_type_defs_for_owner() ever
+// prints (it's inlined at its use site), so ITS by-value members are the
+// real ordering constraint on `container_idx`, not the tagless type itself.
+// A tagless struct can't legally embed itself by value (infinite size), so
+// this recursion can't cycle.
+static void collect_byval_edges(SerializeContext *ctx, Type *mty, TypeVec *defs,
+                                bool *depends, int n, int container_idx) {
+    while (mty && mty->kind == TY_ARRAY)
+        mty = mty->base;
+    if (!mty || (mty->kind != TY_STRUCT && mty->kind != TY_UNION))
+        return;
+
+    bool tagged = find_tag_name(ctx, mty) || find_typedef_name(ctx, mty) ||
+                  find_anonymous_typedef_name(ctx, mty);
+    if (!tagged) {
+        for (Member *mm = mty->members; mm; mm = mm->next)
+            collect_byval_edges(ctx, mm->ty, defs, depends, n, container_idx);
+        return;
+    }
+
+    int target = find_complete_def_index(defs, mty);
+    if (target < 0 || target == container_idx)
+        return;
+    depends[container_idx * n + target] = true;
+}
+
+static void reorder_defs_by_byval_deps(SerializeContext *ctx) {
+    TypeVec *defs = &ctx->defs;
+    int      n    = defs->len;
+    if (n < 2)
+        return;
+
+    bool *depends = calloc((size_t)n * (size_t)n, sizeof(bool));
+    if (!depends)
+        return;
+
+    for (int i = 0; i < n; i++) {
+        Type *ty = defs->data[i];
+        if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+            continue; // enums have no by-value members to order against
+        for (Member *m = ty->members; m; m = m->next)
+            if (member_needs_own_def(m->ty))
+                collect_byval_edges(ctx, m->ty, defs, depends, n, i);
+    }
+
+    int   *indeg = calloc((size_t)n, sizeof(int));
+    bool  *done  = calloc((size_t)n, sizeof(bool));
+    Type **order = malloc(sizeof(Type *) * (size_t)n);
+    if (!indeg || !done || !order) {
+        free(depends);
+        free(indeg);
+        free(done);
+        free(order);
+        return;
+    }
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            if (depends[i * n + j])
+                indeg[i]++;
+
+    int placed = 0;
+    while (placed < n) {
+        int pick = -1;
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && indeg[i] == 0) {
+                pick = i;
+                break;
+            }
+        }
+        if (pick < 0) {
+            // By-value aggregate nesting can't legally cycle in valid C --
+            // fail-soft rather than lose a definition if it somehow does:
+            // append whatever remains in its existing relative order.
+            for (int i = 0; i < n; i++)
+                if (!done[i]) {
+                    order[placed++] = defs->data[i];
+                    done[i]         = true;
+                }
+            break;
+        }
+        order[placed++] = defs->data[pick];
+        done[pick]      = true;
+        for (int i = 0; i < n; i++)
+            if (!done[i] && depends[i * n + pick])
+                indeg[i]--;
+    }
+
+    memcpy(defs->data, order, sizeof(Type *) * (size_t)n);
+    free(order);
+    free(depends);
+    free(indeg);
+    free(done);
+}
+
 // #956: -c=generated support -- tracks which macro-generated functions
 // already have a prototype in the output (either from a preceding
 // forward-declare or their own definition), so a function body that
@@ -4581,10 +4725,104 @@ static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
     serialize_typedef_alias(f, ctx, td);
 }
 
+// Side discovery filing #1042(c)'s minilua audit: a struct/union member
+// declaring a function-pointer parameter of another tag (e.g.
+// `int (*f)(struct lua_State *);` inside `union Value`, minilua's own repro)
+// gives that parameter's `struct lua_State` PROTOTYPE SCOPE (C11 6.2.1p4) --
+// a distinct type from the file-scope `struct lua_State` its own later
+// definition introduces, even though both spell the same tag. No forward
+// declarations were ever emitted for file-scope tags (`grep
+// '^struct [A-Za-z_]*;'` on -m output returns nothing), so a real host
+// compiler reaching a later assignment between the two (minilua's own
+// `(*io).value_.f = (lua_CFunction)fn;`) sees two "different", identically-
+// spelled `struct lua_State *` function-pointer types and rejects it as
+// "incompatible function pointer types".
+//
+// Deliberately narrow, NOT "forward-declare every tagged struct/union" (the
+// first version of this fix, reverted): that blanket form regressed
+// test_serialize_opaque_handle_1010.c's own `CCCC_REJECT_STDOUT: struct
+// DyAtoms1010;\n` -- an ordinary pointer member (`DyAtoms1010 *`) does NOT
+// introduce prototype scope, it declares the tag at the SAME (enclosing,
+// typically file) scope as the containing struct itself (C11 6.7.2.3p11), so
+// a forward declaration ahead of it is pure unwanted noise that test's own
+// #1010 regression guard is right to reject. Only a struct/union pointer
+// reached through a nested FUNCTION TYPE's parameter-type-list or return
+// type is the actual C11 6.2.1p4 hazard -- so only those tags are collected.
+static void collect_proto_scope_targets(SerializeContext *ctx, Type *mty,
+                                        TypeVec *targets) {
+    if (!mty)
+        return;
+    while (mty->kind == TY_PTR || mty->kind == TY_ARRAY || mty->kind == TY_VLA)
+        mty = mty->base;
+
+    if (mty->kind == TY_FUNC) {
+        Type *ret = mty->return_ty;
+        while (ret && ret->kind == TY_PTR)
+            ret = ret->base;
+        if (ret && (ret->kind == TY_STRUCT || ret->kind == TY_UNION))
+            type_vec_push(targets, ret);
+        for (Type *p = mty->params; p; p = p->next) {
+            Type *pt = p;
+            while (pt && pt->kind == TY_PTR)
+                pt = pt->base;
+            if (pt && (pt->kind == TY_STRUCT || pt->kind == TY_UNION))
+                type_vec_push(targets, pt);
+        }
+        return;
+    }
+
+    // Not a function (pointer): if this member is itself a TAGLESS
+    // struct/union, its body is inlined at this same use site (per
+    // serialize_type_defs_for_owner's own "nothing to refer back to them
+    // by" skip), so its own function-pointer members are printed at this
+    // same textual position too -- recurse, mirroring collect_byval_edges'
+    // identical tagless handling above.
+    if ((mty->kind == TY_STRUCT || mty->kind == TY_UNION) &&
+        !find_tag_name(ctx, mty) && !find_typedef_name(ctx, mty) &&
+        !find_anonymous_typedef_name(ctx, mty))
+        for (Member *mm = mty->members; mm; mm = mm->next)
+            collect_proto_scope_targets(ctx, mm->ty, targets);
+}
+
+static void serialize_tag_forward_decls(FILE *f, SerializeContext *ctx) {
+    TypeVec targets = {0};
+    for (int i = 0; i < ctx->defs.len; i++) {
+        Type *ty = ctx->defs.data[i];
+        if ((ty->kind != TY_STRUCT && ty->kind != TY_UNION) ||
+            type_decl_owner(ctx, ty) != NULL)
+            continue; // file scope only -- prototype scope only bites here
+        for (Member *m = ty->members; m; m = m->next)
+            collect_proto_scope_targets(ctx, m->ty, &targets);
+    }
+
+    bool any = false;
+    for (int i = 0; i < targets.len; i++) {
+        int idx = find_complete_def_index(&ctx->defs, targets.data[i]);
+        if (idx < 0)
+            continue; // no real file-scope definition to disambiguate against
+        Type *def_ty = ctx->defs.data[idx];
+        if (type_decl_owner(ctx, def_ty) != NULL ||
+            type_vec_contains(&ctx->hoisted, def_ty)) // #989: printed elsewhere
+            continue;
+        TypeName *tag = find_tag_name(ctx, def_ty);
+        if (!tag)
+            continue; // tagless: nothing to forward-declare by
+        fprintf(f, "%s %.*s;\n", aggregate_keyword(def_ty), tag->name_len,
+                tag->name);
+        any = true;
+    }
+    if (any)
+        fprintf(f, "\n");
+    free(targets.data);
+}
+
 static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                           Obj *owner_fn) {
-    Obj *saved_fn      = ctx->current_fn;
-    ctx->current_fn    = owner_fn;
+    Obj *saved_fn   = ctx->current_fn;
+    ctx->current_fn = owner_fn;
+
+    if (!owner_fn)
+        serialize_tag_forward_decls(f, ctx);
 
     bool *typedef_done = ctx->typedefs_len > 0
                              ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
@@ -5083,11 +5321,74 @@ static bool files_are_same(const char *a, const char *b) {
 // see the nested name registered FIRST and rename the wrong (non-static)
 // side. A non-static name is never a rename candidate, so `anchors` is
 // populated once and never mutated again.
+// #1042(c): resolve the same platform-specific libc path find_libc()
+// (src/vm.c) does, so this probe queries the SAME library the VM's own FFI
+// path would -- deliberately NOT RTLD_DEFAULT/dlopen(NULL): those also
+// search the main executable (this compiler process itself), so a static
+// name matching one of cccc's OWN exported symbols would rename differently
+// depending on which cccc binary happened to run it (stage0 `./cccc` vs.
+// the full `build/cccc` with libbacktrace/readline linked in) -- emitted C
+// must be a function of the host libc only, never of the compiler build.
+static void *open_libc_handle_for_probe(void) {
+#if defined(_WIN32)
+    return NULL; // no dlopen/dlsym on this target; probe is a no-op there
+#else
+    static const char *const candidates[] = {
+#if defined(__APPLE__)
+        "/usr/lib/libSystem.dylib",
+#elif defined(__linux__)
+        "/lib64/libc.so.6",
+        "/lib/x86_64-linux-gnu/libc.so.6",
+        "/lib/libc.so.6",
+        "/usr/lib64/libc.so.6",
+        "/usr/lib/libc.so.6",
+        "libc.so.6",
+#elif defined(__FreeBSD__)
+        "/lib/libc.so.7",
+        "/usr/lib/libc.so.7",
+#else
+        "/lib/libc.so",
+        "/usr/lib/libc.so",
+#endif
+        NULL,
+    };
+    for (int i = 0; candidates[i]; i++) {
+        void *h = dlopen(candidates[i], RTLD_LAZY);
+        if (h)
+            return h;
+    }
+    return NULL;
+#endif
+}
+
 static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
                                           SerializeContext *ctx) {
     HashMap anchors = {0}; // name -> the non-static Obj* that owns it
     HashMap claimed = {
         0}; // name -> first static Obj* claiming it (old semantics)
+    // #1042(c): tests/test_minilua.c's own `static int getmode(...)` is
+    // legal C in the source's own declaration order (its `#include
+    // <unistd.h>` comes AFTER the static definition -- a later, weaker
+    // declaration of an already-defined static doesn't redefine it) --
+    // confirmed directly, `clang -fsyntax-only` on the real source compiles
+    // clean. -c=native's own #include-replay block hoists every captured
+    // include to the very top of the output, unconditionally, ahead of
+    // every prototype/definition -- inverting that legal order and
+    // manufacturing a "static declaration follows non-static declaration"
+    // collision against macOS libc's real `mode_t getmode(...)` that the
+    // user's program never actually has. Any static, defining Obj whose
+    // name resolves in the host libc's own symbol namespace gets the same
+    // "%s__cccc_dupN" rename this pass already applies for an ordinary
+    // cross-TU collision -- renaming a static is always safe (file-local,
+    // every reference resolves through the same Obj) regardless of what
+    // name it lands on. Known, deliberate over-approximation: dlsym proves
+    // a DEFINITION exists in the host's symbol namespace, not that a
+    // replayed header actually DECLARES it -- harmless, since the rename is
+    // invisible outside this one translation unit. `main` is excluded: it's
+    // never actually a libc symbol collision candidate (dlsym would find
+    // the process's own libc startup glue, not a real hazard), and renaming
+    // it would break the emitted binary's entry point.
+    void *libc_handle = open_libc_handle_for_probe();
 
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
@@ -5111,6 +5412,13 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
             obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining)
             continue;
+
+        if (libc_handle && strcmp(obj->name, "main") != 0 &&
+            dlsym(libc_handle, obj->name)) {
+            obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
+                                     ctx->anon_global_counter++);
+            continue;
+        }
 
         if (hashmap_get(&anchors, obj->name)) {
             // Collides with a non-static name -- the non-static side must
@@ -5148,6 +5456,10 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
     }
     hashmap_deinit_borrowed(&anchors);
     hashmap_deinit_borrowed(&claimed);
+#if !defined(_WIN32)
+    if (libc_handle)
+        dlclose(libc_handle);
+#endif
 }
 
 // #1014: does `ty` (or anything reachable through a PTR/ARRAY/VLA/FUNC
@@ -6878,6 +7190,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             continue;
         collect_obj_types(&ctx, obj);
     }
+    reorder_defs_by_byval_deps(&ctx); // #1042(a)
 
     // Header comment
     fprintf(f, "/* Generated by CCCC pragma macro expansion */\n\n");
