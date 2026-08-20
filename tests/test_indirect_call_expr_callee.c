@@ -10,9 +10,13 @@
 //
 // Expected return: 42
 
-int add(int a, int b) { return a + b; }
+int add(int a, int b) {
+    return a + b;
+}
 
-int (*get_add(void))(int, int) { return add; }
+int (*get_add(void))(int, int) {
+    return add;
+}
 
 // Primary repro: callee expression `get_add()` is itself a call.
 int test_inline_callee_call(void) {
@@ -22,9 +26,15 @@ int test_inline_callee_call(void) {
 // Args-side companion: staging order is being touched by the fix, so make
 // sure `f(g(), h())`-shaped argument lists (calls as arguments, not as the
 // callee) still work.
-int sum3(int a, int b, int c) { return a + b + c; }
-int one(void) { return 1; }
-int two(void) { return 2; }
+int sum3(int a, int b, int c) {
+    return a + b + c;
+}
+int one(void) {
+    return 1;
+}
+int two(void) {
+    return 2;
+}
 
 int test_call_args_containing_calls(void) {
     return sum3(one(), two(), 39);

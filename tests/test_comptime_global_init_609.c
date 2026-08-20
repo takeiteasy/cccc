@@ -4,8 +4,12 @@
 // a clean compile error (global initializers require compile-time constants,
 // not macro-expanded values).
 [[cccc::comptime]]
-int ct_sum(int a, int b) { return a + b; }
+int ct_sum(int a, int b) {
+    return a + b;
+}
 
 static const int G = ct_sum(20, 22);
 
-int main(void) { return G; }
+int main(void) {
+    return G;
+}

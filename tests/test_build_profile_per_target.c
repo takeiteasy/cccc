@@ -10,6 +10,6 @@
 int build_main(Builder *ctx) {
     BuildTarget *t = Executable(ctx, "app");
     AddSource(t, "src/main.c");
-    SetProfile(t, "release");  // per-target override
+    SetProfile(t, "release"); // per-target override
     return BuildDefault(ctx);
 }

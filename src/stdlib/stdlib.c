@@ -10,7 +10,7 @@
 #endif
 
 // aligned_alloc native availability: macOS 10.15+ or glibc 2.16+
-#if defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && \
+#if defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) &&          \
     __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_15
 #define CCCC_HAVE_NATIVE_ALIGNED_ALLOC 1
 #elif defined(__GLIBC__)
@@ -33,12 +33,15 @@ static void *cccc_aligned_alloc(size_t alignment, size_t size) {
 
 // Block_copy implementation: heap-duplicate a stack-allocated block descriptor.
 // Descriptor layout: [invoke_ptr(0) | byte_size(8) | captures...]
-// Reads byte_size from slot 1, mallocs that many bytes, and copies the descriptor.
+// Reads byte_size from slot 1, mallocs that many bytes, and copies the
+// descriptor.
 static void *cccc_block_copy_impl(void *desc) {
-    if (!desc) return NULL;
+    if (!desc)
+        return NULL;
     size_t size = (size_t)((long long *)desc)[1];
-    void *copy = malloc(size);
-    if (copy) memcpy(copy, desc, size);
+    void  *copy = malloc(size);
+    if (copy)
+        memcpy(copy, desc, size);
     return copy;
 }
 
@@ -61,13 +64,14 @@ static void *cccc_block_copy_impl(void *desc) {
 // 0 (keeping the sort well-defined) and wrap_qsort/wrap_bsearch surface it
 // via errno after the host call returns.
 static _Thread_local long long g_qsort_compar_value;
-static _Thread_local int g_qsort_compar_faulted;
+static _Thread_local int       g_qsort_compar_faulted;
 
 static int qsort_compar_trampoline(const void *a, const void *b) {
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_qsort_compar_value, args, 2, &result) != 0) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long       args[2] = {(long long)(intptr_t)a, (long long)(intptr_t)b};
+    long long       result  = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_qsort_compar_value, args, 2,
+                                        &result) != 0) {
         g_qsort_compar_faulted = 1;
         return 0;
     }
@@ -102,23 +106,28 @@ static int qsort_compar_trampoline(const void *a, const void *b) {
 // again before the sort completes could see a stale shadow for the
 // remainder of that sort -- the clear only happens once, after wrap_qsort
 // returns. Not worth a CHKT3 suppression range on the hot path for this.
-static long long wrap_qsort(long long base, long long nmemb, long long size, long long compar) {
-    long long saved_compar = g_qsort_compar_value;
-    int saved_faulted = g_qsort_compar_faulted;
-    g_qsort_compar_value = compar;
-    g_qsort_compar_faulted = 0;
+static long long wrap_qsort(long long base, long long nmemb, long long size,
+                            long long compar) {
+    long long saved_compar  = g_qsort_compar_value;
+    int       saved_faulted = g_qsort_compar_faulted;
+    g_qsort_compar_value    = compar;
+    g_qsort_compar_faulted  = 0;
 
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb, (size_t)size))
-        cc_type_shadow_clear_range(vm, (void *)base, (size_t)nmemb * (size_t)size);
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb,
+                                               (size_t)size))
+        cc_type_shadow_clear_range(vm, (void *)base,
+                                   (size_t)nmemb * (size_t)size);
 
     qsort((void *)base, (size_t)nmemb, (size_t)size, qsort_compar_trampoline);
 
-    if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb, (size_t)size))
-        cc_type_shadow_clear_range(vm, (void *)base, (size_t)nmemb * (size_t)size);
+    if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb,
+                                               (size_t)size))
+        cc_type_shadow_clear_range(vm, (void *)base,
+                                   (size_t)nmemb * (size_t)size);
 
-    int faulted = g_qsort_compar_faulted;
-    g_qsort_compar_value = saved_compar;
+    int faulted            = g_qsort_compar_faulted;
+    g_qsort_compar_value   = saved_compar;
     g_qsort_compar_faulted = saved_faulted;
     if (faulted)
         errno = EFAULT;
@@ -127,17 +136,17 @@ static long long wrap_qsort(long long base, long long nmemb, long long size, lon
 
 static long long wrap_bsearch(long long key, long long base, long long nmemb,
                               long long size, long long compar) {
-    long long saved_compar = g_qsort_compar_value;
-    int saved_faulted = g_qsort_compar_faulted;
-    g_qsort_compar_value = compar;
-    g_qsort_compar_faulted = 0;
+    long long saved_compar  = g_qsort_compar_value;
+    int       saved_faulted = g_qsort_compar_faulted;
+    g_qsort_compar_value    = compar;
+    g_qsort_compar_faulted  = 0;
 
-    void *result = bsearch((void *)key, (void *)base, (size_t)nmemb, (size_t)size,
-                           qsort_compar_trampoline);
+    void *result            = bsearch((void *)key, (void *)base, (size_t)nmemb,
+                                      (size_t)size, qsort_compar_trampoline);
 
-    int faulted = g_qsort_compar_faulted;
-    g_qsort_compar_value = saved_compar;
-    g_qsort_compar_faulted = saved_faulted;
+    int   faulted           = g_qsort_compar_faulted;
+    g_qsort_compar_value    = saved_compar;
+    g_qsort_compar_faulted  = saved_faulted;
     if (faulted)
         errno = EFAULT;
     return (long long)(intptr_t)result;
@@ -162,14 +171,15 @@ static long long wrap_bsearch(long long key, long long base, long long nmemb,
 // cc_run_at(main) returns -- so that path (vm.c, cc_run) drains the same
 // list with a top-level cc_run_at cycle per handler instead, matching how
 // constructors/destructors already run.
-static int push_exit_handler(long long **list, int *count, int *cap, long long fn_value) {
+static int push_exit_handler(long long **list, int *count, int *cap,
+                             long long fn_value) {
     if (*count >= *cap) {
-        int new_cap = *cap ? *cap * 2 : 8;
+        int        new_cap = *cap ? *cap * 2 : 8;
         long long *grown = realloc(*list, (size_t)new_cap * sizeof(long long));
         if (!grown)
             return -1;
         *list = grown;
-        *cap = new_cap;
+        *cap  = new_cap;
     }
     (*list)[(*count)++] = fn_value;
     return 0;
@@ -187,8 +197,9 @@ static long long wrap_at_quick_exit(long long fn_value) {
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (!vm)
         return -1;
-    return push_exit_handler(&vm->at_quick_exit_handlers, &vm->at_quick_exit_count,
-                             &vm->at_quick_exit_cap, fn_value);
+    return push_exit_handler(&vm->at_quick_exit_handlers,
+                             &vm->at_quick_exit_count, &vm->at_quick_exit_cap,
+                             fn_value);
 }
 
 // Drain a handler list in LIFO (reverse registration) order via a nested,
@@ -204,7 +215,8 @@ static long long wrap_at_quick_exit(long long fn_value) {
 // of the list and run next -- matching real glibc's observed order
 // (verified against a native build) and cc_run_atexit_entries's (vm.c)
 // identical top-level-context version of this same loop.
-static void drain_exit_handlers_nested(VirtualMachine *vm, long long **list_ptr, int *count) {
+static void drain_exit_handlers_nested(VirtualMachine *vm, long long **list_ptr,
+                                       int *count) {
     while (*count > 0) {
         long long fn_value = (*list_ptr)[--*count];
         long long ignored;
@@ -230,9 +242,9 @@ static void drain_exit_handlers_nested(VirtualMachine *vm, long long **list_ptr,
 static void drain_destructors_nested(VirtualMachine *vm) {
     if (!vm->run_started || vm->dtors_drained)
         return;
-    vm->dtors_drained = true;
-    CCCCInitEntry *list = vm->compiler.dtor_list;
-    int count = vm->compiler.dtor_count;
+    vm->dtors_drained    = true;
+    CCCCInitEntry *list  = vm->compiler.dtor_list;
+    int            count = vm->compiler.dtor_count;
     for (int i = 0; i < count; i++) {
         long long ignored;
         // code_addr is already a Pc (text_seg index, see codegen.c's
@@ -240,8 +252,8 @@ static void drain_destructors_nested(VirtualMachine *vm) {
         // expects a guest function-pointer VALUE and converts it back to a
         // Pc via cc_byte_offset_to_pc internally, so it must be re-encoded
         // as a byte offset here first.
-        cccc_call_guest_callback(vm, cc_pc_to_byte_offset((Pc)list[i].code_addr),
-                                 NULL, 0, &ignored);
+        cccc_call_guest_callback(
+            vm, cc_pc_to_byte_offset((Pc)list[i].code_addr), NULL, 0, &ignored);
         /* A faulting destructor doesn't abort the drain, matching
            drain_exit_handlers_nested's identical policy above. */
     }
@@ -260,7 +272,8 @@ static long long wrap_exit(long long status) {
 static long long wrap_quick_exit(long long status) {
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (vm)
-        drain_exit_handlers_nested(vm, &vm->at_quick_exit_handlers, &vm->at_quick_exit_count);
+        drain_exit_handlers_nested(vm, &vm->at_quick_exit_handlers,
+                                   &vm->at_quick_exit_count);
     quick_exit((int)status);
     return 0; /* unreachable */
 }
@@ -328,7 +341,8 @@ static void cccc_ffi_free(void *ptr) {
         // below the FFI dispatch, with no such return path available --
         // the best available option is a hard exit with the diagnostic
         // cccc_vm_heap_free already printed above.
-        error("free(): heap safety violation detected via an indirect call (see diagnostic above)");
+        error("free(): heap safety violation detected via an indirect call "
+              "(see diagnostic above)");
 }
 
 static void *cccc_ffi_calloc(size_t nmemb, size_t size) {
@@ -348,7 +362,8 @@ static void *cccc_ffi_realloc(void *ptr, size_t size) {
 static void *cccc_ffi_reallocarray(void *ptr, size_t nmemb, size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (vm && (vm->flags & CCCC_VM_HEAP))
-        return cccc_vm_heap_reallocarray(vm, ptr, (long long)nmemb, (long long)size);
+        return cccc_vm_heap_reallocarray(vm, ptr, (long long)nmemb,
+                                         (long long)size);
     return cccc_reallocarray(ptr, nmemb, size);
 }
 
@@ -363,22 +378,42 @@ static void *cccc_ffi_aligned_alloc(size_t alignment, size_t size) {
 #endif
 }
 
-static int cccc_ffi_posix_memalign(void **memptr, size_t alignment, size_t size) {
+static int cccc_ffi_posix_memalign(void **memptr, size_t alignment,
+                                   size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (vm && (vm->flags & CCCC_VM_HEAP))
-        return cccc_vm_heap_posix_memalign(vm, memptr, alignment, (long long)size);
+        return cccc_vm_heap_posix_memalign(vm, memptr, alignment,
+                                           (long long)size);
     return posix_memalign(memptr, alignment, size);
 }
 
 // Wrappers for int-returning functions that can return negative values
-static long long wrap_atoi(long long s)                      { return (long long)atoi((const char *)s); }
-static long long wrap_system(long long cmd)                  { return (long long)system((const char *)cmd); }
-static long long wrap_setenv(long long name, long long value, long long overwrite) { return (long long)setenv((const char *)name, (const char *)value, (int)overwrite); }
-static long long wrap_unsetenv(long long name)                { return (long long)unsetenv((const char *)name); }
-static long long wrap_putenv(long long string)                { return (long long)putenv((char *)string); }
-static long long wrap_mblen(long long s, long long n)        { return (long long)mblen((const char *)s, (size_t)n); }
-static long long wrap_mbtowc(long long pwc, long long s, long long n) { return (long long)mbtowc((wchar_t *)pwc, (const char *)s, (size_t)n); }
-static long long wrap_wctomb(long long s, long long wc)      { return (long long)wctomb((char *)s, (wchar_t)wc); }
+static long long wrap_atoi(long long s) {
+    return (long long)atoi((const char *)s);
+}
+static long long wrap_system(long long cmd) {
+    return (long long)system((const char *)cmd);
+}
+static long long wrap_setenv(long long name, long long value,
+                             long long overwrite) {
+    return (long long)setenv((const char *)name, (const char *)value,
+                             (int)overwrite);
+}
+static long long wrap_unsetenv(long long name) {
+    return (long long)unsetenv((const char *)name);
+}
+static long long wrap_putenv(long long string) {
+    return (long long)putenv((char *)string);
+}
+static long long wrap_mblen(long long s, long long n) {
+    return (long long)mblen((const char *)s, (size_t)n);
+}
+static long long wrap_mbtowc(long long pwc, long long s, long long n) {
+    return (long long)mbtowc((wchar_t *)pwc, (const char *)s, (size_t)n);
+}
+static long long wrap_wctomb(long long s, long long wc) {
+    return (long long)wctomb((char *)s, (wchar_t)wc);
+}
 // #1069: MB_CUR_MAX (include/stdlib.h) reads the real host's own
 // MB_CUR_MAX -- glibc spells it as a function call
 // (__ctype_get_mb_cur_max()), macOS as a plain global (__mb_cur_max);
@@ -388,7 +423,9 @@ static long long wrap_wctomb(long long s, long long wc)      { return (long long
 // etc are all real host passthroughs (this file, above; src/stdlib/
 // locale.c), so the host process's locale already is the guest's -- no
 // separate locale model needed.
-static long long wrap_mb_cur_max(void)                       { return (long long)MB_CUR_MAX; }
+static long long wrap_mb_cur_max(void) {
+    return (long long)MB_CUR_MAX;
+}
 
 // div()/ldiv()/lldiv() return div_t/ldiv_t/lldiv_t by value. CCCC's own
 // calling convention treats every struct/union return as a pointer in
@@ -416,29 +453,29 @@ static long long wrap_mb_cur_max(void)                       { return (long long
 #define CCCC_DIV_POOL_SLOTS 4
 
 static _Thread_local div_t g_div_pool[CCCC_DIV_POOL_SLOTS];
-static _Thread_local int g_div_pool_idx;
+static _Thread_local int   g_div_pool_idx;
 static long long wrap_div(long long numer, long long denom) {
-    div_t *slot = &g_div_pool[g_div_pool_idx];
+    div_t *slot    = &g_div_pool[g_div_pool_idx];
     g_div_pool_idx = (g_div_pool_idx + 1) % CCCC_DIV_POOL_SLOTS;
-    *slot = div((int)numer, (int)denom);
+    *slot          = div((int)numer, (int)denom);
     return (long long)(intptr_t)slot;
 }
 
 static _Thread_local ldiv_t g_ldiv_pool[CCCC_DIV_POOL_SLOTS];
-static _Thread_local int g_ldiv_pool_idx;
+static _Thread_local int    g_ldiv_pool_idx;
 static long long wrap_ldiv(long long numer, long long denom) {
-    ldiv_t *slot = &g_ldiv_pool[g_ldiv_pool_idx];
+    ldiv_t *slot    = &g_ldiv_pool[g_ldiv_pool_idx];
     g_ldiv_pool_idx = (g_ldiv_pool_idx + 1) % CCCC_DIV_POOL_SLOTS;
-    *slot = ldiv((long)numer, (long)denom);
+    *slot           = ldiv((long)numer, (long)denom);
     return (long long)(intptr_t)slot;
 }
 
 static _Thread_local lldiv_t g_lldiv_pool[CCCC_DIV_POOL_SLOTS];
-static _Thread_local int g_lldiv_pool_idx;
+static _Thread_local int     g_lldiv_pool_idx;
 static long long wrap_lldiv(long long numer, long long denom) {
-    lldiv_t *slot = &g_lldiv_pool[g_lldiv_pool_idx];
+    lldiv_t *slot    = &g_lldiv_pool[g_lldiv_pool_idx];
     g_lldiv_pool_idx = (g_lldiv_pool_idx + 1) % CCCC_DIV_POOL_SLOTS;
-    *slot = lldiv((long long)numer, (long long)denom);
+    *slot            = lldiv((long long)numer, (long long)denom);
     return (long long)(intptr_t)slot;
 }
 
@@ -470,17 +507,19 @@ static size_t cccc_memalignment(const void *p) {
 static long long cccc_strtoll(const char *nptr, char **endptr, int base) {
     if (base == 0 || base == 2) {
         const char *p = nptr;
-        while (isspace((unsigned char)*p)) p++;
+        while (isspace((unsigned char)*p))
+            p++;
         const char *digits = p;
-        if (*digits == '+' || *digits == '-') digits++;
+        if (*digits == '+' || *digits == '-')
+            digits++;
         if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B') &&
             (digits[2] == '0' || digits[2] == '1')) {
             size_t prefix_len = (size_t)(digits - p);
-            size_t rest_len = strlen(digits + 2);
-            char *tmp = malloc(prefix_len + rest_len + 1);
+            size_t rest_len   = strlen(digits + 2);
+            char  *tmp        = malloc(prefix_len + rest_len + 1);
             memcpy(tmp, p, prefix_len);
             memcpy(tmp + prefix_len, digits + 2, rest_len + 1);
-            char *tmp_end;
+            char     *tmp_end;
             long long result = strtoll(tmp, &tmp_end, 2);
             if (endptr)
                 *endptr = (char *)p + (size_t)(tmp_end - tmp) + 2;
@@ -491,20 +530,23 @@ static long long cccc_strtoll(const char *nptr, char **endptr, int base) {
     return strtoll(nptr, endptr, base);
 }
 
-static unsigned long long cccc_strtoull(const char *nptr, char **endptr, int base) {
+static unsigned long long cccc_strtoull(const char *nptr, char **endptr,
+                                        int base) {
     if (base == 0 || base == 2) {
         const char *p = nptr;
-        while (isspace((unsigned char)*p)) p++;
+        while (isspace((unsigned char)*p))
+            p++;
         const char *digits = p;
-        if (*digits == '+' || *digits == '-') digits++;
+        if (*digits == '+' || *digits == '-')
+            digits++;
         if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B') &&
             (digits[2] == '0' || digits[2] == '1')) {
             size_t prefix_len = (size_t)(digits - p);
-            size_t rest_len = strlen(digits + 2);
-            char *tmp = malloc(prefix_len + rest_len + 1);
+            size_t rest_len   = strlen(digits + 2);
+            char  *tmp        = malloc(prefix_len + rest_len + 1);
             memcpy(tmp, p, prefix_len);
             memcpy(tmp + prefix_len, digits + 2, rest_len + 1);
-            char *tmp_end;
+            char              *tmp_end;
             unsigned long long result = strtoull(tmp, &tmp_end, 2);
             if (endptr)
                 *endptr = (char *)p + (size_t)(tmp_end - tmp) + 2;
@@ -528,33 +570,38 @@ static unsigned long cccc_strtoul(const char *nptr, char **endptr, int base) {
 // no BID type appears in a VM header. include/stdlib.h's strtod32/64/128
 // static inline wrappers call this directly; no new opcode, following the
 // #828 <decimal_math.h> precedent.
-static long long wrap_dec_strtod(long long w, long long dst, long long s, long long endp) {
-    return cccc_dec_strtod((int)w, (void *)(intptr_t)dst, (const char *)(intptr_t)s,
-                           (char **)(intptr_t)endp, CCCC_DEC_ENV_DYNAMIC);
+static long long wrap_dec_strtod(long long w, long long dst, long long s,
+                                 long long endp) {
+    return cccc_dec_strtod((int)w, (void *)(intptr_t)dst,
+                           (const char *)(intptr_t)s, (char **)(intptr_t)endp,
+                           CCCC_DEC_ENV_DYNAMIC);
 }
 
 // Register all stdlib.h functions
 void register_stdlib_functions(VirtualMachine *vm) {
     // Conversion functions
-    cc_register_cfunc(vm, "atof", (void*)atof, 1, 1);       // returns double
-    cc_register_cfunc(vm, "atoi", (void*)wrap_atoi, 1, 0);
-    cc_register_cfunc(vm, "atol", (void*)atol, 1, 0);       // returns long
-    cc_register_cfunc(vm, "atoll", (void*)atoll, 1, 0);     // returns long long
-    cc_register_cfunc(vm, "strtod", (void*)strtod, 2, 1);   // returns double
-    cc_register_cfunc(vm, "strtof", (void*)strtof, 2, 2);   // returns float
-    cc_register_cfunc(vm, "strtold", (void*)strtold, 2, 1); // returns long double
-    cc_register_cfunc(vm, "strtol", (void*)cccc_strtol, 3, 0);
-    cc_register_cfunc(vm, "strtoll", (void*)cccc_strtoll, 3, 0);
-    cc_register_cfunc(vm, "strtoul", (void*)cccc_strtoul, 3, 0);
-    cc_register_cfunc(vm, "strtoull", (void*)cccc_strtoull, 3, 0);
-    cc_register_cfunc(vm, "__cccc_dec_strtod", (void*)wrap_dec_strtod, 4, 0); // #832
+    cc_register_cfunc(vm, "atof", (void *)atof, 1, 1);     // returns double
+    cc_register_cfunc(vm, "atoi", (void *)wrap_atoi, 1, 0);
+    cc_register_cfunc(vm, "atol", (void *)atol, 1, 0);     // returns long
+    cc_register_cfunc(vm, "atoll", (void *)atoll, 1, 0);   // returns long long
+    cc_register_cfunc(vm, "strtod", (void *)strtod, 2, 1); // returns double
+    cc_register_cfunc(vm, "strtof", (void *)strtof, 2, 2); // returns float
+    cc_register_cfunc(vm, "strtold", (void *)strtold, 2,
+                      1); // returns long double
+    cc_register_cfunc(vm, "strtol", (void *)cccc_strtol, 3, 0);
+    cc_register_cfunc(vm, "strtoll", (void *)cccc_strtoll, 3, 0);
+    cc_register_cfunc(vm, "strtoul", (void *)cccc_strtoul, 3, 0);
+    cc_register_cfunc(vm, "strtoull", (void *)cccc_strtoull, 3, 0);
+    cc_register_cfunc(vm, "__cccc_dec_strtod", (void *)wrap_dec_strtod, 4,
+                      0); // #832
 
     // Random number generation
-    cc_register_cfunc(vm, "rand", (void*)rand, 0, 0);
-    cc_register_cfunc(vm, "srand", (void*)srand, 1, 0);
+    cc_register_cfunc(vm, "rand", (void *)rand, 0, 0);
+    cc_register_cfunc(vm, "srand", (void *)srand, 1, 0);
 
     // Apple Blocks extension: heap-copy a block descriptor for escape
-    cc_register_cfunc(vm, "__cccc_block_copy_impl", (void*)cccc_block_copy_impl, 1, 0);
+    cc_register_cfunc(vm, "__cccc_block_copy_impl",
+                      (void *)cccc_block_copy_impl, 1, 0);
 
     // Memory allocation functions -- registered under the cccc_ffi_* wrappers
     // (not the raw host functions) so that a bare malloc/free/calloc/
@@ -562,49 +609,54 @@ void register_stdlib_functions(VirtualMachine *vm) {
     // function pointer and called indirectly gets the same VM-heap-aware
     // behavior as the direct-call opcode path (MALC/MFRE/CALC/REALC/REALCA/
     // MALCA/PMEMA in ops.c), instead of crashing/silently diverging (#865).
-    cc_register_cfunc(vm, "aligned_alloc", (void*)cccc_ffi_aligned_alloc, 2, 0);
-    cc_register_cfunc(vm, "calloc", (void*)cccc_ffi_calloc, 2, 0);
-    cc_register_cfunc(vm, "free", (void*)cccc_ffi_free, 1, 0);
-    cc_register_cfunc(vm, "free_sized", (void*)cccc_free_sized, 2, 0);
-    cc_register_cfunc(vm, "free_aligned_sized", (void*)cccc_free_aligned_sized, 3, 0);
-    cc_register_cfunc(vm, "malloc", (void*)cccc_ffi_malloc, 1, 0);
-    cc_register_cfunc(vm, "realloc", (void*)cccc_ffi_realloc, 2, 0);
-    cc_register_cfunc(vm, "reallocarray", (void*)cccc_ffi_reallocarray, 3, 0);  // Portable polyfill (#699)
-    cc_register_cfunc(vm, "posix_memalign", (void*)cccc_ffi_posix_memalign, 3, 0);
-    cc_register_cfunc(vm, "memalignment", (void*)cccc_memalignment, 1, 0);
+    cc_register_cfunc(vm, "aligned_alloc", (void *)cccc_ffi_aligned_alloc, 2,
+                      0);
+    cc_register_cfunc(vm, "calloc", (void *)cccc_ffi_calloc, 2, 0);
+    cc_register_cfunc(vm, "free", (void *)cccc_ffi_free, 1, 0);
+    cc_register_cfunc(vm, "free_sized", (void *)cccc_free_sized, 2, 0);
+    cc_register_cfunc(vm, "free_aligned_sized", (void *)cccc_free_aligned_sized,
+                      3, 0);
+    cc_register_cfunc(vm, "malloc", (void *)cccc_ffi_malloc, 1, 0);
+    cc_register_cfunc(vm, "realloc", (void *)cccc_ffi_realloc, 2, 0);
+    cc_register_cfunc(vm, "reallocarray", (void *)cccc_ffi_reallocarray, 3,
+                      0); // Portable polyfill (#699)
+    cc_register_cfunc(vm, "posix_memalign", (void *)cccc_ffi_posix_memalign, 3,
+                      0);
+    cc_register_cfunc(vm, "memalignment", (void *)cccc_memalignment, 1, 0);
 
     // Process control
-    cc_register_cfunc(vm, "abort", (void*)abort, 0, 0);
-    cc_register_cfunc(vm, "exit", (void*)wrap_exit, 1, 0);
-    cc_register_cfunc(vm, "_Exit", (void*)_Exit, 1, 0);
-    cc_register_cfunc(vm, "atexit", (void*)wrap_atexit, 1, 0);
-    cc_register_cfunc(vm, "at_quick_exit", (void*)wrap_at_quick_exit, 1, 0);
-    cc_register_cfunc(vm, "quick_exit", (void*)wrap_quick_exit, 1, 0);
+    cc_register_cfunc(vm, "abort", (void *)abort, 0, 0);
+    cc_register_cfunc(vm, "exit", (void *)wrap_exit, 1, 0);
+    cc_register_cfunc(vm, "_Exit", (void *)_Exit, 1, 0);
+    cc_register_cfunc(vm, "atexit", (void *)wrap_atexit, 1, 0);
+    cc_register_cfunc(vm, "at_quick_exit", (void *)wrap_at_quick_exit, 1, 0);
+    cc_register_cfunc(vm, "quick_exit", (void *)wrap_quick_exit, 1, 0);
 
     // Environment
-    cc_register_cfunc(vm, "getenv", (void*)getenv, 1, 0);
-    cc_register_cfunc(vm, "setenv", (void*)wrap_setenv, 3, 0);
-    cc_register_cfunc(vm, "unsetenv", (void*)wrap_unsetenv, 1, 0);
-    cc_register_cfunc(vm, "putenv", (void*)wrap_putenv, 1, 0);
-    cc_register_cfunc(vm, "system", (void*)wrap_system, 1, 0);
+    cc_register_cfunc(vm, "getenv", (void *)getenv, 1, 0);
+    cc_register_cfunc(vm, "setenv", (void *)wrap_setenv, 3, 0);
+    cc_register_cfunc(vm, "unsetenv", (void *)wrap_unsetenv, 1, 0);
+    cc_register_cfunc(vm, "putenv", (void *)wrap_putenv, 1, 0);
+    cc_register_cfunc(vm, "system", (void *)wrap_system, 1, 0);
 
     // Search and sort
-    cc_register_cfunc(vm, "bsearch", (void*)wrap_bsearch, 5, 0);
-    cc_register_cfunc(vm, "qsort", (void*)wrap_qsort, 4, 0);
+    cc_register_cfunc(vm, "bsearch", (void *)wrap_bsearch, 5, 0);
+    cc_register_cfunc(vm, "qsort", (void *)wrap_qsort, 4, 0);
 
     // Integer arithmetic
-    cc_register_cfunc(vm, "abs", (void*)abs, 1, 0);     // returns int (#777: was incorrectly 1/double)
-    cc_register_cfunc(vm, "labs", (void*)labs, 1, 0);   // returns long
-    cc_register_cfunc(vm, "llabs", (void*)llabs, 1, 0); // returns long long
-    cc_register_cfunc(vm, "div", (void*)wrap_div, 2, 0);
-    cc_register_cfunc(vm, "ldiv", (void*)wrap_ldiv, 2, 0);
-    cc_register_cfunc(vm, "lldiv", (void*)wrap_lldiv, 2, 0);
+    cc_register_cfunc(vm, "abs", (void *)abs, 1,
+                      0); // returns int (#777: was incorrectly 1/double)
+    cc_register_cfunc(vm, "labs", (void *)labs, 1, 0);   // returns long
+    cc_register_cfunc(vm, "llabs", (void *)llabs, 1, 0); // returns long long
+    cc_register_cfunc(vm, "div", (void *)wrap_div, 2, 0);
+    cc_register_cfunc(vm, "ldiv", (void *)wrap_ldiv, 2, 0);
+    cc_register_cfunc(vm, "lldiv", (void *)wrap_lldiv, 2, 0);
 
     // Multibyte/wide character conversion
-    cc_register_cfunc(vm, "mblen", (void*)wrap_mblen, 2, 0);
-    cc_register_cfunc(vm, "mbtowc", (void*)wrap_mbtowc, 3, 0);
-    cc_register_cfunc(vm, "wctomb", (void*)wrap_wctomb, 2, 0);
-    cc_register_cfunc(vm, "mbstowcs", (void*)mbstowcs, 3, 0);
-    cc_register_cfunc(vm, "wcstombs", (void*)wcstombs, 3, 0);
-    cc_register_cfunc(vm, "__cccc_mb_cur_max", (void*)wrap_mb_cur_max, 0, 0);
+    cc_register_cfunc(vm, "mblen", (void *)wrap_mblen, 2, 0);
+    cc_register_cfunc(vm, "mbtowc", (void *)wrap_mbtowc, 3, 0);
+    cc_register_cfunc(vm, "wctomb", (void *)wrap_wctomb, 2, 0);
+    cc_register_cfunc(vm, "mbstowcs", (void *)mbstowcs, 3, 0);
+    cc_register_cfunc(vm, "wcstombs", (void *)wcstombs, 3, 0);
+    cc_register_cfunc(vm, "__cccc_mb_cur_max", (void *)wrap_mb_cur_max, 0, 0);
 }

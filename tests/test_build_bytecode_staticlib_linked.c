@@ -6,7 +6,7 @@
 // invocations — one building the .c4a, one building the .c4 with --link.
 // The regex checks that a .c4a artifact appears in the dry-run output.
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
     BuildTarget *lib = StaticLib(ctx, "mathlib");
     AddSource(lib, "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c");

@@ -9,8 +9,8 @@
 // q[7] read past the real backing storage.
 
 int main(void) {
-    int * [[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
-    int * [[cccc::array, cccc::count(10)]] q;
+    int *[[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
+    int *[[cccc::array, cccc::count(10)]] q;
     q = p; // traps: p's bounds (4) don't imply q's own declared bounds (10)
     return q[7];
 }

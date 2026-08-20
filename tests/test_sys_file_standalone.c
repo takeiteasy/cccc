@@ -16,10 +16,13 @@ int main(void) {
     unlink(path);
 
     int fd = open(path, O_CREAT | O_RDWR | O_TRUNC, 0644);
-    if (fd < 0) return 1;
+    if (fd < 0)
+        return 1;
 
-    if (flock(fd, LOCK_EX | LOCK_NB) != 0) return 2;
-    if (flock(fd, LOCK_UN) != 0) return 3;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+        return 2;
+    if (flock(fd, LOCK_UN) != 0)
+        return 3;
 
     close(fd);
     unlink(path);

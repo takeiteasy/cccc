@@ -1,7 +1,7 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: int use_block\(void\);\s*\n\s*\nstatic int __cccc_block_0\(void \*__static_link\);
-// CCCC_EXPECT_STDOUT: static int __cccc_block_0\(void \*__static_link\) \{
-// CCCC_C4_SKIP
+// CCCC_EXPECT_STDOUT: int use_block\(void\);\s*\n\s*\nstatic int
+// __cccc_block_0\(void \*__static_link\); CCCC_EXPECT_STDOUT: static int
+// __cccc_block_0\(void \*__static_link\) \{ CCCC_C4_SKIP
 //
 // Ticket #995: a block literal lifted while building a macro-generated
 // function body (FunctionSetBody(fn, Quote(...)) without WithFn(fn)) never
@@ -25,9 +25,9 @@
 [[cccc::comptime]]
 void gen(void) {
     Obj *fn = MakeFunction("use_block", GetType("int"));
-    FunctionSetBody(fn, Quote(
-        "{ int n = 42; int (^b)(void) = ^{ return n; }; return b(); }"
-    ));
+    FunctionSetBody(
+        fn,
+        Quote("{ int n = 42; int (^b)(void) = ^{ return n; }; return b(); }"));
     PublishNode(fn);
 }
 gen();

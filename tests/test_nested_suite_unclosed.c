@@ -6,6 +6,6 @@
 #pragma cccc suite begin "never_closed"
 
 [[cccc::test]]
-void test_dummy_unclosed(void) { }
+void test_dummy_unclosed(void) {}
 
 // No matching #pragma cccc suite end — should produce a compile error.

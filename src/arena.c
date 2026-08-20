@@ -3,14 +3,16 @@
 
 #include "internal.h"
 
-
 // Platform-specific includes and definitions
 #if defined(_WIN32) || defined(_WIN64)
-#define ARENA_MMAP(size) VirtualAlloc(NULL, (size), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)
+#define ARENA_MMAP(size)                                                       \
+    VirtualAlloc(NULL, (size), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)
 #define ARENA_MUNMAP(ptr, size) VirtualFree((ptr), 0, MEM_RELEASE)
-#define MAP_FAILED NULL
+#define MAP_FAILED              NULL
 #else
-#define ARENA_MMAP(size) mmap(NULL, (size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+#define ARENA_MMAP(size)                                                       \
+    mmap(NULL, (size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,    \
+         -1, 0)
 #define ARENA_MUNMAP(ptr, size) munmap((ptr), (size))
 #endif
 
@@ -24,8 +26,8 @@ void arena_init(Arena *arena, size_t default_block_size) {
     }
 
     arena->default_block_size = default_block_size;
-    arena->current = NULL;
-    arena->blocks = NULL;
+    arena->current            = NULL;
+    arena->blocks             = NULL;
 }
 
 // Allocate a new memory block via mmap/VirtualAlloc
@@ -46,12 +48,13 @@ static ArenaBlock *arena_new_block(Arena *arena, size_t min_size) {
     void *memory = ARENA_MMAP(size);
     if (memory == MAP_FAILED || memory == NULL) {
         free(block);
-        error("out of memory: failed to allocate arena block of size %zu", size);
+        error("out of memory: failed to allocate arena block of size %zu",
+              size);
     }
 
     // Initialize block metadata
     block->base = (char *)memory;
-    block->ptr = block->base;
+    block->ptr  = block->base;
     block->size = size;
     block->next = arena->blocks;
 
@@ -63,12 +66,13 @@ static ArenaBlock *arena_new_block(Arena *arena, size_t min_size) {
 
 // Allocate memory from the arena (bump pointer allocation)
 void *arena_alloc(Arena *arena, size_t size) {
-    // Align to 16 bytes for proper alignment (sufficient for long double / SIMD)
+    // Align to 16 bytes for proper alignment (sufficient for long double /
+    // SIMD)
     size = (size + 15) & ~15;
 
     // Check if current block has enough space
-    if (!arena->current ||
-        (arena->current->ptr + size > arena->current->base + arena->current->size)) {
+    if (!arena->current || (arena->current->ptr + size >
+                            arena->current->base + arena->current->size)) {
         // After arena_reset all blocks have been rewound; scan the list for one
         // with room before allocating a fresh block. This ensures that reset
         // blocks are actually reused rather than orphaned. (#53)
@@ -81,7 +85,7 @@ void *arena_alloc(Arena *arena, size_t size) {
     }
 
     // Allocate from current block (bump pointer)
-    void *ptr = arena->current->ptr;
+    void *ptr            = arena->current->ptr;
     arena->current->ptr += size;
 
     return ptr;
@@ -104,6 +108,6 @@ void arena_destroy(Arena *arena) {
     }
 
     // Clear arena state
-    arena->blocks = NULL;
+    arena->blocks  = NULL;
     arena->current = NULL;
 }

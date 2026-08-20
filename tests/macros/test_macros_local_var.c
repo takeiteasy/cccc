@@ -7,12 +7,12 @@ Node *doubled(Node *arg) {
 
     // Inject a unique (gensym'd) local of type int
     Type *ty_int = __builtin_ast_get_type("int");
-    Node *tmp = __builtin_ast_local_var_unique(ty_int);
+    Node *tmp    = __builtin_ast_local_var_unique(ty_int);
 
     // Build: tmp = arg * 2
-    Node *two   = __builtin_ast_int_literal(2);
-    Node *mul   = __builtin_ast_binary(NK_MUL, arg, two);
-    Node *asgn  = __builtin_ast_assign(tmp, mul);
+    Node *two  = __builtin_ast_int_literal(2);
+    Node *mul  = __builtin_ast_binary(NK_MUL, arg, two);
+    Node *asgn = __builtin_ast_assign(tmp, mul);
 
     // Return tmp (the assignment expression already set tmp, but return tmp ref
     // as an ND_ASSIGN evaluates to the assigned value — return the assign expr)
@@ -24,8 +24,8 @@ Node *doubled(Node *arg) {
 [[cccc::comptime]]
 Node *make_local_forty_two(void) {
     Type *ty_int = __builtin_ast_get_type("int");
-    Node *var  = __builtin_ast_local_var("named_tmp", ty_int);
-    Node *val  = __builtin_ast_int_literal(42);
+    Node *var    = __builtin_ast_local_var("named_tmp", ty_int);
+    Node *val    = __builtin_ast_int_literal(42);
     return __builtin_ast_assign(var, val);
 }
 
@@ -34,13 +34,13 @@ Node *make_local_forty_two(void) {
 [[cccc::comptime]]
 Node *gen_add_fn(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("local_var_add", int_ty);
+    Obj  *fn     = MakeFunction("local_var_add", int_ty);
     WithFn(fn) {
-        Node *tmp = MakeLocalVarUnique(int_ty);
-        Node *asgn = MakeAssign(tmp, MakeIntLiteral(3));
-        Node *read = MakeLocalVarUnique(int_ty);
+        Node *tmp   = MakeLocalVarUnique(int_ty);
+        Node *asgn  = MakeAssign(tmp, MakeIntLiteral(3));
+        Node *read  = MakeLocalVarUnique(int_ty);
         Node *asgn2 = MakeAssign(read, MakeIntLiteral(4));
-        Node *sum = MakeBinary(NK_ADD, asgn, asgn2);
+        Node *sum   = MakeBinary(NK_ADD, asgn, asgn2);
         FunctionSetBody(fn, MakeReturn(sum));
     }
     return MakeIntLiteral(0);
@@ -49,18 +49,22 @@ gen_add_fn();
 
 int main(void) {
     // doubled: unique temp should not capture any existing local
-    int result = doubled(7);    // tmp = 7*2 = 14 (assign expr = 14)
-    if (result != 14) return 1;
+    int result = doubled(7); // tmp = 7*2 = 14 (assign expr = 14)
+    if (result != 14)
+        return 1;
 
-    int result2 = doubled(10);  // tmp = 10*2 = 20
-    if (result2 != 20) return 2;
+    int result2 = doubled(10); // tmp = 10*2 = 20
+    if (result2 != 20)
+        return 2;
 
     // named local
-    int v = make_local_forty_two();  // named_tmp = 42
-    if (v != 42) return 3;
+    int v = make_local_forty_two(); // named_tmp = 42
+    if (v != 42)
+        return 3;
 
     // MakeLocalVarUnique inside WithFn (ticket #305)
-    if (local_var_add() != 7) return 4;
+    if (local_var_add() != 7)
+        return 4;
 
     return 42;
 }

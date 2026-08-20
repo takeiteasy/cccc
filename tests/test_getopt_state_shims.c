@@ -13,11 +13,11 @@ int main(void) {
     // whatever cccc's own CLI parsing left behind -- reset explicitly
     // before parsing it, the same way any program re-parsing a *second*,
     // different argv mid-process must.
-    optind = 1;
+    optind       = 1;
     char *argv[] = {"prog", "-x", "val", "-y"};
-    int argc = 4;
+    int   argc   = 4;
 
-    int c = getopt(argc, argv, "x:y");
+    int   c      = getopt(argc, argv, "x:y");
     if (c != 'x')
         return 1;
     if (!optarg || strcmp(optarg, "val") != 0)

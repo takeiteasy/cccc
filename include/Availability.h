@@ -63,8 +63,9 @@
 #define __header_always_inline static inline
 #endif
 
-/* Strip __attribute__ specifications - CCCC doesn't parse all attribute positions.
- * These are optimizer hints and not required for correct compilation. */
+/* Strip __attribute__ specifications - CCCC doesn't parse all attribute
+ * positions. These are optimizer hints and not required for correct
+ * compilation. */
 #ifndef __attribute__
 #define __attribute__(x)
 #endif
@@ -74,7 +75,8 @@
 #define __signed signed
 #endif
 
-/* C linkage macros (normally defined in sys/cdefs.h but may not be available early) */
+/* C linkage macros (normally defined in sys/cdefs.h but may not be available
+ * early) */
 #ifndef __BEGIN_DECLS
 #define __BEGIN_DECLS
 #endif
@@ -136,7 +138,8 @@
 /* Legacy macros (still used in some headers) */
 #define __OSX_AVAILABLE_STARTING(mac, iphone)
 #define __OSX_AVAILABLE_BUT_DEPRECATED(mac_start, mac_dep, iph_start, iph_dep)
-#define __OSX_AVAILABLE_BUT_DEPRECATED_MSG(mac_start, mac_dep, iph_start, iph_dep, msg)
+#define __OSX_AVAILABLE_BUT_DEPRECATED_MSG(mac_start, mac_dep, iph_start,      \
+                                           iph_dep, msg)
 
 /* OS availability macros */
 #define __OS_AVAILABILITY(target, availability)
@@ -163,7 +166,8 @@
 #define __TVOS_UNAVAILABLE
 #define __WATCHOS_UNAVAILABLE
 
-/* Platform prohibited macros (used for APIs not available on certain platforms) */
+/* Platform prohibited macros (used for APIs not available on certain platforms)
+ */
 #define __OSX_PROHIBITED
 #define __IOS_PROHIBITED
 #define __TVOS_PROHIBITED
@@ -208,21 +212,21 @@
 
 #endif /* __AVAILABILITY__ */
 
-#else /* !__CCCC__: a genuine host compiler is reading this physical file --
-       * only possible during -c=native/-c=generated serializer replay via
-       * -I./include. Hand off to the host's own real Availability.h: macOS
-       * SDK headers reference __API_AVAILABLE(...) etc., which would
-       * otherwise be undefined function-like macros (a syntax error), and
-       * the empty `#define __attribute__(x)` above would otherwise strip
-       * every later __attribute__(...) in the user's own TU (#1083).
-       * Guarded on __has_include_next since a host with no real
-       * Availability.h at all (e.g. Linux) has nothing to hand off to --
-       * this branch is then simply empty, matching the pre-#1083 shape for
-       * a host that never defined __attribute__ away in the first place. */
+#else  /* !__CCCC__: a genuine host compiler is reading this physical file --  \
+        * only possible during -c=native/-c=generated serializer replay via    \
+        * -I./include. Hand off to the host's own real Availability.h: macOS   \
+        * SDK headers reference __API_AVAILABLE(...) etc., which would         \
+        * otherwise be undefined function-like macros (a syntax error), and    \
+        * the empty `#define __attribute__(x)` above would otherwise strip     \
+        * every later __attribute__(...) in the user's own TU (#1083).         \
+        * Guarded on __has_include_next since a host with no real              \
+        * Availability.h at all (e.g. Linux) has nothing to hand off to --     \
+        * this branch is then simply empty, matching the pre-#1083 shape for   \
+        * a host that never defined __attribute__ away in the first place. */
 #ifdef __has_include_next
-#  if __has_include_next(<Availability.h>)
-#    include_next <Availability.h>
-#  endif
+#if __has_include_next(<Availability.h>)
+#include_next <Availability.h>
+#endif
 #endif
 
 #endif /* __CCCC__ */

@@ -8,9 +8,9 @@
 
 static pthread_key_t g_key;
 static pthread_key_t g_deleted_key;
-static int g_dtor_calls = 0;
-static int g_dtor_last_value = -1;
-static int g_deleted_dtor_calls = 0;
+static int           g_dtor_calls         = 0;
+static int           g_dtor_last_value    = -1;
+static int           g_deleted_dtor_calls = 0;
 
 static void dtor(void *p) {
     g_dtor_calls++;
@@ -25,7 +25,7 @@ static void deleted_dtor(void *p) {
 
 static void *worker(void *arg) {
     int *slot = malloc(sizeof(int));
-    *slot = *(int *)arg;
+    *slot     = *(int *)arg;
     pthread_setspecific(g_key, slot);
 
     // g_deleted_key was already pthread_key_delete()'d, so setspecific must
@@ -47,15 +47,18 @@ int main(void) {
     pthread_key_delete(g_deleted_key);
 
     pthread_t thread;
-    int val = 123;
+    int       val = 123;
     if (pthread_create(&thread, 0, worker, &val) != 0)
         return 3;
     if (pthread_join(thread, NULL) != 0)
         return 4;
 
-    if (g_dtor_calls != 1)          return 5;
-    if (g_dtor_last_value != 123)   return 6;
-    if (g_deleted_dtor_calls != 0)  return 7;
+    if (g_dtor_calls != 1)
+        return 5;
+    if (g_dtor_last_value != 123)
+        return 6;
+    if (g_deleted_dtor_calls != 0)
+        return 7;
 
     pthread_key_delete(g_key);
     return 42;

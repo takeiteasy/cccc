@@ -12,7 +12,7 @@ BuildTarget *make_lib(Builder *ctx) {
     return t;
 }
 
-[[cccc::build_target(kind=native)]]
+[[cccc::build_target(kind = native)]]
 BuildTarget *make_app(Builder *ctx) {
     BuildTarget *t = Executable(ctx, "myapp");
     AddSource(t, "main.c");

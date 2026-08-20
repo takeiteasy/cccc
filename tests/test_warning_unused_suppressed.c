@@ -9,7 +9,7 @@ static int __attribute__((unused)) gnu_function(void) {
 
 int check(int [[maybe_unused]] parameter) {
     int __attribute__((unused)) local = 1;
-    [[maybe_unused]] unused_label:
+[[maybe_unused]] unused_label:
     return 42;
 }
 

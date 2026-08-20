@@ -17,8 +17,8 @@ int main(void) {
     if (!p)
         return 255;
     char *q = p + 4;
-    char *r = q - 8;   // steps to p-4 -- before the allocation start
-    *r = 1;             // must trap
+    char *r = q - 8; // steps to p-4 -- before the allocation start
+    *r      = 1;     // must trap
     free(p);
     return 42;
 }

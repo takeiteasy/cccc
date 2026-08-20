@@ -13,7 +13,7 @@ struct P {
 };
 
 struct P g1src = {1, 2};
-struct P g2 = g1src; // error: not a compile-time constant
+struct P g2    = g1src; // error: not a compile-time constant
 
 int main(void) {
     return g2.x;

@@ -8,7 +8,7 @@
 _Atomic int x = 0;
 
 int main(void) {
-    int *p = (int *)&x;  // cast discards _Atomic — triggers warning
-    *p = 42;
+    int *p = (int *)&x; // cast discards _Atomic — triggers warning
+    *p     = 42;
     return *p;
 }

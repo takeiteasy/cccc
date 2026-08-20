@@ -11,8 +11,8 @@
 // -- rehash() used to re-insert int-keyed entries via the string hash path,
 // corrupting lookups for every int-keyed HashMap in the VM once triggered.
 int sum(int n) {
-    int acc = 0;
-    int *p = &acc;
+    int  acc = 0;
+    int *p   = &acc;
     if (n <= 0)
         return *p;
     *p = n + sum(n - 1);

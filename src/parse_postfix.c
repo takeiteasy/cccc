@@ -47,7 +47,8 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "&")) {
         Node *lhs = cast(vm, rest, tok->next);
         add_type(vm, lhs);
-        if (lhs->kind == ND_MEMBER && !is_error_type(lhs->ty) && lhs->member && lhs->member->is_bitfield) {
+        if (lhs->kind == ND_MEMBER && !is_error_type(lhs->ty) && lhs->member &&
+            lhs->member->is_bitfield) {
             if (vm->collect_errors &&
                 error_tok_recover(vm, tok, "cannot take address of bitfield")) {
                 // Return the member itself as an error placeholder
@@ -90,11 +91,11 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // [GNU] labels-as-values
     if (equal(tok, "&&")) {
-        Node *node = new_node(vm, ND_LABEL_VAL, tok);
-        node->label = get_ident(vm, tok->next);
-        node->goto_next = vm->compiler.gotos;
+        Node *node         = new_node(vm, ND_LABEL_VAL, tok);
+        node->label        = get_ident(vm, tok->next);
+        node->goto_next    = vm->compiler.gotos;
         vm->compiler.gotos = node;
-        *rest = tok->next->next;
+        *rest              = tok->next->next;
         return node;
     }
 
@@ -120,7 +121,7 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
     // If the base expression has error type, propagate it
     if (node->ty && is_error_type(node->ty)) {
         Node *err_node = new_node(vm, ND_MEMBER, tok);
-        err_node->ty = ty_error;
+        err_node->ty   = ty_error;
         return err_node;
     }
 
@@ -128,7 +129,7 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
         if (vm->collect_errors &&
             error_tok_recover(vm, node->tok, "not a struct nor a union")) {
             Node *err_node = new_node(vm, ND_MEMBER, tok);
-            err_node->ty = ty_error;
+            err_node->ty   = ty_error;
             return err_node;
         }
         error_tok(vm, node->tok, "not a struct nor a union");
@@ -153,13 +154,12 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
                 error_tok_recover(vm, tok, "no such member '%.*s'", tok->len,
                                   tok->loc)) {
                 Node *err_node = new_node(vm, ND_MEMBER, tok);
-                err_node->ty = ty_error;
+                err_node->ty   = ty_error;
                 return err_node;
             }
-            error_tok(vm, tok, "no such member '%.*s'", tok->len,
-                      tok->loc);
+            error_tok(vm, tok, "no such member '%.*s'", tok->len, tok->loc);
         }
-        node = new_unary(vm, ND_MEMBER, node, tok);
+        node         = new_unary(vm, ND_MEMBER, node, tok);
         node->member = mem;
         if (mem->name)
             break;
@@ -169,7 +169,8 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
 }
 
 // Convert A++ to `(typeof A)((A += 1) - 1)`
-static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok, int addend) {
+static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
+                         int addend) {
     add_type(vm, node);
     return new_cast(
         vm,
@@ -182,7 +183,7 @@ static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok, int addend)
 static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,
                                    VarAttr *attr) {
     bool saw_register = false;
-    bool saw_auto = false;
+    bool saw_auto     = false;
     for (Token *p = tok; !equal(p, ")") && p->kind != TK_EOF; p = p->next) {
         DeclKw dk = declspec_kw(p);
         if (dk == DK_REGISTER)
@@ -204,7 +205,7 @@ static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,
 
     ty = abstract_declarator(vm, rest, tok, ty);
     if (attr->is_constexpr) {
-        ty = copy_type(vm, ty);
+        ty           = copy_type(vm, ty);
         ty->is_const = true;
     }
     return ty;
@@ -248,8 +249,8 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             warn_tok(vm, start, CCCC_WARN_PEDANTIC,
                      "compound literals are a C99 extension");
         VarAttr attr = {};
-        Type *ty = compound_literal_type(vm, &tok, tok->next, &attr);
-        tok = skip(vm, tok, ")");
+        Type   *ty   = compound_literal_type(vm, &tok, tok->next, &attr);
+        tok          = skip(vm, tok, ")");
 
         // A compound literal used inside a global/static initializer must
         // itself resolve to a constant, even when it has no explicit
@@ -261,17 +262,17 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
         if (vm->compiler.scope->next == NULL || attr.is_static ||
             attr.is_constexpr || attr.is_tls ||
             vm->compiler.in_const_gvar_init) {
-            Obj *var = new_anon_gvar(vm, ty);
-            var->is_constexpr = attr.is_constexpr;
-            var->is_static = attr.is_static || attr.is_constexpr;
-            var->is_tls = attr.is_tls;
-            var->is_local_symbol = vm->compiler.scope->next != NULL;
+            Obj *var                 = new_anon_gvar(vm, ty);
+            var->is_constexpr        = attr.is_constexpr;
+            var->is_static           = attr.is_static || attr.is_constexpr;
+            var->is_tls              = attr.is_tls;
+            var->is_local_symbol     = vm->compiler.scope->next != NULL;
             var->is_compound_literal = true;
             gvar_initializer(vm, rest, tok, var);
             return new_var_node(vm, var, start);
         }
 
-        Obj *var = new_lvar(vm, "", 0, ty);
+        Obj  *var = new_lvar(vm, "", 0, ty);
         Node *lhs = lvar_initializer(vm, rest, tok, var);
         Node *rhs = new_var_node(vm, var, tok);
         return new_binary(vm, ND_COMMA, lhs, rhs, start);
@@ -286,24 +287,24 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             if (node->ty && node->ty->kind == TY_BLOCK) {
                 // Block invocation: create ND_BLOCK_CALL
                 Token *start = tok;
-                tok = tok->next; // Skip '('
+                tok          = tok->next; // Skip '('
 
                 // Parse arguments
-                Node head = {};
-                Node *cur = &head;
+                Node  head = {};
+                Node *cur  = &head;
                 while (!equal(tok, ")")) {
                     if (cur != &head)
                         tok = skip(vm, tok, ",");
                     Node *arg = assign(vm, &tok, tok);
                     cur = cur->next = arg;
                 }
-                tok = tok->next; // Skip ')'
+                tok        = tok->next; // Skip ')'
 
                 Node *call = new_node(vm, ND_BLOCK_CALL, start);
-                call->lhs = node;
+                call->lhs  = node;
                 call->args = head.next;
                 call->ty = node->ty->return_ty ? node->ty->return_ty : ty_void;
-                node = call;
+                node     = call;
             } else {
                 node = funcall(vm, &tok, tok->next, node);
             }
@@ -313,7 +314,7 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok, "[")) {
             // x[y] is short for *(x+y)
             Token *start = tok;
-            Node *idx = expr(vm, &tok, tok->next);
+            Node  *idx   = expr(vm, &tok, tok->next);
 
             // Try to recover if ']' is missing
             if (!equal(tok, "]")) {
@@ -341,17 +342,17 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             if (node->ty && is_vector(node->ty)) {
                 Type *elem_ty = node->ty->base;
-                Node *addr = new_unary(vm, ND_ADDR, node, start);
-                addr = new_cast(vm, addr, pointer_to(vm, elem_ty));
-                node = new_unary(vm, ND_DEREF,
-                                 new_add(vm, addr, idx, start), start);
+                Node *addr    = new_unary(vm, ND_ADDR, node, start);
+                addr          = new_cast(vm, addr, pointer_to(vm, elem_ty));
+                node = new_unary(vm, ND_DEREF, new_add(vm, addr, idx, start),
+                                 start);
                 continue;
             }
 
             {
                 Node *base_addr = node;
-                Node *deref =
-                    new_unary(vm, ND_DEREF, new_add(vm, node, idx, start), start);
+                Node *deref = new_unary(vm, ND_DEREF,
+                                        new_add(vm, node, idx, start), start);
                 set_checked_deref_bounds(vm, deref, base_addr, start);
                 node = deref;
             }
@@ -360,29 +361,29 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (equal(tok, ".")) {
             node = struct_ref(vm, node, tok->next);
-            tok = tok->next->next;
+            tok  = tok->next->next;
             continue;
         }
 
         if (equal(tok, "->")) {
             // x->y is short for (*x).y
             Node *base_addr = node;
-            Node *deref = new_unary(vm, ND_DEREF, node, tok);
+            Node *deref     = new_unary(vm, ND_DEREF, node, tok);
             set_checked_deref_bounds(vm, deref, base_addr, tok);
             node = struct_ref(vm, deref, tok->next);
-            tok = tok->next->next;
+            tok  = tok->next->next;
             continue;
         }
 
         if (equal(tok, "++")) {
             node = new_inc_dec(vm, node, tok, 1);
-            tok = tok->next;
+            tok  = tok->next;
             continue;
         }
 
         if (equal(tok, "--")) {
             node = new_inc_dec(vm, node, tok, -1);
-            tok = tok->next;
+            tok  = tok->next;
             continue;
         }
 
@@ -396,21 +397,21 @@ enum {
     FMT_EXPECT_INT,
     FMT_EXPECT_UINT,
     FMT_EXPECT_DOUBLE,
-    FMT_EXPECT_STRING,       // char*
-    FMT_EXPECT_POINTER,      // void*
-    FMT_EXPECT_INT_PTR,      // int* (for %n, scanf %d)
-    FMT_EXPECT_UINT_PTR,     // unsigned int* (scanf %u, %x)
-    FMT_EXPECT_FLOAT_PTR,    // float* (scanf %f)
+    FMT_EXPECT_STRING,    // char*
+    FMT_EXPECT_POINTER,   // void*
+    FMT_EXPECT_INT_PTR,   // int* (for %n, scanf %d)
+    FMT_EXPECT_UINT_PTR,  // unsigned int* (scanf %u, %x)
+    FMT_EXPECT_FLOAT_PTR, // float* (scanf %f)
     // length-modifier-aware printf variants
-    FMT_EXPECT_LONG,         // %ld, %lld, %jd, %td
-    FMT_EXPECT_ULONG,        // %lu, %llu, %zu, %ju
-    FMT_EXPECT_LDOUBLE,      // %Lf, %Le, %Lg, %La
+    FMT_EXPECT_LONG,    // %ld, %lld, %jd, %td
+    FMT_EXPECT_ULONG,   // %lu, %llu, %zu, %ju
+    FMT_EXPECT_LDOUBLE, // %Lf, %Le, %Lg, %La
     // length-modifier-aware scanf pointer variants
-    FMT_EXPECT_LONG_PTR,     // scanf %ld → long *
-    FMT_EXPECT_ULONG_PTR,    // scanf %lu, %zu → unsigned long *
-    FMT_EXPECT_SHORT_PTR,    // scanf %hd → short *
-    FMT_EXPECT_SCHAR_PTR,    // scanf %hhd → char *
-    FMT_EXPECT_LDOUBLE_PTR,  // scanf %Lf → long double *
+    FMT_EXPECT_LONG_PTR,    // scanf %ld → long *
+    FMT_EXPECT_ULONG_PTR,   // scanf %lu, %zu → unsigned long *
+    FMT_EXPECT_SHORT_PTR,   // scanf %hd → short *
+    FMT_EXPECT_SCHAR_PTR,   // scanf %hhd → char *
+    FMT_EXPECT_LDOUBLE_PTR, // scanf %Lf → long double *
     // #829: decimal length-modifier variants (%Hf/%Df/%DDf)
     FMT_EXPECT_DECIMAL32,      // %Hf
     FMT_EXPECT_DECIMAL64,      // %Df
@@ -422,24 +423,38 @@ enum {
 
 #define MAX_FMT_ARGS 64
 
-static const char *fmt_type_names[] = {
-    "int", "unsigned int", "double", "char *", "void *",
-    "int *", "unsigned int *", "float *",
-    "long", "unsigned long", "long double",
-    "long *", "unsigned long *", "short *", "char *", "long double *",
-    "_Decimal32", "_Decimal64", "_Decimal128",
-    "_Decimal32 *", "_Decimal64 *", "_Decimal128 *"
-};
+static const char *fmt_type_names[] = {"int",
+                                       "unsigned int",
+                                       "double",
+                                       "char *",
+                                       "void *",
+                                       "int *",
+                                       "unsigned int *",
+                                       "float *",
+                                       "long",
+                                       "unsigned long",
+                                       "long double",
+                                       "long *",
+                                       "unsigned long *",
+                                       "short *",
+                                       "char *",
+                                       "long double *",
+                                       "_Decimal32",
+                                       "_Decimal64",
+                                       "_Decimal128",
+                                       "_Decimal32 *",
+                                       "_Decimal64 *",
+                                       "_Decimal128 *"};
 
 // Validate format string arguments for __attribute__((format(...)))
 static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
-                                  Node *args) {
+                                 Node *args) {
     if (!func_ty->format_style)
         return;
 
     // Walk to the format string argument (0-based index)
     Node *fmt_arg = args;
-    int idx = 0;
+    int   idx     = 0;
     while (fmt_arg && idx < func_ty->format_string_index - 1) {
         fmt_arg = fmt_arg->next;
         idx++;
@@ -455,13 +470,13 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
     if (fmt_arg->kind != ND_VAR || !fmt_arg->var || !fmt_arg->var->init_data)
         return;
 
-    const char *fmt = fmt_arg->var->init_data;
-    int style = func_ty->format_style;
+    const char *fmt   = fmt_arg->var->init_data;
+    int         style = func_ty->format_style;
 
     // Count variadic args
-    Node *vararg = args;
-    int vararg_idx = 0;
-    int num_varargs = 0;
+    Node *vararg      = args;
+    int   vararg_idx  = 0;
+    int   num_varargs = 0;
     while (vararg) {
         vararg_idx++;
         if (vararg_idx >= func_ty->format_fmt_first_arg)
@@ -470,22 +485,26 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
     }
 
     // Parse format string and collect expected types
-    int fmt_count = 0;
-    int expected[MAX_FMT_ARGS];
-    int num_expected = 0;
+    int         fmt_count = 0;
+    int         expected[MAX_FMT_ARGS];
+    int         num_expected = 0;
 
-    const char *p = fmt;
+    const char *p            = fmt;
     while (*p && num_expected < MAX_FMT_ARGS) {
         if (*p == '%') {
             p++;
-            if (*p == '%') { p++; continue; }
+            if (*p == '%') {
+                p++;
+                continue;
+            }
 
             if (*p == '*') {
                 expected[num_expected++] = FMT_EXPECT_INT;
                 fmt_count++;
                 p++;
             }
-            while (*p >= '0' && *p <= '9') p++;
+            while (*p >= '0' && *p <= '9')
+                p++;
             if (*p == '.') {
                 p++;
                 if (*p == '*') {
@@ -493,34 +512,46 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                     fmt_count++;
                     p++;
                 } else {
-                    while (*p >= '0' && *p <= '9') p++;
+                    while (*p >= '0' && *p <= '9')
+                        p++;
                 }
             }
             // Capture length modifier (h, hh, l, ll, L, z, j, t, and the
             // #829 decimal modifiers H, D, DD)
             const char *mod_start = p;
-            while (*p == 'h' || *p == 'l' || *p == 'L' ||
-                   *p == 'z' || *p == 'j' || *p == 't' ||
-                   *p == 'H' || *p == 'D')
+            while (*p == 'h' || *p == 'l' || *p == 'L' || *p == 'z' ||
+                   *p == 'j' || *p == 't' || *p == 'H' || *p == 'D')
                 p++;
-            int mod_len = (int)(p - mod_start);
-            char mod0 = mod_len > 0 ? mod_start[0] : 0;
-            char mod1 = mod_len > 1 ? mod_start[1] : 0;
+            int  mod_len = (int)(p - mod_start);
+            char mod0    = mod_len > 0 ? mod_start[0] : 0;
+            char mod1    = mod_len > 1 ? mod_start[1] : 0;
             // mod: 0=none,1=hh,2=h,3=l,4=ll,5=L,6=z,7=j,8=t,
             //      9=H(_Decimal32),10=D(_Decimal64),11=DD(_Decimal128)
             int mod = 0;
-            if (mod_len == 0)                      mod = 0;
-            else if (mod0 == 'h' && mod1 == 'h')   mod = 1;
-            else if (mod0 == 'h')                   mod = 2;
-            else if (mod0 == 'l' && mod1 == 'l')   mod = 4;
-            else if (mod0 == 'l')                   mod = 3;
-            else if (mod0 == 'L')                   mod = 5;
-            else if (mod0 == 'z')                   mod = 6;
-            else if (mod0 == 'j')                   mod = 7;
-            else if (mod0 == 't')                   mod = 8;
-            else if (mod0 == 'H')                   mod = 9;
-            else if (mod0 == 'D' && mod1 == 'D')   mod = 11;
-            else if (mod0 == 'D')                   mod = 10;
+            if (mod_len == 0)
+                mod = 0;
+            else if (mod0 == 'h' && mod1 == 'h')
+                mod = 1;
+            else if (mod0 == 'h')
+                mod = 2;
+            else if (mod0 == 'l' && mod1 == 'l')
+                mod = 4;
+            else if (mod0 == 'l')
+                mod = 3;
+            else if (mod0 == 'L')
+                mod = 5;
+            else if (mod0 == 'z')
+                mod = 6;
+            else if (mod0 == 'j')
+                mod = 7;
+            else if (mod0 == 't')
+                mod = 8;
+            else if (mod0 == 'H')
+                mod = 9;
+            else if (mod0 == 'D' && mod1 == 'D')
+                mod = 11;
+            else if (mod0 == 'D')
+                mod = 10;
             bool mod_is_decimal = (mod == 9 || mod == 10 || mod == 11);
 
             if (*p) {
@@ -532,25 +563,38 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                     c != 'E' && c != 'g' && c != 'G')
                     warn_tok(vm, tok, CCCC_WARN_FORMAT,
                              "conversion '%c' does not accept a decimal "
-                             "length modifier", c);
+                             "length modifier",
+                             c);
                 if (style == 1) {
                     switch (c) {
-                        case 'd': case 'i': case 'c':
+                        case 'd':
+                        case 'i':
+                        case 'c':
                             // l/ll/j/t → long; h/hh/none → int (promoted)
                             if (mod == 3 || mod == 4 || mod == 7 || mod == 8)
                                 expected[num_expected++] = FMT_EXPECT_LONG;
                             else
                                 expected[num_expected++] = FMT_EXPECT_INT;
                             break;
-                        case 'u': case 'o': case 'x': case 'X':
-                            // l/ll/z/j → unsigned long; h/hh/none → unsigned int (promoted)
+                        case 'u':
+                        case 'o':
+                        case 'x':
+                        case 'X':
+                            // l/ll/z/j → unsigned long; h/hh/none → unsigned
+                            // int (promoted)
                             if (mod == 3 || mod == 4 || mod == 6 || mod == 7)
                                 expected[num_expected++] = FMT_EXPECT_ULONG;
                             else
                                 expected[num_expected++] = FMT_EXPECT_UINT;
                             break;
-                        case 'f': case 'F': case 'e': case 'E':
-                        case 'g': case 'G': case 'a': case 'A':
+                        case 'f':
+                        case 'F':
+                        case 'e':
+                        case 'E':
+                        case 'g':
+                        case 'G':
+                        case 'a':
+                        case 'A':
                             // L → long double; H/D/DD → _Decimal32/64/128;
                             // none → double (float promoted)
                             if (mod == 5)
@@ -560,22 +604,28 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             else if (mod == 10)
                                 expected[num_expected++] = FMT_EXPECT_DECIMAL64;
                             else if (mod == 11)
-                                expected[num_expected++] = FMT_EXPECT_DECIMAL128;
+                                expected[num_expected++] =
+                                    FMT_EXPECT_DECIMAL128;
                             else
                                 expected[num_expected++] = FMT_EXPECT_DOUBLE;
                             break;
                         case 's':
-                            expected[num_expected++] = FMT_EXPECT_STRING; break;
+                            expected[num_expected++] = FMT_EXPECT_STRING;
+                            break;
                         case 'p':
-                            expected[num_expected++] = FMT_EXPECT_POINTER; break;
+                            expected[num_expected++] = FMT_EXPECT_POINTER;
+                            break;
                         case 'n':
-                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR;
+                            break;
                         default:
-                            expected[num_expected++] = FMT_EXPECT_INT; break;
+                            expected[num_expected++] = FMT_EXPECT_INT;
+                            break;
                     }
                 } else if (style == 2) {
                     switch (c) {
-                        case 'd': case 'i':
+                        case 'd':
+                        case 'i':
                             if (mod == 3 || mod == 4 || mod == 7 || mod == 8)
                                 expected[num_expected++] = FMT_EXPECT_LONG_PTR;
                             else if (mod == 2)
@@ -585,33 +635,51 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             else
                                 expected[num_expected++] = FMT_EXPECT_INT_PTR;
                             break;
-                        case 'u': case 'o': case 'x': case 'X':
+                        case 'u':
+                        case 'o':
+                        case 'x':
+                        case 'X':
                             if (mod == 3 || mod == 4 || mod == 6 || mod == 7)
                                 expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
                             else
                                 expected[num_expected++] = FMT_EXPECT_UINT_PTR;
                             break;
-                        case 'f': case 'F': case 'e': case 'E':
-                        case 'g': case 'G': case 'a': case 'A':
+                        case 'f':
+                        case 'F':
+                        case 'e':
+                        case 'E':
+                        case 'g':
+                        case 'G':
+                        case 'a':
+                        case 'A':
                             if (mod == 5)
-                                expected[num_expected++] = FMT_EXPECT_LDOUBLE_PTR;
+                                expected[num_expected++] =
+                                    FMT_EXPECT_LDOUBLE_PTR;
                             else if (mod == 9)
-                                expected[num_expected++] = FMT_EXPECT_DECIMAL32_PTR;
+                                expected[num_expected++] =
+                                    FMT_EXPECT_DECIMAL32_PTR;
                             else if (mod == 10)
-                                expected[num_expected++] = FMT_EXPECT_DECIMAL64_PTR;
+                                expected[num_expected++] =
+                                    FMT_EXPECT_DECIMAL64_PTR;
                             else if (mod == 11)
-                                expected[num_expected++] = FMT_EXPECT_DECIMAL128_PTR;
+                                expected[num_expected++] =
+                                    FMT_EXPECT_DECIMAL128_PTR;
                             else
                                 expected[num_expected++] = FMT_EXPECT_FLOAT_PTR;
                             break;
-                        case 's': case 'c':
-                            expected[num_expected++] = FMT_EXPECT_STRING; break;
+                        case 's':
+                        case 'c':
+                            expected[num_expected++] = FMT_EXPECT_STRING;
+                            break;
                         case 'p':
-                            expected[num_expected++] = FMT_EXPECT_POINTER; break;
+                            expected[num_expected++] = FMT_EXPECT_POINTER;
+                            break;
                         case 'n':
-                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR;
+                            break;
                         default:
-                            expected[num_expected++] = FMT_EXPECT_INT_PTR; break;
+                            expected[num_expected++] = FMT_EXPECT_INT_PTR;
+                            break;
                     }
                 }
                 fmt_count++;
@@ -626,19 +694,32 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
     while (*p) {
         if (*p == '%') {
             p++;
-            if (*p == '%') { p++; continue; }
-            if (*p == '*') { fmt_count++; p++; }
-            while (*p >= '0' && *p <= '9') p++;
+            if (*p == '%') {
+                p++;
+                continue;
+            }
+            if (*p == '*') {
+                fmt_count++;
+                p++;
+            }
+            while (*p >= '0' && *p <= '9')
+                p++;
             if (*p == '.') {
                 p++;
-                if (*p == '*') { fmt_count++; p++; }
-                else while (*p >= '0' && *p <= '9') p++;
+                if (*p == '*') {
+                    fmt_count++;
+                    p++;
+                } else
+                    while (*p >= '0' && *p <= '9')
+                        p++;
             }
-            while (*p == 'h' || *p == 'l' || *p == 'L' ||
-                   *p == 'z' || *p == 'j' || *p == 't' ||
-                   *p == 'H' || *p == 'D')
+            while (*p == 'h' || *p == 'l' || *p == 'L' || *p == 'z' ||
+                   *p == 'j' || *p == 't' || *p == 'H' || *p == 'D')
                 p++;
-            if (*p) { fmt_count++; p++; }
+            if (*p) {
+                fmt_count++;
+                p++;
+            }
         } else {
             p++;
         }
@@ -661,14 +742,14 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 
     // Type-check each variadic argument
     int check_idx = 0;
-    vararg = args;
-    vararg_idx = 0;
+    vararg        = args;
+    vararg_idx    = 0;
     while (vararg && check_idx < num_expected) {
         vararg_idx++;
         if (vararg_idx >= func_ty->format_fmt_first_arg) {
-            int exp = expected[check_idx];
+            int   exp    = expected[check_idx];
             Type *arg_ty = vararg->ty;
-            bool ok = true;
+            bool  ok     = true;
             switch (exp) {
                 case FMT_EXPECT_INT:
                     ok = (arg_ty->kind == TY_INT || arg_ty->kind == TY_CHAR ||
@@ -680,7 +761,8 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                           arg_ty->kind == TY_SHORT || arg_ty->kind == TY_LONG);
                     break;
                 case FMT_EXPECT_DOUBLE:
-                    ok = (arg_ty->kind == TY_DOUBLE || arg_ty->kind == TY_FLOAT ||
+                    ok = (arg_ty->kind == TY_DOUBLE ||
+                          arg_ty->kind == TY_FLOAT ||
                           arg_ty->kind == TY_LDOUBLE);
                     break;
                 case FMT_EXPECT_STRING:
@@ -722,11 +804,13 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                     break;
                 case FMT_EXPECT_LONG_PTR:
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
-                          arg_ty->base->kind == TY_LONG && !arg_ty->base->is_unsigned);
+                          arg_ty->base->kind == TY_LONG &&
+                          !arg_ty->base->is_unsigned);
                     break;
                 case FMT_EXPECT_ULONG_PTR:
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
-                          arg_ty->base->kind == TY_LONG && arg_ty->base->is_unsigned);
+                          arg_ty->base->kind == TY_LONG &&
+                          arg_ty->base->is_unsigned);
                     break;
                 case FMT_EXPECT_SHORT_PTR:
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
@@ -781,12 +865,12 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
         error_tok(vm, fn->tok, "not a function");
 
-    Type *ty = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
-    Type *param_ty = ty->params;
+    Type *ty              = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
+    Type *param_ty        = ty->params;
 
-    Node head = {};
-    Node *cur = &head;
-    bool deferred_splice = false;
+    Node  head            = {};
+    Node *cur             = &head;
+    bool  deferred_splice = false;
 
     while (!equal(tok, ")")) {
         if (cur != &head)
@@ -795,30 +879,33 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         Node *arg = assign(vm, &tok, tok);
         add_type(vm, arg);
 
-        // Detect $@k splice placeholder: defer all arity/cast checks from here on.
-        if (!deferred_splice &&
-            arg->kind == ND_VAR && arg->var && arg->var->is_splice_placeholder)
+        // Detect $@k splice placeholder: defer all arity/cast checks from here
+        // on.
+        if (!deferred_splice && arg->kind == ND_VAR && arg->var &&
+            arg->var->is_splice_placeholder)
             deferred_splice = true;
 
         if (!deferred_splice) {
             if (!param_ty && !ty->is_variadic) {
                 if (vm->collect_errors &&
                     error_tok_recover(vm, tok, "too many arguments")) {
-                    // Continue parsing to find more errors, but don't add this arg
+                    // Continue parsing to find more errors, but don't add this
+                    // arg
                     continue;
                 }
                 error_tok(vm, tok, "too many arguments");
             }
 
             if (param_ty) {
-                // [static N] minimum-size check: only enforceable when the argument
-                // is a compile-time-sized array; bare pointers are best-effort.
-                if (param_ty->static_min > 0 &&
-                    arg->ty->kind == TY_ARRAY &&
+                // [static N] minimum-size check: only enforceable when the
+                // argument is a compile-time-sized array; bare pointers are
+                // best-effort.
+                if (param_ty->static_min > 0 && arg->ty->kind == TY_ARRAY &&
                     arg->ty->array_len >= 0 &&
                     arg->ty->array_len < param_ty->static_min) {
                     warn_tok(vm, tok, CCCC_WARN_STATIC_ARRAY_SIZE,
-                             "array argument has %d element%s but parameter requires at least %d",
+                             "array argument has %d element%s but parameter "
+                             "requires at least %d",
                              arg->ty->array_len,
                              arg->ty->array_len == 1 ? "" : "s",
                              param_ty->static_min);
@@ -845,26 +932,27 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
             // Create placeholder arguments for missing parameters
             while (param_ty) {
                 Node *placeholder = new_node(vm, ND_NUM, tok);
-                placeholder->ty = param_ty;
-                placeholder->val = 0;
+                placeholder->ty   = param_ty;
+                placeholder->val  = 0;
                 cur = cur->next = placeholder;
-                param_ty = param_ty->next;
+                param_ty        = param_ty->next;
             }
         } else {
             error_tok(vm, tok, "too few arguments");
         }
     }
 
-    // __attribute__((error("msg"))): emit a compile-time error on every live call.
-    // Suppressed when dead_code_depth > 0, i.e. the call site is inside a
-    // statically-dead branch identified by static_branch_value() at the enclosing
-    // if-statement.  Under collect_errors recovery a live error_tok may longjmp
-    // past the decrement — but dead branches never trigger error_tok, so the
-    // counter stays balanced.
+    // __attribute__((error("msg"))): emit a compile-time error on every live
+    // call. Suppressed when dead_code_depth > 0, i.e. the call site is inside a
+    // statically-dead branch identified by static_branch_value() at the
+    // enclosing if-statement.  Under collect_errors recovery a live error_tok
+    // may longjmp past the decrement — but dead branches never trigger
+    // error_tok, so the counter stays balanced.
     if (ty->attr_error_msg && vm->compiler.dead_code_depth == 0)
         error_tok(vm, fn->tok, "%s", ty->attr_error_msg);
 
-    // __attribute__((warning("msg"))): emit a compile-time warning on every live call.
+    // __attribute__((warning("msg"))): emit a compile-time warning on every
+    // live call.
     if (ty->attr_warning_msg && vm->compiler.dead_code_depth == 0)
         warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s", ty->attr_warning_msg);
 
@@ -883,29 +971,32 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         validate_sentinel_call(vm, tok, ty, head.next);
 
     if ((vm->compiler.warnings & CCCC_WARN_SIZEOF_POINTER_MEMACCESS) &&
-        !deferred_splice &&
-        fn->kind == ND_VAR && fn->var && fn->var->name) {
+        !deferred_splice && fn->kind == ND_VAR && fn->var && fn->var->name) {
         const char *fname = fn->var->name;
         if (strcmp(fname, "memset") == 0 || strcmp(fname, "memcpy") == 0 ||
             strcmp(fname, "memmove") == 0 || strcmp(fname, "memcmp") == 0) {
             Node *a = head.next;
-            for (int i = 0; a && i < 2; i++) a = a->next;
-            // strip any implicit cast to the parameter type to reach the sizeof node
+            for (int i = 0; a && i < 2; i++)
+                a = a->next;
+            // strip any implicit cast to the parameter type to reach the sizeof
+            // node
             Node *inner = a;
-            while (inner && inner->kind == ND_CAST) inner = inner->lhs;
+            while (inner && inner->kind == ND_CAST)
+                inner = inner->lhs;
             if (inner && inner->is_sizeof_ptr_expr)
                 warn_tok(vm, fn->tok, CCCC_WARN_SIZEOF_POINTER_MEMACCESS,
                          "argument to '%s' is the size of a pointer; "
-                         "use sizeof(*ptr) or sizeof(pointed-to type) instead", fname);
+                         "use sizeof(*ptr) or sizeof(pointed-to type) instead",
+                         fname);
         }
     }
 
-    *rest = skip(vm, tok, ")");
+    *rest                = skip(vm, tok, ")");
 
-    Node *node = new_unary(vm, ND_FUNCALL, fn, tok);
-    node->func_ty = ty;
-    node->ty = ty->return_ty;
-    node->args = head.next;
+    Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
+    node->func_ty        = ty;
+    node->ty             = ty->return_ty;
+    node->args           = head.next;
     node->has_splice_arg = deferred_splice;
 
     // If a function returns a struct, it is caller's responsibility
@@ -921,9 +1012,9 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
 //               | "default" ":" assign
 static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    tok = skip(vm, tok, "(");
+    tok          = skip(vm, tok, "(");
 
-    Node *ctrl = assign(vm, &tok, tok);
+    Node *ctrl   = assign(vm, &tok, tok);
     add_type(vm, ctrl);
 
     Type *t1 = ctrl->ty;
@@ -931,27 +1022,27 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
         t1 = pointer_to(vm, t1);
     else if (t1->kind == TY_ARRAY)
         t1 = pointer_to(vm, t1->base);
-    t1 = copy_type(vm, t1);
-    t1->is_const = false;
-    t1->is_volatile = false;
-    t1->origin = NULL;
+    t1                 = copy_type(vm, t1);
+    t1->is_const       = false;
+    t1->is_volatile    = false;
+    t1->origin         = NULL;
 
-    Node *match = NULL;
+    Node *match        = NULL;
     Node *default_node = NULL;
 
     while (!consume(vm, rest, tok, ")")) {
         tok = skip(vm, tok, ",");
 
         if (equal(tok, "default")) {
-            tok = skip(vm, tok->next, ":");
+            tok        = skip(vm, tok->next, ":");
             Node *node = assign(vm, &tok, tok);
             if (!default_node)
                 default_node = node;
             continue;
         }
 
-        Type *t2 = typename(vm, &tok, tok);
-        tok = skip(vm, tok, ":");
+        Type *t2   = typename(vm, &tok, tok);
+        tok        = skip(vm, tok, ":");
         Node *node = assign(vm, &tok, tok);
         if (!match && is_compatible(t1, t2))
             match = node;
@@ -999,8 +1090,8 @@ static void validate_backtick_fragment(VirtualMachine *vm, Token *fragment,
 
         if (*state == BT_LEX_BLOCK_COMMENT) {
             if (p[0] == '*' && p[1] == '/') {
-                *state = BT_LEX_NORMAL;
-                p += 2;
+                *state  = BT_LEX_NORMAL;
+                p      += 2;
             } else {
                 p++;
             }
@@ -1018,13 +1109,13 @@ static void validate_backtick_fragment(VirtualMachine *vm, Token *fragment,
         }
 
         if (p[0] == '/' && p[1] == '/') {
-            *state = BT_LEX_LINE_COMMENT;
-            p += 2;
+            *state  = BT_LEX_LINE_COMMENT;
+            p      += 2;
             continue;
         }
         if (p[0] == '/' && p[1] == '*') {
-            *state = BT_LEX_BLOCK_COMMENT;
-            p += 2;
+            *state  = BT_LEX_BLOCK_COMMENT;
+            p      += 2;
             continue;
         }
         if (*p == '\'') {
@@ -1038,8 +1129,8 @@ static void validate_backtick_fragment(VirtualMachine *vm, Token *fragment,
             continue;
         }
 
-        if (*p == '$' && (isdigit((unsigned char)p[1]) || p[1] == '$' ||
-                          p[1] == '@'))
+        if (*p == '$' &&
+            (isdigit((unsigned char)p[1]) || p[1] == '$' || p[1] == '@'))
             error_tok(vm, fragment,
                       "legacy Quote placeholders are not allowed in backtick "
                       "quasi-quotes; use ${...} or Quote(...)");
@@ -1051,21 +1142,21 @@ static Token *new_backtick_synthetic_token(VirtualMachine *vm, TokenKind kind,
                                            char *text, Token *origin) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
-    tok->kind = kind;
-    tok->loc = text;
-    tok->len = (int)strlen(text);
-    tok->file = origin->file;
+    tok->kind     = kind;
+    tok->loc      = text;
+    tok->len      = (int)strlen(text);
+    tok->file     = origin->file;
     tok->filename = origin->filename;
-    tok->line_no = origin->line_no;
-    tok->col_no = origin->col_no;
-    tok->origin = origin;
+    tok->line_no  = origin->line_no;
+    tok->col_no   = origin->col_no;
+    tok->origin   = origin;
     return tok;
 }
 
 static Token *copy_backtick_expr_token(VirtualMachine *vm, Token *src) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *tok = *src;
-    tok->next = NULL;
+    *tok       = *src;
+    tok->next  = NULL;
     return tok;
 }
 
@@ -1076,11 +1167,11 @@ static bool backtick_fragment_has_splice(Token *fragment) {
 
 static Token *backtick_splice_end(VirtualMachine *vm, Token *fragment,
                                   Token **begin) {
-    *begin = fragment->next->next->next;
+    *begin     = fragment->next->next->next;
     Token *end = *begin;
-    while (end && end->kind != TK_EOF &&
-           !(equal(end, "}") && end->next &&
-             end->next->kind == TK_BACKTICK_STR))
+    while (
+        end && end->kind != TK_EOF &&
+        !(equal(end, "}") && end->next && end->next->kind == TK_BACKTICK_STR))
         end = end->next;
 
     if (!end || end->kind == TK_EOF)
@@ -1096,16 +1187,17 @@ static Token *backtick_splice_end(VirtualMachine *vm, Token *fragment,
 // __builtin_quote("fragment $1 fragment", expr).
 // Interpolation tokens have already passed through the preprocessor, so this
 // preserves macro expansion inside ${...}.
-static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) {
+static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
+                                  Token *tok) {
     if (!vm->compiler.in_macro_mode)
         error_tok(vm, tok,
                   "backtick quasi-quotes are only valid in comptime functions");
 
-    int fragment_count = 0;
-    int splice_count = 0;
-    size_t template_len = 0;
-    BacktickLexState lex_state = BT_LEX_NORMAL;
-    Token *fragment = tok;
+    int              fragment_count = 0;
+    int              splice_count   = 0;
+    size_t           template_len   = 0;
+    BacktickLexState lex_state      = BT_LEX_NORMAL;
+    Token           *fragment       = tok;
 
     // First pass: validate the stream and determine exact storage/template
     // sizes. Quote's FFI path supports overflow arguments on the VM stack, so
@@ -1122,18 +1214,18 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
         Token *end = backtick_splice_end(vm, fragment, &begin);
         splice_count++;
         template_len += (size_t)snprintf(NULL, 0, " $%d ", splice_count);
-        fragment = end->next;
+        fragment      = end->next;
     }
 
-    Token **fragments = arena_alloc(&vm->compiler.parser_arena,
-                                    sizeof(*fragments) * fragment_count);
+    Token **fragments  = arena_alloc(&vm->compiler.parser_arena,
+                                     sizeof(*fragments) * fragment_count);
     Token **expr_begin = NULL;
-    Token **expr_end = NULL;
+    Token **expr_end   = NULL;
     if (splice_count > 0) {
         expr_begin = arena_alloc(&vm->compiler.parser_arena,
                                  sizeof(*expr_begin) * splice_count);
-        expr_end = arena_alloc(&vm->compiler.parser_arena,
-                               sizeof(*expr_end) * splice_count);
+        expr_end   = arena_alloc(&vm->compiler.parser_arena,
+                                 sizeof(*expr_end) * splice_count);
     }
 
     // Second pass: retain fragment and interpolation ranges for lowering.
@@ -1142,15 +1234,15 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
         fragments[i] = fragment;
         if (i < splice_count) {
             Token *begin;
-            Token *end = backtick_splice_end(vm, fragment, &begin);
+            Token *end    = backtick_splice_end(vm, fragment, &begin);
             expr_begin[i] = begin;
-            expr_end[i] = end;
-            fragment = end->next;
+            expr_end[i]   = end;
+            fragment      = end->next;
         }
     }
 
     char *template = arena_alloc(&vm->compiler.parser_arena, template_len + 1);
-    char *out = template;
+    char *out      = template;
     for (int i = 0; i < fragment_count; i++) {
         size_t len = strlen(fragments[i]->str);
         memcpy(out, fragments[i]->str, len);
@@ -1158,22 +1250,22 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest, Token *tok) 
         if (i < splice_count)
             out += sprintf(out, " $%d ", i + 1);
     }
-    *out = '\0';
+    *out        = '\0';
 
-    Token head = {};
-    Token *cur = &head;
-#define APPEND_BT_TOKEN(kind, text)                                           \
+    Token  head = {};
+    Token *cur  = &head;
+#define APPEND_BT_TOKEN(kind, text)                                            \
     (cur = cur->next = new_backtick_synthetic_token(vm, kind, text, tok))
     APPEND_BT_TOKEN(TK_IDENT, "__builtin_quote");
     APPEND_BT_TOKEN(TK_PUNCT, "(");
 
-    Token *template_tok = new_backtick_synthetic_token(vm, TK_STR,
-                                                        tok->loc, tok);
+    Token *template_tok =
+        new_backtick_synthetic_token(vm, TK_STR, tok->loc, tok);
     template_tok->len = tok->len;
     template_tok->str = template;
-    Type *elem = copy_type(vm, ty_char);
-    elem->is_const = true;
-    template_tok->ty = array_of(vm, elem, (int)template_len + 1);
+    Type *elem        = copy_type(vm, ty_char);
+    elem->is_const    = true;
+    template_tok->ty  = array_of(vm, elem, (int)template_len + 1);
     cur = cur->next = template_tok;
 
     for (int i = 0; i < splice_count; i++) {
@@ -1198,23 +1290,23 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // (pre-C23 these are downgraded to TK_IDENT and may be used as
     // ordinary identifiers).
     if (tok->kind == TK_KEYWORD && equal(tok, "true")) {
-        *rest = tok->next;
+        *rest      = tok->next;
         Node *node = new_num(vm, 1, start);
-        node->ty = ty_bool;
+        node->ty   = ty_bool;
         return node;
     }
 
     if (tok->kind == TK_KEYWORD && equal(tok, "false")) {
-        *rest = tok->next;
+        *rest      = tok->next;
         Node *node = new_num(vm, 0, start);
-        node->ty = ty_bool;
+        node->ty   = ty_bool;
         return node;
     }
 
     if (tok->kind == TK_KEYWORD && equal(tok, "nullptr")) {
-        *rest = tok->next;
+        *rest      = tok->next;
         Node *node = new_num(vm, 0, start);
-        node->ty = ty_nullptr_t;
+        node->ty   = ty_nullptr_t;
         return node;
     }
 
@@ -1222,20 +1314,20 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // This is a GNU statement expresssion.
         Node *node = new_node(vm, ND_STMT_EXPR, tok);
         node->body = compound_stmt(vm, &tok, tok->next->next, NULL)->body;
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         return node;
     }
 
     if (equal(tok, "(")) {
         Node *node = expr(vm, &tok, tok->next);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         return node;
     }
 
     if (equal(tok, "sizeof") && equal(tok->next, "(") &&
         is_typename(vm, tok->next->next)) {
         Type *ty = typename(vm, &tok, tok->next->next);
-        *rest = skip(vm, tok, ")");
+        *rest    = skip(vm, tok, ")");
 
         if (ty->kind == TY_VLA) {
             if (ty->vla_size)
@@ -1246,7 +1338,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_binary(vm, ND_COMMA, lhs, rhs, tok);
         }
 
-        Node *sn = new_ulong(vm, ty->size, start);
+        Node *sn               = new_ulong(vm, ty->size, start);
         sn->is_sizeof_ptr_expr = (ty->kind == TY_PTR);
         return sn;
     }
@@ -1256,7 +1348,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         add_type(vm, node);
         if (node->ty->kind == TY_VLA)
             return new_var_node(vm, node->ty->vla_size, tok);
-        Node *sn = new_ulong(vm, node->ty->size, tok);
+        Node *sn               = new_ulong(vm, node->ty->size, tok);
         sn->is_sizeof_ptr_expr = (node->ty->kind == TY_PTR);
         return sn;
     }
@@ -1264,7 +1356,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Alignof") && equal(tok->next, "(") &&
         is_typename(vm, tok->next->next)) {
         Type *ty = typename(vm, &tok, tok->next->next);
-        *rest = skip(vm, tok, ")");
+        *rest    = skip(vm, tok, ")");
         return new_ulong(vm, ty->align, tok);
     }
 
@@ -1282,11 +1374,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "__builtin_types_compatible_p")) {
-        tok = skip(vm, tok->next, "(");
+        tok      = skip(vm, tok->next, "(");
         Type *t1 = typename(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok      = skip(vm, tok, ",");
         Type *t2 = typename(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest    = skip(vm, tok, ")");
         return new_num(vm, is_compatible(t1, t2), start);
     }
 
@@ -1299,9 +1391,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // counterpart so it gets a CCCC-specific code (used by <stdarg.h>'s
     // va_arg to detect a by-pointer variadic vector argument, ticket #721).
     if (equal(tok, "__builtin_classify_type")) {
-        tok = skip(vm, tok->next, "(");
+        tok           = skip(vm, tok->next, "(");
         Node *operand = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest         = skip(vm, tok, ")");
         add_type(vm, operand);
         return new_num(vm, classify_type_code(operand->ty), start);
     }
@@ -1314,13 +1406,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     //   chosen one nor emitted.  This is what <stdarg.h>'s va_arg relies on to
     //   give the correct type for the requested argument.
     if (equal(tok, "__builtin_choose_expr")) {
-        tok = skip(vm, tok->next, "(");
+        tok          = skip(vm, tok->next, "(");
         int64_t cond = const_expr(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *e1 = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *e2 = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        tok          = skip(vm, tok, ",");
+        Node *e1     = assign(vm, &tok, tok);
+        tok          = skip(vm, tok, ",");
+        Node *e2     = assign(vm, &tok, tok);
+        *rest        = skip(vm, tok, ")");
         return cond ? e1 : e2;
     }
 
@@ -1339,68 +1431,68 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // user source -- only from these four macros' own expansion -- so no
     // diagnostic-quality error text is needed for malformed input.
     if (equal(tok, "__cccc_va_start")) {
-        tok = skip(vm, tok->next, "(");
-        Node *ap = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok->next, "(");
+        Node *ap   = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
         Node *last = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok, ",");
         Node *impl = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         add_type(vm, ap);
         add_type(vm, last);
         impl->va_form = VA_START;
-        impl->va_ap = ap;
+        impl->va_ap   = ap;
         impl->va_last = last;
         return impl;
     }
 
     if (equal(tok, "__cccc_va_arg")) {
-        tok = skip(vm, tok->next, "(");
-        Node *ap = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok->next, "(");
+        Node *ap   = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
         Type *type = typename(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok, ",");
         Node *impl = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         add_type(vm, ap);
         impl->va_form = VA_ARG;
-        impl->va_ap = ap;
+        impl->va_ap   = ap;
         impl->va_type = type;
         return impl;
     }
 
     if (equal(tok, "__cccc_va_copy")) {
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
         Node *dest = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *src = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok, ",");
+        Node *src  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
         Node *impl = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         add_type(vm, dest);
         add_type(vm, src);
         impl->va_form = VA_COPY;
-        impl->va_ap = dest;
-        impl->va_src = src;
+        impl->va_ap   = dest;
+        impl->va_src  = src;
         return impl;
     }
 
     if (equal(tok, "__cccc_va_end")) {
-        tok = skip(vm, tok->next, "(");
-        Node *ap = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok->next, "(");
+        Node *ap   = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
         Node *impl = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         add_type(vm, ap);
         impl->va_form = VA_END;
-        impl->va_ap = ap;
+        impl->va_ap   = ap;
         return impl;
     }
 
     if (equal(tok, "__builtin_reg_class")) {
-        tok = skip(vm, tok->next, "(");
+        tok      = skip(vm, tok->next, "(");
         Type *ty = typename(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest    = skip(vm, tok, ")");
 
         if (is_integer(ty) || ty->kind == TY_PTR)
             return new_num(vm, 0, start);
@@ -1419,19 +1511,21 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // (e.g. changing signedness or width without crossing int/float) have
     // no opcode yet and are rejected with a diagnostic.
     if (equal(tok, "__builtin_convertvector")) {
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *src = assign(vm, &tok, tok);
         add_type(vm, src);
-        tok = skip(vm, tok, ",");
+        tok          = skip(vm, tok, ",");
         Type *dst_ty = typename(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest        = skip(vm, tok, ")");
 
         if (!is_vector(src->ty))
             error_tok(vm, start,
-                      "__builtin_convertvector: first argument must be a vector type");
+                      "__builtin_convertvector: first argument must be a "
+                      "vector type");
         if (!is_vector(dst_ty))
-            error_tok(vm, start,
-                      "__builtin_convertvector: target type must be a vector type");
+            error_tok(
+                vm, start,
+                "__builtin_convertvector: target type must be a vector type");
         if (src->ty->vec_len != dst_ty->vec_len)
             error_tok(vm, start,
                       "__builtin_convertvector: source and target vectors "
@@ -1444,8 +1538,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                       "are currently supported)");
 
         Node *node = new_node(vm, ND_CONVERTVECTOR, start);
-        node->lhs = src;
-        node->ty = copy_type(vm, dst_ty);
+        node->lhs  = src;
+        node->ty   = copy_type(vm, dst_ty);
         return node;
     }
 
@@ -1454,13 +1548,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // is deferred to the follow-up ticket). Returns the number of bytes
     // that would have been written, snprintf-style.
     if (equal(tok, "__builtin_decimal_to_chars")) {
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *buf = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *n = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok       = skip(vm, tok, ",");
+        Node *n   = assign(vm, &tok, tok);
+        tok       = skip(vm, tok, ",");
         Node *val = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
 
         // add_type() short-circuits as soon as it sees node->ty already set
         // (see its guard: "node->ty && node->kind != ND_COMPLEX"), and this
@@ -1477,10 +1571,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                       "_Decimal32/64/128 type");
 
         Node *node = new_node(vm, ND_DECIMAL_TO_CHARS, start);
-        node->lhs = buf;
-        node->rhs = n;
+        node->lhs  = buf;
+        node->rhs  = n;
         node->cond = val;
-        node->ty = ty_int;
+        node->ty   = ty_int;
         return node;
     }
 
@@ -1506,11 +1600,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // from the constant form's hard error, since a runtime value can't be
     // rejected at compile time.
     if (equal(tok, "__builtin_shuffle")) {
-        tok = skip(vm, tok->next, "(");
+        tok      = skip(vm, tok->next, "(");
         Node *v1 = assign(vm, &tok, tok);
         add_type(vm, v1);
         if (!is_vector(v1->ty))
-            error_tok(vm, start, "__builtin_shuffle: first argument must be a vector type");
+            error_tok(
+                vm, start,
+                "__builtin_shuffle: first argument must be a vector type");
         tok = skip(vm, tok, ",");
 
         // Disambiguating the arg count: __builtin_shuffle(v1, mask) (1-vector
@@ -1521,9 +1617,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // parse the second argument eagerly and check what follows it: a
         // "," means it was v2 and a mask still follows; anything else means
         // it was itself the (1-vector, runtime) mask.
-        Node *v2 = NULL;
-        Node *mask = NULL;
-        bool mask_is_const = equal(tok, "{");
+        Node *v2            = NULL;
+        Node *mask          = NULL;
+        bool  mask_is_const = equal(tok, "{");
 
         if (!mask_is_const) {
             Node *second = assign(vm, &tok, tok);
@@ -1534,7 +1630,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                     error_tok(vm, start,
                               "__builtin_shuffle: second vector argument must "
                               "match the first vector's type");
-                tok = skip(vm, tok, ",");
+                tok           = skip(vm, tok, ",");
                 mask_is_const = equal(tok, "{");
                 if (!mask_is_const) {
                     mask = assign(vm, &tok, tok);
@@ -1545,9 +1641,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             }
         }
 
-        int lane_count = v1->ty->vec_len;
-        int max_index = v2 ? lane_count * 2 : lane_count;
-        Type *elem_ty = v1->ty->base;
+        int   lane_count = v1->ty->vec_len;
+        int   max_index  = v2 ? lane_count * 2 : lane_count;
+        Type *elem_ty    = v1->ty->base;
 
         // The constant form must be a BARE brace list, `{i0,...}` -- not a
         // `(vTYPE){...}` compound literal. A `(type)`-prefixed literal is
@@ -1557,9 +1653,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // valid argument expression here, so it unambiguously marks a
         // constant mask.
         if (mask_is_const) {
-            tok = tok->next; // consume '{'
+            tok          = tok->next; // consume '{'
             int *indices = arena_alloc(&vm->compiler.parser_arena,
-                                        sizeof(int) * (size_t)lane_count);
+                                       sizeof(int) * (size_t)lane_count);
             for (int i = 0; i < lane_count; i++) {
                 if (i > 0)
                     tok = skip(vm, tok, ",");
@@ -1570,33 +1666,38 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             }
             if (equal(tok, ","))
                 tok = tok->next; // optional trailing comma
-            tok = skip(vm, tok, "}");
+            tok   = skip(vm, tok, "}");
             *rest = skip(vm, tok, ")");
 
             // Materialize the source vector(s) into hidden locals so any
             // side effects in v1/v2 run exactly once, then gather each
             // destination lane individually.
-            Obj *v1var = new_lvar(vm, "", 0, v1->ty);
-            Node *chain = new_binary(vm, ND_ASSIGN, new_var_node(vm, v1var, start), v1, start);
+            Obj  *v1var = new_lvar(vm, "", 0, v1->ty);
+            Node *chain = new_binary(vm, ND_ASSIGN,
+                                     new_var_node(vm, v1var, start), v1, start);
 
-            Obj *v2var = NULL;
+            Obj  *v2var = NULL;
             if (v2) {
-                v2var = new_lvar(vm, "", 0, v2->ty);
-                Node *v2init = new_binary(vm, ND_ASSIGN, new_var_node(vm, v2var, start), v2, start);
+                v2var        = new_lvar(vm, "", 0, v2->ty);
+                Node *v2init = new_binary(
+                    vm, ND_ASSIGN, new_var_node(vm, v2var, start), v2, start);
                 chain = new_binary(vm, ND_COMMA, chain, v2init, start);
             }
 
             Obj *rvar = new_lvar(vm, "", 0, v1->ty);
             for (int i = 0; i < lane_count; i++) {
-                int idx = indices[i];
-                bool from_v2 = v2 && idx >= lane_count;
-                Obj *srcvar = from_v2 ? v2var : v1var;
-                int srclane = from_v2 ? idx - lane_count : idx;
-                Node *dst_lane = vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty,
-                                                  new_num(vm, i, start), start);
-                Node *src_lane = vector_lane_ref(vm, new_var_node(vm, srcvar, start), elem_ty,
-                                                  new_num(vm, srclane, start), start);
-                Node *assign_lane = new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
+                int   idx     = indices[i];
+                bool  from_v2 = v2 && idx >= lane_count;
+                Obj  *srcvar  = from_v2 ? v2var : v1var;
+                int   srclane = from_v2 ? idx - lane_count : idx;
+                Node *dst_lane =
+                    vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty,
+                                    new_num(vm, i, start), start);
+                Node *src_lane = vector_lane_ref(
+                    vm, new_var_node(vm, srcvar, start), elem_ty,
+                    new_num(vm, srclane, start), start);
+                Node *assign_lane =
+                    new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
                 chain = new_binary(vm, ND_COMMA, chain, assign_lane, start);
             }
             Node *result = new_var_node(vm, rvar, start);
@@ -1625,59 +1726,72 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // Materialize v1/v2/mask into hidden locals so side effects run
         // exactly once, then gather each destination lane via a runtime
         // index read out of the mask vector, wrapped into range with `%`.
-        Obj *v1var = new_lvar(vm, "", 0, v1->ty);
-        Node *chain = new_binary(vm, ND_ASSIGN, new_var_node(vm, v1var, start), v1, start);
+        Obj  *v1var = new_lvar(vm, "", 0, v1->ty);
+        Node *chain = new_binary(vm, ND_ASSIGN, new_var_node(vm, v1var, start),
+                                 v1, start);
 
-        Obj *v2var = NULL;
+        Obj  *v2var = NULL;
         if (v2) {
-            v2var = new_lvar(vm, "", 0, v2->ty);
-            Node *v2init = new_binary(vm, ND_ASSIGN, new_var_node(vm, v2var, start), v2, start);
+            v2var        = new_lvar(vm, "", 0, v2->ty);
+            Node *v2init = new_binary(
+                vm, ND_ASSIGN, new_var_node(vm, v2var, start), v2, start);
             chain = new_binary(vm, ND_COMMA, chain, v2init, start);
         }
 
-        Obj *maskvar = new_lvar(vm, "", 0, mask->ty);
-        Node *maskinit = new_binary(vm, ND_ASSIGN, new_var_node(vm, maskvar, start), mask, start);
-        chain = new_binary(vm, ND_COMMA, chain, maskinit, start);
+        Obj  *maskvar  = new_lvar(vm, "", 0, mask->ty);
+        Node *maskinit = new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, maskvar, start), mask, start);
+        chain              = new_binary(vm, ND_COMMA, chain, maskinit, start);
 
         Type *mask_elem_ty = mask->ty->base;
-        Obj *rvar = new_lvar(vm, "", 0, v1->ty);
+        Obj  *rvar         = new_lvar(vm, "", 0, v1->ty);
         for (int i = 0; i < lane_count; i++) {
             // raw_idx = maskvar[i]  (mask's own element type)
-            Node *raw_idx = vector_lane_ref(vm, new_var_node(vm, maskvar, start), mask_elem_ty,
-                                             new_num(vm, i, start), start);
+            Node *raw_idx =
+                vector_lane_ref(vm, new_var_node(vm, maskvar, start),
+                                mask_elem_ty, new_num(vm, i, start), start);
 
-            Node *dst_lane = vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty,
-                                              new_num(vm, i, start), start);
+            Node *dst_lane =
+                vector_lane_ref(vm, new_var_node(vm, rvar, start), elem_ty,
+                                new_num(vm, i, start), start);
             Node *src_lane;
             if (!v2) {
                 // idx = raw_idx % lane_count; result = v1var[idx]
-                Node *idx = new_binary(vm, ND_MOD, raw_idx, new_num(vm, lane_count, start), start);
-                src_lane = vector_lane_ref(vm, new_var_node(vm, v1var, start), elem_ty, idx, start);
+                Node *idx = new_binary(vm, ND_MOD, raw_idx,
+                                       new_num(vm, lane_count, start), start);
+                src_lane  = vector_lane_ref(vm, new_var_node(vm, v1var, start),
+                                            elem_ty, idx, start);
             } else {
                 // idx = raw_idx % (2*lane_count); result = idx < lane_count
                 //     ? v1var[idx] : v2var[idx - lane_count]
                 // Bind idx to a hidden scalar local so it's evaluated once.
-                Obj *idxvar = new_lvar(vm, "", 0, ty_int);
-                Node *idx_mod = new_binary(vm, ND_MOD, raw_idx,
-                                            new_num(vm, max_index, start), start);
-                Node *idx_init = new_binary(vm, ND_ASSIGN, new_var_node(vm, idxvar, start),
-                                             idx_mod, start);
+                Obj  *idxvar  = new_lvar(vm, "", 0, ty_int);
+                Node *idx_mod = new_binary(
+                    vm, ND_MOD, raw_idx, new_num(vm, max_index, start), start);
+                Node *idx_init =
+                    new_binary(vm, ND_ASSIGN, new_var_node(vm, idxvar, start),
+                               idx_mod, start);
 
-                Node *cmp = new_binary(vm, ND_LT, new_var_node(vm, idxvar, start),
-                                        new_num(vm, lane_count, start), start);
-                Node *then_lane = vector_lane_ref(vm, new_var_node(vm, v1var, start), elem_ty,
-                                                   new_var_node(vm, idxvar, start), start);
-                Node *els_idx = new_binary(vm, ND_SUB, new_var_node(vm, idxvar, start),
-                                            new_num(vm, lane_count, start), start);
-                Node *els_lane = vector_lane_ref(vm, new_var_node(vm, v2var, start), elem_ty,
-                                                  els_idx, start);
+                Node *cmp =
+                    new_binary(vm, ND_LT, new_var_node(vm, idxvar, start),
+                               new_num(vm, lane_count, start), start);
+                Node *then_lane =
+                    vector_lane_ref(vm, new_var_node(vm, v1var, start), elem_ty,
+                                    new_var_node(vm, idxvar, start), start);
+                Node *els_idx =
+                    new_binary(vm, ND_SUB, new_var_node(vm, idxvar, start),
+                               new_num(vm, lane_count, start), start);
+                Node *els_lane =
+                    vector_lane_ref(vm, new_var_node(vm, v2var, start), elem_ty,
+                                    els_idx, start);
                 Node *cond = new_node(vm, ND_COND, start);
                 cond->cond = cmp;
                 cond->then = then_lane;
-                cond->els = els_lane;
-                src_lane = new_binary(vm, ND_COMMA, idx_init, cond, start);
+                cond->els  = els_lane;
+                src_lane   = new_binary(vm, ND_COMMA, idx_init, cond, start);
             }
-            Node *assign_lane = new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
+            Node *assign_lane =
+                new_binary(vm, ND_ASSIGN, dst_lane, src_lane, start);
             chain = new_binary(vm, ND_COMMA, chain, assign_lane, start);
         }
         Node *result = new_var_node(vm, rvar, start);
@@ -1685,44 +1799,45 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "__builtin_compare_and_swap")) {
-        Node *node = new_node(vm, ND_CAS, tok);
-        tok = skip(vm, tok->next, "(");
+        Node *node     = new_node(vm, ND_CAS, tok);
+        tok            = skip(vm, tok->next, "(");
         node->cas_addr = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        node->cas_old = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        node->cas_new = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        tok            = skip(vm, tok, ",");
+        node->cas_old  = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
+        node->cas_new  = assign(vm, &tok, tok);
+        *rest          = skip(vm, tok, ")");
         return node;
     }
 
     if (equal(tok, "__builtin_atomic_exchange")) {
         Node *node = new_node(vm, ND_EXCH, tok);
-        tok = skip(vm, tok->next, "(");
-        node->lhs = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        node->rhs = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        node->rhs  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
         return node;
     }
 
     // __builtin_atomic_load(addr) — atomic tagged load; emits ALDR opcode
     if (equal(tok, "__builtin_atomic_load")) {
         Node *node = new_node(vm, ND_ALOAD, tok);
-        tok = skip(vm, tok->next, "(");
-        node->lhs = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
         return node;
     }
 
-    // __builtin_atomic_store(addr, val) — atomic tagged store; emits ASTR opcode
+    // __builtin_atomic_store(addr, val) — atomic tagged store; emits ASTR
+    // opcode
     if (equal(tok, "__builtin_atomic_store")) {
         Node *node = new_node(vm, ND_ASTORE, tok);
-        tok = skip(vm, tok->next, "(");
-        node->lhs = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        node->rhs = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        node->rhs  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
         return node;
     }
 
@@ -1733,44 +1848,48 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         long long level = const_expr(vm, &tok, tok);
         if (level != 0)
             error_tok(vm, tok, "__builtin_frame_address only supports level 0");
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_FRAME_ADDR, start);
-        node->ty = pointer_to(vm, ty_void);
+        node->ty   = pointer_to(vm, ty_void);
         return node;
     }
 
-    // __builtin_return_address(n) - returns the return address of the nth caller frame.
-    // The returned value is a VM bytecode offset (Pc, uint32_t) cast to void*, NOT a
-    // host machine address. This differs from __builtin_frame_address which returns bp
-    // as a real host pointer. Returns NULL past the outermost frame.
-    // Lowered to the RETADDR opcode which walks the saved-bp chain at runtime and
-    // bounds-checks each step against the live stack region.
+    // __builtin_return_address(n) - returns the return address of the nth
+    // caller frame. The returned value is a VM bytecode offset (Pc, uint32_t)
+    // cast to void*, NOT a host machine address. This differs from
+    // __builtin_frame_address which returns bp as a real host pointer. Returns
+    // NULL past the outermost frame. Lowered to the RETADDR opcode which walks
+    // the saved-bp chain at runtime and bounds-checks each step against the
+    // live stack region.
     if (equal(tok, "__builtin_return_address")) {
-        tok = skip(vm, tok->next, "(");
+        tok             = skip(vm, tok->next, "(");
         long long level = const_expr(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_node(vm, ND_RETURN_ADDR, start);
-        node->val = level;
-        node->ty = pointer_to(vm, ty_void);
+        *rest           = skip(vm, tok, ")");
+        Node *node      = new_node(vm, ND_RETURN_ADDR, start);
+        node->val       = level;
+        node->ty        = pointer_to(vm, ty_void);
         return node;
     }
 
     // __builtin_pc_function_name(pc) — map a VM bytecode pc (void*) to the
-    // name of the enclosing C function.  Composes with __builtin_return_address:
-    //   const char *fn = __builtin_pc_function_name(__builtin_return_address(0));
-    // Returns NULL if the pc is NULL or falls outside all known function ranges.
-    // Works in all builds; does NOT require -g.
-    // Lowered to a CALLF to the __cccc_pc_to_name FFI shim registered by
-    // cc_load_symbolize_runtime.
+    // name of the enclosing C function.  Composes with
+    // __builtin_return_address:
+    //   const char *fn =
+    //   __builtin_pc_function_name(__builtin_return_address(0));
+    // Returns NULL if the pc is NULL or falls outside all known function
+    // ranges. Works in all builds; does NOT require -g. Lowered to a CALLF to
+    // the __cccc_pc_to_name FFI shim registered by cc_load_symbolize_runtime.
     if (equal(tok, "__builtin_pc_function_name")) {
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_unary(vm, ND_FUNCALL,
-            new_var_node(vm, vm->compiler.builtin_pc_to_name, arg->tok), arg->tok);
+        tok        = skip(vm, tok->next, "(");
+        Node *arg  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_unary(
+            vm, ND_FUNCALL,
+            new_var_node(vm, vm->compiler.builtin_pc_to_name, arg->tok),
+            arg->tok);
         node->func_ty = vm->compiler.builtin_pc_to_name->ty;
-        node->ty = vm->compiler.builtin_pc_to_name->ty->return_ty;
-        node->args = arg;
+        node->ty      = vm->compiler.builtin_pc_to_name->ty->return_ty;
+        node->args    = arg;
         add_type(vm, arg);
         return node;
     }
@@ -1781,23 +1900,25 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // On success, *file and *line are set; on failure both are zeroed.
     // Composes with __builtin_return_address:
     //   const char *file; int line;
-    //   __builtin_pc_source_location(__builtin_return_address(0), &file, &line);
+    //   __builtin_pc_source_location(__builtin_return_address(0), &file,
+    //   &line);
     // Lowered to a CALLF to the __cccc_pc_to_source FFI shim.
     if (equal(tok, "__builtin_pc_source_location")) {
-        tok = skip(vm, tok->next, "(");
-        Node *pc_arg = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok            = skip(vm, tok->next, "(");
+        Node *pc_arg   = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
         Node *file_arg = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok            = skip(vm, tok, ",");
         Node *line_arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_unary(vm, ND_FUNCALL,
+        *rest          = skip(vm, tok, ")");
+        Node *node     = new_unary(
+            vm, ND_FUNCALL,
             new_var_node(vm, vm->compiler.builtin_pc_to_source, pc_arg->tok),
             pc_arg->tok);
-        node->func_ty = vm->compiler.builtin_pc_to_source->ty;
-        node->ty = vm->compiler.builtin_pc_to_source->ty->return_ty;
-        node->args = pc_arg;
-        pc_arg->next = file_arg;
+        node->func_ty  = vm->compiler.builtin_pc_to_source->ty;
+        node->ty       = vm->compiler.builtin_pc_to_source->ty->return_ty;
+        node->args     = pc_arg;
+        pc_arg->next   = file_arg;
         file_arg->next = line_arg;
         add_type(vm, pc_arg);
         add_type(vm, file_arg);
@@ -1824,14 +1945,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // Union member access is handled by objsize_resolve_lvalue's ND_MEMBER case
     // (offset == 0 for all union members; base_size reflects the whole union).
     //
-    // The ptr argument is not evaluated (no side-effects emitted), matching GCC.
-    // Runtime sizing is a separate builtin (__builtin_dynamic_object_size).
+    // The ptr argument is not evaluated (no side-effects emitted), matching
+    // GCC. Runtime sizing is a separate builtin
+    // (__builtin_dynamic_object_size).
     if (equal(tok, "__builtin_object_size")) {
-        tok = skip(vm, tok->next, "(");
-        Node *ptr = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok                = skip(vm, tok->next, "(");
+        Node *ptr          = assign(vm, &tok, tok);
+        tok                = skip(vm, tok, ",");
         long long type_arg = const_expr(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest              = skip(vm, tok, ")");
 
         add_type(vm, ptr);
 
@@ -1839,10 +1961,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         size_t result = (type_arg & 2) ? 0 : (size_t)-1;
 
         // Helper: bytes remaining in `info` for this type_arg.
-#define OBJSZ_REMAINING(info) ({                                    \
-    int _rem = (type_arg & 1) ? (info).sub_size  - (info).sub_offset  \
-                               : (info).base_size - (info).base_offset; \
-    _rem > 0 ? (size_t)_rem : (size_t)0; })
+#define OBJSZ_REMAINING(info)                                                  \
+    ({                                                                         \
+        int _rem = (type_arg & 1) ? (info).sub_size - (info).sub_offset        \
+                                  : (info).base_size - (info).base_offset;     \
+        _rem > 0 ? (size_t)_rem : (size_t)0;                                   \
+    })
 
         if (ptr->kind == ND_COND) {
             // Ternary: resolve each branch; combine with max (type 0/1) or
@@ -1850,11 +1974,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             // conservative default.
             ObjSizeInfo ti, ei;
             if (objsize_resolve_ptr(vm, ptr->then, &ti) &&
-                objsize_resolve_ptr(vm, ptr->els,  &ei)) {
+                objsize_resolve_ptr(vm, ptr->els, &ei)) {
                 size_t sa = OBJSZ_REMAINING(ti);
                 size_t sb = OBJSZ_REMAINING(ei);
-                result = (type_arg & 2) ? (sa < sb ? sa : sb)
-                                        : (sa > sb ? sa : sb);
+                result =
+                    (type_arg & 2) ? (sa < sb ? sa : sb) : (sa > sb ? sa : sb);
             }
         } else {
             ObjSizeInfo info;
@@ -1865,8 +1989,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 #undef OBJSZ_REMAINING
 
         Node *node = new_node(vm, ND_NUM, start);
-        node->val = (int64_t)result;
-        node->ty = ty_ulong;
+        node->val  = (int64_t)result;
+        node->ty   = ty_ulong;
 
         // #642: constant malloc-family allocation tracking. A bare pointer
         // variable (through casts) whose declaration initializer was
@@ -1902,15 +2026,16 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             // runs at parse time before objsize_unsafe can be poisoned by a
             // later reassignment -- see resolve_objsize_queries.
             Obj *base;
-            int base_offset;
+            int  base_offset;
             if (objsize_peel_offset_chain(vm, ptr, &base, &base_offset) &&
-                base->objsize_has_alloc && base->objsize_decl_fn == vm->compiler.current_fn) {
-                struct ObjSizeQuery *q = arena_alloc(&vm->compiler.parser_arena,
-                                                      sizeof(struct ObjSizeQuery));
-                q->node = node;
-                q->var = base;
-                q->offset = base_offset;
-                q->next = vm->compiler.objsize_queries;
+                base->objsize_has_alloc &&
+                base->objsize_decl_fn == vm->compiler.current_fn) {
+                struct ObjSizeQuery *q = arena_alloc(
+                    &vm->compiler.parser_arena, sizeof(struct ObjSizeQuery));
+                q->node                      = node;
+                q->var                       = base;
+                q->offset                    = base_offset;
+                q->next                      = vm->compiler.objsize_queries;
                 vm->compiler.objsize_queries = q;
             }
         }
@@ -1948,45 +2073,48 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // Scope limitations (v1):
     //   - stack/VLA/alloca buffers: no AllocHeader → conservative.
     if (equal(tok, "__builtin_dynamic_object_size")) {
-        tok = skip(vm, tok->next, "(");
-        Node *ptr = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok                = skip(vm, tok->next, "(");
+        Node *ptr          = assign(vm, &tok, tok);
+        tok                = skip(vm, tok, ",");
         long long type_arg = const_expr(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest              = skip(vm, tok, ")");
 
         add_type(vm, ptr);
 
-        // Static fold: try to resolve at compile time (same as __builtin_object_size).
-        // Ternary (ND_COND) is handled by resolving both branches and combining.
-#define DYNOSZ_REMAINING(info) ({                                        \
-    int _rem = (type_arg & 1) ? (info).sub_size  - (info).sub_offset    \
-                               : (info).base_size - (info).base_offset;  \
-    _rem > 0 ? (size_t)_rem : (size_t)0; })
+        // Static fold: try to resolve at compile time (same as
+        // __builtin_object_size). Ternary (ND_COND) is handled by resolving
+        // both branches and combining.
+#define DYNOSZ_REMAINING(info)                                                 \
+    ({                                                                         \
+        int _rem = (type_arg & 1) ? (info).sub_size - (info).sub_offset        \
+                                  : (info).base_size - (info).base_offset;     \
+        _rem > 0 ? (size_t)_rem : (size_t)0;                                   \
+    })
 
         {
-            bool folded = false;
+            bool   folded      = false;
             size_t fold_result = 0;
             if (ptr->kind == ND_COND) {
                 ObjSizeInfo ti, ei;
                 if (objsize_resolve_ptr(vm, ptr->then, &ti) &&
-                    objsize_resolve_ptr(vm, ptr->els,  &ei)) {
-                    size_t sa = DYNOSZ_REMAINING(ti);
-                    size_t sb = DYNOSZ_REMAINING(ei);
+                    objsize_resolve_ptr(vm, ptr->els, &ei)) {
+                    size_t sa   = DYNOSZ_REMAINING(ti);
+                    size_t sb   = DYNOSZ_REMAINING(ei);
                     fold_result = (type_arg & 2) ? (sa < sb ? sa : sb)
                                                  : (sa > sb ? sa : sb);
-                    folded = true;
+                    folded      = true;
                 }
             } else {
                 ObjSizeInfo info;
                 if (objsize_resolve_ptr(vm, ptr, &info)) {
                     fold_result = DYNOSZ_REMAINING(info);
-                    folded = true;
+                    folded      = true;
                 }
             }
             if (folded) {
                 Node *node = new_node(vm, ND_NUM, start);
-                node->val = (int64_t)fold_result;
-                node->ty = ty_ulong;
+                node->val  = (int64_t)fold_result;
+                node->ty   = ty_ulong;
 #undef DYNOSZ_REMAINING
                 return node;
             }
@@ -1995,39 +2123,39 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
         // Runtime path: emit DYNOBJSZ opcode that reads AllocHeader at runtime.
         Node *node = new_node(vm, ND_DYNOBJ_SIZE, start);
-        node->lhs = ptr;
-        node->val = type_arg;
-        node->ty = ty_ulong;
+        node->lhs  = ptr;
+        node->val  = type_arg;
+        node->ty   = ty_ulong;
         return node;
     }
 
     // __builtin_huge_val() -> double infinity
     if (equal(tok, "__builtin_huge_val")) {
-        tok = skip(vm, tok->next, "(");
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = HUGE_VAL;
-        node->ty = ty_double;
+        node->ty   = ty_double;
         return node;
     }
 
     // __builtin_huge_valf() -> float infinity
     if (equal(tok, "__builtin_huge_valf")) {
-        tok = skip(vm, tok->next, "(");
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = (float)HUGE_VAL;
-        node->ty = ty_float;
+        node->ty   = ty_float;
         return node;
     }
 
     // __builtin_huge_vall() -> long double infinity
     if (equal(tok, "__builtin_huge_vall")) {
-        tok = skip(vm, tok->next, "(");
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = HUGE_VAL;
-        node->ty = ty_ldouble;
+        node->ty   = ty_ldouble;
         return node;
     }
 
@@ -2039,13 +2167,14 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // exactly what a decimal literal's dec_digits would already contain.
     if (equal(tok, "__builtin_infd32") || equal(tok, "__builtin_infd64") ||
         equal(tok, "__builtin_infd128")) {
-        Type *ty = equal(tok, "__builtin_infd32") ? ty_decimal32 :
-                   equal(tok, "__builtin_infd128") ? ty_decimal128 : ty_decimal64;
-        tok = skip(vm, tok->next, "(");
-        *rest = skip(vm, tok, ")");
-        Node *node = new_node(vm, ND_NUM, start);
+        Type *ty         = equal(tok, "__builtin_infd32")    ? ty_decimal32
+                           : equal(tok, "__builtin_infd128") ? ty_decimal128
+                                                             : ty_decimal64;
+        tok              = skip(vm, tok->next, "(");
+        *rest            = skip(vm, tok, ")");
+        Node *node       = new_node(vm, ND_NUM, start);
         node->dec_digits = "Inf";
-        node->ty = ty;
+        node->ty         = ty;
         return node;
     }
 
@@ -2054,68 +2183,80 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // as __builtin_nan's binary-float family below.
     if (equal(tok, "__builtin_nand32") || equal(tok, "__builtin_nand64") ||
         equal(tok, "__builtin_nand128")) {
-        Type *ty = equal(tok, "__builtin_nand32") ? ty_decimal32 :
-                   equal(tok, "__builtin_nand128") ? ty_decimal128 : ty_decimal64;
-        tok = skip(vm, tok->next, "(");
+        Type *ty  = equal(tok, "__builtin_nand32")    ? ty_decimal32
+                    : equal(tok, "__builtin_nand128") ? ty_decimal128
+                                                      : ty_decimal64;
+        tok       = skip(vm, tok->next, "(");
         Node *tag = assign(vm, &tok, tok);
         (void)tag;
-        *rest = skip(vm, tok, ")");
-        Node *node = new_node(vm, ND_NUM, start);
+        *rest            = skip(vm, tok, ")");
+        Node *node       = new_node(vm, ND_NUM, start);
         node->dec_digits = "NaN";
-        node->ty = ty;
+        node->ty         = ty;
         return node;
     }
 
     // __builtin_inf() / __builtin_inff() / __builtin_infl() -> infinity
     if (equal(tok, "__builtin_inf") || equal(tok, "__builtin_infl") ||
         equal(tok, "__builtin_inff")) {
-        Type *ty = equal(tok, "__builtin_inff") ? ty_float :
-                   equal(tok, "__builtin_infl") ? ty_ldouble : ty_double;
-        tok = skip(vm, tok->next, "(");
-        *rest = skip(vm, tok, ")");
+        Type *ty   = equal(tok, "__builtin_inff")   ? ty_float
+                     : equal(tok, "__builtin_infl") ? ty_ldouble
+                                                    : ty_double;
+        tok        = skip(vm, tok->next, "(");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = INFINITY;
-        node->ty = ty;
+        node->ty   = ty;
         return node;
     }
 
-    // __builtin_nan("tag") / __builtin_nanf("tag") / __builtin_nanl("tag") -> NaN
+    // __builtin_nan("tag") / __builtin_nanf("tag") / __builtin_nanl("tag") ->
+    // NaN
     if (equal(tok, "__builtin_nan") || equal(tok, "__builtin_nanf") ||
         equal(tok, "__builtin_nanl")) {
-        Type *ty = equal(tok, "__builtin_nanf") ? ty_float :
-                   equal(tok, "__builtin_nanl") ? ty_ldouble : ty_double;
-        tok = skip(vm, tok->next, "(");
+        Type *ty = equal(tok, "__builtin_nanf")   ? ty_float
+                   : equal(tok, "__builtin_nanl") ? ty_ldouble
+                                                  : ty_double;
+        tok      = skip(vm, tok->next, "(");
         // Parse and discard the string tag argument
         Node *tag = assign(vm, &tok, tok);
         (void)tag;
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         node->fval = NAN;
-        node->ty = ty;
+        node->ty   = ty;
         return node;
     }
 
-    // __builtin_nans("tag") / __builtin_nansf("tag") / __builtin_nansl("tag") -> signaling NaN
-    // Same shape as __builtin_nan above, but sets the IEEE-754 quiet bit to 0
-    // (mantissa MSB) so the bit pattern is a signaling NaN rather than a quiet
-    // one. Note: a narrowing conversion (e.g. long double -> float at literal
-    // codegen) may still quiet the value per IEEE-754 conversion rules -- this
-    // only guarantees the *initial* bit pattern is signaling.
+    // __builtin_nans("tag") / __builtin_nansf("tag") / __builtin_nansl("tag")
+    // -> signaling NaN Same shape as __builtin_nan above, but sets the IEEE-754
+    // quiet bit to 0 (mantissa MSB) so the bit pattern is a signaling NaN
+    // rather than a quiet one. Note: a narrowing conversion (e.g. long double
+    // -> float at literal codegen) may still quiet the value per IEEE-754
+    // conversion rules -- this only guarantees the *initial* bit pattern is
+    // signaling.
     if (equal(tok, "__builtin_nans") || equal(tok, "__builtin_nansf") ||
         equal(tok, "__builtin_nansl")) {
-        Type *ty = equal(tok, "__builtin_nansf") ? ty_float :
-                   equal(tok, "__builtin_nansl") ? ty_ldouble : ty_double;
-        tok = skip(vm, tok->next, "(");
+        Type *ty = equal(tok, "__builtin_nansf")   ? ty_float
+                   : equal(tok, "__builtin_nansl") ? ty_ldouble
+                                                   : ty_double;
+        tok      = skip(vm, tok->next, "(");
         // Parse and discard the string tag argument
         Node *tag = assign(vm, &tok, tok);
         (void)tag;
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
         if (ty == ty_float) {
-            union { uint32_t u; float f; } snan = { .u = 0x7F800001u };
+            union {
+                uint32_t u;
+                float    f;
+            } snan     = {.u = 0x7F800001u};
             node->fval = snan.f;
         } else {
-            union { uint64_t u; double d; } snan = { .u = 0x7FF0000000000001ULL };
+            union {
+                uint64_t u;
+                double   d;
+            } snan     = {.u = 0x7FF0000000000001ULL};
             node->fval = snan.d;
         }
         node->ty = ty;
@@ -2124,67 +2265,69 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // __builtin_isnan(x) -> x != x
     if (equal(tok, "__builtin_isnan")) {
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        // PLACEHOLDER: arg is evaluated twice; should use a temp for side-effecting exprs
+        *rest     = skip(vm, tok, ")");
+        // PLACEHOLDER: arg is evaluated twice; should use a temp for
+        // side-effecting exprs
         Node *node = new_binary(vm, ND_NE, arg, arg, start);
         return node;
     }
 
     // __builtin_isinf(x) -> x == HUGE_VAL || x == -HUGE_VAL
     if (equal(tok, "__builtin_isinf")) {
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *huge = new_node(vm, ND_NUM, start);
-        huge->fval = HUGE_VAL;
-        huge->ty = ty_double;
+        tok            = skip(vm, tok->next, "(");
+        Node *arg      = assign(vm, &tok, tok);
+        *rest          = skip(vm, tok, ")");
+        Node *huge     = new_node(vm, ND_NUM, start);
+        huge->fval     = HUGE_VAL;
+        huge->ty       = ty_double;
         Node *neg_huge = new_unary(vm, ND_NEG, huge, start);
-        // PLACEHOLDER: arg is evaluated twice; should use a temp for side-effecting exprs
+        // PLACEHOLDER: arg is evaluated twice; should use a temp for
+        // side-effecting exprs
         Node *eq_pos = new_binary(vm, ND_EQ, arg, huge, start);
         Node *eq_neg = new_binary(vm, ND_EQ, arg, neg_huge, start);
-        Node *node = new_binary(vm, ND_LOGOR, eq_pos, eq_neg, start);
+        Node *node   = new_binary(vm, ND_LOGOR, eq_pos, eq_neg, start);
         return node;
     }
 
     // __builtin_isfinite(x) -> !(x != x || x == HUGE_VAL || x == -HUGE_VAL)
     if (equal(tok, "__builtin_isfinite")) {
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *huge = new_node(vm, ND_NUM, start);
-        huge->fval = HUGE_VAL;
-        huge->ty = ty_double;
+        tok            = skip(vm, tok->next, "(");
+        Node *arg      = assign(vm, &tok, tok);
+        *rest          = skip(vm, tok, ")");
+        Node *huge     = new_node(vm, ND_NUM, start);
+        huge->fval     = HUGE_VAL;
+        huge->ty       = ty_double;
         Node *neg_huge = new_unary(vm, ND_NEG, huge, start);
         // PLACEHOLDER: arg is evaluated multiple times; should use a temp
         Node *nan_check = new_binary(vm, ND_NE, arg, arg, start);
-        Node *inf_pos = new_binary(vm, ND_EQ, arg, huge, start);
-        Node *inf_neg = new_binary(vm, ND_EQ, arg, neg_huge, start);
+        Node *inf_pos   = new_binary(vm, ND_EQ, arg, huge, start);
+        Node *inf_neg   = new_binary(vm, ND_EQ, arg, neg_huge, start);
         Node *inf_check = new_binary(vm, ND_LOGOR, inf_pos, inf_neg, start);
-        Node *any = new_binary(vm, ND_LOGOR, nan_check, inf_check, start);
-        Node *node = new_unary(vm, ND_NOT, any, start);
+        Node *any       = new_binary(vm, ND_LOGOR, nan_check, inf_check, start);
+        Node *node      = new_unary(vm, ND_NOT, any, start);
         return node;
     }
 
     // __builtin_signbit(x) -> x < 0
     if (equal(tok, "__builtin_signbit")) {
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        Node *arg  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
         Node *zero = new_node(vm, ND_NUM, start);
         zero->fval = 0.0;
-        zero->ty = ty_double;
+        zero->ty   = ty_double;
         Node *node = new_binary(vm, ND_LT, arg, zero, start);
         return node;
     }
 
     // __builtin_expect(exp, c) -> exp (branch prediction hint, ignored for now)
     if (equal(tok, "__builtin_expect")) {
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *exp = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *c = assign(vm, &tok, tok);
+        tok       = skip(vm, tok, ",");
+        Node *c   = assign(vm, &tok, tok);
         (void)c;
         *rest = skip(vm, tok, ")");
         return exp;
@@ -2193,26 +2336,27 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // __builtin_expect_with_probability(exp, c, prob) -> exp
     // Three-arg extension of __builtin_expect; probability hint is discarded.
     if (equal(tok, "__builtin_expect_with_probability")) {
-        tok = skip(vm, tok->next, "(");
-        Node *exp = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *c = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok->next, "(");
+        Node *exp  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        Node *c    = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
         Node *prob = assign(vm, &tok, tok);
-        (void)c; (void)prob;
+        (void)c;
+        (void)prob;
         *rest = skip(vm, tok, ")");
         return exp;
     }
 
     // __builtin_prefetch(addr, [rw], [locality]) -> (void)addr
     // Cache prefetch hint; ignored by the VM. The address operand IS evaluated
-    // for side effects (matching GCC). rw and locality are compile-time constant
-    // hints that are parsed and discarded.
+    // for side effects (matching GCC). rw and locality are compile-time
+    // constant hints that are parsed and discarded.
     if (equal(tok, "__builtin_prefetch")) {
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
         Node *addr = assign(vm, &tok, tok);
         while (consume(vm, &tok, tok, ","))
-            (void)assign(vm, &tok, tok);  // discard rw / locality hints
+            (void)assign(vm, &tok, tok); // discard rw / locality hints
         *rest = skip(vm, tok, ")");
         return new_cast(vm, addr, ty_void);
     }
@@ -2221,20 +2365,20 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // Matches Clang/GCC semantics: the assumption is for the optimizer only;
     // side effects inside expr must not be relied upon.
     if (equal(tok, "__builtin_assume")) {
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
         Node *expr = assign(vm, &tok, tok);
         (void)expr;
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NULL_EXPR, start);
-        node->ty = ty_void;
+        node->ty   = ty_void;
         return node;
     }
 
     // __builtin_constant_p(expr) -> 1 if compile-time constant, 0 otherwise
     if (equal(tok, "__builtin_constant_p")) {
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
         Node *expr = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         add_type(vm, expr);
         int is_const = is_const_expr(vm, expr);
         return new_num(vm, is_const ? 1 : 0, start);
@@ -2242,79 +2386,83 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // __builtin_alloca(size) -> dynamic stack allocation
     if (equal(tok, "__builtin_alloca")) {
-        tok = skip(vm, tok->next, "(");
-        Node *sz = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_unary(vm, ND_FUNCALL,
+        tok        = skip(vm, tok->next, "(");
+        Node *sz   = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_unary(
+            vm, ND_FUNCALL,
             new_var_node(vm, vm->compiler.builtin_alloca, sz->tok), sz->tok);
         node->func_ty = vm->compiler.builtin_alloca->ty;
-        node->ty = vm->compiler.builtin_alloca->ty->return_ty;
-        node->args = sz;
+        node->ty      = vm->compiler.builtin_alloca->ty->return_ty;
+        node->args    = sz;
         add_type(vm, sz);
         return node;
     }
 
     // __builtin_alloca_with_align(size, align) -> dynamic stack allocation
-    // align is in bits and must be a constant; only 16-byte (128-bit) alignment is
-    // guaranteed by the VM arena. Finer alignment is silently ignored.
+    // align is in bits and must be a constant; only 16-byte (128-bit) alignment
+    // is guaranteed by the VM arena. Finer alignment is silently ignored.
     // PLACEHOLDER: actual alignment enforcement not implemented; see ticket for
     // follow-up if needed.
     if (equal(tok, "__builtin_alloca_with_align")) {
-        tok = skip(vm, tok->next, "(");
+        tok      = skip(vm, tok->next, "(");
         Node *sz = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok      = skip(vm, tok, ",");
         // alignment argument must be a compile-time constant (GCC requirement)
         (void)const_expr(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_unary(vm, ND_FUNCALL,
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_unary(
+            vm, ND_FUNCALL,
             new_var_node(vm, vm->compiler.builtin_alloca, sz->tok), sz->tok);
         node->func_ty = vm->compiler.builtin_alloca->ty;
-        node->ty = vm->compiler.builtin_alloca->ty->return_ty;
-        node->args = sz;
+        node->ty      = vm->compiler.builtin_alloca->ty->return_ty;
+        node->args    = sz;
         add_type(vm, sz);
         return node;
     }
 
     // __builtin_strlen(s) -> forward to libc strlen
     if (equal(tok, "__builtin_strlen")) {
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_unary(vm, ND_FUNCALL,
+        tok        = skip(vm, tok->next, "(");
+        Node *arg  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_unary(
+            vm, ND_FUNCALL,
             new_var_node(vm, vm->compiler.builtin_strlen, arg->tok), arg->tok);
         node->func_ty = vm->compiler.builtin_strlen->ty;
-        node->ty = vm->compiler.builtin_strlen->ty->return_ty;
-        node->args = arg;
+        node->ty      = vm->compiler.builtin_strlen->ty->return_ty;
+        node->args    = arg;
         add_type(vm, arg);
         return node;
     }
 
     // __builtin_strcmp(a, b) -> forward to libc strcmp
     if (equal(tok, "__builtin_strcmp")) {
-        tok = skip(vm, tok->next, "(");
-        Node *a = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *b = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
-        Node *node = new_unary(vm, ND_FUNCALL,
+        tok        = skip(vm, tok->next, "(");
+        Node *a    = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        Node *b    = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_unary(
+            vm, ND_FUNCALL,
             new_var_node(vm, vm->compiler.builtin_strcmp, a->tok), a->tok);
         node->func_ty = vm->compiler.builtin_strcmp->ty;
-        node->ty = vm->compiler.builtin_strcmp->ty->return_ty;
-        node->args = a;
-        a->next = b;
+        node->ty      = vm->compiler.builtin_strcmp->ty->return_ty;
+        node->args    = a;
+        a->next       = b;
         add_type(vm, a);
         add_type(vm, b);
         return node;
     }
 
-    // __builtin_unreachable() / __builtin_trap() / __builtin_debugtrap() -> BTRAP
-    if (equal(tok, "__builtin_unreachable") ||
-        equal(tok, "__builtin_trap") ||
+    // __builtin_unreachable() / __builtin_trap() / __builtin_debugtrap() ->
+    // BTRAP
+    if (equal(tok, "__builtin_unreachable") || equal(tok, "__builtin_trap") ||
         equal(tok, "__builtin_debugtrap")) {
-        tok = skip(vm, tok->next, "(");
-        *rest = skip(vm, tok, ")");
+        tok        = skip(vm, tok->next, "(");
+        *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_UNREACHABLE, start);
-        node->ty = ty_void;
+        node->ty   = ty_void;
         return node;
     }
 
@@ -2323,89 +2471,93 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     //   op: 0=CLZ 1=CTZ 2=POPCOUNT 3=PARITY 4=FFS 5=BSWAP
     if (equal(tok, "__builtin_clz") || equal(tok, "__builtin_clzll")) {
         int width = equal(tok, "__builtin_clzll") ? 64 : 32;
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, arg);
         Node *node = new_unary(vm, ND_BITOP, arg, start);
-        node->val = (0 << 8) | width;
-        node->ty = ty_int;
+        node->val  = (0 << 8) | width;
+        node->ty   = ty_int;
         return node;
     }
 
     if (equal(tok, "__builtin_ctz") || equal(tok, "__builtin_ctzll")) {
         int width = equal(tok, "__builtin_ctzll") ? 64 : 32;
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, arg);
         Node *node = new_unary(vm, ND_BITOP, arg, start);
-        node->val = (1 << 8) | width;
-        node->ty = ty_int;
+        node->val  = (1 << 8) | width;
+        node->ty   = ty_int;
         return node;
     }
 
-    if (equal(tok, "__builtin_popcount") || equal(tok, "__builtin_popcountll")) {
-        tok = skip(vm, tok->next, "(");
+    if (equal(tok, "__builtin_popcount") ||
+        equal(tok, "__builtin_popcountll")) {
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, arg);
         Node *node = new_unary(vm, ND_BITOP, arg, start);
-        node->val = (2 << 8) | 0;
-        node->ty = ty_int;
+        node->val  = (2 << 8) | 0;
+        node->ty   = ty_int;
         return node;
     }
 
     if (equal(tok, "__builtin_parity") || equal(tok, "__builtin_parityll")) {
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, arg);
         Node *node = new_unary(vm, ND_BITOP, arg, start);
-        node->val = (3 << 8) | 0;
-        node->ty = ty_int;
+        node->val  = (3 << 8) | 0;
+        node->ty   = ty_int;
         return node;
     }
 
     if (equal(tok, "__builtin_ffs") || equal(tok, "__builtin_ffsll")) {
         int width = equal(tok, "__builtin_ffsll") ? 64 : 32;
-        tok = skip(vm, tok->next, "(");
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, arg);
         Node *node = new_unary(vm, ND_BITOP, arg, start);
-        node->val = (4 << 8) | width;
-        node->ty = ty_int;
+        node->val  = (4 << 8) | width;
+        node->ty   = ty_int;
         return node;
     }
 
     if (equal(tok, "__builtin_bswap16") || equal(tok, "__builtin_bswap32") ||
         equal(tok, "__builtin_bswap64")) {
-        int bytes = equal(tok, "__builtin_bswap16") ? 2 :
-                    equal(tok, "__builtin_bswap32") ? 4 : 8;
-        tok = skip(vm, tok->next, "(");
+        int bytes = equal(tok, "__builtin_bswap16")   ? 2
+                    : equal(tok, "__builtin_bswap32") ? 4
+                                                      : 8;
+        tok       = skip(vm, tok->next, "(");
         Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, arg);
         Node *node = new_unary(vm, ND_BITOP, arg, start);
-        node->val = (5 << 8) | bytes;
+        node->val  = (5 << 8) | bytes;
         node->ty = (bytes == 2) ? ty_ushort : (bytes == 4) ? ty_uint : ty_ulong;
         return node;
     }
 
     // ND_OVERFLOW_ARITH: checked arithmetic builtins (#213)
     // val: 0=add 1=sub 2=mul; lhs=a, rhs=b, cas_addr=result_ptr
-    if (equal(tok, "__builtin_add_overflow") || equal(tok, "__builtin_sub_overflow") ||
+    if (equal(tok, "__builtin_add_overflow") ||
+        equal(tok, "__builtin_sub_overflow") ||
         equal(tok, "__builtin_mul_overflow")) {
-        int op = equal(tok, "__builtin_add_overflow") ? 0 :
-                 equal(tok, "__builtin_sub_overflow") ? 1 : 2;
-        tok = skip(vm, tok->next, "(");
-        Node *a = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
-        Node *b = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        int op    = equal(tok, "__builtin_add_overflow")   ? 0
+                    : equal(tok, "__builtin_sub_overflow") ? 1
+                                                           : 2;
+        tok       = skip(vm, tok->next, "(");
+        Node *a   = assign(vm, &tok, tok);
+        tok       = skip(vm, tok, ",");
+        Node *b   = assign(vm, &tok, tok);
+        tok       = skip(vm, tok, ",");
         Node *ptr = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest     = skip(vm, tok, ")");
         add_type(vm, a);
         add_type(vm, b);
         add_type(vm, ptr);
@@ -2416,59 +2568,65 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // producing C the host compiler refuses (the emitted form calls the
         // same builtin with the same signature, so any type the parser
         // accepts here must also be one clang/gcc accept there).
-        if (ptr->ty->kind != TY_PTR || !ptr->ty->base || !is_integer(ptr->ty->base) ||
-            ptr->ty->base->is_const)
+        if (ptr->ty->kind != TY_PTR || !ptr->ty->base ||
+            !is_integer(ptr->ty->base) || ptr->ty->base->is_const)
             error_tok(vm, ptr->tok,
-                     "__builtin_*_overflow: third argument must be a pointer "
-                     "to a non-const integer type");
-        Node *node = new_node(vm, ND_OVERFLOW_ARITH, start);
-        node->lhs = a;
-        node->rhs = b;
+                      "__builtin_*_overflow: third argument must be a pointer "
+                      "to a non-const integer type");
+        Node *node     = new_node(vm, ND_OVERFLOW_ARITH, start);
+        node->lhs      = a;
+        node->rhs      = b;
         node->cas_addr = ptr;
-        node->val = op;
-        node->ty = ty_int;
+        node->val      = op;
+        node->ty       = ty_int;
         return node;
     }
 
     if (equal(tok, "__cccc_cmplx") || equal(tok, "__cccc_cmplxf") ||
         equal(tok, "__cccc_cmplxl")) {
-        Type *ty = equal(tok, "__cccc_cmplxf") ? ty_fcomplex :
-                   equal(tok, "__cccc_cmplxl") ? ty_ldcomplex : ty_dcomplex;
-        tok = skip(vm, tok->next, "(");
+        Type *ty   = equal(tok, "__cccc_cmplxf")   ? ty_fcomplex
+                     : equal(tok, "__cccc_cmplxl") ? ty_ldcomplex
+                                                   : ty_dcomplex;
+        tok        = skip(vm, tok->next, "(");
         Node *real = assign(vm, &tok, tok);
-        tok = skip(vm, tok, ",");
+        tok        = skip(vm, tok, ",");
         Node *imag = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest      = skip(vm, tok, ")");
         return new_complex_node(vm, real, imag, ty, start);
     }
 
     if (equal(tok, "__cccc_creal") || equal(tok, "__cccc_crealf") ||
         equal(tok, "__cccc_creall") || equal(tok, "__cccc_cimag") ||
         equal(tok, "__cccc_cimagf") || equal(tok, "__cccc_cimagl")) {
-        bool imag_part = equal(tok, "__cccc_cimag") || equal(tok, "__cccc_cimagf") ||
-                         equal(tok, "__cccc_cimagl");
-        Type *ret_ty = (equal(tok, "__cccc_crealf") || equal(tok, "__cccc_cimagf")) ? ty_float :
-                       (equal(tok, "__cccc_creall") || equal(tok, "__cccc_cimagl")) ? ty_ldouble :
-                       ty_double;
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        bool  imag_part = equal(tok, "__cccc_cimag") ||
+                          equal(tok, "__cccc_cimagf") ||
+                          equal(tok, "__cccc_cimagl");
+        Type *ret_ty =
+            (equal(tok, "__cccc_crealf") || equal(tok, "__cccc_cimagf"))
+                ? ty_float
+            : (equal(tok, "__cccc_creall") || equal(tok, "__cccc_cimagl"))
+                ? ty_ldouble
+                : ty_double;
+        tok        = skip(vm, tok->next, "(");
+        Node *arg  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
         Node *node = new_unary(vm, ND_COMPLEX, arg, start);
-        node->val = imag_part ? 2 : 1;
-        node->ty = ret_ty;
+        node->val  = imag_part ? 2 : 1;
+        node->ty   = ret_ty;
         return node;
     }
 
     if (equal(tok, "__cccc_conj") || equal(tok, "__cccc_conjf") ||
         equal(tok, "__cccc_conjl")) {
-        Type *ty = equal(tok, "__cccc_conjf") ? ty_fcomplex :
-                   equal(tok, "__cccc_conjl") ? ty_ldcomplex : ty_dcomplex;
-        tok = skip(vm, tok->next, "(");
-        Node *arg = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        Type *ty   = equal(tok, "__cccc_conjf")   ? ty_fcomplex
+                     : equal(tok, "__cccc_conjl") ? ty_ldcomplex
+                                                  : ty_dcomplex;
+        tok        = skip(vm, tok->next, "(");
+        Node *arg  = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
         Node *node = new_unary(vm, ND_COMPLEX, arg, start);
-        node->val = 3;
-        node->ty = ty;
+        node->val  = 3;
+        node->ty   = ty;
         return node;
     }
 
@@ -2477,9 +2635,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // declaring stack frame. Calls __cccc_block_copy_impl(desc) which reads
     // desc[1] (the descriptor byte-size) and returns a malloc'd copy.
     if (equal(tok, "Block_copy")) {
-        tok = skip(vm, tok->next, "(");
+        tok              = skip(vm, tok->next, "(");
         Node *block_expr = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest            = skip(vm, tok, ")");
         add_type(vm, block_expr);
 
         // The __cccc_block_copy_impl prototype is declared as a builtin (its
@@ -2491,20 +2649,21 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         Node *fn_node = new_var_node(vm, copy_fn, start);
-        Node *call = new_unary(vm, ND_FUNCALL, fn_node, start);
+        Node *call    = new_unary(vm, ND_FUNCALL, fn_node, start);
         call->func_ty = copy_fn->ty;
-        call->ty = copy_fn->ty->return_ty;
-        call->args = block_expr;
+        call->ty      = copy_fn->ty->return_ty;
+        call->args    = block_expr;
         return call;
     }
 
     // Block_release(block) - Apple Blocks extension
-    // Frees a heap-allocated block descriptor previously obtained via Block_copy.
-    // Only call on blocks returned by Block_copy; calling on a stack block is UB.
+    // Frees a heap-allocated block descriptor previously obtained via
+    // Block_copy. Only call on blocks returned by Block_copy; calling on a
+    // stack block is UB.
     if (equal(tok, "Block_release")) {
-        tok = skip(vm, tok->next, "(");
+        tok              = skip(vm, tok->next, "(");
         Node *block_expr = assign(vm, &tok, tok);
-        *rest = skip(vm, tok, ")");
+        *rest            = skip(vm, tok, ")");
         add_type(vm, block_expr);
 
         // Prefer a user-declared free() prototype (e.g. from <stdlib.h>);
@@ -2512,21 +2671,24 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // works even when <stdlib.h> is not included (#458).
         Obj *free_fn = NULL;
         for (Obj *g = vm->compiler.globals; g; g = g->next)
-            if (g->name && strcmp(g->name, "free") == 0) { free_fn = g; break; }
+            if (g->name && strcmp(g->name, "free") == 0) {
+                free_fn = g;
+                break;
+            }
         if (!free_fn)
             free_fn = vm->compiler.builtin_free;
 
         if (!free_fn) {
             Node *node = new_node(vm, ND_NULL_EXPR, start);
-            node->ty = ty_void;
+            node->ty   = ty_void;
             return node;
         }
 
         Node *fn_node = new_var_node(vm, free_fn, start);
-        Node *call = new_unary(vm, ND_FUNCALL, fn_node, start);
+        Node *call    = new_unary(vm, ND_FUNCALL, fn_node, start);
         call->func_ty = free_fn->ty;
-        call->ty = ty_void;
-        call->args = block_expr;
+        call->ty      = ty_void;
+        call->args    = block_expr;
         return call;
     }
 
@@ -2536,13 +2698,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind == TK_IDENT && tok->len > 1 && tok->loc[0] == '$' &&
         (isalpha((unsigned char)tok->loc[1]) || tok->loc[1] == '_')) {
         Token fake = *tok;
-        fake.loc = tok->loc + 1;
-        fake.len = tok->len - 1;
+        fake.loc   = tok->loc + 1;
+        fake.len   = tok->len - 1;
 
         // Helper to get Type* or Obj* as the node's C type.
         // Look up the typedef name from reflection.h; fall back to void*.
         Token type_fake = {.kind = TK_IDENT, .loc = "Type", .len = 4};
-        Token obj_fake  = {.kind = TK_IDENT, .loc = "Obj",  .len = 3};
+        Token obj_fake  = {.kind = TK_IDENT, .loc = "Obj", .len = 3};
 
         // 1. Typedef (e.g. typedef struct Foo Foo)
         Type *found_ty = find_typedef(vm, &fake);
@@ -2552,8 +2714,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (found_ty) {
             Node *node = new_ulong(vm, (uint64_t)(uintptr_t)found_ty, tok);
             Type *meta = find_typedef(vm, &type_fake);
-            node->ty = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
-            *rest = tok->next;
+            node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
+            *rest      = tok->next;
             return node;
         }
 
@@ -2562,8 +2724,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (vs && vs->var) {
             Node *node = new_ulong(vm, (uint64_t)(uintptr_t)vs->var, tok);
             Type *meta = find_typedef(vm, &obj_fake);
-            node->ty = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
-            *rest = tok->next;
+            node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
+            *rest      = tok->next;
             return node;
         }
 
@@ -2574,7 +2736,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
 
-        *rest = tok->next;
+        *rest        = tok->next;
 
         // #887 repro 2: compile_macro_program isolates the comptime compile
         // by nulling vm->compiler.globals, but never resets vm->compiler.scope
@@ -2593,11 +2755,14 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // The $symbol reflection path (above, in this same TK_IDENT branch's
         // sibling handling) is deliberately exempt: reaching into the runtime
         // Obj table for its address is that path's entire purpose.
-        if (vm->compiler.in_macro_mode && sc && sc->var &&
-            !sc->var->is_local && !sc->var->is_function) {
+        if (vm->compiler.in_macro_mode && sc && sc->var && !sc->var->is_local &&
+            !sc->var->is_function) {
             bool in_macro_program = false;
             for (Obj *o = vm->compiler.globals; o; o = o->next) {
-                if (o == sc->var) { in_macro_program = true; break; }
+                if (o == sc->var) {
+                    in_macro_program = true;
+                    break;
+                }
             }
             if (!in_macro_program)
                 sc = NULL;
@@ -2613,8 +2778,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // bother splicing" and skip straight to the same undefined-variable
         // error #887 was trying to avoid. A freshly spliced object -- which
         // new_gvar prepends to vm->compiler.globals, this compile's own list
-        // -- needs no re-check: it is by construction part of "in_macro_program".
-        if (!sc && (vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
+        // -- needs no re-check: it is by construction part of
+        // "in_macro_program".
+        if (!sc &&
+            (vm->compiler.in_macro_mode ||
+             vm->compiler.comptime_splice_active) &&
             cc_comptime_resolve_var(vm, tok))
             sc = find_var(vm, tok);
 
@@ -2637,9 +2805,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             }
             if (sc->enum_ty) {
                 if (sc->is_deprecated)
-                    warn_deprecated_use(
-                        vm, tok, arena_strndup(vm, tok->loc, tok->len),
-                        sc->deprecated_msg);
+                    warn_deprecated_use(vm, tok,
+                                        arena_strndup(vm, tok->loc, tok->len),
+                                        sc->deprecated_msg);
                 Node *num = new_num(vm, sc->enum_val, tok);
                 // Use the enum's own type so size/signedness are correct for
                 // enums with a C23 underlying type (e.g. unsigned long).
@@ -2656,12 +2824,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             if (pm) {
                 // Create ND_MACRO_CALL node
                 Token *macro_tok = tok;
-                tok = tok->next->next; // Skip identifier and '('
+                tok              = tok->next->next; // Skip identifier and '('
 
                 // Parse arguments
-                Node head = {};
-                Node *cur = &head;
-                int arg_count = 0;
+                Node  head      = {};
+                Node *cur       = &head;
+                int   arg_count = 0;
 
                 while (!equal(tok, ")")) {
                     if (cur != &head)
@@ -2670,13 +2838,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                     cur = cur->next = arg;
                     arg_count++;
                 }
-                *rest = tok->next; // Skip ')'
+                *rest                 = tok->next; // Skip ')'
 
-                Node *node = new_node(vm, ND_MACRO_CALL, macro_tok);
-                node->macro_name = pm->name;
-                node->args = head.next;
+                Node *node            = new_node(vm, ND_MACRO_CALL, macro_tok);
+                node->macro_name      = pm->name;
+                node->args            = head.next;
                 node->macro_arg_count = arg_count;
-                node->macro_scope = vm->compiler.scope;
+                node->macro_scope     = vm->compiler.scope;
                 // Type will be determined after macro expansion
                 node->ty =
                     ty_long; // Placeholder - macros return Node* (pointer)
@@ -2710,7 +2878,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         char *msg;
         if (vm->compiler.in_macro_mode &&
             cc_is_source_define_name(vm, tok->loc, tok->len)) {
-            msg = arena_format(vm,
+            msg = arena_format(
+                vm,
                 "undefined variable '%.*s' (it is a #define from the "
                 "runtime translation unit; #defines are not forwarded into "
                 "comptime bodies -- add @shared to its #define, route the "
@@ -2722,7 +2891,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             // index (src/macros.c, #894) declined to splice in -- either its
             // initializer isn't a self-contained constant, or it isn't
             // declared in the primary source file.
-            msg = arena_format(vm,
+            msg = arena_format(
+                vm,
                 "undefined variable '%.*s' (it is an initialized global in "
                 "the runtime translation unit; only constant-initialized "
                 "globals declared directly in the main source file are "
@@ -2738,7 +2908,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (vm->collect_errors && error_tok_recover(vm, tok, "%s", msg)) {
             // Return error placeholder node instead of aborting
             Node *node = new_var_node(vm, &vm->compiler.error_var, tok);
-            node->ty = ty_error;
+            node->ty   = ty_error;
             return node;
         }
 
@@ -2747,7 +2917,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (tok->kind == TK_STR) {
         Obj *var = new_string_literal(vm, tok->str, tok->ty);
-        *rest = tok->next;
+        *rest    = tok->next;
         return new_var_node(vm, var, tok);
     }
 
@@ -2758,7 +2928,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                    tok->ty ? tok->ty->kind : -1, is_flonum(tok->ty));
 
         if (is_flonum(tok->ty)) {
-            node = new_node(vm, ND_NUM, tok);
+            node       = new_node(vm, ND_NUM, tok);
             node->fval = tok->fval;
             if (vm->debug_vm)
                 printf("  primary: created flonum node, fval=%Lf\n",
@@ -2774,10 +2944,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 printf("  primary: created int node, val=%lld\n", node->val);
         }
 
-        node->ty = tok->ty;
+        node->ty          = tok->ty;
         node->wide_digits = tok->wide_digits;
-        node->wide_base = tok->wide_base;
-        node->dec_digits = tok->dec_digits;
+        node->wide_base   = tok->wide_base;
+        node->dec_digits  = tok->dec_digits;
         if (vm->debug_vm)
             printf(" primary: set node->ty to tok->ty, kind=%d\n",
                    node->ty ? node->ty->kind : -1);
@@ -2791,10 +2961,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         error_tok_recover(vm, tok, "expected an expression, found '%.*s'",
                           tok->len, tok->loc)) {
         // Skip the invalid token and return error placeholder
-        *rest = tok->next;
+        *rest      = tok->next;
         Node *node = new_node(vm, ND_NUM, tok);
-        node->ty = ty_int;
-        node->val = 0;
+        node->ty   = ty_int;
+        node->val  = 0;
         return node;
     }
 

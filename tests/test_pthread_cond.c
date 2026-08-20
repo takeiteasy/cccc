@@ -1,11 +1,11 @@
 // Expected return: 42
 #include <pthread.h>
 
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-static int waiting = 0;
-static int ready = 0;
-static int result = 0;
+static pthread_mutex_t mutex   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  cond    = PTHREAD_COND_INITIALIZER;
+static int             waiting = 0;
+static int             ready   = 0;
+static int             result  = 0;
 
 static void *worker(void *arg) {
     (void)arg;

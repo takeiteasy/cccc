@@ -3,7 +3,9 @@
 
 // Define a pragma macro that generates an integer literal
 [[cccc::comptime]]
-Node *make_five(void) { return __builtin_ast_int_literal(5); }
+Node *make_five(void) {
+    return __builtin_ast_int_literal(5);
+}
 
 // Use the macro in code
 int main(void) {

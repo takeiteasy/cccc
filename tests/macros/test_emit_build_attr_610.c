@@ -5,6 +5,8 @@
 #pragma cccc comptime begin
 #pragma cccc emit begin
 [[cccc::build]]
-int emitted_build_fn(Builder *ctx) { return 42; }
+int emitted_build_fn(Builder *ctx) {
+    return 42;
+}
 #pragma cccc emit end
 #pragma cccc comptime end

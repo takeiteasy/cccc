@@ -8,12 +8,12 @@
 #include <stdlib.h>
 
 int main(void) {
-    int *src = malloc(sizeof(int));
-    *src = 99; // stamps src's effective type as int
+    int *src  = malloc(sizeof(int));
+    *src      = 99; // stamps src's effective type as int
 
-    int *dst = malloc(sizeof(int));
-    char *cs = (char *)src;
-    char *cd = (char *)dst;
+    int  *dst = malloc(sizeof(int));
+    char *cs  = (char *)src;
+    char *cd  = (char *)dst;
     for (unsigned long i = 0; i < sizeof(int); i++)
         cd[i] = cs[i]; // hand-rolled byte copy: char stores, char loads
 

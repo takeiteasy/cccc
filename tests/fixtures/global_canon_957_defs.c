@@ -6,5 +6,5 @@
 // never had its offset propagated -- before the #957 fix, an extern
 // reference to canon_g in another TU silently read canon_pad's value (7)
 // instead of canon_g's (42).
-int canon_g = 42;
+int canon_g   = 42;
 int canon_pad = 7;

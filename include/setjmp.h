@@ -17,8 +17,9 @@
  * [0] - saved pc (program counter)
  * [1] - saved sp (stack pointer)
  * [2] - saved bp (base pointer)
- * [3] - CFI shadow-stack offset: (char*)shadow_sp - (char*)shadow_stack, or -1 if CFI disabled
- * [4..] - reserved for future use / native-backend headroom (see below)
+ * [3] - CFI shadow-stack offset: (char*)shadow_sp - (char*)shadow_stack, or -1
+ * if CFI disabled [4..] - reserved for future use / native-backend headroom
+ * (see below)
  *
  * Sizing under -c=native (#1054/#1030):
  * Under -c=native, setjmp()/longjmp() are emitted as calls to the *real*
@@ -126,7 +127,8 @@ typedef long long jmp_buf[40];
  * Special handling:
  * - If val is 0, it's converted to 1 (so setjmp never "returns" 0 twice)
  * - The stack is unwound to the saved sp, freeing all intervening frames
- * - Local variables in the setjmp frame may have undefined values unless volatile
+ * - Local variables in the setjmp frame may have undefined values unless
+ * volatile
  *
  * Undefined behavior:
  * - env must have been initialized by a call to setjmp

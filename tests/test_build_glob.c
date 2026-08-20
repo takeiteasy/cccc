@@ -2,9 +2,9 @@
 // CCCC_EXPECT_STDOUT: main\.c
 // CCCC_REJECT_STDOUT: greet\.c
 //
-// #542: AddSourcesGlob expands a glob pattern into the source list; ExcludeSource
-// removes a matching file.  Verified via dry-run: the cc command for main.c must
-// appear but greet.c must be absent (excluded).
+// #542: AddSourcesGlob expands a glob pattern into the source list;
+// ExcludeSource removes a matching file.  Verified via dry-run: the cc command
+// for main.c must appear but greet.c must be absent (excluded).
 
 [[cccc::build]]
 int build_main(Builder *ctx) {

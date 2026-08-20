@@ -104,15 +104,16 @@ static Obj *find_global_obj(Obj *prog, const char *name) {
 }
 
 bool is_extern_func_name(Node *node, const char *name) {
-    if (!node || node->kind != ND_VAR || !node->var || !node->var->is_function ||
-        node->var->is_definition || !node->var->name)
+    if (!node || node->kind != ND_VAR || !node->var ||
+        !node->var->is_function || node->var->is_definition || !node->var->name)
         return false;
     return strlen(node->var->name) == strlen(name) &&
            memcmp(node->var->name, name, strlen(name)) == 0;
 }
 
-static void add_data_reloc(VirtualMachine *vm, long long data_offset, int target_segment,
-                           long long target_offset, long long addend) {
+static void add_data_reloc(VirtualMachine *vm, long long data_offset,
+                           int target_segment, long long target_offset,
+                           long long addend) {
     PATCH_GROW(vm, data_relocs, num_data_relocs, data_relocs_cap);
     vm->compiler.data_relocs[vm->compiler.num_data_relocs].data_offset =
         data_offset;
@@ -124,21 +125,25 @@ static void add_data_reloc(VirtualMachine *vm, long long data_offset, int target
     vm->compiler.num_data_relocs++;
 }
 
-static void add_tls_reloc(VirtualMachine *vm, long long tls_offset, int target_segment,
-                          long long target_offset, long long addend) {
+static void add_tls_reloc(VirtualMachine *vm, long long tls_offset,
+                          int target_segment, long long target_offset,
+                          long long addend) {
     PATCH_GROW(vm, tls_relocs, num_tls_relocs, tls_relocs_cap);
-    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset    = tls_offset;
-    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_segment = target_segment;
-    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset  = target_offset;
-    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend         = addend;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset =
+        tls_offset;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_segment =
+        target_segment;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset =
+        target_offset;
+    vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend = addend;
     vm->compiler.num_tls_relocs++;
 }
 
 // Persistent label map -- declared in codegen_internal.h (shared with
 // codegen_call.c and codegen_func.c); defined here.
-GlobalLabelEntry *global_label_map = NULL;
-int num_global_labels = 0;
-int global_labels_cap = 0;
+GlobalLabelEntry *global_label_map  = NULL;
+int               num_global_labels = 0;
+int               global_labels_cap = 0;
 
 void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
@@ -151,9 +156,9 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
 
             long long target_offset;
             long long value;
-            int segment;
+            int       segment;
 
-            Obj *target = find_global_obj(prog, *rel->label);
+            Obj      *target = find_global_obj(prog, *rel->label);
             if (!target) {
                 // Not a global object — try the persistent label map.  This
                 // handles &&label stored in a static/global initialiser, where
@@ -168,25 +173,28 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                 }
                 if (!label_pc)
                     error("undefined relocation target: %s", *rel->label);
-                segment      = 1;
+                segment       = 1;
                 target_offset = cc_pc_to_byte_offset(label_pc);
-                value        = target_offset + rel->addend;
+                value         = target_offset + rel->addend;
             } else if (target->is_function) {
                 if (!target->body) {
-                    // Undefined function: if it is an FFI/extern function, store
-                    // the FFI dispatch token (CCCC_FFI_TOKEN_BASE - idx) directly,
-                    // mirroring the runtime function-address path (CALLN/JMPI
-                    // recognise the token).  This is how static initialisers that
-                    // take the address of a libc/POSIX function resolve, e.g.
-                    // SQLite's unix VFS structs full of { close, read, write, ... }
+                    // Undefined function: if it is an FFI/extern function,
+                    // store the FFI dispatch token (CCCC_FFI_TOKEN_BASE - idx)
+                    // directly, mirroring the runtime function-address path
+                    // (CALLN/JMPI recognise the token).  This is how static
+                    // initialisers that take the address of a libc/POSIX
+                    // function resolve, e.g. SQLite's unix VFS structs full of
+                    // { close, read, write, ... }
                     // (#589).  The token is segment-independent, so no data/tls
                     // reloc is recorded (it survives .c4 round-trips verbatim,
                     // exactly like the text-segment FFI case).
-                    int ffi_idx = find_ffi_function(vm, obj_external_name(target));
+                    int ffi_idx =
+                        find_ffi_function(vm, obj_external_name(target));
                     if (ffi_idx < 0)
-                        error("unsupported relocation to undefined function: %s",
-                              target->name);
-                    long long slot = var->offset + rel->offset;
+                        error(
+                            "unsupported relocation to undefined function: %s",
+                            target->name);
+                    long long slot  = var->offset + rel->offset;
                     long long token = CCCC_FFI_TOKEN_BASE - ffi_idx;
                     if (var->is_tls)
                         *(long long *)(vm->tls_template + slot) = token;
@@ -194,9 +202,9 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                         *(long long *)(vm->data_seg + slot) = token;
                     continue;
                 }
-                segment      = 1;
+                segment       = 1;
                 target_offset = cc_pc_to_byte_offset((Pc)target->code_addr);
-                value        = target_offset + rel->addend;
+                value         = target_offset + rel->addend;
             } else {
                 // #957: a static initializer taking &g needs the same
                 // defined-or-deferred check as an ordinary reference (see
@@ -208,9 +216,9 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                     !target->init_data &&
                     !(vm->compiler.compile_only || vm->compiler.deferred_link))
                     error("undefined global: %s", target->name);
-                segment      = 0;
+                segment       = 0;
                 target_offset = target->offset;
-                value        = (long long)(vm->data_seg + target_offset + rel->addend);
+                value = (long long)(vm->data_seg + target_offset + rel->addend);
             }
 
             long long slot_offset = var->offset + rel->offset;
@@ -218,10 +226,12 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                 // TLS pointer initialiser: patch into tls_template and record
                 // the reloc so it can be re-applied after .c4 load (#493).
                 *(long long *)(vm->tls_template + slot_offset) = value;
-                add_tls_reloc(vm, slot_offset, segment, target_offset, rel->addend);
+                add_tls_reloc(vm, slot_offset, segment, target_offset,
+                              rel->addend);
             } else {
                 *(long long *)(vm->data_seg + slot_offset) = value;
-                add_data_reloc(vm, slot_offset, segment, target_offset, rel->addend);
+                add_data_reloc(vm, slot_offset, segment, target_offset,
+                               rel->addend);
             }
         }
     }
@@ -234,20 +244,20 @@ Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
     return hashmap_get(fn_defs, target->name);
 }
 
-void add_debug_symbol(VirtualMachine *vm, char *name, long long offset, Type *ty,
-                             int is_local, Obj *owner_fn) {
+void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,
+                      Type *ty, int is_local, Obj *owner_fn) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !name || !*name)
         return;
     if (vm->dbg.num_debug_symbols >= MAX_DEBUG_SYMBOLS)
         return;
 
     DebugSymbol *sym = &vm->dbg.debug_symbols[vm->dbg.num_debug_symbols++];
-    sym->name = name;
-    sym->offset = offset;
-    sym->ty = ty;
-    sym->is_local = is_local;
+    sym->name        = name;
+    sym->offset      = offset;
+    sym->ty          = ty;
+    sym->is_local    = is_local;
     sym->scope_depth = 0;
-    sym->owner_fn = owner_fn;
+    sym->owner_fn    = owner_fn;
 }
 // ========== Register Allocator ==========
 // Simple bitmap allocator for temporary registers T0-T10
@@ -260,9 +270,9 @@ void add_debug_symbol(VirtualMachine *vm, char *name, long long offset, Type *ty
 // Ticket: https://todo.sr.ht/~takeiteasy/cccc/161
 static unsigned int temp_reg_in_use = 0;
 
-static const int temp_reg_map[] = {REG_T0, REG_T1, REG_T2, REG_T3,
-                                   REG_T4, REG_T5, REG_T6, REG_T7,
-                                   REG_T8, REG_T9, REG_T10};
+static const int    temp_reg_map[]  = {REG_T0, REG_T1, REG_T2, REG_T3,
+                                       REG_T4, REG_T5, REG_T6, REG_T7,
+                                       REG_T8, REG_T9, REG_T10};
 #define NUM_TEMP_REGS 11
 
 int alloc_temp_reg(void) {
@@ -295,7 +305,9 @@ void mark_temp_reg_used(int reg) {
     }
 }
 
-void reset_temp_regs(void) { temp_reg_in_use = 0; }
+void reset_temp_regs(void) {
+    temp_reg_in_use = 0;
+}
 
 // Number of temp registers currently free. Used by the binary-op codegen to
 // decide when to spill the LHS to the stack instead of holding a live temp
@@ -320,7 +332,7 @@ int temp_regs_free(void) {
 
 typedef struct {
     Obj *var;
-    int score;
+    int  score;
     bool address_escapes;
 } PromotionCandidate;
 
@@ -354,7 +366,7 @@ void promotion_alias_add(VirtualMachine *vm, Obj *alias, Obj *target) {
         }
     }
     int idx = vm->compiler.promotion_alias_count++;
-    vm->compiler.promotion_alias_vars[idx] = alias;
+    vm->compiler.promotion_alias_vars[idx]    = alias;
     vm->compiler.promotion_alias_targets[idx] = target;
 }
 
@@ -376,24 +388,25 @@ static bool is_scalar_promotion_type(Type *ty) {
     if (!ty || ty->is_volatile || ty->size > 8)
         return false;
     switch (ty->kind) {
-    case TY_BOOL:
-    case TY_CHAR:
-    case TY_SHORT:
-    case TY_INT:
-    case TY_LONG:
-    case TY_ENUM:
-    case TY_PTR:
-    case TY_BITINT:
-        return true;
-    default:
-        return false;
+        case TY_BOOL:
+        case TY_CHAR:
+        case TY_SHORT:
+        case TY_INT:
+        case TY_LONG:
+        case TY_ENUM:
+        case TY_PTR:
+        case TY_BITINT:
+            return true;
+        default:
+            return false;
     }
 }
 
 static bool is_float_promotion_type(Type *ty) {
     if (!ty || ty->is_volatile || ty->size > 8)
         return false;
-    return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE;
+    return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE ||
+           ty->kind == TY_LDOUBLE;
 }
 
 static bool promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
@@ -413,7 +426,8 @@ static bool promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
     return true;
 }
 
-static bool is_fp_promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
+static bool is_fp_promotion_candidate_ok(VirtualMachine *vm, Obj *fn,
+                                         Obj *var) {
     if (!var || !var->is_local || var->is_block_var || var->is_captured ||
         var->is_static || var == fn->va_area || var == fn->alloca_bottom)
         return false;
@@ -431,7 +445,7 @@ static bool is_fp_promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) 
 }
 
 static PromotionCandidate *promotion_find_candidate(PromotionCandidate *cands,
-                                                     int count, Obj *var) {
+                                                    int count, Obj *var) {
     for (int i = 0; i < count; i++)
         if (cands[i].var == var)
             return &cands[i];
@@ -447,8 +461,8 @@ static bool is_synthetic_addr_assignment(Node *parent, Node *addr_node) {
     return lhs->is_local && (!lhs->name || lhs->name[0] == '\0');
 }
 
-static void collect_promotion_candidates(VirtualMachine *vm, Obj *fn, Node *node,
-                                         Node *parent,
+static void collect_promotion_candidates(VirtualMachine *vm, Obj *fn,
+                                         Node *node, Node *parent,
                                          PromotionCandidate *cands, int count,
                                          int loop_depth) {
     // Walk the sibling chain iteratively.  Recursing into node->next here
@@ -521,7 +535,8 @@ static int promotion_candidate_cmp(const void *a, const void *b) {
 void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     vm->compiler.promoted_count = 0;
     promotion_alias_reset(vm);
-    memset(vm->compiler.promoted_locals, 0, sizeof(vm->compiler.promoted_locals));
+    memset(vm->compiler.promoted_locals, 0,
+           sizeof(vm->compiler.promoted_locals));
     memset(vm->compiler.promoted_regs, 0, sizeof(vm->compiler.promoted_regs));
     memset(vm->compiler.promoted_save_offsets, 0,
            sizeof(vm->compiler.promoted_save_offsets));
@@ -550,25 +565,30 @@ void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     qsort(cands, (size_t)local_count, sizeof(PromotionCandidate),
           promotion_candidate_cmp);
 
-    // Only use S0-S3 for scalar promotion; S4-S7 are reserved for the restrict cache.
+    // Only use S0-S3 for scalar promotion; S4-S7 are reserved for the restrict
+    // cache.
     static const int sregs[] = {REG_S0, REG_S1, REG_S2, REG_S3};
     for (int i = 0; i < local_count && vm->compiler.promoted_count < 4; i++) {
         if (cands[i].address_escapes || cands[i].score < 3)
             continue;
-        int p = vm->compiler.promoted_count++;
-        vm->compiler.promoted_locals[p] = cands[i].var;
-        vm->compiler.promoted_regs[p] = sregs[p];
+        int p                                 = vm->compiler.promoted_count++;
+        vm->compiler.promoted_locals[p]       = cands[i].var;
+        vm->compiler.promoted_regs[p]         = sregs[p];
         vm->compiler.promoted_save_offsets[p] = -(base_stack_size + p + 1);
     }
     free(cands);
 }
 
-void prepare_fp_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
-    memset(vm->compiler.fp_promoted_locals, 0, sizeof(vm->compiler.fp_promoted_locals));
-    memset(vm->compiler.fp_promoted_regs, 0, sizeof(vm->compiler.fp_promoted_regs));
+void prepare_fp_local_promotion(VirtualMachine *vm, Obj *fn,
+                                int base_stack_size) {
+    memset(vm->compiler.fp_promoted_locals, 0,
+           sizeof(vm->compiler.fp_promoted_locals));
+    memset(vm->compiler.fp_promoted_regs, 0,
+           sizeof(vm->compiler.fp_promoted_regs));
     memset(vm->compiler.fp_promoted_save_offsets, 0,
            sizeof(vm->compiler.fp_promoted_save_offsets));
-    memset(vm->compiler.fp_promoted_dirty, 0, sizeof(vm->compiler.fp_promoted_dirty));
+    memset(vm->compiler.fp_promoted_dirty, 0,
+           sizeof(vm->compiler.fp_promoted_dirty));
     vm->compiler.fp_promoted_count = 0;
 
     if (vm->compiler.opt_level < 2 || (vm->flags & CCCC_ENABLE_DEBUGGER))
@@ -595,12 +615,13 @@ void prepare_fp_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size
           promotion_candidate_cmp);
 
     static const int fsregs[] = {FREG_S0, FREG_S1, FREG_S2, FREG_S3};
-    for (int i = 0; i < local_count && vm->compiler.fp_promoted_count < 4; i++) {
+    for (int i = 0; i < local_count && vm->compiler.fp_promoted_count < 4;
+         i++) {
         if (cands[i].address_escapes || cands[i].score < 3)
             continue;
-        int q = vm->compiler.fp_promoted_count++;
+        int q                              = vm->compiler.fp_promoted_count++;
         vm->compiler.fp_promoted_locals[q] = cands[i].var;
-        vm->compiler.fp_promoted_regs[q] = fsregs[q];
+        vm->compiler.fp_promoted_regs[q]   = fsregs[q];
         // Save slots come after the integer promoted save slots.
         vm->compiler.fp_promoted_save_offsets[q] =
             -(base_stack_size + vm->compiler.promoted_count + q + 1);
@@ -608,18 +629,26 @@ void prepare_fp_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size
     free(cands);
 }
 
-// ========== Restrict-param Deref Cache (#267) and Derived-Local Analysis (#269) ==========
+// ========== Restrict-param Deref Cache (#267) and Derived-Local Analysis
+// (#269) ==========
 
-// Evaluate a constant byte offset from a node (ND_NUM or ND_MUL(ND_NUM, ND_NUM)).
-// Returns true and sets *out on success. Strips ND_CAST wrappers.
+// Evaluate a constant byte offset from a node (ND_NUM or ND_MUL(ND_NUM,
+// ND_NUM)). Returns true and sets *out on success. Strips ND_CAST wrappers.
 static bool eval_const_byte_offset(Node *n, long *out) {
-    while (n && n->kind == ND_CAST) n = n->lhs;
-    if (!n) return false;
-    if (n->kind == ND_NUM) { *out = (long)n->val; return true; }
+    while (n && n->kind == ND_CAST)
+        n = n->lhs;
+    if (!n)
+        return false;
+    if (n->kind == ND_NUM) {
+        *out = (long)n->val;
+        return true;
+    }
     if (n->kind == ND_MUL) {
         Node *ml = n->lhs, *mr = n->rhs;
-        while (ml && ml->kind == ND_CAST) ml = ml->lhs;
-        while (mr && mr->kind == ND_CAST) mr = mr->lhs;
+        while (ml && ml->kind == ND_CAST)
+            ml = ml->lhs;
+        while (mr && mr->kind == ND_CAST)
+            mr = mr->lhs;
         if (ml && mr && ml->kind == ND_NUM && mr->kind == ND_NUM) {
             *out = (long)(ml->val * mr->val);
             return true;
@@ -632,12 +661,15 @@ static bool eval_const_byte_offset(Node *n, long *out) {
 // Used by the pre-pass to detect `int *q = p ± const` assignments.
 // Sets *out_var_offset=true when the offset is non-constant (derivation known
 // only for invalidation purposes, not for cache slot keying).
-// Only resolves direct restrict params (single-hop; derived locals not yet mapped).
+// Only resolves direct restrict params (single-hop; derived locals not yet
+// mapped).
 static bool restrict_extract_base_offset(Node *expr, Obj **out_param,
-                                          long *out_byte_offset,
-                                          bool *out_var_offset) {
-    while (expr && expr->kind == ND_CAST) expr = expr->lhs;
-    if (!expr) return false;
+                                         long *out_byte_offset,
+                                         bool *out_var_offset) {
+    while (expr && expr->kind == ND_CAST)
+        expr = expr->lhs;
+    if (!expr)
+        return false;
 
     // Pattern: plain param
     if (expr->kind == ND_VAR) {
@@ -646,35 +678,40 @@ static bool restrict_extract_base_offset(Node *expr, Obj **out_param,
             !var->ty->is_restrict || !var->ty->base ||
             !is_scalar_promotion_type(var->ty->base))
             return false;
-        *out_param = var;
+        *out_param       = var;
         *out_byte_offset = 0;
-        *out_var_offset = false;
+        *out_var_offset  = false;
         return true;
     }
 
     // Pattern: param +/- offset
-    if (expr->kind != ND_ADD && expr->kind != ND_SUB) return false;
+    if (expr->kind != ND_ADD && expr->kind != ND_SUB)
+        return false;
     bool is_sub = (expr->kind == ND_SUB);
 
     // For ADD try both orderings; for SUB only (ptr - off)
     Node *sides[2][2] = {{expr->lhs, expr->rhs}, {expr->rhs, expr->lhs}};
-    int n_sides = is_sub ? 1 : 2;
+    int   n_sides     = is_sub ? 1 : 2;
     for (int s = 0; s < n_sides; s++) {
         Node *ptr_node = sides[s][0], *off_node = sides[s][1];
-        while (ptr_node && ptr_node->kind == ND_CAST) ptr_node = ptr_node->lhs;
-        while (off_node && off_node->kind == ND_CAST) off_node = off_node->lhs;
-        if (!ptr_node || !off_node || ptr_node->kind != ND_VAR) continue;
+        while (ptr_node && ptr_node->kind == ND_CAST)
+            ptr_node = ptr_node->lhs;
+        while (off_node && off_node->kind == ND_CAST)
+            off_node = off_node->lhs;
+        if (!ptr_node || !off_node || ptr_node->kind != ND_VAR)
+            continue;
         Obj *var = ptr_node->var;
         if (!var || !var->is_param || !var->ty || var->ty->kind != TY_PTR ||
             !var->ty->is_restrict || !var->ty->base ||
             !is_scalar_promotion_type(var->ty->base))
             continue;
         long byte_off = 0;
-        bool is_var = !eval_const_byte_offset(off_node, &byte_off);
-        if (is_sub && !is_var) byte_off = -byte_off;
-        *out_param = var;
+        bool is_var   = !eval_const_byte_offset(off_node, &byte_off);
+        if (is_sub && !is_var)
+            byte_off = -byte_off;
+        *out_param       = var;
         *out_byte_offset = is_var ? 0 : byte_off;
-        *out_var_offset = is_var;
+        *out_var_offset  = is_var;
         return true;
     }
     return false;
@@ -685,32 +722,34 @@ static bool restrict_extract_base_offset(Node *expr, Obj **out_param,
 // Per-candidate state collected during the pre-pass AST walk.
 #define MAX_DERIVED_CANDS 24
 typedef struct {
-    Obj  *var;
-    Obj  *base_param;
-    long  byte_offset;
-    bool  var_offset;
-    int   assign_count;
-    bool  addr_taken;
+    Obj *var;
+    Obj *base_param;
+    long byte_offset;
+    bool var_offset;
+    int  assign_count;
+    bool addr_taken;
 } DerivedCand;
 
-static DerivedCand *derived_cand_find_or_create(DerivedCand *cands, int *nc, Obj *var) {
+static DerivedCand *derived_cand_find_or_create(DerivedCand *cands, int *nc,
+                                                Obj *var) {
     for (int i = 0; i < *nc; i++)
-        if (cands[i].var == var) return &cands[i];
-    if (*nc >= MAX_DERIVED_CANDS) return NULL;
-    DerivedCand *c = &cands[(*nc)++];
-    c->var = var;
-    c->base_param = NULL;
-    c->byte_offset = 0;
-    c->var_offset = false;
+        if (cands[i].var == var)
+            return &cands[i];
+    if (*nc >= MAX_DERIVED_CANDS)
+        return NULL;
+    DerivedCand *c  = &cands[(*nc)++];
+    c->var          = var;
+    c->base_param   = NULL;
+    c->byte_offset  = 0;
+    c->var_offset   = false;
     c->assign_count = 0;
-    c->addr_taken = false;
+    c->addr_taken   = false;
     return c;
 }
 
-static void restrict_derived_walk(Node *node,
-                                   DerivedCand *cands, int *nc,
-                                   bool *param_reassigned,
-                                   Obj **rparams, int np) {
+static void restrict_derived_walk(Node *node, DerivedCand *cands, int *nc,
+                                  bool *param_reassigned, Obj **rparams,
+                                  int np) {
     // Walk the sibling chain iteratively — recursing into node->next while
     // also recursing into children would re-process the chain remainder once
     // per sibling, i.e. O(2^N) in statement count.  Iterate siblings and
@@ -721,7 +760,8 @@ static void restrict_derived_walk(Node *node,
             Obj *v = node->lhs->var;
             if (v && v->is_local && !v->is_param) {
                 DerivedCand *c = derived_cand_find_or_create(cands, nc, v);
-                if (c) c->addr_taken = true;
+                if (c)
+                    c->addr_taken = true;
             }
         }
 
@@ -731,7 +771,10 @@ static void restrict_derived_walk(Node *node,
             if (lv) {
                 // Restrict param being reassigned → mark it
                 for (int i = 0; i < np; i++)
-                    if (rparams[i] == lv) { param_reassigned[i] = true; break; }
+                    if (rparams[i] == lv) {
+                        param_reassigned[i] = true;
+                        break;
+                    }
 
                 // Local pointer-to-scalar candidate
                 if (lv->is_local && !lv->is_param && lv->ty &&
@@ -740,24 +783,34 @@ static void restrict_derived_walk(Node *node,
                     DerivedCand *c = derived_cand_find_or_create(cands, nc, lv);
                     if (c) {
                         if (c->assign_count == 0)
-                            restrict_extract_base_offset(node->rhs, &c->base_param,
-                                                         &c->byte_offset, &c->var_offset);
+                            restrict_extract_base_offset(
+                                node->rhs, &c->base_param, &c->byte_offset,
+                                &c->var_offset);
                         c->assign_count++;
                     }
                 }
             }
         }
 
-        restrict_derived_walk(node->lhs, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->rhs, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->cond, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->then, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->els, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->init, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->inc, cands, nc, param_reassigned, rparams, np);
-        restrict_derived_walk(node->body, cands, nc, param_reassigned, rparams, np);
+        restrict_derived_walk(node->lhs, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->rhs, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->cond, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->then, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->els, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->init, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->inc, cands, nc, param_reassigned, rparams,
+                              np);
+        restrict_derived_walk(node->body, cands, nc, param_reassigned, rparams,
+                              np);
         for (Node *arg = node->args; arg; arg = arg->next)
-            restrict_derived_walk(arg, cands, nc, param_reassigned, rparams, np);
+            restrict_derived_walk(arg, cands, nc, param_reassigned, rparams,
+                                  np);
     }
 }
 
@@ -769,32 +822,40 @@ static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
     // Gather all restrict pointer params (at most 8 in CCCC's ABI)
     Obj *rparams[8];
     bool param_reassigned[8];
-    int np = 0;
+    int  np = 0;
     for (Obj *p = fn->params; p && np < 8; p = p->next)
         if (p->ty && p->ty->kind == TY_PTR && p->ty->is_restrict) {
-            rparams[np] = p;
+            rparams[np]          = p;
             param_reassigned[np] = false;
             np++;
         }
-    if (np == 0) return;
+    if (np == 0)
+        return;
 
     DerivedCand cands[MAX_DERIVED_CANDS];
-    int nc = 0;
+    int         nc = 0;
     restrict_derived_walk(fn->body, cands, &nc, param_reassigned, rparams, np);
 
     for (int i = 0; i < nc; i++) {
         DerivedCand *c = &cands[i];
-        if (c->assign_count != 1) continue;
-        if (c->addr_taken) continue;
-        if (!c->base_param) continue;
-        // Bail if the base restrict param was reassigned anywhere in the function
+        if (c->assign_count != 1)
+            continue;
+        if (c->addr_taken)
+            continue;
+        if (!c->base_param)
+            continue;
+        // Bail if the base restrict param was reassigned anywhere in the
+        // function
         bool base_bad = false;
         for (int j = 0; j < np; j++)
             if (rparams[j] == c->base_param && param_reassigned[j]) {
-                base_bad = true; break;
+                base_bad = true;
+                break;
             }
-        if (base_bad) continue;
-        if (vm->compiler.restrict_derived_count >= MAX_RESTRICT_DERIVED) break;
+        if (base_bad)
+            continue;
+        if (vm->compiler.restrict_derived_count >= MAX_RESTRICT_DERIVED)
+            break;
         int idx = vm->compiler.restrict_derived_count++;
         vm->compiler.restrict_derived_vars[idx]       = c->var;
         vm->compiler.restrict_derived_params[idx]     = c->base_param;
@@ -823,14 +884,15 @@ static void collect_restrict_derived_locals(VirtualMachine *vm, Obj *fn) {
 // Look up a variable in the restrict derivation map. Returns index or -1.
 static int restrict_derived_find(VirtualMachine *vm, Obj *var) {
     for (int i = 0; i < vm->compiler.restrict_derived_count; i++)
-        if (vm->compiler.restrict_derived_vars[i] == var) return i;
+        if (vm->compiler.restrict_derived_vars[i] == var)
+            return i;
     return -1;
 }
 
 // ---- Cache setup ----
 
 void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_size) {
-    vm->compiler.restrict_cache_count = 0;
+    vm->compiler.restrict_cache_count    = 0;
     vm->compiler.restrict_cache_capacity = 0;
     memset(vm->compiler.restrict_cache_params, 0,
            sizeof(vm->compiler.restrict_cache_params));
@@ -892,21 +954,24 @@ void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_size) {
 
     collect_restrict_derived_locals(vm, fn);
 
-    // Pre-reserve all MAX_RESTRICT_CACHE slots (S4-S7 and their stack save slots)
-    // so lazy binding can claim any slot without growing the frame mid-function.
-    // Cache entries are bound on first deref access (count starts at 0).
+    // Pre-reserve all MAX_RESTRICT_CACHE slots (S4-S7 and their stack save
+    // slots) so lazy binding can claim any slot without growing the frame
+    // mid-function. Cache entries are bound on first deref access (count starts
+    // at 0).
     static const int rcregs[] = {REG_S4, REG_S5, REG_S6, REG_S7};
     for (int q = 0; q < MAX_RESTRICT_CACHE; q++) {
         vm->compiler.restrict_cache_regs[q] = rcregs[q];
-        // Save slots are placed after both integer and FP promoted-local save slots.
+        // Save slots are placed after both integer and FP promoted-local save
+        // slots.
         vm->compiler.restrict_cache_save_offsets[q] =
-            -(base_stack_size + vm->compiler.promoted_count
-              + vm->compiler.fp_promoted_count + q + 1);
+            -(base_stack_size + vm->compiler.promoted_count +
+              vm->compiler.fp_promoted_count + q + 1);
     }
     vm->compiler.restrict_cache_capacity = MAX_RESTRICT_CACHE;
 }
 
-static int restrict_cache_find(VirtualMachine *vm, Obj *param, long byte_offset) {
+static int restrict_cache_find(VirtualMachine *vm, Obj *param,
+                               long byte_offset) {
     for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
         if (vm->compiler.restrict_cache_params[i] == param &&
             vm->compiler.restrict_cache_offsets[i] == byte_offset)
@@ -920,21 +985,24 @@ void restrict_cache_invalidate_all(VirtualMachine *vm) {
         vm->compiler.restrict_cache_valid[i] = false;
 }
 
-// Invalidate all cache entries for a restrict param (all cached offsets for it).
+// Invalidate all cache entries for a restrict param (all cached offsets for
+// it).
 static void restrict_cache_invalidate_param(VirtualMachine *vm, Obj *param) {
     for (int i = 0; i < vm->compiler.restrict_cache_count; i++)
         if (vm->compiler.restrict_cache_params[i] == param)
             vm->compiler.restrict_cache_valid[i] = false;
 }
 
-// Bind next free cache slot to (param, byte_offset). Returns index or -1 if full.
-static int restrict_cache_alloc(VirtualMachine *vm, Obj *param, long byte_offset) {
+// Bind next free cache slot to (param, byte_offset). Returns index or -1 if
+// full.
+static int restrict_cache_alloc(VirtualMachine *vm, Obj *param,
+                                long byte_offset) {
     if (vm->compiler.restrict_cache_count >= MAX_RESTRICT_CACHE)
         return -1;
     int idx = vm->compiler.restrict_cache_count++;
-    vm->compiler.restrict_cache_params[idx] = param;
+    vm->compiler.restrict_cache_params[idx]  = param;
     vm->compiler.restrict_cache_offsets[idx] = byte_offset;
-    vm->compiler.restrict_cache_valid[idx] = false;
+    vm->compiler.restrict_cache_valid[idx]   = false;
     return idx;
 }
 
@@ -943,7 +1011,8 @@ static int restrict_cache_alloc(VirtualMachine *vm, Obj *param, long byte_offset
 // Also handles *q and q[const] where q is a derived local (see #269).
 // Returns true and sets out_param/out_byte_offset on success.
 static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
-                                         Obj **out_param, long *out_byte_offset) {
+                                         Obj **out_param,
+                                         long *out_byte_offset) {
     if (!node || node->kind != ND_DEREF || !node->lhs)
         return false;
     Node *addr = node->lhs;
@@ -958,14 +1027,14 @@ static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
         if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
             var->ty->is_restrict && var->ty->base &&
             is_scalar_promotion_type(var->ty->base)) {
-            *out_param = var;
+            *out_param       = var;
             *out_byte_offset = 0;
             return true;
         }
         // Derived local: *q where q = p + const
         int di = restrict_derived_find(vm, var);
         if (di >= 0 && !vm->compiler.restrict_derived_var_offset[di]) {
-            *out_param = vm->compiler.restrict_derived_params[di];
+            *out_param       = vm->compiler.restrict_derived_params[di];
             *out_byte_offset = vm->compiler.restrict_derived_offsets[di];
             return true;
         }
@@ -989,44 +1058,50 @@ static bool restrict_const_deref_extract(VirtualMachine *vm, Node *node,
     for (int s = 0; s < 2; s++) {
         Node *ptr_node = sides[s][0];
         Node *off_node = sides[s][1];
-        while (ptr_node && ptr_node->kind == ND_CAST) ptr_node = ptr_node->lhs;
-        while (off_node && off_node->kind == ND_CAST) off_node = off_node->lhs;
+        while (ptr_node && ptr_node->kind == ND_CAST)
+            ptr_node = ptr_node->lhs;
+        while (off_node && off_node->kind == ND_CAST)
+            off_node = off_node->lhs;
         if (!ptr_node || !off_node || ptr_node->kind != ND_VAR)
             continue;
         Obj *var = ptr_node->var;
 
         // Resolve: is var a restrict param or a derived local?
         Obj *base_param = NULL;
-        long base_off = 0;
+        long base_off   = 0;
         if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
             var->ty->is_restrict && var->ty->base &&
             is_scalar_promotion_type(var->ty->base)) {
             base_param = var;
-            base_off = 0;
+            base_off   = 0;
         } else {
             int di = restrict_derived_find(vm, var);
-            if (di < 0 || vm->compiler.restrict_derived_var_offset[di]) continue;
+            if (di < 0 || vm->compiler.restrict_derived_var_offset[di])
+                continue;
             base_param = vm->compiler.restrict_derived_params[di];
-            base_off = vm->compiler.restrict_derived_offsets[di];
+            base_off   = vm->compiler.restrict_derived_offsets[di];
         }
 
         // Evaluate the constant element offset
         long elem_off = 0;
         if (!eval_const_byte_offset(off_node, &elem_off))
             continue;
-        *out_param = base_param;
+        *out_param       = base_param;
         *out_byte_offset = base_off + elem_off;
         return true;
     }
     return false;
 }
 
-// Walk a pointer expression to find its restrict-param root (for indexed stores).
-// Also resolves derived locals (q = p + k maps q → p).
-// Returns the restrict param Obj if found, NULL otherwise.
+// Walk a pointer expression to find its restrict-param root (for indexed
+// stores). Also resolves derived locals (q = p + k maps q → p). Returns the
+// restrict param Obj if found, NULL otherwise.
 static Obj *restrict_root_param_of_ptr(VirtualMachine *vm, Node *ptr) {
     while (ptr) {
-        if (ptr->kind == ND_CAST) { ptr = ptr->lhs; continue; }
+        if (ptr->kind == ND_CAST) {
+            ptr = ptr->lhs;
+            continue;
+        }
         if (ptr->kind == ND_VAR) {
             Obj *var = ptr->var;
             if (var && var->is_param && var->ty && var->ty->kind == TY_PTR &&
@@ -1034,12 +1109,14 @@ static Obj *restrict_root_param_of_ptr(VirtualMachine *vm, Node *ptr) {
                 return var;
             // Derived local: *q where q = p + k → root is p
             int di = restrict_derived_find(vm, var);
-            if (di >= 0) return vm->compiler.restrict_derived_params[di];
+            if (di >= 0)
+                return vm->compiler.restrict_derived_params[di];
             return NULL;
         }
         if (ptr->kind == ND_ADD || ptr->kind == ND_SUB) {
             Obj *r = restrict_root_param_of_ptr(vm, ptr->lhs);
-            if (r) return r;
+            if (r)
+                return r;
             return restrict_root_param_of_ptr(vm, ptr->rhs);
         }
         return NULL;
@@ -1050,8 +1127,7 @@ static Obj *restrict_root_param_of_ptr(VirtualMachine *vm, Node *ptr) {
 // Called on ND_DEREF to check/populate the restrict cache.
 // Handles *restrict_param and restrict_param[const] patterns.
 // Returns true and emits a register copy or a load+cache-fill on hit/miss.
-bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
-                                        int dest_reg) {
+bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node, int dest_reg) {
     if (vm->compiler.restrict_cache_capacity == 0)
         return false;
 
@@ -1100,9 +1176,11 @@ bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node,
         return true;
     }
 
-    // Cache miss: load the value at (param + byte_off) into cache_reg, mark valid
+    // Cache miss: load the value at (param + byte_off) into cache_reg, mark
+    // valid
     int r_addr = alloc_temp_reg();
-    gen_expr(vm, node->lhs, r_addr); // evaluates the full address (p or p+offset)
+    gen_expr(vm, node->lhs,
+             r_addr); // evaluates the full address (p or p+offset)
     emit_load(vm, node->ty, cache_reg, r_addr);
     free_temp_reg(r_addr);
     vm->compiler.restrict_cache_valid[idx] = true;
@@ -1135,15 +1213,17 @@ static bool restrict_cache_store_type_matches(Type *store_ty, Type *cached_ty) {
 }
 
 // Called after a store through a pointer expression.
-// If the store goes through a restrict param, update or invalidate cache entries.
-// If the store goes through a non-restrict pointer, do nothing (restrict contract).
+// If the store goes through a restrict param, update or invalidate cache
+// entries. If the store goes through a non-restrict pointer, do nothing
+// (restrict contract).
 void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_reg) {
     if (vm->compiler.restrict_cache_capacity == 0)
         return;
     if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs)
         return;
 
-    // *p = val or p[const] = val: write-through the specific (param, offset) entry.
+    // *p = val or p[const] = val: write-through the specific (param, offset)
+    // entry.
     Obj *param;
     long byte_off;
     if (restrict_const_deref_extract(vm, lhs, &param, &byte_off)) {
@@ -1162,21 +1242,24 @@ void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_reg) {
             int cache_reg = vm->compiler.restrict_cache_regs[idx];
             if (cache_reg != val_reg)
                 emit_mov3(vm, cache_reg, val_reg);
-            // Truncate to pointee width (e.g. char *restrict: cache holds byte).
+            // Truncate to pointee width (e.g. char *restrict: cache holds
+            // byte).
             emit_normalize_promoted_scalar(vm, param->ty->base, cache_reg);
             vm->compiler.restrict_cache_valid[idx] = true;
         }
         return;
     }
 
-    // p[var] or derived pointer store: find the restrict param root and invalidate
-    // all of its cached offsets (we don't know which byte_offset was hit).
+    // p[var] or derived pointer store: find the restrict param root and
+    // invalidate all of its cached offsets (we don't know which byte_offset was
+    // hit).
     Obj *base = restrict_root_param_of_ptr(vm, lhs->lhs);
     if (base) {
         restrict_cache_invalidate_param(vm, base);
         return;
     }
-    // Unknown base (e.g. int *r = p; *r = x): conservatively invalidate everything.
+    // Unknown base (e.g. int *r = p; *r = x): conservatively invalidate
+    // everything.
     restrict_cache_invalidate_all(vm);
 }
 
@@ -1191,4 +1274,3 @@ void emit_restore_restrict_cache_regs(VirtualMachine *vm) {
         emit_local_load(vm, ty_long, vm->compiler.restrict_cache_regs[i],
                         vm->compiler.restrict_cache_save_offsets[i]);
 }
-

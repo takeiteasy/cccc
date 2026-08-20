@@ -31,8 +31,9 @@
  *
  * ## Return-value model
  *
- * A comptime function's returned Node* is **the node spliced at the call site**,
- * replacing the invocation.  Top-level definitions (functions, globals) are
+ * A comptime function's returned Node* is **the node spliced at the call
+ * site**, replacing the invocation.  Top-level definitions (functions, globals)
+ * are
  * **side effects** — injected into the program regardless of the return value.
  *
  *  - **Expression position** (e.g. `int x = my_macro();`): the function must
@@ -107,7 +108,8 @@ typedef struct Type Type;
 
 /*! @brief Opaque AST node (expression, statement, or literal). Built with
  *           the @c Make* family of macros and spliced into the compiled
- *           program by returning it from a comptime function or via PublishNode. */
+ *           program by returning it from a comptime function or via
+ * PublishNode. */
 typedef struct Node Node;
 
 /*! @brief Opaque global symbol (a function or global variable). Created by
@@ -140,22 +142,22 @@ typedef struct AttrTarget AttrTarget;
  * @details Mirrors the subset of cccc.h's internal @c TypeKind relevant to
  *             comptime functions. Query it via @c GetTypeKind(ty). */
 typedef enum {
-    TK_VOID = 0,
-    TK_BOOL = 1,
-    TK_CHAR = 2,
-    TK_SHORT = 3,
-    TK_INT = 4,
-    TK_LONG = 5,
-    TK_FLOAT = 6,
-    TK_DOUBLE = 7,
+    TK_VOID    = 0,
+    TK_BOOL    = 1,
+    TK_CHAR    = 2,
+    TK_SHORT   = 3,
+    TK_INT     = 4,
+    TK_LONG    = 5,
+    TK_FLOAT   = 6,
+    TK_DOUBLE  = 7,
     TK_LDOUBLE = 8,
-    TK_ENUM = 9,
-    TK_PTR = 10,
-    TK_FUNC = 11,
-    TK_ARRAY = 12,
-    TK_VLA = 13,
-    TK_STRUCT = 14,
-    TK_UNION = 15,
+    TK_ENUM    = 9,
+    TK_PTR     = 10,
+    TK_FUNC    = 11,
+    TK_ARRAY   = 12,
+    TK_VLA     = 13,
+    TK_STRUCT  = 14,
+    TK_UNION   = 15,
 } TypeKind;
 
 /*! @brief Discriminates the operator/statement kind of a Node, e.g. as passed
@@ -166,44 +168,44 @@ typedef enum {
  *             exactly, so the gaps (33-36, 39, 41, 44-50) are internal-only
  *             kinds not exposed here, not omissions. */
 typedef enum {
-    NK_NULL_EXPR = 0,
-    NK_ADD = 1,
-    NK_SUB = 2,
-    NK_MUL = 3,
-    NK_DIV = 4,
-    NK_NEG = 5,
-    NK_MOD = 6,
-    NK_BITAND = 7,
-    NK_BITOR = 8,
-    NK_BITXOR = 9,
-    NK_SHL = 10,
-    NK_SHR = 11,
-    NK_EQ = 12,
-    NK_NE = 13,
-    NK_LT = 14,
-    NK_LE = 15,
-    NK_ASSIGN = 16,
-    NK_COND = 17,
-    NK_COMMA = 18,
-    NK_MEMBER = 19,
-    NK_ADDR = 20,
-    NK_DEREF = 21,
-    NK_NOT = 22,
-    NK_BITNOT = 23,
-    NK_LOGAND = 24,
-    NK_LOGOR = 25,
-    NK_RETURN = 26,
-    NK_IF = 27,
-    NK_FOR = 28,
-    NK_DO = 29,
-    NK_SWITCH = 30,
-    NK_CASE = 31,
-    NK_BLOCK = 32,
-    NK_FUNCALL = 37,
-    NK_EXPR_STMT = 38,
-    NK_VAR = 40,
-    NK_NUM = 42,
-    NK_CAST = 43,
+    NK_NULL_EXPR  = 0,
+    NK_ADD        = 1,
+    NK_SUB        = 2,
+    NK_MUL        = 3,
+    NK_DIV        = 4,
+    NK_NEG        = 5,
+    NK_MOD        = 6,
+    NK_BITAND     = 7,
+    NK_BITOR      = 8,
+    NK_BITXOR     = 9,
+    NK_SHL        = 10,
+    NK_SHR        = 11,
+    NK_EQ         = 12,
+    NK_NE         = 13,
+    NK_LT         = 14,
+    NK_LE         = 15,
+    NK_ASSIGN     = 16,
+    NK_COND       = 17,
+    NK_COMMA      = 18,
+    NK_MEMBER     = 19,
+    NK_ADDR       = 20,
+    NK_DEREF      = 21,
+    NK_NOT        = 22,
+    NK_BITNOT     = 23,
+    NK_LOGAND     = 24,
+    NK_LOGOR      = 25,
+    NK_RETURN     = 26,
+    NK_IF         = 27,
+    NK_FOR        = 28,
+    NK_DO         = 29,
+    NK_SWITCH     = 30,
+    NK_CASE       = 31,
+    NK_BLOCK      = 32,
+    NK_FUNCALL    = 37,
+    NK_EXPR_STMT  = 38,
+    NK_VAR        = 40,
+    NK_NUM        = 42,
+    NK_CAST       = 43,
     NK_MACRO_CALL = 51,
 } NodeKind;
 
@@ -211,10 +213,10 @@ typedef enum {
  *           returned by @c GetAttrTargetKind(target) inside a custom
  *           @c \@attribute handler. */
 typedef enum {
-    ATTR_TARGET_TYPEDEF = 1,
-    ATTR_TARGET_TYPE = 2,
+    ATTR_TARGET_TYPEDEF  = 1,
+    ATTR_TARGET_TYPE     = 2,
     ATTR_TARGET_FUNCTION = 3,
-    ATTR_TARGET_GLOBAL = 4,
+    ATTR_TARGET_GLOBAL   = 4,
 } AttrTargetKind;
 
 /*! @brief Generate a unique identifier string for macro-created symbols.
@@ -239,7 +241,8 @@ Node *__builtin_macroexpand_1(Node *node);
  * @details Repeatedly calls @c __builtin_macroexpand_1 on the top-level node
  *             until it is no longer an @c NK_MACRO_CALL (i.e. the form is
  *             stable). Does not recurse into child nodes. Respects the VM's
- *             @c macro_recursion_limit.  Convenience wrapper: MacroExpand(node).
+ *             @c macro_recursion_limit.  Convenience wrapper:
+ * MacroExpand(node).
  * @param node The node to fully expand.
  * @return The fully expanded node, or @a node itself if it is not a macro call.
  */
@@ -307,7 +310,8 @@ Token *__builtin_ast_token_from_node(Node *node);
 /*! @brief Attach an opaque source token to a node.
  * @param node Node to update.
  * @param tok Token from __builtin_ast_current_token(),
- *            __builtin_ast_synthetic_token(), or __builtin_ast_token_from_node().
+ *            __builtin_ast_synthetic_token(), or
+ * __builtin_ast_token_from_node().
  * @return node, for chaining.
  * @details Convenience wrapper: SetToken(node, tok).
  */
@@ -399,9 +403,9 @@ Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count);
  * @param count Number of elements in the array.
  * @return Head of the chain, or NULL if count == 0 or nodes is NULL.
  * @details A single node is a valid chain of length 1.  An existing
- *             `->next` chain (e.g. `__builtin_ast_block(...)->body`) can also be
- *             passed directly as the splice argument without going through
- *             this helper.  Convenience wrapper: NodeList(nodes, count).
+ *             `->next` chain (e.g. `__builtin_ast_block(...)->body`) can also
+ * be passed directly as the splice argument without going through this helper.
+ * Convenience wrapper: NodeList(nodes, count).
  */
 Node *__builtin_node_list(Node **nodes, int count);
 
@@ -510,7 +514,8 @@ bool __builtin_ast_type_is_variadic(Type *ty);
 
 /*! @brief Return the user-visible name of a type, if any.
  * @param ty The type to inspect.
- * @return A freshly-allocated NUL-terminated string, or NULL for anonymous types.
+ * @return A freshly-allocated NUL-terminated string, or NULL for anonymous
+ * types.
  * @details Convenience wrapper: TypeName(ty).
  */
 const char *__builtin_ast_type_name(Type *ty);
@@ -543,11 +548,13 @@ Type *__builtin_ast_make_array(Type *base, int length);
  * @param return_ty The function's return type.
  * @param param_types Array of parameter types (each copy_type()'d internally).
  * @param nparams Number of entries in param_types (max 16).
- * @return A Type* representing "return_ty (*)(param_types...)", or NULL on error.
- * @details Convenience wrapper: MakeFuncPtrType(return_ty, param_types, nparams).
+ * @return A Type* representing "return_ty (*)(param_types...)", or NULL on
+ * error.
+ * @details Convenience wrapper: MakeFuncPtrType(return_ty, param_types,
+ * nparams).
  */
-Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
-                                        Type **param_types, int nparams);
+Type *__builtin_ast_make_func_ptr_type(Type *return_ty, Type **param_types,
+                                       int nparams);
 
 // Ticket #171: qualified type constructors
 /*! @brief Return a const-qualified copy of ty.
@@ -588,8 +595,7 @@ EnumConstant *__builtin_ast_enum_at(Type *enum_type, int index);
  * @return The matching EnumConstant*, or NULL if not found.
  * @details Convenience wrapper: EnumFind(ty, name).
  */
-EnumConstant *__builtin_ast_enum_find(Type *enum_type,
-                                    const char *name);
+EnumConstant *__builtin_ast_enum_find(Type *enum_type, const char *name);
 
 /*! @brief Return the name of an enum constant.
  * @param ec The enum constant.
@@ -600,7 +606,8 @@ const char *__builtin_ast_enum_constant_name(EnumConstant *ec);
 
 /*! @brief Return the integer value of an enum constant.
  * @param ec The enum constant.
- * @return The constant's integer value (int64_t to support C23 wide underlying types).
+ * @return The constant's integer value (int64_t to support C23 wide underlying
+ * types).
  * @details Convenience wrapper: EnumConstantValue(ec).
  */
 int64_t __builtin_ast_enum_constant_value(EnumConstant *ec);
@@ -672,8 +679,7 @@ int __builtin_ast_struct_member_count(Type *struct_type);
  * @return The Member*, or NULL on out-of-range or non-aggregate.
  * @details Convenience wrapper: StructMemberAt(ty, index).
  */
-Member *__builtin_ast_struct_member_at(Type *struct_type,
-                                        int index);
+Member *__builtin_ast_struct_member_at(Type *struct_type, int index);
 
 /*! @brief Look up a struct or union member by name.
  * @param struct_type The struct or union type to search.
@@ -681,8 +687,7 @@ Member *__builtin_ast_struct_member_at(Type *struct_type,
  * @return The matching Member*, or NULL if not found.
  * @details Convenience wrapper: StructMemberFind(ty, name).
  */
-Member *__builtin_ast_struct_member_find(Type *struct_type,
-                                        const char *name);
+Member *__builtin_ast_struct_member_find(Type *struct_type, const char *name);
 
 /*! @brief Return the name of a struct/union member.
  * @param m The member to inspect.
@@ -726,8 +731,7 @@ int __builtin_ast_member_bitfield_width(Member *m);
  * @return The summed byte offset, or -1 if any name cannot be resolved.
  * @details Convenience wrapper: OffsetofChain(ty, "a", "b", ...).
  */
-int64_t __builtin_ast_offsetof_chain(Type *ty,
-                                   const char **names, int n);
+int64_t __builtin_ast_offsetof_chain(Type *ty, const char **names, int n);
 
 // ============================================================================
 // Global Symbol Introspection
@@ -800,7 +804,8 @@ const char *__builtin_attr_target_name(AttrTarget *target);
  */
 Type *__builtin_attr_target_type(AttrTarget *target);
 
-/*! @brief Return the decorated function or global object, or NULL for type targets.
+/*! @brief Return the decorated function or global object, or NULL for type
+ * targets.
  */
 Obj *__builtin_attr_target_obj(AttrTarget *target);
 
@@ -860,8 +865,7 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name);
  * @return The binary expression node.
  * @details Convenience wrapper: MakeBinary(op, left, right).
  */
-Node *__builtin_ast_binary(NodeKind op, Node *left,
-                            Node *right);
+Node *__builtin_ast_binary(NodeKind op, Node *left, Node *right);
 
 /*! @brief Build a unary operation AST node.
  * @param op The operator kind (NK_NEG, NK_DEREF, ...).
@@ -888,8 +892,7 @@ Node *__builtin_ast_cast(Node *expr, Type *target_type);
  * @return An NK_COND node.
  * @details Convenience wrapper: MakeCond(cond, then_expr, else_expr).
  */
-Node *__builtin_ast_cond(Node *cond, Node *then_expr,
-                          Node *else_expr);
+Node *__builtin_ast_cond(Node *cond, Node *then_expr, Node *else_expr);
 
 /*! @brief Build a typed null pointer node: (void *)0.
  * @return An NK_NUM node representing a typed NULL.
@@ -939,7 +942,8 @@ Node *__builtin_ast_comma(Node *lhs, Node *rhs);
 // ============================================================================
 
 /*! @brief Build a return statement node.
- * @param expr The value to return (may be NULL for `return;` in void functions).
+ * @param expr The value to return (may be NULL for `return;` in void
+ * functions).
  * @return An NK_RETURN node.
  * @details Convenience wrapper: MakeReturn(expr).
  */
@@ -969,8 +973,7 @@ Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt);
  * @return An NK_IF node.
  * @details Convenience wrapper: MakeIf(cond, then_body, else_body).
  */
-Node *__builtin_ast_if(Node *cond, Node *then_body,
-                        Node *else_body);
+Node *__builtin_ast_if(Node *cond, Node *then_body, Node *else_body);
 
 /*! @brief Build a switch statement node.
  * @param cond The expression to switch on.
@@ -987,8 +990,7 @@ Node *__builtin_ast_switch(Node *cond);
  * @details Convenience wrapper: SwitchAddCase(sw, value, body), or
  *             SwitchAddCase(value, body) inside WithSwitch(sw).
  */
-void __builtin_ast_switch_add_case(Node *switch_node,
-                                Node *value, Node *body);
+void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body);
 
 /*! @brief Set the default case for a switch statement.
  * @param switch_node The switch node returned by __builtin_ast_switch.
@@ -996,8 +998,7 @@ void __builtin_ast_switch_add_case(Node *switch_node,
  * @details Convenience wrapper: SwitchSetDefault(sw, body), or
  *             SwitchSetDefault(body) inside WithSwitch(sw).
  */
-void __builtin_ast_switch_set_default(Node *switch_node,
-                                    Node *body);
+void __builtin_ast_switch_set_default(Node *switch_node, Node *body);
 
 /*! @brief Build an expression statement node.
  * @param expr The expression to evaluate for side effects.
@@ -1082,8 +1083,7 @@ Node *__builtin_ast_while(Node *cond, Node *body);
  * @return A NK_FOR node, or NULL on error.
  * @details Convenience wrapper: MakeFor(init, cond, inc, body).
  */
-Node *__builtin_ast_for(Node *init, Node *cond,
-                       Node *inc, Node *body);
+Node *__builtin_ast_for(Node *init, Node *cond, Node *inc, Node *body);
 
 /*! @brief Create a do-while loop node.
  * @param body The loop body.
@@ -1105,8 +1105,7 @@ Node *__builtin_ast_do_while(Node *body, Node *cond);
  *             and will be compiled when the main program is compiled.
  *             Convenience wrapper: MakeFunction(name, return_type).
  */
-Obj *__builtin_ast_function(const char *name,
-                            Type *return_type);
+Obj *__builtin_ast_function(const char *name, Type *return_type);
 
 /*! @brief Make a generated object visible at the current source position.
  * @param obj A function or global variable object created by the AST builders.
@@ -1137,7 +1136,6 @@ Node *__builtin_ast_publish_type(Type *ty, Token *tok);
  */
 void __builtin_emit_directive(const char *line);
 
-
 /*! @brief Add a parameter to a function.
  * @param fn The function object.
  * @param name The parameter name.
@@ -1146,8 +1144,7 @@ void __builtin_emit_directive(const char *line);
  *             for multiple parameters.  Convenience wrapper:
  *             FunctionAddParam(fn, name, type).
  */
-void __builtin_ast_function_add_param(Obj *fn, const char *name,
-                                Type *type);
+void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type);
 
 /*! @brief Set the body of a function.
  * @param fn The function object.
@@ -1186,10 +1183,10 @@ void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic);
  * @details Use FunctionAddParam to add parameters and
  *             PublishNode to expose it in scope. A subsequent
  *             MakeFunction call with the same name will reuse this Obj and
- *             fill in the body.  Convenience wrapper: FunctionPrototype(name, return_type).
+ *             fill in the body.  Convenience wrapper: FunctionPrototype(name,
+ * return_type).
  */
-Obj *__builtin_ast_function_prototype(const char *name,
-                                    Type *return_type);
+Obj *__builtin_ast_function_prototype(const char *name, Type *return_type);
 
 // ============================================================================
 // Programmatic Attribute Application — ticket #619
@@ -1197,16 +1194,17 @@ Obj *__builtin_ast_function_prototype(const char *name,
 
 /*! @brief Apply an attribute string to a programmatically created function.
  * @param fn The function object to attribute (created by MakeFunction).
- * @param attr_text Attribute text as it would appear between [[ and ]] in source,
- *                  e.g. "cccc::test", "cccc::test(suite=\"gen\", timeout=5000)",
+ * @param attr_text Attribute text as it would appear between [[ and ]] in
+ * source, e.g. "cccc::test", "cccc::test(suite=\"gen\", timeout=5000)",
  *                  "nodiscard", "nodiscard(\"always check\")", or "@myattr".
- *                  GNU form __attribute__((…)) is also accepted as the full string.
+ *                  GNU form __attribute__((…)) is also accepted as the full
+ * string.
  * @details Parses attr_text through the existing attribute pipeline and applies
  *             the result to fn.  Supports mode attrs (test/build/build_target/
- *             test_setup/test_teardown), standard C23/GNU attrs (nodiscard, noreturn,
- *             pure, aligned, …), and custom `@attribute` handlers.
- *             cccc::comptime cannot be applied this way and will error.
- *             Convenience wrapper: AddAttribute(fn, text).
+ *             test_setup/test_teardown), standard C23/GNU attrs (nodiscard,
+ * noreturn, pure, aligned, …), and custom `@attribute` handlers. cccc::comptime
+ * cannot be applied this way and will error. Convenience wrapper:
+ * AddAttribute(fn, text).
  */
 void __builtin_ast_add_attribute(Obj *fn, const char *attr_text);
 
@@ -1243,7 +1241,7 @@ Type *__builtin_ast_make_union(const char *name);
  *             Convenience wrapper: StructAddField(ty, name, field_type).
  */
 Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
-                                   Type *field_type);
+                                     Type *field_type);
 
 /*! @brief Create and expose a new named enum type.
  * @param name The enum tag name.
@@ -1262,8 +1260,7 @@ Type *__builtin_ast_make_enum(const char *name);
  *             subsequently compiled code.  Convenience wrapper:
  *             EnumAddConstant(ty, name, value).
  */
-void __builtin_ast_enum_add_constant(Type *ty, const char *name,
-                                  int64_t value);
+void __builtin_ast_enum_add_constant(Type *ty, const char *name, int64_t value);
 
 /*! @brief Register a typedef alias for a type and expose it in scope.
  * @param name The typedef name.
@@ -1298,8 +1295,8 @@ Obj *__builtin_ast_global_var(const char *name, Type *ty);
  * @param len  Number of bytes to copy.  Must equal var->ty->size.
  * @details Convenience wrapper: GlobalVarSetInitData(var, data, len).
  */
-void __builtin_ast_global_var_set_init_data(Obj *var,
-                                        const char *data, int len);
+void __builtin_ast_global_var_set_init_data(Obj *var, const char *data,
+                                            int len);
 
 /*! @brief Set the static (internal linkage) flag on a generated global.
  * @param var       The global variable object.
@@ -1348,7 +1345,7 @@ Node *__builtin_ast_block_add_current_stmt(Node *stmt);
 void __builtin_ast_push_struct(Type *ty);
 void __builtin_ast_pop_struct(void);
 Type *__builtin_ast_struct_add_current_field(const char *name,
-                                            Type *field_type);
+                                             Type       *field_type);
 
 /*! @brief Establish a switch node as the current case/default context.
  * @param switch_node The switch node being populated.
@@ -1357,8 +1354,7 @@ Type *__builtin_ast_struct_add_current_field(const char *name,
  */
 void __builtin_ast_push_switch(Node *switch_node);
 void __builtin_ast_pop_switch(void);
-void __builtin_ast_switch_add_current_case(Node *value,
-                                       Node *body);
+void __builtin_ast_switch_add_current_case(Node *value, Node *body);
 void __builtin_ast_switch_set_current_default(Node *body);
 
 /*! @brief Establish an enum as the current constant-add context.
@@ -1368,8 +1364,7 @@ void __builtin_ast_switch_set_current_default(Node *body);
  */
 void __builtin_ast_push_enum(Type *ty);
 void __builtin_ast_pop_enum(void);
-void __builtin_ast_enum_add_current_constant(const char *name,
-                                         int value);
+void __builtin_ast_enum_add_current_constant(const char *name, int value);
 
 // ============================================================================
 // AST Dump Functions (ticket #58) — Nim-style dumpTree / dumpAstGen
@@ -1389,7 +1384,8 @@ void __builtin_dump_tree(Node *node);
  */
 const char *__builtin_dump_tree_to_string(Node *node);
 
-/*! @brief Print __builtin_ast_*() builder calls that would reconstruct the node.
+/*! @brief Print __builtin_ast_*() builder calls that would reconstruct the
+ * node.
  * @param node The root node to emit builder calls for.
  * @details Covers all node kinds for which relfection.c has a builder.
  *             Unsupported kinds are emitted as C comments.
@@ -1410,27 +1406,36 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 
 // Quasi-quoting helpers (ticket #1, #172)
 /*! @def Quote
- * @brief Parse a C code template string into an AST node, substituting `$N` / `$@N` splice points with the given argument nodes.
- * @param tmpl A C expression or statement as a string literal with splice points.
- * @param ... Node* arguments corresponding to the splice points (up to 64; use QuoteN for more).
- * @note A template with more than one top-level statement does not need explicit braces:
- *       @c Quote("a; b; return c;") and @c Quote("{ a; b; return c; }") parse to the same
- *       block, and every statement is kept either way. A @c ';' inside a nested
- *       @c (...)/[...]/{...} (e.g. a @c for(a;b;c) header) is not treated as a top-level
- *       separator. Any tokens left unparsed once the template's statement(s) or expression
- *       have been consumed are a compile error rather than being silently discarded. */
+ * @brief Parse a C code template string into an AST node, substituting `$N` /
+ * `$@N` splice points with the given argument nodes.
+ * @param tmpl A C expression or statement as a string literal with splice
+ * points.
+ * @param ... Node* arguments corresponding to the splice points (up to 64; use
+ * QuoteN for more).
+ * @note A template with more than one top-level statement does not need
+ * explicit braces:
+ *       @c Quote("a; b; return c;") and @c Quote("{ a; b; return c; }") parse
+ * to the same block, and every statement is kept either way. A @c ';' inside a
+ * nested
+ *       @c (...)/[...]/{...} (e.g. a @c for(a;b;c) header) is not treated as a
+ * top-level separator. Any tokens left unparsed once the template's
+ * statement(s) or expression have been consumed are a compile error rather than
+ * being silently discarded. */
 #define Quote(tmpl, ...) __builtin_quote(tmpl, ##__VA_ARGS__)
 /*! @def QuoteN
- * @brief Array-form quasi-quote that validates the splice count and supports more nodes than Quote's variadic form.
+ * @brief Array-form quasi-quote that validates the splice count and supports
+ * more nodes than Quote's variadic form.
  * @param tmpl Template string with `$N` / `$@N` splice points.
  * @param nodes Array of Node* splice arguments.
  * @param count Length of the nodes array.
- * @note See @ref Quote for the multi-statement and trailing-token parsing rules. */
+ * @note See @ref Quote for the multi-statement and trailing-token parsing
+ * rules. */
 #define QuoteN(tmpl, nodes, count) __builtin_quote_n(tmpl, nodes, count)
 // Build a ->next-linked chain from a compound-literal array for $@k splices:
 //   NodeList((Node*[]){ a, b, c }, 3)
 /*! @def NodeList
- * @brief Build a `->next`-linked node chain from an array, for use as a `$@k` list-splice argument.
+ * @brief Build a `->next`-linked node chain from an array, for use as a `$@k`
+ * list-splice argument.
  * @param nodes Array of Node* to link together.
  * @param count Number of elements in the array. */
 #define NodeList(nodes, count) __builtin_node_list(nodes, count)
@@ -1442,7 +1447,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param ... printf-style format string, followed by format arguments. */
 #define MacroErrorAt(node, ...) __builtin_macro_error_at(node, __VA_ARGS__)
 /*! @def MacroWarningAt
- * @brief Emit a compiler warning pointing at @a node's source location (only under @c -Wcccc-macro).
+ * @brief Emit a compiler warning pointing at @a node's source location (only
+ * under @c -Wcccc-macro).
  * @param node A node whose tok field provides file/line/col, or NULL.
  * @param ... printf-style format string, followed by format arguments. */
 #define MacroWarningAt(node, ...) __builtin_macro_warning_at(node, __VA_ARGS__)
@@ -1457,11 +1463,13 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param node The root node. */
 #define DumpTreeToString(node) __builtin_dump_tree_to_string(node)
 /*! @def DumpAstGen
- * @brief Print @c __builtin_ast_*() builder calls that would reconstruct @a node.
+ * @brief Print @c __builtin_ast_*() builder calls that would reconstruct @a
+ * node.
  * @param node The root node to emit builder calls for. */
 #define DumpAstGen(node) __builtin_dump_ast_gen(node)
 /*! @def DumpAstGenToString
- * @brief Render the @c __builtin_ast_*() builder call sequence for @a node to a string.
+ * @brief Render the @c __builtin_ast_*() builder call sequence for @a node to a
+ * string.
  * @param node The root node. */
 #define DumpAstGenToString(node) __builtin_dump_ast_gen_to_string(node)
 /*! @def Gensym
@@ -1473,7 +1481,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param node The node to (possibly) expand. */
 #define MacroExpand1(node) __builtin_macroexpand_1(node)
 /*! @def MacroExpand
- * @brief Lisp-style full macro expansion; repeats MacroExpand1 until the form is stable.
+ * @brief Lisp-style full macro expansion; repeats MacroExpand1 until the form
+ * is stable.
  * @param node The node to fully expand. */
 #define MacroExpand(node) __builtin_macroexpand(node)
 /*! @def VarargCount
@@ -1484,12 +1493,14 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param i Zero-based variadic argument index. */
 #define VarargAt(i) __builtin_ast_vararg_at(i)
 /*! @def VarargAsArray
- * @brief Return an inline macro's variadic AST arguments as a borrowed array. */
+ * @brief Return an inline macro's variadic AST arguments as a borrowed array.
+ */
 #define VarargAsArray() __builtin_ast_varargs_as_array()
 /*! @def VarargStrAt
- * @brief Return a global-generation macro's stringified variadic argument by index.
+ * @brief Return a global-generation macro's stringified variadic argument by
+ * index.
  * @param i Zero-based variadic argument index. */
-#define VarargStrAt(i) __builtin_ast_vararg_str_at(i)
+#define VarargStrAt(i)                           __builtin_ast_vararg_str_at(i)
 
 #define __builtin_dispatch_2(_1, _2, which, ...) which(_1, _2)
 #define __builtin_dispatch_3(_1, _2, _3, which, ...) which(_1, _2, _3)
@@ -1508,7 +1519,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def SetToken
  * @brief Attach an opaque source token to @a node.
  * @param node Node to update.
- * @param tok Token from CurrentToken(), SyntheticToken(), or TokenFromNode(). */
+ * @param tok Token from CurrentToken(), SyntheticToken(), or TokenFromNode().
+ */
 #define SetToken(node, tok) __builtin_ast_set_token(node, tok)
 /*! @def CopyLocation
  * @brief Copy the source token from @a src to @a dst.
@@ -1533,56 +1545,57 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def GetTypeKind
  * @brief Return the TypeKind tag of a type.
  * @param ty The type to inspect. */
-#define GetTypeKind(ty)          __builtin_ast_type_kind(ty)
+#define GetTypeKind(ty) __builtin_ast_type_kind(ty)
 /*! @def TypeSize
  * @brief Return @c sizeof(ty) in bytes.
  * @param ty The type to inspect. */
-#define TypeSize(ty)          __builtin_ast_type_size(ty)
+#define TypeSize(ty) __builtin_ast_type_size(ty)
 /*! @def TypeAlign
  * @brief Return @c _Alignof(ty) in bytes.
  * @param ty The type to inspect. */
-#define TypeAlign(ty)         __builtin_ast_type_align(ty)
+#define TypeAlign(ty) __builtin_ast_type_align(ty)
 /*! @def TypeIsUnsigned
  * @brief Test whether an integer type is unsigned.
  * @param ty The type to inspect. */
-#define TypeIsUnsigned(ty)   __builtin_ast_type_is_unsigned(ty)
+#define TypeIsUnsigned(ty) __builtin_ast_type_is_unsigned(ty)
 /*! @def TypeIsConst
  * @brief Test whether a type is const-qualified.
  * @param ty The type to inspect. */
-#define TypeIsConst(ty)      __builtin_ast_type_is_const(ty)
+#define TypeIsConst(ty) __builtin_ast_type_is_const(ty)
 /*! @def TypeBase
  * @brief Return the element type of a pointer or array.
  * @param ty The pointer/array type to inspect. */
-#define TypeBase(ty)          __builtin_ast_type_base(ty)
+#define TypeBase(ty) __builtin_ast_type_base(ty)
 /*! @def TypeArrayLen
  * @brief Return the fixed length of an array type.
  * @param ty The array type to inspect. */
-#define TypeArrayLen(ty)     __builtin_ast_type_array_len(ty)
+#define TypeArrayLen(ty) __builtin_ast_type_array_len(ty)
 /*! @def TypeReturnType
  * @brief Return the return type of a function type.
  * @param ty The function type to inspect. */
-#define TypeReturnType(ty)   __builtin_ast_type_return_type(ty)
+#define TypeReturnType(ty) __builtin_ast_type_return_type(ty)
 /*! @def TypeParamCount
  * @brief Return the number of declared parameters of a function type.
  * @param ty The function type to inspect. */
-#define TypeParamCount(ty)   __builtin_ast_type_param_count(ty)
+#define TypeParamCount(ty) __builtin_ast_type_param_count(ty)
 /*! @def TypeParamAt
  * @brief Return the type of the parameter at the given index.
  * @param ty The function type to inspect.
  * @param i Zero-based parameter index. */
-#define TypeParamAt(ty, i)   __builtin_ast_type_param_at(ty, i)
+#define TypeParamAt(ty, i) __builtin_ast_type_param_at(ty, i)
 /*! @def TypeIsVariadic
  * @brief Test whether a function type is variadic.
  * @param ty The type to inspect. */
-#define TypeIsVariadic(ty)   __builtin_ast_type_is_variadic(ty)
+#define TypeIsVariadic(ty) __builtin_ast_type_is_variadic(ty)
 /*! @def TypeName
  * @brief Return the user-visible name of a type, if any.
  * @param ty The type to inspect. */
-#define TypeName(ty)          __builtin_ast_type_name(ty)
+#define TypeName(ty) __builtin_ast_type_name(ty)
 /*! @def TypeCName
- * @brief Return a valid C identifier fragment naming @a ty (for naming generated functions).
+ * @brief Return a valid C identifier fragment naming @a ty (for naming
+ * generated functions).
  * @param ty The type to inspect. */
-#define TypeCName(ty)        __builtin_ast_type_c_name(ty)
+#define TypeCName(ty) __builtin_ast_type_c_name(ty)
 
 /*! @def MakeIntLiteral
  * @brief Build an integer literal AST node.
@@ -1626,7 +1639,8 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 // Ticket #171: new expression builders
 // Ternary conditional: cond ? then_expr : else_expr
 /*! @def MakeCond
- * @brief Build a ternary conditional expression node (@c c @c ? @c t @c : @c e).
+ * @brief Build a ternary conditional expression node (@c c @c ? @c t @c : @c
+ * e).
  * @param c The condition expression.
  * @param t The expression evaluated when c is non-zero.
  * @param e The expression evaluated when c is zero. */
@@ -1644,14 +1658,16 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Emit @c _Alignof(ty) as a compile-time integer literal.
  * @param ty The type to measure. */
 #define MakeAlignofType(ty) __builtin_ast_alignof_type(ty)
-// sizeof(expr): resolves expr's type then returns its size as an integer literal
+// sizeof(expr): resolves expr's type then returns its size as an integer
+// literal
 /*! @def MakeSizeofExpr
  * @brief Emit @c sizeof(expr): resolves the expression's type then its size.
  * @param expr The expression whose type to measure. */
 #define MakeSizeofExpr(expr) __builtin_ast_sizeof_expr(expr)
 // Array subscript: arr[idx] (desugared as *(arr+idx))
 /*! @def MakeSubscript
- * @brief Build an array subscript node: @c arr[idx], desugared as @c *(arr+idx).
+ * @brief Build an array subscript node: @c arr[idx], desugared as @c
+ * *(arr+idx).
  * @param arr The array (or pointer) expression.
  * @param idx The index expression. */
 #define MakeSubscript(arr, idx) __builtin_ast_subscript(arr, idx)
@@ -1671,17 +1687,18 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param stmts Array of statement nodes, or NULL if count is 0.
  * @param count Number of statements in the array. */
 #define MakeBlock(stmts, count) __builtin_ast_block(stmts, count)
-#define __builtin_block_add_stmt_1(stmt, _ignored)                          \
+#define __builtin_block_add_stmt_1(stmt, _ignored)                             \
     __builtin_ast_block_add_current_stmt(stmt)
-#define __builtin_block_add_stmt_2(block, stmt)                              \
+#define __builtin_block_add_stmt_2(block, stmt)                                \
     __builtin_ast_block_add_stmt(block, stmt)
 /*! @def BlockAddStmt
  * @brief Append a statement to a block.
- * @param ... Either @c (stmt) inside a @c WithBlock(block) block, or @c (block, stmt) to name the block explicitly.
+ * @param ... Either @c (stmt) inside a @c WithBlock(block) block, or @c (block,
+ * stmt) to name the block explicitly.
  * @details Dispatches on argument count via __builtin_dispatch_2. */
-#define BlockAddStmt(...)                                             \
-    __builtin_dispatch_2(__VA_ARGS__, __builtin_block_add_stmt_2,                \
-                     __builtin_block_add_stmt_1)
+#define BlockAddStmt(...)                                                      \
+    __builtin_dispatch_2(__VA_ARGS__, __builtin_block_add_stmt_2,              \
+                         __builtin_block_add_stmt_1)
 /*! @def MakeIf
  * @brief Build an if statement node.
  * @param c The condition expression.
@@ -1691,30 +1708,33 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def MakeSwitch
  * @brief Build a switch statement node.
  * @param cond The expression to switch on.
- * @details Use SwitchAddCase / SwitchSetDefault (or WithSwitch) to populate it. */
+ * @details Use SwitchAddCase / SwitchSetDefault (or WithSwitch) to populate it.
+ */
 #define MakeSwitch(cond) __builtin_ast_switch(cond)
-#define __builtin_switch_add_case_2(v, b, _ignored)                          \
+#define __builtin_switch_add_case_2(v, b, _ignored)                            \
     __builtin_ast_switch_add_current_case(v, b)
-#define __builtin_switch_add_case_3(sw, v, b)                                \
+#define __builtin_switch_add_case_3(sw, v, b)                                  \
     __builtin_ast_switch_add_case(sw, v, b)
 /*! @def SwitchAddCase
  * @brief Append a case to a switch statement.
- * @param ... Either @c (value, body) inside a @c WithSwitch(sw) block, or @c (sw, value, body) to name the switch explicitly.
+ * @param ... Either @c (value, body) inside a @c WithSwitch(sw) block, or @c
+ * (sw, value, body) to name the switch explicitly.
  * @details Dispatches on argument count via __builtin_dispatch_3. */
-#define SwitchAddCase(...)                                            \
-    __builtin_dispatch_3(__VA_ARGS__, __builtin_switch_add_case_3,               \
-                     __builtin_switch_add_case_2)
-#define __builtin_switch_set_default_1(b, _ignored)                          \
+#define SwitchAddCase(...)                                                     \
+    __builtin_dispatch_3(__VA_ARGS__, __builtin_switch_add_case_3,             \
+                         __builtin_switch_add_case_2)
+#define __builtin_switch_set_default_1(b, _ignored)                            \
     __builtin_ast_switch_set_current_default(b)
-#define __builtin_switch_set_default_2(sw, b)                                \
+#define __builtin_switch_set_default_2(sw, b)                                  \
     __builtin_ast_switch_set_default(sw, b)
 /*! @def SwitchSetDefault
  * @brief Set the default case for a switch statement.
- * @param ... Either @c (body) inside a @c WithSwitch(sw) block, or @c (sw, body) to name the switch explicitly.
+ * @param ... Either @c (body) inside a @c WithSwitch(sw) block, or @c (sw,
+ * body) to name the switch explicitly.
  * @details Dispatches on argument count via __builtin_dispatch_2. */
-#define SwitchSetDefault(...)                                         \
-    __builtin_dispatch_2(__VA_ARGS__, __builtin_switch_set_default_2,            \
-                     __builtin_switch_set_default_1)
+#define SwitchSetDefault(...)                                                  \
+    __builtin_dispatch_2(__VA_ARGS__, __builtin_switch_set_default_2,          \
+                         __builtin_switch_set_default_1)
 /*! @def MakeExprStmt
  * @brief Build an expression statement node.
  * @param expr The expression to evaluate for side effects. */
@@ -1723,12 +1743,15 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Declare a named local variable in the current function scope.
  * @param name The variable name (user-visible).
  * @param ty The variable type.
- * @details For temporaries that must not capture user names, prefer MakeLocalVarUnique. */
+ * @details For temporaries that must not capture user names, prefer
+ * MakeLocalVarUnique. */
 #define MakeLocalVar(name, ty) __builtin_ast_local_var(name, ty)
 /*! @def MakeLocalVarUnique
- * @brief Declare a hygienic (gensym'd) local variable in the current function scope.
+ * @brief Declare a hygienic (gensym'd) local variable in the current function
+ * scope.
  * @param ty The variable type.
- * @details The safe default for macro temporaries; the generated name cannot collide with a user identifier. */
+ * @details The safe default for macro temporaries; the generated name cannot
+ * collide with a user identifier. */
 #define MakeLocalVarUnique(ty) __builtin_ast_local_var_unique(ty)
 /*! @def MakeAssign
  * @brief Build an assignment node (@c target @c = @c value).
@@ -1739,11 +1762,13 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Create a struct/union member access node (@c obj.name).
  * @param obj An expression node whose type must be a struct or union.
  * @param name The member name as a NUL-terminated string.
- * @details Dereference pointers first (e.g. via @c MakeUnary(NK_DEREF, ...)); this does not do it for you. */
+ * @details Dereference pointers first (e.g. via @c MakeUnary(NK_DEREF, ...));
+ * this does not do it for you. */
 #define MakeMember(obj, name) __builtin_ast_member(obj, name)
 /*! @def MakeFuncCall
  * @brief Create a function call node.
- * @param callee An expression node that evaluates to a function (or function pointer).
+ * @param callee An expression node that evaluates to a function (or function
+ * pointer).
  * @param args Array of argument nodes (may be NULL if n == 0).
  * @param n Number of arguments. */
 #define MakeFuncCall(callee, args, n) __builtin_ast_funcall(callee, args, n)
@@ -1755,22 +1780,21 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param dst Destination expression.
  * @param src Source expression.
  * @param n Byte count expression. */
-#define Memcpy(dst, src, n)                                              \
-    __builtin_ast_funcall(__builtin_ast_var_ref("memcpy"),            \
-        (Node *[]){(dst), (src), (n)}, 3)
+#define Memcpy(dst, src, n)                                                    \
+    __builtin_ast_funcall(__builtin_ast_var_ref("memcpy"),                     \
+                          (Node *[]){(dst), (src), (n)}, 3)
 /*! @def Strlen
  * @brief Build a call node to @c strlen(s).
  * @param s String expression. */
-#define Strlen(s)                                                        \
-    __builtin_ast_funcall(__builtin_ast_var_ref("strlen"),            \
-        (Node *[]){(s)}, 1)
+#define Strlen(s)                                                              \
+    __builtin_ast_funcall(__builtin_ast_var_ref("strlen"), (Node *[]){(s)}, 1)
 /*! @def Strcmp
  * @brief Build a call node to @c strcmp(a, b).
  * @param a First string expression.
  * @param b Second string expression. */
-#define Strcmp(a, b)                                                     \
-    __builtin_ast_funcall(__builtin_ast_var_ref("strcmp"),            \
-        (Node *[]){(a), (b)}, 2)
+#define Strcmp(a, b)                                                           \
+    __builtin_ast_funcall(__builtin_ast_var_ref("strcmp"),                     \
+                          (Node *[]){(a), (b)}, 2)
 /*! @def MakeWhile
  * @brief Create a while loop node.
  * @param cond The loop condition expression.
@@ -1803,14 +1827,14 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param ret The function's return type.
  * @param params Array of parameter types.
  * @param n Number of entries in params (max 16). */
-#define MakeFuncPtrType(ret, params, n) \
+#define MakeFuncPtrType(ret, params, n)                                        \
     __builtin_ast_make_func_ptr_type(ret, params, n)
 
 // Ticket #171: qualified type constructors
 /*! @def MakeConst
  * @brief Return a const-qualified copy of @a ty.
  * @param ty The type to qualify. */
-#define MakeConst(ty)    __builtin_ast_make_const(ty)
+#define MakeConst(ty) __builtin_ast_make_const(ty)
 /*! @def MakeVolatile
  * @brief Return a volatile-qualified copy of @a ty.
  * @param ty The type to qualify. */
@@ -1833,42 +1857,45 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def EnumConstantName
  * @brief Return the name of an enum constant.
  * @param ec The enum constant. */
-#define EnumConstantName(ec)   __builtin_ast_enum_constant_name(ec)
+#define EnumConstantName(ec) __builtin_ast_enum_constant_name(ec)
 /*! @def EnumConstantValue
  * @brief Return the integer value of an enum constant.
  * @param ec The enum constant. */
-#define EnumConstantValue(ec)  __builtin_ast_enum_constant_value(ec)
+#define EnumConstantValue(ec) __builtin_ast_enum_constant_value(ec)
 /*! @def EnumName
  * @brief Return the tag name of an enum type.
  * @param ty The enum type to inspect. */
-#define EnumName(ty)            __builtin_ast_enum_name(ty)
+#define EnumName(ty) __builtin_ast_enum_name(ty)
 /*! @def EnumValueCount
  * @brief Return the number of values in an enum type.
  * @param ty The enum type to inspect. */
-#define EnumValueCount(ty)     __builtin_ast_enum_value_count(ty)
+#define EnumValueCount(ty) __builtin_ast_enum_value_count(ty)
 /*! @def EnumValueName
  * @brief Return the name of the enum constant at the given index.
  * @param ty The enum type to inspect.
  * @param i Zero-based index. */
-#define EnumValueName(ty, i)   __builtin_ast_enum_value_name(ty, i)
+#define EnumValueName(ty, i) __builtin_ast_enum_value_name(ty, i)
 /*! @def EnumValue
  * @brief Return the integer value of the enum constant at the given index.
  * @param ty The enum type to inspect.
  * @param i Zero-based index. */
-#define EnumValue(ty, i)        __builtin_ast_enum_value(ty, i)
+#define EnumValue(ty, i) __builtin_ast_enum_value(ty, i)
 
 // Ticket #235: EnumToString(ty, expr) / EnumFromString(ty, expr)
 /*! @def EnumToString
- * @brief Build a @c switch over @a ty's constants returning each constant's name as a string.
+ * @brief Build a @c switch over @a ty's constants returning each constant's
+ * name as a string.
  * @param ty The enum type.
  * @param expr The expression to switch on (the enum value).
  * @details Wrap the result in a function returning const char *. */
-#define EnumToString(ty, expr)   __builtin_ast_enum_to_string_switch(ty, expr)
+#define EnumToString(ty, expr) __builtin_ast_enum_to_string_switch(ty, expr)
 /*! @def EnumFromString
- * @brief Build an if-chain comparing @a expr against each constant's name, returning the matching value.
+ * @brief Build an if-chain comparing @a expr against each constant's name,
+ * returning the matching value.
  * @param ty The enum type.
  * @param expr The expression to compare (a const char *).
- * @details Wrap the result in a function returning the enum type (or an int). */
+ * @details Wrap the result in a function returning the enum type (or an int).
+ */
 #define EnumFromString(ty, expr) __builtin_ast_enum_from_string_chain(ty, expr)
 
 /*! @def StructMemberCount
@@ -1884,28 +1911,27 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Look up a struct or union member by name.
  * @param ty The struct or union type to search.
  * @param name The member name to look up. */
-#define StructMemberFind(ty, name)                                   \
-    __builtin_ast_struct_member_find(ty, name)
+#define StructMemberFind(ty, name) __builtin_ast_struct_member_find(ty, name)
 /*! @def MemberName
  * @brief Return the name of a struct/union member.
  * @param m The member to inspect. */
-#define MemberName(m)             __builtin_ast_member_name(m)
+#define MemberName(m) __builtin_ast_member_name(m)
 /*! @def MemberType
  * @brief Return the type of a struct/union member.
  * @param m The member to inspect. */
-#define MemberType(m)             __builtin_ast_member_type(m)
+#define MemberType(m) __builtin_ast_member_type(m)
 /*! @def MemberOffset
  * @brief Return the byte offset of a struct/union member.
  * @param m The member to inspect. */
-#define MemberOffset(m)           __builtin_ast_member_offset(m)
+#define MemberOffset(m) __builtin_ast_member_offset(m)
 /*! @def MemberIsBitfield
  * @brief Test whether a member is a bitfield.
  * @param m The member to inspect. */
-#define MemberIsBitfield(m)      __builtin_ast_member_is_bitfield(m)
+#define MemberIsBitfield(m) __builtin_ast_member_is_bitfield(m)
 /*! @def MemberBitfieldWidth
  * @brief Return the bit width of a bitfield member.
  * @param m The member to inspect. */
-#define MemberBitfieldWidth(m)   __builtin_ast_member_bitfield_width(m)
+#define MemberBitfieldWidth(m) __builtin_ast_member_bitfield_width(m)
 
 // Ticket #235: ForeachMember(type, varname, body) — host-side (comptime
 // C) loop over the members of a struct/union type. `varname` is bound to
@@ -1913,86 +1939,92 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 // member at macro-evaluation time (typically building AST nodes via
 // BlockAddStmt etc.). Two-layer __COUNTER__ indirection gives each
 // call-site unique loop-variable names so ForeachMember can be nested.
-#define __builtin_foreach_member_body(type, varname, body, uid)              \
-    do {                                                                  \
-        Type *__builtin_fem_ty_##uid = (type);                           \
-        int __builtin_fem_n_##uid = StructMemberCount(__builtin_fem_ty_##uid); \
-        for (int __builtin_fem_i_##uid = 0; __builtin_fem_i_##uid < __builtin_fem_n_##uid; \
-             __builtin_fem_i_##uid++) {                                      \
-            Member *varname =                                         \
-                StructMemberAt(__builtin_fem_ty_##uid, __builtin_fem_i_##uid); \
-            body                                                          \
-        }                                                                 \
+#define __builtin_foreach_member_body(type, varname, body, uid)                  \
+    do {                                                                         \
+        Type *__builtin_fem_ty_##uid = (type);                                   \
+        int   __builtin_fem_n_##uid = StructMemberCount(__builtin_fem_ty_##uid); \
+        for (int __builtin_fem_i_##uid = 0;                                      \
+             __builtin_fem_i_##uid < __builtin_fem_n_##uid;                      \
+             __builtin_fem_i_##uid++) {                                          \
+            Member *varname =                                                    \
+                StructMemberAt(__builtin_fem_ty_##uid, __builtin_fem_i_##uid);   \
+            body                                                                 \
+        }                                                                        \
     } while (0)
-#define __builtin_foreach_member_uid(type, varname, body, uid)               \
+#define __builtin_foreach_member_uid(type, varname, body, uid)                 \
     __builtin_foreach_member_body(type, varname, body, uid)
 /*! @def ForeachMember
- * @brief Host-side loop over the members of a struct/union type, evaluated at macro-execution (compile) time.
+ * @brief Host-side loop over the members of a struct/union type, evaluated at
+ * macro-execution (compile) time.
  * @param type The struct/union Type* to iterate.
  * @param varname Identifier bound to each Member* in turn.
- * @param body Compound statement run once per member (typically builds AST nodes via BlockAddStmt etc.).
- * @details Nestable: a two-layer __COUNTER__ indirection gives each call site unique loop-variable names. */
-#define ForeachMember(type, varname, body)                             \
+ * @param body Compound statement run once per member (typically builds AST
+ * nodes via BlockAddStmt etc.).
+ * @details Nestable: a two-layer __COUNTER__ indirection gives each call site
+ * unique loop-variable names. */
+#define ForeachMember(type, varname, body)                                     \
     __builtin_foreach_member_uid(type, varname, body, __COUNTER__)
 
 // Ticket #235: OffsetofChain(ty, "a", "b", ...) — offsetof(ty, a.b) as an
 // MakeIntLiteral AST node.
 /*! @def OffsetofChain
- * @brief Compute the byte offset of a (possibly nested) member chain as a MakeIntLiteral AST node.
+ * @brief Compute the byte offset of a (possibly nested) member chain as a
+ * MakeIntLiteral AST node.
  * @param type The starting struct/union type.
  * @param ... Member names to walk, innermost last. */
-#define OffsetofChain(type, ...)                                       \
-    MakeIntLiteral(__builtin_ast_offsetof_chain(type,                   \
-        (const char *[]){__VA_ARGS__},                                  \
+#define OffsetofChain(type, ...)                                               \
+    MakeIntLiteral(__builtin_ast_offsetof_chain(                               \
+        type, (const char *[]){__VA_ARGS__},                                   \
         (int)(sizeof((const char *[]){__VA_ARGS__}) / sizeof(const char *))))
 
 /*! @def FindGlobal
  * @brief Look up a global symbol by name.
  * @param name The global name to look up. */
-#define FindGlobal(name)        __builtin_ast_find_global(name)
+#define FindGlobal(name) __builtin_ast_find_global(name)
 /*! @def GlobalCount
  * @brief Return the total number of global symbols. */
-#define GlobalCount()           __builtin_ast_global_count()
+#define GlobalCount() __builtin_ast_global_count()
 /*! @def GlobalAt
  * @brief Return the global symbol at the given index.
  * @param i Zero-based global index. */
-#define GlobalAt(i)             __builtin_ast_global_at(i)
+#define GlobalAt(i) __builtin_ast_global_at(i)
 /*! @def ObjName
  * @brief Return the name of a global object.
  * @param obj The object to inspect. */
-#define ObjName(obj)            __builtin_ast_obj_name(obj)
+#define ObjName(obj) __builtin_ast_obj_name(obj)
 /*! @def ObjType
  * @brief Return the type of a global object.
  * @param obj The object to inspect. */
-#define ObjType(obj)            __builtin_ast_obj_type(obj)
+#define ObjType(obj) __builtin_ast_obj_type(obj)
 /*! @def ObjIsFunction
  * @brief Test whether a global object is a function.
  * @param obj The object to inspect. */
-#define ObjIsFunction(obj)     __builtin_ast_obj_is_function(obj)
+#define ObjIsFunction(obj) __builtin_ast_obj_is_function(obj)
 /*! @def ObjIsDefinition
  * @brief Test whether a global object has a definition.
  * @param obj The object to inspect. */
-#define ObjIsDefinition(obj)   __builtin_ast_obj_is_definition(obj)
+#define ObjIsDefinition(obj) __builtin_ast_obj_is_definition(obj)
 /*! @def ObjIsStatic
  * @brief Test whether a global object has internal (static) linkage.
  * @param obj The object to inspect. */
-#define ObjIsStatic(obj)       __builtin_ast_obj_is_static(obj)
+#define ObjIsStatic(obj) __builtin_ast_obj_is_static(obj)
 /*! @def GetAttrTargetKind
  * @brief Return the kind of declaration decorated by a custom attribute.
  * @param target The attribute target to inspect. */
-#define GetAttrTargetKind(target)  __builtin_attr_target_kind(target)
+#define GetAttrTargetKind(target) __builtin_attr_target_kind(target)
 /*! @def AttrTargetName
  * @brief Return the decorated declaration's source name, when available.
  * @param target The attribute target to inspect. */
-#define AttrTargetName(target)  __builtin_attr_target_name(target)
+#define AttrTargetName(target) __builtin_attr_target_name(target)
 /*! @def AttrTargetType
  * @brief Return the decorated declaration's type.
  * @param target The attribute target to inspect. */
-#define AttrTargetType(target)  __builtin_attr_target_type(target)
+#define AttrTargetType(target) __builtin_attr_target_type(target)
 /*! @def AttrTargetObj
- * @brief Return the decorated function or global object, or NULL for type targets.
+ * @brief Return the decorated function or global object, or NULL for type
+ * targets.
  * @param target The attribute target to inspect. */
-#define AttrTargetObj(target)   __builtin_attr_target_obj(target)
+#define AttrTargetObj(target) __builtin_attr_target_obj(target)
 /*! @def AttrTargetToken
  * @brief Return a source token for the decorated declaration.
  * @param target The attribute target to inspect. */
@@ -2002,26 +2034,24 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Create a new function object, automatically added to the globals list.
  * @param name The function name.
  * @param ret_type The return type. */
-#define MakeFunction(name, ret_type)                                       \
-    __builtin_ast_function(name, ret_type)
+#define MakeFunction(name, ret_type) __builtin_ast_function(name, ret_type)
 /*! @def PublishNode
  * @brief Make a generated declaration visible at the current source position.
  * @param decl An Obj* (function/global) or Type* created by the AST builders.
- * @details Dispatches on the argument's type via _Generic: Obj* goes to __builtin_ast_publish, Type* to __builtin_ast_publish_type. */
-#define PublishNode(decl)                                                  \
-    _Generic((decl),                                                        \
+ * @details Dispatches on the argument's type via _Generic: Obj* goes to
+ * __builtin_ast_publish, Type* to __builtin_ast_publish_type. */
+#define PublishNode(decl)                                                      \
+    _Generic((decl),                                                           \
         Obj *: __builtin_ast_publish,                                          \
-        Type *: __builtin_ast_publish_type                                     \
-    )((decl), 0)
+        Type *: __builtin_ast_publish_type)((decl), 0)
 /*! @def PublishNodeAt
  * @brief Like PublishNode, but attaches an explicit diagnostic token.
  * @param decl An Obj* (function/global) or Type* created by the AST builders.
  * @param tok Representative token for diagnostics, or NULL. */
-#define PublishNodeAt(decl, tok)                                          \
-    _Generic((decl),                                                        \
+#define PublishNodeAt(decl, tok)                                               \
+    _Generic((decl),                                                           \
         Obj *: __builtin_ast_publish,                                          \
-        Type *: __builtin_ast_publish_type                                     \
-    )((decl), (tok))
+        Type *: __builtin_ast_publish_type)((decl), (tok))
 /*! @def EmitDirective
  * @brief Emit one raw preprocessor directive line into generated output.
  * @param line Complete directive text, for example "#ifdef _WIN32". */
@@ -2032,7 +2062,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param name The parameter name.
  * @param type The parameter type.
  * @details Call once per parameter, in order. */
-#define FunctionAddParam(fn, name, type)                             \
+#define FunctionAddParam(fn, name, type)                                       \
     __builtin_ast_function_add_param(fn, name, type)
 /*! @def FunctionSetBody
  * @brief Set the body of a function.
@@ -2045,25 +2075,24 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  *          @c WithFn is still required to give @c Quote("return x;") the
  *          function's return type for its implicit cast, and to target
  *          @c MakeLocalVar at @c fn from outside a template. */
-#define FunctionSetBody(fn, body)                                    \
-    __builtin_ast_function_set_body(fn, body)
+#define FunctionSetBody(fn, body) __builtin_ast_function_set_body(fn, body)
 /*! @def FunctionSetStatic
  * @brief Set whether a function has static linkage.
  * @param fn The function object.
  * @param is_static True for static linkage, false for external. */
-#define FunctionSetStatic(fn, is_static)                             \
+#define FunctionSetStatic(fn, is_static)                                       \
     __builtin_ast_function_set_static(fn, is_static)
 /*! @def FunctionSetInline
  * @brief Set whether a function is inline.
  * @param fn The function object.
  * @param is_inline True for inline, false otherwise. */
-#define FunctionSetInline(fn, is_inline)                             \
+#define FunctionSetInline(fn, is_inline)                                       \
     __builtin_ast_function_set_inline(fn, is_inline)
 /*! @def FunctionSetVariadic
  * @brief Set whether a function is variadic.
  * @param fn The function object.
  * @param is_variadic True for variadic, false otherwise. */
-#define FunctionSetVariadic(fn, is_variadic)                         \
+#define FunctionSetVariadic(fn, is_variadic)                                   \
     __builtin_ast_function_set_variadic(fn, is_variadic)
 
 // Ticket #171: function forward declaration / prototype builder
@@ -2073,33 +2102,35 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Create a function forward declaration (prototype) without a body.
  * @param name The function name.
  * @param ret The return type.
- * @details Use FunctionAddParam for parameters and PublishNode to expose it in scope.
- * A published prototype that never receives a body via FunctionSetBody still
- * appears in `-c=generated`/`-m` output as a bare declaration. */
-#define FunctionPrototype(name, ret)                                  \
-    __builtin_ast_function_prototype(name, ret)
+ * @details Use FunctionAddParam for parameters and PublishNode to expose it in
+ * scope. A published prototype that never receives a body via FunctionSetBody
+ * still appears in `-c=generated`/`-m` output as a bare declaration. */
+#define FunctionPrototype(name, ret) __builtin_ast_function_prototype(name, ret)
 
 // Mode attribute registration for AST-generated functions.
 // Ticket #619: generic attribute application and convenience shorthands.
-// Use AddAttribute(fn, "cccc::test(suite=\"s\", timeout=5000)") for fine-grained control.
+// Use AddAttribute(fn, "cccc::test(suite=\"s\", timeout=5000)") for
+// fine-grained control.
 /*! @def AddAttribute
  * @brief Apply an attribute string to a programmatically created function.
  * @param fn The function object to attribute (created by MakeFunction).
- * @param text Attribute text as it would appear between [[ and ]], e.g. "cccc::test", "nodiscard", or "@myattr". */
-#define AddAttribute(fn, text)          __builtin_ast_add_attribute(fn, text)
+ * @param text Attribute text as it would appear between [[ and ]], e.g.
+ * "cccc::test", "nodiscard", or "@myattr". */
+#define AddAttribute(fn, text) __builtin_ast_add_attribute(fn, text)
 /*! @def MarkAsTest
  * @brief Shorthand for @c AddAttribute(fn, "cccc::test").
  * @param fn The function object. */
-#define MarkAsTest(fn)                  AddAttribute(fn, "cccc::test")
+#define MarkAsTest(fn) AddAttribute(fn, "cccc::test")
 /*! @def MarkAsBuild
  * @brief Shorthand for @c AddAttribute(fn, "cccc::build").
  * @param fn The function object. */
-#define MarkAsBuild(fn)                 AddAttribute(fn, "cccc::build")
+#define MarkAsBuild(fn) AddAttribute(fn, "cccc::build")
 /*! @def MarkAsBuildTarget
  * @brief Mark @a fn as a @c [[cccc::build_target]] factory of the given kind.
  * @param fn The function object.
  * @param kind The build-target kind string. */
-#define MarkAsBuildTarget(fn, kind)     __builtin_ast_add_build_target_attr(fn, kind)
+#define MarkAsBuildTarget(fn, kind)                                            \
+    __builtin_ast_add_build_target_attr(fn, kind)
 
 // Ticket #171: struct/union/enum/typedef type builders
 // Build a new named aggregate and expose it so GetType(name) resolves it.
@@ -2115,43 +2146,46 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Create and expose a new named struct type.
  * @param name The struct tag name.
  * @details Use StructAddField to add fields after creation. */
-#define MakeStruct(name)     __builtin_ast_make_struct(name)
+#define MakeStruct(name) __builtin_ast_make_struct(name)
 /*! @def MakeUnion
  * @brief Create and expose a new named union type.
  * @param name The union tag name. */
-#define MakeUnion(name)      __builtin_ast_make_union(name)
-#define __builtin_struct_add_field_2(name, field_type, _ignored)             \
+#define MakeUnion(name) __builtin_ast_make_union(name)
+#define __builtin_struct_add_field_2(name, field_type, _ignored)               \
     __builtin_ast_struct_add_current_field(name, field_type)
-#define __builtin_struct_add_field_3(ty, name, field_type)                   \
+#define __builtin_struct_add_field_3(ty, name, field_type)                     \
     __builtin_ast_struct_add_field(ty, name, field_type)
 /*! @def StructAddField
  * @brief Append a field to a struct or union and recompute its layout.
- * @param ... Either @c (name, field_type) inside a @c WithStruct(ty) block, or @c (ty, name, field_type) to name the type explicitly.
- * @details Works for both struct and union types; dispatches on argument count via __builtin_dispatch_3. */
-#define StructAddField(...)                                           \
-    __builtin_dispatch_3(__VA_ARGS__, __builtin_struct_add_field_3,              \
-                     __builtin_struct_add_field_2)
+ * @param ... Either @c (name, field_type) inside a @c WithStruct(ty) block, or
+ * @c (ty, name, field_type) to name the type explicitly.
+ * @details Works for both struct and union types; dispatches on argument count
+ * via __builtin_dispatch_3. */
+#define StructAddField(...)                                                    \
+    __builtin_dispatch_3(__VA_ARGS__, __builtin_struct_add_field_3,            \
+                         __builtin_struct_add_field_2)
 /*! @def MakeEnum
  * @brief Create and expose a new named enum type.
  * @param name The enum tag name.
  * @details Use EnumAddConstant to add constants after creation. */
-#define MakeEnum(name)       __builtin_ast_make_enum(name)
-#define __builtin_enum_add_constant_2(name, value, _ignored)                 \
+#define MakeEnum(name) __builtin_ast_make_enum(name)
+#define __builtin_enum_add_constant_2(name, value, _ignored)                   \
     __builtin_ast_enum_add_current_constant(name, value)
-#define __builtin_enum_add_constant_3(ty, name, value)                       \
+#define __builtin_enum_add_constant_3(ty, name, value)                         \
     __builtin_ast_enum_add_constant(ty, name, value)
 /*! @def EnumAddConstant
  * @brief Add a named constant to an enum type and expose it in scope.
- * @param ... Either @c (name, value) inside a @c WithEnum(ty) block, or @c (ty, name, value) to name the type explicitly.
+ * @param ... Either @c (name, value) inside a @c WithEnum(ty) block, or @c (ty,
+ * name, value) to name the type explicitly.
  * @details Dispatches on argument count via __builtin_dispatch_3. */
-#define EnumAddConstant(...)                                          \
-    __builtin_dispatch_3(__VA_ARGS__, __builtin_enum_add_constant_3,             \
-                     __builtin_enum_add_constant_2)
+#define EnumAddConstant(...)                                                   \
+    __builtin_dispatch_3(__VA_ARGS__, __builtin_enum_add_constant_3,           \
+                         __builtin_enum_add_constant_2)
 /*! @def MakeTypedef
  * @brief Register a typedef alias for a type and expose it in scope.
  * @param name The typedef name.
  * @param underlying The aliased type. */
-#define MakeTypedef(name, underlying) \
+#define MakeTypedef(name, underlying)                                          \
     __builtin_ast_make_typedef(name, underlying)
 
 // Comptime variable access (ticket #188)
@@ -2190,30 +2224,33 @@ Node *__builtin_get_comptime_ptr(const char *name);
  * @return A NK_NUM node for the field's value, or NULL on error.
  * @details Convenience wrapper: GetComptimeMember(var_name, field).
  */
-Node *__builtin_get_comptime_member(const char *var_name,
-                                  const char *field);
+Node *__builtin_get_comptime_member(const char *var_name, const char *field);
 
 /*! @def GetComptimeInt
- * @brief Read an integer-typed @c \#pragma comptime variable's value at compile time.
+ * @brief Read an integer-typed @c \#pragma comptime variable's value at compile
+ * time.
  * @param name The comptime variable's name. */
-#define GetComptimeInt(name)           __builtin_get_comptime_int(name)
+#define GetComptimeInt(name) __builtin_get_comptime_int(name)
 /*! @def GetComptimeFloat
- * @brief Read a float/double-typed @c \#pragma comptime variable's value at compile time.
+ * @brief Read a float/double-typed @c \#pragma comptime variable's value at
+ * compile time.
  * @param name The comptime variable's name. */
-#define GetComptimeFloat(name)         __builtin_get_comptime_float(name)
+#define GetComptimeFloat(name) __builtin_get_comptime_float(name)
 /*! @def GetComptimeVar
  * @brief Read a comptime scalar variable as an AST literal node.
  * @param name The comptime variable's name. */
-#define GetComptimeVar(name)           __builtin_get_comptime_var(name)
+#define GetComptimeVar(name) __builtin_get_comptime_var(name)
 /*! @def GetComptimePtr
- * @brief Return the address of a comptime variable as a generated-code AST pointer node.
+ * @brief Return the address of a comptime variable as a generated-code AST
+ * pointer node.
  * @param name The comptime variable's name. */
-#define GetComptimePtr(name)           __builtin_get_comptime_ptr(name)
+#define GetComptimePtr(name) __builtin_get_comptime_ptr(name)
 /*! @def GetComptimeMember
- * @brief Read a named field from a comptime struct variable as an AST literal node.
+ * @brief Read a named field from a comptime struct variable as an AST literal
+ * node.
  * @param var The comptime struct variable's name.
  * @param field The field name to look up. */
-#define GetComptimeMember(var, field)  __builtin_get_comptime_member(var, field)
+#define GetComptimeMember(var, field) __builtin_get_comptime_member(var, field)
 
 // Constexpr variable access (ticket #189)
 /*! @brief Read the evaluated initializer of a global @c constexpr variable
@@ -2228,10 +2265,12 @@ Node *__builtin_get_comptime_member(const char *var_name,
 Node *__builtin_get_constexpr_value(const char *name);
 
 /*! @def GetConstexprValue
- * @brief Read the evaluated initializer of a global constexpr variable as an AST literal node.
+ * @brief Read the evaluated initializer of a global constexpr variable as an
+ * AST literal node.
  * @param name The constexpr variable's name.
- * @details Errors at compile time if name does not refer to a visible constexpr variable. */
-#define GetConstexprValue(name)  __builtin_get_constexpr_value(name)
+ * @details Errors at compile time if name does not refer to a visible constexpr
+ * variable. */
+#define GetConstexprValue(name) __builtin_get_constexpr_value(name)
 
 // ============================================================================
 // Initializer Builders (ticket #296)
@@ -2239,7 +2278,8 @@ Node *__builtin_get_constexpr_value(const char *name);
 
 /**
  * @brief Build a positional compound literal: zero-initialise an anonymous
- *           local var then positionally assign @a inits via node_expand_init_splice.
+ *           local var then positionally assign @a inits via
+ * node_expand_init_splice.
  * @note Requires function scope (file-scope not supported in V1).
  */
 Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n);
@@ -2254,18 +2294,19 @@ Node *__builtin_ast_init_array(Type *elem_ty, Node **elems, int n);
  * @brief Build a designated struct/union initializer.  Unmentioned fields
  *           are zero-initialised.  Partial init (n < member count) is allowed.
  */
-Node *__builtin_ast_init_struct(Type *ty, const char **fields,
-                                Node **values, int n);
+Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
+                                int n);
 
 /** Positional compound literal — element count inferred from __VA_ARGS__. */
 /*! @def CompoundLiteral
- * @brief Build a positional compound literal; element count is inferred from the argument list.
+ * @brief Build a positional compound literal; element count is inferred from
+ * the argument list.
  * @param ty The compound literal's type.
  * @param ... Node* initializer values, assigned positionally.
  * @details Requires function scope (file-scope is not supported). */
-#define CompoundLiteral(ty, ...)                                      \
-    __builtin_ast_compound_literal(ty,                                 \
-        (Node *[]){__VA_ARGS__},                                     \
+#define CompoundLiteral(ty, ...)                                               \
+    __builtin_ast_compound_literal(                                            \
+        ty, (Node *[]){__VA_ARGS__},                                           \
         (int)(sizeof((Node *[]){__VA_ARGS__}) / sizeof(Node *)))
 
 /** Array compound literal with explicit element type. */
@@ -2273,20 +2314,21 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
  * @brief Build an array compound literal with an explicit element type.
  * @param elem_ty The array element type.
  * @param ... Node* element values; count is inferred from the argument list. */
-#define InitArray(elem_ty, ...)                                       \
-    __builtin_ast_init_array(elem_ty,                                  \
-        (Node *[]){__VA_ARGS__},                                     \
+#define InitArray(elem_ty, ...)                                                \
+    __builtin_ast_init_array(                                                  \
+        elem_ty, (Node *[]){__VA_ARGS__},                                      \
         (int)(sizeof((Node *[]){__VA_ARGS__}) / sizeof(Node *)))
 
 /** Designated struct/union init — fields and values are separate arrays. */
 /*! @def InitStruct
- * @brief Build a designated struct/union initializer; unmentioned fields are zero-initialised.
+ * @brief Build a designated struct/union initializer; unmentioned fields are
+ * zero-initialised.
  * @param ty The struct/union type.
  * @param fields Array of field-name strings.
  * @param values Array of Node* values, parallel to fields.
  * @param n Number of (field, value) pairs.
  * @details Partial init (n less than the member count) is allowed. */
-#define InitStruct(ty, fields, values, n)                             \
+#define InitStruct(ty, fields, values, n)                                      \
     __builtin_ast_init_struct(ty, fields, values, n)
 
 // ============================================================================
@@ -2313,38 +2355,39 @@ Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf);
 Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 
 /*! @def Serialize
- * @brief Build a block of memcpy() calls copying @a expr (of type @a ty) byte-for-byte into @a buf.
+ * @brief Build a block of memcpy() calls copying @a expr (of type @a ty)
+ * byte-for-byte into @a buf.
  * @param ty The type of expr.
  * @param expr The expression to serialize.
  * @param buf A void or char pointer destination.
- * @details Struct/union types are copied member-by-member at their natural offsets; pointer members are copied as raw bytes, not followed. */
-#define Serialize(ty, expr, buf)   __builtin_ast_serialize(ty, expr, buf)
+ * @details Struct/union types are copied member-by-member at their natural
+ * offsets; pointer members are copied as raw bytes, not followed. */
+#define Serialize(ty, expr, buf) __builtin_ast_serialize(ty, expr, buf)
 /*! @def Deserialize
  * @brief Build @c *(ty*)buf — reinterpret @a buf as a @a ty value.
  * @param ty The type to reinterpret as.
  * @param buf The source buffer.
  * @details Inherits the host's alignment requirements for ty. */
-#define Deserialize(ty, buf)       __builtin_ast_deserialize(ty, buf)
+#define Deserialize(ty, buf) __builtin_ast_deserialize(ty, buf)
 
 // Global variable generation (ticket #152)
 /*! @def GlobalVar
  * @brief Create a new named global variable definition.
  * @param name The variable name (must be unique among globals).
  * @param ty The variable type. */
-#define GlobalVar(name, ty)                                           \
-    __builtin_ast_global_var(name, ty)
+#define GlobalVar(name, ty) __builtin_ast_global_var(name, ty)
 /*! @def GlobalVarSetInitData
  * @brief Set the initial data for a generated global variable.
  * @param var The global variable object.
  * @param data Pointer to the raw byte data.
  * @param len Number of bytes to copy (must equal var's type size). */
-#define GlobalVarSetInitData(var, data, len)                       \
+#define GlobalVarSetInitData(var, data, len)                                   \
     __builtin_ast_global_var_set_init_data(var, data, len)
 /*! @def GlobalVarSetStatic
  * @brief Set the static (internal linkage) flag on a generated global.
  * @param var The global variable object.
  * @param is_static True for internal (file-scope static) linkage. */
-#define GlobalVarSetStatic(var, is_static)                          \
+#define GlobalVarSetStatic(var, is_static)                                     \
     __builtin_ast_global_var_set_static(var, is_static)
 
 // Function-building context (ticket #148)
@@ -2355,49 +2398,57 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 // Inside the block, current_fn is set to fn so Quote("return x;") casts
 // to the correct return type.  The pop always runs even on early exit.
 /*! @def WithFn
- * @brief Block helper: establishes @a fn as the current function-building context so @c Quote("return x;") applies the correct return-type cast.
+ * @brief Block helper: establishes @a fn as the current function-building
+ * context so @c Quote("return x;") applies the correct return-type cast.
  * @param fn The generated function whose return type should be used.
- * @details Implemented as a single-iteration for loop; the pop runs in the loop increment. Exit the block with `continue`, not `break` — `break` skips the increment and leaves the context unrestored. */
-#define WithFn(fn)                                                    \
-    for (int _cccc_fn_ctx_ = (__builtin_ast_push_fn((fn)), 1);             \
-         _cccc_fn_ctx_;                                                      \
-         _cccc_fn_ctx_ = (__builtin_ast_pop_fn(), 0))
+ * @details Implemented as a single-iteration for loop; the pop runs in the loop
+ * increment. Exit the block with `continue`, not `break` — `break` skips the
+ * increment and leaves the context unrestored. */
+#define WithFn(fn)                                                             \
+    for (int _cccc_fn_ctx_ = (__builtin_ast_push_fn((fn)), 1); _cccc_fn_ctx_;  \
+         _cccc_fn_ctx_     = (__builtin_ast_pop_fn(), 0))
 
 /*! @def WithBlock
- * @brief Block helper: establishes @a block as the current statement-append context so @c BlockAddStmt(stmt) appends to it.
+ * @brief Block helper: establishes @a block as the current statement-append
+ * context so @c BlockAddStmt(stmt) appends to it.
  * @param block The NK_BLOCK node being populated.
- * @details Implemented as a single-iteration for loop; use `continue` rather than `break` to exit early so the pop still runs. */
-#define WithBlock(block)                                               \
-    for (int _cccc_block_ctx_ = (__builtin_ast_push_block((block)), 1);  \
-         _cccc_block_ctx_;                                                \
-         _cccc_block_ctx_ = (__builtin_ast_pop_block(), 0))
+ * @details Implemented as a single-iteration for loop; use `continue` rather
+ * than `break` to exit early so the pop still runs. */
+#define WithBlock(block)                                                       \
+    for (int _cccc_block_ctx_ = (__builtin_ast_push_block((block)), 1);        \
+         _cccc_block_ctx_; _cccc_block_ctx_ = (__builtin_ast_pop_block(), 0))
 
 /*! @def WithStruct
- * @brief Block helper: establishes @a ty as the current field-add context so @c StructAddField(name, ty) appends to it.
+ * @brief Block helper: establishes @a ty as the current field-add context so @c
+ * StructAddField(name, ty) appends to it.
  * @param ty The aggregate type being populated.
- * @details Implemented as a single-iteration for loop; use `continue` rather than `break` to exit early so the pop still runs. */
-#define WithStruct(ty)                                                 \
-    for (int _cccc_struct_ctx_ = (__builtin_ast_push_struct((ty)), 1);   \
-         _cccc_struct_ctx_;                                               \
+ * @details Implemented as a single-iteration for loop; use `continue` rather
+ * than `break` to exit early so the pop still runs. */
+#define WithStruct(ty)                                                         \
+    for (int _cccc_struct_ctx_ = (__builtin_ast_push_struct((ty)), 1);         \
+         _cccc_struct_ctx_;                                                    \
          _cccc_struct_ctx_ = (__builtin_ast_pop_struct(), 0))
 
 /*! @def WithSwitch
- * @brief Block helper: establishes @a sw as the current case/default context so @c SwitchAddCase / @c SwitchSetDefault populate it.
+ * @brief Block helper: establishes @a sw as the current case/default context so
+ * @c SwitchAddCase / @c SwitchSetDefault populate it.
  * @param sw The switch node being populated.
- * @details Implemented as a single-iteration for loop; use `continue` rather than `break` to exit early so the pop still runs. */
-#define WithSwitch(sw)                                                 \
-    for (int _cccc_switch_ctx_ = (__builtin_ast_push_switch((sw)), 1);   \
-         _cccc_switch_ctx_;                                               \
+ * @details Implemented as a single-iteration for loop; use `continue` rather
+ * than `break` to exit early so the pop still runs. */
+#define WithSwitch(sw)                                                         \
+    for (int _cccc_switch_ctx_ = (__builtin_ast_push_switch((sw)), 1);         \
+         _cccc_switch_ctx_;                                                    \
          _cccc_switch_ctx_ = (__builtin_ast_pop_switch(), 0))
 
 /*! @def WithEnum
- * @brief Block helper: establishes @a ty as the current constant-add context so @c EnumAddConstant(name, value) appends to it.
+ * @brief Block helper: establishes @a ty as the current constant-add context so
+ * @c EnumAddConstant(name, value) appends to it.
  * @param ty The enum type being populated.
- * @details Implemented as a single-iteration for loop; use `continue` rather than `break` to exit early so the pop still runs. */
-#define WithEnum(ty)                                                   \
-    for (int _cccc_enum_ctx_ = (__builtin_ast_push_enum((ty)), 1);       \
-         _cccc_enum_ctx_;                                                 \
-         _cccc_enum_ctx_ = (__builtin_ast_pop_enum(), 0))
+ * @details Implemented as a single-iteration for loop; use `continue` rather
+ * than `break` to exit early so the pop still runs. */
+#define WithEnum(ty)                                                            \
+    for (int _cccc_enum_ctx_              = (__builtin_ast_push_enum((ty)), 1); \
+         _cccc_enum_ctx_; _cccc_enum_ctx_ = (__builtin_ast_pop_enum(), 0))
 
 // ============================================================================
 // Macro Standard Library Attributes (ticket #235)
@@ -2406,12 +2457,12 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 // @serialize struct Foo {...}; publishes
 //   int Foo_serialize(struct Foo *self, void *buf);
 // which copies *self into buf via Serialize and returns sizeof(struct Foo).
-@comptime(attribute("serialize"))
-void __builtin_attr_serialize(AttrTarget *target) {
+@comptime(attribute("serialize")) void __builtin_attr_serialize(
+    AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@serialize expects a type (struct/union) target");
 
-    Type *ty = AttrTargetType(target);
+    Type       *ty    = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@serialize target has no usable type/name");
@@ -2424,8 +2475,8 @@ void __builtin_attr_serialize(AttrTarget *target) {
     FunctionAddParam(fn, "self", MakePointer(ty));
     FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
     WithFn(fn) {
-        Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
-        Node *buf = MakeParamRef(fn, "buf");
+        Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+        Node *buf   = MakeParamRef(fn, "buf");
         Node *block = Serialize(ty, self, buf);
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
         FunctionSetBody(fn, block);
@@ -2436,12 +2487,12 @@ void __builtin_attr_serialize(AttrTarget *target) {
 // @deserialize struct Foo {...}; publishes
 //   struct Foo Foo_deserialize(void *buf);
 // which reconstructs a struct Foo from buf via Deserialize.
-@comptime(attribute("deserialize"))
-void __builtin_attr_deserialize(AttrTarget *target) {
+@comptime(attribute("deserialize")) void __builtin_attr_deserialize(
+    AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@deserialize expects a type (struct/union) target");
 
-    Type *ty = AttrTargetType(target);
+    Type       *ty    = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@deserialize target has no usable type/name");
@@ -2463,12 +2514,12 @@ void __builtin_attr_deserialize(AttrTarget *target) {
 //   const char *Color_to_string(enum Color v);
 // which switches over v and returns the matching constant's name, or "" if
 // no constant matches.
-@comptime(attribute("enum_to_string"))
-void __builtin_attr_enum_to_string(AttrTarget *target) {
+@comptime(attribute("enum_to_string")) void __builtin_attr_enum_to_string(
+    AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@enum_to_string expects a type (enum) target");
 
-    Type *ty = AttrTargetType(target);
+    Type       *ty    = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_to_string target has no usable type/name");
@@ -2480,7 +2531,7 @@ void __builtin_attr_enum_to_string(AttrTarget *target) {
     strcat(fname, "_to_string");
 
     Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
-    Obj *fn = MakeFunction(fname, cstr_ty);
+    Obj  *fn      = MakeFunction(fname, cstr_ty);
     FunctionAddParam(fn, "v", ty);
     WithFn(fn) {
         Node *v = MakeParamRef(fn, "v");
@@ -2493,12 +2544,12 @@ void __builtin_attr_enum_to_string(AttrTarget *target) {
 //   enum Color Color_from_string(const char *s);
 // which compares s against each constant's name and returns the matching
 // value, or -1 if no constant matches.
-@comptime(attribute("enum_from_string"))
-void __builtin_attr_enum_from_string(AttrTarget *target) {
+@comptime(attribute("enum_from_string")) void __builtin_attr_enum_from_string(
+    AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
         MacroErrorAt(0, "@enum_from_string expects a type (enum) target");
 
-    Type *ty = AttrTargetType(target);
+    Type       *ty    = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@enum_from_string target has no usable type/name");
@@ -2510,7 +2561,7 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
     strcat(fname, "_from_string");
 
     Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
-    Obj *fn = MakeFunction(fname, ty);
+    Obj  *fn      = MakeFunction(fname, ty);
     FunctionAddParam(fn, "s", cstr_ty);
     WithFn(fn) {
         Node *s = MakeParamRef(fn, "s");
@@ -2526,13 +2577,12 @@ void __builtin_attr_enum_from_string(AttrTarget *target) {
 
 // __builtin_generate_getters(ty): for each member of struct/union `ty`,
 // publishes `<MemberType> get_<field>(<ty> *self) { return self->field; }`.
-@comptime
-void __builtin_generate_getters(Type *ty) {
+@comptime void __builtin_generate_getters(Type *ty) {
     ForeachMember(ty, m, {
         const char *field = MemberName(m);
-        Type *fty = MemberType(m);
+        Type       *fty   = MemberType(m);
 
-        char gname[128];
+        char        gname[128];
         strcpy(gname, "get_");
         strcat(gname, field);
 
@@ -2547,14 +2597,14 @@ void __builtin_generate_getters(Type *ty) {
 }
 
 // __builtin_generate_setters(ty): for each member of struct/union `ty`,
-// publishes `void set_<field>(<ty> *self, <MemberType> value) { self->field = value; }`.
-@comptime
-void __builtin_generate_setters(Type *ty) {
+// publishes `void set_<field>(<ty> *self, <MemberType> value) { self->field =
+// value; }`.
+@comptime void __builtin_generate_setters(Type *ty) {
     ForeachMember(ty, m, {
         const char *field = MemberName(m);
-        Type *fty = MemberType(m);
+        Type       *fty   = MemberType(m);
 
-        char gname[128];
+        char        gname[128];
         strcpy(gname, "set_");
         strcat(gname, field);
 
@@ -2562,9 +2612,10 @@ void __builtin_generate_setters(Type *ty) {
         FunctionAddParam(fn, "self", MakePointer(ty));
         FunctionAddParam(fn, "value", fty);
         WithFn(fn) {
-            Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+            Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
             Node *value = MakeParamRef(fn, "value");
-            FunctionSetBody(fn, MakeExprStmt(MakeAssign(MakeMember(self, field), value)));
+            FunctionSetBody(
+                fn, MakeExprStmt(MakeAssign(MakeMember(self, field), value)));
         }
         PublishNode(fn);
     });
@@ -2573,22 +2624,20 @@ void __builtin_generate_setters(Type *ty) {
 // __builtin_generate_constructor(ty, tname): publishes
 // `<ty> <tname>_create(<member1>, <member2>, ...) { return (ty){ .member1 =
 // member1, ... }; }` with one parameter per member of `ty`.
-@comptime
-void __builtin_generate_constructor(Type *ty, const char *tname) {
+@comptime void __builtin_generate_constructor(Type *ty, const char *tname) {
     char gname[128];
     strcpy(gname, tname);
     strcat(gname, "_create");
 
     Obj *fn = MakeFunction(gname, ty);
 
-    ForeachMember(ty, m, {
-        FunctionAddParam(fn, MemberName(m), MemberType(m));
-    });
+    ForeachMember(ty, m,
+                  { FunctionAddParam(fn, MemberName(m), MemberType(m)); });
 
     WithFn(fn) {
         const char *fields[64];
-        Node *values[64];
-        int n = 0;
+        Node       *values[64];
+        int         n = 0;
         ForeachMember(ty, m, {
             fields[n] = MemberName(m);
             values[n] = MakeParamRef(fn, MemberName(m));
@@ -2601,10 +2650,11 @@ void __builtin_generate_constructor(Type *ty, const char *tname) {
 
 // @generate_getters struct Foo {...}; publishes get_<field>(struct Foo *self)
 // for each member, returning self->field.
-@comptime(attribute("generate_getters"))
-void __builtin_attr_generate_getters(AttrTarget *target) {
+@comptime(attribute("generate_getters")) void __builtin_attr_generate_getters(
+    AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@generate_getters expects a type (struct/union) target");
+        MacroErrorAt(0,
+                     "@generate_getters expects a type (struct/union) target");
 
     Type *ty = AttrTargetType(target);
     if (!ty)
@@ -2615,10 +2665,11 @@ void __builtin_attr_generate_getters(AttrTarget *target) {
 
 // @generate_setters struct Foo {...}; publishes set_<field>(struct Foo *self,
 // <FieldType> value) for each member, assigning self->field = value.
-@comptime(attribute("generate_setters"))
-void __builtin_attr_generate_setters(AttrTarget *target) {
+@comptime(attribute("generate_setters")) void __builtin_attr_generate_setters(
+    AttrTarget *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@generate_setters expects a type (struct/union) target");
+        MacroErrorAt(0,
+                     "@generate_setters expects a type (struct/union) target");
 
     Type *ty = AttrTargetType(target);
     if (!ty)
@@ -2630,12 +2681,15 @@ void __builtin_attr_generate_setters(AttrTarget *target) {
 // @generate_constructor struct Foo {...}; publishes
 //   struct Foo Foo_create(<member1>, <member2>, ...);
 // returning a struct Foo initialized from the given member values.
-@comptime(attribute("generate_constructor"))
-void __builtin_attr_generate_constructor(AttrTarget *target) {
+@comptime(attribute(
+    "generate_"
+    "constructor")) void __builtin_attr_generate_constructor(AttrTarget
+                                                                 *target) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@generate_constructor expects a type (struct/union) target");
+        MacroErrorAt(
+            0, "@generate_constructor expects a type (struct/union) target");
 
-    Type *ty = AttrTargetType(target);
+    Type       *ty    = AttrTargetType(target);
     const char *tname = AttrTargetName(target);
     if (!ty || !tname)
         MacroErrorAt(0, "@generate_constructor target has no usable type/name");
@@ -2678,17 +2732,20 @@ void __builtin_generate_filter(Type *elem_ty);
 /*! @def GenerateSum
  * @brief Publish @c T @c sum_T(T @c *arr, size_t @c n) summing all elements.
  * @param elem_type The element type T. */
-#define GenerateSum(elem_type)    __builtin_generate_sum(elem_type)
+#define GenerateSum(elem_type) __builtin_generate_sum(elem_type)
 /*! @def GenerateMap
- * @brief Publish @c void @c map_T(T @c *arr, size_t @c n, T @c *out, T @c (*f)(T)).
+ * @brief Publish @c void @c map_T(T @c *arr, size_t @c n, T @c *out, T @c
+ * (*f)(T)).
  * @param elem_type The element type T. */
-#define GenerateMap(elem_type)    __builtin_generate_map(elem_type)
+#define GenerateMap(elem_type) __builtin_generate_map(elem_type)
 /*! @def GenerateReduce
- * @brief Publish @c T @c reduce_T(T @c *arr, size_t @c n, T @c init, T @c (*f)(T, T)).
+ * @brief Publish @c T @c reduce_T(T @c *arr, size_t @c n, T @c init, T @c
+ * (*f)(T, T)).
  * @param elem_type The element type T. */
 #define GenerateReduce(elem_type) __builtin_generate_reduce(elem_type)
 /*! @def GenerateFilter
- * @brief Publish @c void @c filter_T(T @c *arr, size_t @c n, T @c *out, size_t @c *out_n, bool @c (*pred)(T)).
+ * @brief Publish @c void @c filter_T(T @c *arr, size_t @c n, T @c *out, size_t
+ * @c *out_n, bool @c (*pred)(T)).
  * @param elem_type The element type T. */
 #define GenerateFilter(elem_type) __builtin_generate_filter(elem_type)
 

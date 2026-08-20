@@ -11,6 +11,8 @@
 // codegen.c) exactly (descriptor in A0, user args from A1).
 
 int main(void) {
-    int (^add)(int) = ^(int x) { return x + 21; };
+    int (^add)(int) = ^(int x) {
+      return x + 21;
+    };
     return add(21);
 }

@@ -22,7 +22,8 @@
 // and invokes the build entry in the VM.  The entry only *declares* a target
 // graph (pure data); the host-side runner in this file compiles and links it
 // with the system toolchain (cc/ar/ld), synchronously, inside the
-// cccc_build_run* FFI call so the entry's return value reflects the real status.
+// cccc_build_run* FFI call so the entry's return value reflects the real
+// status.
 
 #include "./internal.h"
 
@@ -68,102 +69,114 @@ typedef enum {
 } CcTargetKind;
 
 typedef struct BuildTarget BuildTarget;
-typedef struct Builder Builder;
+typedef struct Builder     Builder;
 
 struct BuildTarget {
     CcTargetKind kind;
-    char *name;
-    StringArray outputs;   // CCCC_TGT_CUSTOM: DeclareOutput() paths, in call order (#851);
-                            // outputs.data[0] (or NULL) is what TargetOutput() returns.
-                            // Kept alongside `output` below rather than replacing it, since
-                            // EXE/STATIC/DYNAMIC/BYTECODE targets still use `output` for
-                            // their single SetOutput() path.
-    char *output;          // explicit output path (relative to out_dir) or NULL
-    char *command;         // CCCC_TGT_CUSTOM: shell command to run
-    StringArray inputs;    // CCCC_TGT_CUSTOM: AddInput() paths (#851) — declared prerequisites
-                            // used for the "up to date" skip check; NOT invalidation-only
-                            // like DeclareOutput's `outputs` used to be before this.
-    char *profile;         // "debug"|"release"|"relwithdebinfo"|"minsizerel", or NULL (#548)
-    char *cc_override;     // per-target compiler binary; NULL = use ctx->cross_cc or global (#547)
-    char *target_triple;   // per-target cross-compilation triple; NULL = inherit from ctx (#547)
+    char        *name;
+    StringArray
+        outputs; // CCCC_TGT_CUSTOM: DeclareOutput() paths, in call order
+                 // (#851); outputs.data[0] (or NULL) is what TargetOutput()
+                 // returns. Kept alongside `output` below rather than replacing
+                 // it, since EXE/STATIC/DYNAMIC/BYTECODE targets still use
+                 // `output` for their single SetOutput() path.
+    char       *output;  // explicit output path (relative to out_dir) or NULL
+    char       *command; // CCCC_TGT_CUSTOM: shell command to run
+    StringArray inputs;  // CCCC_TGT_CUSTOM: AddInput() paths (#851) — declared
+                         // prerequisites used for the "up to date" skip check;
+                         // NOT invalidation-only like DeclareOutput's `outputs`
+                         // used to be before this.
+    char *profile; // "debug"|"release"|"relwithdebinfo"|"minsizerel", or NULL
+                   // (#548)
+    char *cc_override;   // per-target compiler binary; NULL = use ctx->cross_cc
+                         // or global (#547)
+    char *target_triple; // per-target cross-compilation triple; NULL = inherit
+                         // from ctx (#547)
     StringArray sources;
-    StringArray deferred_globs; // AddSourcesGlobDeferred() patterns (#851), expanded at the
-                                // start of build_target() rather than declaration time, so a
-                                // dependency's codegen step can create the matched files first.
-    StringArray excludes;  // glob/path patterns excluded from sources (#542)
+    StringArray
+        deferred_globs; // AddSourcesGlobDeferred() patterns (#851), expanded at
+                        // the start of build_target() rather than declaration
+                        // time, so a dependency's codegen step can create the
+                        // matched files first.
+    StringArray excludes; // glob/path patterns excluded from sources (#542)
     StringArray includes;
-    StringArray defines;   // "NAME=VALUE" or "NAME"
+    StringArray defines;  // "NAME=VALUE" or "NAME"
     StringArray undefs;
     StringArray cflags;
     StringArray ldflags;
-    StringArray libs;      // bare -l names
-    StringArray libpaths;  // -L paths
-    StringArray env;       // "NAME=VALUE" environment overrides for the
-                            // target's compiler/linker child (#842, SetTargetEnv)
+    StringArray libs;     // bare -l names
+    StringArray libpaths; // -L paths
+    StringArray env;      // "NAME=VALUE" environment overrides for the
+                          // target's compiler/linker child (#842, SetTargetEnv)
     BuildTarget **deps;
-    int *deps_link;        // parallel to deps: 1=LinkWith (add -l), 0=DependsOn (order only)
+    int *deps_link; // parallel to deps: 1=LinkWith (add -l), 0=DependsOn (order
+                    // only)
     int deps_count, deps_cap;
-    int visited;           // topo-sort marker: 0 unvisited, 1 in-progress, 2 done
-    int state;             // parallel dispatch state: see TARGET_* constants (#557)
+    int visited;    // topo-sort marker: 0 unvisited, 1 in-progress, 2 done
+    int state;      // parallel dispatch state: see TARGET_* constants (#557)
     // Set by run_graph() for targets that are LinkWith'd (transitively) from a
     // kind=bytecode target (#563).  Such a target is a "bytecode library": its
     // sources are folded into the dependent's single cccc invocation and it is
     // not built standalone.
     int bytecode_folded;
-    // Subkind for CCCC_TGT_BYTECODE targets (#564): 0=exe, 1=static lib, 2=dynamic lib.
-    // Static libs (.c4a) are built standalone; bytecode EXEs link them via --link (#565).
-    // Dynamic libs (.c4d) are runtime-loaded and never folded into anything.
+    // Subkind for CCCC_TGT_BYTECODE targets (#564): 0=exe, 1=static lib,
+    // 2=dynamic lib. Static libs (.c4a) are built standalone; bytecode EXEs
+    // link them via --link (#565). Dynamic libs (.c4d) are runtime-loaded and
+    // never folded into anything.
     int bytecode_subkind;
 };
 
 // Parallel dispatch states for BuildTarget.state (#557).
-#define TARGET_PENDING  0  // not yet started
-#define TARGET_INFLIGHT 1  // forked child running
-#define TARGET_DONE     2  // built successfully
-#define TARGET_FAILED   3  // build failed
-#define TARGET_SKIPPED  4  // blocked: a dep failed/was skipped
+#define TARGET_PENDING  0 // not yet started
+#define TARGET_INFLIGHT 1 // forked child running
+#define TARGET_DONE     2 // built successfully
+#define TARGET_FAILED   3 // build failed
+#define TARGET_SKIPPED  4 // blocked: a dep failed/was skipped
 
 struct Builder {
-    char *root;
-    char *out_dir;
+    char       *root;
+    char       *out_dir;
     const char *host;
     const char *target_filter; // --build-target=NAME, or NULL (build all)
-    int verbose;           // -v or --build-verbose: enables per-target headers
-    int quiet;             // --build-quiet: suppress per-step command lines
-    int keep_going;        // --build-keep-going: continue past target failures
-    int dry_run;
-    int jobs;              // --build-jobs=N: max parallel cc -c slots (<=1 = serial)
-    char *cache_dir;       // --build-cache[=PATH]: content-addressable cache root, or NULL (#546)
-    BuildTarget **targets;
-    int targets_count, targets_cap;
+    int         verbose;    // -v or --build-verbose: enables per-target headers
+    int         quiet;      // --build-quiet: suppress per-step command lines
+    int         keep_going; // --build-keep-going: continue past target failures
+    int         dry_run;
+    int         jobs; // --build-jobs=N: max parallel cc -c slots (<=1 = serial)
+    char *cache_dir; // --build-cache[=PATH]: content-addressable cache root, or
+                     // NULL (#546)
+    BuildTarget              **targets;
+    int                        targets_count, targets_cap;
     const CcNativeCompileArgs *defaults; // CLI -I/-D/-U/--std/-l/-L forwarded
-    int run_invoked;       // set once a cccc_build_run* is called
-    int failed;            // non-zero once any build step fails
+    int run_invoked;                     // set once a cccc_build_run* is called
+    int failed;                          // non-zero once any build step fails
     // Tool gating (#543): if tool_allow_count > 0, only listed tools may run
     // via RunCustom / HaveTool / PkgConfig.  cc/ar/ld bypass this check (they
     // go through run_argv, not the shell).
     const char **tool_allow;
-    int tool_allow_count;
+    int          tool_allow_count;
     // [[cccc::build_target]] factory names (#540): copied from compiler state
     // before the entry runs; used by --build-list-targets and factory-direct
     // --build-target=NAME invocation.
     const char **factory_names;
-    int factory_count;
-    const char *profile;      // --build-profile=NAME global default (#548)
-    const char *cross_triple; // --build-triple=TRIPLE global target triple (#547)
-    const char *cross_cc;     // --build-cc=COMPILER global CC override (#547)
-    const char *cccc_self;    // path to the cccc binary; used for kind=bytecode targets (#545)
+    int          factory_count;
+    const char  *profile;  // --build-profile=NAME global default (#548)
+    const char
+        *cross_triple;     // --build-triple=TRIPLE global target triple (#547)
+    const char *cross_cc;  // --build-cc=COMPILER global CC override (#547)
+    const char *cccc_self; // path to the cccc binary; used for kind=bytecode
+                           // targets (#545)
     // Strings returned by CaptureCommand/GlobFiles/ReadFile; freed at teardown.
     char **captures;
-    int captures_count, captures_cap;
+    int    captures_count, captures_cap;
     // Build options from --build-option=key=value CLI flags (#559)
     const char **build_options;
-    int build_options_count;
+    int          build_options_count;
     // Install support (#560)
-    char         *install_prefix;  // default: PREFIX env or /usr/local
+    char         *install_prefix; // default: PREFIX env or /usr/local
     BuildTarget **install_targets;
     int           install_count, install_cap;
-    int           build_install;   // --build-install flag
+    int           build_install;  // --build-install flag
     // User args forwarded from -- on the CLI (#558)
     const char **user_args;
     int          user_args_count;
@@ -173,8 +186,9 @@ struct Builder {
 
 // The active build context for the current --build run.  Set by cc_run_build
 // before invoking the entry and cleared afterward.  The builder API ignores its
-// cosmetic `ctx` handle (a 64-bit pointer cannot be threaded through cc_run_at's
-// int argc slot) and uses this singleton instead -- one build run, one context.
+// cosmetic `ctx` handle (a 64-bit pointer cannot be threaded through
+// cc_run_at's int argc slot) and uses this singleton instead -- one build run,
+// one context.
 static Builder *s_ctx = NULL;
 
 // ============================================================================
@@ -192,7 +206,7 @@ static char *xstrdup(const char *s) {
 static int mkdir_p(const char *path) {
     if (!path || !*path)
         return 0;
-    char *tmp = xstrdup(path);
+    char  *tmp = xstrdup(path);
     size_t len = strlen(tmp);
     if (len && tmp[len - 1] == '/')
         tmp[len - 1] = '\0';
@@ -217,7 +231,7 @@ static char *dir_of(const char *path) {
     if (!slash)
         return xstrdup(".");
     size_t n = (size_t)(slash - path);
-    char *d = malloc(n + 1);
+    char  *d = malloc(n + 1);
     if (!d)
         error("build: out of memory");
     memcpy(d, path, n);
@@ -228,10 +242,10 @@ static char *dir_of(const char *path) {
 // Base name without directory or extension (for object file naming).
 static char *stem_of(const char *path) {
     const char *slash = strrchr(path, '/');
-    const char *base = slash ? slash + 1 : path;
-    const char *dot = strrchr(base, '.');
-    size_t n = dot ? (size_t)(dot - base) : strlen(base);
-    char *s = malloc(n + 1);
+    const char *base  = slash ? slash + 1 : path;
+    const char *dot   = strrchr(base, '.');
+    size_t      n     = dot ? (size_t)(dot - base) : strlen(base);
+    char       *s     = malloc(n + 1);
     if (!s)
         error("build: out of memory");
     memcpy(s, base, n);
@@ -242,7 +256,7 @@ static char *stem_of(const char *path) {
 // Join out_dir + "/" + rel into a freshly allocated path.
 static char *join(const char *a, const char *b) {
     size_t na = strlen(a), nb = strlen(b);
-    char *r = malloc(na + nb + 2);
+    char  *r = malloc(na + nb + 2);
     if (!r)
         error("build: out of memory");
     snprintf(r, na + nb + 2, "%s/%s", a, b);
@@ -257,25 +271,25 @@ static const char *builder_intern(Builder *ctx, char *s);
 static char *default_output(const BuildTarget *t) {
     char buf[512];
     switch (t->kind) {
-    case CCCC_TGT_EXE:
-        snprintf(buf, sizeof(buf), "bin/%s", t->name);
-        break;
-    case CCCC_TGT_STATIC:
-        snprintf(buf, sizeof(buf), "lib/lib%s.a", t->name);
-        break;
-    case CCCC_TGT_DYNAMIC:
-        snprintf(buf, sizeof(buf), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
-        break;
-    case CCCC_TGT_CUSTOM:
-        return xstrdup(""); // custom targets have no output artifact
-    case CCCC_TGT_BYTECODE:
-        if (t->bytecode_subkind == 1)
-            snprintf(buf, sizeof(buf), "lib/%s.c4a", t->name);
-        else if (t->bytecode_subkind == 2)
-            snprintf(buf, sizeof(buf), "lib/%s.c4d", t->name);
-        else
-            snprintf(buf, sizeof(buf), "bin/%s.c4", t->name);
-        break;
+        case CCCC_TGT_EXE:
+            snprintf(buf, sizeof(buf), "bin/%s", t->name);
+            break;
+        case CCCC_TGT_STATIC:
+            snprintf(buf, sizeof(buf), "lib/lib%s.a", t->name);
+            break;
+        case CCCC_TGT_DYNAMIC:
+            snprintf(buf, sizeof(buf), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
+            break;
+        case CCCC_TGT_CUSTOM:
+            return xstrdup(""); // custom targets have no output artifact
+        case CCCC_TGT_BYTECODE:
+            if (t->bytecode_subkind == 1)
+                snprintf(buf, sizeof(buf), "lib/%s.c4a", t->name);
+            else if (t->bytecode_subkind == 2)
+                snprintf(buf, sizeof(buf), "lib/%s.c4d", t->name);
+            else
+                snprintf(buf, sizeof(buf), "bin/%s.c4", t->name);
+            break;
     }
     return xstrdup(buf);
 }
@@ -302,10 +316,13 @@ static char *resolved_target_output(Builder *ctx, const BuildTarget *t) {
 // Passthrough stdout/stderr for posix_shell_with_io.  Both callbacks must be
 // set; if either is NULL the parent drain loop uses xrealloc/xmalloc instead.
 static void build_passthru_out(const char *d, size_t n, void *u) {
-    (void)u; fwrite(d, 1, n, stdout); fflush(stdout);
+    (void)u;
+    fwrite(d, 1, n, stdout);
+    fflush(stdout);
 }
 static void build_passthru_err(const char *d, size_t n, void *u) {
-    (void)u; fwrite(d, 1, n, stderr);
+    (void)u;
+    fwrite(d, 1, n, stderr);
 }
 
 // ============================================================================
@@ -333,33 +350,51 @@ static int tool_allowed(const Builder *ctx, const char *name) {
 // Run argv and capture stdout into *out (heap, NUL-terminated).
 // Returns exit code (0 = success, -1 = fork/exec error).
 static int run_capture(char *const argv[], char **out) {
-    if (!argv || !argv[0]) return -1;
+    if (!argv || !argv[0])
+        return -1;
     int pipefd[2];
-    if (pipe(pipefd) != 0) return -1;
+    if (pipe(pipefd) != 0)
+        return -1;
     pid_t pid = fork();
-    if (pid < 0) { close(pipefd[0]); close(pipefd[1]); return -1; }
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return -1;
+    }
     if (pid == 0) {
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
         // Suppress stderr (pkg-config error messages go there)
         int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
         execvp(argv[0], argv);
         _exit(127);
     }
     close(pipefd[1]);
 
     size_t cap = 256, len = 0;
-    char *buf = malloc(cap + 1);
-    if (!buf) { close(pipefd[0]); waitpid(pid, NULL, 0); return -1; }
+    char  *buf = malloc(cap + 1);
+    if (!buf) {
+        close(pipefd[0]);
+        waitpid(pid, NULL, 0);
+        return -1;
+    }
     ssize_t n;
-    char tmp[4096];
+    char    tmp[4096];
     while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
         if (len + (size_t)n >= cap) {
-            cap = (cap + (size_t)n) * 2;
+            cap      = (cap + (size_t)n) * 2;
             char *nb = realloc(buf, cap + 1);
-            if (!nb) { free(buf); close(pipefd[0]); waitpid(pid, NULL, 0); return -1; }
+            if (!nb) {
+                free(buf);
+                close(pipefd[0]);
+                waitpid(pid, NULL, 0);
+                return -1;
+            }
             buf = nb;
         }
         memcpy(buf + len, tmp, n);
@@ -367,7 +402,7 @@ static int run_capture(char *const argv[], char **out) {
     }
     close(pipefd[0]);
     buf[len] = '\0';
-    *out = buf;
+    *out     = buf;
 
     int status;
     waitpid(pid, &status, 0);
@@ -385,12 +420,14 @@ static int run_capture(char *const argv[], char **out) {
 // (find_target_by_name() also just returns the first match), which is
 // exactly the failure mode a two-pass build (pass1/pass2 compiling the same
 // binary name against different inputs) must not hit silently.
-static void check_name_unique(Builder *ctx, CcTargetKind kind, const char *name) {
+static void check_name_unique(Builder *ctx, CcTargetKind kind,
+                              const char *name) {
     for (int i = 0; i < ctx->targets_count; i++) {
         if (strcmp(ctx->targets[i]->name, name) == 0)
-            error("build: duplicate target name '%s' (first declared as kind %d, "
-                  "redeclared as kind %d) — target names must be unique",
-                  name, ctx->targets[i]->kind, kind);
+            error(
+                "build: duplicate target name '%s' (first declared as kind %d, "
+                "redeclared as kind %d) — target names must be unique",
+                name, ctx->targets[i]->kind, kind);
     }
 }
 
@@ -406,8 +443,8 @@ static BuildTarget *new_target(CcTargetKind kind, const char *name) {
     t->name = xstrdup(name);
     if (ctx->targets_count >= ctx->targets_cap) {
         ctx->targets_cap = ctx->targets_cap ? ctx->targets_cap * 2 : 8;
-        ctx->targets = realloc(ctx->targets,
-                               sizeof(*ctx->targets) * ctx->targets_cap);
+        ctx->targets =
+            realloc(ctx->targets, sizeof(*ctx->targets) * ctx->targets_cap);
         if (!ctx->targets)
             error("build: out of memory");
     }
@@ -425,7 +462,8 @@ static long long impl_static_lib(long long ctx, long long name) {
 }
 static long long impl_dynamic_lib(long long ctx, long long name) {
     (void)ctx;
-    return (long long)(intptr_t)new_target(CCCC_TGT_DYNAMIC, (const char *)name);
+    return (long long)(intptr_t)new_target(CCCC_TGT_DYNAMIC,
+                                           (const char *)name);
 }
 
 static long long impl_set_output(long long t, long long path) {
@@ -480,7 +518,9 @@ static long long impl_target_output(long long t) {
 static long long impl_declare_output(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     if (tgt->kind != CCCC_TGT_CUSTOM) {
-        fprintf(stderr, "build: DeclareOutput is only valid on a RunCustom target ('%s' is not one)\n",
+        fprintf(stderr,
+                "build: DeclareOutput is only valid on a RunCustom target "
+                "('%s' is not one)\n",
                 tgt->name);
         return 0;
     }
@@ -498,7 +538,9 @@ static long long impl_declare_output(long long t, long long path) {
 static long long impl_add_input(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     if (tgt->kind != CCCC_TGT_CUSTOM) {
-        fprintf(stderr, "build: AddInput is only valid on a RunCustom target ('%s' is not one)\n",
+        fprintf(stderr,
+                "build: AddInput is only valid on a RunCustom target ('%s' is "
+                "not one)\n",
                 tgt->name);
         return 0;
     }
@@ -511,13 +553,15 @@ static long long impl_add_input(long long t, long long path) {
 // afl-asan target. Threaded through run_step()/run_argv_env(); has no effect
 // on CCCC_TGT_CUSTOM targets, whose RunCustom command runs through the
 // vendored shell (build_shell.c), not run_argv.
-static long long impl_set_target_env(long long t, long long name, long long value) {
+static long long impl_set_target_env(long long t, long long name,
+                                     long long value) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *n = (const char *)name;
-    const char *v = (const char *)value;
-    if (!n || !*n) return 0;
-    size_t len = strlen(n) + strlen(v ? v : "") + 2;
-    char *entry = malloc(len);
+    const char  *n   = (const char *)name;
+    const char  *v   = (const char *)value;
+    if (!n || !*n)
+        return 0;
+    size_t len   = strlen(n) + strlen(v ? v : "") + 2;
+    char  *entry = malloc(len);
     if (!entry)
         error("build: out of memory");
     snprintf(entry, len, "%s=%s", n, v ? v : "");
@@ -525,20 +569,22 @@ static long long impl_set_target_env(long long t, long long name, long long valu
     return 0;
 }
 static long long impl_add_source(long long t, long long path) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->sources, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->sources,
+                  xstrdup((const char *)path));
     return 0;
 }
 static long long impl_add_include(long long t, long long path) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->includes, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->includes,
+                  xstrdup((const char *)path));
     return 0;
 }
 static long long impl_add_define(long long t, long long name, long long value) {
     const char *n = (const char *)name;
     const char *v = (const char *)value;
-    char *def;
+    char       *def;
     if (v && *v) {
         size_t len = strlen(n) + strlen(v) + 2;
-        def = malloc(len);
+        def        = malloc(len);
         if (!def)
             error("build: out of memory");
         snprintf(def, len, "%s=%s", n, v);
@@ -549,15 +595,18 @@ static long long impl_add_define(long long t, long long name, long long value) {
     return 0;
 }
 static long long impl_add_undef(long long t, long long name) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->undefs, xstrdup((const char *)name));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->undefs,
+                  xstrdup((const char *)name));
     return 0;
 }
 static long long impl_add_cflag(long long t, long long flag) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->cflags, xstrdup((const char *)flag));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->cflags,
+                  xstrdup((const char *)flag));
     return 0;
 }
 static long long impl_add_ldflag(long long t, long long flag) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags, xstrdup((const char *)flag));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags,
+                  xstrdup((const char *)flag));
     return 0;
 }
 // Internal helper: add a dependency edge.  link=1 → LinkWith (adds -l<dep>);
@@ -565,12 +614,13 @@ static long long impl_add_ldflag(long long t, long long flag) {
 static void add_dep(BuildTarget *tgt, BuildTarget *d, int link) {
     if (tgt->deps_count >= tgt->deps_cap) {
         tgt->deps_cap = tgt->deps_cap ? tgt->deps_cap * 2 : 4;
-        tgt->deps = realloc(tgt->deps, sizeof(*tgt->deps) * tgt->deps_cap);
-        tgt->deps_link = realloc(tgt->deps_link, sizeof(*tgt->deps_link) * tgt->deps_cap);
+        tgt->deps     = realloc(tgt->deps, sizeof(*tgt->deps) * tgt->deps_cap);
+        tgt->deps_link =
+            realloc(tgt->deps_link, sizeof(*tgt->deps_link) * tgt->deps_cap);
         if (!tgt->deps || !tgt->deps_link)
             error("build: out of memory");
     }
-    tgt->deps[tgt->deps_count] = d;
+    tgt->deps[tgt->deps_count]      = d;
     tgt->deps_link[tgt->deps_count] = link;
     tgt->deps_count++;
 }
@@ -586,11 +636,13 @@ static long long impl_depends_on(long long t, long long dep) {
     return 0;
 }
 static long long impl_add_lib(long long t, long long name) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->libs, xstrdup((const char *)name));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->libs,
+                  xstrdup((const char *)name));
     return 0;
 }
 static long long impl_add_libpath(long long t, long long path) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->libpaths, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->libpaths,
+                  xstrdup((const char *)path));
     return 0;
 }
 
@@ -606,7 +658,8 @@ static long long impl_add_libpath(long long t, long long path) {
 // and therefore --build-verbose output and object-file enumeration order —
 // is reproducible across machines/runs.
 static void glob_into(StringArray *into, const char *pat) {
-    if (!pat || !*pat) return;
+    if (!pat || !*pat)
+        return;
 #ifdef _POSIX_VERSION
     glob_t g;
     memset(&g, 0, sizeof(g));
@@ -639,39 +692,48 @@ static long long impl_add_sources_glob(long long t, long long pattern) {
 // immediately and cannot see such files; count_steps() and the ~70 existing
 // AddSourcesGlob-based tests rely on that immediate timing, so this is a
 // separate API rather than a change to AddSourcesGlob's behaviour.
-static long long impl_add_sources_glob_deferred(long long t, long long pattern) {
+static long long impl_add_sources_glob_deferred(long long t,
+                                                long long pattern) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *pat = (const char *)pattern;
-    if (!pat || !*pat) return 0;
+    const char  *pat = (const char *)pattern;
+    if (!pat || !*pat)
+        return 0;
     strarray_push(&tgt->deferred_globs, xstrdup(pat));
     return 0;
 }
 
 // AddSourceStr: write `content` to <out_dir>/gen/<name> and add it as a source.
 // The name must end in .c (or a similar compilable extension).
-static long long impl_add_source_str(long long t, long long name, long long content) {
-    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    Builder *ctx = s_ctx;
-    const char *fname = (const char *)name;
-    const char *body  = (const char *)content;
-    if (!fname || !body || !ctx) return -1;
+static long long impl_add_source_str(long long t, long long name,
+                                     long long content) {
+    BuildTarget *tgt   = (BuildTarget *)(intptr_t)t;
+    Builder     *ctx   = s_ctx;
+    const char  *fname = (const char *)name;
+    const char  *body  = (const char *)content;
+    if (!fname || !body || !ctx)
+        return -1;
 
     // Build the output path: <out_dir>/gen/<name>
     char *gendir = join(ctx->out_dir, "gen");
-    char *path = join(gendir, fname);
+    char *path   = join(gendir, fname);
     free(gendir);
 
     if (!ctx->dry_run) {
         char *d = dir_of(path);
         if (mkdir_p(d) != 0) {
-            fprintf(stderr, "build: failed to create gen dir for '%s'\n", fname);
-            free(d); free(path); return -1;
+            fprintf(stderr, "build: failed to create gen dir for '%s'\n",
+                    fname);
+            free(d);
+            free(path);
+            return -1;
         }
         free(d);
         FILE *f = fopen(path, "w");
         if (!f) {
-            fprintf(stderr, "build: failed to write generated source '%s'\n", path);
-            free(path); return -1;
+            fprintf(stderr, "build: failed to write generated source '%s'\n",
+                    path);
+            free(path);
+            return -1;
         }
         fputs(body, f);
         fclose(f);
@@ -684,7 +746,8 @@ static long long impl_add_source_str(long long t, long long name, long long cont
 // ExcludeSource: add a path or glob pattern to the target's exclude list.
 // Exclusions are applied in compile_sources() via fnmatch().
 static long long impl_exclude_source(long long t, long long path) {
-    strarray_push(&((BuildTarget *)(intptr_t)t)->excludes, xstrdup((const char *)path));
+    strarray_push(&((BuildTarget *)(intptr_t)t)->excludes,
+                  xstrdup((const char *)path));
     return 0;
 }
 
@@ -697,10 +760,15 @@ static long long impl_exclude_source(long long t, long long path) {
 static long long impl_have_tool(long long ctx, long long name) {
     (void)ctx;
     const char *tool = (const char *)name;
-    if (!s_ctx || !tool) return 0;
-    if (!tool_allowed(s_ctx, tool)) return 0;
+    if (!s_ctx || !tool)
+        return 0;
+    if (!tool_allowed(s_ctx, tool))
+        return 0;
     char *path = cccc_path_find_executable(tool);
-    if (path) { free(path); return 1; }
+    if (path) {
+        free(path);
+        return 1;
+    }
     return 0;
 }
 
@@ -708,26 +776,30 @@ static long long impl_have_tool(long long ctx, long long name) {
 // the target's compile/link flag arrays.  Returns 0 on success.
 // Flags starting with -I or -D go to cflags; everything else goes to ldflags.
 static long long impl_pkg_config(long long t, long long pkg) {
-    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *pkgname = (const char *)pkg;
-    if (!tgt || !pkgname || !s_ctx) return -1;
+    BuildTarget *tgt     = (BuildTarget *)(intptr_t)t;
+    const char  *pkgname = (const char *)pkg;
+    if (!tgt || !pkgname || !s_ctx)
+        return -1;
 
     if (!tool_allowed(s_ctx, "pkg-config")) {
-        fprintf(stderr, "build: PkgConfig: 'pkg-config' not in tool allowlist\n");
+        fprintf(stderr,
+                "build: PkgConfig: 'pkg-config' not in tool allowlist\n");
         return -1;
     }
 
 #ifdef _POSIX_VERSION
     char *cflags_out = NULL;
-    char *libs_out = NULL;
-    int rc = 0;
+    char *libs_out   = NULL;
+    int   rc         = 0;
 
     // Run pkg-config --cflags <pkg>
     {
-        char *argv[] = { "pkg-config", "--cflags", (char *)pkgname, NULL };
-        rc = run_capture(argv, &cflags_out);
+        char *argv[] = {"pkg-config", "--cflags", (char *)pkgname, NULL};
+        rc           = run_capture(argv, &cflags_out);
         if (rc != 0) {
-            fprintf(stderr, "build: PkgConfig: pkg-config --cflags %s failed (rc=%d)\n", pkgname, rc);
+            fprintf(stderr,
+                    "build: PkgConfig: pkg-config --cflags %s failed (rc=%d)\n",
+                    pkgname, rc);
             free(cflags_out);
             return rc;
         }
@@ -735,11 +807,14 @@ static long long impl_pkg_config(long long t, long long pkg) {
 
     // Run pkg-config --libs <pkg>
     {
-        char *argv[] = { "pkg-config", "--libs", (char *)pkgname, NULL };
-        rc = run_capture(argv, &libs_out);
+        char *argv[] = {"pkg-config", "--libs", (char *)pkgname, NULL};
+        rc           = run_capture(argv, &libs_out);
         if (rc != 0) {
-            fprintf(stderr, "build: PkgConfig: pkg-config --libs %s failed (rc=%d)\n", pkgname, rc);
-            free(cflags_out); free(libs_out);
+            fprintf(stderr,
+                    "build: PkgConfig: pkg-config --libs %s failed (rc=%d)\n",
+                    pkgname, rc);
+            free(cflags_out);
+            free(libs_out);
             return rc;
         }
     }
@@ -748,7 +823,8 @@ static long long impl_pkg_config(long long t, long long pkg) {
     if (cflags_out) {
         char *tok = strtok(cflags_out, " \t\n\r");
         while (tok) {
-            if (*tok) strarray_push(&tgt->cflags, xstrdup(tok));
+            if (*tok)
+                strarray_push(&tgt->cflags, xstrdup(tok));
             tok = strtok(NULL, " \t\n\r");
         }
         free(cflags_out);
@@ -758,7 +834,8 @@ static long long impl_pkg_config(long long t, long long pkg) {
     if (libs_out) {
         char *tok = strtok(libs_out, " \t\n\r");
         while (tok) {
-            if (*tok) strarray_push(&tgt->ldflags, xstrdup(tok));
+            if (*tok)
+                strarray_push(&tgt->ldflags, xstrdup(tok));
             tok = strtok(NULL, " \t\n\r");
         }
         free(libs_out);
@@ -783,7 +860,7 @@ static long long impl_run_custom(long long ctx, long long name, long long cmd) {
     if (!bctx)
         error("build: RunCustom called outside a build run");
     BuildTarget *t = new_target(CCCC_TGT_CUSTOM, (const char *)name);
-    t->command = xstrdup((const char *)cmd);
+    t->command     = xstrdup((const char *)cmd);
     return (long long)(intptr_t)t;
 }
 
@@ -794,11 +871,16 @@ static long long impl_run_custom(long long ctx, long long name, long long cmd) {
 // Intern a malloc'd string into the builder's capture pool so the pointer
 // stays valid until the builder is torn down.
 static const char *builder_intern(Builder *ctx, char *s) {
-    if (!s) return NULL;
+    if (!s)
+        return NULL;
     if (ctx->captures_count >= ctx->captures_cap) {
         ctx->captures_cap = ctx->captures_cap ? ctx->captures_cap * 2 : 8;
-        char **tmp = realloc(ctx->captures, ctx->captures_cap * sizeof(*ctx->captures));
-        if (!tmp) { free(s); return NULL; }
+        char **tmp =
+            realloc(ctx->captures, ctx->captures_cap * sizeof(*ctx->captures));
+        if (!tmp) {
+            free(s);
+            return NULL;
+        }
         ctx->captures = tmp;
     }
     ctx->captures[ctx->captures_count++] = s;
@@ -809,29 +891,35 @@ static const char *builder_intern(Builder *ctx, char *s) {
 static long long impl_get_env(long long ctx, long long name) {
     (void)ctx;
     const char *var = (const char *)name;
-    if (!var) return 0;
+    if (!var)
+        return 0;
     return (long long)(intptr_t)getenv(var);
 }
 
 // CaptureCommand: run cmd via sh -c and return stdout (trailing whitespace
-// stripped) as a NUL-terminated string owned by the builder, or NULL on failure.
+// stripped) as a NUL-terminated string owned by the builder, or NULL on
+// failure.
 static long long impl_capture_command(long long ctx, long long cmd) {
     (void)ctx;
     const char *command = (const char *)cmd;
-    if (!s_ctx || !command) return 0;
+    if (!s_ctx || !command)
+        return 0;
     if (!tool_allowed(s_ctx, "CaptureCommand")) {
         fprintf(stderr, "build: CaptureCommand is not in the tool allowlist\n");
         return 0;
     }
 #ifdef _POSIX_VERSION
-    char *out = NULL;
-    char *argv[] = { "sh", "-c", (char *)command, NULL };
-    int rc = run_capture(argv, &out);
-    if (rc != 0 || !out) { free(out); return 0; }
+    char *out    = NULL;
+    char *argv[] = {"sh", "-c", (char *)command, NULL};
+    int   rc     = run_capture(argv, &out);
+    if (rc != 0 || !out) {
+        free(out);
+        return 0;
+    }
     // Strip trailing whitespace/newlines
     size_t len = strlen(out);
-    while (len > 0 && (out[len-1] == '\n' || out[len-1] == '\r' ||
-                       out[len-1] == ' '  || out[len-1] == '\t'))
+    while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r' ||
+                       out[len - 1] == ' ' || out[len - 1] == '\t'))
         out[--len] = '\0';
     return (long long)(intptr_t)builder_intern(s_ctx, out);
 #else
@@ -843,7 +931,8 @@ static long long impl_capture_command(long long ctx, long long cmd) {
 static long long impl_file_exists(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!p) return 0;
+    if (!p)
+        return 0;
 #ifdef _POSIX_VERSION
     return access(p, F_OK) == 0 ? 1 : 0;
 #else
@@ -861,18 +950,23 @@ static long long impl_file_exists(long long ctx, long long path) {
 static long long impl_find_tool(long long ctx, long long name) {
     (void)ctx;
     const char *tool = (const char *)name;
-    if (!s_ctx || !tool) return 0;
-    if (!tool_allowed(s_ctx, tool)) return 0;
+    if (!s_ctx || !tool)
+        return 0;
+    if (!tool_allowed(s_ctx, tool))
+        return 0;
     char *path = cccc_path_find_executable(tool);
-    if (!path) return 0;
+    if (!path)
+        return 0;
     return (long long)(intptr_t)builder_intern(s_ctx, path);
 }
 
-// GetBuildOption: return the value of a --build-option=key=value option, or NULL.
+// GetBuildOption: return the value of a --build-option=key=value option, or
+// NULL.
 static long long impl_get_build_option(long long ctx, long long name) {
     (void)ctx;
     const char *key = (const char *)name;
-    if (!s_ctx || !key) return 0;
+    if (!s_ctx || !key)
+        return 0;
     size_t klen = strlen(key);
     for (int i = 0; i < s_ctx->build_options_count; i++) {
         const char *opt = s_ctx->build_options[i];
@@ -886,11 +980,13 @@ static long long impl_get_build_option(long long ctx, long long name) {
 static long long impl_have_build_option(long long ctx, long long name) {
     (void)ctx;
     const char *key = (const char *)name;
-    if (!s_ctx || !key) return 0;
+    if (!s_ctx || !key)
+        return 0;
     size_t klen = strlen(key);
     for (int i = 0; i < s_ctx->build_options_count; i++) {
         const char *opt = s_ctx->build_options[i];
-        if (strncmp(opt, key, klen) == 0 && (opt[klen] == '=' || opt[klen] == '\0'))
+        if (strncmp(opt, key, klen) == 0 &&
+            (opt[klen] == '=' || opt[klen] == '\0'))
             return 1;
     }
     return 0;
@@ -902,21 +998,25 @@ static long long impl_build_argc(long long ctx) {
     return s_ctx ? s_ctx->user_args_count : 0;
 }
 
-// BuildArgv: return the i-th user arg (0-based), or NULL if out of range (#558).
+// BuildArgv: return the i-th user arg (0-based), or NULL if out of range
+// (#558).
 static long long impl_build_argv(long long ctx, long long i) {
     (void)ctx;
-    if (!s_ctx || i < 0 || i >= s_ctx->user_args_count) return 0;
+    if (!s_ctx || i < 0 || i >= s_ctx->user_args_count)
+        return 0;
     return (long long)(intptr_t)s_ctx->user_args[i];
 }
 
-// AddFramework: macOS -framework <name> shorthand (cleaner than two AddLdFlag calls).
-// Adds two separate linker tokens: "-framework" and the framework name.
-// On non-Apple platforms the tokens are still added; the linker will reject them,
-// which is the expected behaviour (build scripts should guard with BuildHost).
+// AddFramework: macOS -framework <name> shorthand (cleaner than two AddLdFlag
+// calls). Adds two separate linker tokens: "-framework" and the framework name.
+// On non-Apple platforms the tokens are still added; the linker will reject
+// them, which is the expected behaviour (build scripts should guard with
+// BuildHost).
 static long long impl_add_framework(long long t, long long name) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *fw = (const char *)name;
-    if (!tgt || !fw) return -1;
+    const char  *fw  = (const char *)name;
+    if (!tgt || !fw)
+        return -1;
     strarray_push(&tgt->ldflags, xstrdup("-framework"));
     strarray_push(&tgt->ldflags, xstrdup(fw));
     return 0;
@@ -929,7 +1029,8 @@ static long long impl_add_framework(long long t, long long name) {
 static long long impl_set_install_prefix(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!s_ctx || !p) return 0;
+    if (!s_ctx || !p)
+        return 0;
     free(s_ctx->install_prefix);
     s_ctx->install_prefix = xstrdup(p);
     return 0;
@@ -938,13 +1039,17 @@ static long long impl_set_install_prefix(long long ctx, long long path) {
 static long long impl_install_artifact(long long ctx, long long t) {
     (void)ctx;
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    if (!s_ctx || !tgt) return 0;
-    if (!s_ctx->build_install) return 0; // no-op without --build-install
+    if (!s_ctx || !tgt)
+        return 0;
+    if (!s_ctx->build_install)
+        return 0; // no-op without --build-install
     if (s_ctx->install_count >= s_ctx->install_cap) {
         s_ctx->install_cap = s_ctx->install_cap ? s_ctx->install_cap * 2 : 4;
-        BuildTarget **tmp = realloc(s_ctx->install_targets,
-                                    s_ctx->install_cap * sizeof(*s_ctx->install_targets));
-        if (!tmp) return -1;
+        BuildTarget **tmp =
+            realloc(s_ctx->install_targets,
+                    s_ctx->install_cap * sizeof(*s_ctx->install_targets));
+        if (!tmp)
+            return -1;
         s_ctx->install_targets = tmp;
     }
     s_ctx->install_targets[s_ctx->install_count++] = tgt;
@@ -964,9 +1069,11 @@ static long long impl_build_wants_install(long long ctx) {
 static long long impl_dir_exists(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!p) return 0;
+    if (!p)
+        return 0;
     struct stat st;
-    if (stat(p, &st) != 0) return 0;
+    if (stat(p, &st) != 0)
+        return 0;
     return S_ISDIR(st.st_mode) ? 1 : 0;
 }
 
@@ -974,18 +1081,27 @@ static long long impl_dir_exists(long long ctx, long long path) {
 // or NULL on no match or non-POSIX platforms.
 static long long impl_glob_files(long long ctx, long long pattern) {
     (void)ctx;
-    if (!s_ctx || !pattern) return 0;
+    if (!s_ctx || !pattern)
+        return 0;
 #ifdef _POSIX_VERSION
     glob_t g;
-    int rc = glob((const char *)pattern, GLOB_TILDE, NULL, &g);
-    if (rc != 0) { if (rc != GLOB_NOMATCH) globfree(&g); return 0; }
+    int    rc = glob((const char *)pattern, GLOB_TILDE, NULL, &g);
+    if (rc != 0) {
+        if (rc != GLOB_NOMATCH)
+            globfree(&g);
+        return 0;
+    }
     char **arr = malloc((g.gl_pathc + 1) * sizeof(char *));
-    if (!arr) { globfree(&g); return 0; }
+    if (!arr) {
+        globfree(&g);
+        return 0;
+    }
     for (size_t i = 0; i < g.gl_pathc; i++)
         arr[i] = (char *)builder_intern(s_ctx, xstrdup(g.gl_pathv[i]));
     arr[g.gl_pathc] = NULL;
     globfree(&g);
-    // Intern the array pointer itself so it is freed when the builder is torn down.
+    // Intern the array pointer itself so it is freed when the builder is torn
+    // down.
     builder_intern(s_ctx, (char *)arr);
     return (long long)(intptr_t)arr;
 #else
@@ -997,17 +1113,30 @@ static long long impl_glob_files(long long ctx, long long pattern) {
 // Returns NULL on error or if the file exceeds the size limit.
 static long long impl_read_file(long long ctx, long long path) {
     (void)ctx;
-    if (!s_ctx || !path) return 0;
+    if (!s_ctx || !path)
+        return 0;
     FILE *f = fopen((const char *)path, "rb");
-    if (!f) return 0;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    if (!f)
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return 0;
+    }
     long sz = ftell(f);
     rewind(f);
-    if (sz < 0 || sz > 4 * 1024 * 1024) { fclose(f); return 0; }
+    if (sz < 0 || sz > 4 * 1024 * 1024) {
+        fclose(f);
+        return 0;
+    }
     char *buf = malloc((size_t)sz + 1);
-    if (!buf) { fclose(f); return 0; }
+    if (!buf) {
+        fclose(f);
+        return 0;
+    }
     if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
-        fclose(f); free(buf); return 0;
+        fclose(f);
+        free(buf);
+        return 0;
     }
     fclose(f);
     buf[sz] = '\0';
@@ -1016,18 +1145,24 @@ static long long impl_read_file(long long ctx, long long path) {
 
 // WriteFile: write content to path, creating parent directories as needed.
 // Returns 0 on success, -1 on failure.
-static long long impl_write_file(long long ctx, long long path, long long content) {
+static long long impl_write_file(long long ctx, long long path,
+                                 long long content) {
     (void)ctx;
     const char *p = (const char *)path;
     const char *c = (const char *)content;
-    if (!p || !c) return -1;
+    if (!p || !c)
+        return -1;
     char *d = dir_of(p);
-    if (mkdir_p(d) != 0) { free(d); return -1; }
+    if (mkdir_p(d) != 0) {
+        free(d);
+        return -1;
+    }
     free(d);
     FILE *f = fopen(p, "wb");
-    if (!f) return -1;
-    size_t n = strlen(c);
-    int ok = fwrite(c, 1, n, f) == n;
+    if (!f)
+        return -1;
+    size_t n  = strlen(c);
+    int    ok = fwrite(c, 1, n, f) == n;
     fclose(f);
     return ok ? 0 : -1;
 }
@@ -1059,9 +1194,10 @@ static long long impl_build_run_default(long long ctx);
 // ============================================================================
 
 static long long impl_set_toolchain(long long t, long long cc) {
-    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *compiler = (const char *)cc;
-    if (!tgt || !compiler) return 0;
+    BuildTarget *tgt      = (BuildTarget *)(intptr_t)t;
+    const char  *compiler = (const char *)cc;
+    if (!tgt || !compiler)
+        return 0;
     free(tgt->cc_override);
     tgt->cc_override = xstrdup(compiler);
     return 0;
@@ -1069,8 +1205,9 @@ static long long impl_set_toolchain(long long t, long long cc) {
 
 static long long impl_set_target_triple(long long t, long long triple) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *tr = (const char *)triple;
-    if (!tgt || !tr) return 0;
+    const char  *tr  = (const char *)triple;
+    if (!tgt || !tr)
+        return 0;
     free(tgt->target_triple);
     tgt->target_triple = xstrdup(tr);
     return 0;
@@ -1086,9 +1223,10 @@ static long long impl_build_target_triple(long long ctx) {
 // ============================================================================
 
 static long long impl_set_profile(long long t, long long p) {
-    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    const char *prof = (const char *)p;
-    if (!tgt || !prof) return 0;
+    BuildTarget *tgt  = (BuildTarget *)(intptr_t)t;
+    const char  *prof = (const char *)p;
+    if (!tgt || !prof)
+        return 0;
     free(tgt->profile);
     tgt->profile = xstrdup(prof);
     return 0;
@@ -1129,74 +1267,133 @@ static long long impl_mkdir(long long ctx, long long path);
 static long long impl_delete_dir(long long ctx, long long path);
 
 void cc_load_build_runtime(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "__builtin_build_executable",    (void *)impl_executable,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_static_lib",    (void *)impl_static_lib,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_dynamic_lib",   (void *)impl_dynamic_lib,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_output",    (void *)impl_set_output,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_target_output", (void *)impl_target_output,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_declare_output",(void *)impl_declare_output,     2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_input",     (void *)impl_add_input,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_source",    (void *)impl_add_source,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_sources_glob",(void*)impl_add_sources_glob,  2, 0);
+    cc_register_cfunc(vm, "__builtin_build_executable", (void *)impl_executable,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_static_lib", (void *)impl_static_lib,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_dynamic_lib",
+                      (void *)impl_dynamic_lib, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_output", (void *)impl_set_output,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_output",
+                      (void *)impl_target_output, 1, 0);
+    cc_register_cfunc(vm, "__builtin_build_declare_output",
+                      (void *)impl_declare_output, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_input", (void *)impl_add_input,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_source", (void *)impl_add_source,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_sources_glob",
+                      (void *)impl_add_sources_glob, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_sources_glob_deferred",
-                       (void*)impl_add_sources_glob_deferred,                                2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_source_str",(void *)impl_add_source_str,     3, 0);
-    cc_register_cfunc(vm, "__builtin_build_exclude_source",(void *)impl_exclude_source,     2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_include",   (void *)impl_add_include,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_define",    (void *)impl_add_define,         3, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_undef",     (void *)impl_add_undef,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_cflag",     (void *)impl_add_cflag,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_ldflag",    (void *)impl_add_ldflag,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_target_env",(void *)impl_set_target_env,     3, 0);
-    cc_register_cfunc(vm, "__builtin_build_link_with",     (void *)impl_link_with,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_depends_on",    (void *)impl_depends_on,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_lib",       (void *)impl_add_lib,            2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_libpath",   (void *)impl_add_libpath,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_have_tool",       (void *)impl_have_tool,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_pkg_config",      (void *)impl_pkg_config,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_run_custom",      (void *)impl_run_custom,         3, 0);
-    cc_register_cfunc(vm, "__builtin_build_get_env",         (void *)impl_get_env,            2, 0);
-    cc_register_cfunc(vm, "__builtin_build_capture_command", (void *)impl_capture_command,    2, 0);
-    cc_register_cfunc(vm, "__builtin_build_file_exists",     (void *)impl_file_exists,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_root",          (void *)impl_build_root,         1, 0);
-    cc_register_cfunc(vm, "__builtin_build_out_dir",       (void *)impl_build_out_dir,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_host",          (void *)impl_build_host,         1, 0);
-    cc_register_cfunc(vm, "__builtin_build_verbose",       (void *)impl_build_verbose,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_run",           (void *)impl_build_run,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_run_all",       (void *)impl_build_run_all,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_run_default",   (void *)impl_build_run_default,  1, 0);
-    cc_register_cfunc(vm, "__builtin_build_target_count",  (void *)impl_target_count,       1, 0);
-    cc_register_cfunc(vm, "__builtin_build_target_name",   (void *)impl_target_name,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_profile",       (void *)impl_set_profile,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_profile",           (void *)impl_build_profile,      1, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_toolchain",     (void *)impl_set_toolchain,      2, 0);
-    cc_register_cfunc(vm, "__builtin_build_set_target_triple", (void *)impl_set_target_triple,  2, 0);
-    cc_register_cfunc(vm, "__builtin_build_target_triple",     (void *)impl_build_target_triple,1, 0);
+                      (void *)impl_add_sources_glob_deferred, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_source_str",
+                      (void *)impl_add_source_str, 3, 0);
+    cc_register_cfunc(vm, "__builtin_build_exclude_source",
+                      (void *)impl_exclude_source, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_include",
+                      (void *)impl_add_include, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_define", (void *)impl_add_define,
+                      3, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_undef", (void *)impl_add_undef,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_cflag", (void *)impl_add_cflag,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_ldflag", (void *)impl_add_ldflag,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_target_env",
+                      (void *)impl_set_target_env, 3, 0);
+    cc_register_cfunc(vm, "__builtin_build_link_with", (void *)impl_link_with,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_depends_on", (void *)impl_depends_on,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_lib", (void *)impl_add_lib, 2,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_add_libpath",
+                      (void *)impl_add_libpath, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_have_tool", (void *)impl_have_tool,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_pkg_config", (void *)impl_pkg_config,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_custom", (void *)impl_run_custom,
+                      3, 0);
+    cc_register_cfunc(vm, "__builtin_build_get_env", (void *)impl_get_env, 2,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_capture_command",
+                      (void *)impl_capture_command, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_file_exists",
+                      (void *)impl_file_exists, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_root", (void *)impl_build_root, 1,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_out_dir", (void *)impl_build_out_dir,
+                      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_host", (void *)impl_build_host, 1,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_verbose", (void *)impl_build_verbose,
+                      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_run", (void *)impl_build_run, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_all", (void *)impl_build_run_all,
+                      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_run_default",
+                      (void *)impl_build_run_default, 1, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_count",
+                      (void *)impl_target_count, 1, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_name",
+                      (void *)impl_target_name, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_profile",
+                      (void *)impl_set_profile, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_profile", (void *)impl_build_profile,
+                      1, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_toolchain",
+                      (void *)impl_set_toolchain, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_target_triple",
+                      (void *)impl_set_target_triple, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_target_triple",
+                      (void *)impl_build_target_triple, 1, 0);
     // #559
-    cc_register_cfunc(vm, "__builtin_build_find_tool",         (void *)impl_find_tool,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_get_build_option",  (void *)impl_get_build_option,   2, 0);
-    cc_register_cfunc(vm, "__builtin_build_have_build_option", (void *)impl_have_build_option,  2, 0);
-    cc_register_cfunc(vm, "__builtin_build_add_framework",     (void *)impl_add_framework,      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_find_tool", (void *)impl_find_tool,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_get_build_option",
+                      (void *)impl_get_build_option, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_have_build_option",
+                      (void *)impl_have_build_option, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_framework",
+                      (void *)impl_add_framework, 2, 0);
     // #560
-    cc_register_cfunc(vm, "__builtin_build_set_install_prefix",(void *)impl_set_install_prefix, 2, 0);
-    cc_register_cfunc(vm, "__builtin_build_install_artifact",  (void *)impl_install_artifact,   2, 0);
-    cc_register_cfunc(vm, "__builtin_build_wants_install",     (void *)impl_build_wants_install, 1, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_install_prefix",
+                      (void *)impl_set_install_prefix, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_install_artifact",
+                      (void *)impl_install_artifact, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_wants_install",
+                      (void *)impl_build_wants_install, 1, 0);
     // #558
-    cc_register_cfunc(vm, "__builtin_build_argc",              (void *)impl_build_argc,          1, 0);
-    cc_register_cfunc(vm, "__builtin_build_argv",              (void *)impl_build_argv,          2, 0);
+    cc_register_cfunc(vm, "__builtin_build_argc", (void *)impl_build_argc, 1,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_argv", (void *)impl_build_argv, 2,
+                      0);
     // #561
-    cc_register_cfunc(vm, "__builtin_build_dir_exists",        (void *)impl_dir_exists,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_glob_files",        (void *)impl_glob_files,         2, 0);
-    cc_register_cfunc(vm, "__builtin_build_read_file",         (void *)impl_read_file,          2, 0);
-    cc_register_cfunc(vm, "__builtin_build_write_file",        (void *)impl_write_file,         3, 0);
+    cc_register_cfunc(vm, "__builtin_build_dir_exists", (void *)impl_dir_exists,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_glob_files", (void *)impl_glob_files,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_read_file", (void *)impl_read_file,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_write_file", (void *)impl_write_file,
+                      3, 0);
     // #569
-    cc_register_cfunc(vm, "__builtin_build_set_cwd",           (void *)impl_set_cwd,            2, 0);
-    cc_register_cfunc(vm, "__builtin_build_get_cwd",           (void *)impl_get_cwd,            1, 0);
-    cc_register_cfunc(vm, "__builtin_build_copy_file",         (void *)impl_copy_file,          3, 0);
-    cc_register_cfunc(vm, "__builtin_build_move_file",         (void *)impl_move_file,          3, 0);
-    cc_register_cfunc(vm, "__builtin_build_delete_file",       (void *)impl_delete_file,        2, 0);
-    cc_register_cfunc(vm, "__builtin_build_mkdir",             (void *)impl_mkdir,              2, 0);
-    cc_register_cfunc(vm, "__builtin_build_delete_dir",        (void *)impl_delete_dir,         2, 0);
+    cc_register_cfunc(vm, "__builtin_build_set_cwd", (void *)impl_set_cwd, 2,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_get_cwd", (void *)impl_get_cwd, 1,
+                      0);
+    cc_register_cfunc(vm, "__builtin_build_copy_file", (void *)impl_copy_file,
+                      3, 0);
+    cc_register_cfunc(vm, "__builtin_build_move_file", (void *)impl_move_file,
+                      3, 0);
+    cc_register_cfunc(vm, "__builtin_build_delete_file",
+                      (void *)impl_delete_file, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_mkdir", (void *)impl_mkdir, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_delete_dir", (void *)impl_delete_dir,
+                      2, 0);
 }
 
 // ============================================================================
@@ -1233,10 +1430,12 @@ static char *effective_cc_for_target(const Builder *ctx, const BuildTarget *t) {
 // Effective triple: t->target_triple ?? ctx->cross_triple.
 // --target is accepted by clang; gcc-style cross-compilers use a prefixed
 // binary (SetToolchain) and do not need this flag.
-static void push_cross_flags(ArgVec *args, const Builder *ctx, const BuildTarget *t,
-                             StringArray *owned) {
-    const char *triple = t->target_triple ? t->target_triple : ctx->cross_triple;
-    if (!triple || !*triple) return;
+static void push_cross_flags(ArgVec *args, const Builder *ctx,
+                             const BuildTarget *t, StringArray *owned) {
+    const char *triple =
+        t->target_triple ? t->target_triple : ctx->cross_triple;
+    if (!triple || !*triple)
+        return;
     // Must be a single joined "--target=<triple>" token (#842): clang
     // accepts "--target=<triple>" or "-target <triple>" (single dash, two
     // tokens) but NOT "--target <triple>" (double dash, two tokens) --
@@ -1245,7 +1444,7 @@ static void push_cross_flags(ArgVec *args, const Builder *ctx, const BuildTarget
     // exercised by a real (non-dry-run) build before #842 added
     // macos_x86_64 to build.c.
     size_t len = strlen(triple) + 10;
-    char *f = malloc(len);
+    char  *f   = malloc(len);
     if (!f)
         error("build: out of memory");
     snprintf(f, len, "--target=%s", triple);
@@ -1262,7 +1461,8 @@ static void push_cross_flags(ArgVec *args, const Builder *ctx, const BuildTarget
 // Profile flags intentionally do NOT include -DNDEBUG here; that is added
 // as a define flag in push_profile_defines() below.
 static void push_profile_cflags(ArgVec *args, const char *profile) {
-    if (!profile) return;
+    if (!profile)
+        return;
     if (strcmp(profile, "debug") == 0) {
         argv_push(args, "-g");
         argv_push(args, "-O0");
@@ -1274,14 +1474,17 @@ static void push_profile_cflags(ArgVec *args, const char *profile) {
     } else if (strcmp(profile, "minsizerel") == 0) {
         argv_push(args, "-Os");
     } else {
-        fprintf(stderr, "build: unknown profile '%s' (valid: debug, release, "
-                "relwithdebinfo, minsizerel)\n", profile);
+        fprintf(stderr,
+                "build: unknown profile '%s' (valid: debug, release, "
+                "relwithdebinfo, minsizerel)\n",
+                profile);
     }
 }
 
 // Push -DNDEBUG for profiles that use it.
 static void push_profile_defines(ArgVec *args, const char *profile) {
-    if (!profile) return;
+    if (!profile)
+        return;
     if (strcmp(profile, "release") == 0 ||
         strcmp(profile, "relwithdebinfo") == 0 ||
         strcmp(profile, "minsizerel") == 0) {
@@ -1316,8 +1519,9 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
         strarray_push(owned, f);
         argv_push(args, f);
     }
-    // Profile flags: pushed before target-specific flags so targets can override.
-    // Effective profile = per-target override else global ctx->profile.
+    // Profile flags: pushed before target-specific flags so targets can
+    // override. Effective profile = per-target override else global
+    // ctx->profile.
     const char *profile = t->profile ? t->profile : ctx->profile;
     push_profile_cflags(args, profile);
     push_profile_defines(args, profile);
@@ -1348,7 +1552,8 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
 // Variant for kind=bytecode targets: forward only flags that cccc understands.
 // Skips native cflags/ldflags/profile flags; forwards -I, -D, -U, and --std.
 static void push_compile_flags_bytecode(ArgVec *args, const Builder *ctx,
-                                        const BuildTarget *t, StringArray *owned) {
+                                        const BuildTarget *t,
+                                        StringArray       *owned) {
     const CcNativeCompileArgs *d = ctx->defaults;
     if (d && d->std_arg) {
         char *f = malloc(strlen(d->std_arg) + 10);
@@ -1398,7 +1603,8 @@ static void free_strarray(StringArray *a) {
     a->len = a->capacity = 0;
 }
 
-// Print a command line the same way it would be executed (for progress / dry-run).
+// Print a command line the same way it would be executed (for progress /
+// dry-run).
 static void print_cmd(int n, int total, char *const argv[]) {
     printf("[%d/%d]", n, total);
     for (int i = 0; argv[i]; i++)
@@ -1411,7 +1617,8 @@ static void print_cmd(int n, int total, char *const argv[]) {
 // SetTargetEnv() entries (t->env), they are applied on top of the process
 // environment for this child only — e.g. AFL_USE_ASAN=1 for an afl-asan
 // target (#842).
-static int run_step(Builder *ctx, int n, int total, ArgVec *args, const BuildTarget *t) {
+static int run_step(Builder *ctx, int n, int total, ArgVec *args,
+                    const BuildTarget *t) {
     if (!ctx->quiet || ctx->verbose || ctx->dry_run) {
         print_cmd(n, total, (char *const *)args->data);
         fflush(stdout);
@@ -1419,7 +1626,8 @@ static int run_step(Builder *ctx, int n, int total, ArgVec *args, const BuildTar
     if (ctx->dry_run)
         return 0;
     if (t && t->env.len > 0)
-        return run_argv_env((char *const *)args->data, (char *const *)t->env.data);
+        return run_argv_env((char *const *)args->data,
+                            (char *const *)t->env.data);
     return run_argv((char *const *)args->data);
 }
 
@@ -1472,15 +1680,19 @@ static int source_is_excluded(const BuildTarget *t, const char *src) {
 
 static uint64_t fnv1a_update(uint64_t h, const void *data, size_t n) {
     const unsigned char *p = (const unsigned char *)data;
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= CACHE_FNV_PRIME; }
+    for (size_t i = 0; i < n; i++) {
+        h ^= p[i];
+        h *= CACHE_FNV_PRIME;
+    }
     return h;
 }
 
 static uint64_t fnv1a_file(const char *path, uint64_t h) {
     FILE *f = fopen(path, "rb");
-    if (!f) return h;
+    if (!f)
+        return h;
     unsigned char buf[8192];
-    size_t n;
+    size_t        n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
         h = fnv1a_update(h, buf, n);
     fclose(f);
@@ -1502,12 +1714,16 @@ static uint64_t fnv1a_file(const char *path, uint64_t h) {
 // this objdir hasn't compiled the source yet could otherwise collide with
 // (and silently restore) an object some other objdir compiled against
 // different header content.
-static uint64_t source_cache_key(const char *src, char *const *argv, StringArray *prereqs) {
+static uint64_t source_cache_key(const char *src, char *const *argv,
+                                 StringArray *prereqs) {
     uint64_t h = CACHE_FNV_OFFSET;
     h = fnv1a_update(h, CCCC_HOST_ARCH_TAG, strlen(CCCC_HOST_ARCH_TAG));
     h = fnv1a_update(h, "\0", 1);
     for (int i = 0; argv[i]; i++) {
-        if (strcmp(argv[i], "-o") == 0) { i++; continue; } // skip -o <path>
+        if (strcmp(argv[i], "-o") == 0) {
+            i++;
+            continue;
+        } // skip -o <path>
         h = fnv1a_update(h, argv[i], strlen(argv[i]));
         h = fnv1a_update(h, "\0", 1); // arg separator
     }
@@ -1527,13 +1743,23 @@ static uint64_t source_cache_key(const char *src, char *const *argv, StringArray
 // cannot safely touch the CAS", not as "this source has zero headers".
 static int read_dep_prereqs(const char *dfile, StringArray *out) {
     FILE *f = fopen(dfile, "rb");
-    if (!f) return 0;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    if (!f)
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return 0;
+    }
     long size = ftell(f);
-    if (size < 0) { fclose(f); return 0; }
+    if (size < 0) {
+        fclose(f);
+        return 0;
+    }
     rewind(f);
     char *buf = malloc((size_t)size + 1);
-    if (!buf) { fclose(f); return 0; }
+    if (!buf) {
+        fclose(f);
+        return 0;
+    }
     size_t n = fread(buf, 1, (size_t)size, f);
     fclose(f);
     buf[n] = '\0';
@@ -1542,28 +1768,36 @@ static int read_dep_prereqs(const char *dfile, StringArray *out) {
     // so the tokenizer below can treat the whole rule as one line.
     for (char *p = buf; *p; p++) {
         if (p[0] == '\\' && p[1] == '\n') {
-            p[0] = ' '; p[1] = ' ';
+            p[0] = ' ';
+            p[1] = ' ';
         } else if (p[0] == '\\' && p[1] == '\r' && p[2] == '\n') {
-            p[0] = ' '; p[1] = ' '; p[2] = ' ';
+            p[0] = ' ';
+            p[1] = ' ';
+            p[2] = ' ';
         }
     }
 
     // Skip past "target:" -- everything before the first ':' is the rule's
     // target list (the .o itself), not a prerequisite.
     char *rest = strchr(buf, ':');
-    if (!rest) { free(buf); return 1; } // malformed/empty .d: zero prereqs
+    if (!rest) {
+        free(buf);
+        return 1;
+    } // malformed/empty .d: zero prereqs
     rest++;
 
     char *p = rest;
     while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-        if (!*p) break;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        if (!*p)
+            break;
         char *tok_start = p;
         char *w = p; // collapses escaped "\ " -> " " in place as we scan
         while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
             if (p[0] == '\\' && p[1] == ' ') {
-                *w++ = ' ';
-                p += 2;
+                *w++  = ' ';
+                p    += 2;
             } else {
                 *w++ = *p++;
             }
@@ -1592,10 +1826,13 @@ static int read_dep_prereqs(const char *dfile, StringArray *out) {
 // => not current: a first build, or an objdir compiled before this .d
 // tracking existed, must not be trusted by mtime alone once header tracking
 // is available -- this self-heals a stale objdir on its next build.
-static int ofile_is_current(const char *ofile, const char *src, const char *dfile) {
+static int ofile_is_current(const char *ofile, const char *src,
+                            const char *dfile) {
     struct stat o_st, s_st;
-    if (stat(ofile, &o_st) != 0 || stat(src, &s_st) != 0) return 0;
-    if (o_st.st_mtime < s_st.st_mtime) return 0;
+    if (stat(ofile, &o_st) != 0 || stat(src, &s_st) != 0)
+        return 0;
+    if (o_st.st_mtime < s_st.st_mtime)
+        return 0;
 
     StringArray prereqs = {0};
     if (!read_dep_prereqs(dfile, &prereqs)) {
@@ -1605,7 +1842,8 @@ static int ofile_is_current(const char *ofile, const char *src, const char *dfil
     int current = 1;
     for (int i = 0; i < prereqs.len; i++) {
         struct stat h_st;
-        if (stat(prereqs.data[i], &h_st) != 0 || o_st.st_mtime < h_st.st_mtime) {
+        if (stat(prereqs.data[i], &h_st) != 0 ||
+            o_st.st_mtime < h_st.st_mtime) {
             current = 0;
             break;
         }
@@ -1648,11 +1886,13 @@ static int arch_stamp_matches(const char *objdir) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/.cccc-arch", objdir);
     FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    char buf[64] = {0};
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    if (!f)
+        return 0;
+    char   buf[64] = {0};
+    size_t n       = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
-    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+        buf[--n] = '\0';
     return strcmp(buf, CCCC_HOST_ARCH_TAG) == 0;
 }
 
@@ -1660,7 +1900,8 @@ static void arch_stamp_write(const char *objdir) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/.cccc-arch", objdir);
     FILE *f = fopen(path, "wb");
-    if (!f) return;
+    if (!f)
+        return;
     fputs(CCCC_HOST_ARCH_TAG, f);
     fclose(f);
 }
@@ -1683,7 +1924,10 @@ static void arch_stamp_write(const char *objdir) {
 static uint64_t link_argv_hash(char *const *argv) {
     uint64_t h = CACHE_FNV_OFFSET;
     for (int i = 0; argv[i]; i++) {
-        if (strcmp(argv[i], "-o") == 0) { i++; continue; }
+        if (strcmp(argv[i], "-o") == 0) {
+            i++;
+            continue;
+        }
         h = fnv1a_update(h, argv[i], strlen(argv[i]));
         h = fnv1a_update(h, "\0", 1);
     }
@@ -1694,11 +1938,13 @@ static int link_stamp_matches(const char *tobjdir, uint64_t hash) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/.cccc-link", tobjdir);
     FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    char buf[32] = {0};
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    if (!f)
+        return 0;
+    char   buf[32] = {0};
+    size_t n       = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
-    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+        buf[--n] = '\0';
     return strtoull(buf, NULL, 16) == hash;
 }
 
@@ -1706,7 +1952,8 @@ static void link_stamp_write(const char *tobjdir, uint64_t hash) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/.cccc-link", tobjdir);
     FILE *f = fopen(path, "wb");
-    if (!f) return;
+    if (!f)
+        return;
     fprintf(f, "%016llx", (unsigned long long)hash);
     fclose(f);
 }
@@ -1715,10 +1962,11 @@ static void link_stamp_write(const char *tobjdir, uint64_t hash) {
 // obj_paths[0..obj_count), and the link argv hash matches the stamp written
 // after the last successful link/archive step.
 static int link_output_is_current(const char *out_abs, char *const *obj_paths,
-                                   int obj_count, char *const *argv,
-                                   const char *tobjdir) {
+                                  int obj_count, char *const *argv,
+                                  const char *tobjdir) {
     struct stat out_st;
-    if (stat(out_abs, &out_st) != 0) return 0;
+    if (stat(out_abs, &out_st) != 0)
+        return 0;
     for (int i = 0; i < obj_count; i++) {
         struct stat o_st;
         if (stat(obj_paths[i], &o_st) != 0 || out_st.st_mtime < o_st.st_mtime)
@@ -1728,9 +1976,8 @@ static int link_output_is_current(const char *out_abs, char *const *obj_paths,
 }
 
 // CAS layout: <cache_dir>/<key[0:2]>/<key_hex><ext>
-static void cache_entry_path(char *buf, size_t len,
-                              const char *cache_dir, uint64_t key,
-                              const char *ext) {
+static void cache_entry_path(char *buf, size_t len, const char *cache_dir,
+                             uint64_t key, const char *ext) {
     char hex[17];
     snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)key);
     snprintf(buf, len, "%s/%.2s/%s%s", cache_dir, hex, hex, ext);
@@ -1739,17 +1986,25 @@ static void cache_entry_path(char *buf, size_t len,
 // Simple binary file copy; returns 0 on success, -1 on error.
 static int copy_file(const char *src, const char *dst) {
     FILE *in = fopen(src, "rb");
-    if (!in) return -1;
+    if (!in)
+        return -1;
     FILE *out = fopen(dst, "wb");
-    if (!out) { fclose(in); return -1; }
-    char buf[8192];
+    if (!out) {
+        fclose(in);
+        return -1;
+    }
+    char   buf[8192];
     size_t n;
-    int rc = 0;
+    int    rc = 0;
     while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
-        if (fwrite(buf, 1, n, out) != n) { rc = -1; break; }
+        if (fwrite(buf, 1, n, out) != n) {
+            rc = -1;
+            break;
+        }
     fclose(in);
     fclose(out);
-    if (rc != 0) remove(dst);
+    if (rc != 0)
+        remove(dst);
     return rc;
 }
 
@@ -1760,7 +2015,8 @@ static int copy_file(const char *src, const char *dst) {
 static long long impl_set_cwd(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!s_ctx || !p) return -1;
+    if (!s_ctx || !p)
+        return -1;
     // Save original CWD on first call for auto-restore at teardown.
     if (!s_ctx->original_cwd) {
         char buf[4096];
@@ -1772,30 +2028,40 @@ static long long impl_set_cwd(long long ctx, long long path) {
 
 static long long impl_get_cwd(long long ctx) {
     (void)ctx;
-    if (!s_ctx) return 0;
+    if (!s_ctx)
+        return 0;
     char buf[4096];
-    if (!getcwd(buf, sizeof(buf))) return 0;
+    if (!getcwd(buf, sizeof(buf)))
+        return 0;
     char *copy = strdup(buf);
-    if (!copy) return 0;
+    if (!copy)
+        return 0;
     return (long long)(intptr_t)builder_intern(s_ctx, copy);
 }
 
 static long long impl_copy_file(long long ctx, long long src, long long dst) {
     (void)ctx;
     const char *s = (const char *)src, *d = (const char *)dst;
-    if (!s || !d) return -1;
+    if (!s || !d)
+        return -1;
     return copy_file(s, d);
 }
 
 static long long impl_move_file(long long ctx, long long src, long long dst) {
     (void)ctx;
     const char *s = (const char *)src, *d = (const char *)dst;
-    if (!s || !d) return -1;
-    if (rename(s, d) == 0) return 0;
+    if (!s || !d)
+        return -1;
+    if (rename(s, d) == 0)
+        return 0;
     // Cross-device move: copy then delete.
     if (errno == EXDEV) {
-        if (copy_file(s, d) != 0) return -1;
-        if (unlink(s) != 0) { remove(d); return -1; }
+        if (copy_file(s, d) != 0)
+            return -1;
+        if (unlink(s) != 0) {
+            remove(d);
+            return -1;
+        }
         return 0;
     }
     return -1;
@@ -1804,55 +2070,66 @@ static long long impl_move_file(long long ctx, long long src, long long dst) {
 static long long impl_delete_file(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!p) return -1;
+    if (!p)
+        return -1;
     return unlink(p) == 0 ? 0 : -1;
 }
 
 static long long impl_mkdir(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!p) return -1;
+    if (!p)
+        return -1;
     return mkdir_p(p);
 }
 
 // Recursive rm-rf; does not follow symlinks out of the tree.
 static int delete_dir_recursive(const char *path) {
     DIR *d = opendir(path);
-    if (!d) return -1;
+    if (!d)
+        return -1;
     struct dirent *e;
-    int rc = 0;
+    int            rc = 0;
     while ((e = readdir(d)) != NULL) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
             continue;
         char child[4096];
         snprintf(child, sizeof(child), "%s/%s", path, e->d_name);
         struct stat st;
-        if (lstat(child, &st) != 0) { rc = -1; continue; }
+        if (lstat(child, &st) != 0) {
+            rc = -1;
+            continue;
+        }
         if (S_ISDIR(st.st_mode)) {
-            if (delete_dir_recursive(child) != 0) rc = -1;
+            if (delete_dir_recursive(child) != 0)
+                rc = -1;
         } else {
-            if (unlink(child) != 0) rc = -1;
+            if (unlink(child) != 0)
+                rc = -1;
         }
     }
     closedir(d);
-    if (rc == 0 && rmdir(path) != 0) rc = -1;
+    if (rc == 0 && rmdir(path) != 0)
+        rc = -1;
     return rc;
 }
 
 static long long impl_delete_dir(long long ctx, long long path) {
     (void)ctx;
     const char *p = (const char *)path;
-    if (!p) return -1;
+    if (!p)
+        return -1;
     return delete_dir_recursive(p);
 }
 
 // Try to restore ofile from the CAS. Returns 1 on hit, 0 on miss.
-static int cache_lookup(const char *cache_dir, uint64_t key,
-                        const char *ofile, const char *ext) {
+static int cache_lookup(const char *cache_dir, uint64_t key, const char *ofile,
+                        const char *ext) {
     char cpath[2048];
     cache_entry_path(cpath, sizeof(cpath), cache_dir, key, ext);
     struct stat st;
-    if (stat(cpath, &st) != 0) return 0;
+    if (stat(cpath, &st) != 0)
+        return 0;
     char *d = dir_of(ofile);
     mkdir_p(d);
     free(d);
@@ -1860,13 +2137,14 @@ static int cache_lookup(const char *cache_dir, uint64_t key,
 }
 
 // Store compiled ofile into the CAS (best-effort; errors are silently ignored).
-static void cache_store(const char *cache_dir, uint64_t key,
-                        const char *ofile, const char *ext) {
+static void cache_store(const char *cache_dir, uint64_t key, const char *ofile,
+                        const char *ext) {
     char hex[17];
     snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)key);
     char prefix[2048];
     snprintf(prefix, sizeof(prefix), "%s/%.2s", cache_dir, hex);
-    if (mkdir_p(prefix) != 0) return;
+    if (mkdir_p(prefix) != 0)
+        return;
     char cpath[2048];
     cache_entry_path(cpath, sizeof(cpath), cache_dir, key, ext);
     copy_file(ofile, cpath);
@@ -1876,24 +2154,32 @@ static void cache_store(const char *cache_dir, uint64_t key,
 // for whole-target bytecode output: .c4 / .c4a / .c4d).
 static int bytecode_output_is_current(const char *out, StringArray *srcs) {
     struct stat o_st;
-    if (stat(out, &o_st) != 0) return 0;
+    if (stat(out, &o_st) != 0)
+        return 0;
     for (int i = 0; i < srcs->len; i++) {
         struct stat s_st;
-        if (stat(srcs->data[i], &s_st) != 0) return 0;
-        if (o_st.st_mtime < s_st.st_mtime) return 0;
+        if (stat(srcs->data[i], &s_st) != 0)
+            return 0;
+        if (o_st.st_mtime < s_st.st_mtime)
+            return 0;
     }
     return srcs->len > 0;
 }
 
-// Per-target cache key for bytecode: FNV-1a over cccc argv (excluding -o <path>)
+// Per-target cache key for bytecode: FNV-1a over cccc argv (excluding -o
+// <path>)
 // + all aggregated source file contents.  The "bytecode\0" prefix namespaces
 // these keys away from native .o keys so both can share a cache directory.
-static uint64_t bytecode_target_cache_key(char *const *argv, StringArray *srcs) {
-    uint64_t h = CACHE_FNV_OFFSET;
+static uint64_t bytecode_target_cache_key(char *const *argv,
+                                          StringArray *srcs) {
+    uint64_t          h    = CACHE_FNV_OFFSET;
     static const char ns[] = "bytecode\0";
-    h = fnv1a_update(h, ns, sizeof(ns));
+    h                      = fnv1a_update(h, ns, sizeof(ns));
     for (int i = 0; argv[i]; i++) {
-        if (strcmp(argv[i], "-o") == 0) { i++; continue; }
+        if (strcmp(argv[i], "-o") == 0) {
+            i++;
+            continue;
+        }
         h = fnv1a_update(h, argv[i], strlen(argv[i]));
         h = fnv1a_update(h, "\0", 1);
     }
@@ -1908,9 +2194,8 @@ static uint64_t bytecode_target_cache_key(char *const *argv, StringArray *srcs) 
 // command line (source_cache_key skips the -o pair, so -MF's argument does
 // not need the same treatment).
 static void build_compile_argv(ArgVec *a, StringArray *owned, Builder *ctx,
-                                const char *cc, BuildTarget *t,
-                                const char *src, const char *ofile,
-                                const char *dfile) {
+                               const char *cc, BuildTarget *t, const char *src,
+                               const char *ofile, const char *dfile) {
     argv_push(a, cc);
     argv_push(a, "-c");
     argv_push(a, src);
@@ -1925,9 +2210,9 @@ static void build_compile_argv(ArgVec *a, StringArray *owned, Builder *ctx,
 // Compile one target's sources to object files; collect the .o paths in `objs`.
 // Sources matching the target's exclude list are silently skipped.
 // Returns 0 on success.
-static int compile_sources(Builder *ctx, const char *cc,
-                           BuildTarget *t, const char *objdir,
-                           StringArray *objs, int *step, int total) {
+static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
+                           const char *objdir, StringArray *objs, int *step,
+                           int total) {
     StringArray owned = {0};
 
     // Level 1 (mtime fast path) is only trusted when this objdir's arch
@@ -1947,24 +2232,35 @@ static int compile_sources(Builder *ctx, const char *cc,
         // store-time key must be built from the .d THIS compile just wrote,
         // not from whatever .d (if any) existed beforehand, so it is
         // recomputed at reap time from `src`/`ofile`/`dfile`.
-        typedef struct { pid_t pid; char *ofile; char *dfile; const char *src; } Job;
+        typedef struct {
+            pid_t       pid;
+            char       *ofile;
+            char       *dfile;
+            const char *src;
+        } Job;
         Job *pool = calloc(jobs, sizeof(Job));
-        if (!pool) goto serial_fallback;
+        if (!pool)
+            goto serial_fallback;
 
-        int in_flight = 0;
+        int in_flight  = 0;
         int any_failed = 0;
 
         for (int i = 0; i <= t->sources.len; i++) {
-            // Drain one slot when the pool is full, or drain all on the final pass.
-            while (in_flight > 0 && (in_flight >= jobs || i == t->sources.len)) {
-                int status;
+            // Drain one slot when the pool is full, or drain all on the final
+            // pass.
+            while (in_flight > 0 &&
+                   (in_flight >= jobs || i == t->sources.len)) {
+                int   status;
                 pid_t done = waitpid(-1, &status, 0);
-                if (done < 0) break;
+                if (done < 0)
+                    break;
                 for (int j = 0; j < jobs; j++) {
-                    if (pool[j].pid != done) continue;
+                    if (pool[j].pid != done)
+                        continue;
                     int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
                     if (exit_code != 0) {
-                        fprintf(stderr, "build: compile failed (exit %d)\n", exit_code);
+                        fprintf(stderr, "build: compile failed (exit %d)\n",
+                                exit_code);
                         any_failed = 1;
                         free(pool[j].ofile);
                         free(pool[j].dfile);
@@ -1976,43 +2272,50 @@ static int compile_sources(Builder *ctx, const char *cc,
                             StringArray post = {0};
                             if (read_dep_prereqs(pool[j].dfile, &post)) {
                                 StringArray o2 = {0};
-                                ArgVec a2 = {0};
-                                build_compile_argv(&a2, &o2, ctx, cc, t, pool[j].src,
-                                                   pool[j].ofile, pool[j].dfile);
-                                uint64_t skey = source_cache_key(pool[j].src,
-                                    (char *const *)a2.data, &post);
-                                cache_store(ctx->cache_dir, skey, pool[j].ofile, ".o");
+                                ArgVec      a2 = {0};
+                                build_compile_argv(&a2, &o2, ctx, cc, t,
+                                                   pool[j].src, pool[j].ofile,
+                                                   pool[j].dfile);
+                                uint64_t skey = source_cache_key(
+                                    pool[j].src, (char *const *)a2.data, &post);
+                                cache_store(ctx->cache_dir, skey, pool[j].ofile,
+                                            ".o");
                                 free(a2.data);
                                 free_strarray(&o2);
                             }
                             free_strarray(&post);
                         }
-                        strarray_push(objs, pool[j].ofile); // transfer ownership
+                        strarray_push(objs,
+                                      pool[j].ofile); // transfer ownership
                         free(pool[j].dfile);
                     }
-                    pool[j].pid = 0;
+                    pool[j].pid   = 0;
                     pool[j].ofile = NULL;
                     pool[j].dfile = NULL;
-                    pool[j].src = NULL;
+                    pool[j].src   = NULL;
                     in_flight--;
                     break;
                 }
             }
 
-            if (i == t->sources.len) break;
-            if (source_is_excluded(t, t->sources.data[i])) continue;
-            if (any_failed) continue; // drain remaining, don't launch more
+            if (i == t->sources.len)
+                break;
+            if (source_is_excluded(t, t->sources.data[i]))
+                continue;
+            if (any_failed)
+                continue; // drain remaining, don't launch more
 
-            const char *src = t->sources.data[i];
-            char *stem = stem_of(src);
-            char ofile[1024], dfile[1024];
+            const char *src  = t->sources.data[i];
+            char       *stem = stem_of(src);
+            char        ofile[1024], dfile[1024];
             snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
             snprintf(dfile, sizeof(dfile), "%s/%s.d", objdir, stem);
             free(stem);
 
             // Level 1: mtime check — skip recompile when ofile (and every
             // header prerequisite recorded in dfile) is up to date.
-            if (ctx->cache_dir && arch_ok && ofile_is_current(ofile, src, dfile)) {
+            if (ctx->cache_dir && arch_ok &&
+                ofile_is_current(ofile, src, dfile)) {
                 if (!ctx->quiet || ctx->verbose)
                     printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
                 else
@@ -2030,12 +2333,13 @@ static int compile_sources(Builder *ctx, const char *cc,
             // CAS (see source_cache_key's comment) since a fresh objdir
             // sharing a global --build-cache would otherwise "hit" an
             // object some other objdir compiled against different headers.
-            StringArray prereqs = {0};
-            int have_dfile = 0;
+            StringArray prereqs    = {0};
+            int         have_dfile = 0;
             if (ctx->cache_dir) {
                 have_dfile = read_dep_prereqs(dfile, &prereqs);
                 if (have_dfile &&
-                    cache_lookup(ctx->cache_dir,
+                    cache_lookup(
+                        ctx->cache_dir,
                         source_cache_key(src, (char *const *)a.data, &prereqs),
                         ofile, ".o")) {
                     if (!ctx->quiet || ctx->verbose)
@@ -2072,10 +2376,11 @@ static int compile_sources(Builder *ctx, const char *cc,
 
             for (int j = 0; j < jobs; j++) {
                 if (pool[j].pid == 0) {
-                    pool[j].pid = pid;
+                    pool[j].pid   = pid;
                     pool[j].ofile = xstrdup(ofile);
                     pool[j].dfile = xstrdup(dfile);
-                    pool[j].src = src; // alias into t->sources; stable for this call
+                    pool[j].src =
+                        src; // alias into t->sources; stable for this call
                     in_flight++;
                     break;
                 }
@@ -2094,9 +2399,9 @@ serial_fallback:;
     for (int i = 0; i < t->sources.len && rc == 0; i++) {
         if (source_is_excluded(t, t->sources.data[i]))
             continue;
-        const char *src = t->sources.data[i];
-        char *stem = stem_of(src);
-        char ofile[1024], dfile[1024];
+        const char *src  = t->sources.data[i];
+        char       *stem = stem_of(src);
+        char        ofile[1024], dfile[1024];
         snprintf(ofile, sizeof(ofile), "%s/%s.o", objdir, stem);
         snprintf(dfile, sizeof(dfile), "%s/%s.d", objdir, stem);
         free(stem);
@@ -2120,12 +2425,13 @@ serial_fallback:;
         // — not treated as a miss under a header-less key — when no .d
         // exists yet for this source in this objdir; see the parallel path's
         // comment above for why).
-        StringArray prereqs = {0};
-        int have_dfile = 0;
+        StringArray prereqs    = {0};
+        int         have_dfile = 0;
         if (ctx->cache_dir && !ctx->dry_run) {
             have_dfile = read_dep_prereqs(dfile, &prereqs);
             if (have_dfile &&
-                cache_lookup(ctx->cache_dir,
+                cache_lookup(
+                    ctx->cache_dir,
                     source_cache_key(src, (char *const *)a.data, &prereqs),
                     ofile, ".o")) {
                 if (!ctx->quiet || ctx->verbose)
@@ -2151,8 +2457,8 @@ serial_fallback:;
             StringArray post = {0};
             if (read_dep_prereqs(dfile, &post))
                 cache_store(ctx->cache_dir,
-                    source_cache_key(src, (char *const *)a.data, &post),
-                    ofile, ".o");
+                            source_cache_key(src, (char *const *)a.data, &post),
+                            ofile, ".o");
             free_strarray(&post);
         }
         free(a.data);
@@ -2169,27 +2475,37 @@ serial_fallback:;
 // Seen-set helpers used by collect_bytecode_inputs to dedup target pointers and
 // source path strings.
 
-typedef struct { BuildTarget **data; int len, cap; } TargetSet;
-typedef struct { const char **data; int len, cap; } StrSet;
+typedef struct {
+    BuildTarget **data;
+    int           len, cap;
+} TargetSet;
+typedef struct {
+    const char **data;
+    int          len, cap;
+} StrSet;
 
 static int tset_has(TargetSet *s, BuildTarget *t) {
-    for (int i = 0; i < s->len; i++) if (s->data[i] == t) return 1;
+    for (int i = 0; i < s->len; i++)
+        if (s->data[i] == t)
+            return 1;
     return 0;
 }
 static void tset_add(TargetSet *s, BuildTarget *t) {
     if (s->len == s->cap) {
-        s->cap = s->cap ? s->cap * 2 : 8;
+        s->cap  = s->cap ? s->cap * 2 : 8;
         s->data = realloc(s->data, sizeof(*s->data) * (size_t)s->cap);
     }
     s->data[s->len++] = t;
 }
 static int sset_has(StrSet *s, const char *str) {
-    for (int i = 0; i < s->len; i++) if (strcmp(s->data[i], str) == 0) return 1;
+    for (int i = 0; i < s->len; i++)
+        if (strcmp(s->data[i], str) == 0)
+            return 1;
     return 0;
 }
 static void sset_add(StrSet *s, const char *str) {
     if (s->len == s->cap) {
-        s->cap = s->cap ? s->cap * 2 : 16;
+        s->cap  = s->cap ? s->cap * 2 : 16;
         s->data = realloc(s->data, sizeof(*s->data) * (size_t)s->cap);
     }
     s->data[s->len++] = str;
@@ -2203,41 +2519,46 @@ static void sset_add(StrSet *s, const char *str) {
 // not free them independently.
 // skip_c4a: if non-zero, do not recurse into bytecode static lib (.c4a) deps —
 // those are linked via --link in bytecode EXE builds (#565).
-static void collect_bytecode_inputs(BuildTarget *t,
-                                     StringArray *srcs,
-                                     StringArray *incs,
-                                     StringArray *defs,
-                                     StringArray *undefs,
-                                     TargetSet *seen_tgts,
-                                     StrSet    *seen_srcs,
-                                     int skip_c4a) {
-    if (tset_has(seen_tgts, t)) return;
+static void collect_bytecode_inputs(BuildTarget *t, StringArray *srcs,
+                                    StringArray *incs, StringArray *defs,
+                                    StringArray *undefs, TargetSet *seen_tgts,
+                                    StrSet *seen_srcs, int skip_c4a) {
+    if (tset_has(seen_tgts, t))
+        return;
     tset_add(seen_tgts, t);
 
     // Sources (respecting this target's excludes).
     for (int i = 0; i < t->sources.len; i++) {
         const char *src = t->sources.data[i];
-        if (source_is_excluded(t, src)) continue;
+        if (source_is_excluded(t, src))
+            continue;
         if (!sset_has(seen_srcs, src)) {
             sset_add(seen_srcs, src);
             strarray_push(srcs, t->sources.data[i]);
         }
     }
     // Per-target includes, defines, undefs.
-    for (int i = 0; i < t->includes.len; i++) strarray_push(incs,   t->includes.data[i]);
-    for (int i = 0; i < t->defines.len;  i++) strarray_push(defs,   t->defines.data[i]);
-    for (int i = 0; i < t->undefs.len;   i++) strarray_push(undefs, t->undefs.data[i]);
+    for (int i = 0; i < t->includes.len; i++)
+        strarray_push(incs, t->includes.data[i]);
+    for (int i = 0; i < t->defines.len; i++)
+        strarray_push(defs, t->defines.data[i]);
+    for (int i = 0; i < t->undefs.len; i++)
+        strarray_push(undefs, t->undefs.data[i]);
 
     // Recurse into LinkWith deps (DependsOn are ordering-only, not folded).
     for (int i = 0; i < t->deps_count; i++) {
-        if (!t->deps_link[i]) continue; // DependsOn: skip
+        if (!t->deps_link[i])
+            continue; // DependsOn: skip
         BuildTarget *dep = t->deps[i];
-        if (dep->sources.len == 0) continue; // source-less dep: warned elsewhere
+        if (dep->sources.len == 0)
+            continue; // source-less dep: warned elsewhere
         // For bytecode EXE targets, skip .c4a deps — they are built standalone
         // and linked via --link (#565).
-        if (skip_c4a && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1)
+        if (skip_c4a && dep->kind == CCCC_TGT_BYTECODE &&
+            dep->bytecode_subkind == 1)
             continue;
-        collect_bytecode_inputs(dep, srcs, incs, defs, undefs, seen_tgts, seen_srcs, skip_c4a);
+        collect_bytecode_inputs(dep, srcs, incs, defs, undefs, seen_tgts,
+                                seen_srcs, skip_c4a);
     }
 }
 
@@ -2251,12 +2572,15 @@ static void collect_bytecode_inputs(BuildTarget *t,
 //     a direct dep of a bytecode EXE — those use --link instead (#565).
 //     Static libs that are deps of OTHER static libs are still folded here.
 static void mark_bytecode_folded_deps(BuildTarget *dep, int for_exe) {
-    if (dep->bytecode_folded) return; // already visited
+    if (dep->bytecode_folded)
+        return; // already visited
     // Dynamic bytecode libs are always built standalone.
-    if (dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 2) return;
+    if (dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 2)
+        return;
     // Static bytecode libs that are direct deps of a bytecode EXE are built
     // standalone and linked via --link (#565).
-    if (for_exe && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1) return;
+    if (for_exe && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1)
+        return;
     dep->bytecode_folded = 1;
     for (int i = 0; i < dep->deps_count; i++) {
         if (dep->deps_link[i])
@@ -2265,17 +2589,17 @@ static void mark_bytecode_folded_deps(BuildTarget *dep, int for_exe) {
     }
 }
 
-// Build a single target (its sources already; deps assumed built).  Returns 0 ok.
-// `cc` is the global fallback CC; per-target and cross_cc overrides are applied
-// inside this function via effective_cc_for_target. `total_p` is a pointer
-// (not a plain int) because deferred-glob expansion below (#851) can grow the
-// step count for THIS target after count_steps() already ran; every other use
-// in this function reads it once into a local `total` since the count is
-// stable for the rest of the call.
-static int build_target(Builder *ctx, const char *cc,
-                        BuildTarget *t, int *step, int *total_p) {
-    // Bytecode-library targets are folded into their bytecode dependent's single
-    // cccc invocation and must not be built standalone (#563).
+// Build a single target (its sources already; deps assumed built).  Returns 0
+// ok. `cc` is the global fallback CC; per-target and cross_cc overrides are
+// applied inside this function via effective_cc_for_target. `total_p` is a
+// pointer (not a plain int) because deferred-glob expansion below (#851) can
+// grow the step count for THIS target after count_steps() already ran; every
+// other use in this function reads it once into a local `total` since the count
+// is stable for the rest of the call.
+static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
+                        int *total_p) {
+    // Bytecode-library targets are folded into their bytecode dependent's
+    // single cccc invocation and must not be built standalone (#563).
     if (t->bytecode_folded)
         return 0;
 
@@ -2291,24 +2615,27 @@ static int build_target(Builder *ctx, const char *cc,
         for (int i = 0; i < t->deferred_globs.len; i++)
             glob_into(&t->sources, t->deferred_globs.data[i]);
         int added = t->sources.len - before;
-        if (added > 0 && t->kind != CCCC_TGT_CUSTOM && t->kind != CCCC_TGT_BYTECODE)
+        if (added > 0 && t->kind != CCCC_TGT_CUSTOM &&
+            t->kind != CCCC_TGT_BYTECODE)
             *total_p += added;
     }
     int total = *total_p;
 
     if (ctx->verbose) {
-        const char *kind_str = t->kind == CCCC_TGT_EXE      ? "executable"
-                             : t->kind == CCCC_TGT_STATIC    ? "static library"
-                             : t->kind == CCCC_TGT_DYNAMIC   ? "dynamic library"
-                             : t->kind == CCCC_TGT_BYTECODE  ? (t->bytecode_subkind == 1 ? "bytecode-static"
-                                                               : t->bytecode_subkind == 2 ? "bytecode-dynamic"
-                                                               :                            "bytecode")
-                             :                                  "custom";
+        const char *kind_str =
+            t->kind == CCCC_TGT_EXE       ? "executable"
+            : t->kind == CCCC_TGT_STATIC  ? "static library"
+            : t->kind == CCCC_TGT_DYNAMIC ? "dynamic library"
+            : t->kind == CCCC_TGT_BYTECODE
+                ? (t->bytecode_subkind == 1   ? "bytecode-static"
+                   : t->bytecode_subkind == 2 ? "bytecode-dynamic"
+                                              : "bytecode")
+                : "custom";
         if (t->kind == CCCC_TGT_CUSTOM)
             printf(">> target '%s' [%s]\n", t->name, kind_str);
         else
-            printf(">> target '%s' [%s, %d source(s)]\n",
-                   t->name, kind_str, t->sources.len);
+            printf(">> target '%s' [%s, %d source(s)]\n", t->name, kind_str,
+                   t->sources.len);
         fflush(stdout);
     }
 
@@ -2336,17 +2663,21 @@ static int build_target(Builder *ctx, const char *cc,
             // Build the shell context with the tool allowlist applied.
             shell_ctx *sctx = shell_ctx_create();
             if (!sctx) {
-                fprintf(stderr, "build: RunCustom '%s': failed to create shell context\n",
-                        t->name);
+                fprintf(
+                    stderr,
+                    "build: RunCustom '%s': failed to create shell context\n",
+                    t->name);
                 return 1;
             }
             for (int i = 0; i < ctx->tool_allow_count; i++)
                 shell_ctx_allowlist_cmd(sctx, ctx->tool_allow[i]);
             // Both callbacks must be set: without them the parent drain loop
-            // falls through to ensure_buffer_capacity/xmalloc in posix_shell_with_io,
-            // which calls die() in the parent process on OOM.
-            shell_io sio = { .out_cb = build_passthru_out, .err_cb = build_passthru_err };
-            int rc = shell_with_ctx(t->command, &sio, sctx);
+            // falls through to ensure_buffer_capacity/xmalloc in
+            // posix_shell_with_io, which calls die() in the parent process on
+            // OOM.
+            shell_io sio = {.out_cb = build_passthru_out,
+                            .err_cb = build_passthru_err};
+            int      rc  = shell_with_ctx(t->command, &sio, sctx);
             shell_ctx_destroy(sctx);
             if (rc != 0) {
                 fprintf(stderr, "build: custom step '%s' failed (exit %d)\n",
@@ -2354,7 +2685,8 @@ static int build_target(Builder *ctx, const char *cc,
             }
             return rc;
 #else
-            fprintf(stderr, "build: RunCustom not supported on this platform\n");
+            fprintf(stderr,
+                    "build: RunCustom not supported on this platform\n");
             return 1;
 #endif
         }
@@ -2364,60 +2696,74 @@ static int build_target(Builder *ctx, const char *cc,
     char *out_rel = t->output ? xstrdup(t->output) : default_output(t);
     char *out_abs = join(ctx->out_dir, out_rel);
     char *out_dir = dir_of(out_abs);
-    char *objdir = join(ctx->out_dir, "obj");
+    char *objdir  = join(ctx->out_dir, "obj");
     char *tobjdir = join(objdir, t->name);
     free(objdir);
     if (!ctx->dry_run && (mkdir_p(out_dir) != 0 || mkdir_p(tobjdir) != 0)) {
         fprintf(stderr, "build: failed to create output directories\n");
-        free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+        free(out_rel);
+        free(out_abs);
+        free(out_dir);
+        free(tobjdir);
         return 1;
     }
 
-    // Bytecode target (#545 + #563 + #564): single whole-program cccc invocation.
-    // exe (bytecode_subkind=0)     → bin/<name>.c4   (runs cccc without -c; main required)
+    // Bytecode target (#545 + #563 + #564): single whole-program cccc
+    // invocation. exe (bytecode_subkind=0)     → bin/<name>.c4   (runs cccc
+    // without -c; main required)
     //   LinkWith .c4a deps are built standalone and linked via --link (#565).
-    // static lib (subkind=1)       → lib/<name>.c4a  (cccc -c bytecode; no main required)
-    //   LinkWith deps are source-folded into the .c4a (self-contained snapshot).
-    // dynamic lib (subkind=2)      → lib/<name>.c4d  (cccc -c bytecode; no main required)
+    // static lib (subkind=1)       → lib/<name>.c4a  (cccc -c bytecode; no main
+    // required)
+    //   LinkWith deps are source-folded into the .c4a (self-contained
+    //   snapshot).
+    // dynamic lib (subkind=2)      → lib/<name>.c4d  (cccc -c bytecode; no main
+    // required)
     //   LinkWith deps are source-folded into the .c4d (self-contained module).
-    // Source-less LinkWith deps (CUSTOM targets, native FFI libs) are skipped with
-    // a warning — linking native artifacts into bytecode requires FFI, not LinkWith.
+    // Source-less LinkWith deps (CUSTOM targets, native FFI libs) are skipped
+    // with a warning — linking native artifacts into bytecode requires FFI, not
+    // LinkWith.
     if (t->kind == CCCC_TGT_BYTECODE) {
-        char *cccc_bin = ctx->cccc_self
-                       ? xstrdup(ctx->cccc_self)
-                       : cccc_path_find_executable("cccc");
+        char *cccc_bin = ctx->cccc_self ? xstrdup(ctx->cccc_self)
+                                        : cccc_path_find_executable("cccc");
         if (!cccc_bin) {
-            fprintf(stderr, "build: cannot find cccc binary for bytecode target '%s'\n",
+            fprintf(stderr,
+                    "build: cannot find cccc binary for bytecode target '%s'\n",
                     t->name);
-            free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+            free(out_rel);
+            free(out_abs);
+            free(out_dir);
+            free(tobjdir);
             return 1;
         }
 
-        // Warn about source-less LinkWith deps (out of scope for bytecode merge).
+        // Warn about source-less LinkWith deps (out of scope for bytecode
+        // merge).
         for (int i = 0; i < t->deps_count; i++) {
             if (t->deps_link[i] && t->deps[i]->sources.len == 0) {
                 fprintf(stderr,
-                    "build: warning: bytecode target '%s': LinkWith dep '%s' has no "
-                    "sources — native FFI linking is out of scope for bytecode targets; "
-                    "dep ignored\n",
-                    t->name, t->deps[i]->name);
+                        "build: warning: bytecode target '%s': LinkWith dep "
+                        "'%s' has no "
+                        "sources — native FFI linking is out of scope for "
+                        "bytecode targets; "
+                        "dep ignored\n",
+                        t->name, t->deps[i]->name);
             }
         }
 
         int is_exe = (t->bytecode_subkind == 0);
 
         // Collect all sources (transitively, deduped) from this target and its
-        // folded deps.  For bytecode EXEs, .c4a deps are skipped (they are built
-        // standalone and linked via --link, #565); all other folded deps are
-        // collected as before.
-        StringArray agg_srcs   = {0};
-        StringArray dummy_incs  = {0};
-        StringArray dummy_defs  = {0};
+        // folded deps.  For bytecode EXEs, .c4a deps are skipped (they are
+        // built standalone and linked via --link, #565); all other folded deps
+        // are collected as before.
+        StringArray agg_srcs     = {0};
+        StringArray dummy_incs   = {0};
+        StringArray dummy_defs   = {0};
         StringArray dummy_undefs = {0};
-        TargetSet seen_tgts = {0};
-        StrSet    seen_srcs = {0};
-        collect_bytecode_inputs(t, &agg_srcs, &dummy_incs, &dummy_defs, &dummy_undefs,
-                                &seen_tgts, &seen_srcs, is_exe);
+        TargetSet   seen_tgts    = {0};
+        StrSet      seen_srcs    = {0};
+        collect_bytecode_inputs(t, &agg_srcs, &dummy_incs, &dummy_defs,
+                                &dummy_undefs, &seen_tgts, &seen_srcs, is_exe);
         free(seen_tgts.data);
         free(seen_srcs.data);
         free(dummy_incs.data);
@@ -2425,15 +2771,16 @@ static int build_target(Builder *ctx, const char *cc,
         free(dummy_undefs.data);
 
         StringArray owned = {0};
-        ArgVec a = {0};
+        ArgVec      a     = {0};
         argv_push(&a, cccc_bin);
         for (int i = 0; i < agg_srcs.len; i++)
             argv_push(&a, agg_srcs.data[i]);
-        // Library targets (static .c4a / dynamic .c4d) need --compile=bytecode so
-        // that cccc compiles without requiring main() and exits after writing
-        // bytecode.  Use the long-form `--compile=bytecode` (not `-c bytecode`)
-        // because -c uses optional_argument and the space-separated form would
-        // treat `bytecode` as a source file instead of the format specifier.
+        // Library targets (static .c4a / dynamic .c4d) need --compile=bytecode
+        // so that cccc compiles without requiring main() and exits after
+        // writing bytecode.  Use the long-form `--compile=bytecode` (not `-c
+        // bytecode`) because -c uses optional_argument and the space-separated
+        // form would treat `bytecode` as a source file instead of the format
+        // specifier.
         if (!is_exe) {
             argv_push(&a, "--compile=bytecode");
         }
@@ -2450,10 +2797,13 @@ static int build_target(Builder *ctx, const char *cc,
         TargetSet dep_seen = {0};
         tset_add(&dep_seen, t); // mark root so collect skips it
         for (int i = 0; i < t->deps_count; i++) {
-            if (!t->deps_link[i]) continue;
+            if (!t->deps_link[i])
+                continue;
             BuildTarget *dep = t->deps[i];
-            if (dep->sources.len == 0) continue;
-            if (is_exe && dep->kind == CCCC_TGT_BYTECODE && dep->bytecode_subkind == 1) {
+            if (dep->sources.len == 0)
+                continue;
+            if (is_exe && dep->kind == CCCC_TGT_BYTECODE &&
+                dep->bytecode_subkind == 1) {
                 // .c4a dep of a bytecode EXE: add --link <dep.c4a> flag (#565).
                 char *dep_out_rel = default_output(dep);
                 char *dep_out_abs = join(ctx->out_dir, dep_out_rel);
@@ -2461,24 +2811,32 @@ static int build_target(Builder *ctx, const char *cc,
                 strarray_push(&owned, dep_out_abs); // owned for later free
                 argv_push(&a, "--link");
                 argv_push(&a, dep_out_abs);
-                // Still collect includes from this dep so the exe can find headers.
-                StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0}, d_undefs = {0};
-                StrSet d_ss = {0};
-                TargetSet d_ts = {0};
-                collect_bytecode_inputs(dep, &d_srcs, &d_incs, &d_defs, &d_undefs,
-                                        &d_ts, &d_ss, 0);
-                free(d_ss.data); free(d_ts.data); free(d_srcs.data);
+                // Still collect includes from this dep so the exe can find
+                // headers.
+                StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0},
+                            d_undefs = {0};
+                StrSet      d_ss     = {0};
+                TargetSet   d_ts     = {0};
+                collect_bytecode_inputs(dep, &d_srcs, &d_incs, &d_defs,
+                                        &d_undefs, &d_ts, &d_ss, 0);
+                free(d_ss.data);
+                free(d_ts.data);
+                free(d_srcs.data);
                 for (int j = 0; j < d_incs.len; j++) {
                     argv_push(&a, "-I");
                     argv_push(&a, d_incs.data[j]);
                 }
-                free(d_incs.data); free(d_defs.data); free(d_undefs.data);
+                free(d_incs.data);
+                free(d_defs.data);
+                free(d_undefs.data);
                 continue;
             }
-            if (tset_has(&dep_seen, dep)) continue;
+            if (tset_has(&dep_seen, dep))
+                continue;
             // Gather this dep's (and its transitive deps') per-target flags.
-            StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0}, d_undefs = {0};
-            StrSet d_ss = {0};
+            StringArray d_srcs = {0}, d_incs = {0}, d_defs = {0},
+                        d_undefs = {0};
+            StrSet      d_ss     = {0};
             collect_bytecode_inputs(dep, &d_srcs, &d_incs, &d_defs, &d_undefs,
                                     &dep_seen, &d_ss, 0);
             free(d_ss.data);
@@ -2495,7 +2853,8 @@ static int build_target(Builder *ctx, const char *cc,
             }
             for (int j = 0; j < d_undefs.len; j++) {
                 char *f = malloc(strlen(d_undefs.data[j]) + 3);
-                snprintf(f, strlen(d_undefs.data[j]) + 3, "-U%s", d_undefs.data[j]);
+                snprintf(f, strlen(d_undefs.data[j]) + 3, "-U%s",
+                         d_undefs.data[j]);
                 strarray_push(&owned, f);
                 argv_push(&a, f);
             }
@@ -2508,10 +2867,11 @@ static int build_target(Builder *ctx, const char *cc,
         // Per-target incremental cache for bytecode (#562).
         // Level 1: mtime fast path — skip if output is newer than all sources.
         // Level 2: content-hash CAS — restore from cache if key matches.
-        const char *bc_ext = t->bytecode_subkind == 1 ? ".c4a"
-                           : t->bytecode_subkind == 2 ? ".c4d" : ".c4";
-        uint64_t bc_key = 0;
-        int brc = 0;
+        const char *bc_ext = t->bytecode_subkind == 1   ? ".c4a"
+                             : t->bytecode_subkind == 2 ? ".c4d"
+                                                        : ".c4";
+        uint64_t    bc_key = 0;
+        int         brc    = 0;
 
         if (ctx->cache_dir && !ctx->dry_run) {
             if (bytecode_output_is_current(out_abs, &agg_srcs)) {
@@ -2521,7 +2881,8 @@ static int build_target(Builder *ctx, const char *cc,
                     ++(*step);
                 goto bytecode_done;
             }
-            bc_key = bytecode_target_cache_key((char *const *)a.data, &agg_srcs);
+            bc_key =
+                bytecode_target_cache_key((char *const *)a.data, &agg_srcs);
             if (cache_lookup(ctx->cache_dir, bc_key, out_abs, bc_ext)) {
                 if (!ctx->quiet || ctx->verbose)
                     printf("[%d/%d] (cached) %s\n", ++(*step), total, t->name);
@@ -2540,15 +2901,22 @@ static int build_target(Builder *ctx, const char *cc,
         free_strarray(&owned);
         free(agg_srcs.data);
         free(cccc_bin);
-        free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+        free(out_rel);
+        free(out_abs);
+        free(out_dir);
+        free(tobjdir);
         return brc;
     }
 
     // Resolve the effective compiler for this target (#547).
     char *eff_cc = effective_cc_for_target(ctx, t);
     if (!eff_cc) {
-        fprintf(stderr, "build: could not find a C compiler for target '%s'\n", t->name);
-        free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+        fprintf(stderr, "build: could not find a C compiler for target '%s'\n",
+                t->name);
+        free(out_rel);
+        free(out_abs);
+        free(out_dir);
+        free(tobjdir);
         return 1;
     }
 
@@ -2564,7 +2932,10 @@ static int build_target(Builder *ctx, const char *cc,
 
     if (t->kind == CCCC_TGT_STATIC) {
         char *ar = cccc_find_native_tool("ar");
-        if (!ar) { rc = 1; goto done; }
+        if (!ar) {
+            rc = 1;
+            goto done;
+        }
         ArgVec a = {0};
         argv_push(&a, ar);
         argv_push(&a, "rcs");
@@ -2575,7 +2946,7 @@ static int build_target(Builder *ctx, const char *cc,
         // already newer than every .o and the ar argv is unchanged.
         if (ctx->cache_dir && !ctx->dry_run &&
             link_output_is_current(out_abs, objs.data, n_real_objs,
-                                    (char *const *)a.data, tobjdir)) {
+                                   (char *const *)a.data, tobjdir)) {
             if (!ctx->quiet || ctx->verbose)
                 printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
             else
@@ -2584,13 +2955,14 @@ static int build_target(Builder *ctx, const char *cc,
         } else {
             rc = run_step(ctx, ++(*step), total, &a, t);
             if (rc == 0 && ctx->cache_dir && !ctx->dry_run)
-                link_stamp_write(tobjdir, link_argv_hash((char *const *)a.data));
+                link_stamp_write(tobjdir,
+                                 link_argv_hash((char *const *)a.data));
         }
         free(a.data);
         free(ar);
     } else {
         // Executable or dynamic library: link with effective cc.
-        ArgVec a = {0};
+        ArgVec      a     = {0};
         StringArray owned = {0};
         argv_push(&a, eff_cc);
         if (t->kind == CCCC_TGT_DYNAMIC)
@@ -2601,9 +2973,10 @@ static int build_target(Builder *ctx, const char *cc,
         for (int i = 0; i < objs.len; i++)
             argv_push(&a, objs.data[i]);
         // Link against dependency libraries via -L<out>/lib -l<dep>.
-        // Only deps created with LinkWith (deps_link[i]==1) contribute -l flags.
-        char *libdir = join(ctx->out_dir, "lib");
-        int have_libdir = 0;
+        // Only deps created with LinkWith (deps_link[i]==1) contribute -l
+        // flags.
+        char *libdir      = join(ctx->out_dir, "lib");
+        int   have_libdir = 0;
         for (int i = 0; i < t->deps_count; i++) {
             if (!t->deps_link[i])
                 continue; // DependsOn edge — ordering only, no linker flag
@@ -2635,7 +3008,7 @@ static int build_target(Builder *ctx, const char *cc,
         // already newer than every .o and the link argv is unchanged.
         if (ctx->cache_dir && !ctx->dry_run &&
             link_output_is_current(out_abs, objs.data, n_real_objs,
-                                    (char *const *)a.data, tobjdir)) {
+                                   (char *const *)a.data, tobjdir)) {
             if (!ctx->quiet || ctx->verbose)
                 printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
             else
@@ -2644,7 +3017,8 @@ static int build_target(Builder *ctx, const char *cc,
         } else {
             rc = run_step(ctx, ++(*step), total, &a, t);
             if (rc == 0 && ctx->cache_dir && !ctx->dry_run)
-                link_stamp_write(tobjdir, link_argv_hash((char *const *)a.data));
+                link_stamp_write(tobjdir,
+                                 link_argv_hash((char *const *)a.data));
         }
         free(a.data);
         free_strarray(&owned);
@@ -2654,7 +3028,10 @@ static int build_target(Builder *ctx, const char *cc,
 done:
     free(eff_cc);
     free_strarray(&objs);
-    free(out_rel); free(out_abs); free(out_dir); free(tobjdir);
+    free(out_rel);
+    free(out_abs);
+    free(out_dir);
+    free(tobjdir);
     return rc;
 }
 
@@ -2663,13 +3040,14 @@ static int count_steps(BuildTarget **order, int n) {
     int total = 0;
     for (int i = 0; i < n; i++) {
         if (order[i]->bytecode_folded)
-            continue; // skipped — folded into a bytecode dependent (#563)
+            continue;   // skipped — folded into a bytecode dependent (#563)
         if (order[i]->kind == CCCC_TGT_CUSTOM)
             total += 1; // one step: run the custom command
         else if (order[i]->kind == CCCC_TGT_BYTECODE)
             total += 1; // one step: single cccc whole-program invocation (#545)
         else
-            total += order[i]->sources.len + 1; // one compile per source + 1 link/ar
+            total +=
+                order[i]->sources.len + 1; // one compile per source + 1 link/ar
     }
     return total;
 }
@@ -2679,23 +3057,26 @@ static int topo_visit(BuildTarget *t, BuildTarget **order, int *n) {
     if (t->visited == 2)
         return 0;
     if (t->visited == 1) {
-        fprintf(stderr, "build: dependency cycle detected at target '%s'\n", t->name);
+        fprintf(stderr, "build: dependency cycle detected at target '%s'\n",
+                t->name);
         return -1;
     }
     t->visited = 1;
     for (int i = 0; i < t->deps_count; i++)
         if (topo_visit(t->deps[i], order, n) != 0)
             return -1;
-    t->visited = 2;
+    t->visited    = 2;
     order[(*n)++] = t;
     return 0;
 }
 
 // Returns 1 if t is ready to build: PENDING with all deps DONE. (#557)
 static int target_is_ready(BuildTarget *t) {
-    if (t->state != TARGET_PENDING) return 0;
+    if (t->state != TARGET_PENDING)
+        return 0;
     for (int i = 0; i < t->deps_count; i++)
-        if (t->deps[i]->state != TARGET_DONE) return 0;
+        if (t->deps[i]->state != TARGET_DONE)
+            return 0;
     return 1;
 }
 
@@ -2706,12 +3087,13 @@ static void propagate_skipped(BuildTarget **order, int n) {
     while (changed) {
         changed = 0;
         for (int i = 0; i < n; i++) {
-            if (order[i]->state != TARGET_PENDING) continue;
+            if (order[i]->state != TARGET_PENDING)
+                continue;
             for (int j = 0; j < order[i]->deps_count; j++) {
                 int ds = order[i]->deps[j]->state;
                 if (ds == TARGET_FAILED || ds == TARGET_SKIPPED) {
                     order[i]->state = TARGET_SKIPPED;
-                    changed = 1;
+                    changed         = 1;
                     break;
                 }
             }
@@ -2739,7 +3121,9 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     if (ctx->target_filter) {
         BuildTarget *sel = find_target_by_name(ctx, ctx->target_filter);
         if (!sel) {
-            fprintf(stderr, "build: --build-target '%s' does not match any declared target\n",
+            fprintf(stderr,
+                    "build: --build-target '%s' does not match any declared "
+                    "target\n",
                     ctx->target_filter);
             if (ctx->targets_count > 0) {
                 fprintf(stderr, "  available targets:");
@@ -2757,15 +3141,16 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         printf("build: no targets declared\n");
         return 0;
     }
-    // Reset topo markers and bytecode_folded, then mark transitive LinkWith deps
-    // of kind=bytecode targets as folded libraries (#563).
+    // Reset topo markers and bytecode_folded, then mark transitive LinkWith
+    // deps of kind=bytecode targets as folded libraries (#563).
     for (int i = 0; i < ctx->targets_count; i++) {
-        ctx->targets[i]->visited = 0;
+        ctx->targets[i]->visited         = 0;
         ctx->targets[i]->bytecode_folded = 0;
-        ctx->targets[i]->state = TARGET_PENDING;
+        ctx->targets[i]->state           = TARGET_PENDING;
     }
     for (int i = 0; i < ctx->targets_count; i++) {
-        if (ctx->targets[i]->kind != CCCC_TGT_BYTECODE) continue;
+        if (ctx->targets[i]->kind != CCCC_TGT_BYTECODE)
+            continue;
         int is_exe = (ctx->targets[i]->bytecode_subkind == 0);
         for (int j = 0; j < ctx->targets[i]->deps_count; j++) {
             if (ctx->targets[i]->deps_link[j])
@@ -2775,8 +3160,8 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     }
 
     BuildTarget **order = calloc(ctx->targets_count, sizeof(*order));
-    int n = 0;
-    int cyc = 0;
+    int           n     = 0;
+    int           cyc   = 0;
     if (only) {
         cyc = topo_visit(only, order, &n);
     } else {
@@ -2802,20 +3187,23 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         if (order[i]->bytecode_folded)
             order[i]->state = TARGET_DONE;
 
-    int total = count_steps(order, n);
-    int step = 0;
-    int failures = 0;
+    int          total        = count_steps(order, n);
+    int          step         = 0;
+    int          failures     = 0;
     const char **failed_names = calloc(n, sizeof(*failed_names));
 
 #ifdef _POSIX_VERSION
     if (ctx->jobs > 1 && !ctx->dry_run) {
         // Target-level parallel dispatch: fork up to `jobs` child processes for
         // simultaneously-ready targets.  The -j budget is shared: each forked
-        // child runs source compilation serially (jobs=1) so the total number of
-        // concurrent compiler invocations never exceeds `jobs` (#557).
-        typedef struct { pid_t pid; BuildTarget *t; } TJob;
+        // child runs source compilation serially (jobs=1) so the total number
+        // of concurrent compiler invocations never exceeds `jobs` (#557).
+        typedef struct {
+            pid_t        pid;
+            BuildTarget *t;
+        } TJob;
         TJob *inflight_jobs = calloc(ctx->jobs, sizeof(TJob));
-        int in_flight = 0, stop_dispatch = 0;
+        int   in_flight = 0, stop_dispatch = 0;
 
         for (;;) {
             // Exit when no targets remain pending or in-flight.
@@ -2824,28 +3212,36 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                 if (order[i]->state == TARGET_PENDING ||
                     order[i]->state == TARGET_INFLIGHT)
                     remaining++;
-            if (remaining == 0) break;
+            if (remaining == 0)
+                break;
 
             // Count how many targets are currently ready to build.
             int ready_count = 0;
             for (int i = 0; i < n; i++)
-                if (target_is_ready(order[i])) ready_count++;
+                if (target_is_ready(order[i]))
+                    ready_count++;
 
             // Lone ready target with nothing in-flight: run in-process so it
-            // can use the full source-level -j parallelism inside compile_sources().
-            // Running in-process while in_flight>0 would cause waitpid(-1) races
-            // between compile_sources() and the parent's reap loop below.
+            // can use the full source-level -j parallelism inside
+            // compile_sources(). Running in-process while in_flight>0 would
+            // cause waitpid(-1) races between compile_sources() and the
+            // parent's reap loop below.
             if (!stop_dispatch && ready_count == 1 && in_flight == 0) {
                 for (int i = 0; i < n; i++) {
-                    if (!target_is_ready(order[i])) continue;
+                    if (!target_is_ready(order[i]))
+                        continue;
                     if (build_target(ctx, cc, order[i], &step, &total) != 0) {
                         fprintf(stderr, "build: target '%s' failed%s\n",
                                 order[i]->name,
                                 ctx->keep_going ? ", continuing" : "");
                         order[i]->state = TARGET_FAILED;
-                        if (failed_names) failed_names[failures] = order[i]->name;
+                        if (failed_names)
+                            failed_names[failures] = order[i]->name;
                         failures++;
-                        if (!ctx->keep_going) { stop_dispatch = 1; break; }
+                        if (!ctx->keep_going) {
+                            stop_dispatch = 1;
+                            break;
+                        }
                         propagate_skipped(order, n);
                     } else {
                         order[i]->state = TARGET_DONE;
@@ -2858,30 +3254,37 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
             // Dispatch ready targets as forked children up to the job limit.
             if (!stop_dispatch) {
                 for (int i = 0; i < n && in_flight < ctx->jobs; i++) {
-                    if (!target_is_ready(order[i])) continue;
-                    fflush(stdout); fflush(stderr);
+                    if (!target_is_ready(order[i]))
+                        continue;
+                    fflush(stdout);
+                    fflush(stderr);
                     pid_t pid = fork();
                     if (pid < 0) {
-                        fprintf(stderr, "build: fork failed: %s\n", strerror(errno));
+                        fprintf(stderr, "build: fork failed: %s\n",
+                                strerror(errno));
                         order[i]->state = TARGET_FAILED;
-                        if (failed_names) failed_names[failures] = order[i]->name;
+                        if (failed_names)
+                            failed_names[failures] = order[i]->name;
                         failures++;
                         continue;
                     }
                     if (pid == 0) {
-                        // Child: compile sources serially to respect shared -j budget.
-                        ctx->jobs = 1;
-                        int local_step = 0;
+                        // Child: compile sources serially to respect shared -j
+                        // budget.
+                        ctx->jobs       = 1;
+                        int local_step  = 0;
                         int local_total = count_steps(&order[i], 1);
-                        int rc = build_target(ctx, cc, order[i], &local_step, &local_total);
-                        fflush(stdout); fflush(stderr);
+                        int rc = build_target(ctx, cc, order[i], &local_step,
+                                              &local_total);
+                        fflush(stdout);
+                        fflush(stderr);
                         _exit(rc == 0 ? 0 : 1);
                     }
                     order[i]->state = TARGET_INFLIGHT;
                     for (int j = 0; j < ctx->jobs; j++) {
                         if (inflight_jobs[j].pid == 0) {
                             inflight_jobs[j].pid = pid;
-                            inflight_jobs[j].t = order[i];
+                            inflight_jobs[j].t   = order[i];
                             in_flight++;
                             break;
                         }
@@ -2899,14 +3302,16 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
             }
 
             // Reap one child.
-            int status;
+            int   status;
             pid_t done = waitpid(-1, &status, 0);
-            if (done < 0) break;
+            if (done < 0)
+                break;
             for (int j = 0; j < ctx->jobs; j++) {
-                if (inflight_jobs[j].pid != done) continue;
-                BuildTarget *t = inflight_jobs[j].t;
+                if (inflight_jobs[j].pid != done)
+                    continue;
+                BuildTarget *t       = inflight_jobs[j].t;
                 inflight_jobs[j].pid = 0;
-                inflight_jobs[j].t = NULL;
+                inflight_jobs[j].t   = NULL;
                 in_flight--;
                 if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
                     t->state = TARGET_DONE;
@@ -2914,18 +3319,21 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
                     fprintf(stderr, "build: target '%s' failed%s\n", t->name,
                             ctx->keep_going ? ", continuing" : "");
                     t->state = TARGET_FAILED;
-                    if (failed_names) failed_names[failures] = t->name;
+                    if (failed_names)
+                        failed_names[failures] = t->name;
                     failures++;
                     if (!ctx->keep_going) {
                         stop_dispatch = 1;
                         // Drain remaining in-flight children before returning.
                         while (in_flight > 0) {
                             pid_t d2 = waitpid(-1, &status, 0);
-                            if (d2 < 0) break;
+                            if (d2 < 0)
+                                break;
                             for (int k = 0; k < ctx->jobs; k++) {
-                                if (inflight_jobs[k].pid != d2) continue;
+                                if (inflight_jobs[k].pid != d2)
+                                    continue;
                                 inflight_jobs[k].pid = 0;
-                                inflight_jobs[k].t = NULL;
+                                inflight_jobs[k].t   = NULL;
                                 in_flight--;
                                 break;
                             }
@@ -2959,9 +3367,11 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
     free(cc);
 
     if (failures == 0) {
-        printf("build succeeded (%d target%s, 0 errors)\n", n, n == 1 ? "" : "s");
+        printf("build succeeded (%d target%s, 0 errors)\n", n,
+               n == 1 ? "" : "s");
     } else {
-        printf("build failed (%d error%s)\n", failures, failures == 1 ? "" : "s");
+        printf("build failed (%d error%s)\n", failures,
+               failures == 1 ? "" : "s");
         if (ctx->keep_going && failed_names) {
             for (int i = 0; i < failures; i++)
                 printf("  failed: %s\n", failed_names[i]);
@@ -3056,45 +3466,53 @@ static int run_install(Builder *ctx) {
         // Determine destination subdirectory and filename within prefix.
         char dest_rel[512];
         switch (t->kind) {
-        case CCCC_TGT_EXE:
-            snprintf(dest_rel, sizeof(dest_rel), "bin/%s", t->name);
-            break;
-        case CCCC_TGT_STATIC:
-            snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.a", t->name);
-            break;
-        case CCCC_TGT_DYNAMIC:
-            snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
-            break;
-        case CCCC_TGT_BYTECODE:
-            if (t->bytecode_subkind == 1)
-                snprintf(dest_rel, sizeof(dest_rel), "lib/%s.c4a", t->name);
-            else if (t->bytecode_subkind == 2)
-                snprintf(dest_rel, sizeof(dest_rel), "lib/%s.c4d", t->name);
-            else
-                snprintf(dest_rel, sizeof(dest_rel), "bin/%s.c4", t->name);
-            break;
-        default:
-            fprintf(stderr, "build: install: cannot install target '%s' (unsupported kind)\n",
-                    t->name);
-            failed++;
-            continue;
+            case CCCC_TGT_EXE:
+                snprintf(dest_rel, sizeof(dest_rel), "bin/%s", t->name);
+                break;
+            case CCCC_TGT_STATIC:
+                snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.a", t->name);
+                break;
+            case CCCC_TGT_DYNAMIC:
+                snprintf(dest_rel, sizeof(dest_rel), "lib/lib%s.%s", t->name,
+                         CCCC_DYLIB_EXT);
+                break;
+            case CCCC_TGT_BYTECODE:
+                if (t->bytecode_subkind == 1)
+                    snprintf(dest_rel, sizeof(dest_rel), "lib/%s.c4a", t->name);
+                else if (t->bytecode_subkind == 2)
+                    snprintf(dest_rel, sizeof(dest_rel), "lib/%s.c4d", t->name);
+                else
+                    snprintf(dest_rel, sizeof(dest_rel), "bin/%s.c4", t->name);
+                break;
+            default:
+                fprintf(stderr,
+                        "build: install: cannot install target '%s' "
+                        "(unsupported kind)\n",
+                        t->name);
+                failed++;
+                continue;
         }
         // Source: the built artifact path.
         char *src_rel = t->output ? xstrdup(t->output) : default_output(t);
-        char *src = join(ctx->out_dir, src_rel);
+        char *src     = join(ctx->out_dir, src_rel);
         free(src_rel);
         // Destination: prefix + dest_rel.
-        char *dst = join(ctx->install_prefix, dest_rel);
+        char *dst     = join(ctx->install_prefix, dest_rel);
         char *dst_dir = dir_of(dst);
 
         if (ctx->dry_run) {
             printf("install %s -> %s\n", src, dst);
-            free(src); free(dst); free(dst_dir);
+            free(src);
+            free(dst);
+            free(dst_dir);
             continue;
         }
         if (mkdir_p(dst_dir) != 0) {
-            fprintf(stderr, "build: install: failed to create directory %s\n", dst_dir);
-            free(src); free(dst); free(dst_dir);
+            fprintf(stderr, "build: install: failed to create directory %s\n",
+                    dst_dir);
+            free(src);
+            free(dst);
+            free(dst_dir);
             failed++;
             continue;
         }
@@ -3103,40 +3521,51 @@ static int run_install(Builder *ctx) {
         // Copy file contents.
         FILE *in = fopen(src, "rb");
         if (!in) {
-            fprintf(stderr, "build: install: cannot open %s: %s\n", src, strerror(errno));
-            free(src); free(dst);
+            fprintf(stderr, "build: install: cannot open %s: %s\n", src,
+                    strerror(errno));
+            free(src);
+            free(dst);
             failed++;
             continue;
         }
         FILE *out = fopen(dst, "wb");
         if (!out) {
-            fprintf(stderr, "build: install: cannot create %s: %s\n", dst, strerror(errno));
-            fclose(in); free(src); free(dst);
+            fprintf(stderr, "build: install: cannot create %s: %s\n", dst,
+                    strerror(errno));
+            fclose(in);
+            free(src);
+            free(dst);
             failed++;
             continue;
         }
-        char buf[65536];
+        char   buf[65536];
         size_t n;
-        int copy_ok = 1;
+        int    copy_ok = 1;
         while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-            if (fwrite(buf, 1, n, out) != n) { copy_ok = 0; break; }
+            if (fwrite(buf, 1, n, out) != n) {
+                copy_ok = 0;
+                break;
+            }
         }
         fclose(in);
         if (fclose(out) != 0 || !copy_ok) {
             fprintf(stderr, "build: install: write error for %s\n", dst);
-            free(src); free(dst);
+            free(src);
+            free(dst);
             failed++;
             continue;
         }
 #ifdef _POSIX_VERSION
         // Preserve executable bit for binaries.
-        if (t->kind == CCCC_TGT_EXE) chmod(dst, 0755);
+        if (t->kind == CCCC_TGT_EXE)
+            chmod(dst, 0755);
 #endif
         if (ctx->verbose)
             printf("installed  %s -> %s\n", t->name, dst);
         else
             printf("install    %s\n", dst);
-        free(src); free(dst);
+        free(src);
+        free(dst);
     }
     return failed;
 }
@@ -3151,12 +3580,14 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     const char **factory_names = NULL;
     if (factory_count > 0) {
         factory_names = calloc(factory_count, sizeof(*factory_names));
-        int fi = 0;
-        for (BuildTargetFnRecord *r = vm->compiler.build_target_fns; r; r = r->next)
+        int fi        = 0;
+        for (BuildTargetFnRecord *r = vm->compiler.build_target_fns; r;
+             r                      = r->next)
             factory_names[fi++] = r->name;
     }
 
-    // --build-list-targets: print factory names and exit without running the entry.
+    // --build-list-targets: print factory names and exit without running the
+    // entry.
     if (opts->list_targets) {
         if (factory_count == 0) {
             printf("(no [[cccc::build_target]] factories found)\n");
@@ -3168,15 +3599,18 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         return 0;
     }
 
-    // --build-target=NAME: check if NAME matches a [[cccc::build_target]] factory.
-    // If so, invoke the factory directly (skipping build_main) and build its target.
+    // --build-target=NAME: check if NAME matches a [[cccc::build_target]]
+    // factory. If so, invoke the factory directly (skipping build_main) and
+    // build its target.
     if (opts->target_name) {
         for (int i = 0; i < factory_count; i++) {
             if (strcmp(factory_names[i], opts->target_name) == 0) {
                 Obj *factory_fn = find_fn(prog, opts->target_name);
                 if (!factory_fn || !factory_fn->is_function) {
-                    fprintf(stderr, "build: factory '%s' not found in compiled output\n",
-                            opts->target_name);
+                    fprintf(
+                        stderr,
+                        "build: factory '%s' not found in compiled output\n",
+                        opts->target_name);
                     free(factory_names);
                     return 1;
                 }
@@ -3186,53 +3620,56 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     snprintf(cwd, sizeof(cwd), ".");
 
                 Builder ctx = {0};
-                ctx.root = cwd;
+                ctx.root    = cwd;
                 ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
-                ctx.host = CCCC_BUILD_HOST;
+                ctx.host    = CCCC_BUILD_HOST;
                 ctx.verbose = opts->verbose || opts->build_verbose;
-                ctx.quiet = opts->quiet && !(opts->verbose || opts->build_verbose);
-                ctx.keep_going = opts->keep_going;
-                ctx.dry_run = opts->dry_run;
-                ctx.jobs = opts->jobs > 1 ? opts->jobs : 1;
-                ctx.defaults = opts->defaults;
-                ctx.tool_allow = opts->tool_allow;
+                ctx.quiet =
+                    opts->quiet && !(opts->verbose || opts->build_verbose);
+                ctx.keep_going       = opts->keep_going;
+                ctx.dry_run          = opts->dry_run;
+                ctx.jobs             = opts->jobs > 1 ? opts->jobs : 1;
+                ctx.defaults         = opts->defaults;
+                ctx.tool_allow       = opts->tool_allow;
                 ctx.tool_allow_count = opts->tool_allow_count;
-                ctx.factory_names = factory_names;
-                ctx.factory_count = factory_count;
-                ctx.profile = opts->profile;
-                ctx.cross_triple = opts->cross_triple;
-                ctx.cross_cc = opts->cross_cc;
-                ctx.cccc_self = opts->cccc_self;
+                ctx.factory_names    = factory_names;
+                ctx.factory_count    = factory_count;
+                ctx.profile          = opts->profile;
+                ctx.cross_triple     = opts->cross_triple;
+                ctx.cross_cc         = opts->cross_cc;
+                ctx.cccc_self        = opts->cccc_self;
                 if (opts->build_cache) {
                     ctx.cache_dir = *opts->build_cache
-                        ? xstrdup(opts->build_cache)
-                        : join(ctx.out_dir, ".cccc-cache");
+                                        ? xstrdup(opts->build_cache)
+                                        : join(ctx.out_dir, ".cccc-cache");
                     mkdir_p(ctx.cache_dir);
                 }
-                ctx.build_options = opts->build_options;
+                ctx.build_options       = opts->build_options;
                 ctx.build_options_count = opts->build_options_count;
-                ctx.build_install = opts->build_install;
-                ctx.user_args       = opts->user_args;
-                ctx.user_args_count = opts->user_args_count;
-                const char *prefix_env = getenv("PREFIX");
-                ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");
+                ctx.build_install       = opts->build_install;
+                ctx.user_args           = opts->user_args;
+                ctx.user_args_count     = opts->user_args_count;
+                const char *prefix_env  = getenv("PREFIX");
+                ctx.install_prefix =
+                    xstrdup(prefix_env ? prefix_env : "/usr/local");
 
                 s_ctx = &ctx;
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
                 BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
-                s_ctx = NULL;
+                s_ctx            = NULL;
 
-                // Apply factory-level kind=bytecode override (#545, #564): if the
-                // matching factory record declares kind=bytecode, promote the
-                // returned target AND all StaticLib/DynamicLib targets created
-                // within the factory to CCCC_TGT_BYTECODE with the appropriate
-                // bytecode_subkind so the host runner uses the bytecode pipeline.
-                // EXE deps are intentionally left as CCCC_TGT_EXE: they are
-                // consumed via source-folding, not built standalone.
+                // Apply factory-level kind=bytecode override (#545, #564): if
+                // the matching factory record declares kind=bytecode, promote
+                // the returned target AND all StaticLib/DynamicLib targets
+                // created within the factory to CCCC_TGT_BYTECODE with the
+                // appropriate bytecode_subkind so the host runner uses the
+                // bytecode pipeline. EXE deps are intentionally left as
+                // CCCC_TGT_EXE: they are consumed via source-folding, not built
+                // standalone.
                 bool factory_is_bytecode = false;
                 if (tgt) {
                     for (BuildTargetFnRecord *r = vm->compiler.build_target_fns;
-                         r; r = r->next) {
+                         r; r                   = r->next) {
                         if (strcmp(r->name, opts->target_name) == 0 &&
                             r->kind && strcmp(r->kind, "bytecode") == 0) {
                             factory_is_bytecode = true;
@@ -3244,13 +3681,13 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     for (int j = 0; j < ctx.targets_count; j++) {
                         BuildTarget *dep = ctx.targets[j];
                         if (dep->kind == CCCC_TGT_STATIC) {
-                            dep->kind = CCCC_TGT_BYTECODE;
+                            dep->kind             = CCCC_TGT_BYTECODE;
                             dep->bytecode_subkind = 1;
                         } else if (dep->kind == CCCC_TGT_DYNAMIC) {
-                            dep->kind = CCCC_TGT_BYTECODE;
+                            dep->kind             = CCCC_TGT_BYTECODE;
                             dep->bytecode_subkind = 2;
                         } else if (dep == tgt && dep->kind == CCCC_TGT_EXE) {
-                            dep->kind = CCCC_TGT_BYTECODE;
+                            dep->kind             = CCCC_TGT_BYTECODE;
                             dep->bytecode_subkind = 0;
                         }
                     }
@@ -3264,29 +3701,36 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 } else {
                     exit_code = run_graph(&ctx, tgt) ? 1 : 0;
                 }
-                if (exit_code == 0 && ctx.build_install && ctx.install_count > 0)
-                    if (run_install(&ctx) != 0) exit_code = 1;
+                if (exit_code == 0 && ctx.build_install &&
+                    ctx.install_count > 0)
+                    if (run_install(&ctx) != 0)
+                        exit_code = 1;
 
                 for (int j = 0; j < ctx.targets_count; j++)
                     free_target(ctx.targets[j]);
                 free(ctx.targets);
                 free(ctx.out_dir);
                 free(ctx.cache_dir);
-                for (int j = 0; j < ctx.captures_count; j++) free(ctx.captures[j]);
+                for (int j = 0; j < ctx.captures_count; j++)
+                    free(ctx.captures[j]);
                 free(ctx.captures);
                 free(ctx.install_prefix);
                 free(ctx.install_targets);
-                if (ctx.original_cwd) { chdir(ctx.original_cwd); free(ctx.original_cwd); }
+                if (ctx.original_cwd) {
+                    chdir(ctx.original_cwd);
+                    free(ctx.original_cwd);
+                }
                 free(factory_names);
                 return exit_code;
             }
         }
-        // NAME did not match any factory; fall through to entry-based flow where
-        // run_graph will match it against registered target names (existing behaviour).
+        // NAME did not match any factory; fall through to entry-based flow
+        // where run_graph will match it against registered target names
+        // (existing behaviour).
     }
 
-    // Entry-based flow: resolve and invoke build_main (or the --build-entry function),
-    // then run_graph filters by --build-target if set.
+    // Entry-based flow: resolve and invoke build_main (or the --build-entry
+    // function), then run_graph filters by --build-target if set.
     const char *entry = resolve_entry(vm, opts->entry_name);
     if (!entry) {
         free(factory_names);
@@ -3304,36 +3748,35 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     if (!getcwd(cwd, sizeof(cwd)))
         snprintf(cwd, sizeof(cwd), ".");
 
-    Builder ctx = {0};
-    ctx.root = cwd;
-    ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
-    ctx.host = CCCC_BUILD_HOST;
+    Builder ctx       = {0};
+    ctx.root          = cwd;
+    ctx.out_dir       = xstrdup(opts->out_dir ? opts->out_dir : "build");
+    ctx.host          = CCCC_BUILD_HOST;
     ctx.target_filter = opts->target_name;
-    ctx.verbose = opts->verbose || opts->build_verbose;
-    ctx.quiet = opts->quiet && !(opts->verbose || opts->build_verbose);
-    ctx.keep_going = opts->keep_going;
-    ctx.dry_run = opts->dry_run;
-    ctx.jobs = opts->jobs > 1 ? opts->jobs : 1;
-    ctx.defaults = opts->defaults;
-    ctx.tool_allow = opts->tool_allow;
+    ctx.verbose       = opts->verbose || opts->build_verbose;
+    ctx.quiet         = opts->quiet && !(opts->verbose || opts->build_verbose);
+    ctx.keep_going    = opts->keep_going;
+    ctx.dry_run       = opts->dry_run;
+    ctx.jobs          = opts->jobs > 1 ? opts->jobs : 1;
+    ctx.defaults      = opts->defaults;
+    ctx.tool_allow    = opts->tool_allow;
     ctx.tool_allow_count = opts->tool_allow_count;
-    ctx.factory_names = factory_names;
-    ctx.factory_count = factory_count;
-    ctx.profile = opts->profile;
-    ctx.cross_triple = opts->cross_triple;
-    ctx.cross_cc = opts->cross_cc;
-    ctx.cccc_self = opts->cccc_self;
+    ctx.factory_names    = factory_names;
+    ctx.factory_count    = factory_count;
+    ctx.profile          = opts->profile;
+    ctx.cross_triple     = opts->cross_triple;
+    ctx.cross_cc         = opts->cross_cc;
+    ctx.cccc_self        = opts->cccc_self;
     if (opts->build_cache) {
-        ctx.cache_dir = *opts->build_cache
-            ? xstrdup(opts->build_cache)
-            : join(ctx.out_dir, ".cccc-cache");
+        ctx.cache_dir = *opts->build_cache ? xstrdup(opts->build_cache)
+                                           : join(ctx.out_dir, ".cccc-cache");
         mkdir_p(ctx.cache_dir);
     }
-    ctx.build_options = opts->build_options;
+    ctx.build_options       = opts->build_options;
     ctx.build_options_count = opts->build_options_count;
-    ctx.build_install = opts->build_install;
-    ctx.user_args       = opts->user_args;
-    ctx.user_args_count = opts->user_args_count;
+    ctx.build_install       = opts->build_install;
+    ctx.user_args           = opts->user_args;
+    ctx.user_args_count     = opts->user_args_count;
     {
         const char *prefix_env = getenv("PREFIX");
         ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");
@@ -3342,7 +3785,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     s_ctx = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
     long long ret = vm->regs[REG_A0];
-    s_ctx = NULL;
+    s_ctx         = NULL;
 
     int exit_code;
     if (ctx.run_invoked)
@@ -3351,18 +3794,23 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         exit_code = (int)ret;
 
     if (exit_code == 0 && ctx.build_install && ctx.install_count > 0)
-        if (run_install(&ctx) != 0) exit_code = 1;
+        if (run_install(&ctx) != 0)
+            exit_code = 1;
 
     for (int i = 0; i < ctx.targets_count; i++)
         free_target(ctx.targets[i]);
     free(ctx.targets);
     free(ctx.out_dir);
     free(ctx.cache_dir);
-    for (int i = 0; i < ctx.captures_count; i++) free(ctx.captures[i]);
+    for (int i = 0; i < ctx.captures_count; i++)
+        free(ctx.captures[i]);
     free(ctx.captures);
     free(ctx.install_prefix);
     free(ctx.install_targets);
-    if (ctx.original_cwd) { chdir(ctx.original_cwd); free(ctx.original_cwd); }
+    if (ctx.original_cwd) {
+        chdir(ctx.original_cwd);
+        free(ctx.original_cwd);
+    }
     free(factory_names);
     return exit_code;
 }

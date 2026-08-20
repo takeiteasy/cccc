@@ -5,11 +5,12 @@
 // must not be flagged may_return_null, and no warning should fire.
 int *never_null(int cond) {
     static int x = 0, y = 0;
-    if (cond) return &x;
+    if (cond)
+        return &x;
     return &y;
 }
 void handle(int *p) __attribute__((nonnull));
-void handle(int *p) { }
+void handle(int *p) {}
 int main(void) {
     int *p = never_null(1);
     handle(p);

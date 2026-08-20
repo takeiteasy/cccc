@@ -12,12 +12,14 @@ void cccc_posix_save_and_release_gil(VirtualMachine *vm, ExecState *state) {
     cccc_gil_release(vm);
 }
 
-void cccc_posix_acquire_and_restore_gil(VirtualMachine *vm, const ExecState *state) {
+void cccc_posix_acquire_and_restore_gil(VirtualMachine  *vm,
+                                        const ExecState *state) {
     cccc_gil_acquire(vm);
     cccc_exec_state_restore(vm, state);
 }
 
-void cccc_posix_guest_sigset_to_host(unsigned int guest_mask, sigset_t *host_set) {
+void cccc_posix_guest_sigset_to_host(unsigned int guest_mask,
+                                     sigset_t    *host_set) {
     sigemptyset(host_set);
     for (int signo = 1; signo < CCCC_NSIG; signo++) {
         if (guest_mask & (1u << (unsigned)(signo - 1)))

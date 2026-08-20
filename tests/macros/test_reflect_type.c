@@ -1,7 +1,10 @@
 // Test $identifier reflect operator: $SomeStruct yields a Type*
 // Verified by passing it to GetTypeKind and checking TK_STRUCT.
 
-typedef struct { int x; int y; } Point;
+typedef struct {
+    int x;
+    int y;
+} Point;
 
 [[cccc::comptime]]
 Node *reflect_type_kind(void) {

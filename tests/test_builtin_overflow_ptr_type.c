@@ -1,5 +1,6 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: __builtin_\*_overflow: third argument must be a pointer to a non-const integer type
+// CCCC_EXPECT_STDERR: __builtin_\*_overflow: third argument must be a pointer
+// to a non-const integer type
 //
 // #964: __builtin_*_overflow's third-argument check used to only require
 // TY_PTR, so a `float *` (or `const int *`) third argument was accepted by
@@ -10,6 +11,6 @@
 
 int main(void) {
     float r;
-    int a = 1;
+    int   a = 1;
     return __builtin_add_overflow(a, a, &r);
 }

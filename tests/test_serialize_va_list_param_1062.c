@@ -70,13 +70,16 @@ static int consume_from_copy(va_list ap) {
 static int test_basic_forward(int count, ...) {
     va_list ap;
     va_start(ap, count);
-    int first = va_arg(ap, int);          // consumes 10
-    int consumed = consume_one(1, ap);    // callee's own copy consumes 20
-    int next = va_arg(ap, int);           // caller's ap must still see 20
+    int first    = va_arg(ap, int);    // consumes 10
+    int consumed = consume_one(1, ap); // callee's own copy consumes 20
+    int next     = va_arg(ap, int);    // caller's ap must still see 20
     va_end(ap);
-    if (first != 10) return 1;
-    if (consumed != 20) return 2;
-    if (next != 20) return 3;             // would be 30 if aliased
+    if (first != 10)
+        return 1;
+    if (consumed != 20)
+        return 2;
+    if (next != 20)
+        return 3; // would be 30 if aliased
     return 0;
 }
 
@@ -92,13 +95,16 @@ static int test_zero_consuming_forward(int count, ...) {
 static int test_two_level_forward(int count, ...) {
     va_list ap;
     va_start(ap, count);
-    int first = va_arg(ap, int);          // consumes 10
-    int forwarded = mid_forward(ap);      // mid->leaf's own copy consumes 20
-    int next = va_arg(ap, int);           // caller's ap must still see 20
+    int first     = va_arg(ap, int); // consumes 10
+    int forwarded = mid_forward(ap); // mid->leaf's own copy consumes 20
+    int next      = va_arg(ap, int); // caller's ap must still see 20
     va_end(ap);
-    if (first != 10) return 1;
-    if (forwarded != 20) return 2;
-    if (next != 20) return 3;
+    if (first != 10)
+        return 1;
+    if (forwarded != 20)
+        return 2;
+    if (next != 20)
+        return 3;
     return 0;
 }
 
@@ -106,22 +112,29 @@ static int test_copy_then_forward(int count, ...) {
     va_list ap, copy;
     va_start(ap, count);
     va_copy(copy, ap);
-    int consumed = consume_from_copy(copy); // consumes 10 from copy's own copy
-    int from_copy = va_arg(copy, int);      // copy must still see 10
-    int from_ap = va_arg(ap, int);          // ap (never forwarded) must see 10 too
+    int consumed  = consume_from_copy(copy); // consumes 10 from copy's own copy
+    int from_copy = va_arg(copy, int);       // copy must still see 10
+    int from_ap   = va_arg(ap, int); // ap (never forwarded) must see 10 too
     va_end(copy);
     va_end(ap);
-    if (consumed != 10) return 1;
-    if (from_copy != 10) return 2;
-    if (from_ap != 10) return 3;
+    if (consumed != 10)
+        return 1;
+    if (from_copy != 10)
+        return 2;
+    if (from_ap != 10)
+        return 3;
     return 0;
 }
 
 int main(void) {
     int r;
-    if ((r = test_basic_forward(2, 10, 20)) != 0) return r;
-    if ((r = test_zero_consuming_forward(1, 10)) != 0) return 10 + r;
-    if ((r = test_two_level_forward(2, 10, 20)) != 0) return 20 + r;
-    if ((r = test_copy_then_forward(1, 10)) != 0) return 30 + r;
+    if ((r = test_basic_forward(2, 10, 20)) != 0)
+        return r;
+    if ((r = test_zero_consuming_forward(1, 10)) != 0)
+        return 10 + r;
+    if ((r = test_two_level_forward(2, 10, 20)) != 0)
+        return 20 + r;
+    if ((r = test_copy_then_forward(1, 10)) != 0)
+        return 30 + r;
     return 42;
 }

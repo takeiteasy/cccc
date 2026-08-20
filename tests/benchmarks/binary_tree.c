@@ -6,31 +6,35 @@
 #endif
 
 typedef struct Node {
-    int key;
+    int          key;
     struct Node *left;
     struct Node *right;
 } Node;
 
 static Node *root;
-static long checksum;
-static long visit_count;
+static long  checksum;
+static long  visit_count;
 
 static Node *new_node(int k) {
     Node *n = malloc(sizeof(Node));
-    n->key = k;
+    n->key  = k;
     n->left = n->right = 0;
     return n;
 }
 
 static Node *insert(Node *n, int k) {
-    if (!n) return new_node(k);
-    if (k < n->key) n->left = insert(n->left, k);
-    else n->right = insert(n->right, k);
+    if (!n)
+        return new_node(k);
+    if (k < n->key)
+        n->left = insert(n->left, k);
+    else
+        n->right = insert(n->right, k);
     return n;
 }
 
 static void inorder(Node *n) {
-    if (!n) return;
+    if (!n)
+        return;
     inorder(n->left);
     checksum += n->key;
     visit_count++;
@@ -44,11 +48,11 @@ static unsigned long mrand(unsigned long *s) {
 
 int main(void) {
     unsigned long s = 0x9E3779B97F4A7C15ULL;
-    long n = BENCH_N;
-    root = 0;
+    long          n = BENCH_N;
+    root            = 0;
     for (long i = 0; i < n; i++) {
         int k = (int)(mrand(&s) & 0x7FFFFFFFL);
-        root = insert(root, k);
+        root  = insert(root, k);
     }
     inorder(root);
     printf("result: visits=%ld checksum=%ld\n", visit_count, checksum);

@@ -8,8 +8,12 @@ typedef int (*math_fn_t)(int, int);
 math_fn_t plugin_add;
 math_fn_t plugin_mul;
 
-static int do_add(int a, int b) { return a + b; }
-static int do_mul(int a, int b) { return a * b; }
+static int do_add(int a, int b) {
+    return a + b;
+}
+static int do_mul(int a, int b) {
+    return a * b;
+}
 
 // Module init: fill the exported function-pointer table.
 void plugin_init(void) {

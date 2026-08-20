@@ -7,7 +7,7 @@
 
 struct S {
     unsigned n : 4;
-    int * [[cccc::array, cccc::count(n)]] p;
+    int *[[cccc::array, cccc::count(n)]] p;
 };
 
 int main(void) {

@@ -1,6 +1,9 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: floating-point, complex, FMA/FMS optimizer, float32
-// Source tests: test_complex, test_complex_tgmath, test_fenv_tgmath_hexfloat, test_float, test_float32_register_file, test_float32_width, test_float_mixed, test_float_simple, test_fstr_promoted, test_optimizer_fmadd, test_optimizer_fmsub, test_optimizer_fnmsub, test_optimizer_fp_promotion,
+// Source tests: test_complex, test_complex_tgmath, test_fenv_tgmath_hexfloat,
+// test_float, test_float32_register_file, test_float32_width, test_float_mixed,
+// test_float_simple, test_fstr_promoted, test_optimizer_fmadd,
+// test_optimizer_fmsub, test_optimizer_fnmsub, test_optimizer_fp_promotion,
 //   test_float_comprehensive, test_fp_minimal
 
 #include <complex.h>
@@ -41,13 +44,13 @@ static int check_args(float a, float b, float c) {
 // [from test_float32_width]
 // Test float uses 32-bit load/store and rounding semantics
 
-float gf = 1.25f;
-float ga[3] = { 1.0f, 2.0f, 39.0f };
+float gf    = 1.25f;
+float ga[3] = {1.0f, 2.0f, 39.0f};
 
 struct S {
-    char c;
+    char  c;
     float f;
-    int i;
+    int   i;
 };
 
 static float add_one(float x) {
@@ -91,16 +94,16 @@ static double store_via_ptr(double *out, double a, double b) {
     double x = 0.0;
     for (int i = 0; i < 4; i++)
         x += a;
-    x = b;        // Promoted register updated to b; previous loop value differs.
-    *out = x;     // FMOV3 tmp=FREG_S0; FSTR tmp, *out — tmp must NOT be NOP'd.
-    return 0.0;   // Do not return x; only consumer of the promoted-read is FSTR.
+    x    = b;   // Promoted register updated to b; previous loop value differs.
+    *out = x;   // FMOV3 tmp=FREG_S0; FSTR tmp, *out — tmp must NOT be NOP'd.
+    return 0.0; // Do not return x; only consumer of the promoted-read is FSTR.
 }
 
 static float store_via_ptr_f32(float *out, float a, float b) {
     float x = 0.0f;
     for (int i = 0; i < 4; i++)
         x += a;
-    x = b;
+    x    = b;
     *out = x;
     return 0.0f;
 }
@@ -109,8 +112,8 @@ static double store_via_index(double *arr, double a, double b, int idx) {
     double x = 0.0;
     for (int i = 0; i < 4; i++)
         x += a;
-    x = b;
-    arr[idx] = x;  // indexed store: FSTR_INDEX
+    x        = b;
+    arr[idx] = x; // indexed store: FSTR_INDEX
     return 0.0;
 }
 
@@ -139,7 +142,8 @@ static int mandel_iters(double cr, double ci, int max) {
     double zr = 0.0, zi = 0.0;
     for (int i = 0; i < max; i++) {
         double zr2 = zr * zr - zi * zi + cr;
-        double zi2 = zr * zi + zr * zi + ci;  // 2*zr*zi+ci (two FMUL+FADD chains)
+        double zi2 =
+            zr * zi + zr * zi + ci; // 2*zr*zi+ci (two FMUL+FADD chains)
         zr = zr2;
         zi = zi2;
         if (zr2 * zr2 + zi2 * zi2 > 4.0)
@@ -149,9 +153,9 @@ static int mandel_iters(double cr, double ci, int max) {
 }
 
 // [from test_optimizer_fmsub]
-// Verifies correctness of FMSUB3 semantics (two-rounding: product rounded first,
-// then subtracted). The fusion pass emits FMSUB3 for the minuend form (a*b - c)
-// when FMUL3 and FSUB3 are adjacent with no intervening instructions.
+// Verifies correctness of FMSUB3 semantics (two-rounding: product rounded
+// first, then subtracted). The fusion pass emits FMSUB3 for the minuend form
+// (a*b - c) when FMUL3 and FSUB3 are adjacent with no intervening instructions.
 // Patterns where a load separates the pair fall back to unfused FMUL3+FSUB3
 // (same numerical result).
 
@@ -176,8 +180,8 @@ static int mandel_sub_iters(double cr, double ci, int max) {
     for (int i = 0; i < max; i++) {
         double zr2 = zr * zr - zi * zi + cr;
         double zi2 = 2.0 * zr * zi + ci;
-        zr = zr2;
-        zi = zi2;
+        zr         = zr2;
+        zi         = zi2;
         if (zr * zr + zi * zi > 4.0)
             return i;
     }
@@ -214,7 +218,7 @@ static double acc_sub_ref(const double *a, const double *b, int n) {
     double sum = 1000.0;
     for (int i = 0; i < n; i++) {
         double prod = a[i] * b[i];
-        sum = sum - prod;
+        sum         = sum - prod;
     }
     return sum;
 }
@@ -222,9 +226,9 @@ static double acc_sub_ref(const double *a, const double *b, int n) {
 // Pattern: diff -= scale * value  (common in numerical methods)
 
 static double weighted_diff(double init, double scale, double v1, double v2) {
-    double result = init;
-    result -= scale * v1;
-    result -= scale * v2;
+    double result  = init;
+    result        -= scale * v1;
+    result        -= scale * v2;
     return result;
 }
 
@@ -238,8 +242,8 @@ static int _optimizer_fnmsub_mandel_iters(double cr, double ci, int max) {
     for (int i = 0; i < max; i++) {
         double zr2 = zr * zr - zi * zi + cr;
         double zi2 = 2.0 * zr * zi + ci;
-        zr = zr2;
-        zi = zi2;
+        zr         = zr2;
+        zi         = zi2;
         if (zr * zr + zi * zi > 4.0)
             return i;
     }
@@ -291,50 +295,74 @@ static double multi(int n) {
 [[cccc::test(return = 42)]]
 int test_complex(void) {
     double _Complex z = CMPLX(1.0, 2.0);
-    if (sizeof(z) != 16) return 1;
-    if (_Alignof(double _Complex) != 8) return 2;
-    if (creal(z) != 1.0) return 3;
-    if (cimag(z) != 2.0) return 4;
+    if (sizeof(z) != 16)
+        return 1;
+    if (_Alignof(double _Complex) != 8)
+        return 2;
+    if (creal(z) != 1.0)
+        return 3;
+    if (cimag(z) != 2.0)
+        return 4;
 
     double complex w = z * CMPLX(3.0, 4.0);
-    if (creal(w) != -5.0) return 5;
-    if (cimag(w) != 10.0) return 6;
+    if (creal(w) != -5.0)
+        return 5;
+    if (cimag(w) != 10.0)
+        return 6;
 
     w = w / CMPLX(3.0, 4.0);
-    if (creal(w) != 1.0) return 7;
-    if (cimag(w) != 2.0) return 8;
+    if (creal(w) != 1.0)
+        return 7;
+    if (cimag(w) != 2.0)
+        return 8;
 
     w = z + CMPLX(5.0, 6.0) - CMPLX(1.0, 1.0);
-    if (creal(w) != 5.0) return 9;
-    if (cimag(w) != 7.0) return 10;
+    if (creal(w) != 5.0)
+        return 9;
+    if (cimag(w) != 7.0)
+        return 10;
 
     w = -z;
-    if (creal(w) != -1.0) return 11;
-    if (cimag(w) != -2.0) return 12;
+    if (creal(w) != -1.0)
+        return 11;
+    if (cimag(w) != -2.0)
+        return 12;
 
     w = conj(z);
-    if (creal(w) != 1.0) return 13;
-    if (cimag(w) != -2.0) return 14;
+    if (creal(w) != 1.0)
+        return 13;
+    if (cimag(w) != -2.0)
+        return 14;
 
     w = 5.0;
-    if (creal(w) != 5.0) return 15;
-    if (cimag(w) != 0.0) return 16;
+    if (creal(w) != 5.0)
+        return 15;
+    if (cimag(w) != 0.0)
+        return 16;
 
     struct Box box;
     box.z = CMPLX(8.0, 9.0);
-    if (creal(box.z) != 8.0) return 17;
-    if (cimag(box.z) != 9.0) return 18;
+    if (creal(box.z) != 8.0)
+        return 17;
+    if (cimag(box.z) != 9.0)
+        return 18;
 
     float complex f = CMPLXF(1.0f, 2.0f);
-    if (sizeof(f) != 8) return 19;
-    if (crealf(f) != 1.0f) return 20;
-    if (cimagf(f) != 2.0f) return 21;
+    if (sizeof(f) != 8)
+        return 19;
+    if (crealf(f) != 1.0f)
+        return 20;
+    if (cimagf(f) != 2.0f)
+        return 21;
 
     int selected = _Generic(z, double complex: 42, default: 0);
-    if (selected != 42) return 22;
+    if (selected != 42)
+        return 22;
 
-    if (z != CMPLX(1.0, 2.0)) return 23;
-    if (z == CMPLX(2.0, 1.0)) return 24;
+    if (z != CMPLX(1.0, 2.0))
+        return 23;
+    if (z == CMPLX(2.0, 1.0))
+        return 24;
 
     return 42;
 }
@@ -343,23 +371,32 @@ int test_complex(void) {
 [[cccc::test(return = 42)]]
 int test_complex_tgmath(void) {
     double complex z = CMPLX(3.0, 4.0);
-    if (fabs(z) != 5.0) return 1;
-    if (cabs(z) != 5.0) return 2;
-    if (carg(CMPLX(1.0, 0.0)) != 0.0) return 3;
+    if (fabs(z) != 5.0)
+        return 1;
+    if (cabs(z) != 5.0)
+        return 2;
+    if (carg(CMPLX(1.0, 0.0)) != 0.0)
+        return 3;
 
     double complex i = I;
-    if (creal(i) != 0.0) return 4;
-    if (cimag(i) != 1.0) return 5;
+    if (creal(i) != 0.0)
+        return 4;
+    if (cimag(i) != 1.0)
+        return 5;
 
     double _Imaginary compat = I;
-    if (creal(compat) != 0.0) return 6;
-    if (cimag(compat) != 1.0) return 7;
+    if (creal(compat) != 0.0)
+        return 6;
+    if (cimag(compat) != 1.0)
+        return 7;
 
     return 42;
 }
 
 // [helper for test_complex_nesting]
-static double complex_nesting_helper(void) { return 7.0; }
+static double complex_nesting_helper(void) {
+    return 7.0;
+}
 
 // test_complex_nesting (#968)
 //
@@ -378,8 +415,10 @@ static double complex_nesting_helper(void) { return 7.0; }
 int test_complex_nesting(void) {
     // The literal repro from the ticket.
     double complex z = 20.0 + 22.0 * I;
-    if (creal(z) != 20.0) return 1;
-    if (cimag(z) != 22.0) return 2;
+    if (creal(z) != 20.0)
+        return 1;
+    if (cimag(z) != 22.0)
+        return 2;
 
     double complex a = CMPLX(1.0, 2.0);
     double complex b = CMPLX(3.0, 4.0);
@@ -387,40 +426,55 @@ int test_complex_nesting(void) {
 
     // Right nesting vs. left nesting, all four operators.
     double complex add_r = a + (b + c), add_l = (a + b) + c;
-    if (creal(add_r) != 9.0 || cimag(add_r) != 12.0) return 3;
-    if (creal(add_l) != 9.0 || cimag(add_l) != 12.0) return 4;
+    if (creal(add_r) != 9.0 || cimag(add_r) != 12.0)
+        return 3;
+    if (creal(add_l) != 9.0 || cimag(add_l) != 12.0)
+        return 4;
 
     double complex sub_r = a - (b - c), sub_l = (a - b) - c;
-    if (creal(sub_r) != 3.0 || cimag(sub_r) != 4.0) return 5;
-    if (creal(sub_l) != -7.0 || cimag(sub_l) != -8.0) return 6;
+    if (creal(sub_r) != 3.0 || cimag(sub_r) != 4.0)
+        return 5;
+    if (creal(sub_l) != -7.0 || cimag(sub_l) != -8.0)
+        return 6;
 
     double complex mul_r = a * (b * c), mul_l = (a * b) * c;
-    if (creal(mul_r) != -85.0 || cimag(mul_r) != 20.0) return 7;
-    if (creal(mul_l) != -85.0 || cimag(mul_l) != 20.0) return 8;
+    if (creal(mul_r) != -85.0 || cimag(mul_r) != 20.0)
+        return 7;
+    if (creal(mul_l) != -85.0 || cimag(mul_l) != 20.0)
+        return 8;
 
     double complex div_r = a / (b / c), div_l = (a / b) / c;
-    if (fabs(creal(div_r) - 1.72) > 1e-9) return 9;
-    if (fabs(cimag(div_r) - 3.04) > 1e-9) return 10;
-    if (fabs(creal(div_l) - 0.0439344262295082) > 1e-9) return 11;
-    if (fabs(cimag(div_l) - (-0.03672131147540984)) > 1e-9) return 12;
+    if (fabs(creal(div_r) - 1.72) > 1e-9)
+        return 9;
+    if (fabs(cimag(div_r) - 3.04) > 1e-9)
+        return 10;
+    if (fabs(creal(div_l) - 0.0439344262295082) > 1e-9)
+        return 11;
+    if (fabs(cimag(div_l) - (-0.03672131147540984)) > 1e-9)
+        return 12;
 
     // Deep right-nested chain -- must not exhaust the temp register pool.
     double complex d0 = CMPLX(1.0, 1.0), d1 = CMPLX(2.0, 2.0);
     double complex d2 = CMPLX(3.0, 3.0), d3 = CMPLX(4.0, 4.0);
     double complex deep = d0 + (d1 + (d2 + (d3 + (d0 + (d1 + (d2 + d3))))));
-    if (creal(deep) != 20.0 || cimag(deep) != 20.0) return 13;
+    if (creal(deep) != 20.0 || cimag(deep) != 20.0)
+        return 13;
 
     // float complex, right-nested.
     float complex fz = 2.0f + 3.0f * I;
-    if (crealf(fz) != 2.0f) return 14;
-    if (cimagf(fz) != 3.0f) return 15;
+    if (crealf(fz) != 2.0f)
+        return 14;
+    if (cimagf(fz) != 3.0f)
+        return 15;
 
     // A function call in the RHS clobbers the LHS if it isn't spilled.
     double complex s = a + complex_nesting_helper();
-    if (creal(s) != 8.0 || cimag(s) != 2.0) return 16;
+    if (creal(s) != 8.0 || cimag(s) != 2.0)
+        return 16;
 
     double complex m = a * (2.0 + complex_nesting_helper());
-    if (creal(m) != 9.0 || cimag(m) != 18.0) return 17;
+    if (creal(m) != 9.0 || cimag(m) != 18.0)
+        return 17;
 
     return 42;
 }
@@ -429,15 +483,20 @@ int test_complex_nesting(void) {
 [[cccc::test(return = 42)]]
 int test_fenv_tgmath_hexfloat(void) {
     double x = 0x1.8p+1;
-    if (x != 3.0) return 1;
+    if (x != 3.0)
+        return 1;
 
-    if (feclearexcept(FE_ALL_EXCEPT) != 0) return 2;
-    if (fetestexcept(FE_ALL_EXCEPT) != 0) return 3;
+    if (feclearexcept(FE_ALL_EXCEPT) != 0)
+        return 2;
+    if (fetestexcept(FE_ALL_EXCEPT) != 0)
+        return 3;
 
-    float f = -3.0f;
+    float  f = -3.0f;
     double d = -4.0;
-    if (fabs(f) != 3.0f) return 4;
-    if (sqrt(d * d) != 4.0) return 5;
+    if (fabs(f) != 3.0f)
+        return 4;
+    if (sqrt(d * d) != 4.0)
+        return 5;
 
     return 42;
 }
@@ -446,81 +505,96 @@ int test_fenv_tgmath_hexfloat(void) {
 [[cccc::test(return = 42)]]
 int test_float(void) {
     // Test 1: Basic float literals and addition
-    double x = 10.5;
-    double y = 31.5;
-    double sum = x + y;  // 42.0
-    
+    double x   = 10.5;
+    double y   = 31.5;
+    double sum = x + y; // 42.0
+
     // Test 2: Subtraction
-    double a = 50.0;
-    double b = 8.0;
-    double diff = a - b;  // 42.0
-    
+    double a    = 50.0;
+    double b    = 8.0;
+    double diff = a - b; // 42.0
+
     // Test 3: Multiplication
-    double m = 6.0;
-    double n = 7.0;
-    double product = m * n;  // 42.0
-    
+    double m       = 6.0;
+    double n       = 7.0;
+    double product = m * n; // 42.0
+
     // Test 4: Division
-    double p = 84.0;
-    double q = 2.0;
-    double quotient = p / q;  // 42.0
-    
+    double p        = 84.0;
+    double q        = 2.0;
+    double quotient = p / q; // 42.0
+
     // Test 5: Unary minus
     double neg = -42.0;
-    double pos = -neg;  // 42.0
-    
+    double pos = -neg; // 42.0
+
     // Test 6: Comparison operators
-    double c1 = 42.0;
-    double c2 = 42.0;
-    double c3 = 41.0;
-    
-    int eq_test = (c1 == c2);    // 1
-    int ne_test = (c1 != c3);    // 1
-    int lt_test = (c3 < c1);     // 1
-    int le_test = (c3 <= c1);    // 1
-    int gt_test = (c1 > c3);     // 1
-    int ge_test = (c1 >= c2);    // 1
-    
+    double c1      = 42.0;
+    double c2      = 42.0;
+    double c3      = 41.0;
+
+    int    eq_test = (c1 == c2); // 1
+    int    ne_test = (c1 != c3); // 1
+    int    lt_test = (c3 < c1);  // 1
+    int    le_test = (c3 <= c1); // 1
+    int    gt_test = (c1 > c3);  // 1
+    int    ge_test = (c1 >= c2); // 1
+
     // Test 7: Type conversion int to float (implicit)
-    int int_val = 21;
-    double converted = int_val * 2.0;  // 42.0 (int_val implicitly converted)
-    
+    int    int_val   = 21;
+    double converted = int_val * 2.0; // 42.0 (int_val implicitly converted)
+
     // Test 8: Complex expression
-    double complex_expr = 10.0 * 4.0 + 2.0;  // 42.0
-    
+    double complex_expr = 10.0 * 4.0 + 2.0; // 42.0
+
     // Test 9: Mixed expressions
-    double mixed = 10.0 + 32.0;  // 42.0
-    
+    double mixed = 10.0 + 32.0; // 42.0
+
     // Test 10: Float variable assignment
     double result = 0.0;
-    result = 42.0;
-    
+    result        = 42.0;
+
     // Verify all tests pass and return 42
-    if (sum != 42.0) return 1;
-    if (diff != 42.0) return 2;
-    if (product != 42.0) return 3;
-    if (quotient != 42.0) return 4;
-    if (pos != 42.0) return 5;
-    
-    if (!eq_test) return 6;
-    if (!ne_test) return 7;
-    if (!lt_test) return 8;
-    if (!le_test) return 9;
-    if (!gt_test) return 10;
-    if (!ge_test) return 11;
-    
-    if (converted != 42.0) return 12;
-    if (complex_expr != 42.0) return 13;
-    if (mixed != 42.0) return 14;
-    if (result != 42.0) return 15;
-    
+    if (sum != 42.0)
+        return 1;
+    if (diff != 42.0)
+        return 2;
+    if (product != 42.0)
+        return 3;
+    if (quotient != 42.0)
+        return 4;
+    if (pos != 42.0)
+        return 5;
+
+    if (!eq_test)
+        return 6;
+    if (!ne_test)
+        return 7;
+    if (!lt_test)
+        return 8;
+    if (!le_test)
+        return 9;
+    if (!gt_test)
+        return 10;
+    if (!ge_test)
+        return 11;
+
+    if (converted != 42.0)
+        return 12;
+    if (complex_expr != 42.0)
+        return 13;
+    if (mixed != 42.0)
+        return 14;
+    if (result != 42.0)
+        return 15;
+
     return 42;
 }
 
 // test_float32_register_file
 [[cccc::test(return = 42)]]
 int test_float32_register_file(void) {
-    float lhs = 16.0f;
+    float lhs      = 16.0f;
     float combined = lhs + call_add_half(25.5f);
     if (combined != 42.0f)
         return 1;
@@ -543,11 +617,11 @@ int test_float32_register_file(void) {
 [[cccc::test(return = 42)]]
 int test_float32_width(void) {
     struct S s;
-    s.c = 7;
-    s.f = 40.75f;
-    s.i = 9;
+    s.c           = 7;
+    s.f           = 40.75f;
+    s.i           = 9;
 
-    float local = 16777216.0f;
+    float local   = 16777216.0f;
     float rounded = local + 1.0f;
     if (rounded != 16777216.0f)
         return 1;
@@ -581,20 +655,25 @@ int test_float32_width(void) {
 int test_float_mixed(void) {
     // Test 1: Int + Float parameters
     double result1 = add_int_float(10, 32.0);
-    if (result1 != 42.0) return 1;
-    
+    if (result1 != 42.0)
+        return 1;
+
     // Test 2: Mixed parameter order
-    double result2 = mixed_ops(20.0, 2, 2.0);  // 20*2 + 2 = 42
-    if (result2 != 42.0) return 2;
-    
+    double result2 = mixed_ops(20.0, 2, 2.0); // 20*2 + 2 = 42
+    if (result2 != 42.0)
+        return 2;
+
     // Test 3: Float to int conversion via function
     int result3 = double_to_int(42.0);
-    if (result3 != 42) return 3;
-    
+    if (result3 != 42)
+        return 3;
+
     // Test 4: Chained calls
-    double result4 = add_int_float(20, add_int_float(10, 12.0));  // 20 + (10 + 12)
-    if (result4 != 42.0) return 4;
-    
+    double result4 =
+        add_int_float(20, add_int_float(10, 12.0)); // 20 + (10 + 12)
+    if (result4 != 42.0)
+        return 4;
+
     return 42;
 }
 
@@ -602,15 +681,15 @@ int test_float_mixed(void) {
 [[cccc::test(return = 42)]]
 int test_float_simple(void) {
     // Basic arithmetic
-    double a = 20.0;
-    double b = 22.0;
-    double sum = a + b;  // 42.0
-    
+    double a   = 20.0;
+    double b   = 22.0;
+    double sum = a + b; // 42.0
+
     // Test comparison
     if (sum == 42.0) {
         return 42;
     }
-    
+
     return 0;
 }
 
@@ -772,27 +851,27 @@ struct discard_deref_s {
 
 [[cccc::test(return = 42)]]
 int test_discarded_float_double_deref(void) {
-    float fx = 5.0f;
+    float  fx = 5.0f;
     float *pf = &fx;
-    *pf;         // bare discarded float deref (the ticket's original repro)
-    (void)*pf;   // explicit (void)-discard
+    *pf;       // bare discarded float deref (the ticket's original repro)
+    (void)*pf; // explicit (void)-discard
 
-    double dx = 5.0;
+    double  dx = 5.0;
     double *pd = &dx;
     *pd;
     (void)*pd;
 
-    long double lx = 5.0L;
+    long double  lx = 5.0L;
     long double *pl = &lx;
     *pl;
 
-    struct discard_deref_s s = {1.0f};
+    struct discard_deref_s  s  = {1.0f};
     struct discard_deref_s *ps = &s;
     ps->f; // discarded member load through a pointer
     s.f;   // discarded member load, no pointer indirection
 
     float arr[3] = {1.0f, 2.0f, 3.0f};
-    int idx = 1;
+    int   idx    = 1;
     arr[idx]; // discarded indexed load (emit_indexed_load_if_possible path)
 
     int z = (*pf, 3); // discarded deref as a comma-operator LHS
@@ -808,17 +887,17 @@ int test_discarded_float_double_deref(void) {
 // just reused REG_ZERO. Regression cover for that added pressure: a
 // discarded deref nested inside a many-argument call, with several other
 // live temps around it.
-static int discard_deref_pressure_sum(int a, int b, int c, int d, int e,
-                                       int f, int g, int h) {
+static int discard_deref_pressure_sum(int a, int b, int c, int d, int e, int f,
+                                      int g, int h) {
     return a + b + c + d + e + f + g + h;
 }
 
 [[cccc::test(return = 42)]]
 int test_discarded_deref_temp_pressure(void) {
-    float fx = 7.0f;
+    float  fx = 7.0f;
     float *pf = &fx;
-    int r = discard_deref_pressure_sum(1 + 1, 2 + 2, 3 + 3, 4 + 4,
-                                        (*pf, 5) + 5, 6 + 6, 7 + 7, 8 + 8);
+    int r = discard_deref_pressure_sum(1 + 1, 2 + 2, 3 + 3, 4 + 4, (*pf, 5) + 5,
+                                       6 + 6, 7 + 7, 8 + 8);
     // (1+1)+(2+2)+(3+3)+(4+4)+(5+5)+(6+6)+(7+7)+(8+8) = 2*(1+..+8) = 72
     if (r != 72)
         return 1;
@@ -860,7 +939,7 @@ int test_discarded_deref_temp_pressure(void) {
 }
 
 [[cccc::test]] void test_nexttowardl_matches_nextafter(void) {
-    double x = 1.0;
+    double      x = 1.0;
     long double a = nexttowardl((long double)x, (long double)2.0);
     Assert(a > (long double)1.0);
     long double b = nexttowardl((long double)x, (long double)0.0);
@@ -869,30 +948,44 @@ int test_discarded_deref_temp_pressure(void) {
 
 // [from test_float_comprehensive]
 // Arithmetic, comparisons, unary minus, assignment chain with doubles.
-static double flc_add(double a, double b) { return a + b; }
-static double flc_multiply(double a, double b) { return a * b; }
+static double flc_add(double a, double b) {
+    return a + b;
+}
+static double flc_multiply(double a, double b) {
+    return a * b;
+}
 
 [[cccc::test(return = 42)]]
 int test_float_comprehensive(void) {
-    if (flc_add(10.0, 32.0) != 42.0) return 1;
-    if (flc_multiply(6.0, 7.0) != 42.0) return 2;
-    if (84.0 / 2.0 != 42.0) return 3;
-    if (50.0 - 8.0 != 42.0) return 4;
+    if (flc_add(10.0, 32.0) != 42.0)
+        return 1;
+    if (flc_multiply(6.0, 7.0) != 42.0)
+        return 2;
+    if (84.0 / 2.0 != 42.0)
+        return 3;
+    if (50.0 - 8.0 != 42.0)
+        return 4;
     double expr = (10.0 + 2.0) * 3.0 + 6.0; // (12*3)+6=42
-    if (expr != 42.0) return 5;
+    if (expr != 42.0)
+        return 5;
     double a = 42.0, b = 41.0;
-    if (!(a > b) || !(b < a) || a != 42.0) return 6;
+    if (!(a > b) || !(b < a) || a != 42.0)
+        return 6;
     double neg = -42.0;
-    if (neg != -42.0 || -neg != 42.0) return 7;
+    if (neg != -42.0 || -neg != 42.0)
+        return 7;
     double v1, v2, v3;
     v1 = v2 = v3 = 42.0;
-    if (v1 != 42.0 || v2 != 42.0 || v3 != 42.0) return 8;
+    if (v1 != 42.0 || v2 != 42.0 || v3 != 42.0)
+        return 8;
     return 42;
 }
 
 // [from test_fp_minimal]
 // Function-pointer call through int-returning function.
-static int fpm_add(int a, int b) { return a + b; }
+static int fpm_add(int a, int b) {
+    return a + b;
+}
 
 [[cccc::test(return = 42)]]
 int test_fp_minimal(void) {
@@ -914,67 +1007,84 @@ struct FM_Nested {
     struct FM_Point b;
 };
 struct FM_Mixed {
-    int i;
+    int    i;
     double d;
-    float f;
+    float  f;
 };
 union FM_Union {
-    double d;
+    double    d;
     long long i;
 };
 
-static double fm_sum2(double a, double b) { return a + b; }
-static float fm_sumf2(float a, float b) { return a + b; }
+static double fm_sum2(double a, double b) {
+    return a + b;
+}
+static float fm_sumf2(float a, float b) {
+    return a + b;
+}
 
 [[cccc::test(return = 42)]]
 int test_member_float_double_loads(void) {
     // Flat double/float member reads, by value and as call arguments (the
     // FREG_A0 aliasing case from the ticket).
-    struct FM_Mixed m = {.i = 10, .d = 21.0, .f = 11.0f};
-    double dv = m.d;
-    float fv = m.f;
-    if (dv != 21.0 || fv != 11.0f) return 1;
-    if (fm_sum2(m.d, 21.0) != 42.0) return 2;
-    if (fm_sumf2(m.f, 31.0f) != 42.0f) return 3;
+    struct FM_Mixed m  = {.i = 10, .d = 21.0, .f = 11.0f};
+    double          dv = m.d;
+    float           fv = m.f;
+    if (dv != 21.0 || fv != 11.0f)
+        return 1;
+    if (fm_sum2(m.d, 21.0) != 42.0)
+        return 2;
+    if (fm_sumf2(m.f, 31.0f) != 42.0f)
+        return 3;
 
     // Mixed int/float member read in the same expression -- exercises the
     // aliasing scenario directly (integer address computation interleaved
     // with a flonum load through the same raw register index).
-    if ((double)m.i + m.d != 31.0) return 4;
+    if ((double)m.i + m.d != 31.0)
+        return 4;
 
     // Member read through a pointer.
     struct FM_Mixed *p = &m;
-    if (p->d != 21.0) return 5;
+    if (p->d != 21.0)
+        return 5;
 
     // Nested struct member chain.
-    struct FM_Nested n = {.a = {.x = 10.0, .y = 5.0}, .b = {.x = 20.0, .y = 7.0}};
-    if (n.a.x + n.b.x != 30.0) return 6;
+    struct FM_Nested n = {.a = {.x = 10.0, .y = 5.0},
+                          .b = {.x = 20.0, .y = 7.0}};
+    if (n.a.x + n.b.x != 30.0)
+        return 6;
     struct FM_Nested *np = &n;
-    if (np->a.x + np->b.x != 30.0) return 7;
+    if (np->a.x + np->b.x != 30.0)
+        return 7;
 
     // Array-of-struct element members.
     struct FM_Point pts[3] = {{1.0, 1.0}, {2.0, 2.0}, {3.0, 3.0}};
-    int idx = 1;
-    if (pts[idx].x != 2.0 || pts[idx].y != 2.0) return 8;
+    int             idx    = 1;
+    if (pts[idx].x != 2.0 || pts[idx].y != 2.0)
+        return 8;
 
     // Union float member.
     union FM_Union u;
     u.d = 42.0;
-    if (u.d != 42.0) return 9;
+    if (u.d != 42.0)
+        return 9;
 
     // Deeply nested float member expression: exercises peak temp-register
     // use through the binary-op spill path (TEMP_REG_SPILL_THRESHOLD).
     struct FM_Point a = {1.0, 2.0}, b = {3.0, 4.0}, c = {5.0, 6.0},
                     d = {7.0, 8.0}, e = {9.0, 1.0}, f = {2.0, 3.0};
-    double deep = a.x * b.y + c.x * d.y + e.x * f.y - a.y * b.x - c.y * d.x -
-                  e.y * f.x;
+    double          deep =
+        a.x * b.y + c.x * d.y + e.x * f.y - a.y * b.x - c.y * d.x - e.y * f.x;
     // 1*4 + 5*8 + 9*3 - 2*3 - 6*7 - 1*2 = 4+40+27-6-42-2 = 21
-    if (deep != 21.0) return 10;
+    if (deep != 21.0)
+        return 10;
 
     // Long member-chain through nested pointers.
-    struct FM_Nested chain = {.a = {.x = 40.0, .y = 0.0}, .b = {.x = 2.0, .y = 0.0}};
-    struct FM_Nested *cp = &chain;
-    if (cp->a.x + cp->b.x != 42.0) return 11;
+    struct FM_Nested  chain = {.a = {.x = 40.0, .y = 0.0},
+                               .b = {.x = 2.0, .y = 0.0}};
+    struct FM_Nested *cp    = &chain;
+    if (cp->a.x + cp->b.x != 42.0)
+        return 11;
 
     return 42;
 }

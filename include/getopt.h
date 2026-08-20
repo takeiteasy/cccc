@@ -24,10 +24,10 @@ extern char **__cccc_optarg_ptr(void);
 extern int *__cccc_optind_ptr(void);
 extern int *__cccc_opterr_ptr(void);
 extern int *__cccc_optopt_ptr(void);
-#define optarg (*__cccc_optarg_ptr())
-#define optind (*__cccc_optind_ptr())
-#define opterr (*__cccc_opterr_ptr())
-#define optopt (*__cccc_optopt_ptr())
+#define optarg            (*__cccc_optarg_ptr())
+#define optind            (*__cccc_optind_ptr())
+#define opterr            (*__cccc_opterr_ptr())
+#define optopt            (*__cccc_optopt_ptr())
 
 #define no_argument       0
 #define required_argument 1
@@ -35,9 +35,9 @@ extern int *__cccc_optopt_ptr(void);
 
 struct option {
     const char *name;
-    int has_arg;
-    int *flag;
-    int val;
+    int         has_arg;
+    int        *flag;
+    int         val;
 };
 
 extern int getopt(int argc, char *const argv[], const char *optstring);

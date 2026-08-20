@@ -10,8 +10,8 @@ static void *worker(void *arg) {
 
 int main(void) {
     pthread_t thread;
-    int arg = 42;
-    void *retval = 0;
+    int       arg    = 42;
+    void     *retval = 0;
 
     if (pthread_create(&thread, 0, worker, &arg) != 0)
         return 1;

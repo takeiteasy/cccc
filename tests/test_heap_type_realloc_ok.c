@@ -7,20 +7,20 @@
 #include <stdlib.h>
 
 struct S {
-    int a;
+    int   a;
     float b;
 };
 
 int main(void) {
     struct S *s = malloc(sizeof(struct S));
-    s->a = 10;
-    s->b = 5.0f;
+    s->a        = 10;
+    s->b        = 5.0f;
 
     s = realloc(s, sizeof(struct S) * 4); // grows -- always a fresh block
-    int result = s->a + (int)s->b;        // must still match the propagated types
+    int result  = s->a + (int)s->b; // must still match the propagated types
 
-    s[1].a = 3; // touch the newly-grown tail too
-    result += s[1].a;
+    s[1].a      = 3;                // touch the newly-grown tail too
+    result     += s[1].a;
 
     free(s);
     return result == 18 ? 42 : 1;

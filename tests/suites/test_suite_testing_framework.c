@@ -71,7 +71,9 @@ void test_string_empty(void) {
 
 #pragma cccc suite end
 
-static int fw_multiply(int a, int b) { return a * b; }
+static int fw_multiply(int a, int b) {
+    return a * b;
+}
 
 [[cccc::test]]
 void test_calls_helper(void) {
@@ -88,11 +90,16 @@ void test_calls_forward(void) {
     AssertEq(fw_square(0), 0);
 }
 
-static int fw_square(int x) { return x * x; }
+static int fw_square(int x) {
+    return x * x;
+}
 
 [[cccc::test]]
 void test_local_struct(void) {
-    struct { int x; int y; } pt;
+    struct {
+        int x;
+        int y;
+    } pt;
     pt.x = 3;
     pt.y = 4;
     AssertEq(pt.x + pt.y, 7);
@@ -416,7 +423,8 @@ void test_ec_le_two(void) {
 
 #pragma cccc suite end
 
-[[cccc::test(error != "nonexistent_pattern_xyz", suite = "framework/error_pat_negate")]]
+[[cccc::test(error != "nonexistent_pattern_xyz",
+             suite = "framework/error_pat_negate")]]
 void test_neg_pattern_absent(void) {
     int a = undeclared_var;
 }
@@ -446,7 +454,7 @@ int test_segfault(void) {
 // #include [[cccc::test]] routes the include only in testing mode.
 #pragma cccc suite begin "framework/include_route"
 
-#include [[cccc::test]] "../fixtures/test_only.h"
+#include[[cccc::test]] "../fixtures/test_only.h"
 
 [[cccc::test]]
 void test_include_loaded(void) {
@@ -512,90 +520,118 @@ int test_return_with_assert(void) {
 #pragma cccc suite begin "framework/return_epsilon"
 
 [[cccc::test(return = 3.14159, return_epsilon = 1e-5)]]
-double test_approx_pi(void) { return 3.141595; }
+double test_approx_pi(void) {
+    return 3.141595;
+}
 
 [[cccc::test(return = 0.0, return_epsilon = 1e-3)]]
-double test_zero_loose(void) { return 0.0005; }
+double test_zero_loose(void) {
+    return 0.0005;
+}
 
 [[cccc::test(return != 99.0, return_epsilon = 0.5)]]
-double test_ne_with_epsilon(void) { return 1.0; }
+double test_ne_with_epsilon(void) {
+    return 1.0;
+}
 
 [[cccc::test(return = 1.0)]]
-double test_exact_one(void) { return 1.0; }
+double test_exact_one(void) {
+    return 1.0;
+}
 
 #pragma cccc suite end
 
 // [from test_return_struct.c]
 // Struct return-value assertion with compound-literal syntax (ticket #353).
-struct FwPoint { int x; int y; };
+struct FwPoint {
+    int x;
+    int y;
+};
 
 #pragma cccc suite begin "framework/struct_return"
 
-[[cccc::test(return = (struct FwPoint){.x = 1, .y = 2})]]
-struct FwPoint test_point_eq(void) {
+[[cccc::test(return = (struct FwPoint){.x = 1, .y = 2})]] struct FwPoint
+    test_point_eq(void) {
     return (struct FwPoint){.x = 1, .y = 2};
 }
 
-[[cccc::test(return = (struct FwPoint){.x = 100, .y = 200})]]
-struct FwPoint test_point_large(void) {
+[[cccc::test(return = (struct FwPoint){.x = 100, .y = 200})]] struct FwPoint
+    test_point_large(void) {
     return (struct FwPoint){.x = 100, .y = 200};
 }
 
-[[cccc::test(return = (struct FwPoint){.x = -3, .y = -9})]]
-struct FwPoint test_point_negative(void) {
+[[cccc::test(return = (struct FwPoint){.x = -3, .y = -9})]] struct FwPoint
+    test_point_negative(void) {
     return (struct FwPoint){.x = -3, .y = -9};
 }
 
-[[cccc::test(return = (struct FwPoint){.x = 7})]]
-struct FwPoint test_point_partial(void) {
+[[cccc::test(return = (struct FwPoint){.x = 7})]] struct FwPoint
+    test_point_partial(void) {
     return (struct FwPoint){.x = 7, .y = 0};
 }
 
-[[cccc::test(return != (struct FwPoint){.x = 1, .y = 1})]]
-struct FwPoint test_point_ne(void) {
+[[cccc::test(return != (struct FwPoint){.x = 1, .y = 1})]] struct FwPoint
+    test_point_ne(void) {
     return (struct FwPoint){.x = 99, .y = 2};
 }
 
 [[cccc::test(return = (struct FwPoint){.x = 42, .y = 0},
-             name = "point with name annotation")]]
-struct FwPoint test_point_named(void) {
+                    name = "point with name annotation")]] struct FwPoint
+    test_point_named(void) {
     return (struct FwPoint){.x = 42, .y = 0};
 }
 
 #pragma cccc suite end
 
-struct FwFPFields { float a; double b; };
+struct FwFPFields {
+    float  a;
+    double b;
+};
 
-[[cccc::test(return = (struct FwFPFields){.a = 1.5, .b = 3.14})]]
-struct FwFPFields test_fp_fields(void) {
+[[cccc::test(return = (struct FwFPFields){.a = 1.5,
+                                          .b = 3.14})]] struct FwFPFields
+    test_fp_fields(void) {
     return (struct FwFPFields){.a = 1.5f, .b = 3.14};
 }
 
-struct FwMixed { int code; double val; };
+struct FwMixed {
+    int    code;
+    double val;
+};
 
-[[cccc::test(return = (struct FwMixed){.code = 7, .val = 2.718})]]
-struct FwMixed test_mixed_int_double(void) {
+[[cccc::test(return = (struct FwMixed){.code = 7,
+                                       .val  = 2.718})]] struct FwMixed
+    test_mixed_int_double(void) {
     return (struct FwMixed){.code = 7, .val = 2.718};
 }
 
-struct FwNamed { char *label; int code; };
+struct FwNamed {
+    char *label;
+    int   code;
+};
 
-[[cccc::test(return = (struct FwNamed){.label = "hello", .code = 42})]]
-struct FwNamed test_named_struct(void) {
+[[cccc::test(return = (struct FwNamed){.label = "hello",
+                                       .code  = 42})]] struct FwNamed
+    test_named_struct(void) {
     return (struct FwNamed){.label = "hello", .code = 42};
 }
 
-struct FwSolo { int n; };
+struct FwSolo {
+    int n;
+};
 
-[[cccc::test(return = (struct FwSolo){.n = 99})]]
-struct FwSolo test_solo(void) {
+[[cccc::test(return = (struct FwSolo){.n = 99})]] struct FwSolo
+    test_solo(void) {
     return (struct FwSolo){.n = 99};
 }
 
-union FwVal { int i; float f; };
+union FwVal {
+    int   i;
+    float f;
+};
 
-[[cccc::test(return = (union FwVal){.i = 123})]]
-union FwVal test_union_field(void) {
+[[cccc::test(return = (union FwVal){.i = 123})]] union FwVal
+    test_union_field(void) {
     return (union FwVal){.i = 123};
 }
 
@@ -604,99 +640,147 @@ union FwVal test_union_field(void) {
 // this bit pattern would fail: the comparator used to walk every member,
 // so the omitted .f arm was read back as ~1.0f and compared against an
 // implicit 0.0 expectation.
-[[cccc::test(return = (union FwVal){.i = 0x3f800000})]]
-union FwVal test_union_field_bitpattern(void) {
+[[cccc::test(return = (union FwVal){.i = 0x3f800000})]] union FwVal
+    test_union_field_bitpattern(void) {
     return (union FwVal){.i = 0x3f800000};
 }
 
 // Nested/aggregate return= fields (ticket #489, follow-up to #353): a
 // struct/union field that is itself a struct, union, or array, plus
 // anonymous struct members. See man/TESTING.md's Struct/union section.
-struct FwInner { int a; int b; };
-struct FwOuter { struct FwInner p; int z; };
+struct FwInner {
+    int a;
+    int b;
+};
+struct FwOuter {
+    struct FwInner p;
+    int            z;
+};
 
 // The ticket's own example spelling: an explicitly-typed nested literal.
-[[cccc::test(return = (struct FwOuter){.p = (struct FwInner){.a = 1, .b = 2}, .z = 3})]]
-struct FwOuter test_nested_typed(void) {
+[[cccc::test(return = (struct FwOuter){.p = (struct FwInner){.a = 1, .b = 2},
+                                       .z = 3})]] struct FwOuter
+    test_nested_typed(void) {
     return (struct FwOuter){.p = (struct FwInner){.a = 1, .b = 2}, .z = 3};
 }
 
 // The more common spelling: a bare brace-list inherits its type from the
 // member being initialized.
-[[cccc::test(return = (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3})]]
-struct FwOuter test_nested_bare(void) {
+[[cccc::test(return = (struct FwOuter){.p = {.a = 1, .b = 2},
+                                       .z = 3})]] struct FwOuter
+    test_nested_bare(void) {
     return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
 }
 
-struct FwL1 { int v; };
-struct FwL2 { struct FwL1 l1; int w; };
-struct FwL3 { struct FwL2 l2; int x; };
+struct FwL1 {
+    int v;
+};
+struct FwL2 {
+    struct FwL1 l1;
+    int         w;
+};
+struct FwL3 {
+    struct FwL2 l2;
+    int         x;
+};
 
-[[cccc::test(return = (struct FwL3){.l2 = {.l1 = {.v = 5}, .w = 6}, .x = 7})]]
-struct FwL3 test_nested_two_levels(void) {
+[[cccc::test(return = (struct FwL3){.l2 = {.l1 = {.v = 5}, .w = 6},
+                                    .x  = 7})]] struct FwL3
+    test_nested_two_levels(void) {
     return (struct FwL3){.l2 = {.l1 = {.v = 5}, .w = 6}, .x = 7};
 }
 
-[[cccc::test(return != (struct FwOuter){.p = {.a = 9, .b = 9}, .z = 0})]]
-struct FwOuter test_nested_ne(void) {
+[[cccc::test(return != (struct FwOuter){.p = {.a = 9, .b = 9},
+                                        .z = 0})]] struct FwOuter
+    test_nested_ne(void) {
     return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
 }
 
 // A nested field omitted from the literal entirely: its sub-fields are
 // expected to be zero, recursively.
-[[cccc::test(return = (struct FwOuter){.z = 3})]]
-struct FwOuter test_nested_omitted(void) {
+[[cccc::test(return = (struct FwOuter){.z = 3})]] struct FwOuter
+    test_nested_omitted(void) {
     struct FwOuter r = {0};
-    r.z = 3;
+    r.z              = 3;
     return r;
 }
 
-struct FwInnerMix { char *label; double val; };
-struct FwOuterMix { struct FwInnerMix m; int code; };
+struct FwInnerMix {
+    char  *label;
+    double val;
+};
+struct FwOuterMix {
+    struct FwInnerMix m;
+    int               code;
+};
 
-[[cccc::test(return = (struct FwOuterMix){.m = {.label = "ok", .val = 2.5}, .code = 1})]]
-struct FwOuterMix test_nested_mixed_fields(void) {
+[[cccc::test(return = (struct FwOuterMix){.m    = {.label = "ok", .val = 2.5},
+                                          .code = 1})]] struct FwOuterMix
+    test_nested_mixed_fields(void) {
     return (struct FwOuterMix){.m = {.label = "ok", .val = 2.5}, .code = 1};
 }
 
-struct FwHolder { union FwVal v; int tag; };
+struct FwHolder {
+    union FwVal v;
+    int         tag;
+};
 
-[[cccc::test(return = (struct FwHolder){.v = {.i = 42}, .tag = 1})]]
-struct FwHolder test_nested_union(void) {
+[[cccc::test(return = (struct FwHolder){.v   = {.i = 42},
+                                        .tag = 1})]] struct FwHolder
+    test_nested_union(void) {
     return (struct FwHolder){.v = {.i = 42}, .tag = 1};
 }
 
-struct FwArr { int a[5]; int n; };
+struct FwArr {
+    int a[5];
+    int n;
+};
 
 // Trailing array elements not listed in the literal are expected to be zero.
-[[cccc::test(return = (struct FwArr){.a = {1, 2, 3}, .n = 3})]]
-struct FwArr test_array_field(void) {
+[[cccc::test(return = (struct FwArr){.a = {1, 2, 3}, .n = 3})]] struct FwArr
+    test_array_field(void) {
     struct FwArr r = {0};
-    r.a[0] = 1; r.a[1] = 2; r.a[2] = 3; r.n = 3;
+    r.a[0]         = 1;
+    r.a[1]         = 2;
+    r.a[2]         = 3;
+    r.n            = 3;
     return r;
 }
 
-struct FwPair { int a; int b; };
-struct FwArrOfStruct { struct FwPair items[2]; };
+struct FwPair {
+    int a;
+    int b;
+};
+struct FwArrOfStruct {
+    struct FwPair items[2];
+};
 
-[[cccc::test(return = (struct FwArrOfStruct){
-    .items = {(struct FwPair){.a = 1, .b = 2}, (struct FwPair){.a = 3, .b = 4}}
-})]]
-struct FwArrOfStruct test_array_of_struct(void) {
+[[cccc::test(return =
+                        (struct FwArrOfStruct){
+                            .items = {(struct FwPair){.a = 1, .b = 2},
+                                      (struct FwPair){
+                                          .a = 3,
+                                          .b = 4}}})]] struct FwArrOfStruct
+    test_array_of_struct(void) {
     struct FwArrOfStruct r;
     r.items[0] = (struct FwPair){.a = 1, .b = 2};
     r.items[1] = (struct FwPair){.a = 3, .b = 4};
     return r;
 }
 
-struct FwBuf { char buf[8]; int n; };
+struct FwBuf {
+    char buf[8];
+    int  n;
+};
 
 // A char[] member compared against a string literal: matched with C
 // zero-initialization semantics (bytes past the literal's NUL expected 0).
-[[cccc::test(return = (struct FwBuf){.buf = "hi", .n = 2})]]
-struct FwBuf test_array_field_string(void) {
+[[cccc::test(return = (struct FwBuf){.buf = "hi", .n = 2})]] struct FwBuf
+    test_array_field_string(void) {
     struct FwBuf r = {0};
-    r.buf[0] = 'h'; r.buf[1] = 'i'; r.n = 2;
+    r.buf[0]       = 'h';
+    r.buf[1]       = 'i';
+    r.n            = 2;
     return r;
 }
 
@@ -710,8 +794,8 @@ struct FwAnonS {
     int z;
 };
 
-[[cccc::test(return = (struct FwAnonS){.x = 1, .y = 2, .z = 3})]]
-struct FwAnonS test_anon_struct_member(void) {
+[[cccc::test(return = (struct FwAnonS){.x = 1, .y = 2, .z = 3})]] struct FwAnonS
+    test_anon_struct_member(void) {
     return (struct FwAnonS){.x = 1, .y = 2, .z = 3};
 }
 
@@ -725,14 +809,14 @@ struct FwAnonS test_anon_struct_member(void) {
 // comparator.
 struct FwAnonU {
     union {
-        int i;
+        int   i;
         float f;
     };
     int z;
 };
 
-[[cccc::test(return = (struct FwAnonU){.i = 1, .z = 3})]]
-struct FwAnonU test_anon_union_member(void) {
+[[cccc::test(return = (struct FwAnonU){.i = 1, .z = 3})]] struct FwAnonU
+    test_anon_union_member(void) {
     return (struct FwAnonU){.i = 1, .z = 3};
 }
 
@@ -740,9 +824,10 @@ struct FwAnonU test_anon_union_member(void) {
 // only that field's assertion is skipped (with a -Wattributes warning) --
 // parsing recovers past the *matching* '}' rather than desyncing on the
 // first inner '}', so the sibling `name =` attribute after it still applies.
-[[cccc::test(return = (struct FwOuter){.p = {.a = 1, .b}, .z = 3},
-             name = "malformed nested literal recovers cleanly")]]
-struct FwOuter test_nested_malformed_recovery(void) {
+[[cccc::test(
+    return = (struct FwOuter){.p = {.a = 1, .b}, .z = 3},
+           name = "malformed nested literal recovers cleanly")]] struct FwOuter
+    test_nested_malformed_recovery(void) {
     return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
 }
 
@@ -750,21 +835,44 @@ struct FwOuter test_nested_malformed_recovery(void) {
 // levels produces a -Wattributes warning and the whole assertion is
 // skipped (test still runs and passes -- there's simply no return=
 // assertion left to check).
-struct FwD0 { int v; };
-struct FwD1 { struct FwD0 a; };
-struct FwD2 { struct FwD1 a; };
-struct FwD3 { struct FwD2 a; };
-struct FwD4 { struct FwD3 a; };
-struct FwD5 { struct FwD4 a; };
-struct FwD6 { struct FwD5 a; };
-struct FwD7 { struct FwD6 a; };
-struct FwD8 { struct FwD7 a; };
-struct FwD9 { struct FwD8 a; };
+struct FwD0 {
+    int v;
+};
+struct FwD1 {
+    struct FwD0 a;
+};
+struct FwD2 {
+    struct FwD1 a;
+};
+struct FwD3 {
+    struct FwD2 a;
+};
+struct FwD4 {
+    struct FwD3 a;
+};
+struct FwD5 {
+    struct FwD4 a;
+};
+struct FwD6 {
+    struct FwD5 a;
+};
+struct FwD7 {
+    struct FwD6 a;
+};
+struct FwD8 {
+    struct FwD7 a;
+};
+struct FwD9 {
+    struct FwD8 a;
+};
 
-[[cccc::test(return = (struct FwD9){
-    .a = {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.v = 1}}}}}}}}}
-}, name = "nested past max depth is skipped, not crashed")]]
-struct FwD9 test_nested_too_deep(void) {
+[[cccc::test(
+    return =
+               (struct FwD9){
+                   .a =
+                       {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.v = 1}}}}}}}}}},
+           name = "nested past max depth is skipped, not crashed")]] struct FwD9
+    test_nested_too_deep(void) {
     struct FwD9 r = {0};
     return r;
 }

@@ -11,7 +11,7 @@ int fact(int n) {
     if (n <= 1)
         return 1;
     int r = fact(n - 1); // recursive call re-enters this function's scope_id
-    return n * r;         // access to `r` here used to falsely abort
+    return n * r;        // access to `r` here used to falsely abort
 }
 
 int main(void) {

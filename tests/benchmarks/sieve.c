@@ -16,7 +16,7 @@ int main(void) {
             }
         }
     }
-    long count = 0;
+    long count    = 0;
     long checksum = 0;
     for (long i = 0; i < (long)BENCH_LIMIT; i++) {
         if (sieve[i]) {

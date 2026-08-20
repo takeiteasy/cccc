@@ -13,7 +13,9 @@
 //  - a function-pointer typedef whose parameter is "struct S *", used to
 //    type a file-scope object a comptime body reads.
 //  - a plain prototype "int f(struct S *);" named from a comptime body.
-struct ParamTagS907 { int x; };
+struct ParamTagS907 {
+    int x;
+};
 
 typedef int (*fp_paramtag_907)(struct ParamTagS907 *);
 fp_paramtag_907 paramtag_fnptr_907;

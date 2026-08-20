@@ -21,6 +21,6 @@ int main(void) {
     // Load (no intervening store) as float: must not false-positive
     // against the pre-call "int" stamp.
     float *head = (float *)&garr[0];
-    float v = *head;
+    float  v    = *head;
     return (v == v) ? 42 : 1; // always true; just needs to reach here
 }

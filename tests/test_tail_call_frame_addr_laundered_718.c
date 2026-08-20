@@ -12,8 +12,9 @@
 // arithmetic on a frame-local base reaching an escaping sink through an
 // assignment, e.g.:
 //
-//   int *q = buf + 0;   // buf's escape was never marked: find_and_mark_escaping_addr's
-//   return use(q);      // switch had no ND_ADD/ND_SUB case, so it fell to
+//   int *q = buf + 0;   // buf's escape was never marked:
+//   find_and_mark_escaping_addr's return use(q);      // switch had no
+//   ND_ADD/ND_SUB case, so it fell to
 //                        // "not an address" and returned without marking
 //
 // left `buf`'s escaping-ness unmarked, so the tail call into `use` was
@@ -33,29 +34,37 @@
 #include <stddef.h>
 
 static volatile long g_sink;
-#define CLOBBER_FRAME()                                                      \
-    do {                                                                     \
-        volatile long junk[8];                                               \
-        for (int _i = 0; _i < 8; _i++)                                       \
-            junk[_i] = 0xdeaddead + _i;                                      \
-        g_sink = junk[0]; /* keep the writes from being optimized away */    \
+#define CLOBBER_FRAME()                                                        \
+    do {                                                                       \
+        volatile long junk[8];                                                 \
+        for (int _i = 0; _i < 8; _i++)                                         \
+            junk[_i] = 0xdeaddead + _i;                                        \
+        g_sink = junk[0]; /* keep the writes from being optimized away */      \
     } while (0)
 
-static int chk(int n) { return n == 5 ? 42 : 0; }
+static int chk(int n) {
+    return n == 5 ? 42 : 0;
+}
 
 // ─── The ticket's exact shape: buf+i laundered through a pointer var ──────
 
-static int use_add(int *p) { CLOBBER_FRAME(); return chk(*p); }
+static int use_add(int *p) {
+    CLOBBER_FRAME();
+    return chk(*p);
+}
 static int call_laundered_add(void) {
-    int buf[2] = {5, 0};
-    int *q = buf + 0; // pointer arithmetic on a frame-local array
-    return use_add(q); // q, not `buf + 0`, is the syntactic argument
+    int  buf[2] = {5, 0};
+    int *q      = buf + 0; // pointer arithmetic on a frame-local array
+    return use_add(q);     // q, not `buf + 0`, is the syntactic argument
 }
 
-static int use_sub(int *p) { CLOBBER_FRAME(); return chk(*p); }
+static int use_sub(int *p) {
+    CLOBBER_FRAME();
+    return chk(*p);
+}
 static int call_laundered_sub(void) {
-    int buf[2] = {0, 5};
-    int *q = (buf + 1) - 0; // exercises ND_SUB too
+    int  buf[2] = {0, 5};
+    int *q      = (buf + 1) - 0; // exercises ND_SUB too
     return use_sub(q);
 }
 
@@ -64,11 +73,14 @@ static int call_laundered_sub(void) {
 // assignment (find_and_mark_escaping_addr's ND_ASSIGN -> rhs walk, applied
 // twice: once to mark q's initializer, once more when q is re-escaped by
 // being copied into r before r escapes).
-static int use_chain(int *p) { CLOBBER_FRAME(); return chk(*p); }
+static int use_chain(int *p) {
+    CLOBBER_FRAME();
+    return chk(*p);
+}
 static int call_laundered_chain(void) {
-    int buf[2] = {5, 0};
-    int *q = buf + 0;
-    int *r = q;
+    int  buf[2] = {5, 0};
+    int *q      = buf + 0;
+    int *r      = q;
     return use_chain(r);
 }
 
@@ -76,7 +88,10 @@ static int call_laundered_chain(void) {
 // correct AND keep TCO (no over-rejection from the new ND_ADD/ND_SUB case) ─
 
 static int g_buf[2] = {5, 0};
-static int use_global_add(int *p) { CLOBBER_FRAME(); return chk(*p); }
+static int use_global_add(int *p) {
+    CLOBBER_FRAME();
+    return chk(*p);
+}
 static int call_laundered_global(void) {
     int *q = g_buf + 0; // arithmetic on a global's base -- not frame-local
     return use_global_add(q);

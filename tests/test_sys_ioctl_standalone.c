@@ -23,32 +23,40 @@ int main(void) {
     // `struct winsize` layout is verified to match on both macOS and Linux
     // (4x unsigned short, 8 bytes).
     struct winsize ws;
-    ws.ws_row = 0;
-    ws.ws_col = 0;
+    ws.ws_row    = 0;
+    ws.ws_col    = 0;
     ws.ws_xpixel = 0;
     ws.ws_ypixel = 0;
-    int r = ioctl(1, TIOCGWINSZ, &ws);
+    int r        = ioctl(1, TIOCGWINSZ, &ws);
     (void)r; // resolution + no crash is what's under test, not the result
 
     // FIONREAD: also allowlisted (int* arg, no layout risk). On a regular
     // file this always succeeds and reports the remaining byte count.
-    int fd = open("/tmp/cccc-ioctl-allowlist-test", O_CREAT | O_TRUNC | O_RDWR, 0600);
-    if (fd < 0) return 1;
-    if (write(fd, "abc", 3) != 3) return 2;
-    if (lseek(fd, 0, SEEK_SET) != 0) return 3;
+    int fd = open("/tmp/cccc-ioctl-allowlist-test", O_CREAT | O_TRUNC | O_RDWR,
+                  0600);
+    if (fd < 0)
+        return 1;
+    if (write(fd, "abc", 3) != 3)
+        return 2;
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        return 3;
     int avail = -1;
-    if (ioctl(fd, FIONREAD, &avail) != 0) return 4;
-    if (avail != 3) return 5;
+    if (ioctl(fd, FIONREAD, &avail) != 0)
+        return 4;
+    if (avail != 3)
+        return 5;
 
     // A raw, unverified request code must be rejected -- not forwarded to
     // the host -- since --posix-emulation was not passed. errno == EINVAL
     // and no crash/corruption, regardless of what the host's real ioctl()
     // would have done with this code.
-    errno = 0;
+    errno     = 0;
     int dummy = 0;
-    int rc = ioctl(fd, 0x12345678, &dummy);
-    if (rc != -1) return 6;
-    if (errno != EINVAL) return 7;
+    int rc    = ioctl(fd, 0x12345678, &dummy);
+    if (rc != -1)
+        return 6;
+    if (errno != EINVAL)
+        return 7;
 
     close(fd);
     unlink("/tmp/cccc-ioctl-allowlist-test");

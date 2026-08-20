@@ -16,9 +16,9 @@ int main(void) {
         printf("FAIL: malloc returned NULL\n");
         return 1;
     }
-    arr[0] = 10;
-    arr[1] = 20;
-    arr[2] = 30;
+    arr[0]    = 10;
+    arr[1]    = 20;
+    arr[2]    = 30;
 
     int *arr2 = reallocarray(arr, 5, sizeof(int));
     if (!arr2) {
@@ -31,7 +31,8 @@ int main(void) {
     }
     printf("PASS: reallocarray grows and preserves data\n");
 
-    // reallocarray(NULL, nmemb, size) behaves like calloc-sized realloc(NULL, ...).
+    // reallocarray(NULL, nmemb, size) behaves like calloc-sized realloc(NULL,
+    // ...).
     int *fresh = reallocarray(NULL, 4, sizeof(int));
     if (!fresh) {
         printf("FAIL: reallocarray(NULL, ...) returned NULL\n");
@@ -48,17 +49,20 @@ int main(void) {
     // leave the original allocation intact (unlike realloc(ptr, 0), which
     // frees). This is the entire reason to use reallocarray over
     // realloc(ptr, nmemb * size).
-    void *overflow_result = reallocarray(arr2, (size_t)1 << 60, (size_t)1 << 60);
+    void *overflow_result =
+        reallocarray(arr2, (size_t)1 << 60, (size_t)1 << 60);
     if (overflow_result != NULL) {
         printf("FAIL: reallocarray did not detect overflow\n");
         return 1;
     }
     // arr2 must still be valid (not freed by the failed call).
     if (arr2[0] != 10 || arr2[1] != 20 || arr2[2] != 30) {
-        printf("FAIL: reallocarray overflow path corrupted/freed the original block\n");
+        printf("FAIL: reallocarray overflow path corrupted/freed the original "
+               "block\n");
         return 1;
     }
-    printf("PASS: reallocarray overflow guard leaves original allocation intact\n");
+    printf("PASS: reallocarray overflow guard leaves original allocation "
+           "intact\n");
 
     free(arr2);
     free(fresh);

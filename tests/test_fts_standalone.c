@@ -11,25 +11,31 @@
 
 int main(void) {
     char dir[] = "/tmp/cccc_fts_standalone_XXXXXX";
-    if (!mkdtemp(dir)) return 1;
+    if (!mkdtemp(dir))
+        return 1;
 
     char f1[512];
     snprintf(f1, sizeof(f1), "%s/only.txt", dir);
     FILE *fp = fopen(f1, "w");
-    if (!fp) return 2;
+    if (!fp)
+        return 2;
     fputs("abc", fp);
     fclose(fp);
 
-    char *paths[2] = { dir, NULL };
-    FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
-    if (!fts) return 3;
+    char *paths[2] = {dir, NULL};
+    FTS  *fts      = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+    if (!fts)
+        return 3;
 
-    int saw = 0;
+    int     saw = 0;
     FTSENT *e;
     while ((e = fts_read(fts)) != NULL) {
         if (e->fts_info == FTS_F && strcmp(e->fts_name, "only.txt") == 0) {
             saw = 1;
-            if (e->fts_statp->st_size != 3) { fts_close(fts); return 4; }
+            if (e->fts_statp->st_size != 3) {
+                fts_close(fts);
+                return 4;
+            }
         }
     }
     fts_close(fts);

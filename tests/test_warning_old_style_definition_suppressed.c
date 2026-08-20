@@ -6,7 +6,9 @@
 int add(a, b)
 int a;
 int b;
-{ return a + b; }
+{
+    return a + b;
+}
 
 int main(void) {
     (void)add(1, 2);

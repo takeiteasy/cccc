@@ -65,7 +65,7 @@ void cc_record_emit_source(VirtualMachine *vm, const char *source) {
         return;
     EmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
     memset(ev, 0, sizeof(*ev));
-    ev->kind = CCCC_EMIT_SOURCE;
+    ev->kind   = CCCC_EMIT_SOURCE;
     ev->source = arena_strdup(vm, source);
     if (vm->compiler.emit_events_tail)
         vm->compiler.emit_events_tail->next = ev;
@@ -83,7 +83,7 @@ void cc_record_emit_object(VirtualMachine *vm, Obj *obj) {
     EmitEvent *ev = arena_alloc(&vm->compiler.parser_arena, sizeof(*ev));
     memset(ev, 0, sizeof(*ev));
     ev->kind = CCCC_EMIT_OBJECT;
-    ev->obj = obj;
+    ev->obj  = obj;
     if (vm->compiler.emit_events_tail)
         vm->compiler.emit_events_tail->next = ev;
     else
@@ -105,8 +105,8 @@ Node *__builtin_ast_vararg_at(int index) {
                   "VarargAt is only valid for inline AST macros");
     if (index < 0 || index >= vm->compiler.macro_vararg_count)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "VarargAt index %d out of range (count %d)",
-                  index, vm->compiler.macro_vararg_count);
+                  "VarargAt index %d out of range (count %d)", index,
+                  vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_nodes[index];
 }
 
@@ -127,12 +127,13 @@ const char *__builtin_ast_vararg_str_at(int index) {
     if (!vm)
         return NULL;
     if (!vm->compiler.macro_vararg_string_mode)
-        error_tok(vm, vm->compiler.macro_call_tok,
-                  "VarargStrAt is only valid for global-generation string macros");
+        error_tok(
+            vm, vm->compiler.macro_call_tok,
+            "VarargStrAt is only valid for global-generation string macros");
     if (index < 0 || index >= vm->compiler.macro_vararg_count)
         error_tok(vm, vm->compiler.macro_call_tok,
-                  "VarargStrAt index %d out of range (count %d)",
-                  index, vm->compiler.macro_vararg_count);
+                  "VarargStrAt index %d out of range (count %d)", index,
+                  vm->compiler.macro_vararg_count);
     return vm->compiler.macro_vararg_strs[index];
 }
 
@@ -146,9 +147,9 @@ static void register_reflection_ffi(VirtualMachine *vm) {
 static void init_vm_segments_for_macros(VirtualMachine *vm);
 
 static Token *copy_macro_token(VirtualMachine *vm, Token *tok) {
-    Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *copy = *tok;
-    copy->next = NULL;
+    Token *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    *copy        = *tok;
+    copy->next   = NULL;
     copy->origin = tok;
     return copy;
 }
@@ -157,13 +158,13 @@ static Token *new_macro_punct(VirtualMachine *vm, char *str, Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = TK_PUNCT;
-    tok->loc = str;
-    tok->len = strlen(str);
+    tok->loc  = str;
+    tok->len  = strlen(str);
     if (tmpl) {
-        tok->file = tmpl->file;
+        tok->file     = tmpl->file;
         tok->filename = tmpl->filename;
-        tok->line_no = tmpl->line_no;
-        tok->col_no = tmpl->col_no;
+        tok->line_no  = tmpl->line_no;
+        tok->col_no   = tmpl->col_no;
     }
     return tok;
 }
@@ -173,12 +174,12 @@ static Token *new_macro_eof(VirtualMachine *vm, Token *tmpl) {
     memset(tok, 0, sizeof(Token));
     tok->kind = TK_EOF;
     if (tmpl) {
-        tok->loc = tmpl->loc;
-        tok->len = tmpl->len;
-        tok->file = tmpl->file;
+        tok->loc      = tmpl->loc;
+        tok->len      = tmpl->len;
+        tok->file     = tmpl->file;
         tok->filename = tmpl->filename;
-        tok->line_no = tmpl->line_no;
-        tok->col_no = tmpl->col_no;
+        tok->line_no  = tmpl->line_no;
+        tok->col_no   = tmpl->col_no;
     }
     return tok;
 }
@@ -186,25 +187,27 @@ static Token *new_macro_eof(VirtualMachine *vm, Token *tmpl) {
 // Synthesize a marker token consumed by preprocess2 to snapshot/restore
 // vm->compiler.macros around a single comptime function body's tokens,
 // isolating its #define/#undef from sibling comptime functions (#283).
-static Token *new_macro_scope_marker(VirtualMachine *vm, TokenKind kind, Token *tmpl) {
+static Token *new_macro_scope_marker(VirtualMachine *vm, TokenKind kind,
+                                     Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = kind;
-    tok->loc = "";
-    tok->len = 0;
+    tok->loc  = "";
+    tok->len  = 0;
     if (tmpl) {
-        tok->file = tmpl->file;
+        tok->file     = tmpl->file;
         tok->filename = tmpl->filename;
-        tok->line_no = tmpl->line_no;
-        tok->col_no = tmpl->col_no;
+        tok->line_no  = tmpl->line_no;
+        tok->col_no   = tmpl->col_no;
     }
     return tok;
 }
 
-static Token *append_macro_prototype(VirtualMachine *vm, Token *cur, MacroFn *pm) {
+static Token *append_macro_prototype(VirtualMachine *vm, Token *cur,
+                                     MacroFn *pm) {
     Token *last = pm->body_tokens;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
-         tok = tok->next) {
+         tok        = tok->next) {
         last = tok;
         if (equal(tok, "{"))
             break;
@@ -214,10 +217,11 @@ static Token *append_macro_prototype(VirtualMachine *vm, Token *cur, MacroFn *pm
     return cur;
 }
 
-static Token *append_macro_definition(VirtualMachine *vm, Token *cur, MacroFn *pm) {
+static Token *append_macro_definition(VirtualMachine *vm, Token *cur,
+                                      MacroFn *pm) {
     Token *last = pm->body_tokens;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
-         tok = tok->next) {
+         tok        = tok->next) {
         last = tok;
         cur = cur->next = copy_macro_token(vm, tok);
     }
@@ -265,7 +269,8 @@ static bool starts_file_scope_call(Token *tok) {
 // deliberately narrower than "any non-system header": declarations in a
 // third file that defines no comptime code of its own still need @shared to
 // reach the comptime pass, matching #551/#552's isolation intent.
-static bool comptime_ctx_file_allowed(VirtualMachine *vm, const char *filename) {
+static bool comptime_ctx_file_allowed(VirtualMachine *vm,
+                                      const char     *filename) {
     if (!filename)
         return false;
     if (vm->compiler.primary_file &&
@@ -350,11 +355,11 @@ typedef enum {
 // declarators as separate names without risking a "redefinition" error from
 // parsing the same statement twice under two different lookups.
 typedef struct ComptimeDecl {
-    Token *start;       // first token of the declaration
-    Token *end;         // token AFTER the terminating ';' (exclusive)
-    File *file;
+    Token      *start; // first token of the declaration
+    Token      *end;   // token AFTER the terminating ';' (exclusive)
+    File       *file;
     const char *filename;
-    bool has_top_level_eq;
+    bool        has_top_level_eq;
     bool initializer_self_contained; // meaningful only if has_top_level_eq
     ComptimeDeclState state;
 } ComptimeDecl;
@@ -364,8 +369,8 @@ typedef struct ComptimeDecl {
 // files each declaring `static int counter;`) and ordinary chaining.
 typedef struct ComptimeDeclName {
     struct ComptimeDeclName *next;
-    ComptimeDecl *decl;
-    ComptimeDeclKind kind;
+    ComptimeDecl            *decl;
+    ComptimeDeclKind         kind;
 } ComptimeDeclName;
 
 static void register_comptime_decl_name(VirtualMachine *vm, HashMap *map,
@@ -385,8 +390,9 @@ static void register_comptime_decl_name(VirtualMachine *vm, HashMap *map,
 // is the enum's own opening '{'. An enumerator is any identifier at
 // brace-depth 1 immediately preceded by '{' or ','.
 static void index_enum_constants(VirtualMachine *vm, HashMap *ordinary_map,
-                                 Token *brace, Token *semi, ComptimeDecl *decl) {
-    int depth = 0;
+                                 Token *brace, Token *semi,
+                                 ComptimeDecl *decl) {
+    int    depth    = 0;
     Token *prev_sig = NULL;
     for (Token *t = brace; t && t != semi; t = t->next) {
         if (equal(t, "{")) {
@@ -397,7 +403,8 @@ static void index_enum_constants(VirtualMachine *vm, HashMap *ordinary_map,
                 return;
         } else if (depth == 1 && t->kind == TK_IDENT && prev_sig &&
                    (equal(prev_sig, "{") || equal(prev_sig, ","))) {
-            register_comptime_decl_name(vm, ordinary_map, t, decl, CDK_ENUM_CONST);
+            register_comptime_decl_name(vm, ordinary_map, t, decl,
+                                        CDK_ENUM_CONST);
         }
         prev_sig = t;
     }
@@ -427,18 +434,19 @@ static void index_enum_constants(VirtualMachine *vm, HashMap *ordinary_map,
 //    taken as an array-dimension start with no preceding token, so `result`
 //    becomes NULL and the declaration is never indexed at all.
 static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
-    Token *result = seg_last;
-    bool found_bracket = false;
-    int depth = 0;
-    int brace_depth = 0;
-    Token *prev = NULL;
-    for (Token *t = seg_start; t; ) {
+    Token *result        = seg_last;
+    bool   found_bracket = false;
+    int    depth         = 0;
+    int    brace_depth   = 0;
+    Token *prev          = NULL;
+    for (Token *t = seg_start; t;) {
         // Skip a C23 attribute-specifier-seq in its entirety -- its
         // brackets are never array dimensions and must not perturb the
         // depth counter below.
-        if (brace_depth == 0 && equal(t, "[") && t->next && equal(t->next, "[")) {
-            int attr_depth = 0;
-            Token *u = t;
+        if (brace_depth == 0 && equal(t, "[") && t->next &&
+            equal(t->next, "[")) {
+            int    attr_depth = 0;
+            Token *u          = t;
             for (;;) {
                 if (equal(u, "["))
                     attr_depth++;
@@ -447,7 +455,7 @@ static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
                 bool at_end = (u == seg_last);
                 if (attr_depth == 0 || at_end) {
                     prev = u;
-                    t = at_end ? NULL : u->next;
+                    t    = at_end ? NULL : u->next;
                     break;
                 }
                 u = u->next;
@@ -456,7 +464,7 @@ static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
         }
         if (brace_depth == 0 && equal(t, "[")) {
             if (depth == 0 && !found_bracket) {
-                result = prev;
+                result        = prev;
                 found_bracket = true;
             }
             depth++;
@@ -470,7 +478,7 @@ static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
         if (t == seg_last)
             break;
         prev = t;
-        t = t->next;
+        t    = t->next;
     }
     return result;
 }
@@ -481,7 +489,7 @@ static Token *segment_declarator_name(Token *seg_start, Token *seg_last) {
 #define CD_PAREN_STACK_MAX 32
 static Token *find_matching_open_paren(Token *seg_start, Token *close) {
     Token *stack[CD_PAREN_STACK_MAX];
-    int sp = 0;
+    int    sp = 0;
     for (Token *t = seg_start; t; t = t->next) {
         if (equal(t, "(")) {
             if (sp >= CD_PAREN_STACK_MAX)
@@ -525,10 +533,12 @@ static Token *extract_declarator_name(Token *seg_start, Token *seg_last,
             return before_open;
         }
         if (before_open && equal(before_open, ")")) {
-            Token *inner_open = find_matching_open_paren(seg_start, before_open);
+            Token *inner_open =
+                find_matching_open_paren(seg_start, before_open);
             if (inner_open) {
                 Token *name = NULL;
-                for (Token *t = inner_open->next; t && t != before_open; t = t->next)
+                for (Token *t = inner_open->next; t && t != before_open;
+                     t        = t->next)
                     if (t->kind == TK_IDENT)
                         name = t;
                 if (name)
@@ -565,14 +575,16 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
         }
     }
 
-    ComptimeDecl *decl = arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeDecl));
-    decl->start = start;
-    decl->end = semi->next;
-    decl->file = file;
-    decl->filename = start->filename;
+    ComptimeDecl *decl =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeDecl));
+    decl->start            = start;
+    decl->end              = semi->next;
+    decl->file             = file;
+    decl->filename         = start->filename;
     decl->has_top_level_eq = has_top_level_eq;
     decl->initializer_self_contained =
-        has_top_level_eq && eq_tok && initializer_is_self_contained(eq_tok, semi);
+        has_top_level_eq && eq_tok &&
+        initializer_is_self_contained(eq_tok, semi);
     decl->state = CD_NEW;
 
     // --- tag: only the first "struct|union|enum IDENT" pair AT DEPTH 0 is
@@ -594,17 +606,19 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
                 (equal(t, "struct") || equal(t, "union") || equal(t, "enum")) &&
                 t->next && t->next->kind == TK_IDENT) {
                 Token *tagname = t->next;
-                Token *after = tagname->next;
+                Token *after   = tagname->next;
                 if (after == semi || equal(after, "{") || equal(after, "*") ||
                     equal(after, ",")) {
-                    register_comptime_decl_name(vm, &vm->compiler.comptime_tag_index,
-                                                tagname, decl, CDK_TAG);
+                    register_comptime_decl_name(
+                        vm, &vm->compiler.comptime_tag_index, tagname, decl,
+                        CDK_TAG);
                     decl_list_start = after;
                     if (equal(after, "{")) {
                         if (equal(t, "enum"))
-                            index_enum_constants(vm, &vm->compiler.comptime_decl_index,
-                                                 after, semi, decl);
-                        Token *close = find_matching_brace(after);
+                            index_enum_constants(
+                                vm, &vm->compiler.comptime_decl_index, after,
+                                semi, decl);
+                        Token *close    = find_matching_brace(after);
                         decl_list_start = close ? close->next : after;
                     }
                 }
@@ -629,12 +643,12 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
         return; // tag-only: "struct Foo;" or "struct Foo { ... };"
 
     // --- declarator list: split on top-level (depth-0) commas ---
-    int paren_depth = 0, bracket_depth = 0, brace_depth = 0;
+    int    paren_depth = 0, bracket_depth = 0, brace_depth = 0;
     Token *seg_start = decl_list_start;
-    for (Token *t = decl_list_start; ; t = t->next) {
-        bool at_boundary = (t == semi) ||
-            (paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 &&
-             equal(t, ","));
+    for (Token *t = decl_list_start;; t = t->next) {
+        bool at_boundary =
+            (t == semi) || (paren_depth == 0 && bracket_depth == 0 &&
+                            brace_depth == 0 && equal(t, ","));
         if (at_boundary) {
             Token *seg_last = NULL;
             for (Token *u = seg_start; u != t; u = u->next)
@@ -645,7 +659,7 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
             // declared name.
             if (seg_last) {
                 int eq_depth = 0;
-                for (Token *u = seg_start; ; u = u->next) {
+                for (Token *u = seg_start;; u = u->next) {
                     if (equal(u, "(") || equal(u, "[") || equal(u, "{"))
                         eq_depth++;
                     else if (equal(u, ")") || equal(u, "]") || equal(u, "}"))
@@ -662,14 +676,17 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
                 }
             }
             if (seg_last) {
-                bool is_simple_proto = false;
+                bool   is_simple_proto = false;
                 Token *name = extract_declarator_name(seg_start, seg_last,
-                                                       &is_simple_proto);
+                                                      &is_simple_proto);
                 if (name) {
-                    ComptimeDeclKind kind = saw_typedef ? CDK_TYPEDEF :
-                        (is_simple_proto ? CDK_PROTO : CDK_OBJECT);
-                    register_comptime_decl_name(vm, &vm->compiler.comptime_decl_index,
-                                                name, decl, kind);
+                    ComptimeDeclKind kind =
+                        saw_typedef
+                            ? CDK_TYPEDEF
+                            : (is_simple_proto ? CDK_PROTO : CDK_OBJECT);
+                    register_comptime_decl_name(
+                        vm, &vm->compiler.comptime_decl_index, name, decl,
+                        kind);
                 }
             }
             if (t == semi)
@@ -716,13 +733,13 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
                 continue;
             }
 
-            bool has_top_level_eq = false;
-            bool is_function_body = false;
-            Token *eq_tok = NULL;
-            int paren_depth = 0;
-            int bracket_depth = 0;
-            int brace_depth = 0;
-            Token *prev_sig = NULL;
+            bool   has_top_level_eq = false;
+            bool   is_function_body = false;
+            Token *eq_tok           = NULL;
+            int    paren_depth      = 0;
+            int    bracket_depth    = 0;
+            int    brace_depth      = 0;
+            Token *prev_sig         = NULL;
 
             while (tok && tok->kind != TK_EOF) {
                 if (brace_depth == 0 && paren_depth == 0 &&
@@ -733,16 +750,16 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
                             eq_tok = tok;
                     }
 
-                    if (equal(tok, "{") && prev_sig &&
-                        equal(prev_sig, ")")) {
+                    if (equal(tok, "{") && prev_sig && equal(prev_sig, ")")) {
                         is_function_body = true;
-                        Token *close = find_matching_brace(tok);
-                        tok = close ? close->next : tok->next;
+                        Token *close     = find_matching_brace(tok);
+                        tok              = close ? close->next : tok->next;
                         break;
                     }
 
                     if (equal(tok, ";")) {
-                        index_declaration(vm, start, tok, has_top_level_eq, eq_tok);
+                        index_declaration(vm, start, tok, has_top_level_eq,
+                                          eq_tok);
                         tok = tok->next;
                         break;
                     }
@@ -777,9 +794,10 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
 // Copy [start, end) (the range recorded on a ComptimeDecl) into a fresh,
 // EOF-terminated token list via copy_macro_token, so the runtime stream
 // itself is never mutated or re-linked by the reentrant parse.
-static Token *materialize_comptime_range(VirtualMachine *vm, Token *start, Token *end) {
-    Token head = {};
-    Token *cur = &head;
+static Token *materialize_comptime_range(VirtualMachine *vm, Token *start,
+                                         Token *end) {
+    Token  head = {};
+    Token *cur  = &head;
     for (Token *t = start; t && t != end && t->kind != TK_EOF; t = t->next)
         cur = cur->next = copy_macro_token(vm, t);
     cur->next = new_macro_eof(vm, cur != &head ? cur : start);
@@ -804,7 +822,8 @@ static Token *materialize_comptime_range(VirtualMachine *vm, Token *start, Token
 // multi-input-file duplicate-name case); otherwise takes the first
 // matching-kind registration.
 static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
-                                  const char *loc, int len, unsigned kind_mask) {
+                                  const char *loc, int len,
+                                  unsigned kind_mask) {
     // Note: NOT gated on vm->compiler.in_macro_mode here -- reflection.c's
     // callers (cc_comptime_resolve_type_name/_value_name) run at comptime
     // *execution* time, after compile_macro_program has already returned
@@ -824,7 +843,8 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
             continue;
         if (!pick)
             pick = r;
-        if (vm->compiler.primary_file && r->decl->file == vm->compiler.primary_file) {
+        if (vm->compiler.primary_file &&
+            r->decl->file == vm->compiler.primary_file) {
             pick = r;
             break;
         }
@@ -878,9 +898,9 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
         }
         bool is_primary = vm->compiler.primary_file &&
                           decl->file == vm->compiler.primary_file;
-        bool allowed = decl->has_top_level_eq
-            ? (is_primary && decl->initializer_self_contained)
-            : comptime_ctx_file_allowed(vm, decl->filename);
+        bool allowed    = decl->has_top_level_eq
+                              ? (is_primary && decl->initializer_self_contained)
+                              : comptime_ctx_file_allowed(vm, decl->filename);
         if (!allowed) {
             decl->state = CD_FAILED;
             if (decl->has_top_level_eq)
@@ -891,8 +911,9 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
     }
 
     decl->state = CD_IN_PROGRESS;
-    Token *materialized = materialize_comptime_range(vm, decl->start, decl->end);
-    bool ok = cc_parse_splice_range(vm, materialized);
+    Token *materialized =
+        materialize_comptime_range(vm, decl->start, decl->end);
+    bool ok     = cc_parse_splice_range(vm, materialized);
     decl->state = ok ? CD_DONE : CD_FAILED;
     return ok;
 }
@@ -903,15 +924,15 @@ bool cc_comptime_resolve_tag(VirtualMachine *vm, Token *name_tok) {
 }
 
 bool cc_comptime_resolve_var(VirtualMachine *vm, Token *name_tok) {
-    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index,
-                                 name_tok->loc, name_tok->len,
-                                 (1u << CDK_OBJECT) | (1u << CDK_PROTO) |
-                                 (1u << CDK_ENUM_CONST));
+    return comptime_index_splice(
+        vm, &vm->compiler.comptime_decl_index, name_tok->loc, name_tok->len,
+        (1u << CDK_OBJECT) | (1u << CDK_PROTO) | (1u << CDK_ENUM_CONST));
 }
 
 bool cc_comptime_resolve_typename(VirtualMachine *vm, Token *name_tok) {
     return comptime_index_splice(vm, &vm->compiler.comptime_decl_index,
-                                 name_tok->loc, name_tok->len, 1u << CDK_TYPEDEF);
+                                 name_tok->loc, name_tok->len,
+                                 1u << CDK_TYPEDEF);
 }
 
 // #894: plain-string variants of the resolvers above, for reflection.c API
@@ -924,29 +945,32 @@ bool cc_comptime_resolve_typename(VirtualMachine *vm, Token *name_tok) {
 // struct/union/enum tag or a typedef through the same call, matching how
 // __builtin_ast_find_type's own scope walk checks sc->tags and sc->vars'
 // type_def entries together.
-bool cc_comptime_resolve_type_name(VirtualMachine *vm, const char *name, int len) {
+bool cc_comptime_resolve_type_name(VirtualMachine *vm, const char *name,
+                                   int len) {
     if (!name || len <= 0)
         return false;
     if (comptime_index_splice(vm, &vm->compiler.comptime_tag_index, name, len,
                               1u << CDK_TAG))
         return true;
-    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index, name, len,
-                                 1u << CDK_TYPEDEF);
+    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index, name,
+                                 len, 1u << CDK_TYPEDEF);
 }
 
-bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name, int len) {
+bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name,
+                                    int len) {
     if (!name || len <= 0)
         return false;
-    return comptime_index_splice(vm, &vm->compiler.comptime_decl_index, name, len,
-                                 (1u << CDK_OBJECT) | (1u << CDK_PROTO) |
-                                 (1u << CDK_ENUM_CONST));
+    return comptime_index_splice(
+        vm, &vm->compiler.comptime_decl_index, name, len,
+        (1u << CDK_OBJECT) | (1u << CDK_PROTO) | (1u << CDK_ENUM_CONST));
 }
 
 // #893: used by parse.c's undefined-variable diagnostic (in_macro_mode only)
 // to tell a genuinely undefined identifier apart from a runtime-TU global
 // that comptime_index_splice saw and deliberately declined to splice in
 // (non-constant initializer, or declared outside the primary file).
-bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len) {
+bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name,
+                                   int len) {
     for (int i = 0; i < vm->compiler.comptime_dropped_globals.len; i++) {
         char *g = vm->compiler.comptime_dropped_globals.data[i];
         if (g && (int)strlen(g) == len && strncmp(g, name, len) == 0)
@@ -960,8 +984,10 @@ bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name, int len
 static Token *find_top_level_eq(Token *tokens) {
     int depth = 0;
     for (Token *t = tokens; t && t->kind != TK_EOF; t = t->next) {
-        if (equal(t, "{")) depth++;
-        else if (equal(t, "}")) depth--;
+        if (equal(t, "{"))
+            depth++;
+        else if (equal(t, "}"))
+            depth--;
         else if (depth == 0 && equal(t, "="))
             return t;
     }
@@ -977,13 +1003,12 @@ typedef enum {
 
 typedef struct {
     ComptimeAggregateCastKind kind;
-    Token *kw;   // "struct" or "union" for tagged aggregates
-    Token *name; // tag or typedef name
+    Token                    *kw;   // "struct" or "union" for tagged aggregates
+    Token                    *name; // tag or typedef name
 } ComptimeAggregateCast;
 
 static bool token_matches_name(Token *tok, const char *name) {
-    return tok && tok->kind == TK_IDENT &&
-           strlen(name) == (size_t)tok->len &&
+    return tok && tok->kind == TK_IDENT && strlen(name) == (size_t)tok->len &&
            strncmp(tok->loc, name, tok->len) == 0;
 }
 
@@ -993,17 +1018,23 @@ static bool token_matches_name(Token *tok, const char *name) {
 //   - typedef'd: Dims dims                 -> (Dims){ ... }
 //   - anonymous: struct { ... } dims       -> (typeof(dims)){ ... }
 static ComptimeAggregateCast comptime_aggregate_cast(ComptimeVar *cv) {
-    ComptimeAggregateCast cast = { COMPTIME_AGG_CAST_NONE, NULL, NULL };
-    Token *typedef_name = NULL;
-    int brace_depth = 0, bracket_depth = 0, paren_depth = 0;
+    ComptimeAggregateCast cast         = {COMPTIME_AGG_CAST_NONE, NULL, NULL};
+    Token                *typedef_name = NULL;
+    int                   brace_depth = 0, bracket_depth = 0, paren_depth = 0;
 
     for (Token *t = cv->decl_tokens; t && t->kind != TK_EOF; t = t->next) {
-        if (equal(t, "{")) brace_depth++;
-        else if (equal(t, "}")) brace_depth--;
-        else if (equal(t, "[")) bracket_depth++;
-        else if (equal(t, "]")) bracket_depth--;
-        else if (equal(t, "(")) paren_depth++;
-        else if (equal(t, ")")) paren_depth--;
+        if (equal(t, "{"))
+            brace_depth++;
+        else if (equal(t, "}"))
+            brace_depth--;
+        else if (equal(t, "["))
+            bracket_depth++;
+        else if (equal(t, "]"))
+            bracket_depth--;
+        else if (equal(t, "("))
+            paren_depth++;
+        else if (equal(t, ")"))
+            paren_depth--;
 
         if (brace_depth != 0 || bracket_depth != 0 || paren_depth != 0)
             continue;
@@ -1014,7 +1045,7 @@ static ComptimeAggregateCast comptime_aggregate_cast(ComptimeVar *cv) {
             Token *next = t->next;
             if (next && next->kind == TK_IDENT) {
                 cast.kind = COMPTIME_AGG_CAST_TAGGED;
-                cast.kw = t;
+                cast.kw   = t;
                 cast.name = next;
                 return cast;
             }
@@ -1035,9 +1066,10 @@ static ComptimeAggregateCast comptime_aggregate_cast(ComptimeVar *cv) {
 }
 
 // True if this comptime var's initializer should be evaluated via
-// __builtin_comptime_init (ticket #191/#192/#193) rather than the constant init_data
-// path. Both build_combined_macro_tokens and build_comptime_init_fn_tokens
-// call this so they agree on which vars are routed through the init fn.
+// __builtin_comptime_init (ticket #191/#192/#193) rather than the constant
+// init_data path. Both build_combined_macro_tokens and
+// build_comptime_init_fn_tokens call this so they agree on which vars are
+// routed through the init fn.
 //
 // Scalar initializers (= <non-brace-expr>): always routed.
 // Aggregate initializers (= { ... }): routed iff a compound-literal cast can
@@ -1054,10 +1086,10 @@ static bool comptime_var_uses_init_fn(ComptimeVar *cv) {
 
 // Inject decl_tokens up to (not including) eq_tok, then emit ';'.
 // Produces a declaration without its initializer, e.g. "int buf_size ;"
-static Token *append_decl_stripped(VirtualMachine *vm, Token *cur, Token *decl_tokens,
-                                   Token *eq_tok) {
+static Token *append_decl_stripped(VirtualMachine *vm, Token *cur,
+                                   Token *decl_tokens, Token *eq_tok) {
     for (Token *t = decl_tokens; t && t->kind != TK_EOF && t != eq_tok;
-         t = t->next)
+         t        = t->next)
         cur = cur->next = copy_macro_token(vm, t);
     cur = cur->next = new_macro_punct(vm, ";", eq_tok);
     return cur;
@@ -1070,7 +1102,7 @@ static Token *append_decl_stripped(VirtualMachine *vm, Token *cur, Token *decl_t
 // Returns a token list via tokenize_string, or NULL when there are no vars
 // routed through the init fn.
 static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
-                                             ComptimeVar **vars, int count) {
+                                            ComptimeVar **vars, int count) {
     bool has_any = false;
     for (int i = 0; i < count; i++) {
         if (comptime_var_uses_init_fn(vars[i])) {
@@ -1081,33 +1113,34 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
     if (!has_any)
         return NULL;
 
-    char buf[16384];
-    char *p   = buf;
-    char *end = buf + sizeof(buf) - 4;
+    char  buf[16384];
+    char *p    = buf;
+    char *end  = buf + sizeof(buf) - 4;
 
-    p += snprintf(p, end - p, "void __builtin_comptime_init(void){\n");
+    p         += snprintf(p, end - p, "void __builtin_comptime_init(void){\n");
 
     for (int i = 0; i < count; i++) {
         ComptimeVar *cv = vars[i];
-        if (!comptime_var_uses_init_fn(cv)) continue;
+        if (!comptime_var_uses_init_fn(cv))
+            continue;
 
         Token *eq = find_top_level_eq(cv->decl_tokens);
-        if (!eq) continue; // Should not happen if predicate is true, but be safe.
+        if (!eq)
+            continue; // Should not happen if predicate is true, but be safe.
 
         if (eq->next && equal(eq->next, "{")) {
             // Aggregate init: emit  name = (<aggregate type>){ ... } ;
             ComptimeAggregateCast cast = comptime_aggregate_cast(cv);
             if (cast.kind == COMPTIME_AGG_CAST_TAGGED) {
-                p += snprintf(p, end - p, "%s=(%.*s %.*s)",
-                              cv->name,
-                              cast.kw->len, cast.kw->loc,
-                              cast.name->len, cast.name->loc);
+                p += snprintf(p, end - p, "%s=(%.*s %.*s)", cv->name,
+                              cast.kw->len, cast.kw->loc, cast.name->len,
+                              cast.name->loc);
             } else if (cast.kind == COMPTIME_AGG_CAST_TYPEDEF) {
-                p += snprintf(p, end - p, "%s=(%.*s)",
-                              cv->name, cast.name->len, cast.name->loc);
+                p += snprintf(p, end - p, "%s=(%.*s)", cv->name, cast.name->len,
+                              cast.name->loc);
             } else if (cast.kind == COMPTIME_AGG_CAST_TYPEOF) {
-                p += snprintf(p, end - p, "%s=(typeof(%s))",
-                              cv->name, cv->name);
+                p +=
+                    snprintf(p, end - p, "%s=(typeof(%s))", cv->name, cv->name);
             } else {
                 continue;
             }
@@ -1115,35 +1148,44 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
             // Emit the brace-group '{ ... }' verbatim from eq->next.
             int depth = 0;
             for (Token *t = eq->next; t && t->kind != TK_EOF; t = t->next) {
-                if (equal(t, "{")) depth++;
-                else if (equal(t, "}")) { depth--; }
-                else if (depth == 0 && equal(t, ";")) break;
+                if (equal(t, "{"))
+                    depth++;
+                else if (equal(t, "}")) {
+                    depth--;
+                } else if (depth == 0 && equal(t, ";"))
+                    break;
                 if (p + t->len + 2 >= end)
-                    error("comptime init function source overflow (too many/long tokens)");
+                    error("comptime init function source overflow (too "
+                          "many/long tokens)");
                 p += snprintf(p, end - p, " %.*s", t->len, t->loc);
-                if (equal(t, "}") && depth == 0) break;
+                if (equal(t, "}") && depth == 0)
+                    break;
             }
             p += snprintf(p, end - p, ";\n");
         } else {
             // Scalar expression init: emit  name = expr ;
-            p += snprintf(p, end - p, "%s=", cv->name);
+            p         += snprintf(p, end - p, "%s=", cv->name);
 
-            int depth = 0;
+            int depth  = 0;
             for (Token *t = eq->next; t && t->kind != TK_EOF; t = t->next) {
-                if (equal(t, "{")) depth++;
-                else if (equal(t, "}")) depth--;
-                else if (depth == 0 && equal(t, ";")) break;
+                if (equal(t, "{"))
+                    depth++;
+                else if (equal(t, "}"))
+                    depth--;
+                else if (depth == 0 && equal(t, ";"))
+                    break;
                 if (p + t->len + 2 >= end)
-                    error("comptime init function source overflow (too many/long tokens)");
+                    error("comptime init function source overflow (too "
+                          "many/long tokens)");
                 p += snprintf(p, end - p, " %.*s", t->len, t->loc);
             }
             p += snprintf(p, end - p, ";\n");
         }
     }
 
-    p += snprintf(p, end - p, "}\n");
+    p           += snprintf(p, end - p, "}\n");
 
-    Token *toks = tokenize_string(vm, "<comptime-init-fn>", buf);
+    Token *toks  = tokenize_string(vm, "<comptime-init-fn>", buf);
     if (!toks)
         return NULL;
     convert_pp_tokens(vm, toks);
@@ -1158,18 +1200,16 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
 static const char *reflection_enum_names[] = {
     // TypeKind
     "TK_VOID", "TK_BOOL", "TK_CHAR", "TK_SHORT", "TK_INT", "TK_LONG",
-    "TK_FLOAT", "TK_DOUBLE", "TK_LDOUBLE", "TK_ENUM", "TK_PTR",
-    "TK_FUNC", "TK_ARRAY", "TK_VLA", "TK_STRUCT", "TK_UNION",
+    "TK_FLOAT", "TK_DOUBLE", "TK_LDOUBLE", "TK_ENUM", "TK_PTR", "TK_FUNC",
+    "TK_ARRAY", "TK_VLA", "TK_STRUCT", "TK_UNION",
     // NodeKind
-    "NK_NULL_EXPR", "NK_ADD", "NK_SUB", "NK_MUL", "NK_DIV", "NK_NEG",
-    "NK_MOD", "NK_BITAND", "NK_BITOR", "NK_BITXOR", "NK_SHL", "NK_SHR",
-    "NK_EQ", "NK_NE", "NK_LT", "NK_LE", "NK_ASSIGN", "NK_COND",
-    "NK_COMMA", "NK_MEMBER", "NK_ADDR", "NK_DEREF", "NK_NOT",
-    "NK_BITNOT", "NK_LOGAND", "NK_LOGOR", "NK_RETURN", "NK_IF",
-    "NK_FOR", "NK_DO", "NK_SWITCH", "NK_CASE", "NK_BLOCK", "NK_FUNCALL",
-    "NK_EXPR_STMT", "NK_VAR", "NK_NUM", "NK_CAST", "NK_MACRO_CALL",
-    NULL
-};
+    "NK_NULL_EXPR", "NK_ADD", "NK_SUB", "NK_MUL", "NK_DIV", "NK_NEG", "NK_MOD",
+    "NK_BITAND", "NK_BITOR", "NK_BITXOR", "NK_SHL", "NK_SHR", "NK_EQ", "NK_NE",
+    "NK_LT", "NK_LE", "NK_ASSIGN", "NK_COND", "NK_COMMA", "NK_MEMBER",
+    "NK_ADDR", "NK_DEREF", "NK_NOT", "NK_BITNOT", "NK_LOGAND", "NK_LOGOR",
+    "NK_RETURN", "NK_IF", "NK_FOR", "NK_DO", "NK_SWITCH", "NK_CASE", "NK_BLOCK",
+    "NK_FUNCALL", "NK_EXPR_STMT", "NK_VAR", "NK_NUM", "NK_CAST",
+    "NK_MACRO_CALL", NULL};
 #define REFLECTION_ENUM_NAMES_COUNT 55
 
 // Remove reflection.h enum-constant macros from the live table, storing each
@@ -1177,8 +1217,8 @@ static const char *reflection_enum_names[] = {
 // Call reflection_enum_names_restore() to put them back.
 static void reflection_enum_names_hide(VirtualMachine *vm, void **saved) {
     for (int i = 0; reflection_enum_names[i]; i++) {
-        saved[i] = hashmap_get(&vm->compiler.macros,
-                               (char *)reflection_enum_names[i]);
+        saved[i] =
+            hashmap_get(&vm->compiler.macros, (char *)reflection_enum_names[i]);
         if (saved[i])
             hashmap_delete(&vm->compiler.macros,
                            (char *)reflection_enum_names[i]);
@@ -1188,8 +1228,8 @@ static void reflection_enum_names_hide(VirtualMachine *vm, void **saved) {
 static void reflection_enum_names_restore(VirtualMachine *vm, void **saved) {
     for (int i = 0; reflection_enum_names[i]; i++)
         if (saved[i])
-            hashmap_put(&vm->compiler.macros,
-                        (char *)reflection_enum_names[i], saved[i]);
+            hashmap_put(&vm->compiler.macros, (char *)reflection_enum_names[i],
+                        saved[i]);
 }
 
 static Token *implicit_reflection_tokens(VirtualMachine *vm) {
@@ -1206,11 +1246,10 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     // private macro API is processed completely in the macro compilation
     // scope. We restore the guards afterwards so subsequent compilation phases
     // are unaffected.
-    static const char *guards[] = {
-        "CCCC_REFLECTION_H", "__STDBOOL_H", "__STDDEF_H", "__STDINT_H",
-        "__STRING_H", NULL
-    };
-    void *saved_guards[5] = {};
+    static const char *guards[]        = {"CCCC_REFLECTION_H", "__STDBOOL_H",
+                                          "__STDDEF_H",        "__STDINT_H",
+                                          "__STRING_H",        NULL};
+    void              *saved_guards[5] = {};
     for (int i = 0; guards[i]; i++) {
         saved_guards[i] = hashmap_get(&vm->compiler.macros, (char *)guards[i]);
         if (saved_guards[i])
@@ -1222,20 +1261,22 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     // tokens, which spuriously warns about CCCC's own internal API surface.
     // Suppress all warnings/werrors for the duration of this internal
     // preprocess pass; restore afterwards so the user's TU is unaffected.
-    uint64_t saved_warnings = vm->compiler.warnings;
-    uint64_t saved_werror = vm->compiler.warning_errors;
-    vm->compiler.warnings = 0;
+    uint64_t saved_warnings     = vm->compiler.warnings;
+    uint64_t saved_werror       = vm->compiler.warning_errors;
+    vm->compiler.warnings       = 0;
     vm->compiler.warning_errors = 0;
 
-    Token *tokens = tokenize_private_header(vm, "reflection.h", "<implicit-reflection.h>");
-    Token *result = preprocess(vm, tokens);
+    Token *tokens =
+        tokenize_private_header(vm, "reflection.h", "<implicit-reflection.h>");
+    Token *result               = preprocess(vm, tokens);
 
-    vm->compiler.warnings = saved_warnings;
+    vm->compiler.warnings       = saved_warnings;
     vm->compiler.warning_errors = saved_werror;
 
     for (int i = 0; guards[i]; i++)
         if (saved_guards[i])
-            hashmap_put(&vm->compiler.macros, (char *)guards[i], saved_guards[i]);
+            hashmap_put(&vm->compiler.macros, (char *)guards[i],
+                        saved_guards[i]);
 
     reflection_enum_names_restore(vm, saved_enum_macros);
 
@@ -1243,9 +1284,9 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 }
 
 // Ticket #235: idempotently preprocess reflection.h so that its built-in
-// @comptime(attribute(...)) handlers (e.g. __builtin_attr_serialize) are registered
-// into vm->compiler.macro_fns before the first attribute-dispatch lookup
-// (find_attribute_macro / run_custom_attrs in parse.c). Without this, a
+// @comptime(attribute(...)) handlers (e.g. __builtin_attr_serialize) are
+// registered into vm->compiler.macro_fns before the first attribute-dispatch
+// lookup (find_attribute_macro / run_custom_attrs in parse.c). Without this, a
 // translation unit with no @comptime definitions of its own never triggers
 // implicit_reflection_tokens() until compile_macro_program() — too late for
 // the very first @serialize/@deserialize/etc. dispatch to find a handler.
@@ -1261,20 +1302,21 @@ void ensure_reflection_attrs_registered(VirtualMachine *vm) {
     __builtin_ensure_string_h_decls();
 }
 
-static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_tokens,
+static Token *build_combined_macro_tokens(VirtualMachine *vm,
+                                          Token          *reflection_tokens,
                                           MacroFn **macros, int count) {
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
-    cur = append_token_list(vm, cur, reflection_tokens);
+    cur         = append_token_list(vm, cur, reflection_tokens);
 
     // Inject routed comptime directives so they are processed by the comptime
     // preprocessing pass (#196/#368).
     for (int i = 0; i < vm->compiler.comptime_pending_includes.len; i++) {
-        char *src = arena_format(vm, "%s\n",
-                                 vm->compiler.comptime_pending_includes.data[i]);
+        char *src = arena_format(
+            vm, "%s\n", vm->compiler.comptime_pending_includes.data[i]);
         Token *inc_toks = tokenize_string(vm, "<comptime-include>", src);
-        cur = append_token_list(vm, cur, inc_toks);
+        cur             = append_token_list(vm, cur, inc_toks);
     }
 
     // Reverse comptime_vars to source order (list is prepended, so reversed).
@@ -1292,16 +1334,16 @@ static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_
     // Vars routed through __builtin_comptime_init (ticket #191/#192) have their
     // initializer stripped so the parser never sees a non-constant expression
     // as a global initializer (which would hard-error via eval2). The stripped
-    // var is declared as a zero-initialized global; __builtin_comptime_init fills
-    // it in at VM run time.
-    // Uninitialised vars, and aggregate vars whose initializer is constant or
-    // whose tag cannot be synthesized, are injected as-is (constant path).
+    // var is declared as a zero-initialized global; __builtin_comptime_init
+    // fills it in at VM run time. Uninitialised vars, and aggregate vars whose
+    // initializer is constant or whose tag cannot be synthesized, are injected
+    // as-is (constant path).
     for (int i = 0; i < nv; i++) {
         ComptimeVar *cv = vars[i];
         if (comptime_var_uses_init_fn(cv)) {
             // Strip initializer; __builtin_comptime_init will assign it.
             Token *eq = find_top_level_eq(cv->decl_tokens);
-            cur = append_decl_stripped(vm, cur, cv->decl_tokens, eq);
+            cur       = append_decl_stripped(vm, cur, cv->decl_tokens, eq);
         } else {
             cur = append_token_list(vm, cur, cv->decl_tokens);
         }
@@ -1311,10 +1353,12 @@ static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_
         cur = append_macro_prototype(vm, cur, macros[i]);
     for (int i = 0; i < count; i++) {
         if (!vm->compiler.allow_comptime_pp_bleed)
-            cur = cur->next = new_macro_scope_marker(vm, TK_MACRO_SCOPE_PUSH, macros[i]->body_tokens);
+            cur = cur->next = new_macro_scope_marker(vm, TK_MACRO_SCOPE_PUSH,
+                                                     macros[i]->body_tokens);
         cur = append_macro_definition(vm, cur, macros[i]);
         if (!vm->compiler.allow_comptime_pp_bleed)
-            cur = cur->next = new_macro_scope_marker(vm, TK_MACRO_SCOPE_POP, macros[i]->body_tokens);
+            cur = cur->next = new_macro_scope_marker(vm, TK_MACRO_SCOPE_POP,
+                                                     macros[i]->body_tokens);
     }
 
     // Synthesized init function: runs after bytecode is compiled to evaluate
@@ -1324,7 +1368,7 @@ static Token *build_combined_macro_tokens(VirtualMachine *vm, Token *reflection_
         cur = append_token_list(vm, cur, init_fn);
 
     Token *tmpl = count > 0 ? macros[count - 1]->body_tokens : NULL;
-    cur->next = new_macro_eof(vm, tmpl);
+    cur->next   = new_macro_eof(vm, tmpl);
     return head.next;
 }
 
@@ -1362,29 +1406,38 @@ static Obj *find_macro_obj(Obj *prog, const char *name) {
 // Valid after init_macro_globals has allocated storage; the value may have
 // been written by a constant-initializer memcpy, by __builtin_comptime_init, or
 // left as zero (no initializer).
-static bool read_comptime_scalar(VirtualMachine *vm, Obj *obj, bool *is_float_out,
-                                 int64_t *int_out, double *float_out) {
+static bool read_comptime_scalar(VirtualMachine *vm, Obj *obj,
+                                 bool *is_float_out, int64_t *int_out,
+                                 double *float_out) {
     if (!obj)
         return false;
-    char *base = vm->data_seg + obj->offset;
+    char    *base = vm->data_seg + obj->offset;
     TypeKind kind = obj->ty->kind;
     switch (kind) {
-    case TY_FLOAT:
-        *is_float_out = true;
-        *float_out = (double)(*(float *)base);
-        return true;
-    case TY_DOUBLE:
-    case TY_LDOUBLE:
-        *is_float_out = true;
-        *float_out = *(double *)base;
-        return true;
-    default:
-        if (obj->ty->size == 1) { *int_out = obj->ty->is_unsigned ? (int64_t)*(uint8_t *)base  : (int64_t)*(int8_t *)base; }
-        else if (obj->ty->size == 2) { *int_out = obj->ty->is_unsigned ? (int64_t)*(uint16_t *)base : (int64_t)*(int16_t *)base; }
-        else if (obj->ty->size == 4) { *int_out = obj->ty->is_unsigned ? (int64_t)*(uint32_t *)base : (int64_t)*(int32_t *)base; }
-        else { *int_out = (int64_t)*(int64_t *)base; }
-        *is_float_out = false;
-        return true;
+        case TY_FLOAT:
+            *is_float_out = true;
+            *float_out    = (double)(*(float *)base);
+            return true;
+        case TY_DOUBLE:
+        case TY_LDOUBLE:
+            *is_float_out = true;
+            *float_out    = *(double *)base;
+            return true;
+        default:
+            if (obj->ty->size == 1) {
+                *int_out = obj->ty->is_unsigned ? (int64_t)*(uint8_t *)base
+                                                : (int64_t)*(int8_t *)base;
+            } else if (obj->ty->size == 2) {
+                *int_out = obj->ty->is_unsigned ? (int64_t)*(uint16_t *)base
+                                                : (int64_t)*(int16_t *)base;
+            } else if (obj->ty->size == 4) {
+                *int_out = obj->ty->is_unsigned ? (int64_t)*(uint32_t *)base
+                                                : (int64_t)*(int32_t *)base;
+            } else {
+                *int_out = (int64_t)*(int64_t *)base;
+            }
+            *is_float_out = false;
+            return true;
     }
 }
 
@@ -1394,14 +1447,14 @@ static Obj *make_comptime_shadow_obj(VirtualMachine *vm, Obj *src) {
 
     Obj *dst = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(dst, 0, sizeof(Obj));
-    dst->name = arena_format(vm, ".L.comptime.%d",
-                             vm->compiler.unique_name_counter++);
-    dst->display_name = dst->name;
-    dst->ty = src->ty;
-    dst->align = src->ty->align;
-    dst->tok = src->tok;
-    dst->is_static = true;
-    dst->is_definition = true;
+    dst->name =
+        arena_format(vm, ".L.comptime.%d", vm->compiler.unique_name_counter++);
+    dst->display_name       = dst->name;
+    dst->ty                 = src->ty;
+    dst->align              = src->ty->align;
+    dst->tok                = src->tok;
+    dst->is_static          = true;
+    dst->is_definition      = true;
     dst->is_macro_generated = true;
     dst->init_data = arena_alloc(&vm->compiler.parser_arena, src->ty->size);
     memcpy(dst->init_data, vm->data_seg + src->offset, src->ty->size);
@@ -1418,38 +1471,39 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
         return;
 
     if (vm->debug_vm)
-        printf("Running __builtin_comptime_init for comptime variable initializers...\n");
+        printf("Running __builtin_comptime_init for comptime variable "
+               "initializers...\n");
 
     VirtualMachine *saved_current_vm = __builtin_current_vm;
-    __builtin_current_vm = vm;
+    __builtin_current_vm             = vm;
 
-    Pc      saved_pc   = vm->pc;
-    long long *saved_sp   = vm->sp;
-    long long *saved_bp   = vm->bp;
+    Pc         saved_pc              = vm->pc;
+    long long *saved_sp              = vm->sp;
+    long long *saved_bp              = vm->bp;
     long long  saved_regs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     Obj *saved_current_fn = vm->compiler.current_fn;
 
-    vm->sp = vm->initial_sp;
-    vm->bp = vm->initial_bp;
-    *(--vm->sp) = 0; // sentinel return address
+    vm->sp                = vm->initial_sp;
+    vm->bp                = vm->initial_bp;
+    *(--vm->sp)           = 0; // sentinel return address
 
-    vm->pc = (Pc)init_fn->code_addr;
+    vm->pc                = (Pc)init_fn->code_addr;
 
-    int saved_debug = vm->debug_vm;
-    vm->debug_vm = 0;
+    int saved_debug       = vm->debug_vm;
+    vm->debug_vm          = 0;
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
     cccc_reset_getopt_state(); // #1041
     int eval_rc = vm_eval(vm);
     fenv_barrier_end(fenv_saved_round);
-    vm->debug_vm = saved_debug;
+    vm->debug_vm         = saved_debug;
 
     __builtin_current_vm = saved_current_vm;
 
-    vm->pc            = saved_pc;
-    vm->sp            = saved_sp;
-    vm->bp            = saved_bp;
+    vm->pc               = saved_pc;
+    vm->sp               = saved_sp;
+    vm->bp               = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     vm->compiler.current_fn = saved_current_fn;
 
@@ -1469,7 +1523,8 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
 
         Obj *obj = find_macro_global(macro_prog, cv->name);
         if (!obj) {
-            fprintf(stderr, "Warning: comptime var '%s' not found in macro program\n",
+            fprintf(stderr,
+                    "Warning: comptime var '%s' not found in macro program\n",
                     cv->name);
             continue;
         }
@@ -1477,13 +1532,15 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
         // Pointer vars create relocations — rejected at preprocess time, but
         // guard here too in case something slips through.
         if (obj->rel) {
-            fprintf(stderr, "Warning: comptime var '%s' has a relocation "
-                    "(pointer/string vars are not yet supported)\n", cv->name);
+            fprintf(stderr,
+                    "Warning: comptime var '%s' has a relocation "
+                    "(pointer/string vars are not yet supported)\n",
+                    cv->name);
             continue;
         }
 
         TypeKind kind = obj->ty->kind;
-        cv->ptr_obj = make_comptime_shadow_obj(vm, obj);
+        cv->ptr_obj   = make_comptime_shadow_obj(vm, obj);
         if (kind == TY_STRUCT || kind == TY_UNION) {
             // Routed vars: __builtin_comptime_init wrote the bytes
             // into the data segment, so init_data is NULL — that is expected.
@@ -1498,7 +1555,7 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
             }
 
             cv->is_struct = true;
-            char *base = vm->data_seg + obj->offset;
+            char *base    = vm->data_seg + obj->offset;
             for (Member *mem = obj->ty->members; mem; mem = mem->next) {
                 if (mem->is_bitfield)
                     continue;
@@ -1508,42 +1565,53 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
                     mk == TY_PTR)
                     continue;
 
-                ComptimeVarMember *m =
-                    arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeVarMember));
+                ComptimeVarMember *m = arena_alloc(&vm->compiler.parser_arena,
+                                                   sizeof(ComptimeVarMember));
                 memset(m, 0, sizeof(ComptimeVarMember));
                 if (mem->name) {
                     char *mname = arena_alloc(&vm->compiler.parser_arena,
-                                             mem->name->len + 1);
+                                              mem->name->len + 1);
                     memcpy(mname, mem->name->loc, mem->name->len);
                     mname[mem->name->len] = '\0';
-                    m->name = mname;
+                    m->name               = mname;
                 }
 
                 char *mbase = base + mem->offset;
                 if (mk == TY_FLOAT) {
-                    m->is_float = true;
+                    m->is_float  = true;
                     m->float_val = (double)(*(float *)mbase);
                 } else if (mk == TY_DOUBLE || mk == TY_LDOUBLE) {
-                    m->is_float = true;
+                    m->is_float  = true;
                     m->float_val = *(double *)mbase;
                 } else {
                     int sz = mem->ty->size;
-                    if (sz == 1) m->int_val = mem->ty->is_unsigned ? (int64_t)*(uint8_t *)mbase  : (int64_t)*(int8_t *)mbase;
-                    else if (sz == 2) m->int_val = mem->ty->is_unsigned ? (int64_t)*(uint16_t *)mbase : (int64_t)*(int16_t *)mbase;
-                    else if (sz == 4) m->int_val = mem->ty->is_unsigned ? (int64_t)*(uint32_t *)mbase : (int64_t)*(int32_t *)mbase;
-                    else m->int_val = *(int64_t *)mbase;
+                    if (sz == 1)
+                        m->int_val = mem->ty->is_unsigned
+                                         ? (int64_t)*(uint8_t *)mbase
+                                         : (int64_t)*(int8_t *)mbase;
+                    else if (sz == 2)
+                        m->int_val = mem->ty->is_unsigned
+                                         ? (int64_t)*(uint16_t *)mbase
+                                         : (int64_t)*(int16_t *)mbase;
+                    else if (sz == 4)
+                        m->int_val = mem->ty->is_unsigned
+                                         ? (int64_t)*(uint32_t *)mbase
+                                         : (int64_t)*(int32_t *)mbase;
+                    else
+                        m->int_val = *(int64_t *)mbase;
                 }
 
-                m->next = cv->members;
+                m->next     = cv->members;
                 cv->members = m;
             }
         } else {
             // Scalar: read from data segment unconditionally. The value is
             // valid after init_macro_globals allocates storage — it was either
             // written by a constant-initializer memcpy (init_data path), by
-            // __builtin_comptime_init (ticket #191 non-constant path), or is zero
-            // for an uninitialised var.
-            read_comptime_scalar(vm, obj, &cv->is_float, &cv->int_val, &cv->float_val);
+            // __builtin_comptime_init (ticket #191 non-constant path), or is
+            // zero for an uninitialised var.
+            read_comptime_scalar(vm, obj, &cv->is_float, &cv->int_val,
+                                 &cv->float_val);
         }
 
         cv->is_evaluated = true;
@@ -1552,9 +1620,11 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
             if (cv->is_struct)
                 printf("Evaluated comptime struct '%s'\n", cv->name);
             else if (cv->is_float)
-                printf("Evaluated comptime var '%s' = %f\n", cv->name, cv->float_val);
+                printf("Evaluated comptime var '%s' = %f\n", cv->name,
+                       cv->float_val);
             else
-                printf("Evaluated comptime var '%s' = %lld\n", cv->name, cv->int_val);
+                printf("Evaluated comptime var '%s' = %lld\n", cv->name,
+                       cv->int_val);
         }
     }
 }
@@ -1570,20 +1640,21 @@ static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
         return;
 
     Obj **globals_arr = alloca(num_globals * sizeof(Obj *));
-    int idx = num_globals - 1;
+    int   idx         = num_globals - 1;
     for (Obj *var = macro_prog; var; var = var->next) {
         if (!var->is_function)
             globals_arr[idx--] = var;
     }
 
     for (int i = 0; i < num_globals; i++) {
-        Obj *var = globals_arr[i];
+        Obj      *var    = globals_arr[i];
 
         long long offset = vm->data_ptr - vm->data_seg;
-        offset = (offset + 7) & ~7;
-        vm->data_ptr = vm->data_seg + offset;
+        offset           = (offset + 7) & ~7;
+        vm->data_ptr     = vm->data_seg + offset;
         if (vm_data_ensure(vm, var->ty->size) != 0)
-            error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
+            error("codegen: data segment overflow (limit: %d bytes)",
+                  vm->poolsize_max);
         var->offset = vm->data_ptr - vm->data_seg;
 
         if (var->init_data)
@@ -1599,7 +1670,8 @@ static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
 // entries resolve to text-segment addresses. Patches vm->data_seg directly
 // and never touches vm->compiler.data_relocs — these relocations are
 // VM-internal and must not pollute the runtime bytecode relocation table.
-static void apply_macro_global_relocations(VirtualMachine *vm, Obj *macro_prog) {
+static void apply_macro_global_relocations(VirtualMachine *vm,
+                                           Obj            *macro_prog) {
     for (Obj *var = macro_prog; var; var = var->next) {
         if (var->is_function)
             continue;
@@ -1616,7 +1688,8 @@ static void apply_macro_global_relocations(VirtualMachine *vm, Obj *macro_prog) 
             long long data_offset = var->offset + rel->offset;
             if (target->is_function) {
                 if (!target->body)
-                    error("unsupported macro relocation to undefined function: %s",
+                    error("unsupported macro relocation to undefined function: "
+                          "%s",
                           target->name);
                 *(long long *)(vm->data_seg + data_offset) =
                     cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend;
@@ -1630,8 +1703,8 @@ static void apply_macro_global_relocations(VirtualMachine *vm, Obj *macro_prog) 
 
 static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
-        Obj *fn = vm->compiler.call_patches[i].function;
-        Pc loc = vm->compiler.call_patches[i].location;
+        Obj *fn     = vm->compiler.call_patches[i].function;
+        Pc   loc    = vm->compiler.call_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
             error("undefined function in macro bytecode: %s", fn->name);
@@ -1639,12 +1712,11 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
     }
 
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
-        Obj *fn = vm->compiler.func_addr_patches[i].function;
-        Pc loc = vm->compiler.func_addr_patches[i].location;
+        Obj *fn     = vm->compiler.func_addr_patches[i].function;
+        Pc   loc    = vm->compiler.func_addr_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
-            error("undefined function address in macro bytecode: %s",
-                  fn->name);
+            error("undefined function address in macro bytecode: %s", fn->name);
         cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
     }
 }
@@ -1656,13 +1728,14 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
 // before compile_macro_program runs and is restored afterward.
 static int undefine_guard_macro_iter(char *key, int keylen, void *val,
                                      void *user_data) {
-    (void)keylen; (void)val;
+    (void)keylen;
+    (void)val;
     hashmap_delete((HashMap *)user_data, key);
     return 0; // continue
 }
 
-// Compile all macro functions and comptime helpers as one compile-time program so
-// macro bytecode can make ordinary function calls across the whole set.
+// Compile all macro functions and comptime helpers as one compile-time program
+// so macro bytecode can make ordinary function calls across the whole set.
 // Shared failure-path teardown for compile_macro_program: unwinds every bit
 // of compiler state it pushed before attempting to compile the macro
 // program, so a failed comptime compile leaves the runtime TU exactly as it
@@ -1672,22 +1745,23 @@ static int undefine_guard_macro_iter(char *key, int keylen, void *val,
 // parse/type errors via error_tok_recover despite parse() still returning a
 // non-NULL tree).
 static void restore_macro_compile_state(VirtualMachine *vm, Obj *saved_locals,
-                                        Obj *saved_current_fn, Obj *saved_globals,
-                                        Scope *saved_scope, int saved_num_call_patches,
-                                        int saved_num_func_addr_patches,
+                                        Obj *saved_current_fn,
+                                        Obj *saved_globals, Scope *saved_scope,
+                                        int     saved_num_call_patches,
+                                        int     saved_num_func_addr_patches,
                                         HashMap saved_macros) {
-    vm->compiler.locals = saved_locals;
+    vm->compiler.locals     = saved_locals;
     vm->compiler.current_fn = saved_current_fn;
-    vm->compiler.globals = saved_globals;
+    vm->compiler.globals    = saved_globals;
     for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
         hashmap_deinit_borrowed(&sc->var_map);
         hashmap_deinit_borrowed(&sc->tag_map);
     }
-    vm->compiler.scope = saved_scope;
-    vm->compiler.in_macro_mode = false;
-    vm->compiler.num_call_patches = saved_num_call_patches;
+    vm->compiler.scope                 = saved_scope;
+    vm->compiler.in_macro_mode         = false;
+    vm->compiler.num_call_patches      = saved_num_call_patches;
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
-    vm->compiler.has_macro_snapshot = false;
+    vm->compiler.has_macro_snapshot    = false;
     hashmap_restore(&vm->compiler.macros, saved_macros);
 }
 
@@ -1699,24 +1773,24 @@ static bool compile_macro_program(VirtualMachine *vm) {
         return true;
 
     MacroFn **macros = alloca(count * sizeof(MacroFn *));
-    int idx = count - 1;
+    int       idx    = count - 1;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
         macros[idx--] = pm;
 
-    Obj *saved_locals = vm->compiler.locals;
-    Obj *saved_current_fn = vm->compiler.current_fn;
-    Obj *saved_globals = vm->compiler.globals;
-    Scope *saved_scope = vm->compiler.scope;
-    int saved_num_call_patches = vm->compiler.num_call_patches;
-    int saved_num_func_addr_patches = vm->compiler.num_func_addr_patches;
+    Obj   *saved_locals                = vm->compiler.locals;
+    Obj   *saved_current_fn            = vm->compiler.current_fn;
+    Obj   *saved_globals               = vm->compiler.globals;
+    Scope *saved_scope                 = vm->compiler.scope;
+    int    saved_num_call_patches      = vm->compiler.num_call_patches;
+    int    saved_num_func_addr_patches = vm->compiler.num_func_addr_patches;
     // Snapshot the preprocessor macro table so that #define directives emitted
     // by reflection.h, comptime-only includes, or comptime function bodies do
     // not persist into the runtime translation unit after this pass completes.
     // The snapshot is taken before isolation so the runtime TU always gets its
     // full original macro state back regardless of what the comptime pass does.
     vm->compiler.macro_snapshot_backup = hashmap_snapshot(&vm->compiler.macros);
-    vm->compiler.has_macro_snapshot = true;
-    HashMap saved_macros = vm->compiler.macro_snapshot_backup;
+    vm->compiler.has_macro_snapshot    = true;
+    HashMap saved_macros               = vm->compiler.macro_snapshot_backup;
 
     // Isolate the comptime macro state: strip ALL source-file #define macros
     // (primary file and any included headers), keeping only CCCC builtins and
@@ -1740,13 +1814,13 @@ static bool compile_macro_program(VirtualMachine *vm) {
     void *saved_enum_macros_cmp[REFLECTION_ENUM_NAMES_COUNT];
     reflection_enum_names_hide(vm, saved_enum_macros_cmp);
 
-    vm->compiler.in_macro_mode = true;
-    vm->compiler.locals = NULL;
-    vm->compiler.globals = NULL;
-    vm->compiler.num_call_patches = 0;
+    vm->compiler.in_macro_mode         = true;
+    vm->compiler.locals                = NULL;
+    vm->compiler.globals               = NULL;
+    vm->compiler.num_call_patches      = 0;
     vm->compiler.num_func_addr_patches = 0;
 
-    Token *reflection_tokens = implicit_reflection_tokens(vm);
+    Token *reflection_tokens           = implicit_reflection_tokens(vm);
     Token *tokens =
         build_combined_macro_tokens(vm, reflection_tokens, macros, count);
 
@@ -1755,20 +1829,20 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // (e.g. VM expansions), producing warnings the user can't fix. Hard
     // errors (error_tok) are unaffected since they aren't gated by
     // vm->compiler.warnings.
-    uint64_t saved_warnings = vm->compiler.warnings;
-    uint64_t saved_werror = vm->compiler.warning_errors;
-    vm->compiler.warnings = 0;
+    uint64_t saved_warnings     = vm->compiler.warnings;
+    uint64_t saved_werror       = vm->compiler.warning_errors;
+    vm->compiler.warnings       = 0;
     vm->compiler.warning_errors = 0;
     // Isolate the comptime preprocessing from the runtime's include guard state
     // so that @shared headers (and any transitive dependencies) can be fully
     // re-included in the comptime context. The runtime preprocessing is already
-    // complete at this point, so modifying these maps does not affect runtime code.
-    // The macro table is already snapshotted (line above) and will be restored,
-    // so undeclaring guard macros here is safe.
-    HashMap saved_pragma_once = vm->compiler.pragma_once;
+    // complete at this point, so modifying these maps does not affect runtime
+    // code. The macro table is already snapshotted (line above) and will be
+    // restored, so undeclaring guard macros here is safe.
+    HashMap saved_pragma_once    = vm->compiler.pragma_once;
     HashMap saved_include_guards = vm->compiler.include_guards;
-    vm->compiler.pragma_once = (HashMap){};
-    vm->compiler.include_guards = (HashMap){};
+    vm->compiler.pragma_once     = (HashMap){};
+    vm->compiler.include_guards  = (HashMap){};
     hashmap_foreach(&vm->compiler.guard_macros, undefine_guard_macro_iter,
                     &vm->compiler.macros);
     // #887: any error collected while preprocessing/parsing the comptime
@@ -1778,21 +1852,21 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // bytecode. collect_errors defaults on (src/main.c), so parse() can
     // return a non-NULL tree that still isn't safe to compile.
     int saved_error_count = vm->error_count;
-    tokens = preprocess(vm, tokens);
-    // Restore include guard state; the comptime-specific maps own their key copies
-    // (via hashmap_put) so must be freed with hashmap_deinit, not _borrowed.
+    tokens                = preprocess(vm, tokens);
+    // Restore include guard state; the comptime-specific maps own their key
+    // copies (via hashmap_put) so must be freed with hashmap_deinit, not
+    // _borrowed.
     hashmap_deinit(&vm->compiler.pragma_once);
     hashmap_deinit(&vm->compiler.include_guards);
-    vm->compiler.pragma_once = saved_pragma_once;
+    vm->compiler.pragma_once    = saved_pragma_once;
     vm->compiler.include_guards = saved_include_guards;
-    Obj *macro_prog = parse(vm, tokens);
-    vm->compiler.warnings = saved_warnings;
+    Obj *macro_prog             = parse(vm, tokens);
+    vm->compiler.warnings       = saved_warnings;
     vm->compiler.warning_errors = saved_werror;
     if (!macro_prog || vm->error_count > saved_error_count) {
-        restore_macro_compile_state(vm, saved_locals, saved_current_fn,
-                                    saved_globals, saved_scope,
-                                    saved_num_call_patches,
-                                    saved_num_func_addr_patches, saved_macros);
+        restore_macro_compile_state(
+            vm, saved_locals, saved_current_fn, saved_globals, saved_scope,
+            saved_num_call_patches, saved_num_func_addr_patches, saved_macros);
         return false;
     }
     vm->compiler.macro_context_scope = vm->compiler.scope;
@@ -1804,10 +1878,10 @@ static bool compile_macro_program(VirtualMachine *vm) {
                 fprintf(stderr,
                         "Could not find macro function '%s' after parsing\n",
                         macros[i]->name);
-            restore_macro_compile_state(vm, saved_locals, saved_current_fn,
-                                        saved_globals, saved_scope,
-                                        saved_num_call_patches,
-                                        saved_num_func_addr_patches, saved_macros);
+            restore_macro_compile_state(
+                vm, saved_locals, saved_current_fn, saved_globals, saved_scope,
+                saved_num_call_patches, saved_num_func_addr_patches,
+                saved_macros);
             return false;
         }
         macros[i]->compiled_fn = func;
@@ -1819,7 +1893,8 @@ static bool compile_macro_program(VirtualMachine *vm) {
     init_macro_globals(vm, macro_prog);
 
     // Step 2: generate bytecode for all functions, including the synthesized
-    //         __builtin_comptime_init helper produced by build_combined_macro_tokens.
+    //         __builtin_comptime_init helper produced by
+    //         build_combined_macro_tokens.
     for (Obj *fn = macro_prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body)
             gen_function(vm, fn);
@@ -1830,7 +1905,8 @@ static bool compile_macro_program(VirtualMachine *vm) {
     //         function addresses (ticket #309).
     apply_macro_global_relocations(vm, macro_prog);
 
-    // Step 4: patch call addresses so __builtin_comptime_init can call comptime fns.
+    // Step 4: patch call addresses so __builtin_comptime_init can call comptime
+    // fns.
     patch_macro_call_addresses(vm, macro_prog);
 
     // Step 5: run __builtin_comptime_init to evaluate scalar comptime var
@@ -1841,14 +1917,14 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // Step 6: read comptime var values out of the data segment.
     evaluate_comptime_vars(vm, macro_prog);
 
-    vm->compiler.locals = saved_locals;
-    vm->compiler.current_fn = saved_current_fn;
-    vm->compiler.globals = saved_globals;
-    vm->compiler.scope = saved_scope;
-    vm->compiler.in_macro_mode = false;
-    vm->compiler.num_call_patches = saved_num_call_patches;
+    vm->compiler.locals                = saved_locals;
+    vm->compiler.current_fn            = saved_current_fn;
+    vm->compiler.globals               = saved_globals;
+    vm->compiler.scope                 = saved_scope;
+    vm->compiler.in_macro_mode         = false;
+    vm->compiler.num_call_patches      = saved_num_call_patches;
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
-    vm->compiler.has_macro_snapshot = false;
+    vm->compiler.has_macro_snapshot    = false;
     hashmap_restore(&vm->compiler.macros, saved_macros);
     // #1049: each ComptimeVar's shadow Obj (cv->ptr_obj,
     // make_comptime_shadow_obj above) used to be prepended here onto
@@ -1915,8 +1991,7 @@ static void compile_all_macros(VirtualMachine *vm) {
     if (vm->debug_vm)
         printf("Compiling %d compile-time function(s)...\n", ({
                    int n = 0;
-                   for (MacroFn *p = vm->compiler.macro_fns; p;
-                        p = p->next)
+                   for (MacroFn *p = vm->compiler.macro_fns; p; p = p->next)
                        n++;
                    n;
                }));
@@ -1946,7 +2021,7 @@ static void setup_macro_call_slots(VirtualMachine *vm, long long *fixed_args,
 static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
                               Node *args, int arg_count,
                               long long *fixed_arg_values,
-                              int fixed_arg_count) {
+                              int        fixed_arg_count) {
     if (!pm || !pm->is_compiled || !pm->compiled_fn)
         return NULL;
 
@@ -1962,22 +2037,22 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     // Set the compiler-internal VM global that every __builtin_* in
     // reflection.c reads instead of taking a VirtualMachine* parameter.
     VirtualMachine *saved_current_vm = __builtin_current_vm;
-    __builtin_current_vm = vm;
+    __builtin_current_vm             = vm;
 
     // Save VM execution state (including current_fn so a macro that calls
     // __builtin_ast_push_fn without a matching pop cannot leak context).
-    Pc saved_pc = vm->pc;
+    Pc         saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
-    long long saved_regs[NUM_REGS];
+    long long  saved_regs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
-    Obj *saved_current_fn = vm->compiler.current_fn;
-    Token *saved_macro_call_tok = vm->compiler.macro_call_tok;
-    Node **saved_vararg_nodes = vm->compiler.macro_vararg_nodes;
-    char **saved_vararg_strs = vm->compiler.macro_vararg_strs;
-    int saved_vararg_count = vm->compiler.macro_vararg_count;
-    bool saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
-    vm->compiler.macro_call_tok = call_tok;
+    Obj   *saved_current_fn         = vm->compiler.current_fn;
+    Token *saved_macro_call_tok     = vm->compiler.macro_call_tok;
+    Node **saved_vararg_nodes       = vm->compiler.macro_vararg_nodes;
+    char **saved_vararg_strs        = vm->compiler.macro_vararg_strs;
+    int    saved_vararg_count       = vm->compiler.macro_vararg_count;
+    bool   saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
+    vm->compiler.macro_call_tok     = call_tok;
 
     // Reset stack for macro execution
     vm->sp = vm->initial_sp;
@@ -2003,21 +2078,22 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
         setup_macro_call_slots(vm, fixed_args, fixed_count);
 
         if (pm->is_variadic) {
-            int var_count = arg_count - pm->fixed_param_count;
-            Node **var_nodes = var_count > 0 ? alloca(var_count * sizeof(Node *)) : NULL;
+            int    var_count = arg_count - pm->fixed_param_count;
+            Node **var_nodes =
+                var_count > 0 ? alloca(var_count * sizeof(Node *)) : NULL;
             for (int i = 0; i < var_count; i++) {
                 var_nodes[i] = arg;
                 if (arg)
                     arg = arg->next;
             }
-            vm->compiler.macro_vararg_nodes = var_nodes;
-            vm->compiler.macro_vararg_strs = NULL;
-            vm->compiler.macro_vararg_count = var_count;
+            vm->compiler.macro_vararg_nodes       = var_nodes;
+            vm->compiler.macro_vararg_strs        = NULL;
+            vm->compiler.macro_vararg_count       = var_count;
             vm->compiler.macro_vararg_string_mode = false;
         } else {
-            vm->compiler.macro_vararg_nodes = NULL;
-            vm->compiler.macro_vararg_strs = NULL;
-            vm->compiler.macro_vararg_count = 0;
+            vm->compiler.macro_vararg_nodes       = NULL;
+            vm->compiler.macro_vararg_strs        = NULL;
+            vm->compiler.macro_vararg_count       = 0;
             vm->compiler.macro_vararg_string_mode = false;
         }
     }
@@ -2031,7 +2107,7 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
 
     // Execute the macro function
     int saved_debug = vm->debug_vm;
-    vm->debug_vm = 0; // Disable debug output during macro execution
+    vm->debug_vm    = 0;       // Disable debug output during macro execution
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
     cccc_reset_getopt_state(); // #1041
@@ -2053,11 +2129,11 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     vm->sp = saved_sp;
     vm->bp = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
-    vm->compiler.current_fn = saved_current_fn;
-    vm->compiler.macro_call_tok = saved_macro_call_tok;
-    vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
-    vm->compiler.macro_vararg_strs = saved_vararg_strs;
-    vm->compiler.macro_vararg_count = saved_vararg_count;
+    vm->compiler.current_fn               = saved_current_fn;
+    vm->compiler.macro_call_tok           = saved_macro_call_tok;
+    vm->compiler.macro_vararg_nodes       = saved_vararg_nodes;
+    vm->compiler.macro_vararg_strs        = saved_vararg_strs;
+    vm->compiler.macro_vararg_count       = saved_vararg_count;
     vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
 
     if (eval_rc == CCCC_HOST_SIGNAL_RC)
@@ -2073,8 +2149,7 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
 }
 
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
-                                AttrTarget *target, Node *args,
-                                int arg_count) {
+                                AttrTarget *target, Node *args, int arg_count) {
     if (!vm || !pm || !target)
         return;
     if (!pm->is_attribute_handler) {
@@ -2087,8 +2162,7 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
     compile_all_macros(vm);
 
     if (!pm->is_compiled) {
-        error_tok(vm, tok, "attribute macro '%s' failed to compile",
-                  pm->name);
+        error_tok(vm, tok, "attribute macro '%s' failed to compile", pm->name);
         return;
     }
 
@@ -2099,12 +2173,14 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                   pm->name, total_args, pm->fixed_param_count);
     if (pm->is_variadic && total_args < pm->fixed_param_count)
         error_tok(vm, tok,
-                  "attribute macro '%s' called with %d arguments; expected at least %d",
+                  "attribute macro '%s' called with %d arguments; expected at "
+                  "least %d",
                   pm->name, total_args, pm->fixed_param_count);
 
     int fixed_count = pm->is_variadic ? pm->fixed_param_count : total_args;
     long long *fixed_values =
-        fixed_count > 0 ? alloca((size_t)fixed_count * sizeof(long long)) : NULL;
+        fixed_count > 0 ? alloca((size_t)fixed_count * sizeof(long long))
+                        : NULL;
     if (fixed_count > 0)
         fixed_values[0] = (long long)target;
 
@@ -2115,13 +2191,13 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
             arg = arg->next;
     }
 
-    Node **saved_vararg_nodes = vm->compiler.macro_vararg_nodes;
-    char **saved_vararg_strs = vm->compiler.macro_vararg_strs;
-    int saved_vararg_count = vm->compiler.macro_vararg_count;
-    bool saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
+    Node **saved_vararg_nodes       = vm->compiler.macro_vararg_nodes;
+    char **saved_vararg_strs        = vm->compiler.macro_vararg_strs;
+    int    saved_vararg_count       = vm->compiler.macro_vararg_count;
+    bool   saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
 
     if (pm->is_variadic) {
-        int var_count = total_args - pm->fixed_param_count;
+        int    var_count = total_args - pm->fixed_param_count;
         Node **var_nodes =
             var_count > 0 ? alloca((size_t)var_count * sizeof(Node *)) : NULL;
         for (int i = 0; i < var_count; i++) {
@@ -2129,24 +2205,24 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
             if (arg)
                 arg = arg->next;
         }
-        vm->compiler.macro_vararg_nodes = var_nodes;
-        vm->compiler.macro_vararg_strs = NULL;
-        vm->compiler.macro_vararg_count = var_count;
+        vm->compiler.macro_vararg_nodes       = var_nodes;
+        vm->compiler.macro_vararg_strs        = NULL;
+        vm->compiler.macro_vararg_count       = var_count;
         vm->compiler.macro_vararg_string_mode = false;
     } else {
-        vm->compiler.macro_vararg_nodes = NULL;
-        vm->compiler.macro_vararg_strs = NULL;
-        vm->compiler.macro_vararg_count = 0;
+        vm->compiler.macro_vararg_nodes       = NULL;
+        vm->compiler.macro_vararg_strs        = NULL;
+        vm->compiler.macro_vararg_count       = 0;
         vm->compiler.macro_vararg_string_mode = false;
     }
 
-    Node *result = execute_macro_fn(vm, pm, tok, NULL, total_args,
-                                    fixed_values, fixed_count);
+    Node *result = execute_macro_fn(vm, pm, tok, NULL, total_args, fixed_values,
+                                    fixed_count);
     (void)result;
 
-    vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
-    vm->compiler.macro_vararg_strs = saved_vararg_strs;
-    vm->compiler.macro_vararg_count = saved_vararg_count;
+    vm->compiler.macro_vararg_nodes       = saved_vararg_nodes;
+    vm->compiler.macro_vararg_strs        = saved_vararg_strs;
+    vm->compiler.macro_vararg_count       = saved_vararg_count;
     vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
 }
 
@@ -2174,8 +2250,8 @@ Node *__builtin_macroexpand_1(Node *node) {
     Scope *saved_scope = vm->compiler.scope;
     if (node->macro_scope)
         vm->compiler.scope = node->macro_scope;
-    Node *result = execute_macro_fn(vm, pm, node->tok, node->args,
-                                    node->macro_arg_count, NULL, 0);
+    Node *result       = execute_macro_fn(vm, pm, node->tok, node->args,
+                                          node->macro_arg_count, NULL, 0);
     vm->compiler.scope = saved_scope;
     return result ? result : node;
 }
@@ -2188,8 +2264,8 @@ Node *__builtin_macroexpand(Node *node) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !node)
         return node;
-    int limit = vm->compiler.macro_recursion_limit;
-    int depth = 0;
+    int   limit   = vm->compiler.macro_recursion_limit;
+    int   depth   = 0;
     Node *current = node;
     while (current && current->kind == ND_MACRO_CALL) {
         if (limit > 0 && depth >= limit) {
@@ -2209,7 +2285,7 @@ Node *__builtin_macroexpand(Node *node) {
 }
 
 void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
-                                       Node *args, int arg_count) {
+                                Node *args, int arg_count) {
     if (!vm || !name)
         return;
 
@@ -2247,8 +2323,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
 
         MacroFn *pm = find_macro_fn_by_name(vm, node->macro_name);
         if (!pm) {
-            error_tok(vm, node->tok, "undefined macro: %s",
-                      node->macro_name);
+            error_tok(vm, node->tok, "undefined macro: %s", node->macro_name);
             return node;
         }
 
@@ -2262,13 +2337,15 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
 
         // Expression-position macros must return Node* — a plain C return type
         // (int, struct, etc.) cannot be spliced into the AST.
-        if (pm->compiled_fn && pm->compiled_fn->ty && pm->compiled_fn->ty->return_ty &&
+        if (pm->compiled_fn && pm->compiled_fn->ty &&
+            pm->compiled_fn->ty->return_ty &&
             pm->compiled_fn->ty->return_ty->kind != TY_PTR) {
-            error_tok(vm, node->tok,
-                      "comptime function '%s' returns a non-pointer type and cannot "
-                      "be used in expression position; expression-position comptime "
-                      "functions must return Node*",
-                      node->macro_name);
+            error_tok(
+                vm, node->tok,
+                "comptime function '%s' returns a non-pointer type and cannot "
+                "be used in expression position; expression-position comptime "
+                "functions must return Node*",
+                node->macro_name);
             return node;
         }
 
@@ -2294,9 +2371,8 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
         Scope *saved_scope = vm->compiler.scope;
         if (node->macro_scope)
             vm->compiler.scope = node->macro_scope;
-        Node *result =
-            execute_macro_fn(vm, pm, node->tok, node->args,
-                             node->macro_arg_count, NULL, 0);
+        Node *result       = execute_macro_fn(vm, pm, node->tok, node->args,
+                                              node->macro_arg_count, NULL, 0);
         vm->compiler.scope = saved_scope;
 
         if (vm->debug_vm)
@@ -2311,9 +2387,9 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
             memset(placeholder, 0, sizeof(Node));
             placeholder->kind = ND_NUM;
-            placeholder->val = 0;
-            placeholder->ty = ty_int;
-            placeholder->tok = node->tok;
+            placeholder->val  = 0;
+            placeholder->ty   = ty_int;
+            placeholder->tok  = node->tok;
             return placeholder;
         }
 
@@ -2348,7 +2424,8 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
                 // (e.g. a macro that returned a pre-linked chain).
                 if (node->next) {
                     Node *tail = lifted;
-                    while (tail->next) tail = tail->next;
+                    while (tail->next)
+                        tail = tail->next;
                     tail->next = node->next;
                 }
                 return lifted;
@@ -2358,20 +2435,20 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
     }
 
     // Recursively transform all child nodes
-    node->lhs = transform_node(vm, node->lhs, depth);
-    node->rhs = transform_node(vm, node->rhs, depth);
+    node->lhs  = transform_node(vm, node->lhs, depth);
+    node->rhs  = transform_node(vm, node->rhs, depth);
     node->cond = transform_node(vm, node->cond, depth);
     node->then = transform_node(vm, node->then, depth);
-    node->els = transform_node(vm, node->els, depth);
+    node->els  = transform_node(vm, node->els, depth);
     node->init = transform_node(vm, node->init, depth);
-    node->inc = transform_node(vm, node->inc, depth);
+    node->inc  = transform_node(vm, node->inc, depth);
     // #1018: va_ap/va_last/va_src (Node.va_form's annotation trees,
     // src/cccc.h) are independently-parsed subtrees, not aliases into this
     // node's own lhs/rhs/etc -- a macro call inside one of them needs the
     // same expansion pass as any other child field.
-    node->va_ap = transform_node(vm, node->va_ap, depth);
+    node->va_ap   = transform_node(vm, node->va_ap, depth);
     node->va_last = transform_node(vm, node->va_last, depth);
-    node->va_src = transform_node(vm, node->va_src, depth);
+    node->va_src  = transform_node(vm, node->va_src, depth);
 
     // For ND_BLOCK, body is a chain of statements linked via ->next
     // We need to transform each statement in the chain
@@ -2424,17 +2501,18 @@ static void init_vm_segments_for_macros(VirtualMachine *vm) {
     // source_map_capacity == 0 and corrupts the heap (ticket #405).
     if (vm->flags & CCCC_ENABLE_DEBUGGER) {
         vm->dbg.source_map_capacity = 1024;
-        vm->dbg.source_map = malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
+        vm->dbg.source_map =
+            malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
         if (!vm->dbg.source_map) {
             error("could not malloc for source map");
         }
-        vm->dbg.source_map_count = 0;
-        vm->dbg.last_debug_file = NULL;
-        vm->dbg.last_debug_line = -1;
-        vm->dbg.source_index = NULL;
+        vm->dbg.source_map_count   = 0;
+        vm->dbg.last_debug_file    = NULL;
+        vm->dbg.last_debug_line    = -1;
+        vm->dbg.source_index       = NULL;
         vm->dbg.source_index_count = 0;
-        vm->dbg.num_debug_symbols = 0;
-        vm->dbg.num_watchpoints = 0;
+        vm->dbg.num_debug_symbols  = 0;
+        vm->dbg.num_watchpoints    = 0;
     }
 }
 
@@ -2457,68 +2535,68 @@ static int write_type_str(Type *ty, char *buf, int bufsize) {
         n += snprintf(buf + n, bufsize - n, "const ");
 
     switch (ty->kind) {
-    case TY_VOID:
-        n += snprintf(buf + n, bufsize - n, "void");
-        break;
-    case TY_BOOL:
-        n += snprintf(buf + n, bufsize - n, "_Bool");
-        break;
-    case TY_CHAR:
-        n += snprintf(buf + n, bufsize - n, "%schar",
-                      ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_SHORT:
-        n += snprintf(buf + n, bufsize - n, "%sshort",
-                      ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_INT:
-        n += snprintf(buf + n, bufsize - n, "%sint",
-                      ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_LONG:
-        n += snprintf(buf + n, bufsize - n, "%slong",
-                      ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_FLOAT:
-        n += snprintf(buf + n, bufsize - n, "float");
-        break;
-    case TY_DOUBLE:
-        n += snprintf(buf + n, bufsize - n, "double");
-        break;
-    case TY_PTR:
-        n += write_type_str(ty->base, buf + n, bufsize - n);
-        n += snprintf(buf + n, bufsize - n, " *");
-        break;
-    case TY_NULLPTR_T:
-        // nullptr_t has the same size/representation as a pointer.
-        n += snprintf(buf + n, bufsize - n, "void *");
-        break;
-    case TY_STRUCT:
-        if (ty->name)
-            n += snprintf(buf + n, bufsize - n, "struct %.*s",
-                          ty->name->len, ty->name->loc);
-        else
-            n += snprintf(buf + n, bufsize - n, "void /*anon struct*/");
-        break;
-    case TY_UNION:
-        if (ty->name)
-            n += snprintf(buf + n, bufsize - n, "union %.*s",
-                          ty->name->len, ty->name->loc);
-        else
-            n += snprintf(buf + n, bufsize - n, "void /*anon union*/");
-        break;
-    case TY_ENUM:
-        if (ty->name)
-            n += snprintf(buf + n, bufsize - n, "enum %.*s",
-                          ty->name->len, ty->name->loc);
-        else
+        case TY_VOID:
+            n += snprintf(buf + n, bufsize - n, "void");
+            break;
+        case TY_BOOL:
+            n += snprintf(buf + n, bufsize - n, "_Bool");
+            break;
+        case TY_CHAR:
+            n += snprintf(buf + n, bufsize - n, "%schar",
+                          ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_SHORT:
+            n += snprintf(buf + n, bufsize - n, "%sshort",
+                          ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_INT:
+            n += snprintf(buf + n, bufsize - n, "%sint",
+                          ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_LONG:
+            n += snprintf(buf + n, bufsize - n, "%slong",
+                          ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_FLOAT:
+            n += snprintf(buf + n, bufsize - n, "float");
+            break;
+        case TY_DOUBLE:
+            n += snprintf(buf + n, bufsize - n, "double");
+            break;
+        case TY_PTR:
+            n += write_type_str(ty->base, buf + n, bufsize - n);
+            n += snprintf(buf + n, bufsize - n, " *");
+            break;
+        case TY_NULLPTR_T:
+            // nullptr_t has the same size/representation as a pointer.
+            n += snprintf(buf + n, bufsize - n, "void *");
+            break;
+        case TY_STRUCT:
+            if (ty->name)
+                n += snprintf(buf + n, bufsize - n, "struct %.*s",
+                              ty->name->len, ty->name->loc);
+            else
+                n += snprintf(buf + n, bufsize - n, "void /*anon struct*/");
+            break;
+        case TY_UNION:
+            if (ty->name)
+                n += snprintf(buf + n, bufsize - n, "union %.*s", ty->name->len,
+                              ty->name->loc);
+            else
+                n += snprintf(buf + n, bufsize - n, "void /*anon union*/");
+            break;
+        case TY_ENUM:
+            if (ty->name)
+                n += snprintf(buf + n, bufsize - n, "enum %.*s", ty->name->len,
+                              ty->name->loc);
+            else
+                n += snprintf(buf + n, bufsize - n, "int");
+            break;
+        default:
+            // Fallback: emit int. Covers edge cases like TY_LDOUBLE, TY_ARRAY,
+            // TY_FUNC return types, etc.
             n += snprintf(buf + n, bufsize - n, "int");
-        break;
-    default:
-        // Fallback: emit int. Covers edge cases like TY_LDOUBLE, TY_ARRAY,
-        // TY_FUNC return types, etc.
-        n += snprintf(buf + n, bufsize - n, "int");
-        break;
+            break;
     }
     return n;
 }
@@ -2531,7 +2609,7 @@ static Token *synthesize_forward_decl_tokens(VirtualMachine *vm, Obj *fn) {
     if (!fn || !fn->ty || fn->ty->kind != TY_FUNC)
         return NULL;
 
-    char buf[512];
+    char  buf[512];
     char *p   = buf;
     char *end = buf + sizeof(buf) - 2; // leave room for ";\n\0"
 
@@ -2549,8 +2627,8 @@ static Token *synthesize_forward_decl_tokens(VirtualMachine *vm, Obj *fn) {
         for (Type *pt = fn->ty->params; pt; pt = pt->next) {
             if (!first)
                 p += snprintf(p, end - p, ", ");
-            first = false;
-            p += write_type_str(pt, p, (int)(end - p));
+            first  = false;
+            p     += write_type_str(pt, p, (int)(end - p));
         }
         if (fn->ty->is_variadic)
             p += snprintf(p, end - p, ", ...");
@@ -2578,22 +2656,22 @@ static Token *synthesize_global_decl_tokens(VirtualMachine *vm, Obj *var) {
     if (!var || var->is_function)
         return NULL;
 
-    char buf[512];
-    char *p   = buf;
-    char *end = buf + sizeof(buf) - 2;
+    char  buf[512];
+    char *p    = buf;
+    char *end  = buf + sizeof(buf) - 2;
 
-    p += snprintf(p, end - p, "extern ");
+    p         += snprintf(p, end - p, "extern ");
 
     // For array types, emit base_type name[len1][len2]... syntax.
     // Walk the type chain to collect dimensions, then emit them after the name.
     if (var->ty && var->ty->kind == TY_ARRAY) {
         // Collect array dimensions
-        int dims[16];
-        int ndims = 0;
-        Type *t = var->ty;
+        int   dims[16];
+        int   ndims = 0;
+        Type *t     = var->ty;
         while (t && t->kind == TY_ARRAY && ndims < 16) {
             dims[ndims++] = t->array_len;
-            t = t->base;
+            t             = t->base;
         }
         // t is now the element type
         p += write_type_str(t, p, (int)(end - p));
@@ -2621,29 +2699,37 @@ static Token *synthesize_global_decl_tokens(VirtualMachine *vm, Obj *var) {
 // Newly generated Obj definitions are drained into vm->compiler.macro_globals
 // immediately after each execution using a saved-next walk, so globals is
 // always restored to its pre-call state and no cycle can form.
-static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr) {
-    Token *prev = NULL;
-    Token *tok = *tokens_ptr;
-    int brace_depth = 0;
-    int paren_depth = 0;
-    bool in_init = false; // true after '=' at depth 0, until ';' or '}'
+static void scan_and_execute_global_calls(VirtualMachine *vm,
+                                          Token         **tokens_ptr) {
+    Token *prev        = NULL;
+    Token *tok         = *tokens_ptr;
+    int    brace_depth = 0;
+    int    paren_depth = 0;
+    bool   in_init     = false; // true after '=' at depth 0, until ';' or '}'
 
     while (tok && tok->kind != TK_EOF) {
         // Track brace/paren depth
-        if (equal(tok, "{")) brace_depth++;
-        else if (equal(tok, "}")) { brace_depth--; if (brace_depth == 0) in_init = false; }
-        else if (equal(tok, "(")) paren_depth++;
-        else if (equal(tok, ")")) paren_depth--;
-        else if (equal(tok, ";") && brace_depth == 0) in_init = false;
-        else if (equal(tok, "=") && brace_depth == 0 && paren_depth == 0) in_init = true;
+        if (equal(tok, "{"))
+            brace_depth++;
+        else if (equal(tok, "}")) {
+            brace_depth--;
+            if (brace_depth == 0)
+                in_init = false;
+        } else if (equal(tok, "("))
+            paren_depth++;
+        else if (equal(tok, ")"))
+            paren_depth--;
+        else if (equal(tok, ";") && brace_depth == 0)
+            in_init = false;
+        else if (equal(tok, "=") && brace_depth == 0 && paren_depth == 0)
+            in_init = true;
 
-        if (brace_depth == 0 && paren_depth == 0 &&
-            tok->kind == TK_IDENT && tok->len == 21 &&
-            strncmp(tok->loc, "__builtin_emit_line__", 21) == 0 &&
-            tok->next && equal(tok->next, "(") &&
-            tok->next->next && tok->next->next->kind == TK_STR &&
-            tok->next->next->next && equal(tok->next->next->next, ")") &&
-            tok->next->next->next->next &&
+        if (brace_depth == 0 && paren_depth == 0 && tok->kind == TK_IDENT &&
+            tok->len == 21 &&
+            strncmp(tok->loc, "__builtin_emit_line__", 21) == 0 && tok->next &&
+            equal(tok->next, "(") && tok->next->next &&
+            tok->next->next->kind == TK_STR && tok->next->next->next &&
+            equal(tok->next->next->next, ")") && tok->next->next->next->next &&
             equal(tok->next->next->next->next, ";")) {
             Token *next_tok = tok->next->next->next->next->next;
             cc_record_emit_source(vm, tok->next->next->str);
@@ -2655,14 +2741,14 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
             continue;
         }
 
-        // Only match standalone file-scope calls (outside braces/parens, not in initializers)
+        // Only match standalone file-scope calls (outside braces/parens, not in
+        // initializers)
         if (brace_depth == 0 && paren_depth == 0 && !in_init &&
             tok->kind == TK_IDENT && tok->next && equal(tok->next, "(")) {
             // Check if this identifier is a macro
             MacroFn *pm = NULL;
             for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {
-                if (m->is_macro_entry &&
-                    strlen(m->name) == tok->len &&
+                if (m->is_macro_entry && strlen(m->name) == tok->len &&
                     strncmp(m->name, tok->loc, tok->len) == 0) {
                     pm = m;
                     break;
@@ -2672,12 +2758,15 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
             if (pm) {
                 // Find matching ')'
                 Token *after_paren = tok->next->next;
-                int call_depth = 1;
-                while (after_paren && after_paren->kind != TK_EOF && call_depth > 0) {
-                    if (equal(after_paren, "(")) call_depth++;
+                int    call_depth  = 1;
+                while (after_paren && after_paren->kind != TK_EOF &&
+                       call_depth > 0) {
+                    if (equal(after_paren, "("))
+                        call_depth++;
                     else if (equal(after_paren, ")")) {
                         call_depth--;
-                        if (call_depth == 0) break;
+                        if (call_depth == 0)
+                            break;
                     }
                     after_paren = after_paren->next;
                 }
@@ -2696,11 +2785,10 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                         // keywords/idents/numbers pass their spelling.
                         int max_args = 0;
                         if (tok->next->next != after_paren) {
-                            max_args = 1;
+                            max_args        = 1;
                             int count_depth = 0;
-                            for (Token *t = tok->next->next;
-                                 t && t != after_paren;
-                                 t = t->next) {
+                            for (Token *t                 = tok->next->next;
+                                 t && t != after_paren; t = t->next) {
                                 if (equal(t, "("))
                                     count_depth++;
                                 else if (equal(t, ")") && count_depth > 0)
@@ -2709,24 +2797,26 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                                     max_args++;
                             }
                         }
-                        char **arg_strs = max_args > 0
-                            ? alloca(max_args * sizeof(char *))
-                            : NULL;
-                        int arg_count = 0;
+                        char **arg_strs =
+                            max_args > 0 ? alloca(max_args * sizeof(char *))
+                                         : NULL;
+                        int    arg_count = 0;
                         Token *a = tok->next->next; // first token after '('
                         while (a && a != after_paren) {
-                            int depth = 0;
+                            int    depth     = 0;
                             Token *arg_start = a;
-                            Token *arg_end = a;
+                            Token *arg_end   = a;
                             while (a && a != after_paren) {
-                                if (equal(a, "(")) depth++;
-                                else if (equal(a, ")")) depth--;
+                                if (equal(a, "("))
+                                    depth++;
+                                else if (equal(a, ")"))
+                                    depth--;
                                 if (depth == 0 && equal(a, ",")) {
                                     a = a->next;
                                     break;
                                 }
                                 arg_end = a;
-                                a = a->next;
+                                a       = a->next;
                             }
                             char *str;
                             if (arg_start == arg_end &&
@@ -2734,16 +2824,14 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                                 str = arg_start->str;
                             } else {
                                 int total = 0;
-                                for (Token *t = arg_start;
-                                     t && t != arg_end->next;
-                                     t = t->next)
+                                for (Token *t                   = arg_start;
+                                     t && t != arg_end->next; t = t->next)
                                     total += t->len;
-                                str = arena_alloc(
-                                    &vm->compiler.parser_arena, total + 1);
+                                str = arena_alloc(&vm->compiler.parser_arena,
+                                                  total + 1);
                                 int pos = 0;
-                                for (Token *t = arg_start;
-                                     t && t != arg_end->next;
-                                     t = t->next) {
+                                for (Token *t                   = arg_start;
+                                     t && t != arg_end->next; t = t->next) {
                                     memcpy(str + pos, t->loc, t->len);
                                     pos += t->len;
                                 }
@@ -2751,21 +2839,23 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                             }
                             arg_strs[arg_count++] = str;
                         }
-                        if (pm->is_variadic && arg_count < pm->fixed_param_count) {
+                        if (pm->is_variadic &&
+                            arg_count < pm->fixed_param_count) {
                             error_tok(vm, tok,
-                                      "macro '%.*s' called with %d arguments; expected at least %d",
+                                      "macro '%.*s' called with %d arguments; "
+                                      "expected at least %d",
                                       tok->len, tok->loc, arg_count,
                                       pm->fixed_param_count);
                         }
                         // Place char* values using the VM calling convention
                         // before calling execute_macro_fn with NULL args so
                         // the arg-setup loop inside does not overwrite them.
-                        int fixed_count = pm->is_variadic ? pm->fixed_param_count
-                                                          : arg_count;
+                        int fixed_count =
+                            pm->is_variadic ? pm->fixed_param_count : arg_count;
                         long long *fixed_args =
-                            fixed_count > 0
-                                ? alloca((size_t)fixed_count * sizeof(long long))
-                                : NULL;
+                            fixed_count > 0 ? alloca((size_t)fixed_count *
+                                                     sizeof(long long))
+                                            : NULL;
                         for (int i = 0; i < fixed_count; i++)
                             fixed_args[i] = (long long)arg_strs[i];
 
@@ -2776,8 +2866,8 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
 
                         // Snapshot globals before execution so we can identify
                         // the objects this call generates.
-                        Obj *globals_before = vm->compiler.globals;
-                        Scope *scope_before = vm->compiler.scope;
+                        Obj   *globals_before = vm->compiler.globals;
+                        Scope *scope_before   = vm->compiler.scope;
                         Scope *saved_scope_next =
                             scope_before ? scope_before->next : NULL;
                         if (scope_before && vm->compiler.macro_context_scope)
@@ -2800,9 +2890,9 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                                 arg_count - pm->fixed_param_count;
                             vm->compiler.macro_vararg_string_mode = true;
                         } else {
-                            vm->compiler.macro_vararg_nodes = NULL;
-                            vm->compiler.macro_vararg_strs = NULL;
-                            vm->compiler.macro_vararg_count = 0;
+                            vm->compiler.macro_vararg_nodes       = NULL;
+                            vm->compiler.macro_vararg_strs        = NULL;
+                            vm->compiler.macro_vararg_count       = 0;
                             vm->compiler.macro_vararg_string_mode = true;
                         }
 
@@ -2815,7 +2905,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                         vm->compiler.macro_emit_recording =
                             saved_emit_recording;
                         vm->compiler.macro_vararg_nodes = saved_vararg_nodes;
-                        vm->compiler.macro_vararg_strs = saved_vararg_strs;
+                        vm->compiler.macro_vararg_strs  = saved_vararg_strs;
                         vm->compiler.macro_vararg_count = saved_vararg_count;
                         vm->compiler.macro_vararg_string_mode =
                             saved_vararg_string_mode;
@@ -2823,16 +2913,17 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                             scope_before->next = saved_scope_next;
                         vm->compiler.scope = scope_before;
 
-                        // Ticket #233: if the macro returned an ND_BLOCK, splice
-                        // its body tokens into the stream so they are re-parsed
-                        // at global scope instead of being silently discarded.
-                        // The block came from Quote("{ ... }") so the token
-                        // chain is: outer-'{' -> body tokens -> outer-'}' -> EOF.
-                        // We start from block_result->tok->next (the token after
-                        // the outer '{') and walk forward, tracking brace depth
-                        // starting at 0, stopping just before the outer '}'.
-                        // Note: compound_stmt adds declarations as side effects
-                        // so block->body may be NULL; use tok-level injection.
+                        // Ticket #233: if the macro returned an ND_BLOCK,
+                        // splice its body tokens into the stream so they are
+                        // re-parsed at global scope instead of being silently
+                        // discarded. The block came from Quote("{ ... }") so
+                        // the token chain is: outer-'{' -> body tokens ->
+                        // outer-'}' -> EOF. We start from
+                        // block_result->tok->next (the token after the outer
+                        // '{') and walk forward, tracking brace depth starting
+                        // at 0, stopping just before the outer '}'. Note:
+                        // compound_stmt adds declarations as side effects so
+                        // block->body may be NULL; use tok-level injection.
                         //
                         // #1034: the splice decision must be made *before* the
                         // globals drain below, not after -- the objects this
@@ -2849,17 +2940,15 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                         // discard this call's generated objects entirely
                         // (rewind vm->compiler.globals, skip the drain) and
                         // let the re-parse be the sole source of truth.
-                        if (block_result &&
-                            block_result->kind == ND_BLOCK &&
+                        if (block_result && block_result->kind == ND_BLOCK &&
                             block_result->tok &&
                             block_result->tok->kind != TK_EOF &&
                             !equal(block_result->tok, "}")) {
                             Token *body_first = block_result->tok;
                             Token *body_last  = NULL;
-                            int bdepth = 0;
-                            for (Token *t = body_first;
-                                 t && t->kind != TK_EOF;
-                                 t = t->next) {
+                            int    bdepth     = 0;
+                            for (Token *t = body_first; t && t->kind != TK_EOF;
+                                 t        = t->next) {
                                 if (equal(t, "{"))
                                     bdepth++;
                                 else if (equal(t, "}")) {
@@ -2871,7 +2960,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                             }
                             if (body_last) {
                                 vm->compiler.globals = globals_before;
-                                body_last->next = next_tok;
+                                body_last->next      = next_tok;
                                 if (prev)
                                     prev->next = body_first;
                                 else
@@ -2881,16 +2970,17 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
                             }
                         }
 
-                        // Drain newly prepended objects into macro_globals using
-                        // a saved-next walk so we never overwrite a next pointer
-                        // we still need to follow (which would create a cycle).
+                        // Drain newly prepended objects into macro_globals
+                        // using a saved-next walk so we never overwrite a next
+                        // pointer we still need to follow (which would create a
+                        // cycle).
                         Obj *o = vm->compiler.globals;
                         while (o && o != globals_before) {
                             Obj *next_obj = o->next;
                             cc_record_emit_object(vm, o);
                             o->next = vm->compiler.macro_globals;
                             vm->compiler.macro_globals = o;
-                            o = next_obj;
+                            o                          = next_obj;
                         }
                         vm->compiler.globals = globals_before;
 
@@ -2908,7 +2998,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
         }
 
         prev = tok;
-        tok = tok->next;
+        tok  = tok->next;
     }
 }
 
@@ -2925,7 +3015,8 @@ static void scan_and_execute_global_calls(VirtualMachine *vm, Token **tokens_ptr
 //
 // After this runs, vm->compiler.macro_globals contains the generated
 // definitions. main.c appends them to the merged program before codegen.
-void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int count) {
+void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
+                              int count) {
     if (!vm)
         return;
 
@@ -2947,33 +3038,46 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
     cc_comptime_index_build(vm, input_tokens, count);
 
     // Quick check: are there any file-scope macro calls in the token streams?
-    // If not, skip init+compile here — they will happen lazily in cc_expand_macros
-    // after parsing, when all symbols are defined. This avoids premature $symbol
-    // lookups in macros that are only called in expression position.
+    // If not, skip init+compile here — they will happen lazily in
+    // cc_expand_macros after parsing, when all symbols are defined. This avoids
+    // premature $symbol lookups in macros that are only called in expression
+    // position.
     bool any_file_scope_call = false;
     for (int fi = 0; fi < count && !any_file_scope_call; fi++) {
-        Token *t = input_tokens[fi];
-        int bd = 0, pd = 0;
-        bool in_init = false;
+        Token *t  = input_tokens[fi];
+        int    bd = 0, pd = 0;
+        bool   in_init = false;
         while (t && t->kind != TK_EOF) {
-            if (equal(t, "{")) bd++;
-            else if (equal(t, "}")) { bd--; if (bd == 0) in_init = false; }
-            else if (equal(t, "(")) pd++;
-            else if (equal(t, ")")) pd--;
-            else if (equal(t, ";") && bd == 0) in_init = false;
-            else if (equal(t, "=") && bd == 0 && pd == 0) in_init = true;
-            if (bd == 0 && pd == 0 && !in_init &&
-                t->kind == TK_IDENT && t->next && equal(t->next, "(")) {
+            if (equal(t, "{"))
+                bd++;
+            else if (equal(t, "}")) {
+                bd--;
+                if (bd == 0)
+                    in_init = false;
+            } else if (equal(t, "("))
+                pd++;
+            else if (equal(t, ")"))
+                pd--;
+            else if (equal(t, ";") && bd == 0)
+                in_init = false;
+            else if (equal(t, "=") && bd == 0 && pd == 0)
+                in_init = true;
+            if (bd == 0 && pd == 0 && !in_init && t->kind == TK_IDENT &&
+                t->next && equal(t->next, "(")) {
                 for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {
-                    if (m->is_macro_entry &&
-                        strlen(m->name) == t->len &&
+                    if (m->is_macro_entry && strlen(m->name) == t->len &&
                         strncmp(m->name, t->loc, t->len) == 0) {
                         // Check for ';' after matching ')'
                         Token *ap = t->next->next;
-                        int cd = 1;
+                        int    cd = 1;
                         while (ap && ap->kind != TK_EOF && cd > 0) {
-                            if (equal(ap, "(")) cd++;
-                            else if (equal(ap, ")")) { cd--; if (cd==0) break; }
+                            if (equal(ap, "("))
+                                cd++;
+                            else if (equal(ap, ")")) {
+                                cd--;
+                                if (cd == 0)
+                                    break;
+                            }
                             ap = ap->next;
                         }
                         if (ap && cd == 0 && ap->next && equal(ap->next, ";"))
@@ -2982,7 +3086,8 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
                     }
                 }
             }
-            if (any_file_scope_call) break;
+            if (any_file_scope_call)
+                break;
             t = t->next;
         }
     }
@@ -3040,25 +3145,24 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens, int coun
         // block function is_macro_generated for the first time, so the
         // is_fn_def arm needed the same `name[0] != '.'` guard #928 already
         // gave is_gvar_def.
-        bool is_fn_def  = o->is_function  && o->body &&
-                          o->is_macro_generated && o->name[0] != '.';
+        bool is_fn_def   = o->is_function && o->body && o->is_macro_generated &&
+                           o->name[0] != '.';
         bool is_gvar_def = !o->is_function && o->is_definition &&
-                            o->is_macro_generated && o->name[0] != '.';
+                           o->is_macro_generated && o->name[0] != '.';
         if (!is_fn_def && !is_gvar_def)
             continue;
 
         for (int fi = 0; fi < count; fi++) {
             if (!input_tokens[fi])
                 continue;
-            Token *decl = is_fn_def
-                ? synthesize_forward_decl_tokens(vm, o)
-                : synthesize_global_decl_tokens(vm, o);
+            Token *decl = is_fn_def ? synthesize_forward_decl_tokens(vm, o)
+                                    : synthesize_global_decl_tokens(vm, o);
             if (!decl)
                 continue;
             Token *tail = decl;
             while (tail->next && tail->next->kind != TK_EOF)
                 tail = tail->next;
-            tail->next = input_tokens[fi];
+            tail->next       = input_tokens[fi];
             input_tokens[fi] = decl;
         }
     }
@@ -3114,7 +3218,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
         // compound assignments in quote templates) are added to THIS
         // function's locals and get proper stack-offset allocation in codegen.
         vm->compiler.current_fn = fn;
-        vm->compiler.locals = fn->locals;
+        vm->compiler.locals     = fn->locals;
 
         // Transform the function body
         fn->body = transform_node(vm, fn->body, 0);
@@ -3125,7 +3229,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
 
     // Clear locals so a stray new_lvar in a global-init comptime context
     // cannot silently attach to the last function's frame.
-    vm->compiler.locals = NULL;
+    vm->compiler.locals     = NULL;
     vm->compiler.current_fn = NULL;
 
     // Also check global initializers (constexpr init_expr expansion).
@@ -3166,7 +3270,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
             if (!obj || obj->next)
                 continue;
             tail->next = obj;
-            tail = obj;
+            tail       = obj;
         }
     }
 

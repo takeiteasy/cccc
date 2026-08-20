@@ -22,24 +22,28 @@ int main(void) {
     // double param through a function pointer got int-register garbage
     // handed to libffi as a double.
     double (*powp)(double, double) = pow;
-    if (powp(2.0, 10.0) != 1024.0) return 4;
+    if (powp(2.0, 10.0) != 1024.0)
+        return 4;
 
     int (*p)(char *, const char *, ...) = sprintf;
     char buf[128];
 
     // (a) integer tail arg
     p(buf, "%d", 7);
-    if (strcmp(buf, "7") != 0) return 1;
+    if (strcmp(buf, "7") != 0)
+        return 1;
 
     // (b) double tail arg -- must come from the integer register file, not
     // FREG_A0 (which is where a *fixed* flonum param would live).
     p(buf, "%d-%f", 7, 3.5);
-    if (strcmp(buf, "7-3.500000") != 0) return 2;
+    if (strcmp(buf, "7-3.500000") != 0)
+        return 2;
 
     // (c) >8 arguments total, mixing fixed + variadic-tail ints/doubles to
     // push some onto the VM stack.
     p(buf, "%d %d %d %d %d %d %d %d %f", 1, 2, 3, 4, 5, 6, 7, 8, 9.5);
-    if (strcmp(buf, "1 2 3 4 5 6 7 8 9.500000") != 0) return 3;
+    if (strcmp(buf, "1 2 3 4 5 6 7 8 9.500000") != 0)
+        return 3;
 
     return 42;
 }

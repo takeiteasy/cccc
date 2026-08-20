@@ -23,32 +23,45 @@
 // error instead of a silent truncation to a wrong value.
 int main(void) {
     // The exact reproductions from the ticket.
-    if (1e1 != 10.0) return 1;
-    if (2e3 != 2000.0) return 2;
-    if (123e2 != 12300.0) return 3;
-    if (1E10 != 1e+10) return 4;
+    if (1e1 != 10.0)
+        return 1;
+    if (2e3 != 2000.0)
+        return 2;
+    if (123e2 != 12300.0)
+        return 3;
+    if (1E10 != 1e+10)
+        return 4;
 
     // Controls that already worked before the fix -- must keep working.
-    if (1e+10 != 1e+10) return 5;
-    if (1e-3 != 0.001) return 6;
-    if (1.0e10 != 1e+10) return 7;
+    if (1e+10 != 1e+10)
+        return 5;
+    if (1e-3 != 0.001)
+        return 6;
+    if (1.0e10 != 1e+10)
+        return 7;
 
     // Hex floats: broken by the identical root cause ('p'/'P' + exponent
     // digits swallowed into the integer digit-run the same way 'e' was).
-    if (0x1p3 != 8.0) return 8;
-    if (0x1.8p1 != 3.0) return 9;
+    if (0x1p3 != 8.0)
+        return 8;
+    if (0x1.8p1 != 3.0)
+        return 9;
 
     // Leading-zero decimal floats: these take the octal `base = 8` code
     // path up front (leading '0'), so the fix must recognize '.'/'e'/'E'
     // as float indicators for base 8 too, not just base 10 -- otherwise
     // valid floats like these would be wrongly rejected as octal
     // constants.
-    if (0e5 != 0.0) return 10;
-    if (012e3 != 12000.0) return 11; // digits after '0' read as decimal, not octal
-    if (08.5 != 8.5) return 12;
+    if (0e5 != 0.0)
+        return 10;
+    if (012e3 != 12000.0)
+        return 11; // digits after '0' read as decimal, not octal
+    if (08.5 != 8.5)
+        return 12;
 
     // float suffix on a bare-exponent literal.
-    if (1e2f != 100.0f) return 13;
+    if (1e2f != 100.0f)
+        return 13;
 
     return 42;
 }

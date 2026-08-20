@@ -8,18 +8,18 @@
 #include <stdlib.h>
 
 union U {
-    int i;
+    int   i;
     float f;
 };
 
 int main(void) {
     union U *u = malloc(sizeof(union U));
-    u->i = 42;
-    int a = u->i;      // same member: must read back cleanly
-    u->f = 1.0f;        // legal punning: write a different member
-    float b = u->f;     // read that member back
-    u->i = 42;           // punning back the other way
-    int c = u->i;
+    u->i       = 42;
+    int a      = u->i; // same member: must read back cleanly
+    u->f       = 1.0f; // legal punning: write a different member
+    float b    = u->f; // read that member back
+    u->i       = 42;   // punning back the other way
+    int c      = u->i;
     free(u);
     return (a == 42 && b == 1.0f && c == 42) ? 42 : 1;
 }

@@ -5,6 +5,7 @@
 // any undefined variable reference.
 
 int main(void) {
-    int * [[cccc::array, cccc::count(not_declared_anywhere)]] a = (int[3]){1, 2, 3};
+    int *[[cccc::array, cccc::count(not_declared_anywhere)]] a =
+        (int[3]){1, 2, 3};
     return a[0];
 }

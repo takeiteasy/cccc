@@ -34,6 +34,7 @@ __attribute__((destructor)) void dtor(void) {
 }
 
 int main(void) {
-    if (!ctor_ran) return 1;
+    if (!ctor_ran)
+        return 1;
     return 42;
 }

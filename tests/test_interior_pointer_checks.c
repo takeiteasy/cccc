@@ -15,8 +15,11 @@
 [[cccc::test(flags = "-V --bounds-checks")]]
 void test_interior_forward_index_in_bounds(void) {
     int *q = malloc(4 * sizeof(int));
-    q[0] = 10; q[1] = 20; q[2] = 30; q[3] = 40;
-    int *p = q + 2; // interior pointer, offset 2 ints into the allocation
+    q[0]   = 10;
+    q[1]   = 20;
+    q[2]   = 30;
+    q[3]   = 40;
+    int *p = q + 2;     // interior pointer, offset 2 ints into the allocation
     AssertEq(p[1], 40); // effective offset 2+1=3, within the 4-int allocation
     free(q);
 }
@@ -24,8 +27,11 @@ void test_interior_forward_index_in_bounds(void) {
 [[cccc::test(flags = "-V --bounds-checks")]]
 void test_interior_negative_index_in_bounds(void) {
     int *q = malloc(4 * sizeof(int));
-    q[0] = 10; q[1] = 20; q[2] = 30; q[3] = 40;
-    int *p = q + 2; // interior pointer, offset 2 ints into the allocation
+    q[0]   = 10;
+    q[1]   = 20;
+    q[2]   = 30;
+    q[3]   = 40;
+    int *p = q + 2;      // interior pointer, offset 2 ints into the allocation
     AssertEq(p[-1], 20); // effective offset 2-1=1: valid, within the allocation
     free(q);
 }

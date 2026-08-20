@@ -28,16 +28,23 @@ int test_warn_wall_clean(void) {
     return 6 * 7;
 }
 
-// Two consecutive tests with different warning flags trigger separate recompiles.
+// Two consecutive tests with different warning flags trigger separate
+// recompiles.
 [[cccc::test(return = 42, flags = "-Wall")]]
-int test_warn_wall_consecutive_1(void) { return 42; }
+int test_warn_wall_consecutive_1(void) {
+    return 42;
+}
 
 [[cccc::test(return = 42, flags = "-Wall -Wpedantic")]]
-int test_warn_wall_pedantic(void) { return 42; }
+int test_warn_wall_pedantic(void) {
+    return 42;
+}
 
 // Back to no flags: recompile to base state.
 [[cccc::test(return = 42)]]
-int test_warn_back_to_base(void) { return 42; }
+int test_warn_back_to_base(void) {
+    return 42;
+}
 
 // --- Optimisation-pass flag tests (-f<pass> / -fno-<pass>) ---
 
@@ -47,7 +54,8 @@ int test_f_ffold(void) {
     return 6 * 7;
 }
 
-// Constant folding disabled: result still correct (just not folded at compile time).
+// Constant folding disabled: result still correct (just not folded at compile
+// time).
 [[cccc::test(return = 42, flags = "-fno-fold")]]
 int test_f_fno_fold(void) {
     return 6 * 7;
@@ -120,10 +128,13 @@ int test_pragma_config_mixed(void) {
 
 // Unrecognized return= operand with -Wattributes per-test: assertion is
 // silently skipped (ret_kind = RET_NONE), test still passes (#350, #621).
-// Warning emission is tested by tests/test_warning_return_unrecognized_operand.c
-// (parse-time; cannot be captured via expect_stderr in a suite test).
+// Warning emission is tested by
+// tests/test_warning_return_unrecognized_operand.c (parse-time; cannot be
+// captured via expect_stderr in a suite test).
 [[cccc::test(return = GREEN, flags = "-Wattributes")]]
-int test_unrecognized_return_operand(void) { return 42; }
+int test_unrecognized_return_operand(void) {
+    return 42;
+}
 
 #pragma cccc suite end
 
@@ -221,11 +232,11 @@ int test_baseline_after_optimised(void) {
 #pragma cccc suite end
 
 // [from test_attr_optimize.c]
-// Per-function optimize attribute: GCC string form, C23 integer form, @ shorthand.
+// Per-function optimize attribute: GCC string form, C23 integer form, @
+// shorthand.
 #pragma cccc suite begin "per_fn_optimize"
 
-__attribute__((optimize("O2")))
-static int gnu_attr_add_opt(int a, int b) {
+__attribute__((optimize("O2"))) static int gnu_attr_add_opt(int a, int b) {
     return a + b;
 }
 
@@ -248,8 +259,7 @@ static void test_c23_int_attr(void) {
     AssertEq(c23_attr_mul(-3, -3), 9);
 }
 
-@optimize(1)
-static int at_attr_sub(int a, int b) {
+@optimize(1) static int at_attr_sub(int a, int b) {
     return a - b;
 }
 
@@ -281,8 +291,7 @@ static void test_c23_str_attr(void) {
     AssertEq(c23_str_attr_fn(-1), 0);
 }
 
-__attribute__((optimize("-O3")))
-static int gcc_dash_attr(int a, int b) {
+__attribute__((optimize("-O3"))) static int gcc_dash_attr(int a, int b) {
     return a - b;
 }
 

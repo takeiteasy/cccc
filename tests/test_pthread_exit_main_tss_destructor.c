@@ -27,7 +27,7 @@ int main(void) {
         return 1;
 
     int *slot = malloc(sizeof(int));
-    *slot = 55;
+    *slot     = 55;
     if (pthread_setspecific(g_key, slot) != 0)
         return 2;
 

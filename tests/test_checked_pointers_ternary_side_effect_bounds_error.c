@@ -8,8 +8,8 @@
 // non-ternary case and node_has_side_effects() in src/parse.c.
 
 int main(void) {
-    int i = 0;
-    int c = 1;
-    int * [[cccc::array, cccc::count(c ? i++ : 3)]] a = (int[3]){1, 2, 3};
+    int i                                               = 0;
+    int c                                               = 1;
+    int * [[ cccc::array, cccc::count(c ? i++ : 3) ]] a = (int[3]){1, 2, 3};
     return a[0];
 }

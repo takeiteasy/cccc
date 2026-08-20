@@ -7,7 +7,7 @@
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    const char *inc = "examples/build_demo/include";
+    const char  *inc = "examples/build_demo/include";
 
     BuildTarget *app = Executable(ctx, "jobs_app");
     AddSource(app, "examples/build_demo/src/lib/sum.c");

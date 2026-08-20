@@ -36,19 +36,21 @@ static void emit_local_addr(VirtualMachine *vm, Obj *var, int dest_reg) {
     emit_lea3(vm, dest_reg, var->offset);
 }
 
-// Call cv->cleanup_fn(&cv->var). The cleanup fn returns void so REG_A0 is clobbered.
-// Uses the standard CALL+patch mechanism (same as ND_FUNCALL for CCCC functions).
+// Call cv->cleanup_fn(&cv->var). The cleanup fn returns void so REG_A0 is
+// clobbered. Uses the standard CALL+patch mechanism (same as ND_FUNCALL for
+// CCCC functions).
 static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv) {
     int r_addr = alloc_temp_reg();
     emit_local_addr(vm, cv->var, r_addr);
     emit_mov3(vm, REG_A0, r_addr);
     free_temp_reg(r_addr);
     emit(vm, CALL);
-    Pc patch = emit_word_ptr(vm);
+    Pc patch            = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
     PATCH_GROW(vm, call_patches, num_call_patches, call_patches_cap);
     vm->compiler.call_patches[vm->compiler.num_call_patches].location = patch;
-    vm->compiler.call_patches[vm->compiler.num_call_patches].function = cv->cleanup_fn;
+    vm->compiler.call_patches[vm->compiler.num_call_patches].function =
+        cv->cleanup_fn;
     vm->compiler.num_call_patches++;
     reset_temp_regs();
 }
@@ -59,14 +61,15 @@ void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope) {
         emit_one_cleanup(vm, cv);
 }
 
-// Emit cleanup calls for all active scopes with depth > target_depth (innermost first).
+// Emit cleanup calls for all active scopes with depth > target_depth (innermost
+// first).
 void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth) {
-    for (CleanupScopeEntry *s = g_cleanup_scope; s && s->depth > target_depth; s = s->outer)
+    for (CleanupScopeEntry *s = g_cleanup_scope; s && s->depth > target_depth;
+         s                    = s->outer)
         emit_scope_cleanups(vm, s);
 }
 
 // ========== Forward Declarations ==========
-
 
 // ========== Inline Assembly Passthru ==========
 
@@ -77,12 +80,12 @@ void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth) {
 static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
     // Create temp source file path (use mkstemp + rename to get .c extension)
     char src_template[] = "/tmp/cccc-asm-XXXXXX";
-    int src_fd = mkstemp(src_template);
+    int  src_fd         = mkstemp(src_template);
     if (src_fd < 0)
         error("--asm-passthru: failed to create temp source file");
     close(src_fd);
-    size_t src_len = strlen(src_template) + 3;
-    char *src_path = malloc(src_len);
+    size_t src_len  = strlen(src_template) + 3;
+    char  *src_path = malloc(src_len);
     if (!src_path)
         error("--asm-passthru: malloc failed");
     snprintf(src_path, src_len, "%s.c", src_template);
@@ -123,7 +126,7 @@ static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
 
     // Create temp output path for shared library
     char so_template[] = "/tmp/cccc-asm-XXXXXX";
-    int so_fd = mkstemp(so_template);
+    int  so_fd         = mkstemp(so_template);
     if (so_fd < 0) {
         unlink(src_path);
         free(src_path);
@@ -131,8 +134,8 @@ static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
         error("--asm-passthru: failed to create temp output file");
     }
     close(so_fd);
-    size_t so_len = strlen(so_template) + 7;
-    char *so_path = malloc(so_len);
+    size_t so_len  = strlen(so_template) + 7;
+    char  *so_path = malloc(so_len);
     if (!so_path) {
         unlink(src_path);
         free(src_path);
@@ -146,23 +149,30 @@ static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
     snprintf(so_path, so_len, "%s.so", so_template);
 #endif
     if (rename(so_template, so_path) != 0) {
-        unlink(src_path); unlink(so_template);
-        free(src_path); free(so_path); free(cc);
+        unlink(src_path);
+        unlink(so_template);
+        free(src_path);
+        free(so_path);
+        free(cc);
         error("--asm-passthru: failed to rename temp output file");
     }
 
     // Compile source to shared library
     pid_t pid = fork();
     if (pid < 0) {
-        unlink(src_path); unlink(so_path);
-        free(src_path); free(so_path); free(cc);
+        unlink(src_path);
+        unlink(so_path);
+        free(src_path);
+        free(so_path);
+        free(cc);
         error("--asm-passthru: fork failed");
     }
     if (pid == 0) {
 #if defined(__APPLE__)
         execlp(cc, cc, "-shared", "-o", so_path, src_path, (char *)NULL);
 #else
-        execlp(cc, cc, "-shared", "-fPIC", "-o", so_path, src_path, (char *)NULL);
+        execlp(cc, cc, "-shared", "-fPIC", "-o", so_path, src_path,
+               (char *)NULL);
 #endif
         _exit(127);
     }
@@ -205,8 +215,8 @@ static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
 void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
 #if !defined(_WIN32)
     static int asm_counter = 0;
-    char sym_name[128];
-    int n = asm_counter++;
+    char       sym_name[128];
+    int        n = asm_counter++;
     snprintf(sym_name, sizeof(sym_name), "__cccc_asm_passthru_%d", n);
 
     void *func_ptr = compile_asm_to_funcptr(sym_name, asm_str);
@@ -219,7 +229,7 @@ void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
     if (ffi_idx < 0)
         error("--asm-passthru: FFI registration failed");
     vm->compiler.ffi_table[ffi_idx].is_asm_passthru = 1;
-    vm->compiler.ffi_table[ffi_idx].asm_src = strdup(asm_str);
+    vm->compiler.ffi_table[ffi_idx].asm_src         = strdup(asm_str);
 
     // Emit CALLF with 0 args
     emit(vm, CALLF);
@@ -234,9 +244,9 @@ void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
 }
 
 // Recompile any asm-passthru FFI entries whose func_ptr was lost during .c4
-// serialization.  Called from the .c4 load path after stdlib/library resolution.
-// Respects the FFI allow/deny policy; denied entries are left with func_ptr=NULL
-// (CALLF will emit the "not resolved" error at execution time).
+// serialization.  Called from the .c4 load path after stdlib/library
+// resolution. Respects the FFI allow/deny policy; denied entries are left with
+// func_ptr=NULL (CALLF will emit the "not resolved" error at execution time).
 // Returns 0 on success, -1 on hard failure.
 int cc_rehydrate_asm_passthru(VirtualMachine *vm) {
 #if !defined(_WIN32)
@@ -305,11 +315,13 @@ int static_link_hop_bytes(VirtualMachine *vm) {
     return -(1 + ((vm->flags & CCCC_STACK_CANARIES) ? 1 : 0)) * 8;
 }
 
-// Return the index of var in block_fn->captures (0-based), or -1 if not captured.
-// Descriptor slot = (index + 1) * 8 so that slot 0 (offset 0) stays the invoke ptr.
+// Return the index of var in block_fn->captures (0-based), or -1 if not
+// captured. Descriptor slot = (index + 1) * 8 so that slot 0 (offset 0) stays
+// the invoke ptr.
 int find_capture_index(Obj *block_fn, Obj *var) {
     for (int i = 0; i < block_fn->num_captures; i++)
-        if (block_fn->captures[i] == var) return i;
+        if (block_fn->captures[i] == var)
+            return i;
     return -1;
 }
 
@@ -327,13 +339,14 @@ static void ensure_local_set(Obj *parent) {
 
 // Check if a variable belongs to an outer (enclosing) function.
 // Returns the owning function, or NULL if it belongs to the current function.
-// O(depth) using per-function lazy hash sets instead of O(depth * locals). (#165)
+// O(depth) using per-function lazy hash sets instead of O(depth * locals).
+// (#165)
 Obj *belongs_to_outer_function(Obj *current_fn, Obj *var) {
     if (!current_fn || !current_fn->is_nested || !var || !var->is_local)
         return NULL;
 
     for (Obj *parent = current_fn->parent_fn; parent;
-         parent = parent->parent_fn) {
+         parent      = parent->parent_fn) {
         ensure_local_set(parent);
         if (hashmap_get_int(&parent->local_set, (long long)(intptr_t)var))
             return parent;
@@ -360,7 +373,7 @@ static int calculate_chain_depth(Obj *current_fn, Obj *owner_fn) {
 // the same failure mode #994 already warned about for the capture-offset
 // layout.
 void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
-                                 Obj *owner_fn, Obj *var, int dest_reg) {
+                                Obj *owner_fn, Obj *var, int dest_reg) {
     Obj *static_link = find_static_link_var(current_fn);
     if (!static_link)
         error("nested function missing __static_link");
@@ -409,10 +422,8 @@ bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
     if (node->var->is_param &&
         (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION))
         return false;
-    return node->ty->kind != TY_ARRAY &&
-           node->ty->kind != TY_STRUCT &&
-           node->ty->kind != TY_UNION &&
-           node->ty->kind != TY_COMPLEX &&
+    return node->ty->kind != TY_ARRAY && node->ty->kind != TY_STRUCT &&
+           node->ty->kind != TY_UNION && node->ty->kind != TY_COMPLEX &&
            !is_wide_bitint(node->ty) &&
            !is_decimal(node->ty); // #402: address-based, same as wide _BitInt
 }
@@ -463,28 +474,30 @@ bool is_union_member_access(Node *node) {
 
 bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
     switch (node->kind) {
-    case ND_VAR: {
-        Obj *var = node->var;
-        if (var->is_function || !var->is_local || var->is_block_var)
-            return false;
-        Obj *current_fn = vm->compiler.current_fn;
-        if (current_fn && current_fn->is_block &&
-            find_capture_index(current_fn, var) >= 0)
-            return false;
-        if (belongs_to_outer_function(current_fn, var))
-            return false;
-        if (var->is_param && (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
-                               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
-                               is_decimal(var->ty))) // #402: passed by pointer too
-            return false;
-        return true;
-    }
-    case ND_MEMBER:
-        return addr_is_local_frame(vm, node->lhs);
-    case ND_COMMA:
-        return addr_is_local_frame(vm, node->rhs);
-    default:
-        return false; // ND_DEREF (pointer value) and everything else: keep checked
+        case ND_VAR: {
+            Obj *var = node->var;
+            if (var->is_function || !var->is_local || var->is_block_var)
+                return false;
+            Obj *current_fn = vm->compiler.current_fn;
+            if (current_fn && current_fn->is_block &&
+                find_capture_index(current_fn, var) >= 0)
+                return false;
+            if (belongs_to_outer_function(current_fn, var))
+                return false;
+            if (var->is_param &&
+                (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
+                 var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
+                 is_decimal(var->ty))) // #402: passed by pointer too
+                return false;
+            return true;
+        }
+        case ND_MEMBER:
+            return addr_is_local_frame(vm, node->lhs);
+        case ND_COMMA:
+            return addr_is_local_frame(vm, node->rhs);
+        default:
+            return false; // ND_DEREF (pointer value) and everything else: keep
+                          // checked
     }
 }
 
@@ -495,7 +508,7 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
 // two different functions whose locals land at the same bp-relative offset
 // (the common case) must not collide in the table (#671).
 void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
-                               Type *ty, int scope_id) {
+                        Type *ty, int scope_id) {
     if (!(vm->flags & CCCC_STACK_INSTR))
         return;
     StackVarMeta *meta = calloc(1, sizeof(StackVarMeta));
@@ -506,7 +519,8 @@ void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
     meta->ty       = ty;
     meta->scope_id = scope_id;
     meta->is_alive = 0;
-    hashmap_put_int(&vm->stack_var_meta, stack_var_meta_key(scope_id, offset), meta);
+    hashmap_put_int(&vm->stack_var_meta, stack_var_meta_key(scope_id, offset),
+                    meta);
 }
 
 // Emit SCOPEIN for scope_id.
@@ -575,7 +589,7 @@ void emit_markw(VirtualMachine *vm, long long offset) {
 // Emit MARKP (mark provenance).
 // rs_ptr and rs_base hold the pointer and its allocation base.
 void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_type,
-                       size_t size) {
+                size_t size) {
     emit(vm, MARKP);
     emit_word(vm, ENCODE_RR(rs_ptr, rs_base));
     emit_word(vm, origin_type);
@@ -599,7 +613,8 @@ void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_type,
 // gate emission on that flag so the default build never emits this opcode.
 static void emit_chkr(VirtualMachine *vm, int rs_addr, int rs_lo, int rs_hi,
                       long long access_size, bool optional) {
-    emit_rrrs_i(vm, optional ? CHKRO : CHKR, rs_addr, rs_lo, rs_hi, 0, access_size);
+    emit_rrrs_i(vm, optional ? CHKRO : CHKR, rs_addr, rs_lo, rs_hi, 0,
+                access_size);
 }
 
 // Emit CHKNT (checked-pointer null-terminator guard, #923).
@@ -612,7 +627,7 @@ static void emit_chkr(VirtualMachine *vm, int rs_addr, int rs_lo, int rs_hi,
 // gate emission on that flag (and on node->checked_nt_terminator) so the
 // default build never emits this opcode.
 void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
-                       long long elem_size) {
+                long long elem_size) {
     emit_rrrs_i(vm, CHKNT, rs_addr, rs_hi, rs_val, 0, elem_size);
 }
 
@@ -626,7 +641,7 @@ void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
 // node->checked_nt_terminator) so the default build never emits this
 // opcode.
 void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
-                        long long elem_size) {
+                 long long elem_size) {
     emit_rrrs_i(vm, CHKNTZ, rs_addr, rs_hi, rs_src, 0, elem_size);
 }
 
@@ -652,7 +667,7 @@ int gen_checked_nt_hi(VirtualMachine *vm, Node *deref) {
 // rs_slo <= rs_val <= rs_shi. No-op at runtime unless CCCC_CHECKED_BOUNDS is
 // set, same as CHKR/CHKNT; callers gate emission on that flag.
 void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
-                       bool is_hi) {
+                bool is_hi) {
     emit_rrrs_i(vm, CHKAB, rs_val, rs_slo, rs_shi, 0, is_hi ? 1 : 0);
 }
 
@@ -661,164 +676,180 @@ void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
 // Generate address of an lvalue into dest_reg
 void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
     switch (node->kind) {
-    case ND_VAR:
-        if (node->var->is_function) {
-            // Function address - emit placeholder and record patch
-            Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
+        case ND_VAR:
+            if (node->var->is_function) {
+                // Function address - emit placeholder and record patch
+                Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 
-            PATCH_GROW(vm, func_addr_patches, num_func_addr_patches, func_addr_patches_cap);
-            vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
-                .location = addr_loc;
-            vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
-                .function = node->var;
-            vm->compiler.num_func_addr_patches++;
-        } else if (node->var->is_local) {
-            // Check if this is a captured variable accessed from within a block
-            Obj *current_fn = vm->compiler.current_fn;
+                PATCH_GROW(vm, func_addr_patches, num_func_addr_patches,
+                           func_addr_patches_cap);
+                vm->compiler
+                    .func_addr_patches[vm->compiler.num_func_addr_patches]
+                    .location = addr_loc;
+                vm->compiler
+                    .func_addr_patches[vm->compiler.num_func_addr_patches]
+                    .function = node->var;
+                vm->compiler.num_func_addr_patches++;
+            } else if (node->var->is_local) {
+                // Check if this is a captured variable accessed from within a
+                // block
+                Obj *current_fn = vm->compiler.current_fn;
 
-            int cap_idx = (current_fn && current_fn->is_block)
-                          ? find_capture_index(current_fn, node->var) : -1;
-            if (cap_idx >= 0) {
-                // Access captured variable from block descriptor via __static_link.
-                // Offset is computed per-block to avoid collisions when the same
-                // variable is captured at different positions in nested descriptors.
-                Obj *static_link = find_static_link_var(current_fn);
-                if (!static_link)
-                    error("block function missing __static_link");
-                // #994: slot width/offset varies with the capture's type
-                // (a by-value aggregate wider than 8 bytes gets a wider
-                // slot) -- shared with parse.c so the layout can't drift.
-                long cap_offset = cc_block_capture_offset(current_fn, cap_idx);
-                // Compiler-internal: this LEA3 only materializes
-                // __static_link's own slot address to immediately load the
-                // descriptor pointer out of it (#676) -- the slot address
-                // itself never survives past the next instruction.
-                emit_lea3_internal(vm, dest_reg, static_link->offset); // &__static_link
-                emit_rr(vm, LDR_D, dest_reg, dest_reg);       // Load descriptor ptr
-                emit_addi3(vm, dest_reg, dest_reg, cap_offset);
-                if (node->var->is_block_var)
-                    emit_rr(vm, LDR_D, dest_reg, dest_reg); // heap ptr from slot
-            } else {
-                // Check if this variable belongs to an outer function (nested
-                // function access)
-                Obj *owner_fn =
-                    belongs_to_outer_function(current_fn, node->var);
-
-                if (owner_fn) {
-                    // Accessing outer function's variable via static chain.
-                    // #1076: shared with the block-literal capture loop
-                    // (codegen_expr.c) via emit_static_chain_var_addr.
-                    emit_static_chain_var_addr(vm, current_fn, owner_fn,
-                                                node->var, dest_reg);
+                int  cap_idx = (current_fn && current_fn->is_block)
+                                   ? find_capture_index(current_fn, node->var)
+                                   : -1;
+                if (cap_idx >= 0) {
+                    // Access captured variable from block descriptor via
+                    // __static_link. Offset is computed per-block to avoid
+                    // collisions when the same variable is captured at
+                    // different positions in nested descriptors.
+                    Obj *static_link = find_static_link_var(current_fn);
+                    if (!static_link)
+                        error("block function missing __static_link");
+                    // #994: slot width/offset varies with the capture's type
+                    // (a by-value aggregate wider than 8 bytes gets a wider
+                    // slot) -- shared with parse.c so the layout can't drift.
+                    long cap_offset =
+                        cc_block_capture_offset(current_fn, cap_idx);
+                    // Compiler-internal: this LEA3 only materializes
+                    // __static_link's own slot address to immediately load the
+                    // descriptor pointer out of it (#676) -- the slot address
+                    // itself never survives past the next instruction.
+                    emit_lea3_internal(vm, dest_reg,
+                                       static_link->offset); // &__static_link
+                    emit_rr(vm, LDR_D, dest_reg,
+                            dest_reg); // Load descriptor ptr
+                    emit_addi3(vm, dest_reg, dest_reg, cap_offset);
+                    if (node->var->is_block_var)
+                        emit_rr(vm, LDR_D, dest_reg,
+                                dest_reg); // heap ptr from slot
                 } else {
-                    // Normal local variable access
-                    // For struct/union (and vector, #714) parameters, the
-                    // slot contains a pointer to the value. We need to load
-                    // that pointer, not the slot address.
-                    if (node->var->is_param && (node->ty->kind == TY_STRUCT ||
-                                                node->ty->kind == TY_UNION ||
-                                                node->ty->kind == TY_VECTOR ||
-                                                is_wide_bitint(node->ty) ||
-                                                is_decimal(node->ty))) {
-                        // Compiler-internal: slot address only feeds the
-                        // immediate load below (#676), not the struct's own
-                        // data address.
-                        emit_lea3_internal(vm, dest_reg,
-                                  node->var->offset); // Slot address
-                        emit_rr(vm, LDR_D, dest_reg,
-                                dest_reg); // Load pointer from slot
-                    } else if (node->var->is_block_var) {
-                        // __block variable: slot contains pointer to
-                        // heap-allocated wrapper. Compiler-internal: slot
-                        // address only feeds the immediate load (#676).
-                        emit_lea3_internal(vm, dest_reg,
-                                  node->var->offset); // Slot address
-                        emit_rr(vm, LDR_D, dest_reg,
-                                dest_reg); // Load heap pointer from slot
-                        // dest_reg now points to actual storage on heap
+                    // Check if this variable belongs to an outer function
+                    // (nested function access)
+                    Obj *owner_fn =
+                        belongs_to_outer_function(current_fn, node->var);
+
+                    if (owner_fn) {
+                        // Accessing outer function's variable via static chain.
+                        // #1076: shared with the block-literal capture loop
+                        // (codegen_expr.c) via emit_static_chain_var_addr.
+                        emit_static_chain_var_addr(vm, current_fn, owner_fn,
+                                                   node->var, dest_reg);
                     } else {
-                        // The address returned here IS this var's own base
-                        // address, handed to whatever wanted it (&var,
-                        // array/struct decay, member/subscript base, ...) --
-                        // skip recording iff #676's escape analysis proved
-                        // it never leaves this frame.
-                        emit_lea3_var(vm, dest_reg, node->var);
+                        // Normal local variable access
+                        // For struct/union (and vector, #714) parameters, the
+                        // slot contains a pointer to the value. We need to load
+                        // that pointer, not the slot address.
+                        if (node->var->is_param &&
+                            (node->ty->kind == TY_STRUCT ||
+                             node->ty->kind == TY_UNION ||
+                             node->ty->kind == TY_VECTOR ||
+                             is_wide_bitint(node->ty) ||
+                             is_decimal(node->ty))) {
+                            // Compiler-internal: slot address only feeds the
+                            // immediate load below (#676), not the struct's own
+                            // data address.
+                            emit_lea3_internal(
+                                vm, dest_reg,
+                                node->var->offset); // Slot address
+                            emit_rr(vm, LDR_D, dest_reg,
+                                    dest_reg);      // Load pointer from slot
+                        } else if (node->var->is_block_var) {
+                            // __block variable: slot contains pointer to
+                            // heap-allocated wrapper. Compiler-internal: slot
+                            // address only feeds the immediate load (#676).
+                            emit_lea3_internal(
+                                vm, dest_reg,
+                                node->var->offset); // Slot address
+                            emit_rr(vm, LDR_D, dest_reg,
+                                    dest_reg); // Load heap pointer from slot
+                            // dest_reg now points to actual storage on heap
+                        } else {
+                            // The address returned here IS this var's own base
+                            // address, handed to whatever wanted it (&var,
+                            // array/struct decay, member/subscript base, ...)
+                            // -- skip recording iff #676's escape analysis
+                            // proved it never leaves this frame.
+                            emit_lea3_var(vm, dest_reg, node->var);
+                        }
                     }
                 }
+            } else {
+                // Global variable (TLS or shared). #957: mark it referenced
+                // here (codegen, not parse-time) so `extern int g; sizeof(g);`
+                // still compiles without a definition -- sizeof never reaches
+                // gen_addr.
+                node->var->is_referenced = true;
+                if (node->var->is_tls)
+                    emit_ldtls3(vm, dest_reg, node->var->offset);
+                else
+                    emit_lda3(vm, dest_reg, node->var->offset);
             }
-        } else {
-            // Global variable (TLS or shared). #957: mark it referenced here
-            // (codegen, not parse-time) so `extern int g; sizeof(g);` still
-            // compiles without a definition -- sizeof never reaches gen_addr.
-            node->var->is_referenced = true;
-            if (node->var->is_tls)
-                emit_ldtls3(vm, dest_reg, node->var->offset);
-            else
-                emit_lda3(vm, dest_reg, node->var->offset);
-        }
-        return;
+            return;
 
-    case ND_DEREF:
-        // Address of *ptr is just ptr
-        gen_expr(vm, node->lhs, dest_reg);
-        // Checked-pointer bounds check (#770/#484). Runs on both the load
-        // and the store path -- both reach the accessed address through
-        // this single site (x = p[i] via gen_expr's ND_DEREF load case
-        // calling gen_addr, p[i] = x via the store path doing the same) --
-        // and even when dest_reg == REG_ZERO (a discarded-value deref must
-        // still trap, matching emit_load_safety_checks's convention above).
-        // Gated on CCCC_CHECKED_BOUNDS so the default build emits nothing;
-        // node->checked_bounds_lo/hi are only non-NULL when
-        // set_checked_deref_bounds() (parse.c) found a checked pointer with
-        // resolvable bounds at this access site, so no per-access flag
-        // check is needed beyond the one on CCCC_CHECKED_BOUNDS itself.
-        if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_bounds_lo &&
-            node->checked_bounds_hi) {
-            mark_temp_reg_used(dest_reg); // protect the just-computed address
-            int r_lo = alloc_temp_reg();
-            int r_hi = alloc_temp_reg();
-            // #945: re-run the member-access object-expression hoist init
-            // (if any) before reading lo/hi -- they may read it back through
-            // `*t`. Result discarded (r_lo is free scratch); only the store
-            // to `t` matters.
-            if (node->checked_bounds_obj_init)
-                gen_expr(vm, node->checked_bounds_obj_init, r_lo);
-            gen_expr(vm, node->checked_bounds_lo, r_lo);
-            gen_expr(vm, node->checked_bounds_hi, r_hi);
-            emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size,
-                     node->checked_bounds_optional);
-            free_temp_reg(r_hi);
-            free_temp_reg(r_lo);
-        }
-        return;
+        case ND_DEREF:
+            // Address of *ptr is just ptr
+            gen_expr(vm, node->lhs, dest_reg);
+            // Checked-pointer bounds check (#770/#484). Runs on both the load
+            // and the store path -- both reach the accessed address through
+            // this single site (x = p[i] via gen_expr's ND_DEREF load case
+            // calling gen_addr, p[i] = x via the store path doing the same) --
+            // and even when dest_reg == REG_ZERO (a discarded-value deref must
+            // still trap, matching emit_load_safety_checks's convention above).
+            // Gated on CCCC_CHECKED_BOUNDS so the default build emits nothing;
+            // node->checked_bounds_lo/hi are only non-NULL when
+            // set_checked_deref_bounds() (parse.c) found a checked pointer with
+            // resolvable bounds at this access site, so no per-access flag
+            // check is needed beyond the one on CCCC_CHECKED_BOUNDS itself.
+            if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_bounds_lo &&
+                node->checked_bounds_hi) {
+                mark_temp_reg_used(
+                    dest_reg); // protect the just-computed address
+                int r_lo = alloc_temp_reg();
+                int r_hi = alloc_temp_reg();
+                // #945: re-run the member-access object-expression hoist init
+                // (if any) before reading lo/hi -- they may read it back
+                // through
+                // `*t`. Result discarded (r_lo is free scratch); only the store
+                // to `t` matters.
+                if (node->checked_bounds_obj_init)
+                    gen_expr(vm, node->checked_bounds_obj_init, r_lo);
+                gen_expr(vm, node->checked_bounds_lo, r_lo);
+                gen_expr(vm, node->checked_bounds_hi, r_hi);
+                emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size,
+                          node->checked_bounds_optional);
+                free_temp_reg(r_hi);
+                free_temp_reg(r_lo);
+            }
+            return;
 
-    case ND_MEMBER:
-        // Address of struct.member = &struct + member_offset
-        gen_addr(vm, node->lhs, dest_reg);
-        if (node->member->offset != 0) {
-            emit_addi3(vm, dest_reg, dest_reg, node->member->offset);
-        }
-        return;
+        case ND_MEMBER:
+            // Address of struct.member = &struct + member_offset
+            gen_addr(vm, node->lhs, dest_reg);
+            if (node->member->offset != 0) {
+                emit_addi3(vm, dest_reg, dest_reg, node->member->offset);
+            }
+            return;
 
-    case ND_COMMA:
-        gen_expr(vm, node->lhs, REG_ZERO); // Discard result
-        gen_addr(vm, node->rhs, dest_reg);
-        return;
+        case ND_COMMA:
+            gen_expr(vm, node->lhs, REG_ZERO); // Discard result
+            gen_addr(vm, node->rhs, dest_reg);
+            return;
 
-    case ND_VLA_PTR:
-        // VLA: get the address of the pointer variable itself (for storing into
-        // it) NOT the pointer value - that's for gen_expr when accessing the
-        // array
-        if (node->var->is_local) {
-            emit_lea3(vm, dest_reg,
-                      node->var->offset); // Address of the pointer variable
-        } else {
-            error_tok(vm, node->tok, "VLA must be local");
-        }
-        return;
+        case ND_VLA_PTR:
+            // VLA: get the address of the pointer variable itself (for storing
+            // into it) NOT the pointer value - that's for gen_expr when
+            // accessing the array
+            if (node->var->is_local) {
+                emit_lea3(vm, dest_reg,
+                          node->var->offset); // Address of the pointer variable
+            } else {
+                error_tok(vm, node->tok, "VLA must be local");
+            }
+            return;
 
-    default:
-        error_tok(vm, node->tok, "not an lvalue");
+        default:
+            error_tok(vm, node->tok, "not an lvalue");
     }
 }
 
@@ -828,12 +859,16 @@ static int complex_part_offset(Type *ty) {
 
 static int complex_load_op(Type *ty) {
     return ty && ty->kind == TY_COMPLEX && ty->base &&
-           ty->base->kind == TY_FLOAT ? FLDR_F32 : FLDR;
+                   ty->base->kind == TY_FLOAT
+               ? FLDR_F32
+               : FLDR;
 }
 
 static int complex_store_op(Type *ty) {
     return ty && ty->kind == TY_COMPLEX && ty->base &&
-           ty->base->kind == TY_FLOAT ? FSTR_F32 : FSTR;
+                   ty->base->kind == TY_FLOAT
+               ? FSTR_F32
+               : FSTR;
 }
 
 static void emit_float_zero(VirtualMachine *vm, int freg) {
@@ -843,8 +878,8 @@ static void emit_float_zero(VirtualMachine *vm, int freg) {
     free_temp_reg(r_zero);
 }
 
-static void emit_complex_load(VirtualMachine *vm, Type *ty, int real_reg, int imag_reg,
-                              int addr_reg) {
+static void emit_complex_load(VirtualMachine *vm, Type *ty, int real_reg,
+                              int imag_reg, int addr_reg) {
     int op = complex_load_op(ty);
     emit_rr(vm, op, real_reg, addr_reg);
     int r_imag_addr = alloc_temp_reg();
@@ -853,8 +888,8 @@ static void emit_complex_load(VirtualMachine *vm, Type *ty, int real_reg, int im
     free_temp_reg(r_imag_addr);
 }
 
-static void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg, int imag_reg,
-                               int addr_reg) {
+static void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg,
+                               int imag_reg, int addr_reg) {
     int op = complex_store_op(ty);
     emit_rr(vm, op, real_reg, addr_reg);
     int r_imag_addr = alloc_temp_reg();
@@ -863,7 +898,8 @@ static void emit_complex_store(VirtualMachine *vm, Type *ty, int real_reg, int i
     free_temp_reg(r_imag_addr);
 }
 
-void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int imag_reg) {
+void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg,
+                      int imag_reg) {
     if (!node)
         error("codegen: null complex expression node");
 
@@ -874,183 +910,187 @@ void gen_complex_expr(VirtualMachine *vm, Node *node, int real_reg, int imag_reg
     }
 
     switch (node->kind) {
-    case ND_COMPLEX:
-        if (node->val == 0) {
-            gen_expr(vm, node->lhs, real_reg);
-            gen_expr(vm, node->rhs, imag_reg);
-            return;
-        }
-        if (node->val == 3) {
-            gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-            emit_frr(vm, fop_for_type(node->ty->base, FNEG3), imag_reg,
-                     imag_reg);
-            return;
-        }
-        break;
-    case ND_CAST:
-        if (is_complex(node->lhs->ty)) {
-            gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-        } else {
-            gen_expr(vm, node->lhs, real_reg);
-            if (!is_flonum(node->lhs->ty))
-                emit_rr(vm,
+        case ND_COMPLEX:
+            if (node->val == 0) {
+                gen_expr(vm, node->lhs, real_reg);
+                gen_expr(vm, node->rhs, imag_reg);
+                return;
+            }
+            if (node->val == 3) {
+                gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+                emit_frr(vm, fop_for_type(node->ty->base, FNEG3), imag_reg,
+                         imag_reg);
+                return;
+            }
+            break;
+        case ND_CAST:
+            if (is_complex(node->lhs->ty)) {
+                gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+            } else {
+                gen_expr(vm, node->lhs, real_reg);
+                if (!is_flonum(node->lhs->ty))
+                    emit_rr(
+                        vm,
                         fop_for_type(node->ty->base,
                                      is_u64_int(node->lhs->ty) ? U2F3 : I2F3),
                         real_reg, real_reg);
-            emit_float_zero(vm, imag_reg);
+                emit_float_zero(vm, imag_reg);
+            }
+            if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
+                emit_fround_f32(vm, real_reg, real_reg);
+                emit_fround_f32(vm, imag_reg, imag_reg);
+            }
+            return;
+        case ND_VAR:
+        case ND_DEREF:
+        case ND_MEMBER: {
+            int r_addr = alloc_temp_reg();
+            gen_addr(vm, node, r_addr);
+            emit_complex_load(vm, node->ty, real_reg, imag_reg, r_addr);
+            free_temp_reg(r_addr);
+            return;
         }
-        if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
-            emit_fround_f32(vm, real_reg, real_reg);
-            emit_fround_f32(vm, imag_reg, imag_reg);
+        case ND_ASSIGN: {
+            gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
+            int r_addr = alloc_temp_reg();
+            gen_addr(vm, node->lhs, r_addr);
+            emit_complex_store(vm, node->ty, real_reg, imag_reg, r_addr);
+            free_temp_reg(r_addr);
+            return;
         }
-        return;
-    case ND_VAR:
-    case ND_DEREF:
-    case ND_MEMBER: {
-        int r_addr = alloc_temp_reg();
-        gen_addr(vm, node, r_addr);
-        emit_complex_load(vm, node->ty, real_reg, imag_reg, r_addr);
-        free_temp_reg(r_addr);
-        return;
-    }
-    case ND_ASSIGN: {
-        gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
-        int r_addr = alloc_temp_reg();
-        gen_addr(vm, node->lhs, r_addr);
-        emit_complex_store(vm, node->ty, real_reg, imag_reg, r_addr);
-        free_temp_reg(r_addr);
-        return;
-    }
-    case ND_COMMA:
-        gen_expr(vm, node->lhs, REG_ZERO);
-        gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
-        return;
-    case ND_NEG:
-        gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-        emit_frr(vm, fop_for_type(node->ty->base, FNEG3), real_reg, real_reg);
-        emit_frr(vm, fop_for_type(node->ty->base, FNEG3), imag_reg, imag_reg);
-        return;
-    case ND_ADD:
-    case ND_SUB:
-    case ND_MUL:
-    case ND_DIV: {
-        // #968: br/bi and t0-t2 used to be *fixed* registers (T5-T9), but
-        // this function recurses -- a right-hand-nested complex binop
-        // (`a + (b + c)`, or the canonical `20.0 + 22.0 * I`) generated its
-        // RHS into T5/T6 and then the nested call immediately reused T5/T6
-        // for its own operands, destroying the outer RHS. Left nesting
-        // (`(a + b) + c`) survived only by accident, since the outer
-        // real_reg/imag_reg happened to differ from T5/T6.
-        //
-        // Simply drawing br/bi/t0-t2 from alloc_temp_reg() is not enough on
-        // its own: T0-T10 are *all* caller-saved, so a function call
-        // anywhere in the RHS subtree clobbers real_reg/imag_reg regardless
-        // of which temp they land in, and holding br/bi live across the RHS
-        // recursion (the natural allocator-only fix) accumulates two
-        // registers per nesting level, exhausting the pool around depth 5
-        // on a right-nested chain. So instead this unconditionally spills
-        // real_reg/imag_reg's bits to the stack before recursing into the
-        // RHS and reloads them after (same FR2R/R2FR-through-PSH3/POP3
-        // idiom the scalar float binop path uses under pressure, see
-        // TEMP_REG_SPILL_THRESHOLD above) -- the RHS recursion then reuses
-        // real_reg/imag_reg directly and holds zero extra pool registers
-        // live across itself, however deep the tree, at the cost of two
-        // push/pop pairs per node (negligible next to the rest of complex
-        // arithmetic).
-        gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
-        // The LHS may itself have gone through this same path and reset the
-        // temp pool; re-mark real_reg/imag_reg as in-use so the allocations
-        // below can't hand back a register this level (or an ancestor
-        // level, for real_reg/imag_reg that are themselves an outer call's
-        // br/bi) still needs live. No-op for FREG_A* inputs, which aren't
-        // part of the temp pool.
-        mark_temp_reg_used(real_reg);
-        mark_temp_reg_used(imag_reg);
+        case ND_COMMA:
+            gen_expr(vm, node->lhs, REG_ZERO);
+            gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
+            return;
+        case ND_NEG:
+            gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+            emit_frr(vm, fop_for_type(node->ty->base, FNEG3), real_reg,
+                     real_reg);
+            emit_frr(vm, fop_for_type(node->ty->base, FNEG3), imag_reg,
+                     imag_reg);
+            return;
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV: {
+            // #968: br/bi and t0-t2 used to be *fixed* registers (T5-T9), but
+            // this function recurses -- a right-hand-nested complex binop
+            // (`a + (b + c)`, or the canonical `20.0 + 22.0 * I`) generated its
+            // RHS into T5/T6 and then the nested call immediately reused T5/T6
+            // for its own operands, destroying the outer RHS. Left nesting
+            // (`(a + b) + c`) survived only by accident, since the outer
+            // real_reg/imag_reg happened to differ from T5/T6.
+            //
+            // Simply drawing br/bi/t0-t2 from alloc_temp_reg() is not enough on
+            // its own: T0-T10 are *all* caller-saved, so a function call
+            // anywhere in the RHS subtree clobbers real_reg/imag_reg regardless
+            // of which temp they land in, and holding br/bi live across the RHS
+            // recursion (the natural allocator-only fix) accumulates two
+            // registers per nesting level, exhausting the pool around depth 5
+            // on a right-nested chain. So instead this unconditionally spills
+            // real_reg/imag_reg's bits to the stack before recursing into the
+            // RHS and reloads them after (same FR2R/R2FR-through-PSH3/POP3
+            // idiom the scalar float binop path uses under pressure, see
+            // TEMP_REG_SPILL_THRESHOLD above) -- the RHS recursion then reuses
+            // real_reg/imag_reg directly and holds zero extra pool registers
+            // live across itself, however deep the tree, at the cost of two
+            // push/pop pairs per node (negligible next to the rest of complex
+            // arithmetic).
+            gen_complex_expr(vm, node->lhs, real_reg, imag_reg);
+            // The LHS may itself have gone through this same path and reset the
+            // temp pool; re-mark real_reg/imag_reg as in-use so the allocations
+            // below can't hand back a register this level (or an ancestor
+            // level, for real_reg/imag_reg that are themselves an outer call's
+            // br/bi) still needs live. No-op for FREG_A* inputs, which aren't
+            // part of the temp pool.
+            mark_temp_reg_used(real_reg);
+            mark_temp_reg_used(imag_reg);
 
-        int fadd = fop_for_type(node->ty->base, FADD3);
-        int fsub = fop_for_type(node->ty->base, FSUB3);
-        int fmul = fop_for_type(node->ty->base, FMUL3);
-        int fdiv = fop_for_type(node->ty->base, FDIV3);
-        int fr2r = fop_for_type(node->ty->base, FR2R);
-        int r2fr = fop_for_type(node->ty->base, R2FR);
+            int fadd  = fop_for_type(node->ty->base, FADD3);
+            int fsub  = fop_for_type(node->ty->base, FSUB3);
+            int fmul  = fop_for_type(node->ty->base, FMUL3);
+            int fdiv  = fop_for_type(node->ty->base, FDIV3);
+            int fr2r  = fop_for_type(node->ty->base, FR2R);
+            int r2fr  = fop_for_type(node->ty->base, R2FR);
 
-        int r_tmp = alloc_temp_reg();
-        emit_rr(vm, fr2r, r_tmp, real_reg); // real bits -> int reg
-        emit_psh3(vm, r_tmp);                // save on the stack
-        emit_rr(vm, fr2r, r_tmp, imag_reg); // imag bits -> int reg
-        emit_psh3(vm, r_tmp);
-        free_temp_reg(r_tmp); // nothing held across the RHS recursion
+            int r_tmp = alloc_temp_reg();
+            emit_rr(vm, fr2r, r_tmp, real_reg); // real bits -> int reg
+            emit_psh3(vm, r_tmp);               // save on the stack
+            emit_rr(vm, fr2r, r_tmp, imag_reg); // imag bits -> int reg
+            emit_psh3(vm, r_tmp);
+            free_temp_reg(r_tmp); // nothing held across the RHS recursion
 
-        gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
+            gen_complex_expr(vm, node->rhs, real_reg, imag_reg);
 
-        int br = alloc_temp_reg();
-        int bi = alloc_temp_reg();
-        emit_fmov3(vm, br, real_reg); // RHS result -> its own registers
-        emit_fmov3(vm, bi, imag_reg);
+            int br = alloc_temp_reg();
+            int bi = alloc_temp_reg();
+            emit_fmov3(vm, br, real_reg); // RHS result -> its own registers
+            emit_fmov3(vm, bi, imag_reg);
 
-        int r_tmp2 = alloc_temp_reg();
-        emit_pop3(vm, r_tmp2); // LIFO: imag was pushed last
-        emit_rr(vm, r2fr, imag_reg, r_tmp2); // int bits -> LHS imag register
-        emit_pop3(vm, r_tmp2);
-        emit_rr(vm, r2fr, real_reg, r_tmp2); // int bits -> LHS real register
-        free_temp_reg(r_tmp2);
+            int r_tmp2 = alloc_temp_reg();
+            emit_pop3(vm, r_tmp2); // LIFO: imag was pushed last
+            emit_rr(vm, r2fr, imag_reg,
+                    r_tmp2);       // int bits -> LHS imag register
+            emit_pop3(vm, r_tmp2);
+            emit_rr(vm, r2fr, real_reg,
+                    r_tmp2);       // int bits -> LHS real register
+            free_temp_reg(r_tmp2);
 
-        int t0 = 0, t1 = 0, t2 = 0;
-        if (node->kind == ND_MUL || node->kind == ND_DIV) {
-            t0 = alloc_temp_reg();
-            t1 = alloc_temp_reg();
-            if (node->kind == ND_DIV)
-                t2 = alloc_temp_reg();
+            int t0 = 0, t1 = 0, t2 = 0;
+            if (node->kind == ND_MUL || node->kind == ND_DIV) {
+                t0 = alloc_temp_reg();
+                t1 = alloc_temp_reg();
+                if (node->kind == ND_DIV)
+                    t2 = alloc_temp_reg();
+            }
+
+            if (node->kind == ND_ADD) {
+                emit_frrr(vm, fadd, real_reg, real_reg, br);
+                emit_frrr(vm, fadd, imag_reg, imag_reg, bi);
+            } else if (node->kind == ND_SUB) {
+                emit_frrr(vm, fsub, real_reg, real_reg, br);
+                emit_frrr(vm, fsub, imag_reg, imag_reg, bi);
+            } else if (node->kind == ND_MUL) {
+                emit_frrr(vm, fmul, t0, real_reg, br);
+                emit_frrr(vm, fmul, t1, imag_reg, bi);
+                emit_frrr(vm, fsub, t0, t0, t1);
+                emit_frrr(vm, fmul, t1, real_reg, bi);
+                emit_frrr(vm, fmul, imag_reg, imag_reg, br);
+                emit_frrr(vm, fadd, imag_reg, t1, imag_reg);
+                emit_fmov3(vm, real_reg, t0);
+            } else {
+                emit_frrr(vm, fmul, t0, br, br);
+                emit_frrr(vm, fmul, t1, bi, bi);
+                emit_frrr(vm, fadd, t0, t0, t1);
+                emit_frrr(vm, fmul, t1, real_reg, br);
+                emit_frrr(vm, fmul, t2, imag_reg, bi);
+                emit_frrr(vm, fadd, t1, t1, t2);
+                emit_frrr(vm, fdiv, t1, t1, t0);
+                emit_frrr(vm, fmul, imag_reg, imag_reg, br);
+                emit_frrr(vm, fmul, t2, real_reg, bi);
+                emit_frrr(vm, fsub, imag_reg, imag_reg, t2);
+                emit_frrr(vm, fdiv, imag_reg, imag_reg, t0);
+                emit_fmov3(vm, real_reg, t1);
+            }
+
+            if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
+                emit_fround_f32(vm, real_reg, real_reg);
+                emit_fround_f32(vm, imag_reg, imag_reg);
+            }
+
+            if (node->kind == ND_MUL || node->kind == ND_DIV) {
+                if (node->kind == ND_DIV)
+                    free_temp_reg(t2);
+                free_temp_reg(t1);
+                free_temp_reg(t0);
+            }
+            free_temp_reg(bi);
+            free_temp_reg(br);
+            return;
         }
-
-        if (node->kind == ND_ADD) {
-            emit_frrr(vm, fadd, real_reg, real_reg, br);
-            emit_frrr(vm, fadd, imag_reg, imag_reg, bi);
-        } else if (node->kind == ND_SUB) {
-            emit_frrr(vm, fsub, real_reg, real_reg, br);
-            emit_frrr(vm, fsub, imag_reg, imag_reg, bi);
-        } else if (node->kind == ND_MUL) {
-            emit_frrr(vm, fmul, t0, real_reg, br);
-            emit_frrr(vm, fmul, t1, imag_reg, bi);
-            emit_frrr(vm, fsub, t0, t0, t1);
-            emit_frrr(vm, fmul, t1, real_reg, bi);
-            emit_frrr(vm, fmul, imag_reg, imag_reg, br);
-            emit_frrr(vm, fadd, imag_reg, t1, imag_reg);
-            emit_fmov3(vm, real_reg, t0);
-        } else {
-            emit_frrr(vm, fmul, t0, br, br);
-            emit_frrr(vm, fmul, t1, bi, bi);
-            emit_frrr(vm, fadd, t0, t0, t1);
-            emit_frrr(vm, fmul, t1, real_reg, br);
-            emit_frrr(vm, fmul, t2, imag_reg, bi);
-            emit_frrr(vm, fadd, t1, t1, t2);
-            emit_frrr(vm, fdiv, t1, t1, t0);
-            emit_frrr(vm, fmul, imag_reg, imag_reg, br);
-            emit_frrr(vm, fmul, t2, real_reg, bi);
-            emit_frrr(vm, fsub, imag_reg, imag_reg, t2);
-            emit_frrr(vm, fdiv, imag_reg, imag_reg, t0);
-            emit_fmov3(vm, real_reg, t1);
-        }
-
-        if (node->ty->base && node->ty->base->kind == TY_FLOAT) {
-            emit_fround_f32(vm, real_reg, real_reg);
-            emit_fround_f32(vm, imag_reg, imag_reg);
-        }
-
-        if (node->kind == ND_MUL || node->kind == ND_DIV) {
-            if (node->kind == ND_DIV)
-                free_temp_reg(t2);
-            free_temp_reg(t1);
-            free_temp_reg(t0);
-        }
-        free_temp_reg(bi);
-        free_temp_reg(br);
-        return;
-    }
-    default:
-        break;
+        default:
+            break;
     }
 
     error_tok(vm, node->tok, "unsupported complex expression");
 }
-

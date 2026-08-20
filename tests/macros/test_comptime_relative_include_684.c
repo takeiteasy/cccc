@@ -8,7 +8,8 @@
 [[cccc::comptime]]
 void generate_result(void) {
     Obj *fn = MakeFunction("result", GetType("int"));
-    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(comptime_relative_triple(14))));
+    FunctionSetBody(fn,
+                    MakeReturn(MakeIntLiteral(comptime_relative_triple(14))));
 }
 
 generate_result();

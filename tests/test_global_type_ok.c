@@ -10,7 +10,7 @@
 // this would false-positive against whatever type was returned through it
 // last).
 union U {
-    int i;
+    int   i;
     float f;
 };
 union U gu;
@@ -38,16 +38,17 @@ int counter(void) {
 }
 
 int main(void) {
-    gu.i = 42;
-    int a = gu.i;   // same member: must read back cleanly
-    gu.f = 1.0f;    // legal punning: write a different member
-    float b = gu.f; // read that member back
-    gu.i = 42;      // punning back the other way
-    int c = gu.i;
+    gu.i           = 42;
+    int a          = gu.i;            // same member: must read back cleanly
+    gu.f           = 1.0f;            // legal punning: write a different member
+    float b        = gu.f;            // read that member back
+    gu.i           = 42;              // punning back the other way
+    int         c  = gu.i;
 
-    struct Pair p1 = make_pair(1, 2);       // stamps a RETBUF slot as struct Pair
-    float f1 = make_float(3.5f);            // no RETBUF traffic for this call
-    struct Pair p2 = make_pair(3, 4);       // same/rotating RETBUF slot, same type: must not false-positive
+    struct Pair p1 = make_pair(1, 2); // stamps a RETBUF slot as struct Pair
+    float       f1 = make_float(3.5f); // no RETBUF traffic for this call
+    struct Pair p2 = make_pair(
+        3, 4); // same/rotating RETBUF slot, same type: must not false-positive
 
     int n1 = counter();
     int n2 = counter();

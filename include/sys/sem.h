@@ -34,25 +34,25 @@
 
 #include "sys/types.h"
 #include "sys/ipc.h"
-#include "time.h" /* for time_t */
+#include "time.h"           /* for time_t */
 
 struct sembuf {
     unsigned short sem_num; /* [XSI] semaphore # */
-    short sem_op;           /* [XSI] semaphore operation */
-    short sem_flg;          /* [XSI] operation flags */
+    short          sem_op;  /* [XSI] semaphore operation */
+    short          sem_flg; /* [XSI] operation flags */
 };
 
 struct semid_ds {
-    struct ipc_perm sem_perm; /* [XSI] operation permission struct */
-    unsigned short sem_nsems; /* [XSI] number of sems in set */
-    time_t sem_otime;        /* [XSI] last semop() time */
-    time_t sem_ctime;        /* [XSI] last time changed by semctl() */
+    struct ipc_perm sem_perm;  /* [XSI] operation permission struct */
+    unsigned short  sem_nsems; /* [XSI] number of sems in set */
+    time_t          sem_otime; /* [XSI] last semop() time */
+    time_t          sem_ctime; /* [XSI] last time changed by semctl() */
 };
 
 union semun {
-    int val;               /* value for SETVAL */
+    int              val;   /* value for SETVAL */
     struct semid_ds *buf;   /* buffer for IPC_STAT & IPC_SET */
-    unsigned short *array;  /* array for GETALL & SETALL */
+    unsigned short  *array; /* array for GETALL & SETALL */
 };
 
 #define SEM_UNDO 010000

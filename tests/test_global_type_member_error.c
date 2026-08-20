@@ -5,16 +5,16 @@
 // vm->data_shadow, so reinterpreting a *different* member's bytes as an
 // unrelated type must still be caught.
 struct S {
-    int a;
+    int   a;
     float b;
 };
 
 struct S g;
 
 int main(void) {
-    g.a = 5;                          // stamps g.a's range as int
-    int *p = (int *)&g.b;             // g.b's range: never stamped as int
-    *p = 3;                           // stamps g.b's range as int instead
-    float *fp = (float *)&g.b;        // same address, reinterpreted
-    return (int)*fp;                  // load as float: mismatches stamped int
+    g.a       = 5;             // stamps g.a's range as int
+    int *p    = (int *)&g.b;   // g.b's range: never stamped as int
+    *p        = 3;             // stamps g.b's range as int instead
+    float *fp = (float *)&g.b; // same address, reinterpreted
+    return (int)*fp;           // load as float: mismatches stamped int
 }

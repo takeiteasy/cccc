@@ -18,7 +18,7 @@ int test_ffi_disable_dlfcn_zero(void) {
     if (!fn)
         return 42; // dlsym correctly blocked by --disable-ffi
 
-    return 3; // dlsym should have been blocked
+    return 3;      // dlsym should have been blocked
 }
 
 #pragma cccc suite end

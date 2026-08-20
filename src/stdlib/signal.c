@@ -56,23 +56,23 @@ void _cccc_sig_shim(int sig) {
 // bug the GuestSigaction comment below warns about for sa_handler.
 #ifdef __APPLE__
 typedef struct {
-    int si_signo;
-    int si_errno;
-    int si_code;
-    int g_pid;
-    int g_uid;
-    int g_status;
+    int  si_signo;
+    int  si_errno;
+    int  si_code;
+    int  g_pid;
+    int  g_uid;
+    int  g_status;
     char __si_pad[104 - 6 * (int)sizeof(int)];
 } GuestSiginfo;
 #else
 typedef struct {
-    int si_signo;
-    int si_errno;
-    int si_code;
-    int __si_pad0;
-    int g_pid;
-    int g_uid;
-    int g_status;
+    int  si_signo;
+    int  si_errno;
+    int  si_code;
+    int  __si_pad0;
+    int  g_pid;
+    int  g_uid;
+    int  g_status;
     char __si_pad[128 - 7 * (int)sizeof(int)];
 } GuestSiginfo;
 #endif
@@ -113,7 +113,7 @@ long long cccc_guest_siginfo_for(int sig, int synthesized) {
     if (sig <= 0 || sig >= CCCC_NSIG)
         return 0;
     GuestSiginfo *gi = &guest_siginfo[sig];
-    gi->si_signo = sig;
+    gi->si_signo     = sig;
     if (synthesized) {
         gi->si_errno = 0;
         gi->si_code  = SI_USER;
@@ -156,13 +156,14 @@ long long cccc_guest_siginfo_for(int sig, int synthesized) {
 // address or getting here at all. `sig` is the real signal number for the
 // pending-signal poll, or 0 for a SIGEV_THREAD notification (there's no
 // signal involved, just a callback function pointer).
-static void push_async_frame(VirtualMachine *vm, int sig, unsigned int saved_blocked) {
-    SigFrame *f = &vm->sig_frames[vm->sig_depth];
-    f->sig = sig;
+static void push_async_frame(VirtualMachine *vm, int sig,
+                             unsigned int saved_blocked) {
+    SigFrame *f      = &vm->sig_frames[vm->sig_depth];
+    f->sig           = sig;
     f->saved_blocked = saved_blocked;
-    f->sp_at_entry = vm->sp;
-    f->saved_pc = vm->pc; // the interruption point -- also what was just
-                          // pushed as the handler's return address
+    f->sp_at_entry   = vm->sp;
+    f->saved_pc      = vm->pc; // the interruption point -- also what was just
+                               // pushed as the handler's return address
     f->save_slot = -1;
 
     if (!vm->async_reg_saves)
@@ -189,22 +190,25 @@ void cccc_signal_push_async_frame(VirtualMachine *vm) {
     push_async_frame(vm, 0, vm->sig_blocked);
 }
 
-int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot, bool async) {
-    int flags = slot->sa_flags;
-    unsigned int bit = 1u << (unsigned)(sig - 1);
+int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot,
+                                 bool async) {
+    int          flags         = slot->sa_flags;
+    unsigned int bit           = 1u << (unsigned)(sig - 1);
     unsigned int newly_blocked = slot->sa_mask;
-    if (!(flags & SA_NODEFER)) newly_blocked |= bit;
+    if (!(flags & SA_NODEFER))
+        newly_blocked |= bit;
 
     if (async) {
         // Caller (vm.c) already checked sig_depth < CCCC_SIG_FRAME_MAX.
         push_async_frame(vm, sig, vm->sig_blocked);
     } else if (vm->sig_depth < CCCC_SIG_FRAME_MAX) {
-        SigFrame *f = &vm->sig_frames[vm->sig_depth++];
-        f->sig = sig;
+        SigFrame *f      = &vm->sig_frames[vm->sig_depth++];
+        f->sig           = sig;
         f->saved_blocked = vm->sig_blocked;
-        f->sp_at_entry = vm->sp;
-        f->saved_pc = vm->pc;
-        f->save_slot = -1; // sync: call-boundary ABI already protects the caller
+        f->sp_at_entry   = vm->sp;
+        f->saved_pc      = vm->pc;
+        f->save_slot =
+            -1; // sync: call-boundary ABI already protects the caller
     }
     /* If the frame stack overflowed (pathological recursive-signal case --
        sync path only; async never reaches here with a full stack, see
@@ -214,10 +218,10 @@ int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot, boo
     vm->sig_blocked |= newly_blocked;
 
     if (flags & SA_RESETHAND) {
-        slot->action = 0;
+        slot->action     = 0;
         slot->handler_fn = 0;
-        slot->sa_flags = 0;
-        slot->sa_mask = 0;
+        slot->sa_flags   = 0;
+        slot->sa_mask    = 0;
         cccc_set_guest_signal_action(vm, sig, 0);
     }
     return flags;
@@ -227,7 +231,7 @@ void cccc_signal_poll_handler_returns(VirtualMachine *vm) {
     while (vm->sig_depth > 0 &&
            vm->sp > vm->sig_frames[vm->sig_depth - 1].sp_at_entry) {
         vm->sig_depth--;
-        SigFrame *f = &vm->sig_frames[vm->sig_depth];
+        SigFrame *f     = &vm->sig_frames[vm->sig_depth];
         vm->sig_blocked = f->saved_blocked;
         // #877: only restore the register snapshot on a genuine handler
         // return -- sp landed exactly one past sp_at_entry (the pushed
@@ -280,10 +284,11 @@ void cccc_signal_poll_handler_returns(VirtualMachine *vm) {
 typedef struct {
     void (*g_handler)(int);
     unsigned int g_mask;
-    int g_flags;
+    int          g_flags;
 } GuestSigaction;
 
-static long long wrap_sigaction(long long sig, long long actp, long long oactp) {
+static long long wrap_sigaction(long long sig, long long actp,
+                                long long oactp) {
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (!vm || sig <= 0 || sig >= CCCC_NSIG) {
         errno = EINVAL;
@@ -306,21 +311,21 @@ static long long wrap_sigaction(long long sig, long long actp, long long oactp) 
             oact->g_handler = (void (*)(int))slot->handler_fn;
         else
             oact->g_handler = (void (*)(int))(long long)0; /* SIG_DFL */
-        oact->g_mask = slot->sa_mask;
+        oact->g_mask  = slot->sa_mask;
         oact->g_flags = slot->sa_flags;
     }
 
     if (!actp)
         return 0; /* query-only */
 
-    GuestSigaction *act = (GuestSigaction *)actp;
-    long long handler = (long long)act->g_handler;
+    GuestSigaction *act        = (GuestSigaction *)actp;
+    long long       handler    = (long long)act->g_handler;
 
-    int new_action = (handler == 0) ? 0 : (handler == 1) ? 1 : 2;
-    slot->action = new_action;
-    slot->handler_fn = (new_action == 2) ? handler : 0;
-    slot->sa_mask = act->g_mask;
-    slot->sa_flags = act->g_flags;
+    int             new_action = (handler == 0) ? 0 : (handler == 1) ? 1 : 2;
+    slot->action               = new_action;
+    slot->handler_fn           = (new_action == 2) ? handler : 0;
+    slot->sa_mask              = act->g_mask;
+    slot->sa_flags             = act->g_flags;
 
     if (cccc_set_guest_signal_action(vm, (int)sig, new_action) != 0) {
         errno = EINVAL;
@@ -343,41 +348,56 @@ static long long wrap_sigaction(long long sig, long long actp, long long oactp) 
 // only ever allocated as 4. Reimplemented natively against the guest's own
 // 4-byte representation instead of touching the host's sigset_t at all.
 static long long wrap_sigemptyset(long long set) {
-    if (!set) { errno = EINVAL; return -1; }
+    if (!set) {
+        errno = EINVAL;
+        return -1;
+    }
     *(unsigned int *)set = 0;
     return 0;
 }
 
 static long long wrap_sigfillset(long long set) {
-    if (!set) { errno = EINVAL; return -1; }
+    if (!set) {
+        errno = EINVAL;
+        return -1;
+    }
     *(unsigned int *)set = 0xFFFFFFFFu;
     return 0;
 }
 
 static long long wrap_sigaddset(long long set, long long signo) {
-    if (!set || signo <= 0 || signo >= CCCC_NSIG) { errno = EINVAL; return -1; }
+    if (!set || signo <= 0 || signo >= CCCC_NSIG) {
+        errno = EINVAL;
+        return -1;
+    }
     *(unsigned int *)set |= (1u << (unsigned)(signo - 1));
     return 0;
 }
 
 static long long wrap_sigdelset(long long set, long long signo) {
-    if (!set || signo <= 0 || signo >= CCCC_NSIG) { errno = EINVAL; return -1; }
+    if (!set || signo <= 0 || signo >= CCCC_NSIG) {
+        errno = EINVAL;
+        return -1;
+    }
     *(unsigned int *)set &= ~(1u << (unsigned)(signo - 1));
     return 0;
 }
 
 static long long wrap_sigismember(long long set, long long signo) {
-    if (!set || signo <= 0 || signo >= CCCC_NSIG) { errno = EINVAL; return -1; }
+    if (!set || signo <= 0 || signo >= CCCC_NSIG) {
+        errno = EINVAL;
+        return -1;
+    }
     return (*(unsigned int *)set & (1u << (unsigned)(signo - 1))) ? 1 : 0;
 }
 
 void register_signal_functions(VirtualMachine *vm) {
     /* signal() and raise() are handled via VSIGNAL/VRAISE opcodes;
        no FFI registration is needed */
-    cc_register_cfunc(vm, "sigaction",   (void*)wrap_sigaction,   3, 0);
-    cc_register_cfunc(vm, "sigemptyset", (void*)wrap_sigemptyset, 1, 0);
-    cc_register_cfunc(vm, "sigfillset",  (void*)wrap_sigfillset,  1, 0);
-    cc_register_cfunc(vm, "sigaddset",   (void*)wrap_sigaddset,   2, 0);
-    cc_register_cfunc(vm, "sigdelset",   (void*)wrap_sigdelset,   2, 0);
-    cc_register_cfunc(vm, "sigismember", (void*)wrap_sigismember, 2, 0);
+    cc_register_cfunc(vm, "sigaction", (void *)wrap_sigaction, 3, 0);
+    cc_register_cfunc(vm, "sigemptyset", (void *)wrap_sigemptyset, 1, 0);
+    cc_register_cfunc(vm, "sigfillset", (void *)wrap_sigfillset, 1, 0);
+    cc_register_cfunc(vm, "sigaddset", (void *)wrap_sigaddset, 2, 0);
+    cc_register_cfunc(vm, "sigdelset", (void *)wrap_sigdelset, 2, 0);
+    cc_register_cfunc(vm, "sigismember", (void *)wrap_sigismember, 2, 0);
 }

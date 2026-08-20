@@ -27,14 +27,14 @@
 typedef unsigned long shmatt_t;
 
 struct shmid_ds {
-    struct ipc_perm shm_perm; /* [XSI] operation permission struct */
-    size_t shm_segsz;         /* [XSI] size of segment in bytes */
-    pid_t shm_lpid;           /* [XSI] pid of last shmop */
-    pid_t shm_cpid;           /* [XSI] pid of creator */
-    shmatt_t shm_nattch;      /* [XSI] number of current attaches */
-    time_t shm_atime;         /* [XSI] time of last shmat() */
-    time_t shm_dtime;         /* [XSI] time of last shmdt() */
-    time_t shm_ctime;         /* [XSI] time of last change by shmctl() */
+    struct ipc_perm shm_perm;   /* [XSI] operation permission struct */
+    size_t          shm_segsz;  /* [XSI] size of segment in bytes */
+    pid_t           shm_lpid;   /* [XSI] pid of last shmop */
+    pid_t           shm_cpid;   /* [XSI] pid of creator */
+    shmatt_t        shm_nattch; /* [XSI] number of current attaches */
+    time_t          shm_atime;  /* [XSI] time of last shmat() */
+    time_t          shm_dtime;  /* [XSI] time of last shmdt() */
+    time_t          shm_ctime;  /* [XSI] time of last change by shmctl() */
 };
 
 /* Mode bits -- identical numbering on macOS and Linux. */
@@ -76,7 +76,7 @@ struct shminfo {
 };
 
 struct shm_info {
-    int used_ids;
+    int           used_ids;
     unsigned long shm_tot;
     unsigned long shm_rss;
     unsigned long shm_swp;

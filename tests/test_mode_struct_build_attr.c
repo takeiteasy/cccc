@@ -2,8 +2,7 @@
 // [[cccc::build]] on a struct declaration is attribute-stripped: the struct
 // is compiled and accessible in build mode.
 
-[[cccc::build]]
-struct BuildConfig {
+[[cccc::build]] struct BuildConfig {
     int jobs;
     int verbose;
 };

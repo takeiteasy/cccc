@@ -6,7 +6,9 @@
 // execute the resulting ty_error-laden bytecode and crash the host.
 
 [[cccc::comptime]]
-int helper(const char *s) { return (int)s[0]; }
+int helper(const char *s) {
+    return (int)s[0];
+}
 
 [[cccc::comptime]]
 Node *gen(void) {
@@ -16,4 +18,6 @@ Node *gen(void) {
 
 int result = gen();
 
-int main(void) { return result; }
+int main(void) {
+    return result;
+}

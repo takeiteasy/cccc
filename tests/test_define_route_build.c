@@ -4,7 +4,7 @@
 // @build defines are applied in build mode.
 #define @build BUILD_JOBS 8
 // @test defines are NOT applied in build mode.
-#define @test  TEST_ONLY  1
+#define @test TEST_ONLY 1
 
 // @build #ifdef is true when defined; plain #endif closes it.
 #ifdef @build BUILD_JOBS

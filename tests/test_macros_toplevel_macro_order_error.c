@@ -4,7 +4,7 @@
 [[cccc::comptime]]
 void generate_late(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("late_generated", int_ty);
+    Obj  *fn     = MakeFunction("late_generated", int_ty);
     FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
 }
 

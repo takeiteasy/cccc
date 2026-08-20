@@ -15,7 +15,7 @@
 // wrongly saw B as still defined.  If the bug regresses, one of the
 // #error directives below fires and the test fails to compile.
 
-#define MX_0 1
+#define MX_0   1
 #define MX_813 1
 #undef MX_0
 #define MX_813 1
@@ -27,7 +27,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_1 1
+#define MX_1   1
 #define MX_812 1
 #undef MX_1
 #define MX_812 1
@@ -39,7 +39,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_2 1
+#define MX_2   1
 #define MX_811 1
 #undef MX_2
 #define MX_811 1
@@ -51,7 +51,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_3 1
+#define MX_3   1
 #define MX_810 1
 #undef MX_3
 #define MX_810 1
@@ -63,7 +63,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_4 1
+#define MX_4   1
 #define MX_817 1
 #undef MX_4
 #define MX_817 1
@@ -75,7 +75,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_5 1
+#define MX_5   1
 #define MX_816 1
 #undef MX_5
 #define MX_816 1
@@ -87,7 +87,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_6 1
+#define MX_6   1
 #define MX_815 1
 #undef MX_6
 #define MX_815 1
@@ -99,7 +99,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_7 1
+#define MX_7   1
 #define MX_814 1
 #undef MX_7
 #define MX_814 1
@@ -111,7 +111,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_8 1
+#define MX_8    1
 #define MX_2426 1
 #undef MX_8
 #define MX_2426 1
@@ -123,7 +123,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_9 1
+#define MX_9    1
 #define MX_2427 1
 #undef MX_9
 #define MX_2427 1
@@ -135,7 +135,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_10 1
+#define MX_10  1
 #define MX_571 1
 #undef MX_10
 #define MX_571 1
@@ -147,7 +147,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_11 1
+#define MX_11  1
 #define MX_570 1
 #undef MX_11
 #define MX_570 1
@@ -159,7 +159,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_12 1
+#define MX_12  1
 #define MX_573 1
 #undef MX_12
 #define MX_573 1
@@ -171,7 +171,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_13 1
+#define MX_13  1
 #define MX_572 1
 #undef MX_13
 #define MX_572 1
@@ -183,7 +183,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_14 1
+#define MX_14  1
 #define MX_575 1
 #undef MX_14
 #define MX_575 1
@@ -195,7 +195,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_15 1
+#define MX_15  1
 #define MX_574 1
 #undef MX_15
 #define MX_574 1
@@ -207,7 +207,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_16 1
+#define MX_16  1
 #define MX_577 1
 #undef MX_16
 #define MX_577 1
@@ -219,7 +219,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_17 1
+#define MX_17  1
 #define MX_576 1
 #undef MX_17
 #define MX_576 1
@@ -231,7 +231,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_18 1
+#define MX_18  1
 #define MX_579 1
 #undef MX_18
 #define MX_579 1
@@ -243,7 +243,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_19 1
+#define MX_19  1
 #define MX_578 1
 #undef MX_19
 #define MX_578 1
@@ -255,7 +255,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_20 1
+#define MX_20   1
 #define MX_3252 1
 #undef MX_20
 #define MX_3252 1
@@ -267,7 +267,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_21 1
+#define MX_21   1
 #define MX_3253 1
 #undef MX_21
 #define MX_3253 1
@@ -279,7 +279,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_22 1
+#define MX_22   1
 #define MX_3250 1
 #undef MX_22
 #define MX_3250 1
@@ -291,7 +291,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_23 1
+#define MX_23   1
 #define MX_3251 1
 #undef MX_23
 #define MX_3251 1
@@ -303,7 +303,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_24 1
+#define MX_24   1
 #define MX_3256 1
 #undef MX_24
 #define MX_3256 1
@@ -315,7 +315,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_25 1
+#define MX_25   1
 #define MX_3257 1
 #undef MX_25
 #define MX_3257 1
@@ -327,7 +327,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_26 1
+#define MX_26  1
 #define MX_569 1
 #undef MX_26
 #define MX_569 1
@@ -339,7 +339,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_27 1
+#define MX_27  1
 #define MX_568 1
 #undef MX_27
 #define MX_568 1
@@ -351,7 +351,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_28 1
+#define MX_28  1
 #define MX_567 1
 #undef MX_28
 #define MX_567 1
@@ -363,7 +363,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_29 1
+#define MX_29  1
 #define MX_566 1
 #undef MX_29
 #define MX_566 1
@@ -375,7 +375,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_30 1
+#define MX_30  1
 #define MX_591 1
 #undef MX_30
 #define MX_591 1
@@ -387,7 +387,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_31 1
+#define MX_31  1
 #define MX_590 1
 #undef MX_31
 #define MX_590 1
@@ -399,7 +399,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_32 1
+#define MX_32  1
 #define MX_593 1
 #undef MX_32
 #define MX_593 1
@@ -411,7 +411,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_33 1
+#define MX_33  1
 #define MX_592 1
 #undef MX_33
 #define MX_592 1
@@ -423,7 +423,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_34 1
+#define MX_34  1
 #define MX_595 1
 #undef MX_34
 #define MX_595 1
@@ -435,7 +435,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_35 1
+#define MX_35  1
 #define MX_594 1
 #undef MX_35
 #define MX_594 1
@@ -447,7 +447,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_36 1
+#define MX_36  1
 #define MX_597 1
 #undef MX_36
 #define MX_597 1
@@ -459,7 +459,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_37 1
+#define MX_37  1
 #define MX_596 1
 #undef MX_37
 #define MX_596 1
@@ -471,7 +471,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_38 1
+#define MX_38  1
 #define MX_599 1
 #undef MX_38
 #define MX_599 1
@@ -483,7 +483,7 @@
 #error "#584 regression: macro still defined after #undef"
 #endif
 
-#define MX_39 1
+#define MX_39  1
 #define MX_598 1
 #undef MX_39
 #define MX_598 1
@@ -508,13 +508,16 @@ int test_define(void) {
 #endif
     // Test that #ifdef/#else works correctly
     // Expected: 200 (TEST_FLAG not defined)
-    if (result != 200) return 1;
+    if (result != 200)
+        return 1;
     return 42;
 }
 
 // test_macro_undef_collision_584
 [[cccc::test(return = 42)]]
-int test_macro_undef_collision_584(void) { return 42; }
+int test_macro_undef_collision_584(void) {
+    return 42;
+}
 
 #pragma cccc suite end
 
@@ -553,10 +556,14 @@ void test_comptime_inline_in_test(void) {
 #pragma cccc suite begin "macros/comptime_gvar_init_613"
 
 [[cccc::comptime]]
-Node *ct_gvar_val_613(void) { return MakeIntLiteral(42); }
+Node *ct_gvar_val_613(void) {
+    return MakeIntLiteral(42);
+}
 
 [[cccc::comptime]]
-Node *ct_gvar_add_613(Node *a, Node *b) { return MakeBinary(NK_ADD, a, b); }
+Node *ct_gvar_add_613(Node *a, Node *b) {
+    return MakeBinary(NK_ADD, a, b);
+}
 
 // Simple scalar int global initialized by a comptime function.
 static int ct_gvar_simple = ct_gvar_val_613();

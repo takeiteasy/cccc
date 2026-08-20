@@ -15,6 +15,6 @@ int main(void) {
     snprintf((char *)garr, sizeof(int) * 2, "ab");
 
     float *tail = (float *)&garr[2];
-    float v = *tail; // load as float: mismatches the still-stamped int tail
+    float  v    = *tail; // load as float: mismatches the still-stamped int tail
     return (int)v;
 }

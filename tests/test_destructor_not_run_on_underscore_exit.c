@@ -6,7 +6,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-__attribute__((destructor)) void d(void) { _exit(1); }
+__attribute__((destructor)) void d(void) {
+    _exit(1);
+}
 
 int main(void) {
     _Exit(42);

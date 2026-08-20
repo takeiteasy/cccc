@@ -13,10 +13,13 @@
 [[cccc::comptime]]
 int magic = 17;
 
-struct Config { int width; int height; };
+struct Config {
+    int width;
+    int height;
+};
 
 [[cccc::comptime]]
-struct Config cfg = { 9, 16 };
+struct Config cfg = {9, 16};
 
 [[cccc::comptime]]
 Node *magic_ptr(void) {
@@ -29,7 +32,7 @@ Node *cfg_ptr(void) {
 }
 
 int main(void) {
-    int *m = magic_ptr();
+    int           *m = magic_ptr();
     struct Config *p = cfg_ptr();
     if ((void *)m == (void *)p)
         return 1;

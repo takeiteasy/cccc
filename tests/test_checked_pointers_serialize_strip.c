@@ -11,7 +11,7 @@
 // attributes on `p` must not survive into -m's emitted C, and the plain
 // `int *p` signature must.
 
-int f(int * [[cccc::array, cccc::count(3)]] p) {
+int f(int *[[cccc::array, cccc::count(3)]] p) {
     return p[0];
 }
 

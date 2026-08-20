@@ -26,52 +26,62 @@
 double g_double_from_u64 = (double)18446744073709551615ULL;
 
 int main(void) {
-    if (g_double_from_u64 != 18446744073709551616.0) return 1;
+    if (g_double_from_u64 != 18446744073709551616.0)
+        return 1;
 
     // In-function constant expression.
     double local_const = (double)18446744073709551615ULL;
-    if (local_const != 18446744073709551616.0) return 2;
+    if (local_const != 18446744073709551616.0)
+        return 2;
 
     // Runtime path (U2F3): ULLONG_MAX must convert to its correct positive
     // double value, not -1.0.
     volatile unsigned long long umax = 18446744073709551615ULL;
-    double d = (double)umax;
-    if (d != 18446744073709551616.0) return 3;
-    if (d < 0) return 4; // the historical bug: sign-reinterpreted as -1.0
+    double                      d    = (double)umax;
+    if (d != 18446744073709551616.0)
+        return 3;
+    if (d < 0)
+        return 4; // the historical bug: sign-reinterpreted as -1.0
 
     // 2^63 is the smallest value where the signed/unsigned interpretations
     // diverge -- exactly the boundary the old I2F3-based lowering got
     // wrong.
     volatile unsigned long long two_p63 = 9223372036854775808ULL;
-    d = (double)two_p63;
-    if (d != 9223372036854775808.0) return 5;
+    d                                   = (double)two_p63;
+    if (d != 9223372036854775808.0)
+        return 5;
 
     // Values below 2^63 are unaffected -- signed and unsigned
     // interpretations agree, sanity-checking that the new path didn't
     // regress the common case.
     volatile unsigned long long small = 42;
-    d = (double)small;
-    if (d != 42.0) return 6;
+    d                                 = (double)small;
+    if (d != 42.0)
+        return 6;
 
     // float32 path (U2F3_F32): ULLONG_MAX rounds to 2^64 in float
     // precision too (see header comment).
     volatile unsigned long long umax_f = 18446744073709551615ULL;
-    float f = (float)umax_f;
-    if ((double)f != 18446744073709551616.0) return 7;
-    if (f < 0) return 8;
+    float                       f      = (float)umax_f;
+    if ((double)f != 18446744073709551616.0)
+        return 7;
+    if (f < 0)
+        return 8;
 
     // Narrower unsigned source (unsigned int, zero-extended in the
     // register) must remain unaffected by the new gating -- regression
     // guard that I2F3 is still selected for non-64-bit unsigned sources.
     volatile unsigned int u32 = 4000000000u;
-    d = (double)u32;
-    if (d != 4000000000.0) return 9;
+    d                         = (double)u32;
+    if (d != 4000000000.0)
+        return 9;
 
     // Signed 64-bit source must remain unaffected too -- regression guard
     // that I2F3 is still selected for signed sources.
     volatile long long neg = -1;
-    d = (double)neg;
-    if (d != -1.0) return 10;
+    d                      = (double)neg;
+    if (d != -1.0)
+        return 10;
 
     return 42;
 }

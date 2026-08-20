@@ -1,4 +1,5 @@
-// Test ticket #277: __builtin_macroexpand / __builtin_macroexpand_1 / MacroExpand reflection API
+// Test ticket #277: __builtin_macroexpand / __builtin_macroexpand_1 /
+// MacroExpand reflection API
 
 // A simple macro to expand in tests
 [[cccc::comptime]]
@@ -22,7 +23,7 @@ Node *test_expand_1_macro_call(void) {
 // Test 2: macroexpand_1 on a non-macro node is identity
 [[cccc::comptime]]
 Node *test_expand_1_identity(void) {
-    Node *lit = __builtin_ast_int_literal(99);
+    Node *lit    = __builtin_ast_int_literal(99);
     Node *result = __builtin_macroexpand_1(lit);
     return __builtin_ast_int_literal(result == lit ? 1 : 0);
 }
@@ -32,7 +33,7 @@ Node *test_expand_1_identity(void) {
 // resolves that to 42, proving the first step stopped after one expansion.
 [[cccc::comptime]]
 Node *test_expand_1_single_level(void) {
-    Node *call = __builtin_quote("wrap_answer()");
+    Node *call  = __builtin_quote("wrap_answer()");
     Node *step1 = __builtin_macroexpand_1(call);
     Node *step2 = __builtin_macroexpand_1(step1);
     return step2;
@@ -48,7 +49,7 @@ Node *test_expand_full(void) {
 // Test 5: macroexpand on a non-macro node is identity
 [[cccc::comptime]]
 Node *test_expand_full_identity(void) {
-    Node *lit = __builtin_ast_int_literal(77);
+    Node *lit    = __builtin_ast_int_literal(77);
     Node *result = __builtin_macroexpand(lit);
     return __builtin_ast_int_literal(result == lit ? 1 : 0);
 }

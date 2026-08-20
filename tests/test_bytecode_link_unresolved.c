@@ -16,7 +16,7 @@
 // Because compile_only is false (we are not using -c bytecode), cccc must
 // error immediately on the undefined function reference.
 
-void undefined_external_fn(void);  // declaration only
+void undefined_external_fn(void); // declaration only
 
 int main(void) {
     undefined_external_fn();

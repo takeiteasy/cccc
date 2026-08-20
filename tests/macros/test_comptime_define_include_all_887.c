@@ -7,7 +7,9 @@
 #define MY_STR "hello"
 
 [[cccc::comptime]]
-int helper(const char *s) { return (int)s[0]; }
+int helper(const char *s) {
+    return (int)s[0];
+}
 
 [[cccc::comptime]]
 Node *gen(void) {
@@ -17,4 +19,6 @@ Node *gen(void) {
 
 int result = gen();
 
-int main(void) { return result == 'h' ? 42 : 1; }
+int main(void) {
+    return result == 'h' ? 42 : 1;
+}

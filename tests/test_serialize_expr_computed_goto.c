@@ -10,10 +10,10 @@
 
 int main(void) {
     void *tab[2];
-    tab[0] = &&one;
-    tab[1] = &&two;
-    int acc = 0;
-    int i = 0;
+    tab[0]    = &&one;
+    tab[1]    = &&two;
+    int   acc = 0;
+    int   i   = 0;
     goto *tab[i];
 one:
     acc += 20;

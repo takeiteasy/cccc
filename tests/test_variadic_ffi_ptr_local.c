@@ -15,16 +15,17 @@
 
 int main(void) {
     char tmpl[] = "/tmp/cccc_variadic_ptr_local_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
     for (int i = 0; i < 500; i++) {
         struct flock fl;
         memset(&fl, 0, sizeof(fl));
-        fl.l_type = F_WRLCK;
+        fl.l_type   = F_WRLCK;
         fl.l_whence = SEEK_SET;
-        fl.l_start = 0;
-        fl.l_len = 0;
+        fl.l_start  = 0;
+        fl.l_len    = 0;
         if (fcntl(fd, F_SETLK, &fl) != 0) {
             close(fd);
             unlink(tmpl);

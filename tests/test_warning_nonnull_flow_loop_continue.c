@@ -4,13 +4,14 @@
 // continue's accumulated env (still null, from before the assignment) must
 // feed back into the loop header and ultimately the exit -- MAYBE.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
-    int c = 0;
+    int  x = 0;
+    int  c = 0;
     int *p = 0;
     for (int i = 0; i < 3; i++) {
-        if (c) continue;
+        if (c)
+            continue;
         p = &x;
     }
     foo(p);

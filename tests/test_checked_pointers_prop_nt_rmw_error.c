@@ -7,9 +7,9 @@
 // and mirror the terminator-slot fact across after the fact.
 
 int main(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = s;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = s;
     q[3] += 1; // RMW into the propagated terminator slot -- traps
     return 0;
 }

@@ -5,4 +5,6 @@
 // See tests/test_serialize_enum_obj_no_collision_1016.c.
 int unrelated_global_1016 = 5;
 
-int a_use_1016_nc(void) { return unrelated_global_1016; }
+int a_use_1016_nc(void) {
+    return unrelated_global_1016;
+}

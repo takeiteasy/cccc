@@ -14,6 +14,7 @@ int inner(int n, ...) {
 int main() {
     // Just test inner first
     int r = inner(3, 10, 20, 30);
-    if (r != 60) return r;
+    if (r != 60)
+        return r;
     return 42;
 }

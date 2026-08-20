@@ -13,18 +13,18 @@ static int cmp_int(const void *a, const void *b) {
 }
 
 int main(void) {
-    int *arr = malloc(sizeof(int) * 4);
-    arr[0] = 1;
-    arr[1] = 2;
-    arr[2] = 3;
-    arr[3] = 4; // stamps arr's whole range as int
+    int *arr    = malloc(sizeof(int) * 4);
+    arr[0]      = 1;
+    arr[1]      = 2;
+    arr[2]      = 3;
+    arr[3]      = 4; // stamps arr's whole range as int
 
-    int key = 3;
+    int   key   = 3;
     void *found = bsearch(&key, arr, 4, sizeof(int), cmp_int);
     (void)found;
 
     float *fbuf = (float *)arr;
-    float v = fbuf[0]; // load as float: mismatches the still-stamped int type
+    float  v = fbuf[0]; // load as float: mismatches the still-stamped int type
     free(arr);
     return (int)v;
 }

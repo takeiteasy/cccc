@@ -2,7 +2,7 @@
 // CCCC_FLAGS: --testing
 
 // @test defines are applied in testing mode.
-#define @test  TEST_TIMEOUT_MS 5000
+#define @test TEST_TIMEOUT_MS 5000
 // @build defines are NOT applied in testing mode.
 #define @build BUILD_ONLY 99
 

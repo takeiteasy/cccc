@@ -8,11 +8,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 int main(void) {
-    _Atomic int *p = malloc(4 * sizeof(int));   // valid indices 0..3
+    _Atomic int *p = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!p)
         return 255;
-    _Atomic int *q = p + 4;   // exactly one past the end -- legal to form
-    int expected = 0;
+    _Atomic int *q        = p + 4; // exactly one past the end -- legal to form
+    int          expected = 0;
     // dereferencing the object pointer -- must trap
     bool ok = atomic_compare_exchange_strong(q, &expected, 1);
     free((void *)p);

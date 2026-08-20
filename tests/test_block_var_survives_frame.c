@@ -14,10 +14,13 @@ typedef int (^IntBlock)(void);
 
 static IntBlock make_capturing_block(void) {
     __block int captured = 99;
-    int k = 4;
-    int u[k]; // VLA in the same frame -- this function's body triggers HMRK/HREL
-    u[0] = 1;
-    IntBlock b = ^{ return captured; };
+    int         k        = 4;
+    int         u[k]; // VLA in the same frame -- this function's body triggers
+                      // HMRK/HREL
+    u[0]       = 1;
+    IntBlock b = ^{
+      return captured;
+    };
     return Block_copy(b);
 }
 

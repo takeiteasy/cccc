@@ -4,8 +4,10 @@
 // CCCC_EXPECT_STDERR: duplicate \(or overlapping\) case value
 int main(void) {
     switch (3) {
-    case 1 ... 5: break;
-    case 3: break;
+        case 1 ... 5:
+            break;
+        case 3:
+            break;
     }
     return 42;
 }

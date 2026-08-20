@@ -1,7 +1,10 @@
 // Ticket #188: struct comptime variable with readable members.
 
-[[cccc::comptime]]
-struct Dims { int width; int height; int depth; } dims = { 640, 480, 3 };
+[[cccc::comptime]] struct Dims {
+    int width;
+    int height;
+    int depth;
+} dims = {640, 480, 3};
 
 [[cccc::comptime]]
 Node *get_area(void) {

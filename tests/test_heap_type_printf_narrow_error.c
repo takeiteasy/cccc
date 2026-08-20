@@ -11,17 +11,17 @@
 
 int main(void) {
     int *arr = malloc(sizeof(int) * 4);
-    arr[0] = 1;
-    arr[1] = 2;
-    arr[2] = 3;
-    arr[3] = 4; // stamps arr's whole range as int
+    arr[0]   = 1;
+    arr[1]   = 2;
+    arr[2]   = 3;
+    arr[3]   = 4; // stamps arr's whole range as int
 
     // printf receives the heap pointer itself (as %p); the format string
     // has no %n, so this must not clear arr's shadow at all.
     printf("%p\n", (void *)arr);
 
     float *tail = (float *)&arr[2];
-    float v = *tail; // still stamped int: mismatch must be caught
+    float  v    = *tail; // still stamped int: mismatch must be caught
     free(arr);
     return (int)v;
 }

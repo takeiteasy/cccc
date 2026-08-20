@@ -45,8 +45,8 @@ int main(void) {
 
     // A pointer-to-array round trip through &a still reads/writes the same
     // storage as the array itself.
-    int (*p)[3] = &a;
-    (*p)[1] += 10;
+    int (*p)[3]  = &a;
+    (*p)[1]     += 10;
     if (a[1] != 12)
         return 6;
 

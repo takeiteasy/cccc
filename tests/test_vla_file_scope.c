@@ -7,4 +7,6 @@
 // aggregate-printing support).
 int n = 3;
 int v[n]; // error: variably modified 'v' at file scope
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

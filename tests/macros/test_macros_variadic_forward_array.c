@@ -19,8 +19,8 @@ Node *forward_all(Node *fn_node, ...) {
 
 [[cccc::comptime]]
 Node *forward_tail(Node *fn_node, Node *base, ...) {
-    Node **tail = VarargAsArray();
-    Node *args[3] = { base, tail[0], tail[1] };
+    Node **tail    = VarargAsArray();
+    Node  *args[3] = {base, tail[0], tail[1]};
     return MakeFuncCall(fn_node, args, 3);
 }
 

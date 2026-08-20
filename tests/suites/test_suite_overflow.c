@@ -30,7 +30,7 @@ void test_overflow_checks_clean(void) {
 // ── test_overflow_add: LLONG_MAX + 1 must abort ──
 [[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
 void test_overflow_add(void) {
-    long long x = LLONG_MAX;
+    long long x      = LLONG_MAX;
     long long result = x + 1;
     (void)result;
 }
@@ -38,7 +38,7 @@ void test_overflow_add(void) {
 // ── test_overflow_sub: LLONG_MIN - 1 must abort ──
 [[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
 void test_overflow_sub(void) {
-    long long x = LLONG_MIN;
+    long long x      = LLONG_MIN;
     long long result = x - 1;
     (void)result;
 }
@@ -46,7 +46,7 @@ void test_overflow_sub(void) {
 // ── test_overflow_mul: LLONG_MAX * 2 must abort ──
 [[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
 void test_overflow_mul(void) {
-    long long x = LLONG_MAX;
+    long long x      = LLONG_MAX;
     long long result = x * 2;
     (void)result;
 }
@@ -54,8 +54,8 @@ void test_overflow_mul(void) {
 // ── test_overflow_div: division by zero must abort ──
 [[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
 void test_overflow_div_by_zero(void) {
-    int x = 42;
-    int y = 0;
+    int x      = 42;
+    int y      = 0;
     int result = x / y;
     (void)result;
 }
@@ -63,7 +63,7 @@ void test_overflow_div_by_zero(void) {
 // ── test_overflow_div_signed: LLONG_MIN / -1 must abort ──
 [[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
 void test_overflow_div_signed(void) {
-    long long x = LLONG_MIN;
+    long long x      = LLONG_MIN;
     long long result = x / -1;
     (void)result;
 }
@@ -88,6 +88,5 @@ void test_invalid_funcptr(void) {
     int (*fn)(void) = (int (*)(void))(intptr_t)12345;
     fn();
 }
-
 
 #pragma cccc suite end

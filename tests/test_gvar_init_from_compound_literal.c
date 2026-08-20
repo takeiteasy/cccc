@@ -39,32 +39,45 @@ struct P garr[2] = {(struct P){7, 8}, {9, 10}};
 // relocation-splice loop (offset + r->offset), not just raw bytes.
 int reloc_a = 10, reloc_b = 20;
 struct Ptr {
-    int v;
+    int  v;
     int *p;
 };
-struct Ptr reloc_arr[2] = {(struct Ptr){1, &reloc_a}, (struct Ptr){2, &reloc_b}};
+struct Ptr reloc_arr[2] = {(struct Ptr){1, &reloc_a},
+                           (struct Ptr){2, &reloc_b}};
 
 int main(void) {
-    if (g1.x != 5) return 1;
-    if (g1.y != 6) return 2;
+    if (g1.x != 5)
+        return 1;
+    if (g1.y != 6)
+        return 2;
 
-    if (gv[0] != 1.0f) return 3;
-    if (gv[3] != 4.0f) return 4;
+    if (gv[0] != 1.0f)
+        return 3;
+    if (gv[3] != 4.0f)
+        return 4;
 
-    if (garr[0].x != 7) return 5;
-    if (garr[0].y != 8) return 6;
-    if (garr[1].x != 9) return 7;
-    if (garr[1].y != 10) return 8;
+    if (garr[0].x != 7)
+        return 5;
+    if (garr[0].y != 8)
+        return 6;
+    if (garr[1].x != 9)
+        return 7;
+    if (garr[1].y != 10)
+        return 8;
 
-    if (*reloc_arr[0].p != 10) return 9;
-    if (*reloc_arr[1].p != 20) return 10;
+    if (*reloc_arr[0].p != 10)
+        return 9;
+    if (*reloc_arr[1].p != 20)
+        return 10;
 
     // Local `static` variable, still initialized from a compound literal
     // that has no storage-class specifier of its own (relies on
     // in_const_gvar_init forcing the anonymous-global path).
     static struct P b = (struct P){3, 4};
-    if (b.x != 3) return 11;
-    if (b.y != 4) return 12;
+    if (b.x != 3)
+        return 11;
+    if (b.y != 4)
+        return 12;
 
     return 42;
 }

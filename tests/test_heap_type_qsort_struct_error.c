@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 struct S {
-    int a;
+    int    a;
     double b;
 };
 
@@ -20,13 +20,14 @@ int main(void) {
     struct S *arr = malloc(sizeof(struct S) * 4);
     for (int i = 0; i < 4; i++) {
         arr[i].a = 4 - i;
-        arr[i].b = (double)(4 - i); // stamps each element's a (int) and b (double)
+        arr[i].b =
+            (double)(4 - i); // stamps each element's a (int) and b (double)
     }
 
     qsort(arr, 4, sizeof(struct S), cmp_s);
 
     int *p = (int *)&arr[0].b; // same bytes as arr[0].b, reinterpreted as int*
-    int result = *p;           // load as int: mismatches the stamped double type
+    int  result = *p; // load as int: mismatches the stamped double type
     free(arr);
     return result;
 }

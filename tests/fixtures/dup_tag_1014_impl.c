@@ -5,9 +5,15 @@
 // line.
 #include "dup_tag_1014.h"
 
-struct DyGC1014 { int v; };
+struct DyGC1014 {
+    int v;
+};
 
-static struct DyGC1014 g_1014 = { 42 };
+static struct DyGC1014 g_1014 = {42};
 
-DyGC1014 *gc_open_1014(void) { return &g_1014; }
-int gc_val_1014(DyGC1014 *g) { return g->v; }
+DyGC1014 *gc_open_1014(void) {
+    return &g_1014;
+}
+int gc_val_1014(DyGC1014 *g) {
+    return g->v;
+}

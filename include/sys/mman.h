@@ -30,9 +30,9 @@
 #define MAP_ANON      MAP_ANONYMOUS
 #endif
 
-#define MS_ASYNC      0x0001
-#define MS_SYNC       0x0002
-#define MS_INVALIDATE 0x0004
+#define MS_ASYNC        0x0001
+#define MS_SYNC         0x0002
+#define MS_INVALIDATE   0x0004
 
 #define MADV_NORMAL     0
 #define MADV_RANDOM     1
@@ -50,7 +50,7 @@
 #define MCL_CURRENT 1
 #define MCL_FUTURE  2
 #ifdef __linux__
-#define MCL_ONFAULT 4
+#define MCL_ONFAULT   4
 #define MAP_LOCKED    0x2000
 #define MAP_POPULATE  0x8000
 #define MAP_NORESERVE 0x4000
@@ -58,7 +58,8 @@
 #define MAP_NORESERVE 0x0040
 #endif
 
-extern void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+extern void *mmap(void *addr, size_t length, int prot, int flags, int fd,
+                  off_t offset);
 extern int munmap(void *addr, size_t length);
 extern int mprotect(void *addr, size_t len, int prot);
 extern int msync(void *addr, size_t len, int flags);
@@ -72,7 +73,8 @@ extern int shm_unlink(const char *name);
 #ifdef __linux__
 // mremap resizes/moves an existing mapping; Linux-only glibc/syscall
 // extension, absent on macOS/BSD (#729).
-extern void *mremap(void *old_address, size_t old_size, size_t new_size, int flags, ...);
+extern void *mremap(void *old_address, size_t old_size, size_t new_size,
+                    int flags, ...);
 #endif
 
 #endif /* __SYS_MMAN_H */

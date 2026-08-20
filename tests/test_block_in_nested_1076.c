@@ -39,7 +39,9 @@
 static int ticket_repro(void) {
     int g = 7;
     int mid(int m) {
-        int (^blk)(void) = ^{ return g + m; };
+        int (^blk)(void) = ^{
+          return g + m;
+        };
         return blk();
     }
     return mid(3);
@@ -49,7 +51,9 @@ static int ticket_repro(void) {
 // own local -- the already-working path this fix must not disturb.
 static int own_local_only(void) {
     int mid(int m) {
-        int (^blk)(void) = ^{ return m; };
+        int (^blk)(void) = ^{
+          return m;
+        };
         return blk();
     }
     return mid(3);
@@ -58,10 +62,12 @@ static int own_local_only(void) {
 // (c) control: block-in-block capturing a grandparent local -- the other
 // already-working transitive-capture path.
 static int block_in_block(void) {
-    int g = 7;
+    int g              = 7;
     int (^outer)(void) = ^{
-        int (^inner)(void) = ^{ return g; };
-        return inner();
+      int (^inner)(void) = ^{
+        return g;
+      };
+      return inner();
     };
     return outer();
 }
@@ -73,7 +79,9 @@ static int two_level_nested(void) {
     int g = 7;
     int level1(int a) {
         int level2(int b) {
-            int (^blk)(void) = ^{ return g + a + b; };
+            int (^blk)(void) = ^{
+              return g + a + b;
+            };
             return blk();
         }
         return level2(2);
@@ -87,32 +95,46 @@ static int two_level_nested(void) {
 static int block_var_ancestor(void) {
     __block int g = 1;
     int mid(int m) {
-        int (^blk)(void) = ^{ g += m; return g; };
+        int (^blk)(void) = ^{
+          g += m;
+          return g;
+        };
         return blk();
     }
-    int r1 = mid(4);  // g: 1 -> 5
-    int r2 = g;       // write must be visible in mid's ancestor frame too
+    int r1 = mid(4); // g: 1 -> 5
+    int r2 = g;      // write must be visible in mid's ancestor frame too
     return (r1 == 5 && r2 == 5) ? 1 : 0;
 }
 
 // (f) a struct capture from a grandparent (wider than 8 bytes), exercising
 // the MCPY arm of the new static-link-chase capture source.
-struct Pair { long a; long b; };
+struct Pair {
+    long a;
+    long b;
+};
 static int struct_ancestor(void) {
-    struct Pair p = { 1, 41 };
+    struct Pair p = {1, 41};
     int mid(void) {
-        int (^blk)(void) = ^{ return (int)(p.a + p.b); };
+        int (^blk)(void) = ^{
+          return (int)(p.a + p.b);
+        };
         return blk();
     }
     return mid();
 }
 
 int main(void) {
-    if (ticket_repro() != 10) return 1;
-    if (own_local_only() != 3) return 2;
-    if (block_in_block() != 7) return 3;
-    if (two_level_nested() != 10) return 4;
-    if (block_var_ancestor() != 1) return 5;
-    if (struct_ancestor() != 42) return 6;
+    if (ticket_repro() != 10)
+        return 1;
+    if (own_local_only() != 3)
+        return 2;
+    if (block_in_block() != 7)
+        return 3;
+    if (two_level_nested() != 10)
+        return 4;
+    if (block_var_ancestor() != 1)
+        return 5;
+    if (struct_ancestor() != 42)
+        return 6;
     return 42;
 }

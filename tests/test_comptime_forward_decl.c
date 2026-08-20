@@ -13,16 +13,16 @@
 int is_odd(int n);
 
 [[cccc::comptime]]
-int is_even(int n)
-{
-    if (n == 0) return 1;
+int is_even(int n) {
+    if (n == 0)
+        return 1;
     return is_odd(n - 1);
 }
 
 [[cccc::comptime]]
-int is_odd(int n)
-{
-    if (n == 0) return 0;
+int is_odd(int n) {
+    if (n == 0)
+        return 0;
     return is_even(n - 1);
 }
 
@@ -32,4 +32,6 @@ Node *gen(void) {
 }
 
 int result = gen();
-int main(void) { return result == 1 ? 42 : 1; }
+int main(void) {
+    return result == 1 ? 42 : 1;
+}

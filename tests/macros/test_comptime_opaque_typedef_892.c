@@ -9,7 +9,9 @@
 #include @shared "comptime_opaque_typedef_892.h"
 
 [[cccc::comptime]]
-Node *check_892(void) { return MakeIntLiteral(0); }
+Node *check_892(void) {
+    return MakeIntLiteral(0);
+}
 
 int main(void) {
     Widget *w = make_widget();

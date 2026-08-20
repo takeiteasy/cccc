@@ -1,6 +1,6 @@
 // #include @comptime still works with the default runtime-only scoping.
 
-#include @comptime <glob.h>
+#include @comptime < glob.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {

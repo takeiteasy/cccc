@@ -47,22 +47,24 @@ typedef unsigned int fexcept_t;
 typedef unsigned long fexcept_t;
 #endif
 
-typedef struct { unsigned long long __opaque[(__CCCC_SIZEOF_FENV_T__ + 7) / 8]; } fenv_t;
+typedef struct {
+    unsigned long long __opaque[(__CCCC_SIZEOF_FENV_T__ + 7) / 8];
+} fenv_t;
 
 /* FE_* values are the real host <fenv.h> values for the machine this
  * compiler was built on -- NOT hardcoded, and NOT an OR of the individual
  * exception macros for FE_ALL_EXCEPT (some platforms have additional bits,
  * e.g. x86's FE_DENORMAL, with no portable C name). See #771. */
-#define FE_INVALID __CCCC_FE_INVALID__
-#define FE_DIVBYZERO __CCCC_FE_DIVBYZERO__
-#define FE_OVERFLOW __CCCC_FE_OVERFLOW__
-#define FE_UNDERFLOW __CCCC_FE_UNDERFLOW__
-#define FE_INEXACT __CCCC_FE_INEXACT__
+#define FE_INVALID    __CCCC_FE_INVALID__
+#define FE_DIVBYZERO  __CCCC_FE_DIVBYZERO__
+#define FE_OVERFLOW   __CCCC_FE_OVERFLOW__
+#define FE_UNDERFLOW  __CCCC_FE_UNDERFLOW__
+#define FE_INEXACT    __CCCC_FE_INEXACT__
 #define FE_ALL_EXCEPT __CCCC_FE_ALL_EXCEPT__
 
-#define FE_TONEAREST __CCCC_FE_TONEAREST__
-#define FE_DOWNWARD __CCCC_FE_DOWNWARD__
-#define FE_UPWARD __CCCC_FE_UPWARD__
+#define FE_TONEAREST  __CCCC_FE_TONEAREST__
+#define FE_DOWNWARD   __CCCC_FE_DOWNWARD__
+#define FE_UPWARD     __CCCC_FE_UPWARD__
 #define FE_TOWARDZERO __CCCC_FE_TOWARDZERO__
 
 /* Sentinel recognized by fesetenv()/feupdateenv()/fegetenv() in

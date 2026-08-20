@@ -17,6 +17,10 @@
 #include "fixtures/header_static_skip_999.h"
 
 int header_static_skip_999_a(void);
-int header_static_skip_999_b(void) { return header_static_skip_999_helper(21); }
+int header_static_skip_999_b(void) {
+    return header_static_skip_999_helper(21);
+}
 
-int main(void) { return header_static_skip_999_a() + header_static_skip_999_b(); }
+int main(void) {
+    return header_static_skip_999_a() + header_static_skip_999_b();
+}

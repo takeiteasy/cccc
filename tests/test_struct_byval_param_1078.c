@@ -23,7 +23,10 @@
 // Basic struct write-through: the caller's object must be untouched.
 // ---------------------------------------------------------------------
 
-struct point { long x; long y; };
+struct point {
+    long x;
+    long y;
+};
 
 static void mutate_point(struct point p) {
     p.x = 999;
@@ -42,7 +45,10 @@ void test_struct_byval_write_no_alias(void) {
 // Union write-through.
 // ---------------------------------------------------------------------
 
-union pun { long a; double d; };
+union pun {
+    long   a;
+    double d;
+};
 
 static void mutate_union(union pun u) {
     u.a = 12345;
@@ -60,11 +66,16 @@ void test_union_byval_write_no_alias(void) {
 // Nested-member and array-member writes.
 // ---------------------------------------------------------------------
 
-struct inner { int v; };
-struct outer { struct inner in; int arr[4]; };
+struct inner {
+    int v;
+};
+struct outer {
+    struct inner in;
+    int          arr[4];
+};
 
 static void mutate_outer(struct outer o) {
-    o.in.v = -1;
+    o.in.v   = -1;
     o.arr[2] = -1;
 }
 
@@ -83,7 +94,7 @@ void test_struct_byval_nested_member_write_no_alias(void) {
 
 static void mutate_via_address(struct point p) {
     struct point *pp = &p;
-    pp->x = 42;
+    pp->x            = 42;
 }
 
 [[cccc::test]]
@@ -97,7 +108,9 @@ void test_struct_byval_addr_of_param_no_alias(void) {
 // Large (>64-byte) struct.
 // ---------------------------------------------------------------------
 
-struct big { long words[16]; }; // 128 bytes
+struct big {
+    long words[16];
+}; // 128 bytes
 
 static void mutate_big(struct big b) {
     for (int i = 0; i < 16; i++)

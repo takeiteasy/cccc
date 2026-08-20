@@ -13,16 +13,19 @@
 [[cccc::comptime]]
 Node *doubled(Node *arg) {
     Type *ty_int = __builtin_ast_get_type("int");
-    Node *tmp = __builtin_ast_local_var_unique(ty_int);
-    Node *two = __builtin_ast_int_literal(2);
-    Node *mul = __builtin_ast_binary(NK_MUL, arg, two);
+    Node *tmp    = __builtin_ast_local_var_unique(ty_int);
+    Node *two    = __builtin_ast_int_literal(2);
+    Node *mul    = __builtin_ast_binary(NK_MUL, arg, two);
     return __builtin_ast_assign(tmp, mul);
 }
 
 int main(void) {
-    int r1 = doubled(7);   // tmp = 7*2 = 14
-    if (r1 != 14) return 1;
-    int r2 = doubled(20);  // a second dotted temp -- must not collide with the first
-    if (r2 != 40) return 2;
+    int r1 = doubled(7); // tmp = 7*2 = 14
+    if (r1 != 14)
+        return 1;
+    int r2 =
+        doubled(20); // a second dotted temp -- must not collide with the first
+    if (r2 != 40)
+        return 2;
     return 42;
 }

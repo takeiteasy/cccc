@@ -7,5 +7,7 @@
 #ifndef TU_ISOLATION_1001_GUARD_H
 #define TU_ISOLATION_1001_GUARD_H
 typedef unsigned long TuIsolation1001Value;
-static inline TuIsolation1001Value tu_isolation_1001_box(unsigned long x) { return x; }
+static inline TuIsolation1001Value tu_isolation_1001_box(unsigned long x) {
+    return x;
+}
 #endif

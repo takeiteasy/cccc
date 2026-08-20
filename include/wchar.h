@@ -8,7 +8,7 @@
 #include "time.h"
 
 #ifndef WEOF
-#define WEOF ((wint_t)-1)
+#define WEOF ((wint_t) - 1)
 #endif
 
 typedef unsigned int wint_t;
@@ -20,8 +20,10 @@ extern int mbsinit(const mbstate_t *ps);
 extern size_t mbrlen(const char *s, size_t n, mbstate_t *ps);
 extern size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, mbstate_t *ps);
 extern size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps);
-extern size_t mbsrtowcs(wchar_t *dst, const char **src, size_t len, mbstate_t *ps);
-extern size_t wcsrtombs(char *dst, const wchar_t **src, size_t len, mbstate_t *ps);
+extern size_t mbsrtowcs(wchar_t *dst, const char **src, size_t len,
+                        mbstate_t *ps);
+extern size_t wcsrtombs(char *dst, const wchar_t **src, size_t len,
+                        mbstate_t *ps);
 
 extern wchar_t *wcscpy(wchar_t *s1, const wchar_t *s2);
 extern wchar_t *wcsncpy(wchar_t *s1, const wchar_t *s2, size_t n);
@@ -41,7 +43,8 @@ extern long double wcstold(const wchar_t *nptr, wchar_t **endptr);
 extern long wcstol(const wchar_t *nptr, wchar_t **endptr, int base);
 extern long long wcstoll(const wchar_t *nptr, wchar_t **endptr, int base);
 extern unsigned long wcstoul(const wchar_t *nptr, wchar_t **endptr, int base);
-extern unsigned long long wcstoull(const wchar_t *nptr, wchar_t **endptr, int base);
+extern unsigned long long wcstoull(const wchar_t *nptr, wchar_t **endptr,
+                                   int base);
 
 extern int wctob(wint_t c);
 extern wint_t btowc(int c);

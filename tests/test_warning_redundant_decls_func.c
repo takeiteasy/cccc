@@ -4,7 +4,7 @@
 void bar(void);
 void bar(void);
 
-void bar(void) { }
+void bar(void) {}
 
 int main(void) {
     bar();

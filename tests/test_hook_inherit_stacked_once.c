@@ -8,10 +8,14 @@ static int outer_setup = 0;
 static int inner_setup = 0;
 
 [[cccc::test_setup(suite = "a", once, inherit)]]
-void setup_outer(void) { outer_setup++; }
+void setup_outer(void) {
+    outer_setup++;
+}
 
 [[cccc::test_setup(suite = "a/b", once, inherit)]]
-void setup_inner(void) { inner_setup++; }
+void setup_inner(void) {
+    inner_setup++;
+}
 
 #pragma cccc suite begin "a"
 
@@ -25,11 +29,12 @@ void test_a_entry(void) {
 
 [[cccc::test]]
 void test_a_b_entry(void) {
-    AssertEq(outer_setup, 1); // restored from inner snap (includes outer effects)
+    AssertEq(outer_setup,
+             1); // restored from inner snap (includes outer effects)
     AssertEq(inner_setup, 1); // inner opened on entry to "a/b"
 }
 
-#pragma cccc suite end  // end b — inner closes here
+#pragma cccc suite end        // end b — inner closes here
 
 [[cccc::test]]
 void test_a_after_b(void) {
@@ -37,4 +42,4 @@ void test_a_after_b(void) {
     AssertEq(inner_setup, 0); // inner closed; its effects not in outer snap
 }
 
-#pragma cccc suite end  // end a — outer closes here
+#pragma cccc suite end        // end a — outer closes here

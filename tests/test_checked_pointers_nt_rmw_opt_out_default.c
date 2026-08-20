@@ -5,8 +5,8 @@
 // plain-assignment case.
 
 int main(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n] += 1; // terminator slot, non-null RMW -- no check without the flag
     return 42;
 }

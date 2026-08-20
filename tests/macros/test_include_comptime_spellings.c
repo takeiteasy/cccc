@@ -1,7 +1,7 @@
 // Test alternate include qualifier spellings for comptime routing.
 
-#include @comptime <glob.h>
-#include __attribute__((comptime)) <stddef.h>
+#include @comptime < glob.h>
+#include __attribute__((comptime)) < stddef.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {

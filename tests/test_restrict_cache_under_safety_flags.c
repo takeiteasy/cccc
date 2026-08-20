@@ -29,28 +29,28 @@ static int sum_derived(int *restrict p) {
 
 static int store_writes_through(int *restrict p) {
     int a = *p;      // fill
-    *p = a + 100;    // write-through: cache updated in place
+    *p    = a + 100; // write-through: cache updated in place
     return *p;       // hit: must observe the new value, not the old one
 }
 
 int main(void) {
-    int arr[4] = {1, 2, 3, 4};
-    int total = 0;
-    total += sum_pattern1(arr);      // 1+1 = 2
-    total += sum_pattern2(arr);      // 3+3 = 6
-    total += sum_derived(arr);       // arr[1]*2 = 2+2 = 4
+    int arr[4]  = {1, 2, 3, 4};
+    int total   = 0;
+    total      += sum_pattern1(arr);    // 1+1 = 2
+    total      += sum_pattern2(arr);    // 3+3 = 6
+    total      += sum_derived(arr);     // arr[1]*2 = 2+2 = 4
     total += store_writes_through(arr); // arr[0]=1 -> writes 101, returns 101
 
     // Cross-check the free()-driven invalidation fix (#754): a fresh
     // allocation's cache must not be seeded by a prior (now-freed) mapping
     // at the same address/offset.
     int *p = malloc(sizeof(int));
-    *p = 7;
-    int x = *p; // fill
+    *p     = 7;
+    int x  = *p; // fill
     free(p);
-    p = malloc(sizeof(int));
-    *p = 20;
-    int y = *p; // must re-load 20, not reuse a stale cached 7
+    p     = malloc(sizeof(int));
+    *p    = 20;
+    int y = *p;     // must re-load 20, not reuse a stale cached 7
     free(p);
 
     total += x + y; // 7 + 20 = 27

@@ -1,7 +1,8 @@
-// Test ticket #286: $@k unquote-splicing into fixed-arity (non-variadic) callees.
-// main() returns 42 on success.
+// Test ticket #286: $@k unquote-splicing into fixed-arity (non-variadic)
+// callees. main() returns 42 on success.
 
-// ---- Helper fixed-arity functions --------------------------------------------
+// ---- Helper fixed-arity functions
+// --------------------------------------------
 
 int add3(int a, int b, int c) {
     return a + b + c;
@@ -15,7 +16,7 @@ int add2(int a, int b) {
 // all three arguments come from a spliced chain; no scalar args.
 [[cccc::comptime]]
 Node *call_add3(Node *a, Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b, c }, 3);
+    Node *chain = __builtin_node_list((Node *[]){a, b, c}, 3);
     return __builtin_quote("add3($@1)", chain);
 }
 
@@ -27,7 +28,7 @@ int test_full_fixed_splice(void) {
 // $1 fills the first fixed parameter; $@2 expands to fill the rest.
 [[cccc::comptime]]
 Node *call_add3_mixed(Node *a, Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ b, c }, 2);
+    Node *chain = __builtin_node_list((Node *[]){b, c}, 2);
     return __builtin_quote("add3($1, $@2)", a, chain);
 }
 
@@ -38,7 +39,7 @@ int test_prefix_then_fixed_splice(void) {
 // ---- Test 3: splice into a two-parameter fixed callee -----------------------
 [[cccc::comptime]]
 Node *call_add2(Node *a, Node *b) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b }, 2);
+    Node *chain = __builtin_node_list((Node *[]){a, b}, 2);
     return __builtin_quote("add2($@1)", chain);
 }
 
@@ -51,7 +52,7 @@ int test_two_param_fixed_splice(void) {
 // 10.7 → 10, 21.3 → 21, 10.9 → 10 — correct result is 41 (not 42.9).
 [[cccc::comptime]]
 Node *call_add3_cast(Node *a, Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b, c }, 3);
+    Node *chain = __builtin_node_list((Node *[]){a, b, c}, 3);
     return __builtin_quote("add3($@1)", chain);
 }
 
@@ -63,10 +64,14 @@ int test_cast_on_splice(void) {
 // ---- main -------------------------------------------------------------------
 
 int main(void) {
-    if (test_full_fixed_splice()        != 42) return 1;
-    if (test_prefix_then_fixed_splice() != 42) return 2;
-    if (test_two_param_fixed_splice()   != 42) return 3;
-    if (test_cast_on_splice()           != 41) return 4;
+    if (test_full_fixed_splice() != 42)
+        return 1;
+    if (test_prefix_then_fixed_splice() != 42)
+        return 2;
+    if (test_two_param_fixed_splice() != 42)
+        return 3;
+    if (test_cast_on_splice() != 41)
+        return 4;
 
     return 42;
 }

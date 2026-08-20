@@ -1,4 +1,4 @@
-#include @shared <glob.h>
+#include @shared < glob.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {
@@ -17,4 +17,3 @@ generate_glob_context_result();
 int main(void) {
     return glob_context_result();
 }
-

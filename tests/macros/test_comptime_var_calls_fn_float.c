@@ -1,7 +1,9 @@
 // Ticket #191: comptime float variable initializer calls a comptime function.
 
 [[cccc::comptime]]
-double get_scale_factor(void) { return 1.5; }
+double get_scale_factor(void) {
+    return 1.5;
+}
 
 [[cccc::comptime]]
 double area = get_scale_factor() * 200.0;

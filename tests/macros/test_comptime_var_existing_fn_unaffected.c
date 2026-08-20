@@ -2,7 +2,9 @@
 // comptime variable declarations — regression guard.
 
 [[cccc::comptime]]
-int double_it(int n) { return n * 2; }
+int double_it(int n) {
+    return n * 2;
+}
 
 [[cccc::comptime]]
 int answer = 21;

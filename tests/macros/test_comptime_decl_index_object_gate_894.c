@@ -14,4 +14,6 @@ int use_it(void) {
     return outside_global_894;
 }
 
-int main(void) { return use_it(); }
+int main(void) {
+    return use_it();
+}

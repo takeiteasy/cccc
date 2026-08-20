@@ -1,5 +1,6 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: <cccc macro: generated expression>:1: generated expression
+// CCCC_EXPECT_STDERR: <cccc macro: generated expression>:1: generated
+// expression
 
 [[cccc::comptime]]
 Node *synthetic_loc(void) {

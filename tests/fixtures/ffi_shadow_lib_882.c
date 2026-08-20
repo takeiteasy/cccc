@@ -6,4 +6,6 @@
 // Compiled standalone to a .c4a bytecode library; a bare declaration in
 // another module is expected to resolve to *this* definition once linked
 // via --link, not silently fall back to the host FFI abs().
-int abs(int x) { return 42; }
+int abs(int x) {
+    return 42;
+}

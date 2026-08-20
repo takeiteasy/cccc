@@ -20,8 +20,8 @@ static int g(int v, int *q) {
 
 static int touch(int *restrict p) {
     int a = g(*p, p); // arg-fill: *p is read (and cached) while preparing
-                       // this call's own arguments
-    int b = *p;        // must observe 999, not the stale cached pre-call value
+                      // this call's own arguments
+    int b = *p;       // must observe 999, not the stale cached pre-call value
     return a + b;
 }
 

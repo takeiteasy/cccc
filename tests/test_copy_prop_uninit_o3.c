@@ -7,7 +7,7 @@
 // register number, and sub-pass B's generic decode would misread it as a
 // destination and NOP a still-live MOV3 crossing the check/mark site.
 static int many_params(int a, int b, int c, int d, int e, int f, int g, int h,
-                        int i, int j, int k) {
+                       int i, int j, int k) {
     int live = a + b + c + d + e + f + g + h;
     live += i; // 9th param: stack-passed, CHKI/MARKI fire at a small +offset
     live += j;
@@ -25,7 +25,9 @@ static int repeated_checks(int seed) {
 }
 
 int main(void) {
-    if (many_params(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) != 66) return 1;
-    if (repeated_checks(0) != 15) return 2;
+    if (many_params(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) != 66)
+        return 1;
+    if (repeated_checks(0) != 15)
+        return 2;
     return 42;
 }

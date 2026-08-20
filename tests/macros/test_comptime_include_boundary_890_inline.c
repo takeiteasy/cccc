@@ -5,7 +5,7 @@
 
 typedef int (*plan_fn)(int);
 
-static int plan_value;
+static int     plan_value;
 static plan_fn plan_ptr;
 
 [[cccc::comptime]]

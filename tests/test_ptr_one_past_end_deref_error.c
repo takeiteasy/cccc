@@ -8,10 +8,10 @@
 // emitted at the store site.
 #include <stdlib.h>
 int main(void) {
-    int *p = malloc(4 * sizeof(int));   // valid indices 0..3
+    int *p = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!p)
         return 255;
-    p[4] = 1;   // exactly one past the end -- must still trap
+    p[4] = 1; // exactly one past the end -- must still trap
     free(p);
     return 42;
 }

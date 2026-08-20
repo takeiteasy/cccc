@@ -32,41 +32,66 @@ static nl_item guest_to_host_nl_item(nl_item guest_item, int *found) {
     long v = (long)guest_item;
     long host_item;
     switch (v) {
-    case 0:  host_item = 14;     break; // CODESET
-    case 1:  host_item = 131112; break; // D_T_FMT
-    case 2:  host_item = 131113; break; // D_FMT
-    case 3:  host_item = 131114; break; // T_FMT
-    case 4:  host_item = 131115; break; // T_FMT_AMPM
-    case 5:  host_item = 131110; break; // AM_STR
-    case 6:  host_item = 131111; break; // PM_STR
-    case 50: host_item = 65536;  break; // RADIXCHAR
-    case 51: host_item = 65537;  break; // THOUSEP
-    case 52: host_item = 327680; break; // YESEXPR
-    case 53: host_item = 327681; break; // NOEXPR
-    case 56: host_item = 262159; break; // CRNCYSTR
-    default:
-        if (v >= 7 && v <= 13)          // DAY_1..DAY_7
-            host_item = 131079 + (v - 7);
-        else if (v >= 14 && v <= 20)    // ABDAY_1..ABDAY_7
-            host_item = 131072 + (v - 14);
-        else if (v >= 21 && v <= 32)    // MON_1..MON_12
-            host_item = 131098 + (v - 21);
-        else if (v >= 33 && v <= 44)    // ABMON_1..ABMON_12
-            host_item = 131086 + (v - 33);
-        else {
-            *found = 0;
-            return (nl_item)0;
-        }
-        break;
+        case 0:
+            host_item = 14;
+            break;                       // CODESET
+        case 1:
+            host_item = 131112;
+            break;                       // D_T_FMT
+        case 2:
+            host_item = 131113;
+            break;                       // D_FMT
+        case 3:
+            host_item = 131114;
+            break;                       // T_FMT
+        case 4:
+            host_item = 131115;
+            break;                       // T_FMT_AMPM
+        case 5:
+            host_item = 131110;
+            break;                       // AM_STR
+        case 6:
+            host_item = 131111;
+            break;                       // PM_STR
+        case 50:
+            host_item = 65536;
+            break;                       // RADIXCHAR
+        case 51:
+            host_item = 65537;
+            break;                       // THOUSEP
+        case 52:
+            host_item = 327680;
+            break;                       // YESEXPR
+        case 53:
+            host_item = 327681;
+            break;                       // NOEXPR
+        case 56:
+            host_item = 262159;
+            break;                       // CRNCYSTR
+        default:
+            if (v >= 7 && v <= 13)       // DAY_1..DAY_7
+                host_item = 131079 + (v - 7);
+            else if (v >= 14 && v <= 20) // ABDAY_1..ABDAY_7
+                host_item = 131072 + (v - 14);
+            else if (v >= 21 && v <= 32) // MON_1..MON_12
+                host_item = 131098 + (v - 21);
+            else if (v >= 33 && v <= 44) // ABMON_1..ABMON_12
+                host_item = 131086 + (v - 33);
+            else {
+                *found = 0;
+                return (nl_item)0;
+            }
+            break;
     }
     return (nl_item)host_item;
 #endif
 }
 
 static char *wrap_nl_langinfo(nl_item guest_item) {
-    int found;
+    int     found;
     nl_item host_item = guest_to_host_nl_item(guest_item, &found);
-    if (!found) return "";
+    if (!found)
+        return "";
     return nl_langinfo(host_item);
 }
 
@@ -74,9 +99,10 @@ static char *wrap_nl_langinfo(nl_item guest_item) {
 // nl_langinfo() above, against an explicit locale_t instead of the
 // process-global/per-thread locale.
 static char *wrap_nl_langinfo_l(nl_item guest_item, locale_t loc) {
-    int found;
+    int     found;
     nl_item host_item = guest_to_host_nl_item(guest_item, &found);
-    if (!found) return "";
+    if (!found)
+        return "";
     return nl_langinfo_l(host_item, loc);
 }
 
@@ -109,54 +135,69 @@ static int cccc_parse_syslog_fmt(const char *fmt, int *types, int max_args) {
 
         while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0')
             p++;
-        if (!*p) break;
+        if (!*p)
+            break;
 
         if (*p == '*') {
-            if (n < max_args) types[n++] = CCCC_VAARG_INT;
+            if (n < max_args)
+                types[n++] = CCCC_VAARG_INT;
             p++;
         } else {
-            while (*p >= '0' && *p <= '9') p++;
+            while (*p >= '0' && *p <= '9')
+                p++;
         }
-        if (!*p) break;
+        if (!*p)
+            break;
 
         if (*p == '.') {
             p++;
             if (*p == '*') {
-                if (n < max_args) types[n++] = CCCC_VAARG_INT;
+                if (n < max_args)
+                    types[n++] = CCCC_VAARG_INT;
                 p++;
             } else {
-                while (*p >= '0' && *p <= '9') p++;
+                while (*p >= '0' && *p <= '9')
+                    p++;
             }
         }
-        if (!*p) break;
+        if (!*p)
+            break;
 
-        while (*p == 'h' || *p == 'l' || *p == 'j' || *p == 'z' ||
-               *p == 't' || *p == 'L')
+        while (*p == 'h' || *p == 'l' || *p == 'j' || *p == 'z' || *p == 't' ||
+               *p == 'L')
             p++;
-        if (!*p) break;
+        if (!*p)
+            break;
 
         if (n < max_args) {
             switch (*p) {
-            case 'f': case 'F': case 'e': case 'E':
-            case 'g': case 'G': case 'a': case 'A':
-                types[n++] = CCCC_VAARG_DOUBLE;
-                break;
-            default:
-                types[n++] = CCCC_VAARG_INT;
-                break;
+                case 'f':
+                case 'F':
+                case 'e':
+                case 'E':
+                case 'g':
+                case 'G':
+                case 'a':
+                case 'A':
+                    types[n++] = CCCC_VAARG_DOUBLE;
+                    break;
+                default:
+                    types[n++] = CCCC_VAARG_INT;
+                    break;
             }
         }
     }
     return n;
 }
 
-static long long wrap_vsyslog(long long priority, long long fmt, long long va_ptr) {
+static long long wrap_vsyslog(long long priority, long long fmt,
+                              long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
     int types[CCCC_VA_MAX_ARGS];
     int n = cccc_parse_syslog_fmt((const char *)fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)priority, (int64_t)fmt };
+    int64_t fixed[] = {(int64_t)priority, (int64_t)fmt};
     return cccc_ffi_call_variadic((void *)syslog, 2, fixed, n, types, vals);
 }
 
@@ -178,22 +219,23 @@ static long long wrap_vsyslog(long long priority, long long fmt, long long va_pt
 // ASAN_OPTIONS=suppressions=<file> merges with this list rather than
 // replacing it (confirmed empirically), so this doesn't hide anything from
 // someone actively debugging with a custom suppression file.
-#if defined(__APPLE__) && (defined(__SANITIZE_ADDRESS__) || \
-    (defined(__has_feature) && __has_feature(address_sanitizer)))
+#if defined(__APPLE__) &&                                                      \
+    (defined(__SANITIZE_ADDRESS__) ||                                          \
+     (defined(__has_feature) && __has_feature(address_sanitizer)))
 const char *__asan_default_suppressions(void) {
     return "interceptor_via_fun:_strfmon\n";
 }
 #endif
 
 void register_posix_lang_functions(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "iconv_open",  (void*)iconv_open,  2, 0);
-    cc_register_cfunc(vm, "iconv",       (void*)iconv,       5, 0);
-    cc_register_cfunc(vm, "iconv_close", (void*)iconv_close, 1, 0);
-    cc_register_cfunc(vm, "nl_langinfo", (void*)wrap_nl_langinfo, 1, 0);
-    cc_register_cfunc(vm, "nl_langinfo_l", (void*)wrap_nl_langinfo_l, 2, 0);
-    cc_register_cfunc(vm, "catopen",  (void*)catopen,  2, 0);
-    cc_register_cfunc(vm, "catgets",  (void*)catgets,  4, 0);
-    cc_register_cfunc(vm, "catclose", (void*)catclose, 1, 0);
+    cc_register_cfunc(vm, "iconv_open", (void *)iconv_open, 2, 0);
+    cc_register_cfunc(vm, "iconv", (void *)iconv, 5, 0);
+    cc_register_cfunc(vm, "iconv_close", (void *)iconv_close, 1, 0);
+    cc_register_cfunc(vm, "nl_langinfo", (void *)wrap_nl_langinfo, 1, 0);
+    cc_register_cfunc(vm, "nl_langinfo_l", (void *)wrap_nl_langinfo_l, 2, 0);
+    cc_register_cfunc(vm, "catopen", (void *)catopen, 2, 0);
+    cc_register_cfunc(vm, "catgets", (void *)catgets, 4, 0);
+    cc_register_cfunc(vm, "catclose", (void *)catclose, 1, 0);
 
     // syslog.h (#803) -- LOG_* constants are identical on both platforms so
     // the header needs no guards. syslog() is registered as a real variadic
@@ -203,11 +245,11 @@ void register_posix_lang_functions(VirtualMachine *vm) {
     // arguments the same way a direct printf() call does -- no format-string
     // parsing required here, unlike the vprintf-family wrappers, which only
     // exist because a captured va_list has already erased those static types.
-    cc_register_cfunc(vm, "openlog",    (void*)openlog,    3, 0);
-    cc_register_cfunc(vm, "closelog",   (void*)closelog,   0, 0);
-    cc_register_cfunc(vm, "setlogmask", (void*)setlogmask, 1, 0);
-    cc_register_variadic_cfunc(vm, "syslog", (void*)syslog, 2, 0);
-    cc_register_cfunc(vm, "vsyslog",    (void*)wrap_vsyslog, 3, 0);
+    cc_register_cfunc(vm, "openlog", (void *)openlog, 3, 0);
+    cc_register_cfunc(vm, "closelog", (void *)closelog, 0, 0);
+    cc_register_cfunc(vm, "setlogmask", (void *)setlogmask, 1, 0);
+    cc_register_variadic_cfunc(vm, "syslog", (void *)syslog, 2, 0);
+    cc_register_cfunc(vm, "vsyslog", (void *)wrap_vsyslog, 3, 0);
 
     // monetary.h (#808) -- strfmon is variadic with double arguments, but
     // (like syslog above) is a real, non-va_list-forwarding call site, so
@@ -218,12 +260,14 @@ void register_posix_lang_functions(VirtualMachine *vm) {
     // conversion correctly). On macOS, this host strfmon() has an internal
     // over-read that only ASan notices -- see the __asan_default_suppressions
     // hook above (#841).
-    cc_register_variadic_cfunc(vm, "strfmon", (void*)strfmon, 3, 0);
+    cc_register_variadic_cfunc(vm, "strfmon", (void *)strfmon, 3, 0);
     // strfmon_l (#820) -- locale_t sits before the format string, so this
     // is 4 fixed args, not 3 like strfmon above.
-    cc_register_variadic_cfunc(vm, "strfmon_l", (void*)strfmon_l, 4, 0);
+    cc_register_variadic_cfunc(vm, "strfmon_l", (void *)strfmon_l, 4, 0);
 }
 
 #else
-void register_posix_lang_functions(VirtualMachine *vm) { (void)vm; }
+void register_posix_lang_functions(VirtualMachine *vm) {
+    (void)vm;
+}
 #endif

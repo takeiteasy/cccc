@@ -30,11 +30,14 @@ int test_nodiscard_void_cast(void) {
 
 int main(void) {
     int v = get_value();
-    if (v != 42) return 1;
+    if (v != 42)
+        return 1;
 
-    if (test_nodiscard_func() != 42) return 2;
+    if (test_nodiscard_func() != 42)
+        return 2;
 
-    if (test_nodiscard_void_cast() != 42) return 3;
+    if (test_nodiscard_void_cast() != 42)
+        return 3;
 
     return 42;
 }

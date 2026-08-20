@@ -5,4 +5,6 @@
 // opposite order from test_cross_tu_global_offset.c, to prove offset
 // propagation is order-independent.
 extern int canon_g;
-int main(void) { return canon_g; }
+int main(void) {
+    return canon_g;
+}

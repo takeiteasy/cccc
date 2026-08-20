@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing --ffi-deny=strlen
 // Consolidated suite: FFI deny-list and fatal-error behaviour
-// Source tests: test_ffi_deny_zero, test_ffi_deny_dlfcn_zero, test_c4_ffi_rehydrate, test_ffi_fatal_error
+// Source tests: test_ffi_deny_zero, test_ffi_deny_dlfcn_zero,
+// test_c4_ffi_rehydrate, test_ffi_fatal_error
 
 #include <dlfcn.h>
 #include <string.h>
@@ -26,7 +27,7 @@ int test_ffi_deny_dlfcn_zero(void) {
     if (!fn)
         return 42; // dlsym correctly blocked by --ffi-deny
 
-    return 3; // dlsym should have been blocked
+    return 3;      // dlsym should have been blocked
 }
 
 // test_c4_ffi_rehydrate: deny policy survives a .c4 save/load round-trip

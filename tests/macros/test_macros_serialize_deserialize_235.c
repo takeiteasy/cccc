@@ -9,21 +9,21 @@ struct Inner {
 };
 
 struct Outer {
-    int x;
+    int          x;
     struct Inner inner;
-    double y;
+    double       y;
 };
 
 [[cccc::comptime]]
 void generate_outer_serdes(void) {
-    Type *ty = GetType("Outer");
+    Type *ty   = GetType("Outer");
 
-    Obj *pack = MakeFunction("outer_pack", GetType("int"));
+    Obj  *pack = MakeFunction("outer_pack", GetType("int"));
     FunctionAddParam(pack, "self", MakePointer(ty));
     FunctionAddParam(pack, "buf", MakePointer(GetType("void")));
     WithFn(pack) {
-        Node *self = MakeUnary(NK_DEREF, MakeParamRef(pack, "self"));
-        Node *buf = MakeParamRef(pack, "buf");
+        Node *self  = MakeUnary(NK_DEREF, MakeParamRef(pack, "self"));
+        Node *buf   = MakeParamRef(pack, "buf");
         Node *block = Serialize(ty, self, buf);
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
         FunctionSetBody(pack, block);
@@ -32,7 +32,8 @@ void generate_outer_serdes(void) {
     Obj *unpack = MakeFunction("outer_unpack", ty);
     FunctionAddParam(unpack, "buf", MakePointer(GetType("void")));
     WithFn(unpack) {
-        FunctionSetBody(unpack, MakeReturn(Deserialize(ty, MakeParamRef(unpack, "buf"))));
+        FunctionSetBody(
+            unpack, MakeReturn(Deserialize(ty, MakeParamRef(unpack, "buf"))));
     }
 }
 
@@ -40,7 +41,7 @@ generate_outer_serdes();
 
 int main(void) {
     struct Outer o = {1, {2, 3}, 4.5};
-    char buf[sizeof(struct Outer)];
+    char         buf[sizeof(struct Outer)];
 
     // Serialize writes each member individually and never touches struct
     // padding, so the deserialized copy's padding bytes would otherwise be

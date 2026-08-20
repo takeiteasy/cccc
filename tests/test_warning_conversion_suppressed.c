@@ -7,7 +7,7 @@ int narrow(int x) {
 }
 
 int main(void) {
-    long big = 100000L;
-    int small = big;
+    long big   = 100000L;
+    int  small = big;
     return narrow(small) != 100000 ? 42 : 0;
 }

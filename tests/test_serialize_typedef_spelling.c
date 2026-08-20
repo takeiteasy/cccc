@@ -16,6 +16,10 @@
 // printed as `unsigned long` before the fix.
 typedef unsigned long MyValue;
 
-MyValue box(MyValue t) { return t << 1; }
+MyValue box(MyValue t) {
+    return t << 1;
+}
 
-int main(void) { return (int)box(21); }
+int main(void) {
+    return (int)box(21);
+}

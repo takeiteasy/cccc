@@ -7,9 +7,9 @@
 // builtins directly inside the emit block where macro expansion is bypassed.
 
 typedef struct BuildTarget BuildTarget;
-typedef struct Builder Builder;
+typedef struct Builder     Builder;
 BuildTarget *__builtin_build_executable(Builder *ctx, const char *name);
-void         __builtin_build_add_source(BuildTarget *t, const char *path);
+void __builtin_build_add_source(BuildTarget *t, const char *path);
 
 #pragma cccc comptime begin
 #pragma cccc emit begin

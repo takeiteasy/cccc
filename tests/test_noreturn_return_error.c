@@ -2,4 +2,6 @@
 _Noreturn void test(void) {
     return;
 }
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

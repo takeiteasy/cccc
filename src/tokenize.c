@@ -16,7 +16,8 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
- This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
+ This file was original part of chibicc by Rui Ueyama (MIT)
+ https://github.com/rui314/chibicc
 */
 
 #include "./internal.h"
@@ -34,13 +35,14 @@ void error(char *fmt, ...) {
 
 typedef struct {
     const char *name;
-    uint64_t mask;
-    bool is_group;
+    uint64_t    mask;
+    bool        is_group;
 } WarningInfo;
 
 static const WarningInfo warning_infos[] = {
     {"unused", CCCC_WARN_UNUSED, false},
-    {"implicit-function-declaration", CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION, false},
+    {"implicit-function-declaration", CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION,
+     false},
     {"implicit-int", CCCC_WARN_IMPLICIT_INT, false},
     {"return-type", CCCC_WARN_RETURN_TYPE, false},
     {"shadow", CCCC_WARN_SHADOW, false},
@@ -71,42 +73,42 @@ static const WarningInfo warning_infos[] = {
     {"static-array-size", CCCC_WARN_STATIC_ARRAY_SIZE, false},
     {"strict-prototypes", CCCC_WARN_STRICT_PROTOTYPES, false},
     {"discarded-qualifiers", CCCC_WARN_DISCARDED_QUALIFIERS, false},
-    {"null-dereference",     CCCC_WARN_NULL_DEREFERENCE,    false},
-    {"restrict",             CCCC_WARN_RESTRICT,             false},
-    {"array-bounds",         CCCC_WARN_ARRAY_BOUNDS,         false},
-    {"stringop-overflow",    CCCC_WARN_STRINGOP_OVERFLOW,    false},
-    {"stringop-truncation",  CCCC_WARN_STRINGOP_TRUNCATION,  false},
-    {"duplicated-branches",  CCCC_WARN_DUPLICATED_BRANCHES,  false},
-    {"duplicated-cond",      CCCC_WARN_DUPLICATED_COND,      false},
-    {"unused-value",         CCCC_WARN_UNUSED_VALUE,         false},
-    {"multichar",            CCCC_WARN_MULTICHAR,            false},
-    {"main",                 CCCC_WARN_MAIN,                 false},
-    {"switch-default",       CCCC_WARN_SWITCH_DEFAULT,       false},
-    {"switch-bool",          CCCC_WARN_SWITCH_BOOL,          false},
-    {"float-equal",              CCCC_WARN_FLOAT_EQUAL,              false},
-    {"shift-negative-value",     CCCC_WARN_SHIFT_NEGATIVE_VALUE,     false},
-    {"shift-overflow",           CCCC_WARN_SHIFT_OVERFLOW,           false},
-    {"logical-op",               CCCC_WARN_LOGICAL_OP,               false},
-    {"tautological-compare",     CCCC_WARN_TAUTOLOGICAL_COMPARE,     false},
+    {"null-dereference", CCCC_WARN_NULL_DEREFERENCE, false},
+    {"restrict", CCCC_WARN_RESTRICT, false},
+    {"array-bounds", CCCC_WARN_ARRAY_BOUNDS, false},
+    {"stringop-overflow", CCCC_WARN_STRINGOP_OVERFLOW, false},
+    {"stringop-truncation", CCCC_WARN_STRINGOP_TRUNCATION, false},
+    {"duplicated-branches", CCCC_WARN_DUPLICATED_BRANCHES, false},
+    {"duplicated-cond", CCCC_WARN_DUPLICATED_COND, false},
+    {"unused-value", CCCC_WARN_UNUSED_VALUE, false},
+    {"multichar", CCCC_WARN_MULTICHAR, false},
+    {"main", CCCC_WARN_MAIN, false},
+    {"switch-default", CCCC_WARN_SWITCH_DEFAULT, false},
+    {"switch-bool", CCCC_WARN_SWITCH_BOOL, false},
+    {"float-equal", CCCC_WARN_FLOAT_EQUAL, false},
+    {"shift-negative-value", CCCC_WARN_SHIFT_NEGATIVE_VALUE, false},
+    {"shift-overflow", CCCC_WARN_SHIFT_OVERFLOW, false},
+    {"logical-op", CCCC_WARN_LOGICAL_OP, false},
+    {"tautological-compare", CCCC_WARN_TAUTOLOGICAL_COMPARE, false},
     {"sizeof-pointer-memaccess", CCCC_WARN_SIZEOF_POINTER_MEMACCESS, false},
-    {"switch",                  CCCC_WARN_SWITCH,                  false},
-    {"switch-enum",             CCCC_WARN_SWITCH_ENUM,             false},
-    {"enum-compare",            CCCC_WARN_ENUM_COMPARE,            false},
-    {"old-style-definition",    CCCC_WARN_OLD_STYLE_DEFINITION,    false},
+    {"switch", CCCC_WARN_SWITCH, false},
+    {"switch-enum", CCCC_WARN_SWITCH_ENUM, false},
+    {"enum-compare", CCCC_WARN_ENUM_COMPARE, false},
+    {"old-style-definition", CCCC_WARN_OLD_STYLE_DEFINITION, false},
     {"incompatible-pointer-types", CCCC_WARN_INCOMPATIBLE_POINTER_TYPES, false},
-    {"cast-qual",                  CCCC_WARN_CAST_QUAL,                  false},
-    {"cast-align",                 CCCC_WARN_CAST_ALIGN,                 false},
-    {"missing-prototypes",         CCCC_WARN_MISSING_PROTOTYPES,         false},
-    {"missing-declarations",       CCCC_WARN_MISSING_DECLARATIONS,       false},
-    {"redundant-decls",            CCCC_WARN_REDUNDANT_DECLS,            false},
-    {"override-init",              CCCC_WARN_OVERRIDE_INIT,              false},
-    {"unused-macros",              CCCC_WARN_UNUSED_MACROS,              false},
-    {"nonnull",                    CCCC_WARN_NONNULL,                    false},
-    {"maybe-nonnull",              CCCC_WARN_MAYBE_NONNULL,              false},
-    {"sentinel",                   CCCC_WARN_SENTINEL,                   false},
-    {"designated-init",            CCCC_WARN_DESIGNATED_INIT,            false},
-    {"int-conversion",             CCCC_WARN_INT_CONVERSION,             false},
-    {"native-name-collision",      CCCC_WARN_NATIVE_NAME_COLLISION,      false},
+    {"cast-qual", CCCC_WARN_CAST_QUAL, false},
+    {"cast-align", CCCC_WARN_CAST_ALIGN, false},
+    {"missing-prototypes", CCCC_WARN_MISSING_PROTOTYPES, false},
+    {"missing-declarations", CCCC_WARN_MISSING_DECLARATIONS, false},
+    {"redundant-decls", CCCC_WARN_REDUNDANT_DECLS, false},
+    {"override-init", CCCC_WARN_OVERRIDE_INIT, false},
+    {"unused-macros", CCCC_WARN_UNUSED_MACROS, false},
+    {"nonnull", CCCC_WARN_NONNULL, false},
+    {"maybe-nonnull", CCCC_WARN_MAYBE_NONNULL, false},
+    {"sentinel", CCCC_WARN_SENTINEL, false},
+    {"designated-init", CCCC_WARN_DESIGNATED_INIT, false},
+    {"int-conversion", CCCC_WARN_INT_CONVERSION, false},
+    {"native-name-collision", CCCC_WARN_NATIVE_NAME_COLLISION, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };
@@ -139,23 +141,33 @@ bool cccc_warning_is_group_name(const char *name) {
 static void print_escaped_string_fp(FILE *f, const char *s) {
     for (; *s; s++) {
         switch (*s) {
-        case '"':  fputs("\\\"", f); break;
-        case '\\': fputs("\\\\", f); break;
-        case '\n': fputs("\\n",  f); break;
-        case '\r': fputs("\\r",  f); break;
-        case '\t': fputs("\\t",  f); break;
-        default:
-            if ((unsigned char)*s < 0x20)
-                fprintf(f, "\\u%04x", (unsigned char)*s);
-            else
-                fputc(*s, f);
+            case '"':
+                fputs("\\\"", f);
+                break;
+            case '\\':
+                fputs("\\\\", f);
+                break;
+            case '\n':
+                fputs("\\n", f);
+                break;
+            case '\r':
+                fputs("\\r", f);
+                break;
+            case '\t':
+                fputs("\\t", f);
+                break;
+            default:
+                if ((unsigned char)*s < 0x20)
+                    fprintf(f, "\\u%04x", (unsigned char)*s);
+                else
+                    fputc(*s, f);
         }
     }
 }
 
 //               ^ error: <message here>
-static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int line_no,
-                           char *loc, const char *kind,
+static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
+                           int line_no, char *loc, const char *kind,
                            const char *warn_name, char *fmt, va_list ap) {
     // Guard: loc must be within the file's contents buffer.
     // Synthesized tokens (e.g. incremental $@k placeholders) may have their
@@ -178,14 +190,15 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int 
 
     // JSON diagnostic mode: emit one JSON object per diagnostic, no buffering.
     if (vm && vm->compiler.diagnostic_json) {
-        char plain_msg[4096];
+        char    plain_msg[4096];
         va_list ap2;
         va_copy(ap2, ap);
         vsnprintf(plain_msg, sizeof(plain_msg), fmt, ap2);
         va_end(ap2);
         fprintf(stderr, "{\"severity\":\"%s\",\"file\":\"", kind);
         print_escaped_string_fp(stderr, filename);
-        fprintf(stderr, "\",\"line\":%d,\"column\":%d,\"message\":\"", line_no, col_no);
+        fprintf(stderr, "\",\"line\":%d,\"column\":%d,\"message\":\"", line_no,
+                col_no);
         print_escaped_string_fp(stderr, plain_msg);
         if (warn_name)
             fprintf(stderr, "\",\"option\":\"-W%s\"}\n", warn_name);
@@ -198,7 +211,8 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int 
     // If error handling or error collection is enabled, save error to buffer
     if (vm && (vm->error_jmp_buf || vm->collect_errors)) {
         // Build error message into a buffer
-        char *msg = arena_alloc(&vm->compiler.parser_arena, 4096);  // Allocate space for error message
+        char *msg = arena_alloc(&vm->compiler.parser_arena,
+                                4096); // Allocate space for error message
         if (!msg) {
             fprintf(stderr, "Failed to allocate error message buffer\n");
             exit(1);
@@ -207,13 +221,17 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int 
 
         // Format the diagnostic message
         int pos = snprintf(msg, 4096, "%s:%d: ", filename, line_no);
-        if (pos > 4096) pos = 4096;
-        pos += snprintf(msg + pos, 4096 - pos, "%.*s\n", (int)(end - line), line);
-        if (pos > 4096) pos = 4096;
+        if (pos > 4096)
+            pos = 4096;
+        pos +=
+            snprintf(msg + pos, 4096 - pos, "%.*s\n", (int)(end - line), line);
+        if (pos > 4096)
+            pos = 4096;
 
-        int indent = strlen(filename) + snprintf(NULL, 0, ":%d: ", line_no);
+        int indent     = strlen(filename) + snprintf(NULL, 0, ":%d: ", line_no);
         int col_offset = display_width(vm, line, loc - line) + indent;
-        pos += snprintf(msg + pos, 4096 - pos, "%*s^ %s: ", col_offset, "", kind);
+        pos +=
+            snprintf(msg + pos, 4096 - pos, "%*s^ %s: ", col_offset, "", kind);
 
         va_list ap_copy;
         va_copy(ap_copy, ap);
@@ -221,20 +239,22 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int 
         va_end(ap_copy);
         if (written > 0) {
             pos += written;
-            if (pos > 4096) pos = 4096;
+            if (pos > 4096)
+                pos = 4096;
         }
         if (warn_name && pos < 4096) {
             int suffix = snprintf(msg + pos, 4096 - pos, " [-W%s]", warn_name);
             if (suffix > 0) {
                 pos += suffix;
-                if (pos > 4096) pos = 4096;
+                if (pos > 4096)
+                    pos = 4096;
             }
         }
         if (pos < 4096)
             snprintf(msg + pos, 4096 - pos, "\n");
 
         vm->error_message = msg;
-        return;  // Don't print to stderr or exit
+        return; // Don't print to stderr or exit
     }
 
     // Normal mode: print to stderr
@@ -252,8 +272,8 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input, int 
     fprintf(stderr, "\n");
 }
 
-static void verror_at(VirtualMachine *vm, char *filename, char *input, int line_no,
-                       char *loc, char *fmt, va_list ap) {
+static void verror_at(VirtualMachine *vm, char *filename, char *input,
+                      int line_no, char *loc, char *fmt, va_list ap) {
     vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, fmt, ap);
 }
 
@@ -290,35 +310,38 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
             line_no++;
 
     // Calculate column number
-    int col_no = 1;
+    int   col_no     = 1;
     char *line_start = loc;
-    while (line_start > vm->compiler.current_file->contents && line_start[-1] != '\n') {
+    while (line_start > vm->compiler.current_file->contents &&
+           line_start[-1] != '\n') {
         line_start--;
         col_no++;
     }
 
     va_list ap;
     va_start(ap, fmt);
-    verror_at(vm, vm->compiler.current_file->name, vm->compiler.current_file->contents, line_no, loc, fmt, ap);
+    verror_at(vm, vm->compiler.current_file->name,
+              vm->compiler.current_file->contents, line_no, loc, fmt, ap);
     va_end(ap);
 
     // Collect error if error collection is enabled
     if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message = vm->error_message;
-        err->filename = vm->compiler.current_file->name;
-        err->line_no = line_no;
-        err->col_no = col_no;
-        err->severity = 0; // error
+        CompileError *err =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        err->message   = vm->error_message;
+        err->filename  = vm->compiler.current_file->name;
+        err->line_no   = line_no;
+        err->col_no    = col_no;
+        err->severity  = 0; // error
         err->warn_name = NULL;
-        err->next = NULL;
+        err->next      = NULL;
 
         // Append to list
         if (!vm->errors) {
             vm->errors = vm->errors_tail = err;
         } else {
             vm->errors_tail->next = err;
-            vm->errors_tail = err;
+            vm->errors_tail       = err;
         }
         vm->error_count++;
         vm->error_message = NULL; // Clear so it's not reused
@@ -332,31 +355,33 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
 }
 
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
-    int line_no = tok_line_no(tok);
-    int col_no = tok_col_no(tok);
+    int     line_no = tok_line_no(tok);
+    int     col_no  = tok_col_no(tok);
 
     va_list ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt, ap);
+    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt,
+              ap);
     va_end(ap);
 
     // Collect error if error collection is enabled
     if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message = vm->error_message;
-        err->filename = tok->file->name;
-        err->line_no = line_no;
-        err->col_no = col_no;
-        err->severity = 0; // error
+        CompileError *err =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        err->message   = vm->error_message;
+        err->filename  = tok->file->name;
+        err->line_no   = line_no;
+        err->col_no    = col_no;
+        err->severity  = 0; // error
         err->warn_name = NULL;
-        err->next = NULL;
+        err->next      = NULL;
 
         // Append to list
         if (!vm->errors) {
             vm->errors = vm->errors_tail = err;
         } else {
             vm->errors_tail->next = err;
-            vm->errors_tail = err;
+            vm->errors_tail       = err;
         }
         vm->error_count++;
         vm->error_message = NULL; // Clear so it's not reused
@@ -370,33 +395,36 @@ void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
 }
 
 // Error reporting with recovery support (Level 2)
-// Returns true if parsing should continue with recovery, false if max errors hit
+// Returns true if parsing should continue with recovery, false if max errors
+// hit
 bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
-    int line_no = tok_line_no(tok);
-    int col_no = tok_col_no(tok);
+    int     line_no = tok_line_no(tok);
+    int     col_no  = tok_col_no(tok);
 
     va_list ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt, ap);
+    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt,
+              ap);
     va_end(ap);
 
     // Collect error if error collection is enabled
     if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message = vm->error_message;
-        err->filename = tok->file->name;
-        err->line_no = line_no;
-        err->col_no = col_no;
-        err->severity = 0; // error
+        CompileError *err =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        err->message   = vm->error_message;
+        err->filename  = tok->file->name;
+        err->line_no   = line_no;
+        err->col_no    = col_no;
+        err->severity  = 0; // error
         err->warn_name = NULL;
-        err->next = NULL;
+        err->next      = NULL;
 
         // Append to list
         if (!vm->errors) {
             vm->errors = vm->errors_tail = err;
         } else {
             vm->errors_tail->next = err;
-            vm->errors_tail = err;
+            vm->errors_tail       = err;
         }
         vm->error_count++;
         vm->error_message = NULL; // Clear so it's not reused
@@ -410,7 +438,7 @@ bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
             return false;
         }
 
-        return true;  // Continue with recovery
+        return true; // Continue with recovery
     }
 
     // If error collection not enabled, use old behavior
@@ -420,38 +448,40 @@ bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
     exit(1);
 }
 
-void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt, ...) {
+void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
+              ...) {
     uint64_t mask = (uint64_t)category;
 
     // Use per-token effective state if the preprocessor stamped it; otherwise
     // fall back to the global compiler warning state.
     uint64_t eff_warnings = (tok && tok->diag_warnings)
-        ? (tok->diag_warnings & ~(1ULL << 63))
-        : (vm ? vm->compiler.warnings : 0);
+                                ? (tok->diag_warnings & ~(1ULL << 63))
+                                : (vm ? vm->compiler.warnings : 0);
     uint64_t eff_werror   = (tok && tok->diag_werror)
-        ? (tok->diag_werror & ~(1ULL << 63))
-        : (vm ? vm->compiler.warning_errors : 0);
+                                ? (tok->diag_werror & ~(1ULL << 63))
+                                : (vm ? vm->compiler.warning_errors : 0);
 
     if (!vm || !(eff_warnings & mask))
         return;
 
-    int line_no = tok_line_no(tok);
-    int col_no = tok_col_no(tok);
+    int         line_no   = tok_line_no(tok);
+    int         col_no    = tok_col_no(tok);
 
     const char *warn_name = cccc_warning_name(category);
-    bool is_error = (vm->warnings_as_errors &&
-                     !(vm->compiler.warning_no_errors & mask)) ||
-                    (eff_werror & mask);
+    bool        is_error =
+        (vm->warnings_as_errors && !(vm->compiler.warning_no_errors & mask)) ||
+        (eff_werror & mask);
 
     va_list ap;
     va_start(ap, fmt);
-    vdiagnostic_at(vm, tok->file->name, tok->file->contents, line_no,
-                   tok->loc, is_error ? "error" : "warning", warn_name, fmt, ap);
+    vdiagnostic_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
+                   is_error ? "error" : "warning", warn_name, fmt, ap);
     va_end(ap);
 
-    // If error_jmp_buf is set but collect_errors is false, print the warning now
-    // (verror_at will have stored it in error_message without printing)
-    if (vm->error_jmp_buf && !vm->collect_errors && !is_error && vm->error_message) {
+    // If error_jmp_buf is set but collect_errors is false, print the warning
+    // now (verror_at will have stored it in error_message without printing)
+    if (vm->error_jmp_buf && !vm->collect_errors && !is_error &&
+        vm->error_message) {
         fprintf(stderr, "%s", vm->error_message);
         vm->error_message = NULL;
     }
@@ -459,23 +489,24 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt, .
     // If this warning is treated as an error, collect it as an error and abort.
     if (is_error) {
         if (vm->error_message) {
-            CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-            err->message = vm->error_message;
-            err->filename = tok->file->name;
-            err->line_no = line_no;
-            err->col_no = col_no;
-            err->severity = 0; // error (not warning)
+            CompileError *err =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+            err->message   = vm->error_message;
+            err->filename  = tok->file->name;
+            err->line_no   = line_no;
+            err->col_no    = col_no;
+            err->severity  = 0; // error (not warning)
             err->warn_name = warn_name;
-            err->next = NULL;
+            err->next      = NULL;
 
             // Append to list
             if (!vm->errors) {
                 vm->errors = vm->errors_tail = err;
             } else {
                 vm->errors_tail->next = err;
-                vm->errors_tail = err;
+                vm->errors_tail       = err;
             }
-            vm->error_count++;  // Count as error
+            vm->error_count++; // Count as error
             vm->error_message = NULL;
         }
 
@@ -488,28 +519,30 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt, .
 
     // Collect warning if error collection is enabled
     if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err = arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message = vm->error_message;
-        err->filename = tok->file->name;
-        err->line_no = line_no;
-        err->col_no = col_no;
-        err->severity = 1; // warning
+        CompileError *err =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        err->message   = vm->error_message;
+        err->filename  = tok->file->name;
+        err->line_no   = line_no;
+        err->col_no    = col_no;
+        err->severity  = 1; // warning
         err->warn_name = warn_name;
-        err->next = NULL;
+        err->next      = NULL;
 
         // Append to list
         if (!vm->errors) {
             vm->errors = vm->errors_tail = err;
         } else {
             vm->errors_tail->next = err;
-            vm->errors_tail = err;
+            vm->errors_tail       = err;
         }
         vm->warning_count++;
         vm->error_message = NULL; // Clear so it's not reused
     }
 }
 
-void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...) {
+void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
+             ...) {
     uint64_t mask = (uint64_t)category;
 
     if (!vm || !(vm->compiler.warnings & mask))
@@ -520,7 +553,7 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
         if (*p == '\n')
             line_no++;
 
-    int col_no = 1;
+    int   col_no     = 1;
     char *line_start = loc;
     while (line_start > vm->compiler.current_file->contents &&
            line_start[-1] != '\n') {
@@ -529,9 +562,9 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
     }
 
     const char *warn_name = cccc_warning_name(category);
-    bool is_error = (vm->warnings_as_errors &&
-                     !(vm->compiler.warning_no_errors & mask)) ||
-                    (vm->compiler.warning_errors & mask);
+    bool        is_error =
+        (vm->warnings_as_errors && !(vm->compiler.warning_no_errors & mask)) ||
+        (vm->compiler.warning_errors & mask);
 
     va_list ap;
     va_start(ap, fmt);
@@ -550,19 +583,19 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
         if (vm->error_message) {
             CompileError *err =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-            err->message = vm->error_message;
-            err->filename = vm->compiler.current_file->name;
-            err->line_no = line_no;
-            err->col_no = col_no;
-            err->severity = 0;
+            err->message   = vm->error_message;
+            err->filename  = vm->compiler.current_file->name;
+            err->line_no   = line_no;
+            err->col_no    = col_no;
+            err->severity  = 0;
             err->warn_name = warn_name;
-            err->next = NULL;
+            err->next      = NULL;
 
             if (!vm->errors) {
                 vm->errors = vm->errors_tail = err;
             } else {
                 vm->errors_tail->next = err;
-                vm->errors_tail = err;
+                vm->errors_tail       = err;
             }
             vm->error_count++;
             vm->error_message = NULL;
@@ -576,19 +609,19 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
     if (vm->collect_errors && vm->error_message) {
         CompileError *err =
             arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message = vm->error_message;
-        err->filename = vm->compiler.current_file->name;
-        err->line_no = line_no;
-        err->col_no = col_no;
-        err->severity = 1;
+        err->message   = vm->error_message;
+        err->filename  = vm->compiler.current_file->name;
+        err->line_no   = line_no;
+        err->col_no    = col_no;
+        err->severity  = 1;
         err->warn_name = warn_name;
-        err->next = NULL;
+        err->next      = NULL;
 
         if (!vm->errors) {
             vm->errors = vm->errors_tail = err;
         } else {
             vm->errors_tail->next = err;
-            vm->errors_tail = err;
+            vm->errors_tail       = err;
         }
         vm->warning_count++;
         vm->error_message = NULL;
@@ -598,21 +631,28 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...
 // Returns the canonical single/double-char spelling for a C digraph, or NULL.
 // Digraphs (C23 §6.4.6): %:%:→## <:→[ :>→] <%→{ %>→} %:→#
 static const char *digraph_canonical(char *loc, int len) {
-    if (len == 4 && memcmp(loc, "%:%:", 4) == 0) return "##";
+    if (len == 4 && memcmp(loc, "%:%:", 4) == 0)
+        return "##";
     if (len == 2) {
-        if (memcmp(loc, "<:", 2) == 0) return "[";
-        if (memcmp(loc, ":>", 2) == 0) return "]";
-        if (memcmp(loc, "<%", 2) == 0) return "{";
-        if (memcmp(loc, "%>", 2) == 0) return "}";
-        if (memcmp(loc, "%:", 2) == 0) return "#";
+        if (memcmp(loc, "<:", 2) == 0)
+            return "[";
+        if (memcmp(loc, ":>", 2) == 0)
+            return "]";
+        if (memcmp(loc, "<%", 2) == 0)
+            return "{";
+        if (memcmp(loc, "%>", 2) == 0)
+            return "}";
+        if (memcmp(loc, "%:", 2) == 0)
+            return "#";
     }
     return NULL;
 }
 
 // Consumes the current token if it matches `op`.
 bool equal(Token *tok, char *op) {
-    if (!tok) return false;
-    int oplen = strlen(op);
+    if (!tok)
+        return false;
+    int         oplen = strlen(op);
     const char *canon = digraph_canonical(tok->loc, tok->len);
     if (canon)
         return oplen == (int)strlen(canon) && memcmp(canon, op, oplen) == 0;
@@ -642,16 +682,17 @@ bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str) {
 }
 
 // Create a new token.
-static Token *new_token(VirtualMachine *vm, TokenKind kind, char *start, char *end) {
+static Token *new_token(VirtualMachine *vm, TokenKind kind, char *start,
+                        char *end) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
-    tok->kind = kind;
-    tok->loc = start;
-    tok->len = end - start;
-    tok->file = vm->compiler.current_file;
-    tok->filename = vm->compiler.current_file->display_name;
-    tok->at_bol = vm->compiler.at_bol;
-    tok->has_space = vm->compiler.has_space;
+    tok->kind           = kind;
+    tok->loc            = start;
+    tok->len            = end - start;
+    tok->file           = vm->compiler.current_file;
+    tok->filename       = vm->compiler.current_file->display_name;
+    tok->at_bol         = vm->compiler.at_bol;
+    tok->has_space      = vm->compiler.has_space;
 
     vm->compiler.at_bol = vm->compiler.has_space = false;
     return tok;
@@ -664,7 +705,7 @@ static bool startswith(VirtualMachine *vm, char *p, char *q) {
 // Read an identifier and returns the length of it.
 // If p does not point to a valid identifier, 0 is returned.
 static int read_ident(VirtualMachine *vm, char *start) {
-    char *p = start;
+    char    *p = start;
     uint32_t c = decode_utf8(vm, &p, p);
     if (!is_ident1(c))
         return 0;
@@ -690,10 +731,9 @@ static int from_hex(char c) {
 static int read_punct(VirtualMachine *vm, char *p) {
     static char *kw[] = {
         // Digraphs (C23 §6.4.6) — must precede any operator they overlap with
-        "%:%:", "<:", ":>", "<%", "%>", "%:",
-        "<<=", ">>=", "...", "==", "!=", "<=", ">=", "->", "+=",
-        "-=", "*=", "/=", "++", "--", "%=", "&=", "|=", "^=", "&&",
-        "||", "<<", ">>", "##",
+        "%:%:", "<:", ":>", "<%", "%>", "%:", "<<=", ">>=", "...", "==",
+        "!=",   "<=", ">=", "->", "+=", "-=", "*=",  "/=",  "++",  "--",
+        "%=",   "&=", "|=", "^=", "&&", "||", "<<",  ">>",  "##",
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -703,22 +743,72 @@ static int read_punct(VirtualMachine *vm, char *p) {
     return ispunct(*p) ? 1 : 0;
 }
 
-static HashMap keyword_map;
+static HashMap        keyword_map;
 static pthread_once_t keyword_map_once = PTHREAD_ONCE_INIT;
 
 static void init_keyword_map(void) {
     static char *kw[] = {
-        "return", "if", "else", "for", "while", "int", "sizeof", "char",
-        "struct", "union", "short", "long", "void", "typedef", "_Bool",
-        "enum", "static", "goto", "break", "continue", "switch", "case",
-        "default", "extern", "_Alignof", "_Alignas", "do", "signed",
-        "unsigned", "const", "volatile", "auto", "register", "restrict",
-        "__restrict", "__restrict__", "_Noreturn", "float", "double",
-        "typeof", "typeof_unqual", "asm", "_Thread_local", "__thread", "_Atomic",
-        "__attribute__", "_Static_assert", "static_assert", "constexpr",
-        "__block", "_Complex", "_Imaginary",  // Apple Blocks extension and C99 complex
-        "bool", "true", "false", "nullptr", "thread_local",  // C23 keywords
-        "_BitInt", "_Decimal32", "_Decimal64", "_Decimal128",  // C23 types
+        "return",
+        "if",
+        "else",
+        "for",
+        "while",
+        "int",
+        "sizeof",
+        "char",
+        "struct",
+        "union",
+        "short",
+        "long",
+        "void",
+        "typedef",
+        "_Bool",
+        "enum",
+        "static",
+        "goto",
+        "break",
+        "continue",
+        "switch",
+        "case",
+        "default",
+        "extern",
+        "_Alignof",
+        "_Alignas",
+        "do",
+        "signed",
+        "unsigned",
+        "const",
+        "volatile",
+        "auto",
+        "register",
+        "restrict",
+        "__restrict",
+        "__restrict__",
+        "_Noreturn",
+        "float",
+        "double",
+        "typeof",
+        "typeof_unqual",
+        "asm",
+        "_Thread_local",
+        "__thread",
+        "_Atomic",
+        "__attribute__",
+        "_Static_assert",
+        "static_assert",
+        "constexpr",
+        "__block",
+        "_Complex",
+        "_Imaginary", // Apple Blocks extension and C99 complex
+        "bool",
+        "true",
+        "false",
+        "nullptr",
+        "thread_local", // C23 keywords
+        "_BitInt",
+        "_Decimal32",
+        "_Decimal64",
+        "_Decimal128", // C23 types
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -770,16 +860,25 @@ static int read_escaped_char(VirtualMachine *vm, char **new_pos, char *p) {
     // For more info, read "Reflections on Trusting Trust" by Ken Thompson.
     // https://github.com/rui314/chibicc/wiki/thompson1984.pdf
     switch (*p) {
-        case 'a': return '\a';
-        case 'b': return '\b';
-        case 't': return '\t';
-        case 'n': return '\n';
-        case 'v': return '\v';
-        case 'f': return '\f';
-        case 'r': return '\r';
+        case 'a':
+            return '\a';
+        case 'b':
+            return '\b';
+        case 't':
+            return '\t';
+        case 'n':
+            return '\n';
+        case 'v':
+            return '\v';
+        case 'f':
+            return '\f';
+        case 'r':
+            return '\r';
             // [GNU] \e for the ASCII escape character is a GNU C extension.
-        case 'e': return 27;
-        default: return *p;
+        case 'e':
+            return 27;
+        default:
+            return *p;
     }
 }
 
@@ -795,7 +894,8 @@ static char *string_literal_end(VirtualMachine *vm, char *p) {
     return p;
 }
 
-static Token *read_string_literal(VirtualMachine *vm, char *start, char *quote) {
+static Token *read_string_literal(VirtualMachine *vm, char *start,
+                                  char *quote) {
     char *end = string_literal_end(vm, quote + 1);
     char *buf = arena_alloc(&vm->compiler.parser_arena, end - quote);
     memset(buf, 0, end - quote);
@@ -808,11 +908,11 @@ static Token *read_string_literal(VirtualMachine *vm, char *start, char *quote) 
             buf[len++] = *p++;
     }
 
-    Token *tok = new_token(vm, TK_STR, start, end + 1);
-    Type *elem = copy_type(vm, ty_char);
+    Token *tok     = new_token(vm, TK_STR, start, end + 1);
+    Type  *elem    = copy_type(vm, ty_char);
     elem->is_const = true;
-    tok->ty = array_of(vm, elem, len + 1);
-    tok->str = buf;
+    tok->ty        = array_of(vm, elem, len + 1);
+    tok->str       = buf;
     return tok;
 }
 
@@ -824,34 +924,34 @@ static Token *read_string_literal(VirtualMachine *vm, char *start, char *quote) 
 static Token *read_backtick_fragment(VirtualMachine *vm, char *token_start,
                                      char *contents, char **new_pos,
                                      bool *has_splice) {
-    char *p = contents;
+    char *p   = contents;
     char *buf = arena_alloc(&vm->compiler.parser_arena, strlen(contents) + 1);
-    int len = 0;
+    int   len = 0;
 
     for (;;) {
         if (*p == '\0')
             error_at(vm, token_start, "unterminated backtick quasi-quote");
 
         if (p[0] == '\\' && p[1] == '`') {
-            buf[len++] = '`';
-            p += 2;
+            buf[len++]  = '`';
+            p          += 2;
             continue;
         }
 
         if (p[0] == '$' && p[1] == '{') {
-            Token *tok = new_token(vm, TK_BACKTICK_STR, token_start, p);
-            buf[len] = '\0';
-            tok->str = buf;
-            *new_pos = p + 2;
+            Token *tok  = new_token(vm, TK_BACKTICK_STR, token_start, p);
+            buf[len]    = '\0';
+            tok->str    = buf;
+            *new_pos    = p + 2;
             *has_splice = true;
             return tok;
         }
 
         if (*p == '`') {
-            Token *tok = new_token(vm, TK_BACKTICK_STR, token_start, p + 1);
-            buf[len] = '\0';
-            tok->str = buf;
-            *new_pos = p + 1;
+            Token *tok  = new_token(vm, TK_BACKTICK_STR, token_start, p + 1);
+            buf[len]    = '\0';
+            tok->str    = buf;
+            *new_pos    = p + 1;
             *has_splice = false;
             return tok;
         }
@@ -867,8 +967,9 @@ static Token *read_backtick_fragment(VirtualMachine *vm, char *token_start,
 // equal to or larger than that are encoded in 4 bytes. Each 2 bytes
 // in the 4 byte sequence is called "surrogate", and a 4 byte sequence
 // is called a "surrogate pair".
-static Token *read_utf16_string_literal(VirtualMachine *vm, char *start, char *quote) {
-    char *end = string_literal_end(vm, quote + 1);
+static Token *read_utf16_string_literal(VirtualMachine *vm, char *start,
+                                        char *quote) {
+    char     *end = string_literal_end(vm, quote + 1);
     uint16_t *buf = arena_alloc(&vm->compiler.parser_arena, 2 * (end - start));
     memset(buf, 0, 2 * (end - start));
     int len = 0;
@@ -885,15 +986,15 @@ static Token *read_utf16_string_literal(VirtualMachine *vm, char *start, char *q
             buf[len++] = c;
         } else {
             // Encode a code point in 4 bytes.
-            c -= 0x10000;
-            buf[len++] = 0xd800 + ((c >> 10) & 0x3ff);
-            buf[len++] = 0xdc00 + (c & 0x3ff);
+            c          -= 0x10000;
+            buf[len++]  = 0xd800 + ((c >> 10) & 0x3ff);
+            buf[len++]  = 0xdc00 + (c & 0x3ff);
         }
     }
 
     Token *tok = new_token(vm, TK_STR, start, end + 1);
-    tok->ty = array_of(vm, ty_ushort, len + 1);
-    tok->str = (char *)buf;
+    tok->ty    = array_of(vm, ty_ushort, len + 1);
+    tok->str   = (char *)buf;
     return tok;
 }
 
@@ -901,8 +1002,9 @@ static Token *read_utf16_string_literal(VirtualMachine *vm, char *start, char *q
 //
 // UTF-32 is a fixed-width encoding for Unicode. Each code point is
 // encoded in 4 bytes.
-static Token *read_utf32_string_literal(VirtualMachine *vm, char *start, char *quote, Type *ty) {
-    char *end = string_literal_end(vm, quote + 1);
+static Token *read_utf32_string_literal(VirtualMachine *vm, char *start,
+                                        char *quote, Type *ty) {
+    char     *end = string_literal_end(vm, quote + 1);
     uint32_t *buf = arena_alloc(&vm->compiler.parser_arena, 4 * (end - quote));
     memset(buf, 0, 4 * (end - quote));
     int len = 0;
@@ -915,12 +1017,13 @@ static Token *read_utf32_string_literal(VirtualMachine *vm, char *start, char *q
     }
 
     Token *tok = new_token(vm, TK_STR, start, end + 1);
-    tok->ty = array_of(vm, ty, len + 1);
-    tok->str = (char *)buf;
+    tok->ty    = array_of(vm, ty, len + 1);
+    tok->str   = (char *)buf;
     return tok;
 }
 
-static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote, Type *ty) {
+static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote,
+                                Type *ty) {
     char *p = quote + 1;
     if (*p == '\0')
         error_at(vm, start, "unclosed char literal");
@@ -936,10 +1039,11 @@ static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote, Ty
         error_at(vm, p, "unclosed char literal");
 
     Token *tok = new_token(vm, TK_NUM, start, end + 1);
-    tok->val = c;
-    tok->ty = ty;
+    tok->val   = c;
+    tok->ty    = ty;
     if (p != end)
-        warn_tok(vm, tok, CCCC_WARN_MULTICHAR, "multi-character character constant");
+        warn_tok(vm, tok, CCCC_WARN_MULTICHAR,
+                 "multi-character character constant");
     return tok;
 }
 
@@ -951,16 +1055,19 @@ static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote, Ty
 // convert_pp_int does) truncates anything wider than 64 bits.
 static int wide_digits_bit_length(const char *digits, int ndigits, int base) {
     int start = 0;
-    while (start < ndigits && digits[start] == '0') start++;
-    if (start == ndigits) return 0; // value is zero
+    while (start < ndigits && digits[start] == '0')
+        start++;
+    if (start == ndigits)
+        return 0; // value is zero
 
     if (base == 2 || base == 8 || base == 16) {
         // Exact O(ndigits) shortcut: each digit maps to a fixed bit count.
-        int bits_per_digit = (base == 2) ? 1 : (base == 8) ? 3 : 4;
-        char c = digits[start];
-        int digit_val = (c >= '0' && c <= '9') ? c - '0' :
-                         (c >= 'a' && c <= 'f') ? c - 'a' + 10 : c - 'A' + 10;
-        int leading_bits = 32 - __builtin_clz((unsigned)digit_val);
+        int  bits_per_digit = (base == 2) ? 1 : (base == 8) ? 3 : 4;
+        char c              = digits[start];
+        int  digit_val      = (c >= '0' && c <= '9')   ? c - '0'
+                              : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+                                                       : c - 'A' + 10;
+        int  leading_bits   = 32 - __builtin_clz((unsigned)digit_val);
         return leading_bits + (ndigits - start - 1) * bits_per_digit;
     }
 
@@ -975,8 +1082,8 @@ static int wide_digits_bit_length(const char *digits, int ndigits, int base) {
         uint64_t carry = (uint64_t)(digits[i] - '0');
         for (int w = 0; w < MAX_WIDE_WORDS; w++) {
             __uint128_t prod = (__uint128_t)words[w] * 10 + carry;
-            words[w] = (uint64_t)prod;
-            carry = (uint64_t)(prod >> 64);
+            words[w]         = (uint64_t)prod;
+            carry            = (uint64_t)(prod >> 64);
         }
     }
     for (int w = MAX_WIDE_WORDS - 1; w >= 0; w--) {
@@ -992,14 +1099,14 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     // Read a binary, octal, decimal or hexadecimal number.
     int base = 10;
     if (!strncasecmp(p, "0x", 2) && isxdigit(p[2])) {
-        p += 2;
-        base = 16;
+        p    += 2;
+        base  = 16;
     } else if (!strncasecmp(p, "0b", 2) && (p[2] == '0' || p[2] == '1')) {
         if (vm->compiler.c_std < CCCC_STD_C23)
             warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                      "binary integer literals are a C23 extension");
-        p += 2;
-        base = 2;
+        p    += 2;
+        base  = 2;
     } else if (*p == '0') {
         base = 8;
     }
@@ -1035,26 +1142,29 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     // Sized to tok->len+1 (an upper bound on digit count) rather than a
     // fixed 256-byte buffer, so very long literals (e.g. a 65535-bit binary
     // wb literal) aren't silently truncated.
-    char *cleaned = arena_alloc(&vm->compiler.parser_arena, (size_t)tok->len + 1);
+    char *cleaned =
+        arena_alloc(&vm->compiler.parser_arena, (size_t)tok->len + 1);
     int j = 0;
     for (char *s = p; *s; s++) {
         if (*s == '\'') {
             if (vm->compiler.c_std < CCCC_STD_C23)
-                error_tok(vm, tok, "digit separators are not available before C23");
+                error_tok(vm, tok,
+                          "digit separators are not available before C23");
             continue;
         }
         // Stop at suffix (L, U, l, u) or non-alphanumeric
         if (!isalnum(*s))
             break;
         // Stop at suffix letters (L/U for existing suffixes; W for C23 wb/uwb)
-        if ((*s == 'L' || *s == 'l' || *s == 'U' || *s == 'u' ||
-             *s == 'W' || *s == 'w') && j > 0)
+        if ((*s == 'L' || *s == 'l' || *s == 'U' || *s == 'u' || *s == 'W' ||
+             *s == 'w') &&
+            j > 0)
             break;
         cleaned[j++] = *s;
     }
     cleaned[j] = '\0';
 
-    char *end_in_cleaned;
+    char   *end_in_cleaned;
     int64_t val = strtoul(cleaned, &end_in_cleaned, base);
 
     // The float case (an 'e'/'E'/'p'/'P' exponent letter) was already
@@ -1064,19 +1174,20 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     // constant, '2' in a binary constant) -- a hard error rather than
     // silently truncating to whatever strtoul() managed to parse (#776).
     if (j > 0 && end_in_cleaned != cleaned + j) {
-        const char *base_name = base == 16 ? "hexadecimal" :
-                                 base == 8  ? "octal" :
-                                 base == 2  ? "binary" : "integer";
-        error_tok(vm, tok, "invalid digit '%c' in %s constant",
-                  *end_in_cleaned, base_name);
+        const char *base_name = base == 16  ? "hexadecimal"
+                                : base == 8 ? "octal"
+                                : base == 2 ? "binary"
+                                            : "integer";
+        error_tok(vm, tok, "invalid digit '%c' in %s constant", *end_in_cleaned,
+                  base_name);
     }
 
     // Adjust p to point to the position in original string after digits
     // Count non-quote characters we consumed
     p = tok->loc + (base == 16 ? 2 : (base == 2 ? 2 : 0));
-    for (int i = 0; i < j; ) {
+    for (int i = 0; i < j;) {
         if (*p == '\'') {
-            p++;  // Skip quote in original
+            p++; // Skip quote in original
         } else {
             p++;
             i++;
@@ -1084,24 +1195,23 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     }
 
     // Read U, L or LL suffixes, plus C23 wb/uwb (_BitInt) suffixes.
-    bool l = false;
-    bool u = false;
+    bool l  = false;
+    bool u  = false;
     bool wb = false;
 
     // wb/uwb must be checked before the single-u branch to avoid misparse.
-    if ((p[0] == 'u' || p[0] == 'U') &&
-        (p[1] == 'w' || p[1] == 'W') &&
+    if ((p[0] == 'u' || p[0] == 'U') && (p[1] == 'w' || p[1] == 'W') &&
         (p[2] == 'b' || p[2] == 'B')) {
-        p += 3;
-        wb = true;
-        u = true;
+        p  += 3;
+        wb  = true;
+        u   = true;
     } else if ((p[0] == 'w' || p[0] == 'W') && (p[1] == 'b' || p[1] == 'B')) {
-        p += 2;
-        wb = true;
+        p  += 2;
+        wb  = true;
     } else if (startswith(vm, p, "LLU") || startswith(vm, p, "LLu") ||
-        startswith(vm, p, "llU") || startswith(vm, p, "llu") ||
-        startswith(vm, p, "ULL") || startswith(vm, p, "Ull") ||
-        startswith(vm, p, "uLL") || startswith(vm, p, "ull")) {
+               startswith(vm, p, "llU") || startswith(vm, p, "llu") ||
+               startswith(vm, p, "ULL") || startswith(vm, p, "Ull") ||
+               startswith(vm, p, "uLL") || startswith(vm, p, "ull")) {
         p += 3;
         l = u = true;
     } else if (!strncasecmp(p, "lu", 2) || !strncasecmp(p, "ul", 2)) {
@@ -1109,7 +1219,7 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
         l = u = true;
     } else if (startswith(vm, p, "LL") || startswith(vm, p, "ll")) {
         p += 2;
-        l = true;
+        l  = true;
     } else if (*p == 'L' || *p == 'l') {
         p++;
         l = true;
@@ -1137,11 +1247,11 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
             width = (vbits + 1 < 2) ? 2 : vbits + 1;
         }
         tok->kind = TK_NUM;
-        tok->val = val;
-        tok->ty = bitint_type(vm, tok, width, u);
+        tok->val  = val;
+        tok->ty   = bitint_type(vm, tok, width, u);
         if (width > 64) {
             tok->wide_digits = cleaned;
-            tok->wide_base = base;
+            tok->wide_base   = base;
         }
         return true;
     }
@@ -1175,8 +1285,8 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     }
 
     tok->kind = TK_NUM;
-    tok->val = val;
-    tok->ty = ty;
+    tok->val  = val;
+    tok->ty   = ty;
     return true;
 }
 
@@ -1199,19 +1309,21 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
     // "1'000e5" would otherwise only parse "1" and leave the rest
     // unconsumed. Strip separators into a clean buffer first, the same way
     // convert_pp_int already does, and call strtold() on that instead.
-    char *cleaned = arena_alloc(&vm->compiler.parser_arena, (size_t)tok->len + 1);
+    char *cleaned =
+        arena_alloc(&vm->compiler.parser_arena, (size_t)tok->len + 1);
     int j = 0;
     for (char *s = tok->loc; s < tok->loc + tok->len; s++) {
         if (*s == '\'') {
             if (vm->compiler.c_std < CCCC_STD_C23)
-                error_tok(vm, tok, "digit separators are not available before C23");
+                error_tok(vm, tok,
+                          "digit separators are not available before C23");
             continue;
         }
         cleaned[j++] = *s;
     }
     cleaned[j] = '\0';
 
-    char *end;
+    char       *end;
     long double val = strtold(cleaned, &end);
 
     // C23 decimal-floating-constant suffixes df/DF/dd/DD/dl/DL (#402) --
@@ -1230,29 +1342,33 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
     bool is_hex = cleaned[0] == '0' && (cleaned[1] == 'x' || cleaned[1] == 'X');
     Type *dec_ty = NULL;
     if (!is_hex && end[0] && end[1]) {
-        if ((end[0] == 'd' && end[1] == 'f') || (end[0] == 'D' && end[1] == 'F'))
+        if ((end[0] == 'd' && end[1] == 'f') ||
+            (end[0] == 'D' && end[1] == 'F'))
             dec_ty = ty_decimal32;
-        else if ((end[0] == 'd' && end[1] == 'd') || (end[0] == 'D' && end[1] == 'D'))
+        else if ((end[0] == 'd' && end[1] == 'd') ||
+                 (end[0] == 'D' && end[1] == 'D'))
             dec_ty = ty_decimal64;
-        else if ((end[0] == 'd' && end[1] == 'l') || (end[0] == 'D' && end[1] == 'L'))
+        else if ((end[0] == 'd' && end[1] == 'l') ||
+                 (end[0] == 'D' && end[1] == 'L'))
             dec_ty = ty_decimal128;
     }
 
     if (dec_ty) {
         if (vm->compiler.c_std < CCCC_STD_C23)
-            error_tok(vm, tok, "_Decimal literal suffixes are not available before C23");
-        char *digits_end = end; // numeric text ends here, before the suffix
-        end += 2;
+            error_tok(vm, tok,
+                      "_Decimal literal suffixes are not available before C23");
+        char *digits_end  = end; // numeric text ends here, before the suffix
+        end              += 2;
         if (cleaned + j != end)
             error_tok(vm, tok, "invalid numeric constant");
         size_t digit_len = (size_t)(digits_end - cleaned);
-        char *digits = arena_alloc(&vm->compiler.parser_arena, digit_len + 1);
+        char  *digits = arena_alloc(&vm->compiler.parser_arena, digit_len + 1);
         memcpy(digits, cleaned, digit_len);
         digits[digit_len] = '\0';
-        tok->kind = TK_NUM;
-        tok->fval = 0.0; // deliberately not strtold's value -- see above
+        tok->kind         = TK_NUM;
+        tok->fval       = 0.0; // deliberately not strtold's value -- see above
         tok->dec_digits = digits;
-        tok->ty = dec_ty;
+        tok->ty         = dec_ty;
         return;
     }
 
@@ -1272,7 +1388,7 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
 
     tok->kind = TK_NUM;
     tok->fval = val;
-    tok->ty = ty;
+    tok->ty   = ty;
 }
 
 // Check whether a newly-recognised keyword is available in the selected -std.
@@ -1283,11 +1399,11 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
 static bool keyword_std_ok(VirtualMachine *vm, Token *t) {
     if (t->origin)
         return true;
-    CStdVersion s = vm->compiler.c_std;
-    int len = t->len;
-    char *kw = t->loc;
+    CStdVersion s   = vm->compiler.c_std;
+    int         len = t->len;
+    char       *kw  = t->loc;
 
-#define KW(str) (len == (int)sizeof(str)-1 && memcmp(kw, str, len) == 0)
+#define KW(str) (len == (int)sizeof(str) - 1 && memcmp(kw, str, len) == 0)
 
     // C99 reserved names — illegal below C99 (fire when --std=c89 is selected)
     if (s < CCCC_STD_C99) {
@@ -1304,7 +1420,8 @@ static bool keyword_std_ok(VirtualMachine *vm, Token *t) {
         if (KW("_Alignof") || KW("_Alignas"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Noreturn"))
-            warn_tok(vm, t, CCCC_WARN_PEDANTIC, "'_Noreturn' is not available before C11");
+            warn_tok(vm, t, CCCC_WARN_PEDANTIC,
+                     "'_Noreturn' is not available before C11");
         if (KW("_Thread_local") || KW("__thread"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Atomic"))
@@ -1320,7 +1437,8 @@ static bool keyword_std_ok(VirtualMachine *vm, Token *t) {
         if (KW("bool") || KW("true") || KW("false") || KW("nullptr") ||
             KW("thread_local"))
             return false;
-        if (KW("_BitInt") || KW("_Decimal32") || KW("_Decimal64") || KW("_Decimal128"))
+        if (KW("_BitInt") || KW("_Decimal32") || KW("_Decimal64") ||
+            KW("_Decimal128"))
             error_tok(vm, t, "'%.*s' is not available before C23", len, kw);
     }
 
@@ -1341,11 +1459,11 @@ void convert_pp_tokens(VirtualMachine *vm, Token *tok) {
 
 // Initialize line info for all tokens.
 static void add_line_numbers(VirtualMachine *vm, Token *tok) {
-    char *p = vm->compiler.current_file->contents;
+    char *p          = vm->compiler.current_file->contents;
     char *line_start = p;
-    int n = 1;
+    int   n          = 1;
 
-    for (Token *t = tok; ; t = t->next) {
+    for (Token *t = tok;; t = t->next) {
         while (p < t->loc) {
             if (*p == '\n') {
                 n++;
@@ -1354,7 +1472,7 @@ static void add_line_numbers(VirtualMachine *vm, Token *tok) {
             p++;
         }
         t->line_no = n;
-        t->col_no = display_width(vm, line_start, t->loc - line_start) + 1;
+        t->col_no  = display_width(vm, line_start, t->loc - line_start) + 1;
         if (t->kind == TK_EOF)
             break;
     }
@@ -1374,22 +1492,23 @@ Token *tokenize_string_literal(VirtualMachine *vm, Token *tok, Type *basety) {
 Token *tokenize(VirtualMachine *vm, File *file) {
     vm->compiler.current_file = file;
 
-    char *p = file->contents;
-    Token head = {};
-    Token *cur = &head;
+    char  *p                  = file->contents;
+    Token  head               = {};
+    Token *cur                = &head;
 
-    vm->compiler.at_bol = true;
-    vm->compiler.has_space = false;
+    vm->compiler.at_bol       = true;
+    vm->compiler.has_space    = false;
 
     // State tracking for #include directive to preserve // in URLs
-    bool after_include_directive = false;  // True after we see #include
-    bool in_include_path = false;          // True when inside <...> or "..." of #include
-    bool in_backtick_splice = false;
-    int backtick_brace_depth = 0;
+    bool after_include_directive = false; // True after we see #include
+    bool in_include_path = false; // True when inside <...> or "..." of #include
+    bool in_backtick_splice     = false;
+    int  backtick_brace_depth   = 0;
     char *backtick_splice_start = NULL;
 
     while (*p) {
-        // Skip line comments (but NOT inside #include paths where URLs may contain //)
+        // Skip line comments (but NOT inside #include paths where URLs may
+        // contain //)
         if (startswith(vm, p, "//") && !in_include_path) {
             if (vm->compiler.c_std < CCCC_STD_C99)
                 warn_at(vm, p, CCCC_WARN_PEDANTIC,
@@ -1406,7 +1525,7 @@ Token *tokenize(VirtualMachine *vm, File *file) {
             char *q = strstr(p + 2, "*/");
             if (!q)
                 error_at(vm, p, "unclosed block comment");
-            p = q + 2;
+            p                      = q + 2;
             vm->compiler.has_space = true;
             continue;
         }
@@ -1414,11 +1533,11 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         // Skip newline.
         if (*p == '\n') {
             p++;
-            vm->compiler.at_bol = true;
+            vm->compiler.at_bol    = true;
             vm->compiler.has_space = false;
             // Reset include directive state on newline
             after_include_directive = false;
-            in_include_path = false;
+            in_include_path         = false;
             continue;
         }
 
@@ -1436,15 +1555,15 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         // normal C tokenization so preprocessing and parsing apply to the
         // interpolation expression exactly as they do elsewhere.
         if (!in_backtick_splice && *p == '`') {
-            char *start = p++;
-            bool has_splice = false;
-            cur = cur->next = read_backtick_fragment(vm, start, p, &p,
-                                                      &has_splice);
+            char *start      = p++;
+            bool  has_splice = false;
+            cur              = cur->next =
+                read_backtick_fragment(vm, start, p, &p, &has_splice);
             if (has_splice) {
                 cur = cur->next = new_token(vm, TK_PUNCT, p - 2, p - 1);
-                cur = cur->next = new_token(vm, TK_PUNCT, p - 1, p);
-                in_backtick_splice = true;
-                backtick_brace_depth = 0;
+                cur = cur->next       = new_token(vm, TK_PUNCT, p - 1, p);
+                in_backtick_splice    = true;
+                backtick_brace_depth  = 0;
                 backtick_splice_start = p - 2;
             }
             continue;
@@ -1456,7 +1575,8 @@ Token *tokenize(VirtualMachine *vm, File *file) {
             for (;;) {
                 if (p[0] && p[1] && strchr("eEpP", p[0]) && strchr("+-", p[1]))
                     p += 2;
-                else if (isalnum(*p) || *p == '.' || *p == '\'')  // C23: digit separators
+                else if (isalnum(*p) || *p == '.' ||
+                         *p == '\'') // C23: digit separators
                     p++;
                 else
                     break;
@@ -1467,77 +1587,78 @@ Token *tokenize(VirtualMachine *vm, File *file) {
 
         // String literal
         if (*p == '"') {
-            cur = cur->next = read_string_literal(vm, p, p);
-            p += cur->len;
+            cur = cur->next  = read_string_literal(vm, p, p);
+            p               += cur->len;
             continue;
         }
 
         // UTF-8 string literal
         if (startswith(vm, p, "u8\"")) {
-            cur = cur->next = read_string_literal(vm, p, p + 2);
-            p += cur->len;
+            cur = cur->next  = read_string_literal(vm, p, p + 2);
+            p               += cur->len;
             continue;
         }
 
         // UTF-16 string literal
         if (startswith(vm, p, "u\"")) {
-            cur = cur->next = read_utf16_string_literal(vm, p, p + 1);
-            p += cur->len;
+            cur = cur->next  = read_utf16_string_literal(vm, p, p + 1);
+            p               += cur->len;
             continue;
         }
 
         // Wide string literal
         if (startswith(vm, p, "L\"")) {
-            cur = cur->next = read_utf32_string_literal(vm, p, p + 1, ty_int);
-            p += cur->len;
+            cur = cur->next  = read_utf32_string_literal(vm, p, p + 1, ty_int);
+            p               += cur->len;
             continue;
         }
 
         // UTF-32 string literal
         if (startswith(vm, p, "U\"")) {
-            cur = cur->next = read_utf32_string_literal(vm, p, p + 1, ty_uint);
-            p += cur->len;
+            cur = cur->next  = read_utf32_string_literal(vm, p, p + 1, ty_uint);
+            p               += cur->len;
             continue;
         }
 
         // Character literal
         if (*p == '\'') {
-            cur = cur->next = read_char_literal(vm, p, p, ty_int);
-            cur->val = (char)cur->val;
-            p += cur->len;
+            cur = cur->next  = read_char_literal(vm, p, p, ty_int);
+            cur->val         = (char)cur->val;
+            p               += cur->len;
             continue;
         }
 
         // UTF-8 character literal (C23 u8'x')
         if (startswith(vm, p, "u8'")) {
             if (vm->compiler.c_std < CCCC_STD_C23)
-                warn_tok(vm, new_token(vm, TK_PUNCT, p, p + 3), CCCC_WARN_PEDANTIC,
+                warn_tok(vm, new_token(vm, TK_PUNCT, p, p + 3),
+                         CCCC_WARN_PEDANTIC,
                          "u8 character literals are a C23 extension");
-            cur = cur->next = read_char_literal(vm, p, p + 2, ty_uchar);
-            cur->val &= 0xff;
-            p += cur->len;
+            cur = cur->next  = read_char_literal(vm, p, p + 2, ty_uchar);
+            cur->val        &= 0xff;
+            p               += cur->len;
             continue;
         }
 
         // UTF-16 character literal
         if (startswith(vm, p, "u'")) {
-            cur = cur->next = read_char_literal(vm, p, p + 1, ty_ushort);
-            cur->val &= 0xffff;
-            p += cur->len;
+            cur = cur->next  = read_char_literal(vm, p, p + 1, ty_ushort);
+            cur->val        &= 0xffff;
+            p               += cur->len;
             continue;
         }
 
         // Wide character literal
         if (startswith(vm, p, "L'")) {
-            cur = cur->next = read_char_literal(vm, p, p + 1, ty_int);
-            p += cur->len;
+            cur = cur->next  = read_char_literal(vm, p, p + 1, ty_int);
+            p               += cur->len;
             continue;
         }
 
         // UTF-32 character literal
         if (startswith(vm, p, "U'")) {
-            cur = cur->next = read_char_literal(vm, p, p + 1, ty_uint);
-            p += cur->len;
+            cur = cur->next  = read_char_literal(vm, p, p + 1, ty_uint);
+            p               += cur->len;
             continue;
         }
 
@@ -1545,7 +1666,8 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         if (vm->compiler.at_bol && *p == '#') {
             // Check if this is #include by peeking ahead
             char *peek = p + 1;
-            while (isspace(*peek) && *peek != '\n') peek++;
+            while (isspace(*peek) && *peek != '\n')
+                peek++;
             if (strncmp(peek, "include", 7) == 0 &&
                 (peek[7] == '\0' || (!isalnum(peek[7]) && peek[7] != '_'))) {
                 after_include_directive = true;
@@ -1556,23 +1678,24 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         // Handle both #include <...> and #include "..."
         if (after_include_directive) {
             if (*p == '<' || *p == '"') {
-                in_include_path = true;
-                after_include_directive = false;  // Clear the flag
+                in_include_path         = true;
+                after_include_directive = false; // Clear the flag
             }
         }
         if (in_include_path) {
             if (*p == '>' || *p == '"') {
-                in_include_path = false;  // This char closes the path
+                in_include_path = false; // This char closes the path
             }
         }
 
         // Identifier or keyword
         int ident_len = read_ident(vm, p);
         if (ident_len) {
-            cur = cur->next = new_token(vm, TK_IDENT, p, p + ident_len);
-            p += cur->len;
+            cur = cur->next  = new_token(vm, TK_IDENT, p, p + ident_len);
+            p               += cur->len;
             // Check if we just tokenized "include" after #
-            if (after_include_directive && ident_len == 7 && strncmp(p - ident_len, "include", 7) == 0) {
+            if (after_include_directive && ident_len == 7 &&
+                strncmp(p - ident_len, "include", 7) == 0) {
                 // Keep the flag set, we'll look for < or " next
             }
             continue;
@@ -1591,21 +1714,21 @@ Token *tokenize(VirtualMachine *vm, File *file) {
                     p++;
 
                     bool has_splice = false;
-                    cur = cur->next = read_backtick_fragment(vm, p, p, &p,
-                                                              &has_splice);
+                    cur             = cur->next =
+                        read_backtick_fragment(vm, p, p, &p, &has_splice);
                     if (has_splice) {
                         cur = cur->next = new_token(vm, TK_PUNCT, p - 2, p - 1);
                         cur = cur->next = new_token(vm, TK_PUNCT, p - 1, p);
                         backtick_splice_start = p - 2;
                     } else {
-                        in_backtick_splice = false;
+                        in_backtick_splice    = false;
                         backtick_splice_start = NULL;
                     }
                     continue;
                 }
             }
-            cur = cur->next = new_token(vm, TK_PUNCT, p, p + punct_len);
-            p += cur->len;
+            cur = cur->next  = new_token(vm, TK_PUNCT, p, p + punct_len);
+            p               += cur->len;
             continue;
         }
 
@@ -1634,14 +1757,14 @@ static char *read_file(VirtualMachine *vm, char *path) {
             return NULL;
     }
 
-    char *buf;
+    char  *buf;
     size_t buflen;
-    FILE *out = open_memstream(&buf, &buflen);
+    FILE  *out = open_memstream(&buf, &buflen);
 
     // Read the entire file.
     for (;;) {
         char buf2[4096];
-        int n = fread(buf2, 1, sizeof(buf2), fp);
+        int  n = fread(buf2, 1, sizeof(buf2), fp);
         if (n == 0)
             break;
         fwrite(buf2, 1, n, out);
@@ -1664,7 +1787,8 @@ static char *read_file(VirtualMachine *vm, char *path) {
 }
 
 // Read binary file without text processing (for #embed directive)
-unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size) {
+unsigned char *read_binary_file(VirtualMachine *vm, char *path,
+                                size_t *out_size) {
     FILE *fp = fopen(path, "rb");
     if (!fp)
         return NULL;
@@ -1707,10 +1831,10 @@ unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size
 File *new_file(VirtualMachine *vm, char *name, int file_no, char *contents) {
     File *file = arena_alloc(&vm->compiler.parser_arena, sizeof(File));
     memset(file, 0, sizeof(File));
-    file->name = name;
+    file->name         = name;
     file->display_name = name;
-    file->file_no = file_no;
-    file->contents = contents;
+    file->file_no      = file_no;
+    file->contents     = contents;
     return file;
 }
 
@@ -1730,8 +1854,8 @@ static void canonicalize_newline(char *p) {
 
     while (p[i]) {
         if (p[i] == '\r' && p[i + 1] == '\n') {
-            i += 2;
-            p[j++] = '\n';
+            i      += 2;
+            p[j++]  = '\n';
         } else if (p[i] == '\r') {
             i++;
             p[j++] = '\n';
@@ -1834,8 +1958,9 @@ Token *tokenize_file(VirtualMachine *vm, char *path, bool allow_shebang) {
     File *file = new_file(vm, path, vm->compiler.file_no + 1, p);
 
     // Save the filename for assembler .file directive.
-    vm->compiler.input_files = realloc(vm->compiler.input_files, sizeof(char *) * (vm->compiler.file_no + 2));
-    vm->compiler.input_files[vm->compiler.file_no] = file;
+    vm->compiler.input_files = realloc(
+        vm->compiler.input_files, sizeof(char *) * (vm->compiler.file_no + 2));
+    vm->compiler.input_files[vm->compiler.file_no]     = file;
     vm->compiler.input_files[vm->compiler.file_no + 1] = NULL;
     vm->compiler.file_no++;
 
@@ -1890,7 +2015,8 @@ static void copy_attr_name(Token *tok, char *buf, size_t cap) {
 }
 
 static CCCCAttrTarget effective_attr_target(VirtualMachine *vm, char *name) {
-    CCCCAttrTarget target = vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
+    CCCCAttrTarget target =
+        vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
     if (target != CCCC_ATTR_TARGET_AUTO)
         return target;
     if (vm && vm->compiler.c_std >= CCCC_STD_C23 && attr_name_is_std(name))
@@ -1918,7 +2044,8 @@ static Token *find_gnu_attr_close(Token *tok) {
     if (!token_is_gnu_attr_start(tok))
         return NULL;
     int depth = 0;
-    for (Token *p = tok->next->next->next; p && p->kind != TK_EOF; p = p->next) {
+    for (Token *p = tok->next->next->next; p && p->kind != TK_EOF;
+         p        = p->next) {
         if (equal(p, "("))
             depth++;
         else if (equal(p, ")")) {
@@ -1943,29 +2070,30 @@ static void print_attr_payload(FILE *f, Token *start, Token *end) {
 
 static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
-    bool c23 = token_is_c23_attr_start(tok);
-    bool gnu = token_is_gnu_attr_start(tok);
+    bool   c23 = token_is_c23_attr_start(tok);
+    bool   gnu = token_is_gnu_attr_start(tok);
     if (!c23 && !gnu)
         return false;
 
     Token *payload = c23 ? tok->next->next : tok->next->next->next;
-    Token *close = c23 ? find_c23_attr_close(tok) : find_gnu_attr_close(tok);
+    Token *close   = c23 ? find_c23_attr_close(tok) : find_gnu_attr_close(tok);
     if (!close)
         return false;
-    Token *end = c23 ? close->next->next : close->next->next;
+    Token *end         = c23 ? close->next->next : close->next->next;
 
-    Token *name_tok = payload;
-    bool cccc_scoped = false;
+    Token *name_tok    = payload;
+    bool   cccc_scoped = false;
     if (c23 && equal(name_tok, "cccc") && name_tok->next &&
         equal(name_tok->next, ":") && name_tok->next->next &&
         equal(name_tok->next->next, ":") && name_tok->next->next->next) {
         cccc_scoped = true;
-        name_tok = name_tok->next->next->next;
+        name_tok    = name_tok->next->next->next;
     }
 
     char name[128] = "";
     copy_attr_name(name_tok, name, sizeof(name));
-    if (vm && vm->compiler.emit_cccc && (cccc_scoped || attr_name_is_cccc(name))) {
+    if (vm && vm->compiler.emit_cccc &&
+        (cccc_scoped || attr_name_is_cccc(name))) {
         // --emit-cccc: preserve CCCC-scoped attrs verbatim as
         // [[cccc::name(...)]] rather than stripping them. `payload` already
         // starts at "cccc" for the explicitly-scoped form; a bare cccc-only
@@ -1986,23 +2114,23 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
 
     CCCCAttrTarget target = effective_attr_target(vm, name);
     switch (target) {
-    case CCCC_ATTR_TARGET_C23:
-        fprintf(f, "[[");
-        print_attr_payload(f, payload, close);
-        fprintf(f, "]]");
-        break;
-    case CCCC_ATTR_TARGET_MSVC:
-        fprintf(f, "__declspec(");
-        print_attr_payload(f, payload, close);
-        fprintf(f, ")");
-        break;
-    case CCCC_ATTR_TARGET_GNU:
-    case CCCC_ATTR_TARGET_AUTO:
-    default:
-        fprintf(f, "__attribute__((");
-        print_attr_payload(f, payload, close);
-        fprintf(f, "))");
-        break;
+        case CCCC_ATTR_TARGET_C23:
+            fprintf(f, "[[");
+            print_attr_payload(f, payload, close);
+            fprintf(f, "]]");
+            break;
+        case CCCC_ATTR_TARGET_MSVC:
+            fprintf(f, "__declspec(");
+            print_attr_payload(f, payload, close);
+            fprintf(f, ")");
+            break;
+        case CCCC_ATTR_TARGET_GNU:
+        case CCCC_ATTR_TARGET_AUTO:
+        default:
+            fprintf(f, "__attribute__((");
+            print_attr_payload(f, payload, close);
+            fprintf(f, "))");
+            break;
     }
 
     *tok_ptr = end;
@@ -2081,7 +2209,7 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
         }
 
         at_bol = 0;
-        t = t->next;
+        t      = t->next;
     }
 
     fprintf(f, "\n");
@@ -2102,22 +2230,24 @@ bool cc_has_errors(VirtualMachine *vm) {
 }
 
 void cc_clear_errors(VirtualMachine *vm) {
-    if (!vm) return;
+    if (!vm)
+        return;
 
-    vm->errors = NULL;
-    vm->errors_tail = NULL;
-    vm->error_count = 0;
+    vm->errors        = NULL;
+    vm->errors_tail   = NULL;
+    vm->error_count   = 0;
     vm->warning_count = 0;
     vm->error_message = NULL;
 }
 
 void cc_print_all_errors(VirtualMachine *vm) {
-    if (!vm || !vm->errors) return;
+    if (!vm || !vm->errors)
+        return;
 
     // Print all collected errors and warnings
-    CompileError *err = vm->errors;
-    int error_num = 0;
-    int warning_num = 0;
+    CompileError *err         = vm->errors;
+    int           error_num   = 0;
+    int           warning_num = 0;
 
     while (err) {
         fprintf(stderr, "%s", err->message);
@@ -2134,14 +2264,14 @@ void cc_print_all_errors(VirtualMachine *vm) {
         fprintf(stderr, "\n");
         if (error_num > 0 && warning_num > 0) {
             fprintf(stderr, "%d error%s and %d warning%s generated.\n",
-                    error_num, error_num == 1 ? "" : "s",
-                    warning_num, warning_num == 1 ? "" : "s");
+                    error_num, error_num == 1 ? "" : "s", warning_num,
+                    warning_num == 1 ? "" : "s");
         } else if (error_num > 0) {
-            fprintf(stderr, "%d error%s generated.\n",
-                    error_num, error_num == 1 ? "" : "s");
+            fprintf(stderr, "%d error%s generated.\n", error_num,
+                    error_num == 1 ? "" : "s");
         } else {
-            fprintf(stderr, "%d warning%s generated.\n",
-                    warning_num, warning_num == 1 ? "" : "s");
+            fprintf(stderr, "%d warning%s generated.\n", warning_num,
+                    warning_num == 1 ? "" : "s");
         }
     }
 }

@@ -12,14 +12,17 @@
 
 int main(void) {
     void *handle = dlopen(0, RTLD_NOW);
-    if (!handle) return 1;
+    if (!handle)
+        return 1;
 
     int (*p)(char *, const char *, ...) = dlsym(handle, "sprintf");
-    if (!p) return 2;
+    if (!p)
+        return 2;
 
     char buf[128];
     p(buf, "%d-%s-%f", 7, "hi", 3.5);
-    if (strcmp(buf, "7-hi-3.500000") != 0) return 3;
+    if (strcmp(buf, "7-hi-3.500000") != 0)
+        return 3;
 
     return 42;
 }

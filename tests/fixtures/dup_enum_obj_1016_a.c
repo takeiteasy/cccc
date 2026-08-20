@@ -9,7 +9,11 @@
 // an enumerator and a plain identifier collide there too. See
 // tests/test_serialize_dup_enum_obj_1016.c.
 static int AA1016 = 3;
-int BB1016 = 7;
-int CC1016(void) { return 9; }
+int        BB1016 = 7;
+int CC1016(void) {
+    return 9;
+}
 
-int a_use_1016(void) { return AA1016 + BB1016 + CC1016(); }
+int a_use_1016(void) {
+    return AA1016 + BB1016 + CC1016();
+}

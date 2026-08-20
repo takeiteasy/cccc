@@ -4,10 +4,14 @@
 // literal assignment: dims = (struct Dims){ compute_width(), 480 };
 
 [[cccc::comptime]]
-int compute_width(void) { return 1920; }
+int compute_width(void) {
+    return 1920;
+}
 
-[[cccc::comptime]]
-struct Dims { int width; int height; } dims = { compute_width(), 1080 };
+[[cccc::comptime]] struct Dims {
+    int width;
+    int height;
+} dims = {compute_width(), 1080};
 
 [[cccc::comptime]]
 Node *get_area(void) {

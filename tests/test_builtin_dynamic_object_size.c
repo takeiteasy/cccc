@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
-// CCCC_LEAKS_KEEP_VM_HEAP: DYNOBJSZ needs AllocHeader; degrades to (size_t)-1 without it
-// Tests for __builtin_dynamic_object_size(ptr, type).
+// CCCC_LEAKS_KEEP_VM_HEAP: DYNOBJSZ needs AllocHeader; degrades to (size_t)-1
+// without it Tests for __builtin_dynamic_object_size(ptr, type).
 //
 // type bits (same encoding as __builtin_object_size):
 //   bit 0 = 0 → whole base object; bit 0 = 1 → nearest subobject
@@ -52,14 +52,14 @@
 
 [[cccc::test]]
 void test_dynobj_static_array_type0(void) {
-    char buf[64];
+    char   buf[64];
     size_t sz = __builtin_dynamic_object_size(buf, 0);
     AssertEq((unsigned long long)sz, 64ULL);
 }
 
 [[cccc::test]]
 void test_dynobj_static_array_type2(void) {
-    char buf[64];
+    char   buf[64];
     size_t sz = __builtin_dynamic_object_size(buf, 2);
     AssertEq((unsigned long long)sz, 64ULL);
 }
@@ -76,21 +76,24 @@ void test_dynobj_static_array_offset(void) {
 void test_dynobj_static_array_sub_inline(void) {
     // #701: constant ND_SUB is now peeled by objsize_resolve_ptr, same as
     // __builtin_object_size's static fold.
-    char buf[64];
+    char   buf[64];
     size_t sz = __builtin_dynamic_object_size(buf + 16 - 4, 0);
     AssertEq((unsigned long long)sz, 52ULL);
 }
 
 [[cccc::test]]
 void test_dynobj_static_scalar(void) {
-    int x = 0;
+    int    x  = 0;
     size_t sz = __builtin_dynamic_object_size(&x, 0);
     AssertEq((unsigned long long)sz, (unsigned long long)sizeof(int));
 }
 
 [[cccc::test]]
 void test_dynobj_static_struct_subobject(void) {
-    struct { int a; char b[8]; } s;
+    struct {
+        int  a;
+        char b[8];
+    } s;
     // type 1: subobject (the member b) = 8 bytes
     size_t sub = __builtin_dynamic_object_size(&s.b, 1);
     AssertEq((unsigned long long)sub, 8ULL);
@@ -242,8 +245,8 @@ void test_dynobj_interior_heap_ptr_type0(void) {
 void test_dynobj_interior_heap_ptr_type2(void) {
     char *p = malloc(64);
     AssertNotNull(p);
-    char *interior = p + 40;
-    size_t sz = __builtin_dynamic_object_size(interior, 2);
+    char  *interior = p + 40;
+    size_t sz       = __builtin_dynamic_object_size(interior, 2);
     AssertEq((unsigned long long)sz, 24ULL);
     free(p);
 }
@@ -253,8 +256,8 @@ void test_dynobj_interior_heap_ptr_last_byte(void) {
     // Pointer to the very last valid byte: 1 byte remaining.
     char *p = malloc(32);
     AssertNotNull(p);
-    char *interior = p + 31;
-    size_t sz = __builtin_dynamic_object_size(interior, 0);
+    char  *interior = p + 31;
+    size_t sz       = __builtin_dynamic_object_size(interior, 0);
     AssertEq((unsigned long long)sz, 1ULL);
     free(p);
 }
@@ -266,8 +269,8 @@ void test_dynobj_interior_heap_ptr_out_of_bounds_conservative(void) {
     // false (too-large) claim.
     char *p = malloc(3);
     AssertNotNull(p);
-    char *past_end = p + 8; // rounded allocation is 8 bytes, requested is 3
-    size_t sz = __builtin_dynamic_object_size(past_end, 0);
+    char  *past_end = p + 8; // rounded allocation is 8 bytes, requested is 3
+    size_t sz       = __builtin_dynamic_object_size(past_end, 0);
     AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
     free(p);
 }
@@ -319,9 +322,10 @@ static void dynamic_safe_memcpy(void *dst, const void *src, size_t len) {
         // Would call __chk_fail in a real FORTIFY implementation.
         return;
     }
-    char *d = (char *)dst;
+    char       *d = (char *)dst;
     const char *s = (const char *)src;
-    for (size_t i = 0; i < len; i++) d[i] = s[i];
+    for (size_t i = 0; i < len; i++)
+        d[i] = s[i];
 }
 
 [[cccc::test(flags = "-V")]]
@@ -348,7 +352,8 @@ void test_dynobj_fortify_style_heap(void) {
 void test_dynobj_alloca_base_and_interior(void) {
     char *p = __builtin_alloca(20);
     AssertEq((unsigned long long)__builtin_dynamic_object_size(p, 0), 20ULL);
-    AssertEq((unsigned long long)__builtin_dynamic_object_size(p + 5, 0), 15ULL);
+    AssertEq((unsigned long long)__builtin_dynamic_object_size(p + 5, 0),
+             15ULL);
 }
 
 [[cccc::test]]
@@ -381,7 +386,9 @@ void test_dynobj_vla_base_and_interior(void) {
 // memory, never routed through MALC.
 // ---------------------------------------------------------------------------
 
-typedef struct { int a[4]; } DynobjStruct16;
+typedef struct {
+    int a[4];
+} DynobjStruct16;
 
 static size_t struct_obj_size(void *dst) {
     return __builtin_dynamic_object_size(dst, 0);
@@ -390,8 +397,9 @@ static size_t struct_obj_size(void *dst) {
 [[cccc::test]]
 void test_dynobj_stack_struct_via_param(void) {
     DynobjStruct16 s;
-    size_t sz = struct_obj_size(&s);
-    AssertEq((unsigned long long)sz, (unsigned long long)sizeof(DynobjStruct16));
+    size_t         sz = struct_obj_size(&s);
+    AssertEq((unsigned long long)sz,
+             (unsigned long long)sizeof(DynobjStruct16));
 }
 
 // A pointer into a frame that has already returned must NOT resolve to a
@@ -405,7 +413,7 @@ static char *dangling_stack_ptr(void) {
 
 [[cccc::test]]
 void test_dynobj_stack_dangling_conservative(void) {
-    char *p = dangling_stack_ptr();
+    char  *p  = dangling_stack_ptr();
     size_t sz = __builtin_dynamic_object_size(p, 0);
     AssertEq((unsigned long long)sz, (unsigned long long)(size_t)-1);
 }
@@ -463,7 +471,9 @@ void test_dynobj_stack_recursion_activation(void) {
 // missed), and a call chain mixing pushing and non-pushing frames.
 // ---------------------------------------------------------------------------
 
-typedef struct { int a[4]; } DynobjParamStruct;
+typedef struct {
+    int a[4];
+} DynobjParamStruct;
 
 // s is a parameter of this function, not a local -- its address escaping
 // here (via struct_obj_size(&s), an ND_FUNCALL argument) must still mark
@@ -475,9 +485,10 @@ static size_t escaping_param_size(DynobjParamStruct s) {
 
 [[cccc::test]]
 void test_dynobj_escaping_aggregate_param(void) {
-    DynobjParamStruct s = {{1, 2, 3, 4}};
-    size_t sz = escaping_param_size(s);
-    AssertEq((unsigned long long)sz, (unsigned long long)sizeof(DynobjParamStruct));
+    DynobjParamStruct s  = {{1, 2, 3, 4}};
+    size_t            sz = escaping_param_size(s);
+    AssertEq((unsigned long long)sz,
+             (unsigned long long)sizeof(DynobjParamStruct));
 }
 
 // Plain pass-through wrappers: none takes the address of any local/param of
@@ -490,9 +501,15 @@ static size_t chain_a(void *p);
 static size_t chain_b(void *p);
 static size_t chain_c(void *p);
 
-static size_t chain_a(void *p) { return chain_b(p); }
-static size_t chain_b(void *p) { return chain_c(p); }
-static size_t chain_c(void *p) { return __builtin_dynamic_object_size(p, 0); }
+static size_t chain_a(void *p) {
+    return chain_b(p);
+}
+static size_t chain_b(void *p) {
+    return chain_c(p);
+}
+static size_t chain_c(void *p) {
+    return __builtin_dynamic_object_size(p, 0);
+}
 
 [[cccc::test]]
 void test_dynobj_mixed_chain_owner_alive(void) {
@@ -525,7 +542,7 @@ static jmp_buf dynobj_jmp_env;
 
 static void dynobj_jmp_level3(void) {
     char buf[8];
-    (void)param_obj_size(buf); // opaque call -- forces the runtime path
+    (void)param_obj_size(buf);  // opaque call -- forces the runtime path
     longjmp(dynobj_jmp_env, 1); // unwinds level3 + level2 in one jump
 }
 
@@ -562,8 +579,12 @@ static void dynobj_jmp_leaf(void) {
     longjmp(dynobj_jmp_env2, 1);
 }
 
-static void dynobj_jmp_wrapper2(void) { dynobj_jmp_leaf(); }
-static void dynobj_jmp_wrapper1(void) { dynobj_jmp_wrapper2(); }
+static void dynobj_jmp_wrapper2(void) {
+    dynobj_jmp_leaf();
+}
+static void dynobj_jmp_wrapper1(void) {
+    dynobj_jmp_wrapper2();
+}
 
 [[cccc::test]]
 void test_dynobj_longjmp_across_nonpushing_frames(void) {

@@ -15,20 +15,24 @@ extern int close(int fd);
 
 int main(void) {
     int fds[2];
-    if (pipe(fds) != 0) return 1;
+    if (pipe(fds) != 0)
+        return 1;
 
-    char msg1[] = "hi";
-    char msg2[] = "!!";
-    struct iovec wv[2] = {
+    char         msg1[] = "hi";
+    char         msg2[] = "!!";
+    struct iovec wv[2]  = {
         {msg1, 2},
         {msg2, 2},
     };
-    if (writev(fds[1], wv, 2) != 4) return 2;
+    if (writev(fds[1], wv, 2) != 4)
+        return 2;
 
-    char buf[4] = {0};
-    struct iovec rv[1] = {{buf, 4}};
-    if (readv(fds[0], rv, 1) != 4) return 3;
-    if (buf[0] != 'h' || buf[1] != 'i' || buf[2] != '!' || buf[3] != '!') return 4;
+    char         buf[4] = {0};
+    struct iovec rv[1]  = {{buf, 4}};
+    if (readv(fds[0], rv, 1) != 4)
+        return 3;
+    if (buf[0] != 'h' || buf[1] != 'i' || buf[2] != '!' || buf[3] != '!')
+        return 4;
 
     close(fds[0]);
     close(fds[1]);

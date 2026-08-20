@@ -1,5 +1,7 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: error: FunctionSetBody: local 'a' was declared for function 'helper' while building it from inside function 'main'; wrap the call in WithFn\(helper\)
+// CCCC_EXPECT_STDERR: error: FunctionSetBody: local 'a' was declared for
+// function 'helper' while building it from inside function 'main'; wrap the
+// call in WithFn\(helper\)
 //
 // Ticket #997: follow-up from #996. #996's fix adopts locals declared while
 // building a function's body onto that function, but only when

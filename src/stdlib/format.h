@@ -15,15 +15,15 @@
 // one small slice of the VM-wide internal API. Keep in sync with
 // src/internal.h's CCCC_DECFMT_* / cccc_dec_format_ex / cccc_dec_from_string
 // / CCCC_DEC_ENV_*.
-#define CCCC_DECFMT_MINUS 1u
-#define CCCC_DECFMT_PLUS  2u
-#define CCCC_DECFMT_SPACE 4u
-#define CCCC_DECFMT_ALT   8u
-#define CCCC_DECFMT_ZERO  16u
+#define CCCC_DECFMT_MINUS    1u
+#define CCCC_DECFMT_PLUS     2u
+#define CCCC_DECFMT_SPACE    4u
+#define CCCC_DECFMT_ALT      8u
+#define CCCC_DECFMT_ZERO     16u
 #define CCCC_DEC_ENV_STATIC  0
 #define CCCC_DEC_ENV_DYNAMIC 1
-int  cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
-                        unsigned flags, int field_width, int prec);
+int cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
+                       unsigned flags, int field_width, int prec);
 bool cccc_dec_from_string(int w, void *dst, const char *s, int env);
 
 // ---- printf family (format_printf.c) ----
@@ -38,7 +38,8 @@ int cccc_snprintf(char *buf, size_t count, const char *fmt, ...);
 
 long long wrap_cccc_vprintf(const char *fmt, long long va_ptr);
 long long wrap_cccc_vsprintf(char *str, const char *fmt, long long va_ptr);
-long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt, long long va_ptr);
+long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt,
+                              long long va_ptr);
 long long wrap_cccc_vfprintf(FILE *stream, const char *fmt, long long va_ptr);
 
 // ---- scanf family (format_scanf.c) ----

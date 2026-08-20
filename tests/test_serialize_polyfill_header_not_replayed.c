@@ -1,6 +1,7 @@
 // CCCC_FLAGS: -m
 // CCCC_REJECT_STDOUT: #include <stdbit\.h>
-// CCCC_EXPECT_STDOUT: static unsigned int stdc_leading_zeros_ui\(unsigned int x\)
+// CCCC_EXPECT_STDOUT: static unsigned int stdc_leading_zeros_ui\(unsigned int
+// x\)
 //
 // #1003: <stdbit.h> is a cccc-owned polyfill with no guaranteed real system
 // counterpart -- verified missing from this host's SDK, and structurally
@@ -18,4 +19,6 @@
 // varies by host (see stdckdint.h, which *is* present here).
 #include <stdbit.h>
 
-int main(void) { return (int)stdc_leading_zeros_ui(1u) + 11; }
+int main(void) {
+    return (int)stdc_leading_zeros_ui(1u) + 11;
+}

@@ -23,7 +23,9 @@
 // resulting native binary actually links and runs.
 #include "fixtures/opaque_handle_1010.h"
 
-struct DyAtoms1010 { int x; };
+struct DyAtoms1010 {
+    int x;
+};
 
 DyAtoms1010 *make_atoms_1010(void) {
     static struct DyAtoms1010 a;
@@ -31,7 +33,9 @@ DyAtoms1010 *make_atoms_1010(void) {
     return &a;
 }
 
-int get_x_1010(DyAtoms1010 *t) { return t->x; }
+int get_x_1010(DyAtoms1010 *t) {
+    return t->x;
+}
 
 int opaque_handle_1010_use(void);
 

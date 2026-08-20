@@ -3,7 +3,9 @@
 // by the C parser; it must be run in the macro VM after page_count is compiled.
 
 [[cccc::comptime]]
-int page_count(void) { return 4; }
+int page_count(void) {
+    return 4;
+}
 
 [[cccc::comptime]]
 int buf_size = page_count() * 4096;

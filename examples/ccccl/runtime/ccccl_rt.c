@@ -5,10 +5,10 @@
 #include <string.h>
 
 static LObj g_cell_arena[CCCCL_RT_ARENA_CELLS];
-static int g_cell_next = 0;
+static int  g_cell_next = 0;
 
 static LObj g_sym_arena[CCCCL_RT_MAX_SYMS];
-static int g_sym_next = 0;
+static int  g_sym_next = 0;
 
 /* Backing storage for interned atom names (see the comment on LObjAtom in
  * ccccl_rt_internal.h for why this is a pointer into a pool rather than a
@@ -17,7 +17,7 @@ static int g_sym_next = 0;
 #ifndef CCCCL_RT_NAME_POOL_SIZE
 #define CCCCL_RT_NAME_POOL_SIZE 32768
 #endif
-static char g_name_pool[CCCCL_RT_NAME_POOL_SIZE];
+static char   g_name_pool[CCCCL_RT_NAME_POOL_SIZE];
 static size_t g_name_pool_next = 0;
 
 static const char *pool_name(const char *name) {
@@ -33,7 +33,7 @@ static const char *pool_name(const char *name) {
 }
 
 LObj *ccccl_nil = NULL;
-LObj *ccccl_t = NULL;
+LObj *ccccl_t   = NULL;
 
 static LObj *alloc_cell(void) {
     /* Fixed arena, never freed — see the file header and the "Garbage
@@ -56,36 +56,43 @@ LObj *ccccl_intern(const char *name) {
         fprintf(stderr, "ccccl: symbol arena exhausted\n");
         exit(1);
     }
-    LObj *s = &g_sym_arena[g_sym_next++];
-    s->tag = CCCCL_ATOM;
+    LObj *s         = &g_sym_arena[g_sym_next++];
+    s->tag          = CCCCL_ATOM;
     s->as.atom.name = pool_name(name);
     return s;
 }
 
 void ccccl_rt_init(void) {
-    if (ccccl_nil) return; /* idempotent */
+    if (ccccl_nil)
+        return; /* idempotent */
     ccccl_nil = ccccl_intern("NIL");
-    ccccl_t = ccccl_intern("T");
+    ccccl_t   = ccccl_intern("T");
 }
 
-LObj *ccccl_get_nil(void) { return ccccl_nil; }
-LObj *ccccl_get_t(void) { return ccccl_t; }
+LObj *ccccl_get_nil(void) {
+    return ccccl_nil;
+}
+LObj *ccccl_get_t(void) {
+    return ccccl_t;
+}
 
 LObj *ccccl_cons(LObj *a, LObj *d) {
-    LObj *c = alloc_cell();
-    c->tag = CCCCL_PAIR;
+    LObj *c        = alloc_cell();
+    c->tag         = CCCCL_PAIR;
     c->as.pair.car = a;
     c->as.pair.cdr = d;
     return c;
 }
 
 LObj *ccccl_car(LObj *x) {
-    if (x->tag != CCCCL_PAIR) return ccccl_nil;
+    if (x->tag != CCCCL_PAIR)
+        return ccccl_nil;
     return x->as.pair.car;
 }
 
 LObj *ccccl_cdr(LObj *x) {
-    if (x->tag != CCCCL_PAIR) return ccccl_nil;
+    if (x->tag != CCCCL_PAIR)
+        return ccccl_nil;
     return x->as.pair.cdr;
 }
 
@@ -103,7 +110,7 @@ LObj *ccccl_bind(LObj *sym, LObj *val, LObj *env) {
 
 LObj *ccccl_bind_list(LObj *syms, LObj *vals, LObj *env) {
     while (syms->tag == CCCCL_PAIR) {
-        env = ccccl_bind(ccccl_car(syms), ccccl_car(vals), env);
+        env  = ccccl_bind(ccccl_car(syms), ccccl_car(vals), env);
         syms = ccccl_cdr(syms);
         vals = ccccl_cdr(vals);
     }
@@ -121,9 +128,9 @@ LObj *ccccl_assoc(LObj *sym, LObj *env) {
 }
 
 LObj *ccccl_closure(CccclFn fn, LObj *env) {
-    LObj *c = alloc_cell();
-    c->tag = CCCCL_FN;
-    c->as.closure.fn = fn;
+    LObj *c           = alloc_cell();
+    c->tag            = CCCCL_FN;
+    c->as.closure.fn  = fn;
     c->as.closure.env = env;
     return c;
 }
@@ -145,7 +152,8 @@ void ccccl_print(LObj *x, FILE *out) {
         fputc('(', out);
         int first = 1;
         while (x->tag == CCCCL_PAIR) {
-            if (!first) fputc(' ', out);
+            if (!first)
+                fputc(' ', out);
             first = 0;
             ccccl_print(ccccl_car(x), out);
             x = ccccl_cdr(x);

@@ -41,8 +41,9 @@
 #endif
 
 #define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION 1 // Bytecode format version (pre-1.0; bump only at release)
-                       // V2: TLS template + reloc section added (#493)
+#define CCCC_VERSION                                                           \
+    1 // Bytecode format version (pre-1.0; bump only at release)
+      // V2: TLS template + reloc section added (#493)
 
 // Product release version (#883), distinct from CCCC_VERSION above -- that
 // one is the .c4 bytecode container format version and is bumped
@@ -75,42 +76,43 @@
 //   18-25 - Saved S0-S7 (callee-saved, preserved across calls)
 //   26-31 - Temporaries T5-T10 (caller-saved)
 
-// Token range for built-in FFI function pointers (goto */call via function pointer).
-// Distinct from CCCC_DYN_TOKEN_BASE (-0x4a434300) used for dlopen symbols.
-// Token for ffi_table[i] = CCCC_FFI_TOKEN_BASE - i  (all values <= CCCC_FFI_TOKEN_BASE).
+// Token range for built-in FFI function pointers (goto */call via function
+// pointer). Distinct from CCCC_DYN_TOKEN_BASE (-0x4a434300) used for dlopen
+// symbols. Token for ffi_table[i] = CCCC_FFI_TOKEN_BASE - i  (all values <=
+// CCCC_FFI_TOKEN_BASE).
 #define CCCC_FFI_TOKEN_BASE (-0x4a434380LL)
 
-#define REG_ZERO 0 // Always zero (writes discarded)
-#define REG_RA 1   // Return address
-#define REG_SP 2   // Stack pointer (unused for now - we have vm->sp)
-#define REG_T0 5   // Temporary (caller-saved)
-#define REG_T1 6   // Temporary
-#define REG_T2 7   // Temporary
-#define REG_T3 8   // Temporary
-#define REG_T4 9   // Temporary
-#define REG_A0 10  // Argument/return value
-#define REG_A1 11  // Argument
-#define REG_A2 12  // Argument
-#define REG_A3 13  // Argument
-#define REG_A4 14  // Argument
-#define REG_A5 15  // Argument
-#define REG_A6 16  // Argument
-#define REG_A7 17  // Argument
-#define REG_S0 18  // Saved (callee-saved)
-#define REG_S1 19  // Saved
-#define REG_S2 20  // Saved
-#define REG_S3 21  // Saved
-#define REG_S4 22  // Saved
-#define REG_S5 23  // Saved
-#define REG_S6 24  // Saved
-#define REG_S7 25  // Saved
-#define REG_T5 26  // Temporary (caller-saved)
-#define REG_T6 27  // Temporary
-#define REG_T7 28  // Temporary
-#define REG_T8 29  // Temporary
-#define REG_T9 30  // Temporary
-#define REG_T10 31 // Temporary
-#define NUM_REGS 32
+#define REG_ZERO            0 // Always zero (writes discarded)
+#define REG_RA              1 // Return address
+#define REG_SP              2 // Stack pointer (unused for now - we have vm->sp)
+#define REG_T0              5 // Temporary (caller-saved)
+#define REG_T1              6 // Temporary
+#define REG_T2              7 // Temporary
+#define REG_T3              8 // Temporary
+#define REG_T4              9 // Temporary
+#define REG_A0              10 // Argument/return value
+#define REG_A1              11 // Argument
+#define REG_A2              12 // Argument
+#define REG_A3              13 // Argument
+#define REG_A4              14 // Argument
+#define REG_A5              15 // Argument
+#define REG_A6              16 // Argument
+#define REG_A7              17 // Argument
+#define REG_S0              18 // Saved (callee-saved)
+#define REG_S1              19 // Saved
+#define REG_S2              20 // Saved
+#define REG_S3              21 // Saved
+#define REG_S4              22 // Saved
+#define REG_S5              23 // Saved
+#define REG_S6              24 // Saved
+#define REG_S7              25 // Saved
+#define REG_T5              26 // Temporary (caller-saved)
+#define REG_T6              27 // Temporary
+#define REG_T7              28 // Temporary
+#define REG_T8              29 // Temporary
+#define REG_T9              30 // Temporary
+#define REG_T10             31 // Temporary
+#define NUM_REGS            32
 
 // Floating-point register file indices (for float/double arguments)
 // These mirror REG_A* but in the fregs[] array
@@ -132,35 +134,33 @@
 // two consecutive instruction words.
 // RRR format: [rd:8|rs1:8|rs2:8|unused:8]
 #define ENCODE_RRR(rd, rs1, rs2)                                               \
-    ((InstrWord)(rd) | ((InstrWord)(rs1) << 8) |                         \
-     ((InstrWord)(rs2) << 16))
-#define ENCODE_RRRS(rd, rs1, rs2, scale)                                      \
+    ((InstrWord)(rd) | ((InstrWord)(rs1) << 8) | ((InstrWord)(rs2) << 16))
+#define ENCODE_RRRS(rd, rs1, rs2, scale)                                       \
     (ENCODE_RRR((rd), (rs1), (rs2)) | ((InstrWord)(scale) << 24))
 #define DECODE_RRR(operands, rd, rs1, rs2)                                     \
     do {                                                                       \
-        rd = (operands) & 0xFF;                                                \
+        rd  = (operands) & 0xFF;                                               \
         rs1 = ((operands) >> 8) & 0xFF;                                        \
         rs2 = ((operands) >> 16) & 0xFF;                                       \
     } while (0)
-#define DECODE_RRRS(operands, rd, rs1, rs2, scale)                            \
+#define DECODE_RRRS(operands, rd, rs1, rs2, scale)                             \
     do {                                                                       \
         DECODE_RRR((operands), rd, rs1, rs2);                                  \
         scale = ((operands) >> 24) & 0xFF;                                     \
     } while (0)
-#define ENCODE_RRRR(rd, rs1, rs2, rs3)                                        \
+#define ENCODE_RRRR(rd, rs1, rs2, rs3)                                         \
     (ENCODE_RRR((rd), (rs1), (rs2)) | ((InstrWord)(rs3) << 24))
-#define DECODE_RRRR(operands, rd, rs1, rs2, rs3)                              \
+#define DECODE_RRRR(operands, rd, rs1, rs2, rs3)                               \
     do {                                                                       \
         DECODE_RRR((operands), rd, rs1, rs2);                                  \
         rs3 = ((operands) >> 24) & 0xFF;                                       \
     } while (0)
 
 // RR format: [rd:8|rs1:8|unused:16]
-#define ENCODE_RR(rd, rs1)                                                     \
-    ((InstrWord)(rd) | ((InstrWord)(rs1) << 8))
+#define ENCODE_RR(rd, rs1) ((InstrWord)(rd) | ((InstrWord)(rs1) << 8))
 #define DECODE_RR(operands, rd, rs1)                                           \
     do {                                                                       \
-        rd = (operands) & 0xFF;                                                \
+        rd  = (operands) & 0xFF;                                               \
         rs1 = ((operands) >> 8) & 0xFF;                                        \
     } while (0)
 
@@ -228,7 +228,7 @@ static inline long long cc_read_i64(VirtualMachine *vm) {
 }
 
 static inline void cc_write_i64_at(VirtualMachine *vm, Pc pc, long long val) {
-    vm->text_seg[pc] = cc_i64_lo(val);
+    vm->text_seg[pc]     = cc_i64_lo(val);
     vm->text_seg[pc + 1] = cc_i64_hi(val);
 }
 
@@ -250,7 +250,8 @@ static inline long long cc_pc_to_byte_offset(Pc pc) {
 /* The register file holds a flat double. A `float` value is stored as its
  * exact double widening, so reads need no precision branch. F32 opcodes round
  * their result through `(float)` before calling cccc_freg_set_f32. */
-static inline void cccc_freg_set_f64(VirtualMachine *vm, int reg, double value) {
+static inline void cccc_freg_set_f64(VirtualMachine *vm, int reg,
+                                     double value) {
     vm->fregs[reg].f64 = value;
 }
 
@@ -387,7 +388,7 @@ static inline unsigned long long cccc_f32_to_u64(float x) {
 
 static inline long long cccc_freg_raw_f64(VirtualMachine *vm, int reg) {
     union {
-        double d;
+        double    d;
         long long ll;
     } conv;
     conv.d = cccc_freg_get_f64(vm, reg);
@@ -397,25 +398,27 @@ static inline long long cccc_freg_raw_f64(VirtualMachine *vm, int reg) {
 static inline int cccc_freg_raw_f32(VirtualMachine *vm, int reg) {
     union {
         float f;
-        int i;
+        int   i;
     } conv;
     conv.f = cccc_freg_get_f32(vm, reg);
     return conv.i;
 }
 
-static inline void cccc_freg_set_raw_f64(VirtualMachine *vm, int reg, long long bits) {
+static inline void cccc_freg_set_raw_f64(VirtualMachine *vm, int reg,
+                                         long long bits) {
     union {
-        double d;
+        double    d;
         long long ll;
     } conv;
     conv.ll = bits;
     cccc_freg_set_f64(vm, reg, conv.d);
 }
 
-static inline void cccc_freg_set_raw_f32(VirtualMachine *vm, int reg, int bits) {
+static inline void cccc_freg_set_raw_f32(VirtualMachine *vm, int reg,
+                                         int bits) {
     union {
         float f;
-        int i;
+        int   i;
     } conv;
     conv.i = bits;
     cccc_freg_set_f32(vm, reg, conv.f);
@@ -430,7 +433,8 @@ static inline void cccc_freg_set_raw_f32(VirtualMachine *vm, int reg, int bits) 
  * use (mirrors VMOV3), NOT for a value-width VLDR/VSTR-style move (see
  * op_VLDR_fn/op_VSTR_fn in ops.c for that, which decode an explicit byte
  * width from the operand instead of assuming sizeof(VReg)). */
-static inline void cccc_vreg_load(VirtualMachine *vm, int reg, const void *src) {
+static inline void cccc_vreg_load(VirtualMachine *vm, int reg,
+                                  const void *src) {
     memcpy(&vm->vregs[reg], src, sizeof(VReg));
 }
 
@@ -494,7 +498,7 @@ static inline bool node_is_vla_ptr_assign(Node *n) {
 // own `v = alloca(...)`.
 static inline bool node_is_deferred_vla_ptr_init(Node *n) {
     return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VAR &&
-          n->lhs->var->deferred_vla_ptr_init == n;
+           n->lhs->var->deferred_vla_ptr_init == n;
 }
 
 // #964: true if any of blk's *immediate* statements is a VLA_PTR assignment
@@ -511,9 +515,8 @@ static inline bool block_defines_vla(Node *blk) {
     if (!blk || blk->kind != ND_BLOCK)
         return false;
     for (Node *s = blk->body; s; s = s->next)
-        if (s->kind == ND_EXPR_STMT &&
-            (node_is_vla_ptr_assign(s->lhs) ||
-             node_is_deferred_vla_ptr_init(s->lhs)))
+        if (s->kind == ND_EXPR_STMT && (node_is_vla_ptr_assign(s->lhs) ||
+                                        node_is_deferred_vla_ptr_init(s->lhs)))
             return true;
     return false;
 }
@@ -540,10 +543,10 @@ void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
-void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt, ...)
-    __attribute__((format(printf, 4, 5)));
-void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt, ...)
-    __attribute__((format(printf, 4, 5)));
+void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
+             ...) __attribute__((format(printf, 4, 5)));
+void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
+              ...) __attribute__((format(printf, 4, 5)));
 const char *cccc_warning_name(CCCCWarning warning);
 bool equal(Token *tok, char *op);
 Token *skip(VirtualMachine *vm, Token *tok, char *op);
@@ -554,7 +557,8 @@ Token *tokenize_string_literal(VirtualMachine *vm, Token *tok, Type *basety);
 Token *tokenize(VirtualMachine *vm, File *file);
 Token *tokenize_file(VirtualMachine *vm, char *filename, bool allow_shebang);
 Token *tokenize_string(VirtualMachine *vm, char *name, char *contents);
-unsigned char *read_binary_file(VirtualMachine *vm, char *path, size_t *out_size);
+unsigned char *read_binary_file(VirtualMachine *vm, char *path,
+                                size_t *out_size);
 
 #undef unreachable
 #define unreachable() error("internal error at %s:%d", __FILE__, __LINE__)
@@ -577,7 +581,8 @@ void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);
 void isolate_comptime_macros(VirtualMachine *vm);
-bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan);
+bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
+                            bool emit_scan);
 
 //
 // parse.c
@@ -592,21 +597,24 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c);
 bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to);
 Obj *parse(VirtualMachine *vm, Token *tok);
-void cc_leave_top_file_scope(VirtualMachine *vm); // #1001, parse.c -- see comment there
+void cc_leave_top_file_scope(
+    VirtualMachine *vm); // #1001, parse.c -- see comment there
 void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
-                                AttrTarget *target, Node *args,
-                                int arg_count);
+                                AttrTarget *target, Node *args, int arg_count);
 void ensure_reflection_attrs_registered(VirtualMachine *vm);
 void __builtin_ensure_string_h_decls(void);
-void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Token *site_tok);
+void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
+                         Token *site_tok);
 // Expand a deferred ND_INIT_SPLICE node into positional ND_ASSIGN chains.
-// Called by quote_substitute in relfection.c after the splice chain is resolved.
+// Called by quote_substitute in relfection.c after the splice chain is
+// resolved.
 Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain);
-// Compile-time constant evaluators (wrappers around the static eval/eval_double).
+// Compile-time constant evaluators (wrappers around the static
+// eval/eval_double).
 int64_t cc_eval(VirtualMachine *vm, Node *node);
-double  cc_eval_double(VirtualMachine *vm, Node *node);
+double cc_eval_double(VirtualMachine *vm, Node *node);
 
 //
 // type.c
@@ -637,7 +645,7 @@ extern Type *ty_decimal32;
 extern Type *ty_decimal64;
 extern Type *ty_decimal128;
 
-extern Type *ty_auto;  // C23 type-inference sentinel
+extern Type *ty_auto; // C23 type-inference sentinel
 
 extern Type *ty_error;
 
@@ -646,7 +654,7 @@ bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_vector(Type *ty);
 bool is_decimal(Type *ty);
-int  dec_width_code(Type *ty); // 0/1/2 for _Decimal32/64/128, else -1
+int dec_width_code(Type *ty); // 0/1/2 for _Decimal32/64/128, else -1
 bool is_error_type(Type *ty);
 
 // #832: `env` selects which BID rounding mode/exception-flag policy an
@@ -665,17 +673,25 @@ bool is_error_type(Type *ty);
 // under CCCC_HAS_DECIMAL via the Intel BID library, else return
 // false/UNORDERED/-1 as documented per-function below. Raw byte pointers
 // only, so no BID type needs to appear in a VM header.
-bool cccc_dec_binop(int op /* '+','-','*','/' */, int w,
-                    void *dst, const void *a, const void *b, int env);
+bool cccc_dec_binop(int op /* '+','-','*','/' */, int w, void *dst,
+                    const void *a, const void *b, int env);
 bool cccc_dec_neg(int w, void *dst, const void *a); // exact, no env
-int  cccc_dec_cmp(int w, const void *a, const void *b); // 0=EQ,1=LT,2=GT,3=UNORDERED; quiet, no env
-bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned, int env);
-bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned, int env);
-bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32, int env);
-bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32, uint64_t *out_bits, int env);
-bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src, int env);
-int  cccc_dec_format(char *buf, size_t n, const void *val, int w); // -1 if unsupported
-bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-time only, always to-nearest
+int cccc_dec_cmp(int w, const void *a,
+                 const void *b); // 0=EQ,1=LT,2=GT,3=UNORDERED; quiet, no env
+bool cccc_dec_from_int(int w, void *dst, long long v, bool is_unsigned,
+                       int env);
+bool cccc_dec_to_int(int w, const void *src, long long *out, bool is_unsigned,
+                     int env);
+bool cccc_dec_from_bin(int w, void *dst, uint64_t bits, bool src_is_f32,
+                       int env);
+bool cccc_dec_to_bin(int w, const void *src, bool dst_is_f32,
+                     uint64_t *out_bits, int env);
+bool cccc_dec_convert(int dst_w, int src_w, void *dst, const void *src,
+                      int env);
+int cccc_dec_format(char *buf, size_t n, const void *val,
+                    int w);              // -1 if unsupported
+bool cccc_dec_encode_literal(const char *digits, int w,
+                             void *out); // compile-time only, always to-nearest
 
 // printf/scanf %Hf/%Df/%DDf integration (tracker #829, phase 2 of #402).
 // cccc_dec_format() above only ever produces BID's canonical shortest-form
@@ -687,14 +703,15 @@ bool cccc_dec_encode_literal(const char *digits, int w, void *out); // compile-t
 // default matches C's per-conversion default: 6 for f/e, 6-treated-as-1 for
 // g). Returns the length that would have been written (snprintf contract),
 // or -1 if unsupported (CCCC_HAS_DECIMAL off).
-#define CCCC_DECFMT_MINUS 1u // '-' flag: left-justify
-#define CCCC_DECFMT_PLUS  2u // '+' flag: force sign
-#define CCCC_DECFMT_SPACE 4u // ' ' flag: space for positive sign
-#define CCCC_DECFMT_ALT   8u // '#' flag: keep trailing zeros / decimal point
+#define CCCC_DECFMT_MINUS 1u  // '-' flag: left-justify
+#define CCCC_DECFMT_PLUS  2u  // '+' flag: force sign
+#define CCCC_DECFMT_SPACE 4u  // ' ' flag: space for positive sign
+#define CCCC_DECFMT_ALT   8u  // '#' flag: keep trailing zeros / decimal point
 #define CCCC_DECFMT_ZERO  16u // '0' flag: zero-pad (ignored if '-' set)
-int  cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
-                        unsigned flags, int field_width, int prec);
-bool cccc_dec_from_string(int w, void *dst, const char *s, int env); // scanf %Hf/%Df/%DDf
+int cccc_dec_format_ex(char *buf, size_t n, const void *val, int w, int conv,
+                       unsigned flags, int field_width, int prec);
+bool cccc_dec_from_string(int w, void *dst, const char *s,
+                          int env); // scanf %Hf/%Df/%DDf
 
 // strtod32/64/128 (tracker #832, phase 2 of #402): parse a decimal out of a
 // NUL-terminated string, C's strtod() contract (`*endptr` set past the
@@ -737,7 +754,8 @@ long cc_block_desc_size(Obj *block_fn);
 Type *complex_type_for(VirtualMachine *vm, Type *base);
 Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned);
 void add_type(VirtualMachine *vm, Node *node);
-void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *tok);
+void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to,
+                              Token *tok);
 
 //
 // unicode.c
@@ -800,10 +818,10 @@ int vm_stack_grow(VirtualMachine *vm, int slots_needed);
 
 #define STACK_GUARD_SIZE 16
 
-#define WATCHPOINT_CHECK(vm, addr, size, kind)                          \
-    do {                                                                \
-        if ((vm)->flags & CCCC_ENABLE_DEBUGGER)                          \
-            debugger_check_watchpoint((vm), (addr), (size), (kind));    \
+#define WATCHPOINT_CHECK(vm, addr, size, kind)                                 \
+    do {                                                                       \
+        if ((vm)->flags & CCCC_ENABLE_DEBUGGER)                                \
+            debugger_check_watchpoint((vm), (addr), (size), (kind));           \
     } while (0)
 
 static inline int check_stack_overflow(VirtualMachine *vm, int slots_needed) {
@@ -825,16 +843,18 @@ static inline int check_stack_overflow(VirtualMachine *vm, int slots_needed) {
 }
 
 long long cccc_rt_dlopen(VirtualMachine *vm, const char *path, int mode);
-long long cccc_rt_dlsym(VirtualMachine *vm, long long handle_token, const char *symbol);
+long long cccc_rt_dlsym(VirtualMachine *vm, long long handle_token,
+                        const char *symbol);
 long long cccc_rt_dlclose(VirtualMachine *vm, long long handle_token);
 long long cccc_rt_dlerror(VirtualMachine *vm);
 int cccc_ffi_name_in_list(char **list, int count, const char *name);
 DynamicSymbol *cccc_find_dynamic_symbol(VirtualMachine *vm, long long token);
-int cccc_call_native_function(VirtualMachine *vm, void *func_ptr, const char *name,
-                             long long *args, int actual_nargs,
-                             uint64_t double_arg_mask, uint64_t float_arg_mask,
-                             int returns_double, int returns_float,
-                             int is_variadic, int num_fixed_args);
+int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
+                              const char *name, long long *args,
+                              int actual_nargs, uint64_t double_arg_mask,
+                              uint64_t float_arg_mask, int returns_double,
+                              int returns_float, int is_variadic,
+                              int num_fixed_args);
 VirtualMachine *cccc_current_ffi_vm(void);
 // Returns the number of mutexes currently held by the active VM thread.
 // Used by race detection in ops.c; implemented in stdlib/pthread.c.
@@ -865,8 +885,8 @@ int cccc_thread_held_lock_count(VirtualMachine *vm);
 // or if the nested vm_eval reports an error (e.g. the guest callback itself
 // faulted).
 int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
-                              const long long *args, int nargs,
-                              long long *out_ival);
+                             const long long *args, int nargs,
+                             long long *out_ival);
 
 // Runs `entry` as a complete, non-nested top-level VM execution cycle (same
 // machinery as cc_run_at) with a single pointer argument in REG_A0 --
@@ -899,13 +919,15 @@ void cccc_pthread_run_main_tss_destructors(VirtualMachine *vm);
 // extracted from their opcode counterparts (op_CALC_fn/op_REALC_fn/
 // op_REALCA_fn), which remain untouched.
 void *cccc_vm_heap_malloc(VirtualMachine *vm, long long requested_size);
-void *cccc_vm_heap_malloc_aligned(VirtualMachine *vm, long long requested_size, size_t alignment);
-int cccc_vm_heap_posix_memalign(VirtualMachine *vm, void **memptr, size_t alignment,
-                                long long requested_size);
+void *cccc_vm_heap_malloc_aligned(VirtualMachine *vm, long long requested_size,
+                                  size_t alignment);
+int cccc_vm_heap_posix_memalign(VirtualMachine *vm, void **memptr,
+                                size_t alignment, long long requested_size);
 int cccc_vm_heap_free(VirtualMachine *vm, void *ptr);
 void *cccc_vm_heap_calloc(VirtualMachine *vm, long long nmemb, long long size);
 void *cccc_vm_heap_realloc(VirtualMachine *vm, void *ptr, long long new_size);
-void *cccc_vm_heap_reallocarray(VirtualMachine *vm, void *ptr, long long nmemb, long long size);
+void *cccc_vm_heap_reallocarray(VirtualMachine *vm, void *ptr, long long nmemb,
+                                long long size);
 
 //
 // hashmap.c
@@ -918,8 +940,10 @@ void hashmap_put2(HashMap *map, const char *key, int keylen, void *val);
 void hashmap_delete(HashMap *map, const char *key);
 void hashmap_delete2(HashMap *map, const char *key, int keylen);
 
-// Borrowed key HashMap functions (keys are NOT copied; caller must ensure lifetime)
-void hashmap_put2_borrowed(HashMap *map, const char *key, int keylen, void *val);
+// Borrowed key HashMap functions (keys are NOT copied; caller must ensure
+// lifetime)
+void hashmap_put2_borrowed(HashMap *map, const char *key, int keylen,
+                           void *val);
 void hashmap_put_borrowed(HashMap *map, const char *key, void *val);
 
 // Deinitialize a HashMap: free all owned string keys and the bucket array.
@@ -986,21 +1010,21 @@ void cc_vm_profile_reset(VirtualMachine *vm);
 void cccc_reset_getopt_state(void);
 
 typedef struct ExecState {
-    long long regs[32];
-    FReg fregs[32];
-    VReg vregs[32];
-    Pc pc;
+    long long  regs[32];
+    FReg       fregs[32];
+    VReg       vregs[32];
+    Pc         pc;
     long long *bp;
     long long *sp;
-    long long cycle;
+    long long  cycle;
     long long *initial_sp;
     long long *initial_bp;
     long long *stack_seg;
     long long *stack_base;
-    size_t stack_committed;
+    size_t     stack_committed;
     long long *shadow_stack;
     long long *shadow_sp;
-    HashMap init_state;
+    HashMap    init_state;
     // Per-thread dangling-detector state (#866) -- see the comment above
     // VirtualMachine's own copy of these fields in cccc.h. frame_epoch_counter
     // starts at 0 for a brand-new thread (via cccc_exec_state_alloc_stack's
@@ -1008,18 +1032,18 @@ typedef struct ExecState {
     // one stack's address range to disambiguate a reused address's old vs.
     // new occupant, and no two threads ever share a stack allocation.
     unsigned long long frame_epoch_counter;
-    FrameEpochs frame_epochs;
-    HashMap live_epochs;
-    HashMap stack_ptr_epochs;
-    StackIntervals stack_intervals;
+    FrameEpochs        frame_epochs;
+    HashMap            live_epochs;
+    HashMap            stack_ptr_epochs;
+    StackIntervals     stack_intervals;
 } ExecState;
 
 void cccc_exec_state_save(VirtualMachine *vm, ExecState *state);
 void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state);
 int cccc_exec_state_alloc_stack(VirtualMachine *vm, ExecState *state);
 void cccc_exec_state_release_stack(VirtualMachine *vm, ExecState *state);
-void cccc_exec_state_prepare_call(VirtualMachine *vm, ExecState *state, Pc entry,
-                                  long long arg);
+void cccc_exec_state_prepare_call(VirtualMachine *vm, ExecState *state,
+                                  Pc entry, long long arg);
 void cccc_gil_init(VirtualMachine *vm);
 void cccc_gil_destroy(VirtualMachine *vm);
 void cccc_gil_acquire(VirtualMachine *vm);
@@ -1038,16 +1062,15 @@ void cc_optimize(VirtualMachine *vm, int level);
 // the fusion-candidate half lives here since optimize.c calls it too.
 
 typedef struct {
-    int top_n;
-    bool json;    // emit JSON instead of text
+    int  top_n;
+    bool json; // emit JSON instead of text
 } CcAnalyzeFusionOptions;
 
 typedef struct CcFusionState CcFusionState;
 
 CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts);
 void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
-                            long long num_words, const char *label,
-                            FILE *out);
+                            long long num_words, const char *label, FILE *out);
 void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
 
 typedef struct {
@@ -1072,10 +1095,14 @@ void cc_debug_repl_host_fault(VirtualMachine *vm, int sig, void *fault_addr);
 void debugger_disassemble_current(VirtualMachine *vm);
 void debugger_print_stack(VirtualMachine *vm, int count);
 int debugger_check_breakpoint(VirtualMachine *vm);
-int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int access_type);
+int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size,
+                              int access_type);
 void debugger_print_registers(VirtualMachine *vm);
 int debugger_run(VirtualMachine *vm, int argc, char **argv);
-int cc_is_valid_vm_address(VirtualMachine *vm, void *addr); // text/data/heap/stack segment bounds check (used by dump.c's cc_dump_value, #666)
+int cc_is_valid_vm_address(
+    VirtualMachine *vm,
+    void *addr); // text/data/heap/stack segment bounds check (used by dump.c's
+                 // cc_dump_value, #666)
 
 //
 // host_backtrace.c
@@ -1093,10 +1120,14 @@ void cc_host_backtrace_print(void);
 // dump_ast.c
 //
 
-void cc_dump_node(FILE *f, Node *node, int verbose);      // single-node dump (used by relfection.c)
-const char *cc_node_kind_name(NodeKind kind);             // kind→string (used by relfection.c)
-const char *cc_type_kind_name(TypeKind kind);              // kind→string (used by serialize.c's #963c hard error)
-void cc_dump_type(FILE *f, Type *ty);                     // C-ish type spelling (used by the REPL, #661)
+void cc_dump_node(FILE *f, Node *node,
+                  int verbose);   // single-node dump (used by relfection.c)
+const char *
+cc_node_kind_name(NodeKind kind); // kind→string (used by relfection.c)
+const char *cc_type_kind_name(
+    TypeKind kind); // kind→string (used by serialize.c's #963c hard error)
+void cc_dump_type(FILE *f,
+                  Type *ty); // C-ish type spelling (used by the REPL, #661)
 
 // Recursive aggregate/scalar value formatter (#666), shared between the REPL
 // and (follow-up) the debugger's inspect/print commands. Neither prints a
@@ -1113,7 +1144,8 @@ void cc_dump_value(FILE *f, VirtualMachine *vm, Type *ty, const void *addr);
 // TY_ARRAY/TY_VECTOR, ival *is* the address (RETBUF pool for a returned
 // struct/union/vector, data-segment address for an array lvalue), so this
 // just validates and delegates to cc_dump_value.
-void cc_dump_value_reg(FILE *f, VirtualMachine *vm, Type *ty, long long ival, double fval);
+void cc_dump_value_reg(FILE *f, VirtualMachine *vm, Type *ty, long long ival,
+                       double fval);
 
 //
 // json.c
@@ -1136,7 +1168,8 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url);
 // stdlib
 //
 
-// vm.c — global pointer to the currently executing VM (set/cleared by cc_run_at)
+// vm.c — global pointer to the currently executing VM (set/cleared by
+// cc_run_at)
 extern VirtualMachine *cc_running_vm;
 
 // reflection.c — the VM live for the current compile. Seeded by cc_init,
@@ -1150,7 +1183,8 @@ extern VirtualMachine *__builtin_current_vm;
 // (host-function writes to guest heap memory have no other VM hook). A
 // no-op when --type-checks is off or either range isn't in the tracked
 // heap; see type_shadow_copy's doc comment in ops.c for full semantics.
-void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src, size_t len);
+void cc_type_shadow_copy(VirtualMachine *vm, void *dst, const void *src,
+                         size_t len);
 
 // ops.c (included into vm.c) -- #769: exposed for wrap_qsort's shim in
 // stdlib/stdlib.c, so a host qsort() call can preserve the #653 type shadow
@@ -1170,11 +1204,11 @@ void cc_type_shadow_clear_range(VirtualMachine *vm, void *p, size_t len);
 Token *cc_inject_test_header(VirtualMachine *vm);
 
 // preprocess.c — parse a whitespace-separated CLI-flag string (as allowed in
-// Parses a whitespace-separated CLI-flag string from [[cccc::test(flags="...")]]
-// into a CcTestFlagsDelta.  Supports safety presets, -O levels, safety check
-// flags, -W*/-Werror* warning flags, and -f/-fno- optimisation-pass flags.
-// Unknown or malformed flags are reported via error_tok() at src_tok's source
-// location and terminate compilation.
+// Parses a whitespace-separated CLI-flag string from
+// [[cccc::test(flags="...")]] into a CcTestFlagsDelta.  Supports safety
+// presets, -O levels, safety check flags, -W*/-Werror* warning flags, and
+// -f/-fno- optimisation-pass flags. Unknown or malformed flags are reported via
+// error_tok() at src_tok's source location and terminate compilation.
 void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                          const char *flags_str, const char *test_name,
                          CcTestFlagsDelta *out);
@@ -1188,9 +1222,9 @@ typedef struct {
 } ArgVec;
 
 void argv_push(ArgVec *args, const char *arg);
-int  run_argv(char *const argv[]);
-int  run_argv_env(char *const argv[], char *const envp[]);
-int  run_argv_quiet(char *const argv[]);
+int run_argv(char *const argv[]);
+int run_argv_env(char *const argv[], char *const envp[]);
+int run_argv_quiet(char *const argv[]);
 
 // Preprocess include/cccc/building.h; see cc_inject_build_header's
 // definition (src/build.c) for the full contract.
@@ -1199,8 +1233,9 @@ Token *cc_inject_build_header(VirtualMachine *vm);
 //
 // build.c (--build mode)
 //
-char  *cccc_find_native_tool(const char *tool);
-char  *cccc_path_find_executable(const char *name); // silent PATH probe (no error print)
+char *cccc_find_native_tool(const char *tool);
+char *cccc_path_find_executable(
+    const char *name); // silent PATH probe (no error print)
 
 void register_ctype_functions(VirtualMachine *vm);
 void register_fenv_functions(VirtualMachine *vm);
@@ -1248,41 +1283,67 @@ void cccc_sigev_cookie_free(int idx);
 /* out_sival_addr is the address of a persistent host-side union sigval
    slot (not the raw 8 bytes) -- guest-to-guest calls pass struct/union
    arguments by reference, see src/stdlib/posix_aio.c's definition. */
-int cccc_sigev_cookie_guest_fn(int idx, long long *out_fn, long long *out_sival_addr);
+int cccc_sigev_cookie_guest_fn(int idx, long long *out_fn,
+                               long long *out_sival_addr);
 /* Comparison helpers for test attribute assertions (CmpOp). */
 static inline const char *cmp_op_str(CmpOp op) {
     switch (op) {
-    case CMP_EQ: return "=";
-    case CMP_NE: return "!=";
-    case CMP_LT: return "<";
-    case CMP_LE: return "<=";
-    case CMP_GT: return ">";
-    case CMP_GE: return ">=";
-    default:     return "?";
+        case CMP_EQ:
+            return "=";
+        case CMP_NE:
+            return "!=";
+        case CMP_LT:
+            return "<";
+        case CMP_LE:
+            return "<=";
+        case CMP_GT:
+            return ">";
+        case CMP_GE:
+            return ">=";
+        default:
+            return "?";
     }
 }
 
 static inline bool apply_cmp_op_i64(CmpOp op, int64_t a, int64_t b) {
     switch (op) {
-    case CMP_EQ: return a == b;
-    case CMP_NE: return a != b;
-    case CMP_LT: return a <  b;
-    case CMP_LE: return a <= b;
-    case CMP_GT: return a >  b;
-    case CMP_GE: return a >= b;
-    default:     return false;
+        case CMP_EQ:
+            return a == b;
+        case CMP_NE:
+            return a != b;
+        case CMP_LT:
+            return a < b;
+        case CMP_LE:
+            return a <= b;
+        case CMP_GT:
+            return a > b;
+        case CMP_GE:
+            return a >= b;
+        default:
+            return false;
     }
 }
 
 static inline bool apply_cmp_op_f64(CmpOp op, double a, double b, double eps) {
     switch (op) {
-    case CMP_EQ: { double d = a - b; return d < eps && d > -eps; }
-    case CMP_NE: { double d = a - b; return !(d < eps && d > -eps); }
-    case CMP_LT: return a <  b;
-    case CMP_LE: return a <= b;
-    case CMP_GT: return a >  b;
-    case CMP_GE: return a >= b;
-    default:     return false;
+        case CMP_EQ: {
+            double d = a - b;
+            return d < eps && d > -eps;
+        }
+        case CMP_NE: {
+            double d = a - b;
+            return !(d < eps && d > -eps);
+        }
+        case CMP_LT:
+            return a < b;
+        case CMP_LE:
+            return a <= b;
+        case CMP_GT:
+            return a > b;
+        case CMP_GE:
+            return a >= b;
+        default:
+            return false;
     }
 }
 
@@ -1312,7 +1373,8 @@ long long cccc_guest_siginfo_for(int sig, int synthesized);
    instruction -- takes a register-file snapshot, #877) and false from
    op_VRAISE_fn (synchronous, runs at a call boundary -- no snapshot
    needed). See src/stdlib/signal.c. */
-int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot, bool async);
+int cccc_signal_prepare_delivery(VirtualMachine *vm, int sig, SigSlot *slot,
+                                 bool async);
 /* #877: called by the SIGEV_THREAD poll (vm.c), which has no SigSlot of
    its own, immediately after pushing the handler's return address onto
    the VM stack and before jumping to it -- same register-snapshot

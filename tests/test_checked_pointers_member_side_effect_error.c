@@ -7,7 +7,7 @@
 static int g_i = 0;
 
 struct S {
-    int * [[cccc::array, cccc::count(g_i++)]] p;
+    int *[[cccc::array, cccc::count(g_i++)]] p;
 };
 
 int main(void) {

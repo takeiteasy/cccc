@@ -20,9 +20,9 @@
 
 int main(void) {
     char *argv[] = {"prog", "-x", "val", "-y"};
-    int argc = 4;
+    int   argc   = 4;
 
-    int c = getopt(argc, argv, "x:y");
+    int   c      = getopt(argc, argv, "x:y");
     if (c != 'x')
         return 1;
     if (!optarg || strcmp(optarg, "val") != 0)

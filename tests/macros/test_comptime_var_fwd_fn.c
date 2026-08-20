@@ -3,10 +3,12 @@
 // are compiled before any initializers run, so forward refs are supported.
 
 [[cccc::comptime]]
-int items = get_item_count();   // forward ref — get_item_count defined below
+int items = get_item_count(); // forward ref — get_item_count defined below
 
 [[cccc::comptime]]
-int get_item_count(void) { return 6; }
+int get_item_count(void) {
+    return 6;
+}
 
 [[cccc::comptime]]
 Node *get_items(void) {

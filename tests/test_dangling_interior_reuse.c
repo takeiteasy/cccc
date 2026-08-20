@@ -14,12 +14,14 @@ int *get_local(int i) {
 }
 
 int holder(int *p) {
-    int pad[6]; // reoccupy part of arr's former memory with a live, smaller object
+    int pad[6]; // reoccupy part of arr's former memory with a live, smaller
+                // object
     pad[0] = 0;
-    return *p; // p points past pad's extent, into arr's now-dead remainder
+    return *p;  // p points past pad's extent, into arr's now-dead remainder
 }
 
 int main(void) {
-    int *p = get_local(7); // arr's last element -- outside pad's narrower extent
+    int *p =
+        get_local(7); // arr's last element -- outside pad's narrower extent
     return holder(p);
 }

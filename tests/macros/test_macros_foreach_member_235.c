@@ -8,10 +8,10 @@ struct Point3D {
 
 [[cccc::comptime]]
 void generate_point3d_offset_sum(void) {
-    Type *ty = GetType("Point3D");
+    Type *ty           = GetType("Point3D");
 
-    int total_offset = 0;
-    int count = 0;
+    int   total_offset = 0;
+    int   count        = 0;
     ForeachMember(ty, m, {
         total_offset += MemberOffset(m);
         count++;

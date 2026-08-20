@@ -21,7 +21,8 @@ static int add2(int a, int b) {
 int main(void) {
     // A comma-expression funcall argument must not split into extra args.
     int r = add2(TWO_THEN_INC(5), 10); // (5, 6) -> 6, so add2(6, 10) == 16
-    if (r != 16) return 1;
+    if (r != 16)
+        return 1;
 
     // A comma expression inside one declarator's own initializer, combined
     // with the for-loop's own comma-joining of multiple declarators --
@@ -33,7 +34,8 @@ int main(void) {
     }
     // i runs 3,4,5 (starts at 3, the comma expression's last value);
     // j runs 100,200,300.
-    if (total != (3 + 100) + (4 + 200) + (5 + 300)) return 2;
+    if (total != (3 + 100) + (4 + 200) + (5 + 300))
+        return 2;
 
     return 42;
 }

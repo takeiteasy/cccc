@@ -30,11 +30,11 @@ static int cmp_int(const void *a, const void *b) {
 }
 
 int main(void) {
-    int *arr = malloc(sizeof(int) * 4);
-    arr[0] = 4; // int
+    int *arr          = malloc(sizeof(int) * 4);
+    arr[0]            = 4;    // int
     ((float *)arr)[1] = 1.0f; // float: array is non-uniform going in
-    arr[2] = 2; // int
-    arr[3] = 1; // int
+    arr[2]            = 2;    // int
+    arr[3]            = 1;    // int
 
     qsort(arr, 4, sizeof(int), cmp_int);
 
@@ -54,7 +54,10 @@ int main(void) {
     volatile int i1 = arr[1];
     volatile int i2 = arr[2];
     volatile int i3 = arr[3];
-    (void)i0; (void)i1; (void)i2; (void)i3;
+    (void)i0;
+    (void)i1;
+    (void)i2;
+    (void)i3;
 
     free(arr);
     return 42;

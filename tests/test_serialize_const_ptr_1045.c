@@ -24,8 +24,12 @@
 //       half of the same bug (serialize_type_decl's TY_FUNC branch prints
 //       each parameter through serialize_type() too).
 
-int rhandler_a(void) { return 100; }
-int rhandler_b(void) { return 200; }
+int rhandler_a(void) {
+    return 100;
+}
+int rhandler_b(void) {
+    return 200;
+}
 
 static int (*const rtable[])(void) = {rhandler_a, rhandler_b};
 
@@ -46,10 +50,10 @@ int main(void) {
         return 2;
 
     // (b): const-pointer value round-tripped through a cast.
-    int x = 7;
-    int *const cp = &x;
-    void *vp = (void *)cp;
-    int *back = (int *)vp;
+    int        x    = 7;
+    int *const cp   = &x;
+    void      *vp   = (void *)cp;
+    int       *back = (int *)vp;
     if (*back != 7)
         return 3;
 

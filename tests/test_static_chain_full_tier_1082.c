@@ -9,7 +9,9 @@ static int depth3(void) {
     int g = 7;
     int l1(int a) {
         int l2(int b) {
-            int l3(int c) { return g + a + b + c; }
+            int l3(int c) {
+                return g + a + b + c;
+            }
             return l3(3);
         }
         return l2(2);

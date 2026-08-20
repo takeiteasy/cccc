@@ -22,8 +22,12 @@
 
 // Single-depth helpers ─────────────────────────────────────────────────────
 
-static void *get_ra0(void) { return __builtin_return_address(0); }
-static void *get_ra1(void) { return __builtin_return_address(1); }
+static void *get_ra0(void) {
+    return __builtin_return_address(0);
+}
+static void *get_ra1(void) {
+    return __builtin_return_address(1);
+}
 
 // ─── Type acceptance ───────────────────────────────────────────────────────
 
@@ -59,8 +63,8 @@ void test_return_address_test_fn_is_outermost(void) {
 
 [[cccc::test]]
 void test_return_address_distinct_call_sites(void) {
-    void *ra1 = get_ra0();  // call site 1
-    void *ra2 = get_ra0();  // call site 2
+    void *ra1 = get_ra0(); // call site 1
+    void *ra2 = get_ra0(); // call site 2
     AssertNeq((long long)ra1, (long long)ra2);
 }
 

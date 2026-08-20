@@ -6,12 +6,14 @@
 [[cccc::comptime]]
 void gen_sum_upto(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("sum_upto", int_ty);
+    Obj  *fn     = MakeFunction("sum_upto", int_ty);
     FunctionAddParam(fn, "n", int_ty);
     Node *n = MakeParamRef(fn, "n");
     WithFn(fn) {
-        FunctionSetBody(fn, Quote(
-            "int s = 0; for (int i = 0; i < $1; i++) s += i; return s;", n));
+        FunctionSetBody(
+            fn,
+            Quote("int s = 0; for (int i = 0; i < $1; i++) s += i; return s;",
+                  n));
     }
 }
 gen_sum_upto();

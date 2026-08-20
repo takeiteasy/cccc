@@ -11,6 +11,6 @@ int main(void) {
         u[0] = i;
     }
     char *p = __builtin_alloca(8);
-    p[0] = 1;
+    p[0]    = 1;
     return 42;
 }

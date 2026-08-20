@@ -1,7 +1,8 @@
-__comptime int helper(void) { return 21; }
+__comptime int helper(void) {
+    return 21;
+}
 
-__comptime__
-Node *answer(void) {
+__comptime__ Node *answer(void) {
     return MakeIntLiteral(helper() * 2);
 }
 

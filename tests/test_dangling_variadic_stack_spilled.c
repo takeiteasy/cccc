@@ -23,8 +23,8 @@
 // had for #727, now also applied at layer 2.
 #include <stdarg.h>
 
-typedef float v4sf __attribute__((vector_size(16)));
-typedef float v8sf __attribute__((vector_size(32)));
+typedef float  v4sf __attribute__((vector_size(16)));
+typedef float  v8sf __attribute__((vector_size(32)));
 typedef double v8df __attribute__((vector_size(64)));
 
 static int sum_vecs(int n, ...) {
@@ -32,8 +32,8 @@ static int sum_vecs(int n, ...) {
     va_start(ap, n);
     float acc = 0;
     for (int i = 0; i < n; i++) {
-        v4sf v = va_arg(ap, v4sf);
-        acc += v[0] + v[1] + v[2] + v[3];
+        v4sf v  = va_arg(ap, v4sf);
+        acc    += v[0] + v[1] + v[2] + v[3];
     }
     va_end(ap);
     return (int)acc;
@@ -42,8 +42,8 @@ static int sum_vecs(int n, ...) {
 static int mixed(int n, ...) {
     va_list ap;
     va_start(ap, n);
-    v4sf v = va_arg(ap, v4sf);
-    int i2 = va_arg(ap, int);
+    v4sf v  = va_arg(ap, v4sf);
+    int  i2 = va_arg(ap, int);
     va_end(ap);
     return (int)(v[0] + v[1] + v[2] + v[3]) + i2;
 }
@@ -51,8 +51,7 @@ static int mixed(int n, ...) {
 // 8 fixed register-passed args before '...': the variadic vector arg is
 // stack-spilled (arg index >= 8) rather than register-passed -- #740's
 // actual repro shape.
-static int after8(int a, int b, int c, int d, int e, int f, int g, int h,
-                   ...) {
+static int after8(int a, int b, int c, int d, int e, int f, int g, int h, ...) {
     va_list ap;
     va_start(ap, h);
     v4sf v = va_arg(ap, v4sf);
@@ -68,21 +67,27 @@ static int wide(int n, ...) {
     v8df b = va_arg(ap, v8df);
     va_end(ap);
     double acc = 0;
-    for (int i = 0; i < 8; i++) acc += a[i];
-    for (int i = 0; i < 8; i++) acc += b[i];
+    for (int i = 0; i < 8; i++)
+        acc += a[i];
+    for (int i = 0; i < 8; i++)
+        acc += b[i];
     return (int)acc;
 }
 
 int main(void) {
     v4sf a = {1, 2, 3, 4}, b = {10, 20, 30, 40};
 
-    if (sum_vecs(2, a, b) != 110) return 1;
-    if (mixed(0, a, 100) != 110) return 2;
-    if (after8(1, 2, 3, 4, 5, 6, 7, 8, a) != 10) return 3;
+    if (sum_vecs(2, a, b) != 110)
+        return 1;
+    if (mixed(0, a, 100) != 110)
+        return 2;
+    if (after8(1, 2, 3, 4, 5, 6, 7, 8, a) != 10)
+        return 3;
 
     v8sf w1 = {1, 2, 3, 4, 5, 6, 7, 8};
     v8df w2 = {1, 2, 3, 4, 5, 6, 7, 8};
-    if (wide(2, w1, w2) != 72) return 4;
+    if (wide(2, w1, w2) != 72)
+        return 4;
 
     return 42;
 }

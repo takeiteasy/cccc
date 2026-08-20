@@ -3,7 +3,10 @@
 
 [[cccc::comptime]]
 Node *bad_quote(Node *x) {
-    return `return $1;`;
+    return `return $1;
+    `;
 }
 
-int main(void) { bad_quote(42); }
+int main(void) {
+    bad_quote(42);
+}

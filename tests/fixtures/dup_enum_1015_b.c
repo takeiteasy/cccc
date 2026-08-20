@@ -6,4 +6,6 @@
 // (`enum E1015__cccc_dupN`) -- but AA1015 itself still collided with the
 // enumerator declared by dup_enum_1015_a.c until #1015 fixed it.
 enum E1015 { AA1015 = 5, CC1015 };
-int b_use_1015(void) { return AA1015 + CC1015; }
+int b_use_1015(void) {
+    return AA1015 + CC1015;
+}

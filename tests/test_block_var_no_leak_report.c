@@ -6,6 +6,6 @@
 // same reasoning as a VLA's alloca-backed block.
 int main(void) {
     __block int x = 1;
-    x = 2;
+    x             = 2;
     return 40 + x;
 }

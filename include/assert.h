@@ -9,7 +9,8 @@
 #ifdef NDEBUG
 #define assert(expr) ((void)0)
 #else
-#define assert(expr) ((expr) ? (void)0 : (puts("Assertion failed: " #expr), abort()))
+#define assert(expr)                                                           \
+    ((expr) ? (void)0 : (puts("Assertion failed: " #expr), abort()))
 #endif
 
 #endif /* __ASSERT_H */

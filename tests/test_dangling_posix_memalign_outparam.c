@@ -6,8 +6,8 @@
 #include <stdlib.h>
 
 int main(void) {
-    void *q = NULL;
-    int rc = posix_memalign(&q, 64, 128);
+    void *q  = NULL;
+    int   rc = posix_memalign(&q, 64, 128);
     if (rc != 0 || !q)
         return 1;
     free(q);

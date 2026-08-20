@@ -30,14 +30,14 @@ int main(void) {
     signal(SIGALRM, alarm_handler);
 
     struct itimerval it;
-    it.it_interval.tv_sec = 0;
+    it.it_interval.tv_sec  = 0;
     it.it_interval.tv_usec = 200; // fire roughly every 200us
-    it.it_value = it.it_interval;
+    it.it_value            = it.it_interval;
     if (setitimer(ITIMER_REAL, &it, 0) != 0)
         return 1;
 
-    long long checksum = 0;
-    long long spins = 0;
+    long long       checksum  = 0;
+    long long       spins     = 0;
     const long long max_spins = 2000000;
     while (spins < max_spins) {
         checksum += (spins ^ (spins << 3)) - (checksum >> 1);
@@ -50,15 +50,17 @@ int main(void) {
     // reason to leave the timer running once the loop under test is done.
     struct itimerval off;
     off.it_interval.tv_sec = off.it_interval.tv_usec = 0;
-    off.it_value = off.it_interval;
+    off.it_value                                     = off.it_interval;
     setitimer(ITIMER_REAL, &off, 0);
 
     long long expected = 0;
     for (long long s = 0; s < max_spins; s++)
         expected += (s ^ (s << 3)) - (expected >> 1);
 
-    if (handler_calls <= 0) return 2; // SIGALRM never observed -- test didn't exercise anything
-    if (checksum != expected) return 3; // async delivery corrupted a live register (#877)
+    if (handler_calls <= 0)
+        return 2; // SIGALRM never observed -- test didn't exercise anything
+    if (checksum != expected)
+        return 3; // async delivery corrupted a live register (#877)
 
     return 42;
 }

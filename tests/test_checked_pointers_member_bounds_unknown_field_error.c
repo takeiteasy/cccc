@@ -7,7 +7,7 @@
 // an unknown name fails exactly like an unknown identifier anywhere else.
 
 struct S {
-    int * [[cccc::array, cccc::count(not_a_member)]] p;
+    int *[[cccc::array, cccc::count(not_a_member)]] p;
 };
 
 int main(void) {

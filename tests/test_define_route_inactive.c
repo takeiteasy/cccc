@@ -1,11 +1,12 @@
-// Ticket #611: @build/@test route on #define, #ifdef, etc. in comp mode (inactive).
-// Both routes are inactive so all mode-gated defines must be absent, and
-// conditional nesting must stay balanced (plain #endif closes @build #ifdef).
+// Ticket #611: @build/@test route on #define, #ifdef, etc. in comp mode
+// (inactive). Both routes are inactive so all mode-gated defines must be
+// absent, and conditional nesting must stay balanced (plain #endif closes
+// @build #ifdef).
 #include <stdlib.h>
 
 // These defines must NOT be applied in comp mode.
 #define @build BUILD_CANARY 1
-#define @test  TEST_CANARY  1
+#define @test  TEST_CANARY 1
 
 int main(void) {
     int result = 42;
@@ -37,9 +38,9 @@ int main(void) {
 
     // Nested: outer @build false, inner @test also false; nesting must balance.
 #ifdef @build BUILD_CANARY
-#  ifdef @test TEST_CANARY
+#ifdef @test TEST_CANARY
     result = 6;
-#  endif
+#endif
 #endif
 
     return result; // must be 42

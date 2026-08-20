@@ -5,7 +5,7 @@ int generated_answer(void);
 [[cccc::comptime]]
 Node *generate_answer(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("generated_answer", int_ty);
+    Obj  *fn     = MakeFunction("generated_answer", int_ty);
     FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
     return MakeIntLiteral(0);
 }

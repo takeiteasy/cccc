@@ -8,7 +8,7 @@
 Node *double_inc(Node *x) {
     Node *s1    = __builtin_quote("$1 += 1;", x);
     Node *s2    = __builtin_quote("$1 += 1;", x);
-    Node *chain = __builtin_node_list((Node*[]){ s1, s2 }, 2);
+    Node *chain = __builtin_node_list((Node *[]){s1, s2}, 2);
     return __builtin_quote("{ $@1; }", chain);
 }
 
@@ -17,16 +17,17 @@ int get_plus_two(int v) {
     return v;
 }
 
-// ---- __builtin_node_list + $@1 (three-element chain) ---------------------------
-// accumulate3 takes an accumulator variable and three addends; builds a
-// three-statement chain and splices it.  All inner templates reference only
-// macro arguments (which are call-site nodes, in scope at macro execution).
+// ---- __builtin_node_list + $@1 (three-element chain)
+// --------------------------- accumulate3 takes an accumulator variable and
+// three addends; builds a three-statement chain and splices it.  All inner
+// templates reference only macro arguments (which are call-site nodes, in scope
+// at macro execution).
 [[cccc::comptime]]
 Node *accumulate3(Node *acc, Node *a, Node *b, Node *c) {
     Node *s1    = __builtin_quote("$1 += $2;", acc, a);
     Node *s2    = __builtin_quote("$1 += $2;", acc, b);
     Node *s3    = __builtin_quote("$1 += $2;", acc, c);
-    Node *chain = __builtin_node_list((Node*[]){ s1, s2, s3 }, 3);
+    Node *chain = __builtin_node_list((Node *[]){s1, s2, s3}, 3);
     return __builtin_quote("{ $@1; }", chain);
 }
 
@@ -73,28 +74,33 @@ int test_if_then(void) {
 // the locals-flush fix is correct, all lvars get distinct stack slots and
 // neither the native nor the injected increments clobber each other.
 int test_locals_mix(int base) {
-    int native = base;
-    native += 100;          // native compound assign — lvar at parse time
-    double_inc(native);     // splice macro injects two more compound assigns
-    native += 5;            // another native compound assign
-    return native;          // base + 100 + 2 + 5
+    int native  = base;
+    native     += 100;  // native compound assign — lvar at parse time
+    double_inc(native); // splice macro injects two more compound assigns
+    native += 5;        // another native compound assign
+    return native;      // base + 100 + 2 + 5
 }
 
 int main(void) {
     // double_inc: v = 5, two increments -> 7
-    if (get_plus_two(5) != 7) return 1;
+    if (get_plus_two(5) != 7)
+        return 1;
 
     // accumulate3: acc = 0 + 1 + 2 + 3 = 6
-    if (test_accumulate() != 6) return 2;
+    if (test_accumulate() != 6)
+        return 2;
 
     // two_increments: x += 10, y += 20, sum = 30
-    if (test_incr() != 30) return 3;
+    if (test_incr() != 30)
+        return 3;
 
     // if_then: cond=1, body x += 7 -> x = 7
-    if (test_if_then() != 7) return 4;
+    if (test_if_then() != 7)
+        return 4;
 
     // locals_mix: base=0 -> 0 + 100 + 2 + 5 = 107
-    if (test_locals_mix(0) != 107) return 5;
+    if (test_locals_mix(0) != 107)
+        return 5;
 
     return 42;
 }

@@ -7,8 +7,8 @@
 #include <stdlib.h>
 
 int main(void) {
-    int *p = malloc(sizeof(int));
-    *p = 5;
+    int *p   = malloc(sizeof(int));
+    *p       = 5;
     float *q = (float *)p; // same base address, reinterpreted
     return (int)*q;        // load as float: mismatches the stamped int type
 }

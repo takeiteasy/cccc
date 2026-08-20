@@ -12,12 +12,12 @@
 // all, since that loop skips anything with no tag and no alias.
 
 typedef unsigned char lu_byte;
-typedef lu_byte TStatus;
+typedef lu_byte       TStatus;
 
 struct GCHeader {
     struct GCHeader *next;
-    lu_byte tt;
-    lu_byte marked;
+    lu_byte          tt;
+    lu_byte          marked;
 };
 
 union Value {
@@ -30,13 +30,13 @@ union Value {
 
 int main(void) {
     struct GCHeader h;
-    h.next = 0;
-    h.tt = 1;
+    h.next   = 0;
+    h.tt     = 1;
     h.marked = 2;
 
     union Value v;
     v.tagged.tag = 3;
-    v.tagged.st = 4;
+    v.tagged.st  = 4;
 
     return h.tt + h.marked + v.tagged.tag + v.tagged.st + 32;
 }

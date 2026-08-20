@@ -11,8 +11,9 @@ static int re_entries;
 __attribute__((destructor)) void d(void) {
     re_entries++;
     if (re_entries > 1)
-        _exit(1); // ran more than once -- recursion bug
-    exit(re_entries == 1 ? 42 : 1); // re-enter wrap_exit from inside the destructor
+        _exit(1);              // ran more than once -- recursion bug
+    exit(re_entries == 1 ? 42
+                         : 1); // re-enter wrap_exit from inside the destructor
 }
 
 int main(void) {

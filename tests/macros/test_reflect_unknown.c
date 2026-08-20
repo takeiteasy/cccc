@@ -1,5 +1,6 @@
 // EXPECT_COMPILE_ERROR
-// Test $identifier reflect operator: $UnknownName must produce a compile-time error.
+// Test $identifier reflect operator: $UnknownName must produce a compile-time
+// error.
 
 [[cccc::comptime]]
 Node *bad_reflect(void) {

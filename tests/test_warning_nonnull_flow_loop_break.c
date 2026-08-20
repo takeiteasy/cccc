@@ -7,11 +7,11 @@
 // must be no spurious "fell out normally" predecessor for a loop with no
 // cond (see the exit_normal handling in nn_walk_loop_precise).
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
-    int n = 3;
+    int  n = 3;
     for (;;) {
         n--;
         if (n == 0) {

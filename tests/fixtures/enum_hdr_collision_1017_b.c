@@ -8,4 +8,6 @@
 // tests/test_serialize_enum_header_obj_collision_1017.c.
 static int AA1017 = 3;
 
-int b_use_1017(void) { return AA1017; }
+int b_use_1017(void) {
+    return AA1017;
+}

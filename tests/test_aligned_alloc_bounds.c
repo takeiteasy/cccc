@@ -9,6 +9,6 @@
 
 int main(void) {
     int *p = aligned_alloc(32, 4 * sizeof(int));
-    p[10] = 1; // 10 >= 4 allocated ints: out of bounds
+    p[10]  = 1; // 10 >= 4 allocated ints: out of bounds
     return 42;
 }

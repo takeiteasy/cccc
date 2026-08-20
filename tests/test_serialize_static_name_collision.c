@@ -14,6 +14,10 @@
 // file defines it. Only the *second* TU's definition should be renamed --
 // the fixture above (TU1) keeps its original name.
 int collide_1002_call_a(void);
-static int collide_1002(void) { return 22; }
+static int collide_1002(void) {
+    return 22;
+}
 
-int main(void) { return collide_1002_call_a() + collide_1002(); }
+int main(void) {
+    return collide_1002_call_a() + collide_1002();
+}

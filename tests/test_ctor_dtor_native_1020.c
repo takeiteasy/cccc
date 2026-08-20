@@ -46,9 +46,12 @@ __attribute__((destructor)) void plain_dtor(void) {
 }
 
 int main(void) {
-    if (!ctor_ran) return 1;       // constructor never ran at all
-    if (!ctor_prio_ran) return 2;  // prioritised constructor never ran
-    if (order_idx != 1 || order[0] != 1) return 3; // static ctor dropped
+    if (!ctor_ran)
+        return 1; // constructor never ran at all
+    if (!ctor_prio_ran)
+        return 2; // prioritised constructor never ran
+    if (order_idx != 1 || order[0] != 1)
+        return 3; // static ctor dropped
     // plain_dtor can't be observed from inside main() (it runs after
     // return) -- its own execution is covered by dtor_ran being read back
     // is not possible here; test_destructor_basic.c/test_destructor_

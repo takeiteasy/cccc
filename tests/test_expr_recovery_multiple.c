@@ -7,7 +7,9 @@ int main() {
     int a = foo + bar;
 
     // Struct member errors
-    struct { int x; } s;
+    struct {
+        int x;
+    } s;
     int b = s.y + s.z;
 
     // More undefined variables

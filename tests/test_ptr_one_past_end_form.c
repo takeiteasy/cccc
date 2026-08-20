@@ -9,10 +9,10 @@
 // dereference is still caught).
 #include <stdlib.h>
 int main(void) {
-    int *p = malloc(4 * sizeof(int));   // valid indices 0..3
+    int *p = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!p)
         return 255;
-    int *e = p + 4;   // one-past-the-end -- legal to FORM, must not trap
+    int *e = p + 4; // one-past-the-end -- legal to FORM, must not trap
     long d = e - p;
     free(p);
     return d == 4 ? 42 : 1;

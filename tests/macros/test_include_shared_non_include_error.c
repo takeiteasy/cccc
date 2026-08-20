@@ -4,4 +4,6 @@
 // #include and #define (#888 added #define @shared as a second valid
 // directive; #undef is still rejected).
 #undef @shared FOO
-int main(void) { return 0; }
+int main(void) {
+    return 0;
+}

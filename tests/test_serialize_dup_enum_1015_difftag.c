@@ -1,7 +1,9 @@
-// CCCC_FLAGS: tests/fixtures/dup_enum_1015_difftag_a.c tests/fixtures/dup_enum_1015_difftag_b.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*enum E1015DTA \{\n    AA1015DT = 1,)(?=[\s\S]*enum E1015DTB \{\n    AA1015DT__cccc_dup[0-9]+ = 5,)
-// CCCC_REJECT_STDOUT: enum E1015DTB \{\n    AA1015DT =
+// CCCC_FLAGS: tests/fixtures/dup_enum_1015_difftag_a.c
+// tests/fixtures/dup_enum_1015_difftag_b.c -m CCCC_C4_SKIP: multi-source
+// compile, not a single-TU bytecode round-trip CCCC_EXPECT_STDOUT:
+// (?=[\s\S]*enum E1015DTA \{\n    AA1015DT = 1,)(?=[\s\S]*enum E1015DTB \{\n
+// AA1015DT__cccc_dup[0-9]+ = 5,) CCCC_REJECT_STDOUT: enum E1015DTB \{\n
+// AA1015DT =
 //
 // #1015 widening: two enums with *different* tags (so #1014's tag-rename
 // pass never fires -- E1015DTA and E1015DTB don't collide) can still

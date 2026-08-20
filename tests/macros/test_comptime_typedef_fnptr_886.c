@@ -15,12 +15,14 @@ typedef int (*fn_t)(int);
 // declaration snapshot) so it's usable from a comptime function body.
 typedef int myint;
 
-static int add_one(int x) { return x + 1; }
+static int add_one(int x) {
+    return x + 1;
+}
 
 void gen(void) {
-    fn_t f = add_one;
-    myint r = f(41);
-    Obj *fn = MakeFunction("result", GetType("int"));
+    fn_t  f  = add_one;
+    myint r  = f(41);
+    Obj  *fn = MakeFunction("result", GetType("int"));
     FunctionSetBody(fn, MakeReturn(MakeIntLiteral(r)));
 }
 gen();

@@ -23,13 +23,14 @@
 
 #include "./parse_internal.h"
 
-Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
+Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
+                     VarAttr *attr) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
         if (!first)
             tok = skip(vm, tok, ",");
-        first = false;
+        first    = false;
 
         Type *ty = declarator(vm, &tok, tok, basety);
         if (!ty->name)
@@ -71,16 +72,17 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr
         // would have frozen at its still-incomplete size/members forever,
         // silently reproducing an incomplete `struct Beta` in the output
         // even after the real definition completed the original.
-        if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        if (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
+            ty->kind != TY_ENUM)
             ty = copy_type(vm, ty);
-        char *name = get_ident(vm, ty->name);
-        VarScope *sc = push_scope(vm, name, ty->name->len);
-        sc->type_def = ty;
-        sc->is_deprecated = ty->is_deprecated;
+        char     *name     = get_ident(vm, ty->name);
+        VarScope *sc       = push_scope(vm, name, ty->name->len);
+        sc->type_def       = ty;
+        sc->is_deprecated  = ty->is_deprecated;
         sc->deprecated_msg = ty->deprecated_msg;
         record_type_name(vm, ty, name, ty->name->len, false, ty->name);
-        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty,
-                              NULL, ty->name);
+        run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty, NULL,
+                              ty->name);
     }
     return tok;
 }
@@ -100,7 +102,8 @@ static void create_param_lvars(VirtualMachine *vm, Type *param) {
 // being exited by a goto are exactly those active at the goto whose depth is
 // greater than this LCA depth, so this is the correct cleanup_target_depth even
 // for cross-sibling jumps where the goto and label share a depth number but not
-// an ancestor. Returns 0 when there is no common cleanup scope (function level).
+// an ancestor. Returns 0 when there is no common cleanup scope (function
+// level).
 static int cleanup_lca_depth(CleanupChainNode *g, CleanupChainNode *l) {
     while (g && (!l || g->depth > l->depth))
         g = g->parent;
@@ -125,25 +128,29 @@ static void resolve_goto_labels(VirtualMachine *vm) {
                 strncmp(x->label, y->label, strlen(y->label)) == 0) {
                 x->unique_label = y->unique_label;
                 // Cleanup ancestry applies only to actual jumps. ND_LABEL_VAL
-                // (labels-as-values, `&&label`) also flows through this loop but
-                // merely takes an address — it neither exits nor enters scopes.
+                // (labels-as-values, `&&label`) also flows through this loop
+                // but merely takes an address — it neither exits nor enters
+                // scopes.
                 if (x->kind == ND_GOTO) {
-                    // The goto must clean up every active cleanup scope that the
-                    // label is not inside of, i.e. everything below their lowest
-                    // common ancestor. Using the LCA depth (rather than the
-                    // label's depth) handles cross-sibling jumps, where the goto
-                    // and label share a depth number but no common cleanup scope.
-                    int lca = cleanup_lca_depth(x->cleanup_chain, y->cleanup_chain);
+                    // The goto must clean up every active cleanup scope that
+                    // the label is not inside of, i.e. everything below their
+                    // lowest common ancestor. Using the LCA depth (rather than
+                    // the label's depth) handles cross-sibling jumps, where the
+                    // goto and label share a depth number but no common cleanup
+                    // scope.
+                    int lca =
+                        cleanup_lca_depth(x->cleanup_chain, y->cleanup_chain);
                     x->cleanup_target_depth = lca;
                     // Jumping *into* a cleanup scope (the label sits inside a
                     // cleanup scope the goto is not in) leaves that variable
                     // uninitialized when its cleanup runs at the label's block
                     // exit — ill-formed C.
                     if (y->cleanup_chain && y->cleanup_chain->depth > lca)
-                        warn_tok(vm, x->tok, CCCC_WARN_ATTRIBUTES,
-                                 "goto jumps into scope of variable with "
-                                 "__attribute__((cleanup)); cleanup may run on an "
-                                 "uninitialized object");
+                        warn_tok(
+                            vm, x->tok, CCCC_WARN_ATTRIBUTES,
+                            "goto jumps into scope of variable with "
+                            "__attribute__((cleanup)); cleanup may run on an "
+                            "uninitialized object");
                 }
                 y->label_used = true;
                 break;
@@ -177,7 +184,8 @@ static Obj *find_func(VirtualMachine *vm, char *name, int name_len) {
     return NULL;
 }
 
-static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name, int name_len) {
+static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name,
+                                       int name_len) {
     Scope *sc = vm->compiler.scope;
     if (!sc)
         return NULL;
@@ -205,8 +213,8 @@ static void check_sentinel_variadic(VirtualMachine *vm, Type *ty) {
                  "sentinel attribute only applies to variadic functions");
 }
 
-static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *attr,
-                                       Token *tok) {
+static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
+                                       VarAttr *attr, Token *tok) {
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
 
@@ -231,7 +239,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
         if (fn->is_implicit) {
-            fn->ty = ty;
+            fn->ty          = ty;
             fn->is_implicit = false;
         }
         if (!fn->is_static && attr->is_static)
@@ -242,36 +250,38 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
         fn->is_maybe_unused |= ty->is_maybe_unused;
-        fn->is_deprecated |= ty->is_deprecated;
-        fn->is_noreturn |= ty->is_noreturn;
-        fn->is_pure |= ty->is_pure;
-        fn->is_func_const |= ty->is_func_const;
+        fn->is_deprecated   |= ty->is_deprecated;
+        fn->is_noreturn     |= ty->is_noreturn;
+        fn->is_pure         |= ty->is_pure;
+        fn->is_func_const   |= ty->is_func_const;
         if (ty->asm_label)
             fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
             fn->deprecated_msg = ty->deprecated_msg;
         if (ty->format_style && fn->ty) {
-            fn->ty->format_style = ty->format_style;
-            fn->ty->format_string_index = ty->format_string_index;
+            fn->ty->format_style         = ty->format_style;
+            fn->ty->format_string_index  = ty->format_string_index;
             fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
         }
         if (fn->ty) {
-            if (ty->nonnull_all) fn->ty->nonnull_all = true;
+            if (ty->nonnull_all)
+                fn->ty->nonnull_all = true;
             fn->ty->nonnull_mask |= ty->nonnull_mask;
-            if (ty->returns_nonnull) fn->ty->returns_nonnull = true;
+            if (ty->returns_nonnull)
+                fn->ty->returns_nonnull = true;
             if (ty->is_sentinel) {
-                fn->ty->is_sentinel = true;
+                fn->ty->is_sentinel  = true;
                 fn->ty->sentinel_pos = ty->sentinel_pos;
             }
             if (ty->alloc_size_idx) {
-                fn->ty->alloc_size_idx = ty->alloc_size_idx;
+                fn->ty->alloc_size_idx  = ty->alloc_size_idx;
                 fn->ty->alloc_size_idx2 = ty->alloc_size_idx2;
             }
             fn->ty->is_malloc |= ty->is_malloc;
         }
     } else {
-        fn = new_gvar(vm, name_str, ty->name->len, ty);
-        fn->is_function = true;
+        fn                = new_gvar(vm, name_str, ty->name->len, ty);
+        fn->is_function   = true;
         fn->is_definition = false;
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
@@ -280,22 +290,22 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty, VarAttr *at
     }
 
     fn->is_root = !(fn->is_static && fn->is_inline);
-    run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
-                          fn->ty, fn, fn->tok);
+    run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
+                          fn, fn->tok);
     return fn;
 }
 
-Token *function_declaration_list(VirtualMachine *vm, Token *tok,
-                                        Type *basety, VarAttr *attr) {
+Token *function_declaration_list(VirtualMachine *vm, Token *tok, Type *basety,
+                                 VarAttr *attr) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
         if (!first)
             tok = skip(vm, tok, ",");
-        first = false;
+        first    = false;
 
         Type *ty = declarator(vm, &tok, tok, basety);
-        ty = apply_var_attrs_to_type(vm, ty, attr);
+        ty       = apply_var_attrs_to_type(vm, ty, attr);
         if (ty->kind != TY_FUNC)
             error_tok(vm, ty->name ? ty->name : tok,
                       "expected function declaration");
@@ -322,21 +332,21 @@ static bool statement_terminates(Node *node) {
         return false;
 
     switch (node->kind) {
-    case ND_RETURN:
-        return true;
-    case ND_BLOCK: {
-        Node *last = node->body;
-        if (!last)
+        case ND_RETURN:
+            return true;
+        case ND_BLOCK: {
+            Node *last = node->body;
+            if (!last)
+                return false;
+            while (last->next)
+                last = last->next;
+            return statement_terminates(last);
+        }
+        case ND_IF:
+            return node->els && statement_terminates(node->then) &&
+                   statement_terminates(node->els);
+        default:
             return false;
-        while (last->next)
-            last = last->next;
-        return statement_terminates(last);
-    }
-    case ND_IF:
-        return node->els && statement_terminates(node->then) &&
-               statement_terminates(node->els);
-    default:
-        return false;
     }
 }
 
@@ -356,13 +366,14 @@ static void append_implicit_return(VirtualMachine *vm, Obj *fn, Token *tok) {
         return;
 
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        error_tok(vm, tok, "control reaches end of non-void aggregate function");
+        error_tok(vm, tok,
+                  "control reaches end of non-void aggregate function");
 
     warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
              "control reaches end of non-void function");
 
-    Node *ret = new_node(vm, ND_RETURN, tok);
-    ret->lhs = new_cast(vm, new_num(vm, 0, tok), ty);
+    Node *ret  = new_node(vm, ND_RETURN, tok);
+    ret->lhs   = new_cast(vm, new_num(vm, 0, tok), ty);
 
     Node **cur = &fn->body->body;
     while (*cur)
@@ -375,8 +386,7 @@ static bool is_plain_signed_int(Type *ty) {
 }
 
 static bool is_char_ptr_ptr(Type *ty) {
-    return ty && ty->kind == TY_PTR &&
-           ty->base && ty->base->kind == TY_PTR &&
+    return ty && ty->kind == TY_PTR && ty->base && ty->base->kind == TY_PTR &&
            ty->base->base && ty->base->base->size == 1;
 }
 
@@ -418,10 +428,11 @@ static void validate_main_signature(VirtualMachine *vm, Obj *fn) {
 
 Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     if (attr->is_constexpr)
-        error_tok(vm, tok, "constexpr is only supported for object definitions");
+        error_tok(vm, tok,
+                  "constexpr is only supported for object definitions");
 
     Type *ty = declarator(vm, &tok, tok, basety);
-    ty = apply_var_attrs_to_type(vm, ty, attr);
+    ty       = apply_var_attrs_to_type(vm, ty, attr);
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
     char *name_str = get_ident(vm, ty->name);
@@ -432,21 +443,21 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         ty->is_noreturn = true;
 
     // Check if this is a nested function (defined inside another function)
-    Obj *parent_fn = vm->compiler.current_fn;
-    bool is_nested = (parent_fn != NULL);
-    Obj *saved_locals = NULL;
-    int saved_nesting_depth = 0;
+    Obj                 *parent_fn             = vm->compiler.current_fn;
+    bool                 is_nested             = (parent_fn != NULL);
+    Obj                 *saved_locals          = NULL;
+    int                  saved_nesting_depth   = 0;
     struct ObjSizeQuery *saved_objsize_queries = NULL;
 
     if (is_nested) {
         // Save parent's locals - we're about to start a new locals chain
-        saved_locals = vm->compiler.locals;
+        saved_locals        = vm->compiler.locals;
         saved_nesting_depth = vm->compiler.fn_nesting_depth;
         // #642: the nested function gets its own pending __builtin_object_size
         // query list; resolve_objsize_queries resets it to NULL when the
         // nested body finishes, so the parent's in-flight queries must be
         // parked here rather than lost.
-        saved_objsize_queries = vm->compiler.objsize_queries;
+        saved_objsize_queries        = vm->compiler.objsize_queries;
         vm->compiler.objsize_queries = NULL;
     }
 
@@ -468,16 +479,18 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                   : find_func(vm, name_str, ty->name->len);
     // Save prototype state before the if/else can mutate fn->is_implicit.
     bool had_prior_decl = (fn != NULL) && !fn->is_implicit;
-    bool had_full_proto = had_prior_decl &&
+    bool had_full_proto =
+        had_prior_decl &&
         (vm->compiler.c_std >= CCCC_STD_C23
-            ? !fn->ty->is_variadic       // C23: () == (void); non-variadic = full proto
-            : fn->ty->params != NULL);   // pre-C23: need an explicit params list
+             ? !fn->ty->is_variadic // C23: () == (void); non-variadic = full
+                                    // proto
+             : fn->ty->params != NULL); // pre-C23: need an explicit params list
     if (fn) {
         // Redeclaration
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
         if (fn->is_implicit) {
-            fn->ty = ty;
+            fn->ty          = ty;
             fn->is_implicit = false;
         }
         if (fn->is_definition && equal(tok, "{"))
@@ -489,38 +502,40 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
-        fn->is_definition = fn->is_definition || equal(tok, "{");
+        fn->is_definition    = fn->is_definition || equal(tok, "{");
         fn->is_maybe_unused |= ty->is_maybe_unused;
-        fn->is_deprecated |= ty->is_deprecated;
-        fn->is_noreturn |= ty->is_noreturn;
-        fn->is_pure |= ty->is_pure;
-        fn->is_func_const |= ty->is_func_const;
+        fn->is_deprecated   |= ty->is_deprecated;
+        fn->is_noreturn     |= ty->is_noreturn;
+        fn->is_pure         |= ty->is_pure;
+        fn->is_func_const   |= ty->is_func_const;
         if (ty->asm_label)
             fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
             fn->deprecated_msg = ty->deprecated_msg;
         if (ty->format_style && fn->ty) {
-            fn->ty->format_style = ty->format_style;
-            fn->ty->format_string_index = ty->format_string_index;
+            fn->ty->format_style         = ty->format_style;
+            fn->ty->format_string_index  = ty->format_string_index;
             fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
         }
         if (fn->ty) {
-            if (ty->nonnull_all) fn->ty->nonnull_all = true;
+            if (ty->nonnull_all)
+                fn->ty->nonnull_all = true;
             fn->ty->nonnull_mask |= ty->nonnull_mask;
-            if (ty->returns_nonnull) fn->ty->returns_nonnull = true;
+            if (ty->returns_nonnull)
+                fn->ty->returns_nonnull = true;
             if (ty->is_sentinel) {
-                fn->ty->is_sentinel = true;
+                fn->ty->is_sentinel  = true;
                 fn->ty->sentinel_pos = ty->sentinel_pos;
             }
             if (ty->alloc_size_idx) {
-                fn->ty->alloc_size_idx = ty->alloc_size_idx;
+                fn->ty->alloc_size_idx  = ty->alloc_size_idx;
                 fn->ty->alloc_size_idx2 = ty->alloc_size_idx2;
             }
             fn->ty->is_malloc |= ty->is_malloc;
         }
     } else {
-        fn = new_gvar(vm, name_str, ty->name->len, ty);
-        fn->is_function = true;
+        fn                = new_gvar(vm, name_str, ty->name->len, ty);
+        fn->is_function   = true;
         fn->is_definition = equal(tok, "{");
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
@@ -551,8 +566,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // compiled to expect). Recompute is_root after this, since is_static may
     // just have changed.
     if (is_nested) {
-        fn->parent_fn = parent_fn;
-        fn->is_nested = true;
+        fn->parent_fn     = parent_fn;
+        fn->is_nested     = true;
         fn->nesting_depth = vm->compiler.fn_nesting_depth + 1;
         // #1039: nested functions are implicitly static (not visible
         // outside) -- except when an asm("symbol") label is present; see
@@ -567,30 +582,32 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // is_nested rather than is_block.
         fn->block_outer_locals = saved_locals;
     } else {
-        fn->parent_fn = NULL;
-        fn->is_nested = false;
+        fn->parent_fn     = NULL;
+        fn->is_nested     = false;
         fn->nesting_depth = 0;
     }
 
     fn->is_root = !(fn->is_static && fn->is_inline);
 
-    // -Wmissing-declarations / -Wmissing-prototypes for external function definitions.
+    // -Wmissing-declarations / -Wmissing-prototypes for external function
+    // definitions.
     if (!vm->compiler.in_type_lookahead && !fn->is_static && !fn->is_nested) {
-        bool is_main = fn->name && strlen(fn->name) == 4 &&
-                       !memcmp(fn->name, "main", 4);
+        bool is_main =
+            fn->name && strlen(fn->name) == 4 && !memcmp(fn->name, "main", 4);
         if (!is_main) {
             if ((vm->compiler.warnings & CCCC_WARN_MISSING_DECLARATIONS) &&
                 !had_prior_decl && !fn->is_inline)
                 warn_tok(vm, ty->name, CCCC_WARN_MISSING_DECLARATIONS,
                          "no previous declaration for '%s'", fn->name);
-            if ((vm->compiler.warnings & CCCC_WARN_MISSING_PROTOTYPES) && !had_full_proto)
+            if ((vm->compiler.warnings & CCCC_WARN_MISSING_PROTOTYPES) &&
+                !had_full_proto)
                 warn_tok(vm, ty->name, CCCC_WARN_MISSING_PROTOTYPES,
                          "no previous prototype for '%s'", fn->name);
         }
     }
 
     vm->compiler.current_fn = fn;
-    vm->compiler.locals = NULL;
+    vm->compiler.locals     = NULL;
     if (is_nested)
         vm->compiler.fn_nesting_depth++;
 
@@ -599,19 +616,20 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // K&R declaration-list: type declarations between ')' and '{' that give
     // explicit types to the parameter names.  Update ty->params *before*
     // create_param_lvars so that stack-slot sizes are derived from the correct
-    // types (e.g. a double param must get an 8-byte slot, not a 4-byte int slot).
+    // types (e.g. a double param must get an 8-byte slot, not a 4-byte int
+    // slot).
     if ((vm->compiler.warnings & CCCC_WARN_OLD_STYLE_DEFINITION) &&
         !equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok))
         warn_tok(vm, fn->tok, CCCC_WARN_OLD_STYLE_DEFINITION,
                  "old-style (K&R) function definition");
     while (!equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok)) {
         VarAttr knr_attr = {};
-        Type *basety = declspec(vm, &tok, tok, &knr_attr);
-        bool first = true;
+        Type   *basety   = declspec(vm, &tok, tok, &knr_attr);
+        bool    first    = true;
         for (;;) {
             if (!first)
                 tok = skip(vm, tok, ",");
-            first = false;
+            first         = false;
             Type *decl_ty = declarator(vm, &tok, tok, basety);
             if (decl_ty->name) {
                 char *pname = decl_ty->name->loc;
@@ -621,9 +639,9 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                         !memcmp(p->name->loc, pname, plen)) {
                         Token *saved_name = p->name;
                         Type  *saved_next = p->next;
-                        *p = *decl_ty;
-                        p->name = saved_name;
-                        p->next = saved_next;
+                        *p                = *decl_ty;
+                        p->name           = saved_name;
+                        p->next           = saved_next;
                         break;
                     }
                 }
@@ -679,7 +697,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // only a real definition ever reaches this point, so this can't
     // wrongly mark a prototype.
     fn->is_definition = true;
-    tok = skip(vm, tok, "{");
+    tok               = skip(vm, tok, "{");
 
     // Reset cleanup-scope ancestry for this function body. The ++/-- pairs in
     // compound_stmt balance to NULL, but reset defensively in case of error
@@ -701,20 +719,21 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 
     Token *close_brace = NULL;
 
-    // Negative test: body is expected to fail compilation with a specific error.
-    // Compile in error-collection mode and absorb all errors regardless of match.
-    // A nested setjmp catches fatal error_tok() longjmps so they are treated the
-    // same as recoverable errors (#615): the function body is entered, any error
-    // terminates it, and the error is counted and matched normally.
+    // Negative test: body is expected to fail compilation with a specific
+    // error. Compile in error-collection mode and absorb all errors regardless
+    // of match. A nested setjmp catches fatal error_tok() longjmps so they are
+    // treated the same as recoverable errors (#615): the function body is
+    // entered, any error terminates it, and the error is counted and matched
+    // normally.
     TestFnRecord *neg_rec = find_neg_test_record(vm, fn->name);
     if (neg_rec) {
-        bool old_collect       = vm->collect_errors;
-        int  pre_count         = vm->error_count;
-        CompileError *pre_tail = vm->errors_tail;
+        bool          old_collect = vm->collect_errors;
+        int           pre_count   = vm->error_count;
+        CompileError *pre_tail    = vm->errors_tail;
         jmp_buf       neg_jmp_buf;
         jmp_buf      *saved_jmp_buf = vm->error_jmp_buf;
-        vm->collect_errors = true;
-        vm->error_jmp_buf  = &neg_jmp_buf;
+        vm->collect_errors          = true;
+        vm->error_jmp_buf           = &neg_jmp_buf;
 
         // Save the opening '{' position so we can skip past the body if a
         // fatal longjmp fires and leaves tok stranded inside it (#615).
@@ -722,7 +741,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 
         if (setjmp(neg_jmp_buf) == 0) {
             fn->body = compound_stmt(vm, &tok, tok, &close_brace);
-            append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
+            append_implicit_return(vm, fn,
+                                   close_brace ? close_brace : ty->name);
             fn->locals = vm->compiler.locals;
             leave_scope(vm);
             resolve_goto_labels(vm);
@@ -736,26 +756,31 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             // regardless, so the function is simply skipped by that loop.
         } else {
             // Fatal error_tok() fired inside the function body.  The error has
-            // already been collected by error_tok(); we just need to clean up scope.
-            // Advance tok past the closing '}' of the function body so the outer
-            // parse loop doesn't try to re-parse tokens from inside the body.
-            // Note: tok = skip(vm, tok, "{") above already consumed the opening '{',
-            // so body_start is the first token *inside* the body — start at depth 1.
+            // already been collected by error_tok(); we just need to clean up
+            // scope. Advance tok past the closing '}' of the function body so
+            // the outer parse loop doesn't try to re-parse tokens from inside
+            // the body. Note: tok = skip(vm, tok, "{") above already consumed
+            // the opening '{', so body_start is the first token *inside* the
+            // body — start at depth 1.
             leave_scope(vm);
             int depth = 1;
             for (Token *t = body_start; t && t->kind != TK_EOF; t = t->next) {
-                if (equal(t, "{")) depth++;
+                if (equal(t, "{"))
+                    depth++;
                 else if (equal(t, "}")) {
                     depth--;
-                    if (depth == 0) { tok = t->next; break; }
+                    if (depth == 0) {
+                        tok = t->next;
+                        break;
+                    }
                 }
             }
         }
 
-        vm->error_jmp_buf = saved_jmp_buf;
+        vm->error_jmp_buf        = saved_jmp_buf;
 
         CompileError *new_errors = pre_tail ? pre_tail->next : vm->errors;
-        int err_count = vm->error_count - pre_count;
+        int           err_count  = vm->error_count - pre_count;
         if (err_count == 0) {
             neg_rec->neg_passed = 0;
             strncpy(neg_rec->neg_actual, "no error produced",
@@ -767,13 +792,15 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                         sizeof(neg_rec->neg_actual) - 1);
             // First check: if error_count operator is set, apply it
             if (neg_rec->error_count_op != CMP_NONE &&
-                !apply_cmp_op_i64(neg_rec->error_count_op, err_count, neg_rec->expect_errors)) {
+                !apply_cmp_op_i64(neg_rec->error_count_op, err_count,
+                                  neg_rec->expect_errors)) {
                 snprintf(neg_rec->neg_actual, sizeof(neg_rec->neg_actual),
                          "expected error_count %s %d, got %d",
                          cmp_op_str(neg_rec->error_count_op),
                          neg_rec->expect_errors, err_count);
             } else if (!neg_rec->error_pat) {
-                // expect_compile_error = true and no pattern: any error passes (#615)
+                // expect_compile_error = true and no pattern: any error passes
+                // (#615)
                 neg_rec->neg_passed = 1;
             } else {
                 // Second check: error message pattern
@@ -781,9 +808,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                     // error != "pat": passes if NO error contains the pattern
                     bool matched = false;
                     for (CompileError *e = new_errors; e; e = e->next) {
-                        if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                        if (e->message &&
+                            strstr(e->message, neg_rec->error_pat)) {
                             matched = true;
-                            snprintf(neg_rec->neg_actual, sizeof(neg_rec->neg_actual),
+                            snprintf(neg_rec->neg_actual,
+                                     sizeof(neg_rec->neg_actual),
                                      "error unexpectedly matched \"%s\": %s",
                                      neg_rec->error_pat, e->message);
                             break;
@@ -793,7 +822,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                         neg_rec->neg_passed = 1;
                 } else {
                     for (CompileError *e = new_errors; e; e = e->next) {
-                        if (e->message && strstr(e->message, neg_rec->error_pat)) {
+                        if (e->message &&
+                            strstr(e->message, neg_rec->error_pat)) {
                             neg_rec->neg_passed = 1;
                             strncpy(neg_rec->neg_actual, e->message,
                                     sizeof(neg_rec->neg_actual) - 1);
@@ -804,10 +834,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             }
         }
 
-        if (pre_tail) pre_tail->next = NULL;
-        else          vm->errors = NULL;
-        vm->errors_tail  = pre_tail;
-        vm->error_count  = pre_count;
+        if (pre_tail)
+            pre_tail->next = NULL;
+        else
+            vm->errors = NULL;
+        vm->errors_tail    = pre_tail;
+        vm->error_count    = pre_count;
         vm->collect_errors = old_collect;
 
         fn->body = NULL; // suppress codegen — test result is precomputed
@@ -837,10 +869,10 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 
     // Restore parent function context if this was a nested function
     if (is_nested) {
-        vm->compiler.current_fn = parent_fn;
-        vm->compiler.locals = saved_locals;
+        vm->compiler.current_fn       = parent_fn;
+        vm->compiler.locals           = saved_locals;
         vm->compiler.fn_nesting_depth = saved_nesting_depth;
-        vm->compiler.objsize_queries = saved_objsize_queries;
+        vm->compiler.objsize_queries  = saved_objsize_queries;
     } else {
         // CRITICAL: Reset current_fn to NULL for top-level functions!
         // Otherwise the next top-level function will incorrectly think it's
@@ -848,8 +880,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->compiler.current_fn = NULL;
     }
 
-    run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
-                          fn->ty, fn, fn->tok);
+    run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
+                          fn, fn->tok);
 
     return tok;
 }
@@ -878,10 +910,11 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
 
     if (attr->is_constexpr) {
         if (attr->is_extern || attr->is_tls)
-            error_tok(vm, name_tok,
-                      "constexpr object must be a definition with internal storage");
+            error_tok(
+                vm, name_tok,
+                "constexpr object must be a definition with internal storage");
         prev->is_constexpr = true;
-        prev->is_static = true;
+        prev->is_static    = true;
     }
 
     if (attr->align > prev->align)
@@ -891,26 +924,26 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
     // later declaration's complete size (`extern int a[]; extern int a[5];`)
     // so the data-segment allocation loop (which sizes the slot from
     // var->ty->size) gets the real size instead of the first-seen one.
-    if (is_def_now ||
-        (prev->ty->kind == TY_ARRAY && prev->ty->size < 0 &&
-         ty->kind == TY_ARRAY && ty->size >= 0))
+    if (is_def_now || (prev->ty->kind == TY_ARRAY && prev->ty->size < 0 &&
+                       ty->kind == TY_ARRAY && ty->size >= 0))
         prev->ty = ty;
 
     if (ty->asm_label) {
         if (!prev->asm_label)
             prev->asm_label = ty->asm_label;
         else if (strcmp(prev->asm_label, ty->asm_label) != 0)
-            error_tok(vm, name_tok, "conflicting asm label for '%s'", prev->name);
+            error_tok(vm, name_tok, "conflicting asm label for '%s'",
+                      prev->name);
     }
 
     if (ty->checked_kind != CHECKED_NONE) {
-        prev->checked_kind = ty->checked_kind;
+        prev->checked_kind        = ty->checked_kind;
         prev->checked_bounds_form = ty->checked_bounds_form;
         resolve_checked_bounds(vm, prev);
     }
 
     prev->is_maybe_unused |= ty->is_maybe_unused;
-    prev->is_deprecated |= ty->is_deprecated;
+    prev->is_deprecated   |= ty->is_deprecated;
     if (!prev->deprecated_msg)
         prev->deprecated_msg = ty->deprecated_msg;
 
@@ -936,13 +969,13 @@ static bool type_has_vla(Type *ty) {
 }
 
 Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
-                              VarAttr *attr) {
+                       VarAttr *attr) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
         if (!first)
             tok = skip(vm, tok, ",");
-        first = false;
+        first    = false;
 
         Type *ty = declarator(vm, &tok, tok, basety);
         if (!ty->name)
@@ -952,7 +985,8 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         int   var_name_len = (int)ty->name->len;
 
         if (type_has_vla(ty))
-            error_tok(vm, ty->name, "variably modified '%s' at file scope", var_name);
+            error_tok(vm, ty->name, "variably modified '%s' at file scope",
+                      var_name);
 
         // C23 auto type inference for global variables
         if (attr->is_auto) {
@@ -960,19 +994,21 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                 error_tok(vm, ty->name, "cannot use 'auto' with 'extern'");
             int decl_depth = count_auto_ptr_depth(ty);
             if (decl_depth < 0)
-                error_tok(vm, ty->name,
-                          "cannot use 'auto' with array or function declarator");
+                error_tok(
+                    vm, ty->name,
+                    "cannot use 'auto' with array or function declarator");
             if (!equal(tok, "="))
                 error_tok(vm, ty->name,
-                          "declaration of variable '%.*s' with deduced type 'auto' requires an initializer",
+                          "declaration of variable '%.*s' with deduced type "
+                          "'auto' requires an initializer",
                           (int)ty->name->len, ty->name->loc);
             if (equal(tok->next, "{"))
                 error_tok(vm, tok->next, "cannot use 'auto' with array in C");
 
             // Probe: parse the initializer expression to infer the type
-            Token *eq_tok = tok;
+            Token *eq_tok    = tok;
             Token *probe_tok = tok->next;
-            Node *probe = assign(vm, &probe_tok, probe_tok);
+            Node  *probe     = assign(vm, &probe_tok, probe_tok);
             add_type(vm, probe);
             Type *deduced = auto_deduced_type(vm, probe->ty);
 
@@ -981,7 +1017,8 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                 for (int i = 0; i < decl_depth && i < 15; i++)
                     stars[i] = '*';
                 error_tok(vm, ty->name,
-                          "variable '%.*s' with type 'auto%s%s' has incompatible initializer",
+                          "variable '%.*s' with type 'auto%s%s' has "
+                          "incompatible initializer",
                           (int)ty->name->len, ty->name->loc,
                           decl_depth > 0 ? " " : "", stars);
             }
@@ -993,9 +1030,9 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                     error_tok(vm, ty->name, "redefinition of '%s'", var_name);
                 merge_global_decl(vm, prev, deduced, attr, ty->name);
                 push_scope(vm, var_name, var_name_len)->var = prev;
-                var = prev;
+                var                                         = prev;
             } else {
-                var = new_gvar(vm, var_name, var_name_len, deduced);
+                var            = new_gvar(vm, var_name, var_name_len, deduced);
                 var->is_static = attr->is_static;
                 if (attr->align)
                     var->align = attr->align;
@@ -1027,8 +1064,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             !hashmap_get(&vm->compiler.global_decl_map, var_name)) {
             Obj *mg = NULL;
             for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
-                if (!o->is_function &&
-                    (int)strlen(o->name) == var_name_len &&
+                if (!o->is_function && (int)strlen(o->name) == var_name_len &&
                     strncmp(o->name, var_name, var_name_len) == 0) {
                     mg = o;
                     break;
@@ -1066,13 +1102,13 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                 error_tok(vm, ty->name, "redefinition of '%s'", var_name);
             merge_global_decl(vm, prev, ty, attr, ty->name);
             push_scope(vm, var_name, var_name_len)->var = prev;
-            var = prev;
+            var                                         = prev;
         } else {
-            var = new_gvar(vm, var_name, var_name_len, ty);
+            var                = new_gvar(vm, var_name, var_name_len, ty);
             var->is_definition = !attr->is_extern;
-            var->is_static = attr->is_static;
-            var->is_tls = attr->is_tls;
-            var->is_constexpr = attr->is_constexpr;
+            var->is_static     = attr->is_static;
+            var->is_tls        = attr->is_tls;
+            var->is_constexpr  = attr->is_constexpr;
             if (attr->align)
                 var->align = attr->align;
             if (var->checked_kind != CHECKED_NONE)
@@ -1081,7 +1117,8 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             if (var->is_constexpr) {
                 if (attr->is_extern || attr->is_tls)
                     error_tok(vm, ty->name,
-                              "constexpr object must be a definition with internal storage");
+                              "constexpr object must be a definition with "
+                              "internal storage");
                 var->is_static = true;
             }
             hashmap_put(&vm->compiler.global_decl_map, var_name, var);
@@ -1106,26 +1143,28 @@ bool is_function(VirtualMachine *vm, Token *tok, Type *basety) {
     if (equal(tok, ";"))
         return false;
 
-    Type dummy = {};
-    bool saved_lookahead = vm->compiler.in_type_lookahead;
+    Type dummy                     = {};
+    bool saved_lookahead           = vm->compiler.in_type_lookahead;
     vm->compiler.in_type_lookahead = true;
-    Type *ty = declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
+    Type *ty =
+        declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
     vm->compiler.in_type_lookahead = saved_lookahead;
     return ty->kind == TY_FUNC;
 }
 
 bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety) {
-    Type dummy = {};
-    bool saved_lookahead = vm->compiler.in_type_lookahead;
+    Type dummy                     = {};
+    bool saved_lookahead           = vm->compiler.in_type_lookahead;
     vm->compiler.in_type_lookahead = true;
-    Type *ty = declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
+    Type *ty =
+        declarator(vm, &tok, tok, basety ? copy_type(vm, basety) : &dummy);
     vm->compiler.in_type_lookahead = saved_lookahead;
     return ty->kind == TY_FUNC && equal(tok, ",");
 }
 
 // Remove redundant tentative definitions.
 static void scan_globals(VirtualMachine *vm) {
-    Obj head;
+    Obj  head;
     Obj *cur = &head;
 
     for (Obj *var = vm->compiler.globals; var; var = var->next) {
@@ -1148,7 +1187,7 @@ static void scan_globals(VirtualMachine *vm) {
             cur = cur->next = var;
     }
 
-    cur->next = NULL;
+    cur->next            = NULL;
     vm->compiler.globals = head.next;
 }
 
@@ -1159,7 +1198,7 @@ static void warn_unused_globals(VirtualMachine *vm) {
             var->is_maybe_unused)
             continue;
 
-        bool already_checked = false;
+        bool already_checked    = false;
         bool redeclaration_used = false;
         for (Obj *other = vm->compiler.globals; other; other = other->next) {
             if (other == var)
@@ -1183,8 +1222,8 @@ static void warn_unused_globals(VirtualMachine *vm) {
 
 static void declare_builtin_functions(VirtualMachine *vm) {
     // alloca(size) -> void*
-    Type *ty = func_type(vm, pointer_to(vm, ty_void));
-    ty->params = copy_type(vm, ty_int);
+    Type *ty                    = func_type(vm, pointer_to(vm, ty_void));
+    ty->params                  = copy_type(vm, ty_int);
     vm->compiler.builtin_alloca = new_gvar(vm, "alloca", 6, ty);
     vm->compiler.builtin_alloca->is_definition = false;
     // Mark with a stable flag: codegen identifies VLA-lowered alloca calls by
@@ -1193,39 +1232,39 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // otherwise leave AST nodes pointing at a stale builtin_alloca Obj (#588).
     vm->compiler.builtin_alloca->is_builtin_alloca = true;
 
-    // strlen(s) -> long  (private stub; not in global scope so it doesn't conflict
-    // with user redeclarations like `int strcmp(const char *s)`)
-    Type *strlen_ty = func_type(vm, ty_long);
-    strlen_ty->params = pointer_to(vm, ty_char);
+    // strlen(s) -> long  (private stub; not in global scope so it doesn't
+    // conflict with user redeclarations like `int strcmp(const char *s)`)
+    Type *strlen_ty             = func_type(vm, ty_long);
+    strlen_ty->params           = pointer_to(vm, ty_char);
     vm->compiler.builtin_strlen = new_private_func_obj(vm, "strlen", strlen_ty);
 
     // strcmp(a, b) -> int  (private stub; same rationale as strlen above)
-    Type *strcmp_ty = func_type(vm, ty_int);
-    strcmp_ty->params = pointer_to(vm, ty_char);
-    strcmp_ty->params->next = pointer_to(vm, ty_char);
+    Type *strcmp_ty             = func_type(vm, ty_int);
+    strcmp_ty->params           = pointer_to(vm, ty_char);
+    strcmp_ty->params->next     = pointer_to(vm, ty_char);
     vm->compiler.builtin_strcmp = new_private_func_obj(vm, "strcmp", strcmp_ty);
 
     // __cccc_pc_to_name(void *pc) -> const char*
     // Private stub for __builtin_pc_function_name — maps a VM bytecode offset
     // (returned by __builtin_return_address) to the enclosing function name.
     Type *pc_to_name_ty = func_type(vm, pointer_to(vm, copy_type(vm, ty_char)));
-    pc_to_name_ty->return_ty->base->is_const = true;  // const char *
-    pc_to_name_ty->params = pointer_to(vm, ty_void);
+    pc_to_name_ty->return_ty->base->is_const = true; // const char *
+    pc_to_name_ty->params                    = pointer_to(vm, ty_void);
     vm->compiler.builtin_pc_to_name =
         new_private_func_obj(vm, "__cccc_pc_to_name", pc_to_name_ty);
 
     // __cccc_pc_to_source(void *pc, const char **file, int *line) -> int
     // Private stub for __builtin_pc_source_location.
     Type *pc_to_src_ty = func_type(vm, ty_int);
-    Type *pc_param = pointer_to(vm, ty_void);
+    Type *pc_param     = pointer_to(vm, ty_void);
     // const char **:  pointer to (const char *)
-    Type *const_char_p = pointer_to(vm, copy_type(vm, ty_char));
+    Type *const_char_p           = pointer_to(vm, copy_type(vm, ty_char));
     const_char_p->base->is_const = true;
-    Type *file_param = pointer_to(vm, const_char_p);
-    Type *line_param = pointer_to(vm, ty_int);
-    pc_to_src_ty->params = pc_param;
-    pc_param->next = file_param;
-    file_param->next = line_param;
+    Type *file_param             = pointer_to(vm, const_char_p);
+    Type *line_param             = pointer_to(vm, ty_int);
+    pc_to_src_ty->params         = pc_param;
+    pc_param->next               = file_param;
+    file_param->next             = line_param;
     vm->compiler.builtin_pc_to_source =
         new_private_func_obj(vm, "__cccc_pc_to_source", pc_to_src_ty);
 
@@ -1239,15 +1278,15 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // a `long *` there. jmp_buf itself is include/setjmp.h's
     // `long long[40]` -- sized to cover every supported host's real
     // sizeof(jmp_buf) (see that header's comment).
-    Type *setjmp_ty = func_type(vm, ty_int);
-    setjmp_ty->params = pointer_to(vm, ty_long);
+    Type *setjmp_ty             = func_type(vm, ty_int);
+    setjmp_ty->params           = pointer_to(vm, ty_long);
     vm->compiler.builtin_setjmp = new_gvar(vm, "setjmp", 6, setjmp_ty);
     vm->compiler.builtin_setjmp->is_definition = false;
 
     // longjmp(jmp_buf, int) -> void (noreturn)
-    Type *longjmp_ty = func_type(vm, ty_void);
-    longjmp_ty->params = pointer_to(vm, ty_long);
-    longjmp_ty->params->next = copy_type(vm, ty_int);
+    Type *longjmp_ty             = func_type(vm, ty_void);
+    longjmp_ty->params           = pointer_to(vm, ty_long);
+    longjmp_ty->params->next     = copy_type(vm, ty_int);
     vm->compiler.builtin_longjmp = new_gvar(vm, "longjmp", 7, longjmp_ty);
     vm->compiler.builtin_longjmp->is_definition = false;
 
@@ -1258,39 +1297,39 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     vm->compiler.builtin__longjmp = new_gvar(vm, "_longjmp", 8, longjmp_ty);
     vm->compiler.builtin__longjmp->is_definition = false;
 
-    Type *dlopen_ty = func_type(vm, pointer_to(vm, ty_void));
-    dlopen_ty->params = pointer_to(vm, ty_char);
-    dlopen_ty->params->next = copy_type(vm, ty_int);
+    Type *dlopen_ty             = func_type(vm, pointer_to(vm, ty_void));
+    dlopen_ty->params           = pointer_to(vm, ty_char);
+    dlopen_ty->params->next     = copy_type(vm, ty_int);
     vm->compiler.builtin_dlopen = new_gvar(vm, "dlopen", 6, dlopen_ty);
     vm->compiler.builtin_dlopen->is_definition = false;
 
-    Type *dlsym_ty = func_type(vm, pointer_to(vm, ty_void));
-    dlsym_ty->params = pointer_to(vm, ty_void);
-    dlsym_ty->params->next = pointer_to(vm, ty_char);
+    Type *dlsym_ty             = func_type(vm, pointer_to(vm, ty_void));
+    dlsym_ty->params           = pointer_to(vm, ty_void);
+    dlsym_ty->params->next     = pointer_to(vm, ty_char);
     vm->compiler.builtin_dlsym = new_gvar(vm, "dlsym", 5, dlsym_ty);
     vm->compiler.builtin_dlsym->is_definition = false;
 
-    Type *dlclose_ty = func_type(vm, ty_int);
-    dlclose_ty->params = pointer_to(vm, ty_void);
+    Type *dlclose_ty                          = func_type(vm, ty_int);
+    dlclose_ty->params                        = pointer_to(vm, ty_void);
     vm->compiler.builtin_dlclose = new_gvar(vm, "dlclose", 7, dlclose_ty);
     vm->compiler.builtin_dlclose->is_definition = false;
 
-    Type *dlerror_ty = func_type(vm, pointer_to(vm, ty_char));
+    Type *dlerror_ty             = func_type(vm, pointer_to(vm, ty_char));
     vm->compiler.builtin_dlerror = new_gvar(vm, "dlerror", 7, dlerror_ty);
     vm->compiler.builtin_dlerror->is_definition = false;
 
     // signal(int sig, void (*func)(int)) -> void (*)(int)
-    Type *signal_handler_ty = func_type(vm, ty_void);
+    Type *signal_handler_ty   = func_type(vm, ty_void);
     signal_handler_ty->params = copy_type(vm, ty_int);
-    Type *signal_ty = func_type(vm, pointer_to(vm, signal_handler_ty));
-    signal_ty->params = copy_type(vm, ty_int);
+    Type *signal_ty         = func_type(vm, pointer_to(vm, signal_handler_ty));
+    signal_ty->params       = copy_type(vm, ty_int);
     signal_ty->params->next = pointer_to(vm, signal_handler_ty);
     vm->compiler.builtin_signal = new_gvar(vm, "signal", 6, signal_ty);
     vm->compiler.builtin_signal->is_definition = false;
 
     // raise(int sig) -> int
-    Type *raise_ty = func_type(vm, ty_int);
-    raise_ty->params = copy_type(vm, ty_int);
+    Type *raise_ty             = func_type(vm, ty_int);
+    raise_ty->params           = copy_type(vm, ty_int);
     vm->compiler.builtin_raise = new_gvar(vm, "raise", 5, raise_ty);
     vm->compiler.builtin_raise->is_definition = false;
 
@@ -1298,11 +1337,11 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // Internal helper backing the Block_copy() extension; resolved to the
     // host cfunc registered in the FFI table by register_stdlib_functions.
     // Declared as a global prototype so Block_copy's parser lookup finds it.
-    Type *block_copy_ty = func_type(vm, pointer_to(vm, ty_void));
+    Type *block_copy_ty   = func_type(vm, pointer_to(vm, ty_void));
     block_copy_ty->params = pointer_to(vm, ty_void);
     vm->compiler.builtin_block_copy =
         new_gvar(vm, "__cccc_block_copy_impl", 22, block_copy_ty);
-    vm->compiler.builtin_block_copy->is_function = true;
+    vm->compiler.builtin_block_copy->is_function   = true;
     vm->compiler.builtin_block_copy->is_definition = false;
 
     // free(void*) -> void
@@ -1311,10 +1350,10 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // check routes it to MFRE (CCCC_VM_HEAP) or the host free() via FFI.
     // If the TU later declares its own free prototype the parser will find the
     // user declaration in globals first (it's prepended), shadowing this one.
-    Type *free_ty = func_type(vm, ty_void);
-    free_ty->params = pointer_to(vm, ty_void);
-    vm->compiler.builtin_free = new_gvar(vm, "free", 4, free_ty);
-    vm->compiler.builtin_free->is_function = true;
+    Type *free_ty                            = func_type(vm, ty_void);
+    free_ty->params                          = pointer_to(vm, ty_void);
+    vm->compiler.builtin_free                = new_gvar(vm, "free", 4, free_ty);
+    vm->compiler.builtin_free->is_function   = true;
     vm->compiler.builtin_free->is_definition = false;
 }
 
@@ -1343,13 +1382,15 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             if (pm) {
                 // Skip the call tokens (was executed pre-parse).
                 // Walk to matching ')' respecting nesting.
-                tok = tok->next->next; // after '('
+                tok       = tok->next->next; // after '('
                 int depth = 1;
                 while (tok && tok->kind != TK_EOF && depth > 0) {
-                    if (equal(tok, "(")) depth++;
+                    if (equal(tok, "("))
+                        depth++;
                     else if (equal(tok, ")")) {
                         depth--;
-                        if (depth == 0) break;
+                        if (depth == 0)
+                            break;
                     }
                     tok = tok->next;
                 }
@@ -1359,8 +1400,8 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             }
         }
 
-        VarAttr attr = {};
-        Type *basety = declspec(vm, &tok, tok, &attr);
+        VarAttr attr   = {};
+        Type   *basety = declspec(vm, &tok, tok, &attr);
 
         // Typedef
         if (attr.is_typedef) {
@@ -1381,7 +1422,8 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             if (has_custom_attrs(basety, &attr)) {
                 char *name = NULL;
                 if (basety->name)
-                    name = arena_strndup(vm, basety->name->loc, basety->name->len);
+                    name =
+                        arena_strndup(vm, basety->name->loc, basety->name->len);
                 run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE, name,
                                       basety, NULL, basety->name);
             }
@@ -1413,18 +1455,18 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
 // and never retries it -- rather than adding a full scope/globals
 // snapshot-restore for what should be a rare path.
 bool cc_parse_splice_range(VirtualMachine *vm, Token *tok) {
-    Obj *saved_locals = vm->compiler.locals;
-    Obj *saved_current_fn = vm->compiler.current_fn;
-    Scope *saved_scope = vm->compiler.scope;
-    bool saved_lookahead = vm->compiler.in_type_lookahead;
-    bool saved_splice_active = vm->compiler.comptime_splice_active;
-    uint64_t saved_warnings = vm->compiler.warnings;
-    uint64_t saved_werror = vm->compiler.warning_errors;
-    int saved_error_count = vm->error_count;
-    jmp_buf *saved_jmp = vm->error_jmp_buf;
-    jmp_buf local;
+    Obj     *saved_locals        = vm->compiler.locals;
+    Obj     *saved_current_fn    = vm->compiler.current_fn;
+    Scope   *saved_scope         = vm->compiler.scope;
+    bool     saved_lookahead     = vm->compiler.in_type_lookahead;
+    bool     saved_splice_active = vm->compiler.comptime_splice_active;
+    uint64_t saved_warnings      = vm->compiler.warnings;
+    uint64_t saved_werror        = vm->compiler.warning_errors;
+    int      saved_error_count   = vm->error_count;
+    jmp_buf *saved_jmp           = vm->error_jmp_buf;
+    jmp_buf  local;
 
-    vm->compiler.locals = NULL;
+    vm->compiler.locals     = NULL;
     vm->compiler.current_fn = NULL;
     if (vm->compiler.macro_file_scope)
         vm->compiler.scope = vm->compiler.macro_file_scope;
@@ -1447,9 +1489,9 @@ bool cc_parse_splice_range(VirtualMachine *vm, Token *tok) {
     // Suppress warnings for the duration -- a spliced header declaration
     // (e.g. -Wredundant-decls on a struct also visible via @shared) is not
     // something the user can act on from here.
-    vm->compiler.warnings = 0;
+    vm->compiler.warnings       = 0;
     vm->compiler.warning_errors = 0;
-    vm->error_jmp_buf = &local;
+    vm->error_jmp_buf           = &local;
 
     bool ok;
     if (setjmp(local) == 0) {
@@ -1459,14 +1501,14 @@ bool cc_parse_splice_range(VirtualMachine *vm, Token *tok) {
         ok = false;
     }
 
-    vm->error_jmp_buf = saved_jmp;
-    vm->compiler.warnings = saved_warnings;
-    vm->compiler.warning_errors = saved_werror;
-    vm->compiler.in_type_lookahead = saved_lookahead;
+    vm->error_jmp_buf                   = saved_jmp;
+    vm->compiler.warnings               = saved_warnings;
+    vm->compiler.warning_errors         = saved_werror;
+    vm->compiler.in_type_lookahead      = saved_lookahead;
     vm->compiler.comptime_splice_active = saved_splice_active;
-    vm->compiler.scope = saved_scope;
-    vm->compiler.current_fn = saved_current_fn;
-    vm->compiler.locals = saved_locals;
+    vm->compiler.scope                  = saved_scope;
+    vm->compiler.current_fn             = saved_current_fn;
+    vm->compiler.locals                 = saved_locals;
     return ok;
 }
 
@@ -1474,7 +1516,7 @@ bool cc_parse_splice_range(VirtualMachine *vm, Token *tok) {
 Obj *parse(VirtualMachine *vm, Token *tok) {
     // Initialize error recovery placeholder
     vm->compiler.error_var.name = "<error>";
-    vm->compiler.error_var.ty = ty_error;
+    vm->compiler.error_var.ty   = ty_error;
 
     // Initialize global scope
     enter_scope(vm);
@@ -1495,7 +1537,8 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     // name across TUs, which is exactly the cross-module hazard
     // cc_link_progs (not this map) is responsible for.
     hashmap_deinit(&vm->compiler.global_decl_map);
-    memset(&vm->compiler.global_decl_map, 0, sizeof(vm->compiler.global_decl_map));
+    memset(&vm->compiler.global_decl_map, 0,
+           sizeof(vm->compiler.global_decl_map));
 
     tok = parse_file_scope_decls(vm, tok);
 
@@ -1572,13 +1615,17 @@ Node *cc_parse_compound_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     return compound_stmt(vm, rest, tok, NULL);
 }
 
-int64_t cc_eval(VirtualMachine *vm, Node *node) { return eval(vm, node); }
+int64_t cc_eval(VirtualMachine *vm, Node *node) {
+    return eval(vm, node);
+}
 
-double  cc_eval_double(VirtualMachine *vm, Node *node) { return eval_double(vm, node); }
+double cc_eval_double(VirtualMachine *vm, Node *node) {
+    return eval_double(vm, node);
+}
 
 void cc_init_parser(VirtualMachine *vm) {
     vm->compiler.error_var.name = "<error>";
-    vm->compiler.error_var.ty = ty_error;
+    vm->compiler.error_var.ty   = ty_error;
 }
 
 // ---------------------------------------------------------------------
@@ -1589,7 +1636,8 @@ void cc_init_parser(VirtualMachine *vm) {
 // parse() once up front on an empty token stream to enter the global scope
 // and declare builtins). Unlike parse(), this never enters/leaves scope and
 // never resets vm->compiler.globals -- declarations accumulate across calls.
-ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr) {
+ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok,
+                                Node **out_expr) {
     *out_expr = NULL;
     if (!tok || tok->kind == TK_EOF)
         return REPL_UNIT_EMPTY;
@@ -1610,8 +1658,8 @@ ReplUnitKind cc_parse_repl_unit(VirtualMachine *vm, Token *tok, Node **out_expr)
     if (equal(tok, ";"))
         tok = tok->next;
     if (tok->kind != TK_EOF)
-        error_tok(vm, tok, "unexpected token after expression: '%.*s'", tok->len,
-                  tok->loc);
+        error_tok(vm, tok, "unexpected token after expression: '%.*s'",
+                  tok->len, tok->loc);
     *out_expr = n;
     return REPL_UNIT_EXPR;
 }

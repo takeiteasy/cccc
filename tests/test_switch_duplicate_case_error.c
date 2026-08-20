@@ -5,8 +5,12 @@
 int printf(const char *, ...);
 int main(void) {
     switch (1) {
-    case 1: printf("first\n"); break;
-    case 1: printf("second\n"); break;
+        case 1:
+            printf("first\n");
+            break;
+        case 1:
+            printf("second\n");
+            break;
     }
     return 42;
 }

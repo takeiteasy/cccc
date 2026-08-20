@@ -6,4 +6,6 @@
 // enclosing tags themselves collided. See
 // tests/test_serialize_dup_enum_1015_difftag.c.
 enum E1015DTA { AA1015DT = 1, BB1015DT };
-int a_use_1015dt(void) { return AA1015DT + BB1015DT; }
+int a_use_1015dt(void) {
+    return AA1015DT + BB1015DT;
+}

@@ -3,4 +3,4 @@
 // Inner894 too.
 #include "comptime_decl_index_transitive_a_894.h"
 typedef Inner894 Mid894;
-typedef Mid894 Outer894;
+typedef Mid894   Outer894;

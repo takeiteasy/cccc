@@ -22,10 +22,11 @@ int main() {
 
     // Error 4: Stray default
     default:
-        y = 20;
+        y          = 20;
 
-    int result = x + y + z;
-    // x=10 (from case), y=20 (from default), z=3 => 33
-    if (result != 33) return 1;  // Assert result == 33
-    return 42;
+        int result = x + y + z;
+        // x=10 (from case), y=20 (from default), z=3 => 33
+        if (result != 33)
+            return 1; // Assert result == 33
+        return 42;
 }

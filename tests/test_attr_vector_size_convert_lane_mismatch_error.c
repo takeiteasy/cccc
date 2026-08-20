@@ -2,7 +2,7 @@
 // GNU __builtin_convertvector (tracker #715): source and target vectors
 // must have the same lane count.
 
-typedef int v4si __attribute__((vector_size(16)));
+typedef int   v4si __attribute__((vector_size(16)));
 typedef short v8hi __attribute__((vector_size(16)));
 
 int main(void) {

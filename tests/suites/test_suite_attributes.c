@@ -1,9 +1,11 @@
 // CCCC_FLAGS: --testing
-// Consolidated suite: attributes: [[nodiscard]], [[noreturn]], fallthrough, format, pragma,
+// Consolidated suite: attributes: [[nodiscard]], [[noreturn]], fallthrough,
+// format, pragma,
 //   __has_attribute/__has_builtin/__has_c_attribute, format spelling aliases
-// Source tests: test_alignof_alignas, test_attr_format_spellings, test_attribute_simple,
-//   test_fallthrough_attribute, test_format_attribute_custom, test_has_attribute_builtin,
-//   test_noreturn, test_pragma_link
+// Source tests: test_alignof_alignas, test_attr_format_spellings,
+// test_attribute_simple,
+//   test_fallthrough_attribute, test_format_attribute_custom,
+//   test_has_attribute_builtin, test_noreturn, test_pragma_link
 
 #include "stdio.h"
 
@@ -40,7 +42,8 @@ static int test_fallthrough(int x) {
  * Test __attribute__((format(printf, ...))) on custom functions
  */
 
-static int my_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2))) {
+static int my_printf(const char *fmt, ...)
+    __attribute__((format(printf, 1, 2))) {
     return 42;
 }
 
@@ -50,21 +53,25 @@ static int my_fancy_printf(const char *label, const char *fmt, ...)
 }
 
 // [from test_noreturn]
-// Test _Noreturn function specifier and [[noreturn]] / __attribute__((noreturn))
+// Test _Noreturn function specifier and [[noreturn]] /
+// __attribute__((noreturn))
 
 // Test 1: _Noreturn keyword (C11)
 _Noreturn void test_noreturn_kw(void) {
-    for (;;) {}
+    for (;;) {
+    }
 }
 
 // Test 2: __attribute__((noreturn)) (GNU) after return type
 void __attribute__((noreturn)) test_noreturn_gnu(void) {
-    for (;;) {}
+    for (;;) {
+    }
 }
 
 // Test 3: __attribute__((__noreturn__)) (GNU with underscores)
 void __attribute__((__noreturn__)) test_noreturn_gnu_us(void) {
-    for (;;) {}
+    for (;;) {
+    }
 }
 
 // Test 4: Check that noreturn is propagated to function objects
@@ -87,73 +94,92 @@ extern double sqrt(double x);
 [[cccc::test(return = 42)]]
 int test_alignof_alignas(void) {
     // Test 1: _Alignof with basic types
-    if (_Alignof(char) != 1) return 1;
-    if (_Alignof(short) != 2) return 2;
-    if (_Alignof(int) < 4) return 3;
-    if (_Alignof(long) < 8) return 4;
-    if (_Alignof(double) < 8) return 5;
-    
+    if (_Alignof(char) != 1)
+        return 1;
+    if (_Alignof(short) != 2)
+        return 2;
+    if (_Alignof(int) < 4)
+        return 3;
+    if (_Alignof(long) < 8)
+        return 4;
+    if (_Alignof(double) < 8)
+        return 5;
+
     // Test 2: _Alignof with pointer
-    if (_Alignof(int*) < 8) return 6;
-    if (_Alignof(void*) < 8) return 7;
-    
+    if (_Alignof(int *) < 8)
+        return 6;
+    if (_Alignof(void *) < 8)
+        return 7;
+
     // Test 3: _Alignof with struct
     struct S1 {
         char c;
-        int i;
+        int  i;
     };
-    if (_Alignof(struct S1) < 4) return 8;
-    
+    if (_Alignof(struct S1) < 4)
+        return 8;
+
     // Test 4: _Alignof with array
     int arr[10];
-    if (_Alignof(arr) < 4) return 9;
-    
+    if (_Alignof(arr) < 4)
+        return 9;
+
     // Test 5: _Alignof with variable
     int x = 42;
-    if (_Alignof(x) < 4) return 10;
-    
+    if (_Alignof(x) < 4)
+        return 10;
+
     // Test 6: _Alignas with integer (2-byte alignment)
     _Alignas(2) char c1 = 'A';
-    if (c1 != 'A') return 11;
-    
+    if (c1 != 'A')
+        return 11;
+
     // Test 7: _Alignas with type
     _Alignas(int) char c2 = 'B';
-    if (c2 != 'B') return 12;
-    
+    if (c2 != 'B')
+        return 12;
+
     // Test 8: _Alignas with larger alignment
     _Alignas(16) int aligned_int = 100;
-    if (aligned_int != 100) return 13;
-    
+    if (aligned_int != 100)
+        return 13;
+
     // Test 9: _Alignas in struct
     struct AlignedStruct {
         _Alignas(8) char c;
         int i;
     };
     struct AlignedStruct as = {'X', 200};
-    if (as.c != 'X' || as.i != 200) return 14;
-    
+    if (as.c != 'X' || as.i != 200)
+        return 14;
+
     // Test 10: Multiple aligned variables
     _Alignas(8) char a1 = '1';
     _Alignas(8) char a2 = '2';
     _Alignas(8) char a3 = '3';
-    if (a1 != '1' || a2 != '2' || a3 != '3') return 15;
-    
-    return 42;  // Success
+    if (a1 != '1' || a2 != '2' || a3 != '3')
+        return 15;
+
+    return 42; // Success
 }
 
 // test_attribute_simple
 [[cccc::test(return = 42)]]
 int test_attribute_simple(void) {
-    if (x != 5) return 1;  // Assert x == 5
+    if (x != 5)
+        return 1; // Assert x == 5
     return 42;
 }
 
 // test_fallthrough_attribute
 [[cccc::test(return = 42)]]
 int test_fallthrough_attribute(void) {
-    if (test_fallthrough(1) != 30) return 1;
-    if (test_fallthrough(2) != 20) return 2;
-    if (test_fallthrough(5) != 99) return 3;
+    if (test_fallthrough(1) != 30)
+        return 1;
+    if (test_fallthrough(2) != 20)
+        return 2;
+    if (test_fallthrough(5) != 99)
+        return 3;
     return 42;
 }
 
@@ -197,16 +223,15 @@ int test_pragma_link(void) {
 // Tests for @identifier attribute syntax (ticket #234).
 #pragma cccc suite begin "attributes/at_syntax"
 
-@comptime
-int at_double_val(int x) { return x * 2; }
+@comptime int at_double_val(int x) {
+    return x * 2;
+}
 
-@comptime
-Node *at_make_doubled_42(void) {
+@comptime Node *at_make_doubled_42(void) {
     return MakeIntLiteral(at_double_val(21));
 }
 
-@comptime
-Node *at_add_one(Node *x) {
+@comptime Node *at_add_one(Node *x) {
     return MakeBinary(NK_ADD, x, MakeIntLiteral(1));
 }
 
@@ -222,20 +247,19 @@ void test_at_macro_inline(void) {
     AssertEq(v, 11);
 }
 
-@test
-void test_at_test_bare(void) {
+@test void test_at_test_bare(void) {
     AssertEq(1 + 1, 2);
 }
 
-@test(suite="at_suite")
-void test_at_test_with_suite(void) {
+@test(suite = "at_suite") void test_at_test_with_suite(void) {
     AssertEq(6 * 7, 42);
 }
 
 #pragma cccc suite end
 
 // [from test_attr_cleanup.c]
-// Tests for __attribute__((cleanup(fn))) scope-exit callbacks (tickets #218, #480).
+// Tests for __attribute__((cleanup(fn))) scope-exit callbacks (tickets #218,
+// #480).
 #include <stdbool.h>
 
 #pragma cccc suite begin "attributes/cleanup"
@@ -243,10 +267,19 @@ void test_at_test_with_suite(void) {
 static int g_cleanup_log[64];
 static int g_cleanup_log_n = 0;
 
-static void cleanup_log_reset(void) { g_cleanup_log_n = 0; }
-static void cleanup_log_val(int v)  { if (g_cleanup_log_n < 64) g_cleanup_log[g_cleanup_log_n++] = v; }
-static void cleanup_int(int *p) { cleanup_log_val(*p); }
-static void cleanup_set_true(bool *p) { *p = true; }
+static void cleanup_log_reset(void) {
+    g_cleanup_log_n = 0;
+}
+static void cleanup_log_val(int v) {
+    if (g_cleanup_log_n < 64)
+        g_cleanup_log[g_cleanup_log_n++] = v;
+}
+static void cleanup_int(int *p) {
+    cleanup_log_val(*p);
+}
+static void cleanup_set_true(bool *p) {
+    *p = true;
+}
 
 [[cccc::test]]
 static void test_basic_block_exit(void) {
@@ -271,7 +304,7 @@ static void void_with_cleanup_return(bool cond, bool *cleaned) {
 
 [[cccc::test]]
 static void test_cleanup_on_void_return(void) {
-    bool cleaned = false;
+    bool cleaned    = false;
     bool took_early = false;
     void_with_cleanup_return(true, &took_early);
     AssertEq(took_early, true);
@@ -292,7 +325,9 @@ static void test_nonvoid_return_value_preserved(void) {
     AssertEq(g_cleanup_log[0], 99);
 }
 
-static void cleanup_float_marker(int *p) { *p = 1; }
+static void cleanup_float_marker(int *p) {
+    *p = 1;
+}
 
 static float float_return_with_cleanup(void) {
     int marker __attribute__((cleanup(cleanup_float_marker))) = 0;
@@ -313,7 +348,9 @@ static void test_lifo_order(void) {
         int a __attribute__((cleanup(cleanup_int))) = 1;
         int b __attribute__((cleanup(cleanup_int))) = 2;
         int c __attribute__((cleanup(cleanup_int))) = 3;
-        (void)a; (void)b; (void)c;
+        (void)a;
+        (void)b;
+        (void)c;
     }
     AssertEq(g_cleanup_log_n, 3);
     AssertEq(g_cleanup_log[0], 3);
@@ -468,7 +505,10 @@ static void test_goto_skip_multiple_scopes(void) {
     AssertEq(g_cleanup_log[2], 10);
 }
 
-static void cleanup_tag_99(int *p) { (void)p; cleanup_log_val(99); }
+static void cleanup_tag_99(int *p) {
+    (void)p;
+    cleanup_log_val(99);
+}
 
 static void cross_sibling_goto(void) {
     {
@@ -524,39 +564,42 @@ static void test_cross_sibling_goto_label_before_decl(void) {
 static int gnu_setup_count    = 0;
 static int gnu_teardown_count = 0;
 
-__attribute__((test_setup(suite = "attributes/gnu_test")))
-void gnu_test_setup(void) { gnu_setup_count++; }
+__attribute__((test_setup(suite = "attributes/gnu_test"))) void
+gnu_test_setup(void) {
+    gnu_setup_count++;
+}
 
-__attribute__((test_teardown(suite = "attributes/gnu_test")))
-void gnu_test_teardown(void) { gnu_teardown_count++; }
+__attribute__((test_teardown(suite = "attributes/gnu_test"))) void
+gnu_test_teardown(void) {
+    gnu_teardown_count++;
+}
 
-__attribute__((test))
-void test_gnu_bare(void) {
+__attribute__((test)) void test_gnu_bare(void) {
     AssertEq(1 + 1, 2);
 }
 
-__attribute__((test(name = "gnu with args")))
-void test_gnu_with_args(void) {
+__attribute__((test(name = "gnu with args"))) void test_gnu_with_args(void) {
     AssertEq(6 * 7, 42);
 }
 
-__attribute__((test))
-void test_gnu_hooks_ran(void) {
+__attribute__((test)) void test_gnu_hooks_ran(void) {
     Assert(gnu_setup_count > 0);
 }
 
 static int gnu_once_count = 0;
 
-__attribute__((test_setup(suite = "attributes/gnu_test/once", once)))
-void gnu_once_setup(void) { gnu_once_count++; }
+__attribute__((test_setup(suite = "attributes/gnu_test/once", once))) void
+gnu_once_setup(void) {
+    gnu_once_count++;
+}
 
-__attribute__((test(suite = "attributes/gnu_test/once")))
-void test_gnu_once_setup_a(void) {
+__attribute__((test(suite = "attributes/gnu_test/once"))) void
+test_gnu_once_setup_a(void) {
     AssertEq(gnu_once_count, 1);
 }
 
-__attribute__((test(suite = "attributes/gnu_test/once")))
-void test_gnu_once_setup_b(void) {
+__attribute__((test(suite = "attributes/gnu_test/once"))) void
+test_gnu_once_setup_b(void) {
     AssertEq(gnu_once_count, 1);
 }
 
@@ -583,15 +626,23 @@ void test_gnu_once_setup_b(void) {
 // Verify __attribute__((format(...))) accepts GNU/Clang alternate spellings.
 // macOS SDK headers use __printf__, gnu_printf, __scanf__, strftime, os_log
 // via __printflike/__scanflike macros from <sys/cdefs.h>.  Compile-time only.
-__attribute__((format(__printf__, 1, 2)))    int _fmts_my_printf(const char *fmt, ...);
-__attribute__((format(gnu_printf, 1, 2)))    int _fmts_my_gprintf(const char *fmt, ...);
-__attribute__((format(__printf0__, 1, 2)))   int _fmts_my_printf0(const char *fmt, ...);
-__attribute__((format(__scanf__, 1, 2)))     int _fmts_my_scanf(const char *fmt, ...);
-__attribute__((format(gnu_scanf, 1, 2)))     int _fmts_my_gscanf(const char *fmt, ...);
-__attribute__((format(strftime, 3, 0)))      int _fmts_my_strftime(char *s, int n, const char *fmt, void *tm);
-__attribute__((format(__strftime__, 3, 0)))  int _fmts_my_strftime2(char *s, int n, const char *fmt, void *tm);
-__attribute__((format(os_log, 1, 2)))        int _fmts_my_oslog(const char *fmt, ...);
-__attribute__((format(__os_log__, 1, 2)))    int _fmts_my_oslog2(const char *fmt, ...);
+__attribute__((format(__printf__, 1, 2))) int _fmts_my_printf(const char *fmt,
+                                                              ...);
+__attribute__((format(gnu_printf, 1, 2))) int _fmts_my_gprintf(const char *fmt,
+                                                               ...);
+__attribute__((format(__printf0__, 1, 2))) int _fmts_my_printf0(const char *fmt,
+                                                                ...);
+__attribute__((format(__scanf__, 1, 2))) int _fmts_my_scanf(const char *fmt,
+                                                            ...);
+__attribute__((format(gnu_scanf, 1, 2))) int _fmts_my_gscanf(const char *fmt,
+                                                             ...);
+__attribute__((format(strftime, 3, 0))) int
+_fmts_my_strftime(char *s, int n, const char *fmt, void *tm);
+__attribute__((format(__strftime__, 3, 0))) int
+_fmts_my_strftime2(char *s, int n, const char *fmt, void *tm);
+__attribute__((format(os_log, 1, 2))) int _fmts_my_oslog(const char *fmt, ...);
+__attribute__((format(__os_log__, 1, 2))) int _fmts_my_oslog2(const char *fmt,
+                                                              ...);
 
 [[cccc::test(return = 42)]]
 int test_attr_format_spellings(void) {
@@ -600,8 +651,9 @@ int test_attr_format_spellings(void) {
 }
 
 // [from test_has_attribute_builtin]
-// Verify __has_attribute, __has_builtin, __has_c_attribute return correct values.
-// All checks are in preprocessor #if context (the only valid form for these predicates).
+// Verify __has_attribute, __has_builtin, __has_c_attribute return correct
+// values. All checks are in preprocessor #if context (the only valid form for
+// these predicates).
 #if !__has_attribute(aligned)
 #error expected __has_attribute(aligned)
 #endif

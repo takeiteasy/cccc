@@ -7,6 +7,6 @@
 #pragma cccc comptime begin
 #pragma cccc emit begin
 [[cccc::test]]
-void emitted_test_fn(void) { }
+void emitted_test_fn(void) {}
 #pragma cccc emit end
 #pragma cccc comptime end

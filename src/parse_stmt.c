@@ -26,7 +26,8 @@
 bool is_typename(VirtualMachine *vm, Token *tok) {
     pthread_once(&typename_map_once, init_typename_map);
 
-    if (hashmap_get2(&typename_map, tok->loc, tok->len) || find_typedef(vm, tok))
+    if (hashmap_get2(&typename_map, tok->loc, tok->len) ||
+        find_typedef(vm, tok))
         return true;
 
     // #894: an unresolved identifier during the comptime parse may name a
@@ -37,8 +38,8 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
     // call find_typedef() directly to reach into the *runtime*
     // Obj/Type tables, which must never be redirected through this index.
     if ((vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
-        tok->kind == TK_IDENT &&
-        cc_comptime_resolve_typename(vm, tok) && find_typedef(vm, tok))
+        tok->kind == TK_IDENT && cc_comptime_resolve_typename(vm, tok) &&
+        find_typedef(vm, tok))
         return true;
 
     // "bool" is only a typename when it was actually classified as a C23
@@ -53,7 +54,7 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
 // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
 static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_ASM, tok);
-    tok = tok->next;
+    tok        = tok->next;
 
     while (equal(tok, "volatile") || equal(tok, "inline"))
         tok = tok->next;
@@ -63,7 +64,7 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         error_tok(vm, tok, "expected string literal, found '%.*s'", tok->len,
                   tok->loc);
     node->asm_str = tok->str;
-    *rest = skip(vm, tok->next, ")");
+    *rest         = skip(vm, tok->next, ")");
     return node;
 }
 
@@ -77,8 +78,9 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 // splicing the new node in, so it only ever compares against prior entries).
 //
 // Case nodes built by the reflection API may carry a NULL tok (macro_call_tok
-// can be unset -- see alloc_node in reflection.c), so this can't unconditionally
-// deref tok->file/tok->loc the way plain error_tok() call sites do.
+// can be unset -- see alloc_node in reflection.c), so this can't
+// unconditionally deref tok->file/tok->loc the way plain error_tok() call sites
+// do.
 void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
     for (Node *o = chain; o; o = o->case_next) {
         if (c->begin > o->end || o->begin > c->end)
@@ -90,7 +92,7 @@ void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
             later = c;
 
         char *msg;
-        char buf[64];
+        char  buf[64];
         if (c->begin == c->end && o->begin == o->end) {
             snprintf(buf, sizeof(buf), "duplicate case value '%ld'", c->begin);
             msg = buf;
@@ -116,8 +118,8 @@ static Node *stmt_or_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             error_tok(vm, tok,
                       "a declaration may not appear directly after a label "
                       "(use --std=c23 or later)");
-        VarAttr attr = {};
-        Type *basety = declspec(vm, &tok, tok, &attr);
+        VarAttr attr   = {};
+        Type   *basety = declspec(vm, &tok, tok, &attr);
         return declaration(vm, rest, tok, basety, &attr);
     }
     return stmt(vm, rest, tok);
@@ -125,16 +127,16 @@ static Node *stmt_or_decl(VirtualMachine *vm, Token **rest, Token *tok) {
 
 Token *static_assert_decl(VirtualMachine *vm, Token *tok) {
     bool c23_static_assert = equal(tok, "static_assert");
-    tok = skip(vm, tok->next, "(");
-    long long val = const_expr(vm, &tok, tok);
-    char *message = "static assertion failed";
+    tok                    = skip(vm, tok->next, "(");
+    long long val          = const_expr(vm, &tok, tok);
+    char     *message      = "static assertion failed";
 
     if (consume(vm, &tok, tok, ",")) {
         if (tok->kind != TK_STR)
             error_tok(vm, tok, "expected string literal, found '%.*s'",
                       tok->len, tok->loc);
         message = tok->str;
-        tok = tok->next;
+        tok     = tok->next;
     } else if (!c23_static_assert || vm->compiler.c_std < CCCC_STD_C23) {
         error_tok(vm, tok, "expected ','");
     }
@@ -183,9 +185,9 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // the mismatch warnings/casts below are meaningful yet. The real
         // type is inferred from these very `return` statements after the
         // body is fully parsed, and any needed cast is inserted then.
-        bool block_infer_pending = vm->compiler.current_fn &&
-                                   vm->compiler.current_fn->is_block &&
-                                   vm->compiler.current_fn->block_return_ty_pending;
+        bool block_infer_pending =
+            vm->compiler.current_fn && vm->compiler.current_fn->is_block &&
+            vm->compiler.current_fn->block_return_ty_pending;
 
         if (consume(vm, rest, tok->next, ";")) {
             if (vm->compiler.current_fn && !block_infer_pending) {
@@ -193,7 +195,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (ty->kind != TY_VOID) {
                     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
                         error_tok(vm, tok,
-                                  "non-void aggregate function should return a value");
+                                  "non-void aggregate function should return a "
+                                  "value");
                     warn_tok(vm, tok, CCCC_WARN_RETURN_TYPE,
                              "non-void function should return a value");
                     node->lhs = new_cast(vm, new_num(vm, 0, tok), ty);
@@ -203,13 +206,13 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         Node *exp = expr(vm, &tok, tok->next);
-        *rest = skip(vm, tok, ";");
+        *rest     = skip(vm, tok, ";");
 
         add_type(vm, exp);
         // current_fn may be NULL when a $quote template is parsed at file scope
-        // (e.g. inside a top-level pragma macro call that uses $quote("return x;")).
-        // Guard the implicit return-type cast; types will be resolved by add_type
-        // later, or by the caller establishing context via $with_fn.
+        // (e.g. inside a top-level pragma macro call that uses $quote("return
+        // x;")). Guard the implicit return-type cast; types will be resolved by
+        // add_type later, or by the caller establishing context via $with_fn.
         if (vm->compiler.current_fn && !block_infer_pending) {
             Type *ty = vm->compiler.current_fn->ty->return_ty;
             if (ty->kind == TY_VOID) {
@@ -223,7 +226,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 (vm->compiler.warnings & CCCC_WARN_NONNULL) &&
                 is_const_expr(vm, exp) && eval(vm, exp) == 0)
                 warn_tok(vm, node->tok, CCCC_WARN_NONNULL,
-                         "null returned from function declared with 'returns_nonnull'");
+                         "null returned from function declared with "
+                         "'returns_nonnull'");
         }
 
         node->lhs = exp;
@@ -232,9 +236,9 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "if")) {
         Node *node = new_node(vm, ND_IF, tok);
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
         node->cond = expr(vm, &tok, tok);
-        tok = skip(vm, tok, ")");
+        tok        = skip(vm, tok, ")");
 
         // DCE-aware diagnostic suppression: when saw_diag_attr is set, check
         // whether the condition is a compile-time constant or an unsigned
@@ -242,38 +246,47 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // branches compose correctly, e.g. if(0){ if(1){ chk_fail(); } }.
         // Note: we suppress diagnostics inside the dead branch but still parse
         // and emit it — we do not prune the AST, so codegen is unaffected.
-        int bv = vm->compiler.saw_diag_attr
-                     ? static_branch_value(vm, node->cond)
-                     : -1;
+        int  bv        = vm->compiler.saw_diag_attr
+                             ? static_branch_value(vm, node->cond)
+                             : -1;
         bool then_dead = (bv == 0), else_dead = (bv == 1);
 
-        if (then_dead) vm->compiler.dead_code_depth++;
+        if (then_dead)
+            vm->compiler.dead_code_depth++;
         node->then = stmt(vm, &tok, tok);
-        if (then_dead) vm->compiler.dead_code_depth--;
+        if (then_dead)
+            vm->compiler.dead_code_depth--;
 
         if (equal(tok, "else")) {
-            if (else_dead) vm->compiler.dead_code_depth++;
+            if (else_dead)
+                vm->compiler.dead_code_depth++;
             node->els = stmt(vm, &tok, tok->next);
-            if (else_dead) vm->compiler.dead_code_depth--;
+            if (else_dead)
+                vm->compiler.dead_code_depth--;
         }
         *rest = tok;
 
-        if (node->els && (vm->compiler.warnings & CCCC_WARN_DUPLICATED_BRANCHES) &&
+        if (node->els &&
+            (vm->compiler.warnings & CCCC_WARN_DUPLICATED_BRANCHES) &&
             nodes_structurally_equal(node->then, node->els))
             warn_tok(vm, node->tok, CCCC_WARN_DUPLICATED_BRANCHES,
                      "both branches of 'if' statement are identical");
 
         if (vm->compiler.warnings & CCCC_WARN_DUPLICATED_COND) {
-            Node *conds[64]; int nconds = 0;
-            for (Node *chain = node; chain && chain->kind == ND_IF; chain = chain->els) {
+            Node *conds[64];
+            int   nconds = 0;
+            for (Node *chain = node; chain && chain->kind == ND_IF;
+                 chain       = chain->els) {
                 for (int i = 0; i < nconds; i++) {
                     if (nodes_structurally_equal(conds[i], chain->cond)) {
-                        warn_tok(vm, chain->tok, CCCC_WARN_DUPLICATED_COND,
-                                 "duplicated condition in 'if'/'else if' chain");
+                        warn_tok(
+                            vm, chain->tok, CCCC_WARN_DUPLICATED_COND,
+                            "duplicated condition in 'if'/'else if' chain");
                         break;
                     }
                 }
-                if (nconds < 64) conds[nconds++] = chain->cond;
+                if (nconds < 64)
+                    conds[nconds++] = chain->cond;
             }
         }
 
@@ -282,9 +295,9 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "switch")) {
         Node *node = new_node(vm, ND_SWITCH, tok);
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
         node->cond = expr(vm, &tok, tok);
-        tok = skip(vm, tok, ")");
+        tok        = skip(vm, tok, ")");
 
         if (vm->compiler.warnings & CCCC_WARN_SWITCH_BOOL) {
             add_type(vm, node->cond);
@@ -293,15 +306,15 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                          "switch condition has boolean type");
         }
 
-        Node *sw = vm->compiler.current_switch;
+        Node *sw                    = vm->compiler.current_switch;
         vm->compiler.current_switch = node;
 
-        char *brk = vm->compiler.brk_label;
+        char *brk                   = vm->compiler.brk_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
-        int saved_brk_cld = vm->compiler.brk_cleanup_depth;
+        int saved_brk_cld              = vm->compiler.brk_cleanup_depth;
         vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
-        node->then = stmt(vm, rest, tok);
+        node->then                     = stmt(vm, rest, tok);
 
         warn_switch_fallthrough(vm, node);
 
@@ -316,15 +329,20 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         for (Node *c1 = node->case_next; c1; c1 = c1->case_next)
             check_case_conflict(vm, c1->case_next, c1);
 
-        if (vm->compiler.warnings & (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
+        if (vm->compiler.warnings &
+            (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
             add_type(vm, node->cond);
             Type *cond_ty = node->cond->ty;
-            if (cond_ty && cond_ty->kind == TY_ENUM && cond_ty->enum_constants) {
+            if (cond_ty && cond_ty->kind == TY_ENUM &&
+                cond_ty->enum_constants) {
                 bool has_default = node->default_case != NULL;
-                bool check_sw   = (vm->compiler.warnings & CCCC_WARN_SWITCH) && !has_default;
-                bool check_se   = !!(vm->compiler.warnings & CCCC_WARN_SWITCH_ENUM);
+                bool check_sw =
+                    (vm->compiler.warnings & CCCC_WARN_SWITCH) && !has_default;
+                bool check_se =
+                    !!(vm->compiler.warnings & CCCC_WARN_SWITCH_ENUM);
                 if (check_sw || check_se) {
-                    for (EnumConstant *ec = cond_ty->enum_constants; ec; ec = ec->next) {
+                    for (EnumConstant *ec = cond_ty->enum_constants; ec;
+                         ec               = ec->next) {
                         bool covered = false;
                         for (Node *c = node->case_next; c; c = c->case_next) {
                             if (ec->value >= c->begin && ec->value <= c->end) {
@@ -334,9 +352,12 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                         }
                         if (!covered) {
                             CCCCWarning which = (check_se && has_default)
-                                               ? CCCC_WARN_SWITCH_ENUM : CCCC_WARN_SWITCH;
-                            warn_tok(vm, node->tok, which,
-                                     "enumeration value '%s' not handled in switch", ec->name);
+                                                    ? CCCC_WARN_SWITCH_ENUM
+                                                    : CCCC_WARN_SWITCH;
+                            warn_tok(
+                                vm, node->tok, which,
+                                "enumeration value '%s' not handled in switch",
+                                ec->name);
                         }
                     }
                 }
@@ -350,7 +371,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (vm->compiler.warnings & CCCC_WARN_SWITCH) {
                     for (Node *c = node->case_next; c; c = c->case_next) {
                         bool matches = false;
-                        for (EnumConstant *ec = cond_ty->enum_constants; ec; ec = ec->next) {
+                        for (EnumConstant *ec = cond_ty->enum_constants; ec;
+                             ec               = ec->next) {
                             if (ec->value >= c->begin && ec->value <= c->end) {
                                 matches = true;
                                 break;
@@ -369,8 +391,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             warn_tok(vm, node->tok, CCCC_WARN_SWITCH_DEFAULT,
                      "switch statement has no default case");
 
-        vm->compiler.current_switch = sw;
-        vm->compiler.brk_label = brk;
+        vm->compiler.current_switch    = sw;
+        vm->compiler.brk_label         = brk;
         vm->compiler.brk_cleanup_depth = saved_brk_cld;
         return node;
     }
@@ -382,14 +404,14 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 return new_node(vm, ND_NULL_EXPR, tok);
             }
             // Skip to end of statement and return empty node
-            tok = skip_to_stmt_end(vm, tok);
+            tok   = skip_to_stmt_end(vm, tok);
             *rest = tok;
             return new_node(vm, ND_NULL_EXPR, tok);
         }
 
-        Node *node = new_node(vm, ND_CASE, tok);
-        int begin = const_expr(vm, &tok, tok->next);
-        int end;
+        Node *node  = new_node(vm, ND_CASE, tok);
+        int   begin = const_expr(vm, &tok, tok->next);
+        int   end;
 
         if (equal(tok, "...")) {
             // [GNU] Case ranges, e.g. "case 1 ... 5:"
@@ -400,11 +422,11 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             end = begin;
         }
 
-        tok = skip(vm, tok, ":");
-        node->label = new_unique_name(vm);
-        node->lhs = stmt_or_decl(vm, rest, tok);
-        node->begin = begin;
-        node->end = end;
+        tok             = skip(vm, tok, ":");
+        node->label     = new_unique_name(vm);
+        node->lhs       = stmt_or_decl(vm, rest, tok);
+        node->begin     = begin;
+        node->end       = end;
         node->case_next = vm->compiler.current_switch->case_next;
         vm->compiler.current_switch->case_next = node;
         return node;
@@ -417,7 +439,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 return new_node(vm, ND_NULL_EXPR, tok);
             }
             // Skip to end of statement and return empty node
-            tok = skip_to_stmt_end(vm, tok);
+            tok   = skip_to_stmt_end(vm, tok);
             *rest = tok;
             return new_node(vm, ND_NULL_EXPR, tok);
         }
@@ -429,32 +451,32 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         if (vm->compiler.current_switch->default_case)
             error_tok(vm, tok, "multiple default labels in one switch");
 
-        Node *node = new_node(vm, ND_CASE, tok);
-        tok = skip(vm, tok->next, ":");
-        node->label = new_unique_name(vm);
-        node->lhs = stmt_or_decl(vm, rest, tok);
+        Node *node                                = new_node(vm, ND_CASE, tok);
+        tok                                       = skip(vm, tok->next, ":");
+        node->label                               = new_unique_name(vm);
+        node->lhs                                 = stmt_or_decl(vm, rest, tok);
         vm->compiler.current_switch->default_case = node;
         return node;
     }
 
     if (equal(tok, "for")) {
         Node *node = new_node(vm, ND_FOR, tok);
-        tok = skip(vm, tok->next, "(");
+        tok        = skip(vm, tok->next, "(");
 
         enter_scope(vm);
 
-        char *brk = vm->compiler.brk_label;
-        char *cont = vm->compiler.cont_label;
+        char *brk              = vm->compiler.brk_label;
+        char *cont             = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
-        int saved_brk_cld_for = vm->compiler.brk_cleanup_depth;
-        int saved_cont_cld_for = vm->compiler.cont_cleanup_depth;
-        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        int saved_brk_cld_for           = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_for          = vm->compiler.cont_cleanup_depth;
+        vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         if (is_decl_start(vm, tok)) {
             Type *basety = declspec(vm, &tok, tok, NULL);
-            node->init = declaration(vm, &tok, tok, basety, NULL);
+            node->init   = declaration(vm, &tok, tok, basety, NULL);
         } else {
             node->init = expr_stmt(vm, &tok, tok);
         }
@@ -469,77 +491,83 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                              static_branch_value(vm, node->cond) == 0;
 
         if (!equal(tok, ")")) {
-            if (for_cond_dead) vm->compiler.dead_code_depth++;
+            if (for_cond_dead)
+                vm->compiler.dead_code_depth++;
             node->inc = expr(vm, &tok, tok);
-            if (for_cond_dead) vm->compiler.dead_code_depth--;
+            if (for_cond_dead)
+                vm->compiler.dead_code_depth--;
         }
         tok = skip(vm, tok, ")");
 
-        if (for_cond_dead) vm->compiler.dead_code_depth++;
+        if (for_cond_dead)
+            vm->compiler.dead_code_depth++;
         node->then = stmt(vm, rest, tok);
-        if (for_cond_dead) vm->compiler.dead_code_depth--;
+        if (for_cond_dead)
+            vm->compiler.dead_code_depth--;
 
         leave_scope(vm);
-        vm->compiler.brk_label = brk;
-        vm->compiler.cont_label = cont;
-        vm->compiler.brk_cleanup_depth = saved_brk_cld_for;
+        vm->compiler.brk_label          = brk;
+        vm->compiler.cont_label         = cont;
+        vm->compiler.brk_cleanup_depth  = saved_brk_cld_for;
         vm->compiler.cont_cleanup_depth = saved_cont_cld_for;
         return node;
     }
 
     if (equal(tok, "while")) {
-        Node *node = new_node(vm, ND_FOR, tok);
-        tok = skip(vm, tok->next, "(");
-        node->cond = expr(vm, &tok, tok);
-        tok = skip(vm, tok, ")");
+        Node *node             = new_node(vm, ND_FOR, tok);
+        tok                    = skip(vm, tok->next, "(");
+        node->cond             = expr(vm, &tok, tok);
+        tok                    = skip(vm, tok, ")");
 
-        char *brk = vm->compiler.brk_label;
-        char *cont = vm->compiler.cont_label;
+        char *brk              = vm->compiler.brk_label;
+        char *cont             = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
-        int saved_brk_cld_whl = vm->compiler.brk_cleanup_depth;
-        int saved_cont_cld_whl = vm->compiler.cont_cleanup_depth;
-        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        int saved_brk_cld_whl           = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_whl          = vm->compiler.cont_cleanup_depth;
+        vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         // DCE-aware suppression: while(0){...} — body is statically dead.
         bool whl_body_dead = vm->compiler.saw_diag_attr &&
                              static_branch_value(vm, node->cond) == 0;
-        if (whl_body_dead) vm->compiler.dead_code_depth++;
+        if (whl_body_dead)
+            vm->compiler.dead_code_depth++;
         node->then = stmt(vm, rest, tok);
-        if (whl_body_dead) vm->compiler.dead_code_depth--;
+        if (whl_body_dead)
+            vm->compiler.dead_code_depth--;
 
-        vm->compiler.brk_label = brk;
-        vm->compiler.cont_label = cont;
-        vm->compiler.brk_cleanup_depth = saved_brk_cld_whl;
+        vm->compiler.brk_label          = brk;
+        vm->compiler.cont_label         = cont;
+        vm->compiler.brk_cleanup_depth  = saved_brk_cld_whl;
         vm->compiler.cont_cleanup_depth = saved_cont_cld_whl;
         return node;
     }
 
     if (equal(tok, "do")) {
-        Node *node = new_node(vm, ND_DO, tok);
+        Node *node             = new_node(vm, ND_DO, tok);
 
-        char *brk = vm->compiler.brk_label;
-        char *cont = vm->compiler.cont_label;
+        char *brk              = vm->compiler.brk_label;
+        char *cont             = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
-        int saved_brk_cld_do = vm->compiler.brk_cleanup_depth;
-        int saved_cont_cld_do = vm->compiler.cont_cleanup_depth;
-        vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        int saved_brk_cld_do            = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_do           = vm->compiler.cont_cleanup_depth;
+        vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
-        node->then = stmt(vm, &tok, tok->next);
+        node->then                      = stmt(vm, &tok, tok->next);
 
-        vm->compiler.brk_label = brk;
-        vm->compiler.cont_label = cont;
-        vm->compiler.brk_cleanup_depth = saved_brk_cld_do;
+        vm->compiler.brk_label          = brk;
+        vm->compiler.cont_label         = cont;
+        vm->compiler.brk_cleanup_depth  = saved_brk_cld_do;
         vm->compiler.cont_cleanup_depth = saved_cont_cld_do;
 
-        tok = skip(vm, tok, "while");
-        tok = skip(vm, tok, "(");
-        node->cond = expr(vm, &tok, tok);
-        tok = skip(vm, tok, ")");
-        *rest = skip(vm, tok, ";");
+        tok                             = skip(vm, tok, "while");
+        tok                             = skip(vm, tok, "(");
+        node->cond                      = expr(vm, &tok, tok);
+        tok                             = skip(vm, tok, ")");
+        *rest                           = skip(vm, tok, ";");
         return node;
     }
 
@@ -550,17 +578,17 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok->next, "*")) {
             // [GNU] `goto *ptr` jumps to the address specified by `ptr`.
             Node *node = new_node(vm, ND_GOTO_EXPR, tok);
-            node->lhs = expr(vm, &tok, tok->next->next);
-            *rest = skip(vm, tok, ";");
+            node->lhs  = expr(vm, &tok, tok->next->next);
+            *rest      = skip(vm, tok, ";");
             return node;
         }
 
-        Node *node = new_node(vm, ND_GOTO, tok);
-        node->label = get_ident(vm, tok->next);
+        Node *node          = new_node(vm, ND_GOTO, tok);
+        node->label         = get_ident(vm, tok->next);
         node->cleanup_chain = vm->compiler.cur_cleanup_chain;
-        node->goto_next = vm->compiler.gotos;
-        vm->compiler.gotos = node;
-        *rest = skip(vm, tok->next->next, ";");
+        node->goto_next     = vm->compiler.gotos;
+        vm->compiler.gotos  = node;
+        *rest               = skip(vm, tok->next->next, ";");
         return node;
     }
 
@@ -571,14 +599,14 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 return new_node(vm, ND_NULL_EXPR, tok);
             }
             // Skip to end of statement and return empty node
-            tok = skip_to_stmt_end(vm, tok);
+            tok   = skip_to_stmt_end(vm, tok);
             *rest = tok;
             return new_node(vm, ND_NULL_EXPR, tok);
         }
-        Node *node = new_node(vm, ND_GOTO, tok);
-        node->unique_label = vm->compiler.brk_label;
+        Node *node                 = new_node(vm, ND_GOTO, tok);
+        node->unique_label         = vm->compiler.brk_label;
         node->cleanup_target_depth = vm->compiler.brk_cleanup_depth;
-        *rest = skip(vm, tok->next, ";");
+        *rest                      = skip(vm, tok->next, ";");
         return node;
     }
 
@@ -589,46 +617,47 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 return new_node(vm, ND_NULL_EXPR, tok);
             }
             // Skip to end of statement and return empty node
-            tok = skip_to_stmt_end(vm, tok);
+            tok   = skip_to_stmt_end(vm, tok);
             *rest = tok;
             return new_node(vm, ND_NULL_EXPR, tok);
         }
-        Node *node = new_node(vm, ND_GOTO, tok);
-        node->unique_label = vm->compiler.cont_label;
+        Node *node                 = new_node(vm, ND_GOTO, tok);
+        node->unique_label         = vm->compiler.cont_label;
         node->cleanup_target_depth = vm->compiler.cont_cleanup_depth;
-        *rest = skip(vm, tok->next, ";");
+        *rest                      = skip(vm, tok->next, ";");
         return node;
     }
 
     VarAttr label_attr = {};
-    tok = attribute_list(vm, tok, NULL, &label_attr);
-    tok = c23_attribute_list(vm, tok, NULL, &label_attr);
+    tok                = attribute_list(vm, tok, NULL, &label_attr);
+    tok                = c23_attribute_list(vm, tok, NULL, &label_attr);
 
     if (label_attr.is_fallthrough) {
         if (equal(tok, ";")) {
-            *rest = tok->next;
-            Node *node = new_node(vm, ND_BLOCK, tok);
+            *rest                = tok->next;
+            Node *node           = new_node(vm, ND_BLOCK, tok);
             node->is_fallthrough = true;
             return node;
         }
     }
 
     if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
-        Node *node = new_node(vm, ND_LABEL, tok);
-        node->label = arena_strndup(vm, tok->loc, tok->len);
+        Node *node         = new_node(vm, ND_LABEL, tok);
+        node->label        = arena_strndup(vm, tok->loc, tok->len);
         node->unique_label = new_unique_name(vm);
         // Record the active cleanup scope depth at this label so that
-        // resolve_goto_labels can propagate it to each goto's cleanup_target_depth.
-        // A goto landing here exits only cleanup scopes *above* this depth.
+        // resolve_goto_labels can propagate it to each goto's
+        // cleanup_target_depth. A goto landing here exits only cleanup scopes
+        // *above* this depth.
         node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
-        node->cleanup_chain = vm->compiler.cur_cleanup_chain;
-        Token *body_tok = tok->next->next;
+        node->cleanup_chain       = vm->compiler.cur_cleanup_chain;
+        Token *body_tok           = tok->next->next;
         body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
         body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
         node->label_maybe_unused = label_attr.is_maybe_unused;
-        node->lhs = stmt_or_decl(vm, rest, body_tok);
-        node->goto_next = vm->compiler.labels;
-        vm->compiler.labels = node;
+        node->lhs                = stmt_or_decl(vm, rest, body_tok);
+        node->goto_next          = vm->compiler.labels;
+        vm->compiler.labels      = node;
         return node;
     }
 
@@ -639,27 +668,30 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 }
 
 // compound-stmt = (typedef | declaration | stmt)* "}"
-Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_tok) {
+Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
+                    Token **close_tok) {
     Node *node = new_node(vm, ND_BLOCK, tok);
-    Node head = {};
-    Node *cur = &head;
+    Node  head = {};
+    Node *cur  = &head;
 
     enter_scope(vm);
 
     bool seen_stmt = false;
-    bool scope_has_cleanup = false; // true once first cleanup var is seen in this scope
+    bool scope_has_cleanup =
+        false; // true once first cleanup var is seen in this scope
     while (!equal(tok, "}")) {
         if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
                 warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "mixing declarations and code is a C99 extension");
-            VarAttr attr = {};
-            Type *basety = declspec(vm, &tok, tok, &attr);
+            VarAttr attr   = {};
+            Type   *basety = declspec(vm, &tok, tok, &attr);
 
             if (attr.is_typedef) {
                 if (has_custom_attrs(basety, &attr))
                     error_tok(vm, tok,
-                              "custom attributes are only supported on file-scope declarations");
+                              "custom attributes are only supported on "
+                              "file-scope declarations");
                 tok = parse_typedef(vm, tok, basety, &attr);
                 continue;
             }
@@ -676,23 +708,28 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_
                 continue;
             }
 
-            // Snapshot scope->vars before declaration so we can detect new cleanup vars.
+            // Snapshot scope->vars before declaration so we can detect new
+            // cleanup vars.
             VarScopeNode *vars_before = vm->compiler.scope->vars;
             cur = cur->next = declaration(vm, &tok, tok, basety, &attr);
-            // If any newly declared var has cleanup_fn, push a cleanup scope depth.
-            // This must happen immediately (not deferred) so that break/continue nodes
-            // parsed after this see the updated brk/cont_cleanup_depth.
+            // If any newly declared var has cleanup_fn, push a cleanup scope
+            // depth. This must happen immediately (not deferred) so that
+            // break/continue nodes parsed after this see the updated
+            // brk/cont_cleanup_depth.
             if (!scope_has_cleanup) {
-                for (VarScopeNode *sv = vm->compiler.scope->vars; sv != vars_before; sv = sv->next) {
+                for (VarScopeNode *sv      = vm->compiler.scope->vars;
+                     sv != vars_before; sv = sv->next) {
                     if (sv->var && sv->var->cleanup_fn) {
                         scope_has_cleanup = true;
                         vm->compiler.cleanup_scope_depth++;
                         // Push an ancestry node so gotos/labels can compute the
                         // LCA of their cleanup scopes. Arena-allocated because
-                        // resolve_goto_labels reads it after compound_stmt returns.
-                        CleanupChainNode *cn = arena_alloc(&vm->compiler.parser_arena,
-                                                           sizeof(CleanupChainNode));
-                        cn->depth = vm->compiler.cleanup_scope_depth;
+                        // resolve_goto_labels reads it after compound_stmt
+                        // returns.
+                        CleanupChainNode *cn =
+                            arena_alloc(&vm->compiler.parser_arena,
+                                        sizeof(CleanupChainNode));
+                        cn->depth  = vm->compiler.cleanup_scope_depth;
                         cn->parent = vm->compiler.cur_cleanup_chain;
                         vm->compiler.cur_cleanup_chain = cn;
                         break;
@@ -705,7 +742,7 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_
             // initialized but not assigned later
             vm->compiler.initializing_var = NULL;
             cur = cur->next = stmt(vm, &tok, tok);
-            seen_stmt = true;
+            seen_stmt       = true;
         }
         add_type(vm, cur);
     }
@@ -713,27 +750,29 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_
     // Also clear at end in case there are no statements after declarations
     vm->compiler.initializing_var = NULL;
 
-    // Build CleanupVar list for this block (LIFO order = most-recently-declared first).
-    // scope->vars uses prepend so its head is the most recently declared var,
-    // which is exactly the right order for LIFO cleanup emission.
+    // Build CleanupVar list for this block (LIFO order = most-recently-declared
+    // first). scope->vars uses prepend so its head is the most recently
+    // declared var, which is exactly the right order for LIFO cleanup emission.
     if (scope_has_cleanup) {
         node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
-        CleanupVar *cv_list = NULL;
-        CleanupVar **cv_tail = &cv_list;
+        CleanupVar  *cv_list      = NULL;
+        CleanupVar **cv_tail      = &cv_list;
         for (VarScopeNode *sv = vm->compiler.scope->vars; sv; sv = sv->next) {
             if (sv->var && sv->var->cleanup_fn) {
-                CleanupVar *cv = arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupVar));
-                cv->var = sv->var;
+                CleanupVar *cv =
+                    arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupVar));
+                cv->var        = sv->var;
                 cv->cleanup_fn = sv->var->cleanup_fn;
-                cv->next = NULL;
-                *cv_tail = cv;
-                cv_tail = &cv->next;
+                cv->next       = NULL;
+                *cv_tail       = cv;
+                cv_tail        = &cv->next;
             }
         }
         node->cleanup_vars = cv_list; // LIFO order: codegen iterates directly
         vm->compiler.cleanup_scope_depth--;
         if (vm->compiler.cur_cleanup_chain)
-            vm->compiler.cur_cleanup_chain = vm->compiler.cur_cleanup_chain->parent;
+            vm->compiler.cur_cleanup_chain =
+                vm->compiler.cur_cleanup_chain->parent;
     }
 
     leave_scope(vm);
@@ -748,73 +787,118 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_
 // Returns true if the expression has no observable side effects and its result
 // can be safely discarded. Conservative: returns false for unknown node kinds.
 static bool expr_has_no_side_effects(Node *n) {
-    if (!n) return true;
-    switch (n->kind) {
-    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
-    case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
-    case ND_EQ: case ND_NE: case ND_LT: case ND_LE:
-    case ND_LOGAND: case ND_LOGOR:
-        return expr_has_no_side_effects(n->lhs) && expr_has_no_side_effects(n->rhs);
-    case ND_NEG: case ND_NOT: case ND_BITNOT: case ND_CAST: case ND_ADDR:
-        return expr_has_no_side_effects(n->lhs);
-    case ND_DEREF:
-        return expr_has_no_side_effects(n->lhs);
-    case ND_COND:
-        return expr_has_no_side_effects(n->cond) &&
-               expr_has_no_side_effects(n->then) &&
-               expr_has_no_side_effects(n->els);
-    case ND_COMMA:
-        return expr_has_no_side_effects(n->lhs) && expr_has_no_side_effects(n->rhs);
-    case ND_MEMBER:
-        return expr_has_no_side_effects(n->lhs);
-    case ND_NUM:
-    case ND_VAR:
+    if (!n)
         return true;
-    default:
-        return false;
+    switch (n->kind) {
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_LOGAND:
+        case ND_LOGOR:
+            return expr_has_no_side_effects(n->lhs) &&
+                   expr_has_no_side_effects(n->rhs);
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+        case ND_CAST:
+        case ND_ADDR:
+            return expr_has_no_side_effects(n->lhs);
+        case ND_DEREF:
+            return expr_has_no_side_effects(n->lhs);
+        case ND_COND:
+            return expr_has_no_side_effects(n->cond) &&
+                   expr_has_no_side_effects(n->then) &&
+                   expr_has_no_side_effects(n->els);
+        case ND_COMMA:
+            return expr_has_no_side_effects(n->lhs) &&
+                   expr_has_no_side_effects(n->rhs);
+        case ND_MEMBER:
+            return expr_has_no_side_effects(n->lhs);
+        case ND_NUM:
+        case ND_VAR:
+            return true;
+        default:
+            return false;
     }
 }
 
-// Conservative structural equality for -Wduplicated-branches / -Wduplicated-cond.
-// Returns false for unrecognised node kinds to avoid false positives.
+// Conservative structural equality for -Wduplicated-branches /
+// -Wduplicated-cond. Returns false for unrecognised node kinds to avoid false
+// positives.
 bool nodes_structurally_equal(Node *a, Node *b) {
-    if (a == b) return true;
-    if (!a || !b) return false;
-    if (a->kind != b->kind) return false;
-    switch (a->kind) {
-    case ND_NUM:
-        return a->val == b->val;
-    case ND_VAR:
-        return a->var == b->var;
-    case ND_MEMBER:
-        return a->member == b->member && nodes_structurally_equal(a->lhs, b->lhs);
-    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
-    case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
-    case ND_EQ: case ND_NE: case ND_LT: case ND_LE:
-    case ND_LOGAND: case ND_LOGOR: case ND_ASSIGN: case ND_COMMA:
-        return nodes_structurally_equal(a->lhs, b->lhs) &&
-               nodes_structurally_equal(a->rhs, b->rhs);
-    case ND_NEG: case ND_NOT: case ND_BITNOT: case ND_CAST: case ND_ADDR:
-    case ND_DEREF: case ND_EXPR_STMT:
-        return nodes_structurally_equal(a->lhs, b->lhs);
-    case ND_COND:
-        return nodes_structurally_equal(a->cond, b->cond) &&
-               nodes_structurally_equal(a->then, b->then) &&
-               nodes_structurally_equal(a->els, b->els);
-    case ND_BLOCK: {
-        Node *pa = a->body, *pb = b->body;
-        while (pa && pb) {
-            if (!nodes_structurally_equal(pa, pb)) return false;
-            pa = pa->next; pb = pb->next;
-        }
-        return !pa && !pb;
-    }
-    case ND_RETURN:
-        return nodes_structurally_equal(a->lhs, b->lhs);
-    case ND_NULL_EXPR:
+    if (a == b)
         return true;
-    default:
+    if (!a || !b)
         return false;
+    if (a->kind != b->kind)
+        return false;
+    switch (a->kind) {
+        case ND_NUM:
+            return a->val == b->val;
+        case ND_VAR:
+            return a->var == b->var;
+        case ND_MEMBER:
+            return a->member == b->member &&
+                   nodes_structurally_equal(a->lhs, b->lhs);
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_ASSIGN:
+        case ND_COMMA:
+            return nodes_structurally_equal(a->lhs, b->lhs) &&
+                   nodes_structurally_equal(a->rhs, b->rhs);
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+        case ND_CAST:
+        case ND_ADDR:
+        case ND_DEREF:
+        case ND_EXPR_STMT:
+            return nodes_structurally_equal(a->lhs, b->lhs);
+        case ND_COND:
+            return nodes_structurally_equal(a->cond, b->cond) &&
+                   nodes_structurally_equal(a->then, b->then) &&
+                   nodes_structurally_equal(a->els, b->els);
+        case ND_BLOCK: {
+            Node *pa = a->body, *pb = b->body;
+            while (pa && pb) {
+                if (!nodes_structurally_equal(pa, pb))
+                    return false;
+                pa = pa->next;
+                pb = pb->next;
+            }
+            return !pa && !pb;
+        }
+        case ND_RETURN:
+            return nodes_structurally_equal(a->lhs, b->lhs);
+        case ND_NULL_EXPR:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -826,35 +910,38 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     Node *node = new_node(vm, ND_EXPR_STMT, tok);
-    node->lhs = expr(vm, &tok, tok);
-    *rest = skip(vm, tok, ";");
+    node->lhs  = expr(vm, &tok, tok);
+    *rest      = skip(vm, tok, ";");
 
     add_type(vm, node->lhs);
-    if (node->lhs && !(node->lhs->kind == ND_CAST &&
-                       node->lhs->ty && node->lhs->ty->kind == TY_VOID)) {
-        bool nodiscard = false;
-        const char *what = NULL;
+    if (node->lhs && !(node->lhs->kind == ND_CAST && node->lhs->ty &&
+                       node->lhs->ty->kind == TY_VOID)) {
+        bool        nodiscard = false;
+        const char *what      = NULL;
         if (node->lhs->kind == ND_FUNCALL && node->lhs->func_ty &&
             node->lhs->func_ty->is_nodiscard) {
             nodiscard = true;
-            what = "function";
+            what      = "function";
         } else if (node->lhs->ty && node->lhs->ty->is_nodiscard) {
             nodiscard = true;
-            what = "type";
+            what      = "type";
         }
         if (nodiscard) {
             if (node->lhs->func_ty && node->lhs->func_ty->nodiscard_msg)
-                warn_tok(vm, node->tok, CCCC_WARN_NODISCARD,
-                         "ignoring return value of %s declared with 'nodiscard': %s",
-                         what, node->lhs->func_ty->nodiscard_msg);
+                warn_tok(
+                    vm, node->tok, CCCC_WARN_NODISCARD,
+                    "ignoring return value of %s declared with 'nodiscard': %s",
+                    what, node->lhs->func_ty->nodiscard_msg);
             else if (node->lhs->ty && node->lhs->ty->nodiscard_msg)
-                warn_tok(vm, node->tok, CCCC_WARN_NODISCARD,
-                         "ignoring return value of %s declared with 'nodiscard': %s",
-                         what, node->lhs->ty->nodiscard_msg);
+                warn_tok(
+                    vm, node->tok, CCCC_WARN_NODISCARD,
+                    "ignoring return value of %s declared with 'nodiscard': %s",
+                    what, node->lhs->ty->nodiscard_msg);
             else
-                warn_tok(vm, node->tok, CCCC_WARN_NODISCARD,
-                         "ignoring return value of %s declared with 'nodiscard'",
-                         what);
+                warn_tok(
+                    vm, node->tok, CCCC_WARN_NODISCARD,
+                    "ignoring return value of %s declared with 'nodiscard'",
+                    what);
         }
 
         if ((vm->compiler.warnings & CCCC_WARN_UNUSED_VALUE) &&
@@ -868,43 +955,52 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
 // Returns true if control can fall through to the statement after `n`.
 static bool falls_through(Node *n) {
-    if (!n) return true;
-    switch (n->kind) {
-    case ND_RETURN:
-    case ND_GOTO:
-    case ND_GOTO_EXPR:
-    case ND_UNREACHABLE:
-        return false;
-    case ND_IF:
-        if (!n->els) return true;
-        return falls_through(n->then) || falls_through(n->els);
-    case ND_BLOCK:
-    case ND_STMT_EXPR:
-        if (!n->body) return true;
-        { Node *last = n->body;
-          while (last->next) last = last->next;
-          return falls_through(last); }
-    default:
+    if (!n)
         return true;
+    switch (n->kind) {
+        case ND_RETURN:
+        case ND_GOTO:
+        case ND_GOTO_EXPR:
+        case ND_UNREACHABLE:
+            return false;
+        case ND_IF:
+            if (!n->els)
+                return true;
+            return falls_through(n->then) || falls_through(n->els);
+        case ND_BLOCK:
+        case ND_STMT_EXPR:
+            if (!n->body)
+                return true;
+            {
+                Node *last = n->body;
+                while (last->next)
+                    last = last->next;
+                return falls_through(last);
+            }
+        default:
+            return true;
     }
 }
 
 static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw) {
-    if (!sw || sw->kind != ND_SWITCH || !sw->then) return;
-    if (sw->then->kind != ND_BLOCK || !sw->then->body) return;
+    if (!sw || sw->kind != ND_SWITCH || !sw->then)
+        return;
+    if (sw->then->kind != ND_BLOCK || !sw->then->body)
+        return;
 
-    Node *body = sw->then->body;
+    Node *body       = sw->then->body;
     Node *group_case = NULL; // current case group's label node
-    Node *annotated = NULL; // last annotated [[fallthrough]] node in group
+    Node *annotated  = NULL; // last annotated [[fallthrough]] node in group
 
     for (Node *cur = body; cur; cur = cur->next) {
         if (cur->kind == ND_CASE) {
             if (group_case && annotated != (Node *)1) {
                 // Check if the previous case group reaches the end
-                // (annotated == non-NULL and also NOT sentinel-1 means fallthrough annotated)
+                // (annotated == non-NULL and also NOT sentinel-1 means
+                // fallthrough annotated)
             }
             group_case = cur;
-            annotated = NULL;
+            annotated  = NULL;
 
             // Unwind nested case labels to find first real statement
             Node *c = cur;
@@ -915,27 +1011,28 @@ static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw) {
                     annotated = c->lhs;
             }
         } else {
-            if (!group_case) continue;
+            if (!group_case)
+                continue;
             if (cur->is_fallthrough)
                 annotated = cur;
         }
     }
 
     // Reset and redo properly with group_reaches_end tracking
-    annotated = NULL;
-    group_case = NULL;
+    annotated              = NULL;
+    group_case             = NULL;
     bool group_reaches_end = true;
 
     for (Node *cur = body; cur; cur = cur->next) {
         if (cur->kind == ND_CASE) {
             if (group_case && group_reaches_end && !annotated) {
-                // The previous case group reaches the end (falls through to this label)
-                // and it's not annotated with [[fallthrough]]
+                // The previous case group reaches the end (falls through to
+                // this label) and it's not annotated with [[fallthrough]]
                 warn_tok(vm, group_case->tok, CCCC_WARN_FALLTHROUGH,
                          "unannotated fallthrough between case labels");
             }
-            group_case = cur;
-            annotated = NULL;
+            group_case        = cur;
+            annotated         = NULL;
             group_reaches_end = true;
 
             // Unwind nested case labels to find the first real statement
@@ -951,8 +1048,10 @@ static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw) {
                 }
             }
         } else {
-            if (!group_case) continue;
-            if (!group_reaches_end) continue;
+            if (!group_case)
+                continue;
+            if (!group_reaches_end)
+                continue;
 
             if (cur->is_fallthrough) {
                 annotated = cur;

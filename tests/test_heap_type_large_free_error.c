@@ -11,14 +11,14 @@
 int main(void) {
     // Several times the shadow page size (64 KiB) worth of int elements,
     // so freeing it exercises the page-reclaim path across multiple pages.
-    size_t n = (256 * 1024) / sizeof(int);
-    int *big = malloc(n * sizeof(int));
+    size_t n   = (256 * 1024) / sizeof(int);
+    int   *big = malloc(n * sizeof(int));
     for (size_t i = 0; i < n; i++)
         big[i] = (int)i; // stamps the whole range as int
     free(big);
 
-    int *p = malloc(sizeof(int));
-    *p = 5;
+    int *p   = malloc(sizeof(int));
+    *p       = 5;
     float *q = (float *)p; // same base address, reinterpreted
     return (int)*q;        // load as float: mismatches the stamped int type
 }

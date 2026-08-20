@@ -15,10 +15,10 @@ static int fds[2];
 static void *poller(void *arg) {
     (void)arg;
     struct pollfd pfd;
-    pfd.fd = fds[0];
-    pfd.events = POLLIN;
+    pfd.fd      = fds[0];
+    pfd.events  = POLLIN;
     pfd.revents = 0;
-    int r = poll(&pfd, 1, 1000);
+    int r       = poll(&pfd, 1, 1000);
     return (void *)(long long)(r > 0 ? 0 : 1);
 }
 

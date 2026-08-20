@@ -8,21 +8,32 @@
 #include <stdio.h>
 
 int main(void) {
-    double a[2]; a[0] = 3.5;
+    double a[2];
+    a[0]                      = 3.5;
 
-    int (^only_float)(double) = ^(double d) { return d == 3.5 ? 1 : 0; };
-    if (!only_float(a[0])) return 1;
+    int (^only_float)(double) = ^(double d) {
+      return d == 3.5 ? 1 : 0;
+    };
+    if (!only_float(a[0]))
+        return 1;
 
-    int (^int_then_float)(int, double) =
-        ^(int n, double d) { return (n == 7 && d == 3.5) ? 1 : 0; };
-    if (!int_then_float(7, a[0])) return 2;
+    int (^int_then_float)(int, double) = ^(int n, double d) {
+      return (n == 7 && d == 3.5) ? 1 : 0;
+    };
+    if (!int_then_float(7, a[0]))
+        return 2;
 
-    int (^float_then_int)(double, int) =
-        ^(double d, int n) { return (d == 3.5 && n == 7) ? 1 : 0; };
-    if (!float_then_int(a[0], 7)) return 3;
+    int (^float_then_int)(double, int) = ^(double d, int n) {
+      return (d == 3.5 && n == 7) ? 1 : 0;
+    };
+    if (!float_then_int(a[0], 7))
+        return 3;
 
-    int (^two_ints)(int, int) = ^(int n, int m) { return (n == 7 && m == 5) ? 1 : 0; };
-    if (!two_ints(7, 5)) return 4;
+    int (^two_ints)(int, int) = ^(int n, int m) {
+      return (n == 7 && m == 5) ? 1 : 0;
+    };
+    if (!two_ints(7, 5))
+        return 4;
 
     return 42;
 }

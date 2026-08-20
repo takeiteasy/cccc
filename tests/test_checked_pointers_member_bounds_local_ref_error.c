@@ -8,7 +8,7 @@
 int main(void) {
     int n = 4;
     struct S {
-        int * [[cccc::array, cccc::count(n)]] p;
+        int *[[cccc::array, cccc::count(n)]] p;
     };
     struct S s = {(int[4]){1, 2, 3, 4}};
     return s.p[0];

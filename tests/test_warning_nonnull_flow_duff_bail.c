@@ -7,20 +7,20 @@
 // completion (the loop terminates via the bounded counter) without a false
 // positive.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = &x;
-    int i = 0;
+    int  i = 0;
     switch (i) {
-    case 0:
-        while (i < 3) {
-            p = 0;
-            i++;
-    case 1:
-            p = &x;
-            i++;
-        }
+        case 0:
+            while (i < 3) {
+                p = 0;
+                i++;
+                case 1:
+                    p = &x;
+                    i++;
+            }
     }
     foo(p);
     return 42;

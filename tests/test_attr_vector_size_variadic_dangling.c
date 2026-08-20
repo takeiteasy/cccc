@@ -24,8 +24,8 @@ static int sum_vecs(int n, ...) {
     va_start(ap, n);
     float acc = 0;
     for (int i = 0; i < n; i++) {
-        v4sf v = va_arg(ap, v4sf);
-        acc += v[0] + v[1] + v[2] + v[3];
+        v4sf v  = va_arg(ap, v4sf);
+        acc    += v[0] + v[1] + v[2] + v[3];
     }
     va_end(ap);
     return (int)acc;
@@ -38,8 +38,8 @@ static int sum_vecs(int n, ...) {
 static int mixed(int n, ...) {
     va_list ap;
     va_start(ap, n);
-    v4sf v = va_arg(ap, v4sf);
-    int i2 = va_arg(ap, int);
+    v4sf v  = va_arg(ap, v4sf);
+    int  i2 = va_arg(ap, int);
     va_end(ap);
     return (int)(v[0] + v[1] + v[2] + v[3]) + i2;
 }
@@ -47,8 +47,10 @@ static int mixed(int n, ...) {
 int main(void) {
     v4sf a = {1, 2, 3, 4}, b = {10, 20, 30, 40};
 
-    if (sum_vecs(2, a, b) != 110) return 1;
-    if (mixed(0, a, 100) != 110) return 2;
+    if (sum_vecs(2, a, b) != 110)
+        return 1;
+    if (mixed(0, a, 100) != 110)
+        return 2;
 
     return 42;
 }

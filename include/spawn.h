@@ -36,47 +36,58 @@
 typedef void *posix_spawnattr_t;
 typedef void *posix_spawn_file_actions_t;
 
-#define POSIX_SPAWN_RESETIDS    1
-#define POSIX_SPAWN_SETPGROUP   2
-#define POSIX_SPAWN_SETSIGDEF   4
-#define POSIX_SPAWN_SETSIGMASK  8
+#define POSIX_SPAWN_RESETIDS   1
+#define POSIX_SPAWN_SETPGROUP  2
+#define POSIX_SPAWN_SETSIGDEF  4
+#define POSIX_SPAWN_SETSIGMASK 8
 
 #ifdef __APPLE__
-#define POSIX_SPAWN_SETEXEC          0x0040
-#define POSIX_SPAWN_START_SUSPENDED  0x0080
-#define POSIX_SPAWN_SETSID           0x0400
+#define POSIX_SPAWN_SETEXEC         0x0040
+#define POSIX_SPAWN_START_SUSPENDED 0x0080
+#define POSIX_SPAWN_SETSID          0x0400
 #else
-#define POSIX_SPAWN_SETSID           0x0080
+#define POSIX_SPAWN_SETSID 0x0080
 #endif
 
 extern int posix_spawn(pid_t *pid, const char *path,
-                        const posix_spawn_file_actions_t *file_actions,
-                        const posix_spawnattr_t *attrp,
-                        char *const argv[], char *const envp[]);
+                       const posix_spawn_file_actions_t *file_actions,
+                       const posix_spawnattr_t *attrp, char *const argv[],
+                       char *const envp[]);
 extern int posix_spawnp(pid_t *pid, const char *file,
-                         const posix_spawn_file_actions_t *file_actions,
-                         const posix_spawnattr_t *attrp,
-                         char *const argv[], char *const envp[]);
+                        const posix_spawn_file_actions_t *file_actions,
+                        const posix_spawnattr_t *attrp, char *const argv[],
+                        char *const envp[]);
 
 extern int posix_spawnattr_init(posix_spawnattr_t *attr);
 extern int posix_spawnattr_destroy(posix_spawnattr_t *attr);
-extern int posix_spawnattr_getflags(const posix_spawnattr_t *attr, short *flags);
+extern int posix_spawnattr_getflags(const posix_spawnattr_t *attr,
+                                    short                   *flags);
 extern int posix_spawnattr_setflags(posix_spawnattr_t *attr, short flags);
-extern int posix_spawnattr_getpgroup(const posix_spawnattr_t *attr, pid_t *pgroup);
+extern int posix_spawnattr_getpgroup(const posix_spawnattr_t *attr,
+                                     pid_t                   *pgroup);
 extern int posix_spawnattr_setpgroup(posix_spawnattr_t *attr, pid_t pgroup);
-extern int posix_spawnattr_getsigdefault(const posix_spawnattr_t *attr, sigset_t *sigdefault);
-extern int posix_spawnattr_setsigdefault(posix_spawnattr_t *attr, const sigset_t *sigdefault);
-extern int posix_spawnattr_getsigmask(const posix_spawnattr_t *attr, sigset_t *sigmask);
-extern int posix_spawnattr_setsigmask(posix_spawnattr_t *attr, const sigset_t *sigmask);
+extern int posix_spawnattr_getsigdefault(const posix_spawnattr_t *attr,
+                                         sigset_t                *sigdefault);
+extern int posix_spawnattr_setsigdefault(posix_spawnattr_t *attr,
+                                         const sigset_t    *sigdefault);
+extern int posix_spawnattr_getsigmask(const posix_spawnattr_t *attr,
+                                      sigset_t                *sigmask);
+extern int posix_spawnattr_setsigmask(posix_spawnattr_t *attr,
+                                      const sigset_t    *sigmask);
 
-extern int posix_spawn_file_actions_init(posix_spawn_file_actions_t *file_actions);
-extern int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *file_actions);
-extern int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *file_actions,
-                                             int fildes, const char *path,
-                                             int oflag, mode_t mode);
-extern int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t *file_actions,
-                                              int fildes);
-extern int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *file_actions,
-                                             int fildes, int newfildes);
+extern int
+posix_spawn_file_actions_init(posix_spawn_file_actions_t *file_actions);
+extern int
+posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *file_actions);
+extern int
+posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *file_actions,
+                                 int fildes, const char *path, int oflag,
+                                 mode_t mode);
+extern int
+posix_spawn_file_actions_addclose(posix_spawn_file_actions_t *file_actions,
+                                  int                         fildes);
+extern int
+posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *file_actions,
+                                 int fildes, int newfildes);
 
 #endif /* __SPAWN_H */

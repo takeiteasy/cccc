@@ -9,60 +9,60 @@ typedef int sig_atomic_t;
 
 #define SIG_DFL ((void (*)(int))0)
 #define SIG_IGN ((void (*)(int))1)
-#define SIG_ERR ((void (*)(int))-1)
+#define SIG_ERR ((void (*)(int)) - 1)
 
 /* Standard POSIX signals. Numbers differ between Darwin and Linux past the
    common core (1-15), so the rest are guarded per-platform. */
-#define SIGHUP   1   /* hangup */
-#define SIGINT   2   /* interrupt */
-#define SIGQUIT  3   /* quit */
-#define SIGILL   4   /* illegal instruction */
-#define SIGTRAP  5   /* trace/debugger trap */
-#define SIGABRT  6   /* abort */
-#define SIGFPE   8   /* floating-point exception */
-#define SIGKILL  9   /* kill (cannot be caught or ignored) */
+#define SIGHUP  1    /* hangup */
+#define SIGINT  2    /* interrupt */
+#define SIGQUIT 3    /* quit */
+#define SIGILL  4    /* illegal instruction */
+#define SIGTRAP 5    /* trace/debugger trap */
+#define SIGABRT 6    /* abort */
+#define SIGFPE  8    /* floating-point exception */
+#define SIGKILL 9    /* kill (cannot be caught or ignored) */
 #define SIGPIPE 13   /* broken pipe */
 #define SIGALRM 14   /* alarm clock */
 #define SIGTERM 15   /* termination */
 
 #ifdef __APPLE__
-#define SIGBUS     10   /* bus error */
-#define SIGSEGV    11   /* segmentation fault */
-#define SIGSYS     12   /* bad system call */
-#define SIGURG     16   /* urgent condition on socket */
-#define SIGSTOP    17   /* stop (cannot be caught or ignored) */
-#define SIGTSTP    18   /* stop signal from tty */
-#define SIGCONT    19   /* continue after stop */
-#define SIGCHLD    20   /* child status change */
-#define SIGTTIN    21   /* background tty read */
-#define SIGTTOU    22   /* background tty write */
-#define SIGIO      23   /* I/O now possible */
-#define SIGXCPU    24   /* CPU time limit exceeded */
-#define SIGXFSZ    25   /* file size limit exceeded */
-#define SIGVTALRM  26   /* virtual time alarm */
-#define SIGPROF    27   /* profiling time alarm */
-#define SIGWINCH   28   /* window size change */
-#define SIGUSR1    30   /* user-defined signal 1 */
-#define SIGUSR2    31   /* user-defined signal 2 */
+#define SIGBUS    10 /* bus error */
+#define SIGSEGV   11 /* segmentation fault */
+#define SIGSYS    12 /* bad system call */
+#define SIGURG    16 /* urgent condition on socket */
+#define SIGSTOP   17 /* stop (cannot be caught or ignored) */
+#define SIGTSTP   18 /* stop signal from tty */
+#define SIGCONT   19 /* continue after stop */
+#define SIGCHLD   20 /* child status change */
+#define SIGTTIN   21 /* background tty read */
+#define SIGTTOU   22 /* background tty write */
+#define SIGIO     23 /* I/O now possible */
+#define SIGXCPU   24 /* CPU time limit exceeded */
+#define SIGXFSZ   25 /* file size limit exceeded */
+#define SIGVTALRM 26 /* virtual time alarm */
+#define SIGPROF   27 /* profiling time alarm */
+#define SIGWINCH  28 /* window size change */
+#define SIGUSR1   30 /* user-defined signal 1 */
+#define SIGUSR2   31 /* user-defined signal 2 */
 #else
-#define SIGBUS     7    /* bus error */
-#define SIGSEGV    11   /* segmentation fault */
-#define SIGUSR1    10   /* user-defined signal 1 */
-#define SIGUSR2    12   /* user-defined signal 2 */
-#define SIGCHLD    17   /* child status change */
-#define SIGCONT    18   /* continue after stop */
-#define SIGSTOP    19   /* stop (cannot be caught or ignored) */
-#define SIGTSTP    20   /* stop signal from tty */
-#define SIGTTIN    21   /* background tty read */
-#define SIGTTOU    22   /* background tty write */
-#define SIGURG     23   /* urgent condition on socket */
-#define SIGXCPU    24   /* CPU time limit exceeded */
-#define SIGXFSZ    25   /* file size limit exceeded */
-#define SIGVTALRM  26   /* virtual time alarm */
-#define SIGPROF    27   /* profiling time alarm */
-#define SIGWINCH   28   /* window size change */
-#define SIGIO      29   /* I/O now possible */
-#define SIGSYS     31   /* bad system call */
+#define SIGBUS    7  /* bus error */
+#define SIGSEGV   11 /* segmentation fault */
+#define SIGUSR1   10 /* user-defined signal 1 */
+#define SIGUSR2   12 /* user-defined signal 2 */
+#define SIGCHLD   17 /* child status change */
+#define SIGCONT   18 /* continue after stop */
+#define SIGSTOP   19 /* stop (cannot be caught or ignored) */
+#define SIGTSTP   20 /* stop signal from tty */
+#define SIGTTIN   21 /* background tty read */
+#define SIGTTOU   22 /* background tty write */
+#define SIGURG    23 /* urgent condition on socket */
+#define SIGXCPU   24 /* CPU time limit exceeded */
+#define SIGXFSZ   25 /* file size limit exceeded */
+#define SIGVTALRM 26 /* virtual time alarm */
+#define SIGPROF   27 /* profiling time alarm */
+#define SIGWINCH  28 /* window size change */
+#define SIGIO     29 /* I/O now possible */
+#define SIGSYS    31 /* bad system call */
 #endif
 
 /* SIGKILL and SIGSTOP cannot be caught, blocked, or ignored */
@@ -83,30 +83,30 @@ typedef unsigned int sigset_t;
    siginfo_t union are only reachable through the padding here -- this
    struct is only guest-visible for waitid(), which never touches them. */
 union sigval {
-    int    sival_int;
-    void  *sival_ptr;
+    int   sival_int;
+    void *sival_ptr;
 };
 
 #ifdef __APPLE__
 typedef struct {
-    int    si_signo;
-    int    si_errno;
-    int    si_code;
-    int    si_pid;
-    int    si_uid;
-    int    si_status;
-    char   __si_pad[104 - 6 * sizeof(int)];
+    int  si_signo;
+    int  si_errno;
+    int  si_code;
+    int  si_pid;
+    int  si_uid;
+    int  si_status;
+    char __si_pad[104 - 6 * sizeof(int)];
 } siginfo_t;
 #else
 typedef struct {
-    int    si_signo;
-    int    si_errno;
-    int    si_code;
-    int    __si_pad0;
-    int    si_pid;
-    int    si_uid;
-    int    si_status;
-    char   __si_pad[128 - 7 * sizeof(int)];
+    int  si_signo;
+    int  si_errno;
+    int  si_code;
+    int  __si_pad0;
+    int  si_pid;
+    int  si_uid;
+    int  si_status;
+    char __si_pad[128 - 7 * sizeof(int)];
 } siginfo_t;
 #endif
 
@@ -134,17 +134,17 @@ typedef struct {
    thread has fired, not concurrently on that host thread. */
 #ifdef __APPLE__
 struct sigevent {
-    int   sigev_notify;
-    int   sigev_signo;
+    int          sigev_notify;
+    int          sigev_signo;
     union sigval sigev_value;
-    void  (*sigev_notify_function)(union sigval);
-    void  *sigev_notify_attributes;
+    void (*sigev_notify_function)(union sigval);
+    void *sigev_notify_attributes;
 };
 _Static_assert(sizeof(struct sigevent) == 32, "macOS sigevent layout mismatch");
 _Static_assert(offsetof(struct sigevent, sigev_notify_function) == 16,
-              "macOS sigevent sigev_notify_function offset mismatch");
+               "macOS sigevent sigev_notify_function offset mismatch");
 _Static_assert(offsetof(struct sigevent, sigev_notify_attributes) == 24,
-              "macOS sigevent sigev_notify_attributes offset mismatch");
+               "macOS sigevent sigev_notify_attributes offset mismatch");
 
 #define SIGEV_NONE   0
 #define SIGEV_SIGNAL 1
@@ -152,17 +152,17 @@ _Static_assert(offsetof(struct sigevent, sigev_notify_attributes) == 24,
 #else
 struct sigevent {
     union sigval sigev_value;
-    int   sigev_signo;
-    int   sigev_notify;
-    void  (*sigev_notify_function)(union sigval);
-    void  *sigev_notify_attributes;
+    int          sigev_signo;
+    int          sigev_notify;
+    void (*sigev_notify_function)(union sigval);
+    void *sigev_notify_attributes;
     char  __sigev_pad[32]; /* rest of _sigev_un, unused */
 };
 _Static_assert(sizeof(struct sigevent) == 64, "glibc sigevent layout mismatch");
 _Static_assert(offsetof(struct sigevent, sigev_notify_function) == 16,
-              "glibc sigevent sigev_notify_function offset mismatch");
+               "glibc sigevent sigev_notify_function offset mismatch");
 _Static_assert(offsetof(struct sigevent, sigev_notify_attributes) == 24,
-              "glibc sigevent sigev_notify_attributes offset mismatch");
+               "glibc sigevent sigev_notify_attributes offset mismatch");
 
 #define SIGEV_SIGNAL 0
 #define SIGEV_NONE   1
@@ -212,19 +212,19 @@ extern int sigismember(const sigset_t *set, int signo);
    SA_SIGINFO is enforced at dispatch (see src/vm.c, src/ops.c); the rest
    remain inert -- not passed to the host sigaction(). */
 #ifdef __APPLE__
-#define SA_RESTART    0x0002
-#define SA_RESETHAND  0x0004
-#define SA_NOCLDSTOP  0x0008
-#define SA_NODEFER    0x0010
-#define SA_NOCLDWAIT  0x0020
-#define SA_SIGINFO    0x0040
+#define SA_RESTART   0x0002
+#define SA_RESETHAND 0x0004
+#define SA_NOCLDSTOP 0x0008
+#define SA_NODEFER   0x0010
+#define SA_NOCLDWAIT 0x0020
+#define SA_SIGINFO   0x0040
 #else
-#define SA_NOCLDSTOP  0x00000001
-#define SA_NOCLDWAIT  0x00000002
-#define SA_SIGINFO    0x00000004
-#define SA_RESTART    0x10000000
-#define SA_NODEFER    0x40000000
-#define SA_RESETHAND  0x80000000
+#define SA_NOCLDSTOP 0x00000001
+#define SA_NOCLDWAIT 0x00000002
+#define SA_SIGINFO   0x00000004
+#define SA_RESTART   0x10000000
+#define SA_NODEFER   0x40000000
+#define SA_RESETHAND 0x80000000
 #endif
 
 /* SI_USER: si_code value for a signal sent via kill()/raise() rather than

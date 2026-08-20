@@ -8,10 +8,14 @@ static int inherit_count = 0;
 static int exact_count   = 0;
 
 [[cccc::test_setup(suite = "a", inherit)]]
-void setup_inherit(void) { inherit_count++; }
+void setup_inherit(void) {
+    inherit_count++;
+}
 
 [[cccc::test_setup(suite = "a")]]
-void setup_exact(void) { exact_count++; }
+void setup_exact(void) {
+    exact_count++;
+}
 
 #pragma cccc suite begin "a"
 
@@ -19,7 +23,7 @@ void setup_exact(void) { exact_count++; }
 void test_in_a(void) {
     // Both hooks match suite "a" exactly
     AssertEq(inherit_count, 1);
-    AssertEq(exact_count,   1);
+    AssertEq(exact_count, 1);
 }
 
 #pragma cccc suite begin "b"
@@ -28,9 +32,9 @@ void test_in_a(void) {
 void test_in_a_b(void) {
     // inherit hook fires via suite_matches("a/b", "a"); exact hook does not
     AssertEq(inherit_count, 1);
-    AssertEq(exact_count,   0);
+    AssertEq(exact_count, 0);
 }
 
-#pragma cccc suite end  // end b
+#pragma cccc suite end // end b
 
-#pragma cccc suite end  // end a
+#pragma cccc suite end // end a

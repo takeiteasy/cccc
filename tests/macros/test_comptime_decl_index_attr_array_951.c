@@ -8,12 +8,16 @@
 // the anonymous-struct-array case, but the same missing-brace/bracket
 // discipline in the same function. Left unfixed, a later use of "B" as a
 // member type (as below) misparses with an unrelated "expected ','".
-[[deprecated]] typedef struct { int y; } B;
-struct UsesB { B m; };
+[[deprecated]] typedef struct {
+    int y;
+} B;
+struct UsesB {
+    B m;
+};
 
 [[cccc::comptime]]
 int check(void) {
-    Type *tb = GetType("B");
+    Type *tb      = GetType("B");
     Type *tuses_b = GetType("UsesB");
     if (tb && tuses_b)
         return 42;

@@ -4,7 +4,7 @@
 // kind=bytecode is now a valid [[cccc::build_target]] option (#545).
 // Dry-run must print the cccc invocation with a .c4 output path.
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *my_target(Builder *ctx) {
     BuildTarget *t = Executable(ctx, "app");
     AddSource(t, "examples/build_demo/src/main.c");

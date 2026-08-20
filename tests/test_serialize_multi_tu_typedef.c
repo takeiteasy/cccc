@@ -29,7 +29,7 @@ static MultiTu1006Thing multi_tu_typedef_1006_pick(void) {
 
 int main(void) {
     MultiTu1006Thing t = multi_tu_typedef_1006_pick();
-    void *p = malloc(8);
+    void            *p = malloc(8);
     free(p);
     return (t == MULTI_TU_1006_TWO ? 41 : 0) + multi_tu_typedef_1006_a();
 }

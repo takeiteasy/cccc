@@ -1,10 +1,7 @@
-@define CT_VALUE 42
-@ifdef CT_VALUE
-@define CT_SEEN 1
-@endif
+@define CT_VALUE 42 @ifdef CT_VALUE @define CT_SEEN 1 @endif
 
-[[cccc::comptime]]
-Node *answer(void) {
+    [[cccc::comptime]]
+    Node *answer(void) {
 #if CT_SEEN
     return MakeIntLiteral(CT_VALUE);
 #else
@@ -12,4 +9,6 @@ Node *answer(void) {
 #endif
 }
 
-int main(void) { return answer(); }
+int main(void) {
+    return answer();
+}

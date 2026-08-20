@@ -17,21 +17,21 @@ typedef int regoff_t;
 
 #ifdef __APPLE__
 typedef struct {
-    int re_magic;
-    size_t re_nsub;
+    int         re_magic;
+    size_t      re_nsub;
     const char *re_endp;
-    void *re_g;
+    void       *re_g;
 } regex_t;
 #else
 typedef struct {
-    void *__buffer;
+    void         *__buffer;
     unsigned long __allocated;
     unsigned long __used;
     unsigned long __syntax;
-    char *__fastmap;
-    char *__translate;
-    size_t re_nsub;
-    unsigned int __flags;
+    char         *__fastmap;
+    char         *__translate;
+    size_t        re_nsub;
+    unsigned int  __flags;
 } regex_t;
 #endif
 
@@ -45,10 +45,10 @@ typedef struct {
 #define REG_NOSUB    4
 #define REG_NEWLINE  8
 
-#define REG_NOTBOL 1
-#define REG_NOTEOL 2
+#define REG_NOTBOL   1
+#define REG_NOTEOL   2
 
-#define REG_NOMATCH 1
+#define REG_NOMATCH  1
 
 extern int regcomp(regex_t *preg, const char *regex, int cflags);
 extern int regexec(const regex_t *preg, const char *string, size_t nmatch,

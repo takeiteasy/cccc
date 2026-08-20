@@ -11,18 +11,18 @@
 struct S {
     int tag;
     union {
-        int i;
+        int   i;
         float f;
     };
 };
 
 int main(void) {
     struct S *s = malloc(sizeof(struct S));
-    s->tag = 7;      // regular struct member: stamped/checked normally
-    s->i = 42;        // anonymous union member: must clear, not stamp
-    float g = s->f;    // legal punning through the other anon union member
+    s->tag      = 7;    // regular struct member: stamped/checked normally
+    s->i        = 42;   // anonymous union member: must clear, not stamp
+    float g     = s->f; // legal punning through the other anon union member
     (void)g;
-    int h = s->tag;   // regular member: still checked, must still match
+    int h = s->tag;     // regular member: still checked, must still match
     free(s);
     return (h == 7 && s->i == 42) ? 42 : 1;
 }

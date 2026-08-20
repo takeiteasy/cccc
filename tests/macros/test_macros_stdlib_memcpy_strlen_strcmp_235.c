@@ -8,8 +8,8 @@ void generate_stdlib_wrappers(void) {
     FunctionAddParam(cpy, "n", GetType("size_t"));
     WithFn(cpy) {
         FunctionSetBody(cpy, MakeReturn(Memcpy(MakeParamRef(cpy, "dst"),
-                                                  MakeParamRef(cpy, "src"),
-                                                  MakeParamRef(cpy, "n"))));
+                                               MakeParamRef(cpy, "src"),
+                                               MakeParamRef(cpy, "n"))));
     }
 
     Obj *len = MakeFunction("wrap_strlen", GetType("size_t"));
@@ -23,7 +23,7 @@ void generate_stdlib_wrappers(void) {
     FunctionAddParam(cmp, "b", MakePointer(GetType("char")));
     WithFn(cmp) {
         FunctionSetBody(cmp, MakeReturn(Strcmp(MakeParamRef(cmp, "a"),
-                                                  MakeParamRef(cmp, "b"))));
+                                               MakeParamRef(cmp, "b"))));
     }
 }
 

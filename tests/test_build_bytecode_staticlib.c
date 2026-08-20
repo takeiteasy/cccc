@@ -6,7 +6,7 @@
 // instead of the native ar toolchain.  Also verifies that -c bytecode is
 // passed so cccc does not require main().
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_mathlib(Builder *ctx) {
     BuildTarget *t = StaticLib(ctx, "mathlib");
     AddSource(t, "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c");

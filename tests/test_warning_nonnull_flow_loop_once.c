@@ -5,12 +5,13 @@
 // internally (all quiet), and only the single final reporting pass may emit
 // a diagnostic for this one call site.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
     for (int i = 0; i < 3; i++) {
-        if (i == 1) p = &x;
+        if (i == 1)
+            p = &x;
     }
     foo(p);
     return 42;

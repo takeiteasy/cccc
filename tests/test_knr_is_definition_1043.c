@@ -6,8 +6,12 @@
 int knr(a, b)
 int a;
 int b;
-{ return a + b; }
+{
+    return a + b;
+}
 
 int knr(int, int);
 
-int main(void) { return knr(40, 2); }
+int main(void) {
+    return knr(40, 2);
+}

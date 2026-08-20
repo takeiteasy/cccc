@@ -14,8 +14,8 @@
 // count() -- locals, globals, params; heap, stack and global storage.
 // ---------------------------------------------------------------------
 
-static int g_n = 4;
-static int * [[cccc::array, cccc::count(g_n)]] g_arr = (int[4]){10, 20, 30, 40};
+static int g_n                                      = 4;
+static int *[[cccc::array, cccc::count(g_n)]] g_arr = (int[4]){10, 20, 30, 40};
 
 [[cccc::test]]
 void test_count_global_array_in_bounds(void) {
@@ -26,14 +26,14 @@ void test_count_global_array_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_count_global_array_oob(void) {
     volatile int i = 4;
-    int x = g_arr[i];
+    int          x = g_arr[i];
     (void)x;
 }
 
 [[cccc::test]]
 void test_count_stack_array_in_bounds(void) {
-    int n = 5;
-    int * [[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
+    int n                                  = 5;
+    int *[[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
     AssertEq(a[0], 1);
     AssertEq(a[4], 5);
 }
@@ -44,45 +44,45 @@ void test_count_stack_array_in_bounds(void) {
 // this.
 [[cccc::test(exit_code = 255)]]
 void test_count_stack_array_oob(void) {
-    int n = 5;
-    int * [[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
-    volatile int i = 5;
-    int x = a[i];
+    int n                                  = 5;
+    int *[[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
+    volatile int i                         = 5;
+    int          x                         = a[i];
     (void)x;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_count_stack_array_negative_index(void) {
-    int n = 5;
-    int * [[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
-    volatile int i = -1;
-    int x = a[i];
+    int n                                  = 5;
+    int *[[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
+    volatile int i                         = -1;
+    int          x                         = a[i];
     (void)x;
 }
 
 [[cccc::test]]
 void test_count_heap_array_in_bounds(void) {
-    int n = 3;
-    int * [[cccc::array, cccc::count(n)]] a = malloc(n * sizeof(int));
-    a[0] = 1;
-    a[1] = 2;
-    a[2] = 3;
+    int n                                  = 3;
+    int *[[cccc::array, cccc::count(n)]] a = malloc(n * sizeof(int));
+    a[0]                                   = 1;
+    a[1]                                   = 2;
+    a[2]                                   = 3;
     AssertEq(a[0] + a[1] + a[2], 6);
     free(a);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_count_heap_array_oob(void) {
-    int n = 3;
-    int * [[cccc::array, cccc::count(n)]] a = malloc(n * sizeof(int));
-    volatile int i = 3;
+    int n                                  = 3;
+    int *[[cccc::array, cccc::count(n)]] a = malloc(n * sizeof(int));
+    volatile int i                         = 3;
     a[i] = 99; // still inside the real malloc'd chunk's rounding slack on
                // most allocators -- CHKR must trap on the *declared* count,
                // not the allocator's actual usable size.
     free(a);
 }
 
-static void count_param_fill(int * [[cccc::array, cccc::count(n)]] p, int n) {
+static void count_param_fill(int *[[cccc::array, cccc::count(n)]] p, int n) {
     for (int i = 0; i < n; i++)
         p[i] = i * i;
 }
@@ -95,16 +95,16 @@ void test_count_param_in_bounds(void) {
     AssertEq(buf[3], 9);
 }
 
-static int count_param_read_oob(int * [[cccc::array, cccc::count(n)]] p, int n,
+static int count_param_read_oob(int *[[cccc::array, cccc::count(n)]] p, int n,
                                 int idx) {
     return p[idx];
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_count_param_oob(void) {
-    int buf[4] = {1, 2, 3, 4};
-    volatile int idx = 4;
-    int x = count_param_read_oob(buf, 4, idx);
+    int          buf[4] = {1, 2, 3, 4};
+    volatile int idx    = 4;
+    int          x      = count_param_read_oob(buf, 4, idx);
     (void)x;
 }
 
@@ -115,7 +115,7 @@ void test_count_param_oob(void) {
 [[cccc::test]]
 void test_byte_count_in_bounds(void) {
     int nbytes = 4 * (int)sizeof(int);
-    char * [[cccc::array, cccc::byte_count(nbytes)]] b =
+    char *[[cccc::array, cccc::byte_count(nbytes)]] b =
         (char *)(int[4]){1, 2, 3, 4};
     AssertEq(b[0], 1);
 }
@@ -123,10 +123,10 @@ void test_byte_count_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_byte_count_oob(void) {
     int nbytes = 4 * (int)sizeof(int);
-    char * [[cccc::array, cccc::byte_count(nbytes)]] b =
+    char *[[cccc::array, cccc::byte_count(nbytes)]] b =
         (char *)(int[4]){1, 2, 3, 4};
     volatile int i = nbytes;
-    char x = b[i];
+    char         x = b[i];
     (void)x;
 }
 
@@ -136,18 +136,18 @@ void test_byte_count_oob(void) {
 
 [[cccc::test]]
 void test_bounds_range_in_bounds(void) {
-    int arr[6] = {1, 2, 3, 4, 5, 6};
-    int * [[cccc::array, cccc::bounds(arr, arr + 6)]] a = arr;
+    int arr[6]                                         = {1, 2, 3, 4, 5, 6};
+    int *[[cccc::array, cccc::bounds(arr, arr + 6)]] a = arr;
     AssertEq(a[0], 1);
     AssertEq(a[5], 6);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_bounds_range_oob_high(void) {
-    int arr[6] = {1, 2, 3, 4, 5, 6};
-    int * [[cccc::array, cccc::bounds(arr, arr + 6)]] a = arr;
-    volatile int i = 6;
-    int x = a[i];
+    int arr[6]                                         = {1, 2, 3, 4, 5, 6};
+    int *[[cccc::array, cccc::bounds(arr, arr + 6)]] a = arr;
+    volatile int i                                     = 6;
+    int          x                                     = a[i];
     (void)x;
 }
 
@@ -156,9 +156,9 @@ void test_bounds_range_oob_low(void) {
     int arr[6] = {1, 2, 3, 4, 5, 6};
     // Narrower than the underlying array -- CHKR enforces the DECLARED
     // range, not the storage's real extent.
-    int * [[cccc::array, cccc::bounds(arr + 1, arr + 6)]] a = arr + 1;
-    volatile int i = -1;
-    int x = a[i];
+    int *[[cccc::array, cccc::bounds(arr + 1, arr + 6)]] a = arr + 1;
+    volatile int i                                         = -1;
+    int          x                                         = a[i];
     (void)x;
 }
 
@@ -166,8 +166,8 @@ void test_bounds_range_oob_low(void) {
 // no runtime range check is ever emitted for it.
 [[cccc::test]]
 void test_bounds_unknown_no_check(void) {
-    int arr[3] = {7, 8, 9};
-    int * [[cccc::array, cccc::bounds(unknown)]] a = arr;
+    int arr[3]                                    = {7, 8, 9};
+    int *[[cccc::array, cccc::bounds(unknown)]] a = arr;
     AssertEq(a[0], 7);
     AssertEq(a[2], 9);
 }
@@ -178,15 +178,15 @@ void test_bounds_unknown_no_check(void) {
 
 [[cccc::test]]
 void test_single_deref_ok(void) {
-    int x = 99;
-    int * [[cccc::single]] p = &x;
+    int x                   = 99;
+    int *[[cccc::single]] p = &x;
     AssertEq(*p, 99);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_single_null_deref_traps(void) {
-    int * [[cccc::single]] p = 0;
-    int x = *p;
+    int *[[cccc::single]] p = 0;
+    int x                   = *p;
     (void)x;
 }
 
@@ -199,17 +199,17 @@ void test_single_null_deref_traps(void) {
 
 [[cccc::test]]
 void test_interior_pointer_in_bounds(void) {
-    int n = 6;
-    int * [[cccc::array, cccc::count(n)]] p = (int[6]){0, 1, 2, 3, 4, 5};
+    int n                                  = 6;
+    int *[[cccc::array, cccc::count(n)]] p = (int[6]){0, 1, 2, 3, 4, 5};
     AssertEq((p + 2)[3], 5); // p[5], last valid element
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_interior_pointer_oob(void) {
-    int n = 6;
-    int * [[cccc::array, cccc::count(n)]] p = (int[6]){0, 1, 2, 3, 4, 5};
+    int n                                  = 6;
+    int *[[cccc::array, cccc::count(n)]] p = (int[6]){0, 1, 2, 3, 4, 5};
     volatile int k = 2, i = 4;
-    int x = (p + k)[i]; // p[6], one past the declared count
+    int          x = (p + k)[i]; // p[6], one past the declared count
     (void)x;
 }
 
@@ -220,8 +220,8 @@ void test_interior_pointer_oob(void) {
 
 [[cccc::test]]
 void test_ntarray_terminator_write(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     AssertEq(s[0], 'a');
     s[3] = '\0'; // the terminator slot -- one past count(n), still in range
     AssertEq(s[3], 0);
@@ -229,10 +229,10 @@ void test_ntarray_terminator_write(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_past_terminator_traps(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     volatile int i = 4; // one past the terminator slot
-    char x = s[i];
+    char         x = s[i];
     (void)x;
 }
 
@@ -246,39 +246,39 @@ void test_ntarray_past_terminator_traps(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_terminator_nonnull_traps(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[3] = 'x'; // terminator slot, non-null -- traps
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_terminator_nonnull_traps_runtime_index(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     volatile int i = 3; // same slot, but via a runtime (non-constant) index
-    s[i] = 'x';
+    s[i]           = 'x';
 }
 
 [[cccc::test]]
 void test_ntarray_inside_count_nonnull_ok(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n - 1] = 'z'; // still inside count(n), not the terminator slot
     AssertEq(s[n - 1], 'z');
 }
 
 [[cccc::test]]
 void test_ntarray_int_terminator_zero_ok(void) {
-    int n = 3;
-    int * [[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
+    int n                                    = 3;
+    int *[[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
     a[n] = 0; // terminator slot, null -- proves hi - elem_size for sizeof > 1
     AssertEq(a[n], 0);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_int_terminator_nonzero_traps(void) {
-    int n = 3;
-    int * [[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
+    int n                                    = 3;
+    int *[[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
     a[n] = 1; // terminator slot, non-null -- traps
 }
 
@@ -287,8 +287,8 @@ void test_ntarray_int_terminator_nonzero_traps(void) {
 // the CHKNT guard added for ntarray.
 [[cccc::test(exit_code = 255)]]
 void test_array_no_widening_oob_write_traps(void) {
-    int n = 3;
-    char * [[cccc::array, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                   = 3;
+    char *[[cccc::array, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n] = 0; // one past count(n) -- CHKR OOB, no terminator slot exists
 }
 
@@ -303,55 +303,58 @@ void test_array_no_widening_oob_write_traps(void) {
 
 [[cccc::test]]
 void test_ntarray_double_terminator_zero_ok(void) {
-    int n = 2;
-    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
-    a[n] = 0.0;
+    int n                                       = 2;
+    double *[[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    a[n]                                        = 0.0;
     AssertDoubleEq(a[n], 0.0);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_double_terminator_nonzero_traps(void) {
-    int n = 2;
-    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    int n                                       = 2;
+    double *[[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
     a[n] = 1.0; // terminator slot, non-null -- traps
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_double_terminator_negative_zero_traps(void) {
-    int n = 2;
-    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    int n                                       = 2;
+    double *[[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
     a[n] = -0.0; // -0.0 has a non-zero bit pattern -- traps, same rule as
                  // the all-bytes-zero aggregate case below
 }
 
 [[cccc::test]]
 void test_ntarray_float_terminator_zero_ok(void) {
-    int n = 2;
-    float * [[cccc::ntarray, cccc::count(n)]] a = (float[3]){1.0f, 2.0f, 0.0f};
-    a[n] = 0.0f;
+    int n                                      = 2;
+    float *[[cccc::ntarray, cccc::count(n)]] a = (float[3]){1.0f, 2.0f, 0.0f};
+    a[n]                                       = 0.0f;
     AssertFloatEq(a[n], 0.0f);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_float_terminator_nonzero_traps(void) {
-    int n = 2;
-    float * [[cccc::ntarray, cccc::count(n)]] a = (float[3]){1.0f, 2.0f, 0.0f};
+    int n                                      = 2;
+    float *[[cccc::ntarray, cccc::count(n)]] a = (float[3]){1.0f, 2.0f, 0.0f};
     a[n] = 1.0f; // terminator slot, non-null -- traps
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_double_terminator_rmw_traps(void) {
-    int n = 2;
-    double * [[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
+    int n                                       = 2;
+    double *[[cccc::ntarray, cccc::count(n)]] a = (double[3]){1.0, 2.0, 0.0};
     a[n] += 1.0; // proves to_assign()'s copy reaches the new float path too
 }
 
-typedef struct { int a; char b; } CHKNTZOption;
+typedef struct {
+    int  a;
+    char b;
+} CHKNTZOption;
 
 [[cccc::test]]
 void test_ntarray_struct_terminator_zero_ok(void) {
     int n = 2;
-    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+    CHKNTZOption *[[cccc::ntarray, cccc::count(n)]] tbl =
         (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
     tbl[n] = (CHKNTZOption){0, 0}; // terminator slot, all-zero-bytes -- ok
     AssertEq(tbl[n].a, 0);
@@ -360,7 +363,7 @@ void test_ntarray_struct_terminator_zero_ok(void) {
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_struct_terminator_nonzero_member_traps(void) {
     int n = 2;
-    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+    CHKNTZOption *[[cccc::ntarray, cccc::count(n)]] tbl =
         (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
     tbl[n] = (CHKNTZOption){1, 0}; // terminator slot, a[0].a != 0 -- traps
 }
@@ -368,7 +371,7 @@ void test_ntarray_struct_terminator_nonzero_member_traps(void) {
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_struct_terminator_nonzero_padding_traps(void) {
     int n = 2;
-    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+    CHKNTZOption *[[cccc::ntarray, cccc::count(n)]] tbl =
         (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
     // Members are all zero, but 'b' is non-zero -- still traps: the rule is
     // all bytes zero, not "every member individually reads as its zero
@@ -379,7 +382,7 @@ void test_ntarray_struct_terminator_nonzero_padding_traps(void) {
 [[cccc::test]]
 void test_ntarray_bitint_terminator_zero_ok(void) {
     int n = 2;
-    _BitInt(128) * [[cccc::ntarray, cccc::count(n)]] a =
+    _BitInt(128) *[[cccc::ntarray, cccc::count(n)]] a =
         (_BitInt(128)[3]){1, 2, 0};
     a[n] = 0;
 }
@@ -391,7 +394,7 @@ void test_ntarray_bitint_terminator_nonzero_traps(void) {
     // _BitInt store took codegen's memcpy branch and returned before the
     // old CHKNT-only emission site, so nothing ever guarded it.
     int n = 2;
-    _BitInt(128) * [[cccc::ntarray, cccc::count(n)]] a =
+    _BitInt(128) *[[cccc::ntarray, cccc::count(n)]] a =
         (_BitInt(128)[3]){1, 2, 0};
     a[n] = 1; // terminator slot, non-null -- now traps via CHKNTZ
 }
@@ -403,7 +406,7 @@ void test_ntarray_bitint_terminator_nonzero_traps(void) {
 [[cccc::test]]
 void test_ntarray_long_double_terminator_not_guarded(void) {
     int n = 2;
-    long double * [[cccc::ntarray, cccc::count(n)]] a =
+    long double *[[cccc::ntarray, cccc::count(n)]] a =
         (long double[3]){1.0L, 2.0L, 0.0L};
     a[n] = 1.0L; // would trap under CHKNT/CHKNTZ if guarded -- it isn't
     AssertTrue(a[n] == 1.0L);
@@ -418,7 +421,7 @@ void test_ntarray_long_double_terminator_not_guarded(void) {
 [[cccc::test]]
 void test_ntarray_struct_terminator_member_write_not_guarded(void) {
     int n = 2;
-    CHKNTZOption * [[cccc::ntarray, cccc::count(n)]] tbl =
+    CHKNTZOption *[[cccc::ntarray, cccc::count(n)]] tbl =
         (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
     tbl[n].a = 1; // member-wise write into the terminator slot -- unguarded
     AssertEq(tbl[n].a, 1);
@@ -434,16 +437,17 @@ void test_ntarray_struct_terminator_member_write_not_guarded(void) {
 [[cccc::test]]
 void test_ntarray_byte_count_terminator_write(void) {
     int nbytes = 3;
-    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+    char *[[cccc::ntarray, cccc::byte_count(nbytes)]] s =
         (char[4]){'a', 'b', 'c', 0};
-    s[nbytes] = '\0'; // the terminator slot -- one past byte_count(n), still in range
+    s[nbytes] =
+        '\0'; // the terminator slot -- one past byte_count(n), still in range
     AssertEq(s[nbytes], 0);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_byte_count_terminator_nonnull_traps(void) {
     int nbytes = 3;
-    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+    char *[[cccc::ntarray, cccc::byte_count(nbytes)]] s =
         (char[4]){'a', 'b', 'c', 0};
     s[nbytes] = 'x'; // terminator slot, non-null -- traps
 }
@@ -451,16 +455,16 @@ void test_ntarray_byte_count_terminator_nonnull_traps(void) {
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_byte_count_terminator_nonnull_traps_runtime_index(void) {
     int nbytes = 3;
-    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+    char *[[cccc::ntarray, cccc::byte_count(nbytes)]] s =
         (char[4]){'a', 'b', 'c', 0};
     volatile int i = nbytes;
-    s[i] = 'x';
+    s[i]           = 'x';
 }
 
 [[cccc::test]]
 void test_ntarray_byte_count_inside_range_nonnull_ok(void) {
     int nbytes = 3;
-    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+    char *[[cccc::ntarray, cccc::byte_count(nbytes)]] s =
         (char[4]){'a', 'b', 'c', 0};
     s[nbytes - 1] = 'z'; // still inside byte_count(n), not the terminator slot
     AssertEq(s[nbytes - 1], 'z');
@@ -469,10 +473,10 @@ void test_ntarray_byte_count_inside_range_nonnull_ok(void) {
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_byte_count_past_terminator_traps(void) {
     int nbytes = 3;
-    char * [[cccc::ntarray, cccc::byte_count(nbytes)]] s =
+    char *[[cccc::ntarray, cccc::byte_count(nbytes)]] s =
         (char[4]){'a', 'b', 'c', 0};
     volatile int i = nbytes + 1; // one past the terminator slot
-    char x = s[i];
+    char         x = s[i];
     (void)x;
 }
 
@@ -481,74 +485,72 @@ void test_ntarray_byte_count_past_terminator_traps(void) {
 // proving the widening is byte-granular, not element-granular.
 [[cccc::test]]
 void test_ntarray_byte_count_int_terminator_zero_ok(void) {
-    int nbytes = 3 * (int)sizeof(int);
-    int * [[cccc::ntarray, cccc::byte_count(nbytes)]] a =
-        (int[4]){1, 2, 3, 0};
+    int nbytes                                         = 3 * (int)sizeof(int);
+    int *[[cccc::ntarray, cccc::byte_count(nbytes)]] a = (int[4]){1, 2, 3, 0};
     a[3] = 0; // byte offset 12 == element index 3, terminator slot, null
     AssertEq(a[3], 0);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_byte_count_int_terminator_nonzero_traps(void) {
-    int nbytes = 3 * (int)sizeof(int);
-    int * [[cccc::ntarray, cccc::byte_count(nbytes)]] a =
-        (int[4]){1, 2, 3, 0};
+    int nbytes                                         = 3 * (int)sizeof(int);
+    int *[[cccc::ntarray, cccc::byte_count(nbytes)]] a = (int[4]){1, 2, 3, 0};
     a[3] = 1; // terminator slot, non-null -- traps
 }
 
 [[cccc::test]]
 void test_ntarray_bounds_terminator_write(void) {
-    char buf[4] = {'a', 'b', 'c', 0};
-    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    char buf[4]                                           = {'a', 'b', 'c', 0};
+    char *[[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
     s[3] = '\0'; // the terminator slot -- one past declared hi, still in range
     AssertEq(s[3], 0);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_bounds_terminator_nonnull_traps(void) {
-    char buf[4] = {'a', 'b', 'c', 0};
-    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    char buf[4]                                           = {'a', 'b', 'c', 0};
+    char *[[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
     s[3] = 'x'; // terminator slot, non-null -- traps
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_bounds_terminator_nonnull_traps_runtime_index(void) {
-    char buf[4] = {'a', 'b', 'c', 0};
-    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
-    volatile int i = 3;
-    s[i] = 'x';
+    char buf[4]                                           = {'a', 'b', 'c', 0};
+    char *[[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    volatile int i                                        = 3;
+    s[i]                                                  = 'x';
 }
 
 [[cccc::test]]
 void test_ntarray_bounds_inside_range_nonnull_ok(void) {
-    char buf[4] = {'a', 'b', 'c', 0};
-    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    char buf[4]                                           = {'a', 'b', 'c', 0};
+    char *[[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
     s[2] = 'z'; // still inside [buf, buf+3), not the terminator slot
     AssertEq(s[2], 'z');
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_bounds_past_terminator_traps(void) {
-    char buf[4] = {'a', 'b', 'c', 0};
-    char * [[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
+    char buf[4]                                           = {'a', 'b', 'c', 0};
+    char *[[cccc::ntarray, cccc::bounds(buf, buf + 3)]] s = buf;
     volatile int i = 4; // one past the terminator slot
-    char x = s[i];
+    char         x = s[i];
     (void)x;
 }
 
 // int pointee (elem_size > 1) via bounds(lo, hi).
 [[cccc::test]]
 void test_ntarray_bounds_int_terminator_zero_ok(void) {
-    int arr[4] = {1, 2, 3, 0};
-    int * [[cccc::ntarray, cccc::bounds(arr, arr + 3)]] a = arr;
+    int arr[4]                                           = {1, 2, 3, 0};
+    int *[[cccc::ntarray, cccc::bounds(arr, arr + 3)]] a = arr;
     a[3] = 0; // terminator slot, null -- proves hi - elem_size for sizeof > 1
     AssertEq(a[3], 0);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_bounds_int_terminator_nonzero_traps(void) {
-    int arr[4] = {1, 2, 3, 0};
-    int * [[cccc::ntarray, cccc::bounds(arr, arr + 3)]] a = arr;
+    int arr[4]                                           = {1, 2, 3, 0};
+    int *[[cccc::ntarray, cccc::bounds(arr, arr + 3)]] a = arr;
     a[3] = 1; // terminator slot, non-null -- traps
 }
 
@@ -558,19 +560,19 @@ void test_ntarray_bounds_int_terminator_nonzero_traps(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_load_path_traps(void) {
-    int n = 2;
-    int * [[cccc::array, cccc::count(n)]] a = (int[2]){1, 2};
-    volatile int i = 2;
-    int x = a[i];
+    int n                                  = 2;
+    int *[[cccc::array, cccc::count(n)]] a = (int[2]){1, 2};
+    volatile int i                         = 2;
+    int          x                         = a[i];
     (void)x;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_store_path_traps(void) {
-    int n = 2;
-    int * [[cccc::array, cccc::count(n)]] a = (int[2]){1, 2};
-    volatile int i = 2;
-    a[i] = 5;
+    int n                                  = 2;
+    int *[[cccc::array, cccc::count(n)]] a = (int[2]){1, 2};
+    volatile int i                         = 2;
+    a[i]                                   = 5;
 }
 
 // Read-modify-write (`a[i] += 1`, `a[i]++`) desugars through to_assign()
@@ -583,17 +585,17 @@ void test_store_path_traps(void) {
 // below for that coverage.
 [[cccc::test(exit_code = 255)]]
 void test_compound_assign_traps(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
-    volatile int i = 4;
-    a[i] += 1;
+    int n                                   = 4;
+    int *[[cccc::array, cccc::count(n)]] a  = (int[4]){1, 2, 3, 4};
+    volatile int i                          = 4;
+    a[i]                                   += 1;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_increment_traps(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
-    volatile int i = 4;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
+    volatile int i                         = 4;
     a[i]++;
 }
 
@@ -607,52 +609,52 @@ void test_increment_traps(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_terminator_rmw_traps(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n] += 1; // null terminator slot -> 1, non-null -- traps
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_terminator_increment_traps(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n]++; // same slot, postfix increment
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_terminator_decrement_traps(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n]--; // null -> -1, non-null -- traps
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_terminator_rmw_runtime_index_traps(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    volatile int i = 3; // same slot, but via a runtime (non-constant) index
-    s[i] += 1;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    volatile int i  = 3; // same slot, but via a runtime (non-constant) index
+    s[i]           += 1;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_int_terminator_rmw_traps(void) {
-    int n = 3;
-    int * [[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
+    int n                                    = 3;
+    int *[[cccc::ntarray, cccc::count(n)]] a = (int[4]){1, 2, 3, 0};
     a[n] += 1; // proves hi - elem_size for sizeof > 1 on the RMW path
 }
 
 [[cccc::test]]
 void test_ntarray_terminator_rmw_zero_ok(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    s[n] += 0; // stays null -- no trap
+    int n                                      = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s  = (char[4]){'a', 'b', 'c', 0};
+    s[n]                                      += 0; // stays null -- no trap
     AssertEq(s[n], 0);
 }
 
 [[cccc::test]]
 void test_ntarray_inside_count_rmw_ok(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n - 1] += 1; // still inside count(n), not the terminator slot
     AssertEq(s[n - 1], 'd');
 }
@@ -662,17 +664,17 @@ void test_ntarray_inside_count_rmw_ok(void) {
 // needed its own CHKNT emission.
 [[cccc::test(exit_code = 255)]]
 void test_ntarray_atomic_terminator_rmw_traps(void) {
-    int n = 3;
-    _Atomic char backing[4] = {'a', 'b', 'c', 0};
-    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s = backing;
+    int          n                                    = 3;
+    _Atomic char backing[4]                           = {'a', 'b', 'c', 0};
+    _Atomic char *[[cccc::ntarray, cccc::count(n)]] s = backing;
     s[n] += 1; // terminator slot, non-null via the CAS-loop store -- traps
 }
 
 [[cccc::test]]
 void test_ntarray_atomic_terminator_rmw_zero_ok(void) {
-    int n = 3;
-    _Atomic char backing[4] = {'a', 'b', 'c', 0};
-    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s = backing;
+    int          n                                    = 3;
+    _Atomic char backing[4]                           = {'a', 'b', 'c', 0};
+    _Atomic char *[[cccc::ntarray, cccc::count(n)]] s = backing;
     s[n] += 0; // stays null -- no trap
     AssertEq(s[n], 0);
 }
@@ -681,19 +683,21 @@ void test_ntarray_atomic_terminator_rmw_zero_ok(void) {
 // p->x is short for (*p).x -- both spellings must be checked identically.
 // ---------------------------------------------------------------------
 
-struct checked_pointers_s { int x; };
+struct checked_pointers_s {
+    int x;
+};
 
 [[cccc::test]]
 void test_arrow_deref_ok(void) {
-    struct checked_pointers_s s = {7};
-    struct checked_pointers_s * [[cccc::single]] p = &s;
+    struct checked_pointers_s s                   = {7};
+    struct checked_pointers_s *[[cccc::single]] p = &s;
     AssertEq(p->x, 7);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_arrow_null_deref_traps(void) {
-    struct checked_pointers_s * [[cccc::single]] p = 0;
-    int x = p->x;
+    struct checked_pointers_s *[[cccc::single]] p = 0;
+    int x                                         = p->x;
     (void)x;
 }
 
@@ -710,7 +714,7 @@ void test_arrow_null_deref_traps(void) {
 
 struct mem_count_s {
     int n;
-    int * [[cccc::array, cccc::count(n)]] p;
+    int *[[cccc::array, cccc::count(n)]] p;
 };
 
 [[cccc::test]]
@@ -723,8 +727,8 @@ void test_member_count_sibling_after_ptr_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_count_sibling_after_ptr_oob(void) {
     struct mem_count_s s = {4, (int[4]){10, 20, 30, 40}};
-    volatile int i = 4;
-    int x = s.p[i];
+    volatile int       i = 4;
+    int                x = s.p[i];
     (void)x;
 }
 
@@ -732,7 +736,7 @@ void test_member_count_sibling_after_ptr_oob(void) {
 // resolve_member_checked_bounds() doesn't depend on textual order any more
 // than parameter bounds do (a bound may name a LATER field/param).
 struct mem_count_before_s {
-    int * [[cccc::array, cccc::count(n)]] p;
+    int *[[cccc::array, cccc::count(n)]] p;
     int n;
 };
 
@@ -745,8 +749,8 @@ void test_member_count_sibling_before_ptr_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_count_sibling_before_ptr_oob(void) {
     struct mem_count_before_s s = {(int[3]){1, 2, 3}, 3};
-    volatile int i = 3;
-    int x = s.p[i];
+    volatile int              i = 3;
+    int                       x = s.p[i];
     (void)x;
 }
 
@@ -756,7 +760,7 @@ void test_member_count_sibling_before_ptr_oob(void) {
 struct mem_count_ternary_s {
     int c;
     int n;
-    int * [[cccc::array, cccc::count(c ? n : 0)]] p;
+    int * [[ cccc::array, cccc::count(c ? n : 0) ]] p;
 };
 
 [[cccc::test]]
@@ -769,15 +773,15 @@ void test_member_count_ternary_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_count_ternary_oob(void) {
     struct mem_count_ternary_s s = {1, 3, (int[3]){1, 2, 3}};
-    volatile int i = 3;
-    int x = s.p[i];
+    volatile int               i = 3;
+    int                        x = s.p[i];
     (void)x;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_count_ternary_false_branch_oob(void) {
     struct mem_count_ternary_s s = {0, 3, (int[3]){1, 2, 3}};
-    volatile int i = 0;
+    volatile int               i = 0;
     int x = s.p[i]; // c is false -> count(c ? n : 0) resolves to 0
     (void)x;
 }
@@ -786,7 +790,7 @@ void test_member_count_ternary_false_branch_oob(void) {
 // side-effect-free-condition fast path applies) and must be accepted.
 struct mem_count_elvis_s {
     int n;
-    int * [[cccc::array, cccc::count(n ?: 8)]] p;
+    int * [[ cccc::array, cccc::count(n ?: 8) ]] p;
 };
 
 [[cccc::test]]
@@ -798,8 +802,8 @@ void test_member_count_elvis_nonzero_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_count_elvis_nonzero_oob(void) {
     struct mem_count_elvis_s s = {3, (int[3]){1, 2, 3}};
-    volatile int i = 3;
-    int x = s.p[i];
+    volatile int             i = 3;
+    int                      x = s.p[i];
     (void)x;
 }
 
@@ -812,40 +816,45 @@ void test_member_count_elvis_zero_falls_back_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_count_elvis_zero_falls_back_oob(void) {
     struct mem_count_elvis_s s = {0, (int[8]){1, 2, 3, 4, 5, 6, 7, 8}};
-    volatile int i = 8;
-    int x = s.p[i];
+    volatile int             i = 8;
+    int                      x = s.p[i];
     (void)x;
 }
 
 struct mem_byte_count_s {
     int nbytes;
-    char * [[cccc::array, cccc::byte_count(nbytes)]] b;
+    char *[[cccc::array, cccc::byte_count(nbytes)]] b;
 };
 
 [[cccc::test]]
 void test_member_byte_count_in_bounds(void) {
-    struct mem_byte_count_s s = {4 * (int)sizeof(int), (char *)(int[4]){1, 2, 3, 4}};
+    struct mem_byte_count_s s = {4 * (int)sizeof(int),
+                                 (char *)(int[4]){1, 2, 3, 4}};
     AssertEq(s.b[0], 1);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_byte_count_oob(void) {
-    struct mem_byte_count_s s = {4 * (int)sizeof(int), (char *)(int[4]){1, 2, 3, 4}};
-    volatile int i = s.nbytes;
-    char x = s.b[i];
+    struct mem_byte_count_s s = {4 * (int)sizeof(int),
+                                 (char *)(int[4]){1, 2, 3, 4}};
+    volatile int            i = s.nbytes;
+    char                    x = s.b[i];
     (void)x;
 }
 
 struct mem_range_s {
-    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p;
+    int *[[cccc::array, cccc::bounds(arr, arr + 4)]] p;
     int arr[4];
 };
 
 [[cccc::test]]
 void test_member_bounds_range_in_bounds(void) {
     struct mem_range_s s;
-    s.arr[0] = 1; s.arr[1] = 2; s.arr[2] = 3; s.arr[3] = 4;
-    s.p = s.arr;
+    s.arr[0] = 1;
+    s.arr[1] = 2;
+    s.arr[2] = 3;
+    s.arr[3] = 4;
+    s.p      = s.arr;
     AssertEq(s.p[0], 1);
     AssertEq(s.p[3], 4);
 }
@@ -853,20 +862,23 @@ void test_member_bounds_range_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_bounds_range_oob(void) {
     struct mem_range_s s;
-    s.arr[0] = 1; s.arr[1] = 2; s.arr[2] = 3; s.arr[3] = 4;
-    s.p = s.arr;
+    s.arr[0]       = 1;
+    s.arr[1]       = 2;
+    s.arr[2]       = 3;
+    s.arr[3]       = 4;
+    s.p            = s.arr;
     volatile int i = 4;
-    int x = s.p[i];
+    int          x = s.p[i];
     (void)x;
 }
 
 struct mem_single_s {
-    int * [[cccc::single]] p;
+    int *[[cccc::single]] p;
 };
 
 [[cccc::test]]
 void test_member_single_deref_ok(void) {
-    int x = 99;
+    int                 x = 99;
     struct mem_single_s s = {&x};
     AssertEq(*s.p, 99);
 }
@@ -874,7 +886,7 @@ void test_member_single_deref_ok(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_single_null_deref_traps(void) {
     struct mem_single_s s = {0};
-    int x = *s.p;
+    int                 x = *s.p;
     (void)x;
 }
 
@@ -883,7 +895,7 @@ void test_member_single_null_deref_traps(void) {
 // descent, same as the existing Obj-rooted interior-pointer coverage above.
 [[cccc::test]]
 void test_member_access_spellings_agree(void) {
-    struct mem_count_s s = {2, (int[2]){11, 22}};
+    struct mem_count_s  s  = {2, (int[2]){11, 22}};
     struct mem_count_s *sp = &s;
     AssertEq(s.p[1], 22);
     AssertEq(sp->p[1], 22);
@@ -894,10 +906,10 @@ void test_member_access_spellings_agree(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_member_arrow_spelling_oob(void) {
-    struct mem_count_s s = {2, (int[2]){11, 22}};
+    struct mem_count_s  s  = {2, (int[2]){11, 22}};
     struct mem_count_s *sp = &s;
-    volatile int i = 2;
-    int x = sp->p[i];
+    volatile int        i  = 2;
+    int                 x  = sp->p[i];
     (void)x;
 }
 
@@ -918,8 +930,8 @@ void test_member_nested_struct_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_nested_struct_oob(void) {
     struct mem_nested_outer_s outer = {{3, (int[3]){5, 6, 7}}};
-    volatile int i = 3;
-    int x = outer.inner.p[i];
+    volatile int              i     = 3;
+    int                       x     = outer.inner.p[i];
     (void)x;
 }
 
@@ -943,7 +955,7 @@ void test_member_array_of_structs_oob(void) {
         {2, (int[2]){3, 4}},
     };
     volatile int k = 1, i = 2;
-    int x = arr[k].p[i];
+    int          x = arr[k].p[i];
     (void)x;
 }
 
@@ -955,29 +967,37 @@ void test_member_array_of_structs_oob(void) {
 struct mem_range_two_sib_s {
     int *lo;
     int *hi;
-    int * [[cccc::array, cccc::bounds(lo, hi)]] p;
+    int *[[cccc::array, cccc::bounds(lo, hi)]] p;
 };
 
 [[cccc::test]]
 void test_member_array_of_structs_bounds_range_in_bounds(void) {
-    static int backing0[3] = {1, 2, 3};
-    static int backing1[3] = {4, 5, 6};
+    static int                 backing0[3] = {1, 2, 3};
+    static int                 backing1[3] = {4, 5, 6};
     struct mem_range_two_sib_s arr[2];
-    arr[0].lo = backing0; arr[0].hi = backing0 + 3; arr[0].p = backing0;
-    arr[1].lo = backing1; arr[1].hi = backing1 + 3; arr[1].p = backing1;
+    arr[0].lo      = backing0;
+    arr[0].hi      = backing0 + 3;
+    arr[0].p       = backing0;
+    arr[1].lo      = backing1;
+    arr[1].hi      = backing1 + 3;
+    arr[1].p       = backing1;
     volatile int k = 1;
     AssertEq(arr[k].p[2], 6);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_array_of_structs_bounds_range_oob(void) {
-    static int backing0[3] = {1, 2, 3};
-    static int backing1[3] = {4, 5, 6};
+    static int                 backing0[3] = {1, 2, 3};
+    static int                 backing1[3] = {4, 5, 6};
     struct mem_range_two_sib_s arr[2];
-    arr[0].lo = backing0; arr[0].hi = backing0 + 3; arr[0].p = backing0;
-    arr[1].lo = backing1; arr[1].hi = backing1 + 3; arr[1].p = backing1;
+    arr[0].lo      = backing0;
+    arr[0].hi      = backing0 + 3;
+    arr[0].p       = backing0;
+    arr[1].lo      = backing1;
+    arr[1].hi      = backing1 + 3;
+    arr[1].p       = backing1;
     volatile int k = 1, i = 3;
-    int x = arr[k].p[i];
+    int          x = arr[k].p[i];
     (void)x;
 }
 
@@ -1002,7 +1022,7 @@ void test_member_array_of_structs_byte_count_oob(void) {
     };
     volatile int k = 1;
     volatile int i = arr[k].nbytes;
-    char x = arr[k].b[i];
+    char         x = arr[k].b[i];
     (void)x;
 }
 
@@ -1011,7 +1031,7 @@ void test_member_array_of_structs_byte_count_oob(void) {
 // (src/codegen.c's ND_ASSIGN site) with a hoisted, non-trivial `obj`.
 struct mem_nt_count_s {
     int n;
-    char * [[cccc::ntarray, cccc::count(n)]] s;
+    char *[[cccc::ntarray, cccc::count(n)]] s;
 };
 
 [[cccc::test]]
@@ -1021,7 +1041,7 @@ void test_member_array_of_structs_ntarray_terminator_write(void) {
         {3, (char[4]){'d', 'e', 'f', 0}},
     };
     volatile int k = 1;
-    arr[k].s[3] = 0; // writing null into the widened terminator slot is fine
+    arr[k].s[3]    = 0; // writing null into the widened terminator slot is fine
     AssertEq(arr[k].s[3], 0);
 }
 
@@ -1032,7 +1052,7 @@ void test_member_array_of_structs_ntarray_terminator_nonnull_traps(void) {
         {3, (char[4]){'d', 'e', 'f', 0}},
     };
     volatile int k = 1;
-    arr[k].s[3] = 'x'; // non-null write to the terminator slot traps
+    arr[k].s[3]    = 'x'; // non-null write to the terminator slot traps
 }
 
 // #945: the `_Atomic` RMW desugar (to_assign()'s CAS-loop path,
@@ -1041,28 +1061,28 @@ void test_member_array_of_structs_ntarray_terminator_nonnull_traps(void) {
 // when the hoist init and CHKNT's `hi` are evaluated).
 struct mem_nt_atomic_s {
     int n;
-    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s;
+    _Atomic char *[[cccc::ntarray, cccc::count(n)]] s;
 };
 
 [[cccc::test]]
 void test_member_array_of_structs_ntarray_atomic_rmw_ok(void) {
-    static char backing0[4] = {'a', 'b', 'c', 0};
-    static char backing1[4] = {'d', 'e', 'f', 0};
-    struct mem_nt_atomic_s arr[2] = {{3, backing0}, {3, backing1}};
-    volatile int k = 1;
-    arr[k].s[2] = 'z'; // inside the declared range -- ordinary RMW, no trap
+    static char            backing0[4] = {'a', 'b', 'c', 0};
+    static char            backing1[4] = {'d', 'e', 'f', 0};
+    struct mem_nt_atomic_s arr[2]      = {{3, backing0}, {3, backing1}};
+    volatile int           k           = 1;
+    arr[k].s[2]  = 'z'; // inside the declared range -- ordinary RMW, no trap
     arr[k].s[2] += 1;
     AssertEq(arr[k].s[2], 'z' + 1);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_array_of_structs_ntarray_atomic_rmw_traps(void) {
-    static char backing0[4] = {'a', 'b', 'c', 0};
-    static char backing1[4] = {'d', 'e', 'f', 0};
-    struct mem_nt_atomic_s arr[2] = {{3, backing0}, {3, backing1}};
-    volatile int k = 1;
+    static char            backing0[4] = {'a', 'b', 'c', 0};
+    static char            backing1[4] = {'d', 'e', 'f', 0};
+    struct mem_nt_atomic_s arr[2]      = {{3, backing0}, {3, backing1}};
+    volatile int           k           = 1;
     arr[k].s[3] += 1; // writing a non-null desired value into the
-                       // terminator slot traps
+                      // terminator slot traps
 }
 
 // #945: a nested member chain reached through a runtime-indexed array --
@@ -1089,7 +1109,7 @@ void test_member_array_of_nested_structs_oob(void) {
         {{3, (int[3]){4, 5, 6}}},
     };
     volatile int k = 1, i = 3;
-    int x = arr[k].inner.p[i];
+    int          x = arr[k].inner.p[i];
     (void)x;
 }
 
@@ -1101,20 +1121,20 @@ void test_member_array_of_nested_structs_oob(void) {
 // indexing.
 [[cccc::test]]
 void test_member_via_ternary_ptr_in_bounds(void) {
-    struct mem_count_s s0 = {2, (int[2]){1, 2}};
-    struct mem_count_s s1 = {2, (int[2]){3, 4}};
+    struct mem_count_s  s0  = {2, (int[2]){1, 2}};
+    struct mem_count_s  s1  = {2, (int[2]){3, 4}};
     struct mem_count_s *sp0 = &s0, *sp1 = &s1;
-    volatile int c = 1;
+    volatile int        c = 1;
     AssertEq((c ? sp0 : sp1)->p[1], 2);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_via_ternary_ptr_oob(void) {
-    struct mem_count_s s0 = {2, (int[2]){1, 2}};
-    struct mem_count_s s1 = {2, (int[2]){3, 4}};
+    struct mem_count_s  s0  = {2, (int[2]){1, 2}};
+    struct mem_count_s  s1  = {2, (int[2]){3, 4}};
     struct mem_count_s *sp0 = &s0, *sp1 = &s1;
-    volatile int c = 1, i = 2;
-    int x = (c ? sp0 : sp1)->p[i];
+    volatile int        c = 1, i = 2;
+    int                 x = (c ? sp0 : sp1)->p[i];
     (void)x;
 }
 
@@ -1123,24 +1143,24 @@ void test_member_via_ternary_ptr_oob(void) {
 // checked against sp), and the member access's own count(n).
 [[cccc::test]]
 void test_member_via_single_ptr_in_bounds(void) {
-    struct mem_count_s s = {2, (int[2]){7, 8}};
-    struct mem_count_s * [[cccc::single]] sp = &s;
+    struct mem_count_s s                    = {2, (int[2]){7, 8}};
+    struct mem_count_s *[[cccc::single]] sp = &s;
     AssertEq(sp->p[1], 8);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_via_single_ptr_null_traps(void) {
-    struct mem_count_s * [[cccc::single]] sp = 0;
+    struct mem_count_s *[[cccc::single]] sp = 0;
     int x = sp->p[0]; // the `sp` deref itself traps before the member bound
-                       // would even be evaluated
+                      // would even be evaluated
     (void)x;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_member_via_single_ptr_member_oob(void) {
-    struct mem_count_s s = {2, (int[2]){7, 8}};
-    struct mem_count_s * [[cccc::single]] sp = &s;
-    volatile int i = 2;
+    struct mem_count_s s                    = {2, (int[2]){7, 8}};
+    struct mem_count_s *[[cccc::single]] sp = &s;
+    volatile int i                          = 2;
     int x = sp->p[i]; // sp itself is in range; the member's own count(n) traps
     (void)x;
 }
@@ -1149,7 +1169,7 @@ void test_member_via_single_ptr_member_oob(void) {
 // "any in-scope global" rule Obj-rooted bounds already have.
 static int g_mem_n = 3;
 struct mem_global_bound_s {
-    int * [[cccc::array, cccc::count(g_mem_n)]] p;
+    int *[[cccc::array, cccc::count(g_mem_n)]] p;
 };
 
 [[cccc::test]]
@@ -1161,8 +1181,8 @@ void test_member_bounds_global_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_bounds_global_oob(void) {
     struct mem_global_bound_s s = {(int[3]){1, 2, 3}};
-    volatile int i = 3;
-    int x = s.p[i];
+    volatile int              i = 3;
+    int                       x = s.p[i];
     (void)x;
 }
 
@@ -1176,7 +1196,7 @@ void test_member_bounds_global_oob(void) {
 // memory layout.
 static int g_mem_union_n = 2;
 union mem_union_s {
-    int * [[cccc::array, cccc::count(g_mem_union_n)]] p;
+    int *[[cccc::array, cccc::count(g_mem_union_n)]] p;
     long raw;
 };
 
@@ -1190,16 +1210,16 @@ void test_member_union_bounds_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_member_union_bounds_oob(void) {
     union mem_union_s u;
-    u.p = (int[2]){21, 22};
+    u.p            = (int[2]){21, 22};
     volatile int i = 2;
-    int x = u.p[i];
+    int          x = u.p[i];
     (void)x;
 }
 
 // Opt-out proof: bounds(unknown) on a member is the same trust escape hatch
 // as an Obj-rooted bounds(unknown) -- checked-array type, zero runtime check.
 struct mem_unknown_s {
-    int * [[cccc::array, cccc::bounds(unknown)]] p;
+    int *[[cccc::array, cccc::bounds(unknown)]] p;
 };
 
 [[cccc::test]]
@@ -1226,20 +1246,20 @@ void test_member_bounds_unknown_no_check(void) {
 
 [[cccc::test]]
 void test_prop_interior_assignment_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q                                 = p + 0;
     AssertEq(q[0], 1);
     AssertEq(q[3], 4);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_interior_assignment_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
-    volatile int i = 4;
-    int x = q[i];
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int         *q                         = p + 0;
+    volatile int i                         = 4;
+    int          x                         = q[i];
     (void)x;
 }
 
@@ -1249,10 +1269,10 @@ void test_prop_interior_assignment_oob(void) {
 // against the same range.
 [[cccc::test]]
 void test_prop_increment_preserves_fact_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
-    int *q = p;
-    int total = 0;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q                                 = p;
+    int  total                             = 0;
     for (int i = 0; i < 4; i++) {
         total += *q;
         q++;
@@ -1262,9 +1282,9 @@ void test_prop_increment_preserves_fact_in_bounds(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_increment_preserves_fact_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
-    int *q = p;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q                                 = p;
     for (int i = 0; i < 4; i++)
         q++;
     int x = *q; // one past the end -- must still trap after 4 plain q++'s
@@ -1275,20 +1295,20 @@ void test_prop_increment_preserves_fact_oob(void) {
 // the ACCESS site's own type (char, here), not the source's (int).
 [[cccc::test]]
 void test_prop_cast_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    char *q = (char *)p;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    char *q                                = (char *)p;
     AssertEq(q[0], 1); // little/big-endian-agnostic: byte 0 of int 1 on any
-                        // platform this test matrix runs on is non-zero iff
-                        // the low byte is; just check it doesn't trap here.
+                       // platform this test matrix runs on is non-zero iff
+                       // the low byte is; just check it doesn't trap here.
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_cast_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    char *q = (char *)p;
-    volatile int i = 4 * (int)sizeof(int);
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    char        *q                         = (char *)p;
+    volatile int i                         = 4 * (int)sizeof(int);
     char x = q[i]; // one byte past the declared count(n)*sizeof(int) range
     (void)x;
 }
@@ -1296,19 +1316,19 @@ void test_prop_cast_oob(void) {
 // Propagation from a bounds(lo, hi) source.
 [[cccc::test]]
 void test_prop_from_bounds_range_in_bounds(void) {
-    int arr[4] = {1, 2, 3, 4};
-    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
-    int *q = p;
+    int arr[4]                                         = {1, 2, 3, 4};
+    int *[[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
+    int *q                                             = p;
     AssertEq(q[3], 4);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_from_bounds_range_oob(void) {
-    int arr[4] = {1, 2, 3, 4};
-    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
-    int *q = p;
-    volatile int i = 4;
-    int x = q[i];
+    int arr[4]                                         = {1, 2, 3, 4};
+    int *[[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
+    int         *q                                     = p;
+    volatile int i                                     = 4;
+    int          x                                     = q[i];
     (void)x;
 }
 
@@ -1316,7 +1336,7 @@ void test_prop_from_bounds_range_oob(void) {
 [[cccc::test]]
 void test_prop_from_byte_count_in_bounds(void) {
     int nbytes = 4 * (int)sizeof(int);
-    char * [[cccc::array, cccc::byte_count(nbytes)]] p =
+    char *[[cccc::array, cccc::byte_count(nbytes)]] p =
         (char *)(int[4]){1, 2, 3, 4};
     char *q = p;
     AssertEq(q[0], 1);
@@ -1325,33 +1345,33 @@ void test_prop_from_byte_count_in_bounds(void) {
 [[cccc::test(exit_code = 255)]]
 void test_prop_from_byte_count_oob(void) {
     int nbytes = 4 * (int)sizeof(int);
-    char * [[cccc::array, cccc::byte_count(nbytes)]] p =
+    char *[[cccc::array, cccc::byte_count(nbytes)]] p =
         (char *)(int[4]){1, 2, 3, 4};
-    char *q = p;
+    char        *q = p;
     volatile int i = nbytes;
-    char x = q[i];
+    char         x = q[i];
     (void)x;
 }
 
 // Propagation from a #921 struct-member source -- the two features compose.
 struct prop_member_s {
     int n;
-    int * [[cccc::array, cccc::count(n)]] p;
+    int *[[cccc::array, cccc::count(n)]] p;
 };
 
 [[cccc::test]]
 void test_prop_from_member_source_in_bounds(void) {
     struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
-    int *q = s.p;
+    int                 *q = s.p;
     AssertEq(q[3], 4);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_from_member_source_oob(void) {
     struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
-    int *q = s.p;
-    volatile int i = 4;
-    int x = q[i];
+    int                 *q = s.p;
+    volatile int         i = 4;
+    int                  x = q[i];
     (void)x;
 }
 
@@ -1368,7 +1388,7 @@ void test_prop_from_member_source_runtime_index_in_bounds(void) {
         {3, (int[3]){5, 6, 7}},
     };
     volatile int k = 1;
-    int *q = arr[k].p;
+    int         *q = arr[k].p;
     AssertEq(q[2], 7);
 }
 
@@ -1379,9 +1399,9 @@ void test_prop_from_member_source_runtime_index_oob(void) {
         {3, (int[3]){5, 6, 7}},
     };
     volatile int k = 1;
-    int *q = arr[k].p;
+    int         *q = arr[k].p;
     volatile int i = 3;
-    int x = q[i];
+    int          x = q[i];
     (void)x;
 }
 
@@ -1390,22 +1410,22 @@ void test_prop_from_member_source_runtime_index_oob(void) {
 [[cccc::test]]
 void test_prop_reassignment_uses_new_range_in_bounds(void) {
     int n1 = 2, n2 = 4;
-    int * [[cccc::array, cccc::count(n1)]] p1 = (int[2]){1, 2};
-    int * [[cccc::array, cccc::count(n2)]] p2 = (int[4]){9, 8, 7, 6};
-    int *q = p1;
-    q = p2 + 1; // re-snapshot: now [p2+1, p2+4)
+    int *[[cccc::array, cccc::count(n1)]] p1 = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(n2)]] p2 = (int[4]){9, 8, 7, 6};
+    int *q                                   = p1;
+    q = p2 + 1;        // re-snapshot: now [p2+1, p2+4)
     AssertEq(q[2], 6); // p2[3], last valid element through the new range
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_reassignment_uses_new_range_oob(void) {
     int n1 = 2, n2 = 4;
-    int * [[cccc::array, cccc::count(n1)]] p1 = (int[2]){1, 2};
-    int * [[cccc::array, cccc::count(n2)]] p2 = (int[4]){9, 8, 7, 6};
-    int *q = p1;
-    q = p2 + 1;
+    int *[[cccc::array, cccc::count(n1)]] p1 = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(n2)]] p2 = (int[4]){9, 8, 7, 6};
+    int *q                                   = p1;
+    q                                        = p2 + 1;
     volatile int i = 3; // p2[4] -- one past the re-snapshotted range
-    int x = q[i];
+    int          x = q[i];
     (void)x;
 }
 
@@ -1428,42 +1448,42 @@ void test_prop_reassignment_uses_new_range_oob(void) {
 // asserting that, with the stale "not propagated" framing corrected.
 [[cccc::test(exit_code = 255)]]
 void test_prop_no_init_not_propagated(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
     int *r; // no initializer, but #942 still registers r as a candidate --
             // its only store (r = p, below) is checked-rooted, so r DOES
             // become a chain source with p's bounds.
-    r = p;
+    r              = p;
     volatile int i = 10; // past count(n) -- and r IS checked, so this traps.
-    int x = r[i];
+    int          x = r[i];
     (void)x;
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_non_checked_rooted_reassign_not_propagated(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int local[4] = {0, 0, 0, 0};
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int  local[4]                          = {0, 0, 0, 0};
     int *q = local; // unrooted store -- q survives as OPT (optional), not
-                     // poisoned outright: phase A only requires at least
-                     // one rooted store across the whole function, not
-                     // that this particular one be rooted.
+                    // poisoned outright: phase A only requires at least
+                    // one rooted store across the whole function, not
+                    // that this particular one be rooted.
     q = p; // rooted store -- q's live snapshot now really is p's bounds.
-    volatile int i = 10; // q currently holds p, and i is past count(n).
-    int x = q[i]; // checked against p's bounds -- traps.
+    volatile int i = 10;   // q currently holds p, and i is past count(n).
+    int          x = q[i]; // checked against p's bounds -- traps.
     (void)x;
 }
 
 [[cccc::test]]
 void test_prop_address_taken_not_propagated(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int other[2] = {9, 9};
-    int *q = p;
-    int **pp = &q; // escapes -- poisons q
-    *pp = other;
-    volatile int i = 10;
-    int x = q[i];
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int   other[2]                         = {9, 9};
+    int  *q                                = p;
+    int **pp                               = &q; // escapes -- poisons q
+    *pp                                    = other;
+    volatile int i                         = 10;
+    int          x                         = q[i];
     (void)x;
 }
 
@@ -1475,9 +1495,9 @@ void test_prop_address_taken_not_propagated(void) {
 // propagated since #919.
 [[cccc::test(exit_code = 255)]]
 void test_prop_chknt_propagates(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = s;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = s;
     q[3] = 'x'; // now traps via CHKNT through `q`, same as through `s` directly
 }
 
@@ -1485,9 +1505,9 @@ void test_prop_chknt_propagates(void) {
 // be allowed through a propagated pointer, exactly as it is directly.
 [[cccc::test]]
 void test_prop_chknt_null_write_ok(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = s;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = s;
     q[3] = 0; // still null -- must not trap
     AssertEq(q[3], 0);
 }
@@ -1499,8 +1519,9 @@ void test_prop_chknt_null_write_ok(void) {
 [[cccc::test]]
 void test_prop_chknt_elem_size_mismatch_no_guard(void) {
     int n = 7; // char ntarray, widened hi = s + 8
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[8]){1, 2, 3, 4, 5, 6, 7, 0};
-    short *q = (short *)s;
+    char *[[cccc::ntarray, cccc::count(n)]] s =
+        (char[8]){1, 2, 3, 4, 5, 6, 7, 0};
+    short       *q = (short *)s;
     volatile int i = 3;
     // addr = s + 6 = hi - 2 (the short access size, NOT the source's own
     // char element size 1) -- if the element-size guard were missing or
@@ -1517,10 +1538,10 @@ void test_prop_chknt_elem_size_mismatch_no_guard(void) {
 // terminator slot; guarding it would falsely trap a legitimate write there.
 [[cccc::test]]
 void test_prop_chknt_mixed_source_no_guard(void) {
-    int n = 3;
-    volatile int c = 0;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char * [[cccc::array, cccc::count(8)]] a = (char[8]){0};
+    int          n                            = 3;
+    volatile int c                            = 0;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *[[cccc::array, cccc::count(8)]] a   = (char[8]){0};
     char *q;
     if (c)
         q = s;
@@ -1545,15 +1566,15 @@ void test_prop_chknt_mixed_source_no_guard(void) {
 // terminator slot and falsely trap.
 [[cccc::test]]
 void test_prop_chknt_mixed_source_reverse_order_no_guard(void) {
-    int n = 3;
-    volatile int c = 1;
-    char * [[cccc::array, cccc::count(8)]] a = (char[8]){0};
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int          n                            = 3;
+    volatile int c                            = 1;
+    char *[[cccc::array, cccc::count(8)]] a   = (char[8]){0};
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     char *q;
     if (c)
-        q = a; // array-rooted store, visited FIRST by the poison scan
+        q = a;  // array-rooted store, visited FIRST by the poison scan
     else
-        q = s; // ntarray-rooted store, visited SECOND
+        q = s;  // ntarray-rooted store, visited SECOND
     q[7] = 'x'; // c is true -- q holds `a`; a's own last valid byte
     AssertEq(q[7], 'x');
 }
@@ -1563,10 +1584,10 @@ void test_prop_chknt_mixed_source_reverse_order_no_guard(void) {
 // write through the final hop.
 [[cccc::test(exit_code = 255)]]
 void test_prop_chknt_chain_propagates(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = s + 0;
-    char *r = q + 0;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = s + 0;
+    char *r                                   = q + 0;
     r[3] = 'x'; // traps via the chained NT fact
 }
 
@@ -1585,23 +1606,23 @@ void test_prop_chknt_chain_propagates(void) {
 
 [[cccc::test]]
 void test_prop_chain_three_deep_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
-    int *r = q + 1;
-    int *s = r + 1;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q                                 = p + 0;
+    int *r                                 = q + 1;
+    int *s                                 = r + 1;
     AssertEq(s[1], 4); // p[3], last valid element through the 3-hop chain
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_chain_three_deep_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
-    int *r = q + 1;
-    int *s = r + 1;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int         *q                         = p + 0;
+    int         *r                         = q + 1;
+    int         *s                         = r + 1;
     volatile int i = 2; // p[4] -- one past the end, through the 3-hop chain
-    int x = s[i];
+    int          x = s[i];
     (void)x;
 }
 
@@ -1610,18 +1631,18 @@ void test_prop_chain_three_deep_oob(void) {
 [[cccc::test]]
 void test_prop_chain_from_member_source_in_bounds(void) {
     struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
-    int *q = s.p;
-    int *r = q + 1;
+    int                 *q = s.p;
+    int                 *r = q + 1;
     AssertEq(r[2], 4); // s.p[3]
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_chain_from_member_source_oob(void) {
     struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
-    int *q = s.p;
-    int *r = q + 1;
-    volatile int i = 3; // s.p[4] -- one past the end
-    int x = r[i];
+    int                 *q = s.p;
+    int                 *r = q + 1;
+    volatile int         i = 3; // s.p[4] -- one past the end
+    int                  x = r[i];
     (void)x;
 }
 
@@ -1630,14 +1651,14 @@ void test_prop_chain_from_member_source_oob(void) {
 // would wrongly let `s` inherit `p`'s range here).
 [[cccc::test]]
 void test_prop_chain_broken_link_not_propagated(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int local[4] = {0, 0, 0, 0};
-    int *q = p + 0;
-    q = local; // non-checked-rooted reassignment -- poisons q
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int  local[4]                          = {0, 0, 0, 0};
+    int *q                                 = p + 0;
+    q      = local; // non-checked-rooted reassignment -- poisons q
     int *r = q + 1; // must NOT propagate: q is poisoned, not a chain source
     volatile int i = 10;
-    int x = r[i];
+    int          x = r[i];
     (void)x;
 }
 
@@ -1659,14 +1680,14 @@ void test_prop_chain_broken_link_not_propagated(void) {
 // caught this had been genuinely trapping all along.
 [[cccc::test(exit_code = 255)]]
 void test_prop_chain_cycle_not_propagated(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0; // rooted: q's live snapshot = p's real bounds.
-    int *r = q + 1; // rooted from q (still holding p's real bounds).
-    q = r + 1;      // rooted from r (still holding p's real bounds) --
-                     // q's live snapshot is p's real bounds again.
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q = p + 0;        // rooted: q's live snapshot = p's real bounds.
+    int *r = q + 1;        // rooted from q (still holding p's real bounds).
+    q      = r + 1;        // rooted from r (still holding p's real bounds) --
+                           // q's live snapshot is p's real bounds again.
     volatile int i = 10;
-    int x = q[i]; // checked against p's real bounds -- traps.
+    int          x = q[i]; // checked against p's real bounds -- traps.
     (void)x;
 }
 
@@ -1676,21 +1697,21 @@ void test_prop_chain_cycle_not_propagated(void) {
 // `q++`/`q += k` preserve propagation).
 [[cccc::test]]
 void test_prop_self_assign_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
-    q = q + 1; // self-rooted -- neutral, not a poison
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q                                 = p + 0;
+    q = q + 1;         // self-rooted -- neutral, not a poison
     AssertEq(q[2], 4); // p[3], through the still-live snapshot
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_self_assign_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
-    q = q + 1; // self-rooted -- neutral
-    volatile int i = 3; // p[4] -- one past the end
-    int x = q[i];
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int *q                                 = p + 0;
+    q                                      = q + 1; // self-rooted -- neutral
+    volatile int i                         = 3;     // p[4] -- one past the end
+    int          x                         = q[i];
     (void)x;
 }
 
@@ -1706,7 +1727,8 @@ void test_prop_self_assign_oob(void) {
 [[cccc::test]]
 void test_prop_self_assign_init_not_propagated(void) {
     int *q = q;
-    AssertEq(1, 1); // reaches here without a false CHKR trap or a compiler crash
+    AssertEq(1,
+             1); // reaches here without a false CHKR trap or a compiler crash
 }
 
 // Chained store on a loop back edge: the fixpoint's straight-line,
@@ -1715,13 +1737,13 @@ void test_prop_self_assign_init_not_propagated(void) {
 // re-snapshotted every iteration keeps enforcing.
 [[cccc::test]]
 void test_prop_chain_in_loop_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
-    int *q = p;
-    int total = 0;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q                                 = p;
+    int  total                             = 0;
     for (int i = 0; i < 4; i++) {
-        int *r = q; // re-snapshots each iteration
-        total += *r;
+        int *r  = q; // re-snapshots each iteration
+        total  += *r;
         q++;
     }
     AssertEq(total, 100);
@@ -1729,16 +1751,16 @@ void test_prop_chain_in_loop_in_bounds(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_prop_chain_in_loop_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
-    int *q = p;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){10, 20, 30, 40};
+    int *q                                 = p;
     for (int i = 0; i < 4; i++) {
         int *r = q;
         (void)r;
         q++;
     }
     int *r = q; // one past the end after 4 plain q++'s
-    int x = *r;
+    int  x = *r;
     (void)x;
 }
 
@@ -1764,11 +1786,11 @@ void test_prop_chain_in_loop_oob(void) {
 
 [[cccc::test]]
 void test_opt_unrooted_path_not_checked(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 0;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 0;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     if (c)
         q = p;
     q[10] = 99; // c==0: q holds buf (unrooted) -- not checked, no trap
@@ -1778,11 +1800,11 @@ void test_opt_unrooted_path_not_checked(void) {
 
 [[cccc::test]]
 void test_opt_rooted_path_checked_in_bounds(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 1;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 1;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     if (c)
         q = p;
     AssertEq(q[2], 3); // c==1: q holds p (rooted) -- checked, in bounds
@@ -1791,11 +1813,11 @@ void test_opt_rooted_path_checked_in_bounds(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_opt_rooted_path_checked_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 1;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 1;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     if (c)
         q = p;
     int x = q[10]; // c==1: q holds p -- OOB against p's count(4), must trap
@@ -1807,11 +1829,11 @@ void test_opt_rooted_path_checked_oob(void) {
 // which #919/#941 never registered as a candidate at all.
 [[cccc::test]]
 void test_opt_uninitialized_unrooted_path_not_checked(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 0;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 0;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q;
     if (c)
         q = p;
     else
@@ -1823,11 +1845,11 @@ void test_opt_uninitialized_unrooted_path_not_checked(void) {
 
 [[cccc::test(exit_code = 255)]]
 void test_opt_uninitialized_rooted_path_checked_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 1;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 1;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q;
     if (c)
         q = p;
     else
@@ -1843,14 +1865,14 @@ void test_opt_uninitialized_rooted_path_checked_oob(void) {
 // simply hold whatever the last executed store put there.
 [[cccc::test]]
 void test_opt_flow_sensitive_kill_and_revive(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
     void *buf;
-    int *q = p;
+    int  *q = p;
     AssertEq(q[2], 3); // checked: q's most recent store is rooted (init)
-    buf = malloc(sizeof(int) * 16);
-    q = buf;
-    q[10] = 7; // not checked: q's most recent store is unrooted
+    buf   = malloc(sizeof(int) * 16);
+    q     = buf;
+    q[10] = 7;         // not checked: q's most recent store is unrooted
     AssertEq(q[10], 7);
     free(buf);
 }
@@ -1863,30 +1885,30 @@ void test_opt_flow_sensitive_kill_and_revive(void) {
 // sentinel through plain CHKR and trap on this correct, unrooted-path code.
 [[cccc::test]]
 void test_opt_chain_through_optional_source_not_checked(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 0;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 0;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     if (c)
         q = p;
     int *r = q + 1; // r's own store is unconditionally rooted (from q)
-    r[10] = 5;       // c==0: q (and therefore r) is unrooted -- no trap
+    r[10]  = 5;     // c==0: q (and therefore r) is unrooted -- no trap
     AssertEq(r[10], 5);
     free(buf);
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_opt_chain_through_optional_source_oob(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 1;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 1;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     if (c)
         q = p;
     int *r = q + 1;
-    int x = r[10]; // c==1: r chains from p through q -- OOB, must trap
+    int  x = r[10]; // c==1: r chains from p through q -- OOB, must trap
     (void)x;
 }
 
@@ -1894,16 +1916,16 @@ void test_opt_chain_through_optional_source_oob(void) {
 // more than one hop.
 [[cccc::test]]
 void test_opt_chain_three_deep_through_optional_source_not_checked(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 0;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 0;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     if (c)
         q = p;
     int *r = q + 1;
     int *s = r + 1;
-    s[10] = 5; // c==0: whole chain unrooted -- no trap
+    s[10]  = 5; // c==0: whole chain unrooted -- no trap
     AssertEq(s[10], 5);
     free(buf);
 }
@@ -1914,14 +1936,14 @@ void test_opt_chain_three_deep_through_optional_source_not_checked(void) {
 // rooted store executes.
 [[cccc::test]]
 void test_opt_loop_back_edge_rooted_store(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
-    int total = 0;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    void *buf                              = malloc(sizeof(int) * 16);
+    int  *q                                = buf;
+    int   total                            = 0;
     for (int i = 0; i < 3; i++) {
         if (i == 1)
-            q = p; // rooted only on this one iteration
+            q = p;         // rooted only on this one iteration
         else if (i == 2)
             total += q[2]; // checked: q's most recent store (i==1) was rooted
     }
@@ -1933,17 +1955,17 @@ void test_opt_loop_back_edge_rooted_store(void) {
 // trap on the branch whose only reachable store is unrooted.
 [[cccc::test]]
 void test_opt_switch_fallthrough_not_checked(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    volatile int c = 0;
-    void *buf = malloc(sizeof(int) * 16);
-    int *q = buf;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    volatile int c                         = 0;
+    void        *buf                       = malloc(sizeof(int) * 16);
+    int         *q                         = buf;
     switch (c) {
-    case 1:
-        q = p;
-        break;
-    default:
-        break;
+        case 1:
+            q = p;
+            break;
+        default:
+            break;
     }
     q[10] = 42; // c==0 (default): q holds buf -- not checked, no trap
     AssertEq(q[10], 42);
@@ -1954,14 +1976,14 @@ void test_opt_switch_fallthrough_not_checked(void) {
 // skips it -- the entry sentinel (phase B') covers exactly this.
 [[cccc::test]]
 void test_opt_goto_skips_rooted_store_not_checked(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    void *buf = malloc(sizeof(int) * 16);
-    int *q;
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    void *buf                              = malloc(sizeof(int) * 16);
+    int  *q;
     goto skip;
     q = p;
 skip:
-    q = buf;
+    q     = buf;
     q[10] = 7; // reached only via goto -- q holds buf, not checked, no trap
     AssertEq(q[10], 7);
     free(buf);
@@ -1972,11 +1994,11 @@ skip:
 // the terminator slot traps exactly like the FULL case above.
 [[cccc::test(exit_code = 255)]]
 void test_opt_chknt_propagates_on_rooted_path(void) {
-    int n = 3;
-    volatile int c = 1;
-    void *buf = malloc(8);
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = buf;
+    int          n                            = 3;
+    volatile int c                            = 1;
+    void        *buf                          = malloc(8);
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = buf;
     if (c)
         q = s;
     q[3] = 'x'; // c is true this run -- q holds s, traps via CHKNT
@@ -1990,11 +2012,11 @@ void test_opt_chknt_propagates_on_rooted_path(void) {
 // to_assign() set at parse time.
 [[cccc::test(exit_code = 255)]]
 void test_opt_chknt_rmw_propagates_on_rooted_path(void) {
-    int n = 3;
-    volatile int c = 1;
-    void *buf = malloc(8);
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = buf;
+    int          n                            = 3;
+    volatile int c                            = 1;
+    void        *buf                          = malloc(8);
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = buf;
     if (c)
         q = s;
     q[3] += 1; // c is true this run -- q holds s, RMW traps via CHKNT
@@ -2006,11 +2028,11 @@ void test_opt_chknt_rmw_propagates_on_rooted_path(void) {
 // early-out covers the sentinel hi == 0 case).
 [[cccc::test]]
 void test_opt_chknt_unrooted_path_no_trap(void) {
-    int n = 3;
-    volatile int c = 0;
-    void *buf = malloc(8);
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = buf;
+    int          n                            = 3;
+    volatile int c                            = 0;
+    void        *buf                          = malloc(8);
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = buf;
     if (c)
         q = s;
     q[3] = 'x'; // c is false this run -- q holds buf, not checked, no trap
@@ -2030,34 +2052,34 @@ void test_opt_chknt_unrooted_path_no_trap(void) {
 
 [[cccc::test]]
 void test_assume_bounds_equal_ok(void) {
-    int * [[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
-    int * [[cccc::array, cccc::count(4)]] q;
+    int *[[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
+    int *[[cccc::array, cccc::count(4)]] q;
     q = p; // equal bounds -- must not trap
     AssertEq(q[3], 4);
 }
 
 [[cccc::test]]
 void test_assume_bounds_narrower_target_ok(void) {
-    int * [[cccc::array, cccc::count(10)]] p =
+    int *[[cccc::array, cccc::count(10)]] p =
         (int[10]){0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-    int * [[cccc::array, cccc::count(4)]] q;
+    int *[[cccc::array, cccc::count(4)]] q;
     q = p; // target's own bounds are a SUBSET of the source's -- must not trap
     AssertEq(q[3], 3);
 }
 
 [[cccc::test]]
 void test_assume_bounds_byte_count_ok(void) {
-    int * [[cccc::array, cccc::byte_count(16)]] p = (int[4]){1, 2, 3, 4};
-    int * [[cccc::array, cccc::byte_count(16)]] q;
+    int *[[cccc::array, cccc::byte_count(16)]] p = (int[4]){1, 2, 3, 4};
+    int *[[cccc::array, cccc::byte_count(16)]] q;
     q = p;
     AssertEq(q[0], 1);
 }
 
 [[cccc::test]]
 void test_assume_bounds_range_form_ok(void) {
-    int arr[4] = {1, 2, 3, 4};
-    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
-    int * [[cccc::array, cccc::bounds(arr, arr + 4)]] q;
+    int arr[4]                                         = {1, 2, 3, 4};
+    int *[[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
+    int *[[cccc::array, cccc::bounds(arr, arr + 4)]] q;
     q = p;
     AssertEq(q[0], 1);
 }
@@ -2070,25 +2092,26 @@ void test_assume_bounds_range_form_ok(void) {
 [[cccc::test]]
 void test_assume_bounds_range_form_narrower_target_ok(void) {
     int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
-    int * [[cccc::array, cccc::bounds(arr + 2, arr + 6)]] q;
-    int * [[cccc::array, cccc::bounds(arr, arr + 8)]] p = arr;
-    q = p; // q's [arr+2, arr+6) IS a subset of p's [arr, arr+8) -- must not trap
+    int *[[cccc::array, cccc::bounds(arr + 2, arr + 6)]] q;
+    int *[[cccc::array, cccc::bounds(arr, arr + 8)]] p = arr;
+    q = p; // q's [arr+2, arr+6) IS a subset of p's [arr, arr+8) -- must not
+           // trap
     AssertEq(q[2], 2); // arr+2, within q's own absolute range
 }
 
 [[cccc::test(exit_code = 255)]]
 void test_assume_bounds_range_form_wider_target_error(void) {
     int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
-    int * [[cccc::array, cccc::bounds(arr, arr + 8)]] q;
-    int * [[cccc::array, cccc::bounds(arr + 2, arr + 6)]] p = arr + 2;
+    int *[[cccc::array, cccc::bounds(arr, arr + 8)]] q;
+    int *[[cccc::array, cccc::bounds(arr + 2, arr + 6)]] p = arr + 2;
     q = p; // q's [arr, arr+8) is NOT a subset of p's [arr+2, arr+6) -- traps
 }
 
 [[cccc::test]]
 void test_assume_bounds_single_target_ok(void) {
-    int x = 7;
-    int * [[cccc::single]] p = &x;
-    int * [[cccc::single]] q;
+    int x                   = 7;
+    int *[[cccc::single]] p = &x;
+    int *[[cccc::single]] q;
     q = p; // [[cccc::single]] target -- [q, q+sizeof(int)) implied by p's own
     AssertEq(*q, 7);
 }
@@ -2110,8 +2133,8 @@ void test_assume_bounds_member_target_ok(void) {
 [[cccc::test]]
 void test_assume_bounds_runtime_index_target_ok(void) {
     struct prop_member_s arr[2] = {{4, 0}, {2, 0}};
-    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
-    volatile int k = 1;
+    struct prop_member_s s      = {4, (int[4]){1, 2, 3, 4}};
+    volatile int         k      = 1;
     arr[k].p = s.p; // arr[1].n == 2, narrower-or-equal to s's count(4)
     AssertEq(arr[k].p[1], 2);
 }
@@ -2119,10 +2142,10 @@ void test_assume_bounds_runtime_index_target_ok(void) {
 [[cccc::test(exit_code = 255)]]
 void test_assume_bounds_runtime_index_target_error(void) {
     struct prop_member_s arr[2] = {{4, 0}, {10, 0}};
-    struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
-    volatile int k = 1;
+    struct prop_member_s s      = {4, (int[4]){1, 2, 3, 4}};
+    volatile int         k      = 1;
     arr[k].p = s.p; // arr[1].n == 10 -- WIDER than s's own count(4), not
-                     // implied, traps
+                    // implied, traps
 }
 
 // #947: both the TARGET and SOURCE object expressions are runtime-indexed
@@ -2138,22 +2161,22 @@ void test_assume_bounds_runtime_index_both_ok(void) {
     };
     volatile int k = 1, j = 0;
     dst_arr[k].p = src_arr[j].p; // dst_arr[1].n == 2, subset of src_arr[0]'s
-                                  // count(4) -- must not trap
+                                 // count(4) -- must not trap
     AssertEq(dst_arr[k].p[1], 2);
 }
 
 [[cccc::test]]
 void test_assume_bounds_unknown_target_skipped(void) {
-    int * [[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
-    int * [[cccc::array, cccc::bounds(unknown)]] q;
+    int *[[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
+    int *[[cccc::array, cccc::bounds(unknown)]] q;
     q = p; // CB_UNKNOWN target -- v1 skips the check entirely, never trap
     AssertEq(q[0], 1); // and q itself is usable afterwards, unaffected
 }
 
 [[cccc::test]]
 void test_assume_bounds_unchecked_source_skipped(void) {
-    int * [[cccc::array, cccc::count(4)]] q;
-    q = malloc(4 * sizeof(int)); // non-declared-checked rhs -- v1 skips
+    int *[[cccc::array, cccc::count(4)]] q;
+    q    = malloc(4 * sizeof(int)); // non-declared-checked rhs -- v1 skips
     q[0] = 5;
     AssertEq(q[0], 5);
     free(q);

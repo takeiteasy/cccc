@@ -9,7 +9,7 @@
 // The dry-run output must contain a .c4d path (the plugin is built separately),
 // and the exe's cccc invocation must NOT contain plugin.c (not folded).
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_exe_with_plugin(Builder *ctx) {
     // Dynamic module: no main(), loaded at runtime.
     BuildTarget *plugin = DynamicLib(ctx, "plugin");

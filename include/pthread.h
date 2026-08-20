@@ -27,23 +27,23 @@
 #include "stddef.h"
 #include "time.h"
 
-typedef void *pthread_t;
+typedef void        *pthread_t;
 typedef unsigned int pthread_key_t;
 
 typedef struct {
     void *__handle;
-    long __state;
-    int __type;
+    long  __state;
+    int   __type;
 } pthread_mutex_t;
 
 typedef struct {
     void *__handle;
-    long __state;
+    long  __state;
 } pthread_cond_t;
 
 typedef struct {
     size_t __stack_size;
-    void *__stack_addr;
+    void  *__stack_addr;
 } pthread_attr_t;
 
 typedef struct {
@@ -54,8 +54,8 @@ typedef struct {
     int __unused;
 } pthread_condattr_t;
 
-#define PTHREAD_MUTEX_INITIALIZER { 0, 0, 0 }
-#define PTHREAD_COND_INITIALIZER { 0, 0 }
+#define PTHREAD_MUTEX_INITIALIZER {0, 0, 0}
+#define PTHREAD_COND_INITIALIZER  {0, 0}
 
 // Mutex types (POSIX). Values are the real host encoding so they can be
 // forwarded directly to the native pthread_mutexattr_settype() underneath
@@ -73,15 +73,14 @@ typedef struct {
 #endif
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                   void *(*start_routine)(void *), void *arg);
+                   void *(*start_routine)(void *), void    *arg);
 int pthread_join(pthread_t thread, void **retval);
 int pthread_detach(pthread_t thread);
 void pthread_exit(void *retval);
 pthread_t pthread_self(void);
 int pthread_equal(pthread_t t1, pthread_t t2);
 
-int pthread_mutex_init(pthread_mutex_t *mutex,
-                       const pthread_mutexattr_t *attr);
+int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr);
 int pthread_mutex_destroy(pthread_mutex_t *mutex);
 int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_trylock(pthread_mutex_t *mutex);

@@ -11,7 +11,7 @@
 
 int main(void) {
     int *buf = malloc(sizeof(int));
-    *buf = 5; // stamps buf's effective type as int
+    *buf     = 5; // stamps buf's effective type as int
 
     // snprintf writes through buf's bytes with no VM-level hook: the
     // backstop must clear buf's shadow before this call runs.
@@ -21,8 +21,8 @@ int main(void) {
     // Reinterpret as float and write/read: must not false-positive against
     // a stale "int" stamp from before the snprintf call.
     float *fbuf = (float *)buf;
-    *fbuf = 3.0f;
-    int result = (int)*fbuf;
+    *fbuf       = 3.0f;
+    int result  = (int)*fbuf;
     free(buf);
     return (result == 3) ? 42 : 1;
 }

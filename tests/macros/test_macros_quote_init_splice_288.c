@@ -1,35 +1,39 @@
 // Ticket #288: $@k initializer splices can mix with ordinary positional
 // elements and inferred array lengths.
 
-struct Triple { int a; int b; int c; };
+struct Triple {
+    int a;
+    int b;
+    int c;
+};
 
 [[cccc::comptime]]
 Node *make_triple_tail(Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ b, c }, 2);
+    Node *chain = __builtin_node_list((Node *[]){b, c}, 2);
     return Quote("(struct Triple){ 1, $@1 }", chain);
 }
 
 [[cccc::comptime]]
 Node *make_triple_middle(Node *a, Node *b) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b }, 2);
+    Node *chain = __builtin_node_list((Node *[]){a, b}, 2);
     return Quote("(struct Triple){ $@1, 30 }", chain);
 }
 
 [[cccc::comptime]]
 Node *make_arr4(Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ b, c }, 2);
+    Node *chain = __builtin_node_list((Node *[]){b, c}, 2);
     return Quote("(int[4]){ 1, $@1, 4 }", chain);
 }
 
 [[cccc::comptime]]
 Node *make_arr_inferred(Node *a, Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b, c }, 3);
+    Node *chain = __builtin_node_list((Node *[]){a, b, c}, 3);
     return Quote("(int[]){ $@1 }", chain);
 }
 
 [[cccc::comptime]]
 Node *make_arr_mixed_inferred(Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ b, c }, 2);
+    Node *chain = __builtin_node_list((Node *[]){b, c}, 2);
     return Quote("(int[]){ 1, $@1, 4 }", chain);
 }
 

@@ -3,7 +3,7 @@
 // #689: a pointer that is null on *every* path through a loop body must
 // still warn under plain -Wnonnull, not just -Wmaybe-nonnull.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
     int *p = 0;
     for (int i = 0; i < 3; i++) {

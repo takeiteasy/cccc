@@ -8,10 +8,10 @@
 #include <stdlib.h>
 
 int main(void) {
-    int *ip = malloc(4 * sizeof(int));
-    ip[0] = 5;
+    int *ip   = malloc(4 * sizeof(int));
+    ip[0]     = 5;
     float *fp = (float *)ip;
-    fp[0] = 1.0f; // re-stamps the allocation's effective type to float
-    int idx = 0;  // non-constant index forces the variable-index fusion path
+    fp[0]     = 1.0f; // re-stamps the allocation's effective type to float
+    int idx   = 0;  // non-constant index forces the variable-index fusion path
     return ip[idx]; // load as int: mismatches the stamped float type
 }

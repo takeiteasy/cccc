@@ -15,11 +15,12 @@
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    const char *result = CaptureCommand(ctx,
-        "sh -c '\"./cccc\" "
-        "\"tests/fixtures/global_canon_957_main.c\" "
-        "\"tests/fixtures/global_canon_957_defs.c\"; "
-        "echo \"exit=$?\"'");
-    if (result) puts(result);
+    const char *result =
+        CaptureCommand(ctx, "sh -c '\"./cccc\" "
+                            "\"tests/fixtures/global_canon_957_main.c\" "
+                            "\"tests/fixtures/global_canon_957_defs.c\"; "
+                            "echo \"exit=$?\"'");
+    if (result)
+        puts(result);
     return 0;
 }

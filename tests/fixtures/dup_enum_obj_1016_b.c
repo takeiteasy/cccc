@@ -9,4 +9,6 @@
 // tests/test_serialize_dup_enum_obj_1016.c.
 enum E1016 { AA1016 = 100, BB1016 = 101, CC1016 = 102 };
 
-int b_use_1016(void) { return AA1016 + BB1016 + CC1016; }
+int b_use_1016(void) {
+    return AA1016 + BB1016 + CC1016;
+}

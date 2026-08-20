@@ -8,11 +8,15 @@
 
 int main(void) {
     int id = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
-    if (id < 0) return 1;
+    if (id < 0)
+        return 1;
 
     int *p = (int *)shmat(id, 0, 0);
-    if (p == (void *)-1) { shmctl(id, IPC_RMID, 0); return 2; }
-    *p = 7;
+    if (p == (void *)-1) {
+        shmctl(id, IPC_RMID, 0);
+        return 2;
+    }
+    *p      = 7;
     int val = *p;
     shmdt(p);
 

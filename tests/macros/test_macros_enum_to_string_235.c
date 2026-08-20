@@ -17,9 +17,10 @@ enum Color {
 
 [[cccc::comptime]]
 void generate_color_funcs(void) {
-    Type *ty = GetType("Color");
+    Type *ty     = GetType("Color");
 
-    Obj *to_str = MakeFunction("color_to_string", MakePointer(MakeConst(GetType("char"))));
+    Obj  *to_str = MakeFunction("color_to_string",
+                                MakePointer(MakeConst(GetType("char"))));
     FunctionAddParam(to_str, "v", GetType("int"));
     WithFn(to_str) {
         Node *v = MakeParamRef(to_str, "v");
@@ -37,15 +38,23 @@ void generate_color_funcs(void) {
 generate_color_funcs();
 
 int main(void) {
-    if (strcmp(color_to_string(RED), "RED") != 0) return 1;
-    if (strcmp(color_to_string(GREEN), "GREEN") != 0) return 2;
-    if (strcmp(color_to_string(BLUE), "BLUE") != 0) return 3;
-    if (strcmp(color_to_string(99), "") != 0) return 4;
+    if (strcmp(color_to_string(RED), "RED") != 0)
+        return 1;
+    if (strcmp(color_to_string(GREEN), "GREEN") != 0)
+        return 2;
+    if (strcmp(color_to_string(BLUE), "BLUE") != 0)
+        return 3;
+    if (strcmp(color_to_string(99), "") != 0)
+        return 4;
 
-    if (color_from_string("RED") != RED) return 5;
-    if (color_from_string("GREEN") != GREEN) return 6;
-    if (color_from_string("BLUE") != BLUE) return 7;
-    if (color_from_string("nope") != -1) return 8;
+    if (color_from_string("RED") != RED)
+        return 5;
+    if (color_from_string("GREEN") != GREEN)
+        return 6;
+    if (color_from_string("BLUE") != BLUE)
+        return 7;
+    if (color_from_string("nope") != -1)
+        return 8;
 
     return 42;
 }

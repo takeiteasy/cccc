@@ -8,7 +8,7 @@
 [[cccc::comptime]]
 Node *make_dup_case_switch(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("dup_case_switch", int_ty);
+    Obj  *fn     = MakeFunction("dup_case_switch", int_ty);
     FunctionAddParam(fn, "x", int_ty);
 
     WithFn(fn) {

@@ -25,18 +25,21 @@
 //   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
 //   header_resolution_smoke, comptime_native_smoke, audit_ffi,
 //   audit_reflection_enums, reflection_ffi_gen / _check
-//   docs                Doxygen HTML API docs for include/cccc/*.h (needs doxygen)
-//   macos_x86_64             macOS x86_64 cross-build only (Rosetta needed to run it)
-//   macos_x86_64_smoke       + Rosetta smoke test + the build_cache_arch_smoke guard
-//   macos_x86_64_test        + full test suite (source, --c4, host-signal debugger)
-//   build_cache_arch_smoke   #730 regression guard (native vs. cross --build-cache reuse)
-//   linux_amd64_build / linux_aarch64_build    build the Colima container image
-//   linux_amd64_smoke / linux_aarch64_smoke    + container arch/exit-42 sanity check
-//   linux_amd64_test / linux_aarch64_test      + full test suite (amd64 is 5-way sharded)
-//   linux_amd64_msan_test                      + cccc-msan build + full suite (#844 known-noise)
+//   docs                Doxygen HTML API docs for include/cccc/*.h (needs
+//   doxygen) macos_x86_64             macOS x86_64 cross-build only (Rosetta
+//   needed to run it) macos_x86_64_smoke       + Rosetta smoke test + the
+//   build_cache_arch_smoke guard macos_x86_64_test        + full test suite
+//   (source, --c4, host-signal debugger) build_cache_arch_smoke   #730
+//   regression guard (native vs. cross --build-cache reuse) linux_amd64_build /
+//   linux_aarch64_build    build the Colima container image linux_amd64_smoke /
+//   linux_aarch64_smoke    + container arch/exit-42 sanity check
+//   linux_amd64_test / linux_aarch64_test      + full test suite (amd64 is
+//   5-way sharded) linux_amd64_msan_test                      + cccc-msan build
+//   + full suite (#844 known-noise)
 //
 // Not covered here — use tools/Makefile.backup for:
-//   Cross-compiling for a 4th Colima profile / other architectures not listed above.
+//   Cross-compiling for a 4th Colima profile / other architectures not listed
+//   above.
 
 #include <stdio.h>
 #include <string.h>
@@ -86,11 +89,11 @@ static void maybe_add_curl(Builder *ctx, BuildTarget *t) {
     AddLib(t, "curl");
 }
 
-// ---- Intel BID decimal FP library (optional; controlled by CCCC_HAS_DECIMAL) --
-// Never vendored (see tools/fetch_intel_bid.sh); fetched/built on demand into
-// a gitignored prefix. Mirrors Makefile.backup's CCCC_HAS_DECIMAL block, one
-// difference: a missing libbid.a here degrades to a non-decimal build with a
-// diagnostic rather than aborting the whole graph (add_cccc_flags(), which
+// ---- Intel BID decimal FP library (optional; controlled by CCCC_HAS_DECIMAL)
+// -- Never vendored (see tools/fetch_intel_bid.sh); fetched/built on demand
+// into a gitignored prefix. Mirrors Makefile.backup's CCCC_HAS_DECIMAL block,
+// one difference: a missing libbid.a here degrades to a non-decimal build with
+// a diagnostic rather than aborting the whole graph (add_cccc_flags(), which
 // calls this, has no way to fail its caller's target outright).
 
 static void maybe_add_decimal(Builder *ctx, BuildTarget *t) {
@@ -105,8 +108,10 @@ static void maybe_add_decimal(Builder *ctx, BuildTarget *t) {
     snprintf(bid_inc, sizeof(bid_inc), "%s/src", prefix);
     if (!FileExists(ctx, bid_a)) {
         fprintf(stderr,
-            "build: CCCC_HAS_DECIMAL=1 but %s is missing — run tools/fetch_intel_bid.sh "
-            "first. Building without decimal FP support.\n", bid_a);
+                "build: CCCC_HAS_DECIMAL=1 but %s is missing — run "
+                "tools/fetch_intel_bid.sh "
+                "first. Building without decimal FP support.\n",
+                bid_a);
         return;
     }
     AddDefine(t, "CCCC_HAS_DECIMAL", "1");
@@ -215,7 +220,7 @@ static BuildTarget *make_libbacktrace(Builder *ctx) {
 // binary a user hands back a crash report from is still debuggable.
 
 static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
-                                const char *opt_flag) {
+                               const char *opt_flag) {
     AddCFlag(t, "-Wall");
     AddCFlag(t, opt_flag);
     AddCFlag(t, "-g");
@@ -260,7 +265,8 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
     // tarballs (no .git) -- CCCC_GIT_DESC then falls back to "" (see
     // src/internal.h) and --version shows CCCC_RELEASE_VERSION alone.
     if (FileExists(ctx, ".git")) {
-        const char *desc = CaptureCommand(ctx, "git describe --tags --always --dirty 2>/dev/null");
+        const char *desc = CaptureCommand(
+            ctx, "git describe --tags --always --dirty 2>/dev/null");
         if (desc && *desc) {
             char quoted[256];
             snprintf(quoted, sizeof(quoted), "\"%s\"", desc);
@@ -295,8 +301,8 @@ static void add_cccc_sources(Builder *ctx, BuildTarget *t) {
 // opt_flag/ndebug let release() and the opt_test_* targets below reuse this
 // without duplicating add_cccc_sources()'s exclusion rules.
 static BuildTarget *make_cccc_exe_named_opt(Builder *ctx, BuildTarget *bt,
-                                             const char *name, const char *opt_flag,
-                                             bool ndebug) {
+                                            const char *name,
+                                            const char *opt_flag, bool ndebug) {
     BuildTarget *t = Executable(ctx, name);
     SetOutput(t, name);
     add_cccc_sources(ctx, t);
@@ -306,7 +312,8 @@ static BuildTarget *make_cccc_exe_named_opt(Builder *ctx, BuildTarget *bt,
     return t;
 }
 
-static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt, const char *name) {
+static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt,
+                                        const char *name) {
     return make_cccc_exe_named_opt(ctx, bt, name, "-O0", false);
 }
 
@@ -318,7 +325,8 @@ static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt, const cha
 // standalone, would declare four "backtrace" targets in the same graph and
 // trip the duplicate-name check added in #842 Step 1).
 static BuildTarget *make_sanitizer_variant(Builder *ctx, BuildTarget *bt,
-                                            const char *name, const char *sanitize_flag) {
+                                           const char *name,
+                                           const char *sanitize_flag) {
     BuildTarget *t = Executable(ctx, name);
     SetOutput(t, name);
     add_cccc_sources(ctx, t);
@@ -331,13 +339,15 @@ static BuildTarget *make_sanitizer_variant(Builder *ctx, BuildTarget *bt,
 [[cccc::build_target]]
 BuildTarget *cccc_asan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    return make_sanitizer_variant(ctx, bt, "cccc-asan", "-fsanitize=address,undefined");
+    return make_sanitizer_variant(ctx, bt, "cccc-asan",
+                                  "-fsanitize=address,undefined");
 }
 
 [[cccc::build_target]]
 BuildTarget *cccc_ubsan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    return make_sanitizer_variant(ctx, bt, "cccc-ubsan", "-fsanitize=undefined");
+    return make_sanitizer_variant(ctx, bt, "cccc-ubsan",
+                                  "-fsanitize=undefined");
 }
 
 [[cccc::build_target]]
@@ -356,7 +366,7 @@ BuildTarget *cccc_msan(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *fuzz_harness(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *t = Executable(ctx, "fuzz_harness");
+    BuildTarget *t  = Executable(ctx, "fuzz_harness");
     SetOutput(t, "fuzz_harness");
     add_cccc_sources(ctx, t);
     ExcludeSource(t, "src/main.c");
@@ -369,9 +379,9 @@ BuildTarget *fuzz_harness(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *libcccc(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *t = DynamicLib(ctx, "cccc"); // -> lib/libcccc.{dylib,so}
+    BuildTarget *t  = DynamicLib(ctx, "cccc"); // -> lib/libcccc.{dylib,so}
     add_cccc_sources(ctx, t);
-    ExcludeSource(t, "src/main.c"); // no main() in a shared library
+    ExcludeSource(t, "src/main.c");            // no main() in a shared library
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, "-fPIC");
     return t;
@@ -385,10 +395,11 @@ BuildTarget *libcccc(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *release(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *gen = stdlib_regen_step(ctx, bt);
+    BuildTarget *bt             = make_libbacktrace(ctx);
+    BuildTarget *gen            = stdlib_regen_step(ctx, bt);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *final = make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
+    BuildTarget *final =
+        make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
     DependsOn(final, gen);
     DependsOn(final, reflection_gen);
     return final;
@@ -400,13 +411,16 @@ BuildTarget *release(Builder *ctx) {
 // gets away with at -O0 (aliasing, uninitialized reads, signed overflow)
 // that only misbehaves once the host compiler starts optimizing across it.
 
-static BuildTarget *make_opt_test(Builder *ctx, const char *level, const char *opt_flag) {
+static BuildTarget *make_opt_test(Builder *ctx, const char *level,
+                                  const char *opt_flag) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    char exe_name[32];
+    char         exe_name[32];
     snprintf(exe_name, sizeof(exe_name), "cccc-opt-%s", level);
-    BuildTarget *cccc = make_cccc_exe_named_opt(ctx, bt, exe_name, opt_flag, false);
+    BuildTarget *cccc =
+        make_cccc_exe_named_opt(ctx, bt, exe_name, opt_flag, false);
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s", TargetOutput(cccc));
+    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s",
+             TargetOutput(cccc));
     char step_name[32];
     snprintf(step_name, sizeof(step_name), "opt-test-%s", level);
     BuildTarget *step = RunCustom(ctx, step_name, cmd);
@@ -415,13 +429,19 @@ static BuildTarget *make_opt_test(Builder *ctx, const char *level, const char *o
 }
 
 [[cccc::build_target]]
-BuildTarget *opt_test_O1(Builder *ctx) { return make_opt_test(ctx, "O1", "-O1"); }
+BuildTarget *opt_test_O1(Builder *ctx) {
+    return make_opt_test(ctx, "O1", "-O1");
+}
 
 [[cccc::build_target]]
-BuildTarget *opt_test_O2(Builder *ctx) { return make_opt_test(ctx, "O2", "-O2"); }
+BuildTarget *opt_test_O2(Builder *ctx) {
+    return make_opt_test(ctx, "O2", "-O2");
+}
 
 [[cccc::build_target]]
-BuildTarget *opt_test_O3(Builder *ctx) { return make_opt_test(ctx, "O3", "-O3"); }
+BuildTarget *opt_test_O3(Builder *ctx) {
+    return make_opt_test(ctx, "O3", "-O3");
+}
 
 // ---- Sanitizer aggregate (Makefile:217-227) --------------------------------
 // No meta-target concept exists in the builder API; a no-op RunCustom that
@@ -430,16 +450,20 @@ BuildTarget *opt_test_O3(Builder *ctx) { return make_opt_test(ctx, "O3", "-O3");
 
 [[cccc::build_target]]
 BuildTarget *sanitizers(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *asan = make_sanitizer_variant(ctx, bt, "cccc-asan", "-fsanitize=address,undefined");
-    BuildTarget *ubsan = make_sanitizer_variant(ctx, bt, "cccc-ubsan", "-fsanitize=undefined");
-    BuildTarget *tsan = make_sanitizer_variant(ctx, bt, "cccc-tsan", "-fsanitize=thread");
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *asan = make_sanitizer_variant(ctx, bt, "cccc-asan",
+                                               "-fsanitize=address,undefined");
+    BuildTarget *ubsan =
+        make_sanitizer_variant(ctx, bt, "cccc-ubsan", "-fsanitize=undefined");
+    BuildTarget *tsan =
+        make_sanitizer_variant(ctx, bt, "cccc-tsan", "-fsanitize=thread");
     BuildTarget *step = RunCustom(ctx, "sanitizers", "true");
     DependsOn(step, asan);
     DependsOn(step, ubsan);
     DependsOn(step, tsan);
     if (strcmp(BuildHost(ctx), "linux") == 0)
-        DependsOn(step, make_sanitizer_variant(ctx, bt, "cccc-msan", "-fsanitize=memory"));
+        DependsOn(step, make_sanitizer_variant(ctx, bt, "cccc-msan",
+                                               "-fsanitize=memory"));
     return step;
 }
 
@@ -480,17 +504,17 @@ BuildTarget *clean(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *host_tests(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt    = make_libbacktrace(ctx);
     const char **files = GlobFiles(ctx, "tests/host/test_*.c");
     BuildTarget *tests[256];
-    int n = 0;
-    char cmd[8192];
+    int          n = 0;
+    char         cmd[8192];
     cmd[0] = '\0';
     for (int i = 0; files[i] && n < 256; i++) {
-        const char *path = files[i];
+        const char *path  = files[i];
         const char *slash = strrchr(path, '/');
-        const char *base = slash ? slash + 1 : path;
-        char name[128];
+        const char *base  = slash ? slash + 1 : path;
+        char        name[128];
         snprintf(name, sizeof(name), "host_%s", base);
         size_t nlen = strlen(name);
         if (nlen > 2 && strcmp(name + nlen - 2, ".c") == 0)
@@ -510,7 +534,8 @@ BuildTarget *host_tests(Builder *ctx) {
         tests[n++] = t;
     }
     if (n == 0) {
-        fprintf(stderr, "build: host_tests found no tests/host/test_*.c files\n");
+        fprintf(stderr,
+                "build: host_tests found no tests/host/test_*.c files\n");
         return RunCustom(ctx, "host-tests", "true");
     }
     BuildTarget *step = RunCustom(ctx, "host-tests", cmd);
@@ -519,14 +544,16 @@ BuildTarget *host_tests(Builder *ctx) {
     return step;
 }
 
-// ---- test / test-suites / test-legacy / sqlite-smoke / audit-ffi (Makefile:368-389) --
+// ---- test / test-suites / test-legacy / sqlite-smoke / audit-ffi
+// (Makefile:368-389) --
 
 [[cccc::build_target]]
 BuildTarget *test(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s", TargetOutput(cccc));
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s",
+             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "test", cmd);
     DependsOn(step, cccc);
     return step;
@@ -534,10 +561,11 @@ BuildTarget *test(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *test_suites(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --suites --binary %s", TargetOutput(cccc));
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --suites --binary %s",
+             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "test-suites", cmd);
     DependsOn(step, cccc);
     return step;
@@ -545,10 +573,11 @@ BuildTarget *test_suites(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *test_legacy(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --legacy --binary %s", TargetOutput(cccc));
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --legacy --binary %s",
+             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "test-legacy", cmd);
     DependsOn(step, cccc);
     return step;
@@ -566,10 +595,11 @@ BuildTarget *sqlite_smoke(Builder *ctx) {
     // faults in a code page. `mv` swaps the directory entry to a new inode
     // atomically, leaving the running process's already-open mapping of
     // the old one untouched until it exits.
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
+    char         cmd[512];
+    snprintf(
+        cmd, sizeof(cmd),
         "cp %s ./cccc.sqlite-smoke-tmp && mv ./cccc.sqlite-smoke-tmp ./cccc "
         "&& python3 tools/sqlite_smoke.py",
         TargetOutput(cccc));
@@ -584,14 +614,14 @@ BuildTarget *header_resolution_smoke(Builder *ctx) {
     // sqlite_smoke.py above -- see the comment on sqlite_smoke for why the
     // built binary is placed via `cp` + atomic `mv` rather than a direct
     // `cp` onto ./cccc.
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
+    char         cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "cp %s ./cccc.header-resolution-smoke-tmp && "
-        "mv ./cccc.header-resolution-smoke-tmp ./cccc "
-        "&& python3 tools/header_resolution_smoke.py",
-        TargetOutput(cccc));
+             "cp %s ./cccc.header-resolution-smoke-tmp && "
+             "mv ./cccc.header-resolution-smoke-tmp ./cccc "
+             "&& python3 tools/header_resolution_smoke.py",
+             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "header-resolution-smoke", cmd);
     DependsOn(step, cccc);
     return step;
@@ -603,14 +633,14 @@ BuildTarget *comptime_native_smoke(Builder *ctx) {
     // header_resolution_smoke above -- see the comment on sqlite_smoke for
     // why the built binary is placed via `cp` + atomic `mv` rather than a
     // direct `cp` onto ./cccc.
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
+    char         cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "cp %s ./cccc.comptime-native-smoke-tmp && "
-        "mv ./cccc.comptime-native-smoke-tmp ./cccc "
-        "&& python3 tools/comptime_native_smoke.py",
-        TargetOutput(cccc));
+             "cp %s ./cccc.comptime-native-smoke-tmp && "
+             "mv ./cccc.comptime-native-smoke-tmp ./cccc "
+             "&& python3 tools/comptime_native_smoke.py",
+             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "comptime-native-smoke", cmd);
     DependsOn(step, cccc);
     return step;
@@ -630,7 +660,7 @@ BuildTarget *audit_reflection_enums(Builder *ctx) {
     // internal TypeKind (TY_*) / NodeKind (ND_*) / AttrTargetKind in
     // src/cccc.h -- no build required, same reasoning as audit_ffi above.
     return RunCustom(ctx, "audit-reflection-enums",
-        "python3 tools/audit_reflection_enums.py");
+                     "python3 tools/audit_reflection_enums.py");
 }
 
 // src/reflection_ffi_protos.inc / src/reflection_ffi_register.inc are
@@ -647,7 +677,7 @@ BuildTarget *audit_reflection_enums(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *reflection_ffi_gen(Builder *ctx) {
     BuildTarget *gen = RunCustom(ctx, "reflection-ffi-gen",
-        "python3 tools/gen_reflection_ffi.py");
+                                 "python3 tools/gen_reflection_ffi.py");
     DeclareOutput(gen, "src/reflection_ffi_protos.inc");
     DeclareOutput(gen, "src/reflection_ffi_register.inc");
     AddInput(gen, "include/cccc/reflection.h");
@@ -658,7 +688,7 @@ BuildTarget *reflection_ffi_gen(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *reflection_ffi_check(Builder *ctx) {
     return RunCustom(ctx, "reflection-ffi-check",
-        "python3 tools/gen_reflection_ffi.py --check");
+                     "python3 tools/gen_reflection_ffi.py --check");
 }
 
 // Doxygen HTML API docs for the three public headers.
@@ -670,12 +700,14 @@ BuildTarget *reflection_ffi_check(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *docs(Builder *ctx) {
     if (!HaveTool(ctx, "doxygen")) {
-        fprintf(stderr, "build: docs requires doxygen (not found in PATH) — "
-                        "install it (e.g. brew install doxygen / apt install doxygen)\n");
+        fprintf(
+            stderr,
+            "build: docs requires doxygen (not found in PATH) — "
+            "install it (e.g. brew install doxygen / apt install doxygen)\n");
         return RunCustom(ctx, "docs", "false");
     }
-    BuildTarget *step = RunCustom(ctx, "docs",
-        "mkdir -p build/docs && doxygen Doxyfile");
+    BuildTarget *step =
+        RunCustom(ctx, "docs", "mkdir -p build/docs && doxygen Doxyfile");
     AddInput(step, "Doxyfile");
     AddInput(step, "include/cccc/building.h");
     AddInput(step, "include/cccc/reflection.h");
@@ -686,10 +718,11 @@ BuildTarget *docs(Builder *ctx) {
 
 // ---- bench-compare{,-quick,-json} (Makefile:551-564) -----------------------
 
-static BuildTarget *make_bench_compare(Builder *ctx, const char *name, const char *pyflags) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+static BuildTarget *make_bench_compare(Builder *ctx, const char *name,
+                                       const char *pyflags) {
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
+    char         cmd[512];
     snprintf(cmd, sizeof(cmd), "python3 tools/bench.py %s", pyflags);
     BuildTarget *step = RunCustom(ctx, name, cmd);
     DependsOn(step, cccc);
@@ -703,12 +736,14 @@ BuildTarget *bench_compare(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *bench_compare_quick(Builder *ctx) {
-    return make_bench_compare(ctx, "bench-compare-quick", "--runs 2 --warmup 1");
+    return make_bench_compare(ctx, "bench-compare-quick",
+                              "--runs 2 --warmup 1");
 }
 
 [[cccc::build_target]]
 BuildTarget *bench_compare_json(Builder *ctx) {
-    return make_bench_compare(ctx, "bench-compare-json", "--format json --runs 3 --warmup 1");
+    return make_bench_compare(ctx, "bench-compare-json",
+                              "--format json --runs 3 --warmup 1");
 }
 
 // ---- profile-cpu / profile-mem (Makefile:566-599) --------------------------
@@ -716,7 +751,7 @@ BuildTarget *bench_compare_json(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *profile_cpu(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *t = Executable(ctx, "cccc-prof");
+    BuildTarget *t  = Executable(ctx, "cccc-prof");
     SetOutput(t, "cccc-prof");
     add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
@@ -729,8 +764,9 @@ BuildTarget *profile_cpu(Builder *ctx) {
     // argv[0]="env" invocation the shell's plain command parser handles fine.
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "mkdir -p profile && env CPUPROFILE=profile/cpu.prof %s -I./include tests/benchmarks/mandelbrot.c || true",
-        TargetOutput(t));
+             "mkdir -p profile && env CPUPROFILE=profile/cpu.prof %s "
+             "-I./include tests/benchmarks/mandelbrot.c || true",
+             TargetOutput(t));
     BuildTarget *step = RunCustom(ctx, "profile-cpu", cmd);
     DependsOn(step, t);
     return step;
@@ -738,19 +774,21 @@ BuildTarget *profile_cpu(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *profile_mem(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char cmd[512];
+    char         cmd[512];
     if (strcmp(BuildHost(ctx), "darwin") == 0)
         snprintf(cmd, sizeof(cmd),
-            "mkdir -p profile && leaks -atExit -- %s -I./include tests/benchmarks/mandelbrot.c "
-            "> profile/mem-leaks.txt 2>&1 || true",
-            TargetOutput(cccc));
+                 "mkdir -p profile && leaks -atExit -- %s -I./include "
+                 "tests/benchmarks/mandelbrot.c "
+                 "> profile/mem-leaks.txt 2>&1 || true",
+                 TargetOutput(cccc));
     else
         snprintf(cmd, sizeof(cmd),
-            "mkdir -p profile && valgrind --tool=massif --massif-out-file=profile/mem.massif "
-            "%s -I./include tests/benchmarks/mandelbrot.c || true",
-            TargetOutput(cccc));
+                 "mkdir -p profile && valgrind --tool=massif "
+                 "--massif-out-file=profile/mem.massif "
+                 "%s -I./include tests/benchmarks/mandelbrot.c || true",
+                 TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "profile-mem", cmd);
     DependsOn(step, cccc);
     return step;
@@ -760,7 +798,7 @@ BuildTarget *profile_mem(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *dsym(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     BuildTarget *step;
     if (strcmp(BuildHost(ctx), "darwin") == 0) {
@@ -769,7 +807,8 @@ BuildTarget *dsym(Builder *ctx) {
         step = RunCustom(ctx, "dsym", cmd);
     } else {
         step = RunCustom(ctx, "dsym",
-            "echo 'dsym: no-op on this platform (DWARF is already in the ELF)'");
+                         "echo 'dsym: no-op on this platform (DWARF is already "
+                         "in the ELF)'");
     }
     DependsOn(step, cccc);
     return step;
@@ -783,7 +822,8 @@ BuildTarget *dsym(Builder *ctx) {
 
 static const char *find_afl_cc(Builder *ctx) {
     const char *cc = FindTool(ctx, "afl-clang-fast");
-    if (cc) return cc;
+    if (cc)
+        return cc;
     return FindTool(ctx, "afl-clang");
 }
 
@@ -791,11 +831,12 @@ static const char *find_afl_cc(Builder *ctx) {
 BuildTarget *afl(Builder *ctx) {
     const char *afl_cc = find_afl_cc(ctx);
     if (!afl_cc) {
-        fprintf(stderr, "build: afl requires afl-clang-fast or afl-clang (AFL++ not found)\n");
+        fprintf(stderr, "build: afl requires afl-clang-fast or afl-clang "
+                        "(AFL++ not found)\n");
         return RunCustom(ctx, "afl", "false");
     }
     BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *t = Executable(ctx, "cccc-afl");
+    BuildTarget *t  = Executable(ctx, "cccc-afl");
     SetOutput(t, "cccc-afl");
     add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
@@ -807,11 +848,12 @@ BuildTarget *afl(Builder *ctx) {
 BuildTarget *afl_asan(Builder *ctx) {
     const char *afl_cc = find_afl_cc(ctx);
     if (!afl_cc) {
-        fprintf(stderr, "build: afl-asan requires afl-clang-fast or afl-clang (AFL++ not found)\n");
+        fprintf(stderr, "build: afl-asan requires afl-clang-fast or afl-clang "
+                        "(AFL++ not found)\n");
         return RunCustom(ctx, "afl-asan", "false");
     }
     BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *t = Executable(ctx, "cccc-afl-asan");
+    BuildTarget *t  = Executable(ctx, "cccc-afl-asan");
     SetOutput(t, "cccc-afl-asan");
     add_cccc_sources(ctx, t);
     add_cccc_flags(ctx, t, bt);
@@ -840,10 +882,10 @@ BuildTarget *afl_asan(Builder *ctx) {
 // inlined into RunCustom command strings.
 
 // Builds the cross-compiled executable only (no SDK/OS-check duplication
-// between the plain macos_x86_64 target and the composing build_cache_arch_smoke
-// below, which needs its own separately-named libbacktrace -- see
-// make_libbacktrace_named's comment). Returns NULL (with no diagnostic; the
-// caller prints one) if the macOS SDK can't be found.
+// between the plain macos_x86_64 target and the composing
+// build_cache_arch_smoke below, which needs its own separately-named
+// libbacktrace -- see make_libbacktrace_named's comment). Returns NULL (with no
+// diagnostic; the caller prints one) if the macOS SDK can't be found.
 static BuildTarget *make_macos_x86_64_exe(Builder *ctx, BuildTarget *bt) {
     const char *sdk = CaptureCommand(ctx, "xcrun --sdk macosx --show-sdk-path");
     if (!sdk || !*sdk)
@@ -867,11 +909,13 @@ BuildTarget *macos_x86_64(Builder *ctx) {
         return RunCustom(ctx, "macos-x86_64", "false");
     }
     BuildTarget *bt = make_libbacktrace(ctx);
-    if (bt) // CCCC_HAS_BACKTRACE=0 (#850): no "backtrace" target to cross-triple
+    if (bt) // CCCC_HAS_BACKTRACE=0 (#850): no "backtrace" target to
+            // cross-triple
         SetTargetTriple(bt, "x86_64-apple-macos");
     BuildTarget *t = make_macos_x86_64_exe(ctx, bt);
     if (!t) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
+        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command "
+                        "Line Tools.\n");
         return RunCustom(ctx, "macos-x86_64", "false");
     }
     return t;
@@ -893,29 +937,34 @@ BuildTarget *macos_x86_64(Builder *ctx) {
 // under a second, differently-named set of targets -- the graph-uniqueness
 // rule that forces bt_x86's distinct name here would otherwise force a
 // second distinct name for the cross executable too.
-static BuildTarget *make_build_cache_arch_smoke(Builder *ctx, BuildTarget **out_cross) {
+static BuildTarget *make_build_cache_arch_smoke(Builder      *ctx,
+                                                BuildTarget **out_cross) {
     BuildTarget *bt_native = make_libbacktrace(ctx);
-    BuildTarget *native = make_cccc_exe_named(ctx, bt_native, "cccc");
+    BuildTarget *native    = make_cccc_exe_named(ctx, bt_native, "cccc");
 
-    BuildTarget *bt_x86 = make_libbacktrace_named(ctx, "backtrace-x86_64");
+    BuildTarget *bt_x86    = make_libbacktrace_named(ctx, "backtrace-x86_64");
     if (bt_x86)
         SetTargetTriple(bt_x86, "x86_64-apple-macos");
     BuildTarget *cross = make_macos_x86_64_exe(ctx, bt_x86);
     if (out_cross)
         *out_cross = cross;
     if (!cross) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
+        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command "
+                        "Line Tools.\n");
         return RunCustom(ctx, "build-cache-arch-smoke", "false");
     }
 
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd),
+    snprintf(
+        cmd, sizeof(cmd),
         "rm -rf build/build_cache_arch_smoke && "
         "%s -I./include --build --build-out-dir=build/build_cache_arch_smoke "
         "--build-cache tests/test_build_cache.c >/dev/null && "
-        "file build/build_cache_arch_smoke/bin/cache_app | grep -q 'arm64\\|aarch64\\|arm64e' && "
+        "file build/build_cache_arch_smoke/bin/cache_app | grep -q "
+        "'arm64\\|aarch64\\|arm64e' && "
         "/usr/bin/arch -x86_64 %s -I./include --build "
-        "--build-out-dir=build/build_cache_arch_smoke --build-cache tests/test_build_cache.c && "
+        "--build-out-dir=build/build_cache_arch_smoke --build-cache "
+        "tests/test_build_cache.c && "
         "file build/build_cache_arch_smoke/bin/cache_app | grep -q 'x86_64' && "
         "/usr/bin/arch -x86_64 build/build_cache_arch_smoke/bin/cache_app && "
         "rm -rf build/build_cache_arch_smoke && "
@@ -930,7 +979,8 @@ static BuildTarget *make_build_cache_arch_smoke(Builder *ctx, BuildTarget **out_
 [[cccc::build_target]]
 BuildTarget *build_cache_arch_smoke(Builder *ctx) {
     if (strcmp(BuildHost(ctx), "darwin") != 0) {
-        fprintf(stderr, "build: build_cache_arch_smoke requires macOS (native arm64 + Rosetta x86_64)\n");
+        fprintf(stderr, "build: build_cache_arch_smoke requires macOS (native "
+                        "arm64 + Rosetta x86_64)\n");
         return RunCustom(ctx, "build-cache-arch-smoke", "false");
     }
     return make_build_cache_arch_smoke(ctx, NULL);
@@ -944,12 +994,13 @@ BuildTarget *macos_x86_64_smoke(Builder *ctx) {
     }
     // Makefile:452 chains macos-x86_64-smoke onto build-cache-arch-smoke;
     // reuse its cross-compiled binary rather than building a second one.
-    BuildTarget *cross = NULL;
+    BuildTarget *cross     = NULL;
     BuildTarget *arch_step = make_build_cache_arch_smoke(ctx, &cross);
     if (!cross)
         return arch_step; // already printed its own diagnostic
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_smoke.sh %s", TargetOutput(cross));
+    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_smoke.sh %s",
+             TargetOutput(cross));
     BuildTarget *step = RunCustom(ctx, "macos-x86_64-smoke", cmd);
     DependsOn(step, cross);
     DependsOn(step, arch_step);
@@ -967,11 +1018,13 @@ BuildTarget *macos_x86_64_test(Builder *ctx) {
         SetTargetTriple(bt, "x86_64-apple-macos");
     BuildTarget *t = make_macos_x86_64_exe(ctx, bt);
     if (!t) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command Line Tools.\n");
+        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command "
+                        "Line Tools.\n");
         return RunCustom(ctx, "macos-x86_64-test", "false");
     }
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_test.sh %s", TargetOutput(t));
+    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_test.sh %s",
+             TargetOutput(t));
     BuildTarget *step = RunCustom(ctx, "macos-x86_64-test", cmd);
     DependsOn(step, t);
     return step;
@@ -987,26 +1040,30 @@ BuildTarget *macos_x86_64_test(Builder *ctx) {
 // The smoke/sharded-test recipes need $(...) substitution, $? capture, and
 // (for the sharded test) a `for` loop with a fail-flag accumulator -- none
 // of which the vendored build shell supports -- so they're delegated to
-// real shell scripts (tools/linux_container_smoke.sh, tools/linux_amd64_test.sh,
-// tools/linux_amd64_msan_test.sh) rather than inlined into RunCustom strings.
+// real shell scripts (tools/linux_container_smoke.sh,
+// tools/linux_amd64_test.sh, tools/linux_amd64_msan_test.sh) rather than
+// inlined into RunCustom strings.
 
 [[cccc::build_target]]
 BuildTarget *linux_amd64_build(Builder *ctx) {
-    return RunCustom(ctx, "linux-amd64-build",
+    return RunCustom(
+        ctx, "linux-amd64-build",
         "colima -p cccc-linux-amd64 nerdctl -- build --platform linux/amd64 "
         "-t cccc-linux-amd64 .");
 }
 
 [[cccc::build_target]]
 BuildTarget *linux_aarch64_build(Builder *ctx) {
-    return RunCustom(ctx, "linux-aarch64-build",
+    return RunCustom(
+        ctx, "linux-aarch64-build",
         "colima -p cccc-linux-arm64 nerdctl -- build --platform linux/arm64 "
         "-t cccc-linux-arm64 .");
 }
 
 [[cccc::build_target]]
 BuildTarget *linux_amd64_smoke(Builder *ctx) {
-    BuildTarget *step = RunCustom(ctx, "linux-amd64-smoke",
+    BuildTarget *step = RunCustom(
+        ctx, "linux-amd64-smoke",
         "sh tools/linux_container_smoke.sh cccc-linux-amd64 cccc-linux-amd64 "
         "linux/amd64 x86_64 'x86-64|x86_64'");
     DependsOn(step, linux_amd64_build(ctx));
@@ -1015,7 +1072,8 @@ BuildTarget *linux_amd64_smoke(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *linux_aarch64_smoke(Builder *ctx) {
-    BuildTarget *step = RunCustom(ctx, "linux-aarch64-smoke",
+    BuildTarget *step = RunCustom(
+        ctx, "linux-aarch64-smoke",
         "sh tools/linux_container_smoke.sh cccc-linux-arm64 cccc-linux-arm64 "
         "linux/arm64 aarch64 'aarch64|arm64'");
     DependsOn(step, linux_aarch64_build(ctx));
@@ -1024,7 +1082,8 @@ BuildTarget *linux_aarch64_smoke(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *linux_amd64_test(Builder *ctx) {
-    BuildTarget *step = RunCustom(ctx, "linux-amd64-test",
+    BuildTarget *step = RunCustom(
+        ctx, "linux-amd64-test",
         "sh tools/linux_amd64_test.sh cccc-linux-amd64 cccc-linux-amd64 8");
     DependsOn(step, linux_amd64_smoke(ctx));
     return step;
@@ -1034,7 +1093,8 @@ BuildTarget *linux_amd64_test(Builder *ctx) {
 BuildTarget *linux_aarch64_test(Builder *ctx) {
     // No 5-way sharding on this side (Makefile:552-555 was always
     // single-shot here too -- only the x86_64/amd64 side shards).
-    BuildTarget *step = RunCustom(ctx, "linux-aarch64-test",
+    BuildTarget *step = RunCustom(
+        ctx, "linux-aarch64-test",
         "colima -p cccc-linux-arm64 nerdctl -- run --rm --platform linux/arm64 "
         "cccc-linux-arm64 timeout 600 python3 tools/run_tests.py -j 8");
     DependsOn(step, linux_aarch64_smoke(ctx));
@@ -1048,7 +1108,8 @@ BuildTarget *linux_aarch64_test(Builder *ctx) {
 [[cccc::build_target]]
 BuildTarget *linux_amd64_msan_test(Builder *ctx) {
     BuildTarget *step = RunCustom(ctx, "linux-amd64-msan-test",
-        "sh tools/linux_amd64_msan_test.sh cccc-linux-amd64 cccc-linux-amd64 8");
+                                  "sh tools/linux_amd64_msan_test.sh "
+                                  "cccc-linux-amd64 cccc-linux-amd64 8");
     DependsOn(step, linux_amd64_build(ctx));
     return step;
 }
@@ -1083,8 +1144,9 @@ BuildTarget *linux_amd64_msan_test(Builder *ctx) {
 // a bug in either regen_stdlib.sh or this up-to-date check.
 static BuildTarget *stdlib_regen_step(Builder *ctx, BuildTarget *bt) {
     BuildTarget *pass1 = make_cccc_exe_named(ctx, bt, "cccc-pass1");
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "sh tools/regen_stdlib.sh %s", TargetOutput(pass1));
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "sh tools/regen_stdlib.sh %s",
+             TargetOutput(pass1));
     BuildTarget *gen = RunCustom(ctx, "stdlib-regen", cmd);
     DeclareOutput(gen, "src/std.c");
     DependsOn(gen, pass1);
@@ -1107,18 +1169,20 @@ BuildTarget *stdlib_gen(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *bench(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
+    BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     if (!HaveTool(ctx, "hyperfine")) {
         fprintf(stderr, "build: bench requires hyperfine (not found in PATH) — "
-                        "install it (e.g. brew install hyperfine / apt install hyperfine)\n");
+                        "install it (e.g. brew install hyperfine / apt install "
+                        "hyperfine)\n");
         return RunCustom(ctx, "bench", "false");
     }
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "mkdir -p profile && hyperfine --warmup 3 --ignore-failure "
-        "--export-json profile/bench.json '%s -I./include tests/benchmarks/mandelbrot.c'",
-        TargetOutput(cccc));
+             "mkdir -p profile && hyperfine --warmup 3 --ignore-failure "
+             "--export-json profile/bench.json '%s -I./include "
+             "tests/benchmarks/mandelbrot.c'",
+             TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "bench", cmd);
     DependsOn(step, cccc);
     return step;
@@ -1131,10 +1195,10 @@ BuildTarget *bench(Builder *ctx) {
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
-    BuildTarget *gen = stdlib_regen_step(ctx, bt);
+    BuildTarget *bt             = make_libbacktrace(ctx);
+    BuildTarget *gen            = stdlib_regen_step(ctx, bt);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *final = make_cccc_exe_named(ctx, bt, "cccc");
+    BuildTarget *final          = make_cccc_exe_named(ctx, bt, "cccc");
     DependsOn(final, gen);
     DependsOn(final, reflection_gen);
     return BuildAll(ctx);

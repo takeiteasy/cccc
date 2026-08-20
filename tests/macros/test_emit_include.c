@@ -1,8 +1,8 @@
 // Test #include [[cccc::emit]]: the directive is routed to serialized output
 // without entering the runtime translation unit.
 
-#include [[cccc::emit]] <stddef.h>
-#include [[cccc::emit]] <stddef.h>
+#include[[cccc::emit]] < stddef.h>
+#include[[cccc::emit]] < stddef.h>
 
 [[cccc::comptime]]
 void gen_answer(void) {

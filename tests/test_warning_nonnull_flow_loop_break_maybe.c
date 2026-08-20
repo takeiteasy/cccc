@@ -6,10 +6,10 @@
 // second predecessor of the exit alongside the break (p non-null) --
 // the two paths must join to MAYBE.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
-    int c = 0;
+    int  x = 0;
+    int  c = 0;
     int *p = 0;
     for (int i = 0; i < 5; i++) {
         if (c) {

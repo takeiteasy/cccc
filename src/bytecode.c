@@ -35,16 +35,16 @@
 //   Return buffer offsets: data-segment byte offset for each buffer
 //   FFI table count (8 bytes)
 //   FFI entries: name_len (4 bytes), name (name_len bytes),
-//                num_args (4), returns_double (4), returns_float (4), is_variadic (4),
-//                num_fixed_args (4), double_arg_mask (8), is_dynamic_placeholder (4)
+//                num_args (4), returns_double (4), returns_float (4),
+//                is_variadic (4), num_fixed_args (4), double_arg_mask (8),
+//                is_dynamic_placeholder (4)
 //   [V2] TLS template size (8 bytes)
-//   [V2] TLS template bytes (tls_template_size bytes; pointer slots stripped to addend)
-//   [V2] TLS relocation count (8 bytes)
-//   [V2] TLS relocations: tls_offset, target_segment, target_offset, addend (4×8B each)
-//   [V3] Exported symbol table count (8 bytes)
-//   [V3] Symbol entries: pc_offset (8B), name_len (4B), name (name_len bytes)
-//   [V3] Text relocation count (8 bytes)
-//   [V3] Text relocation entries: location (8B), name_len (4B), name (name_len bytes)
+//   [V2] TLS template bytes (tls_template_size bytes; pointer slots stripped to
+//   addend) [V2] TLS relocation count (8 bytes) [V2] TLS relocations:
+//   tls_offset, target_segment, target_offset, addend (4×8B each) [V3] Exported
+//   symbol table count (8 bytes) [V3] Symbol entries: pc_offset (8B), name_len
+//   (4B), name (name_len bytes) [V3] Text relocation count (8 bytes) [V3] Text
+//   relocation entries: location (8B), name_len (4B), name (name_len bytes)
 
 static int get_opcode_operand_count(int op) {
     return cc_opcode_operand_words(op);
@@ -52,7 +52,7 @@ static int get_opcode_operand_count(int op) {
 
 static int get_instruction_word_count(InstrWord *text, long long pc,
                                       long long num_instructions) {
-    int op = (int)text[pc];
+    int op            = (int)text[pc];
     int operand_count = get_opcode_operand_count(op);
     if (operand_count < 0)
         return -1;
@@ -61,8 +61,8 @@ static int get_instruction_word_count(InstrWord *text, long long pc,
 
     int word_count = operand_count + 1;
     if (op == JMPT) {
-        Pc table_pc = text[pc + 1];
-        InstrWord count = text[pc + 2];
+        Pc        table_pc = text[pc + 1];
+        InstrWord count    = text[pc + 2];
         if (table_pc == pc + 4) {
             if (table_pc + (Pc)count > (Pc)num_instructions)
                 return -2;
@@ -84,13 +84,14 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
     }
 
     // Calculate sizes
-    long long text_size = ((long long)vm->text_ptr + 1) * (long long)sizeof(InstrWord);
-    long long data_size = vm->data_ptr - vm->data_seg;
-    long long main_offset = vm->text_seg[0];  // main() instruction index
-    long long num_instructions = text_size / (long long)sizeof(InstrWord);
-    long long data_reloc_count = vm->compiler.num_data_relocs;
+    long long text_size =
+        ((long long)vm->text_ptr + 1) * (long long)sizeof(InstrWord);
+    long long data_size           = vm->data_ptr - vm->data_seg;
+    long long main_offset         = vm->text_seg[0]; // main() instruction index
+    long long num_instructions    = text_size / (long long)sizeof(InstrWord);
+    long long data_reloc_count    = vm->compiler.num_data_relocs;
     long long return_buffer_count = vm->compiler.return_buffer_count;
-    long long return_buffer_size = vm->compiler.return_buffer_size;
+    long long return_buffer_size  = vm->compiler.return_buffer_size;
 
     if (return_buffer_count < 0 ||
         return_buffer_count > RETURN_BUFFER_POOL_SIZE ||
@@ -117,7 +118,8 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
     if (data_size > 0) {
         data_copy = malloc(data_size);
         if (!data_copy) {
-            fprintf(stderr, "error: failed to allocate temporary data buffer\n");
+            fprintf(stderr,
+                    "error: failed to allocate temporary data buffer\n");
             free(text_copy);
             return -1;
         }
@@ -130,7 +132,8 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
                 free(text_copy);
                 return -1;
             }
-            *(long long *)(data_copy + slot) = vm->compiler.data_relocs[i].addend;
+            *(long long *)(data_copy + slot) =
+                vm->compiler.data_relocs[i].addend;
         }
     }
 
@@ -142,21 +145,24 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         return -1;
     }
     // Note: text_seg[0] is metadata (main entry offset), skip it
-    is_operand[0] = 1;  // Mark position 0 as "operand" to skip it
+    is_operand[0] = 1; // Mark position 0 as "operand" to skip it
     for (long long i = 1; i < num_instructions; i++) {
-        if (is_operand[i]) continue;
+        if (is_operand[i])
+            continue;
         int op = text_copy[i];
         int word_count =
             get_instruction_word_count(text_copy, i, num_instructions);
         if (word_count == -1) {
-            fprintf(stderr, "error: unknown opcode %d while writing bytecode\n", op);
+            fprintf(stderr, "error: unknown opcode %d while writing bytecode\n",
+                    op);
             free(is_operand);
             free(data_copy);
             free(text_copy);
             return -1;
         }
         if (word_count < 0) {
-            fprintf(stderr, "error: truncated opcode %d while writing bytecode\n", op);
+            fprintf(stderr,
+                    "error: truncated opcode %d while writing bytecode\n", op);
             free(is_operand);
             free(data_copy);
             free(text_copy);
@@ -170,78 +176,107 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
     free(is_operand);
 
     // Write header
-    if (fwrite(CCCC_MAGIC, 1, 4, f) != 4) goto write_error;
+    if (fwrite(CCCC_MAGIC, 1, 4, f) != 4)
+        goto write_error;
 
     int version = CCCC_VERSION;
-    if (fwrite(&version, sizeof(int), 1, f) != 1) goto write_error;
+    if (fwrite(&version, sizeof(int), 1, f) != 1)
+        goto write_error;
 
     uint32_t flags = vm->flags;
-    if (fwrite(&flags, sizeof(uint32_t), 1, f) != 1) goto write_error;
+    if (fwrite(&flags, sizeof(uint32_t), 1, f) != 1)
+        goto write_error;
 
-    if (fwrite(&text_size, sizeof(long long), 1, f) != 1) goto write_error;
-    if (fwrite(&data_size, sizeof(long long), 1, f) != 1) goto write_error;
-    if (fwrite(&main_offset, sizeof(long long), 1, f) != 1) goto write_error;
-    if (fwrite(&data_reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+    if (fwrite(&text_size, sizeof(long long), 1, f) != 1)
+        goto write_error;
+    if (fwrite(&data_size, sizeof(long long), 1, f) != 1)
+        goto write_error;
+    if (fwrite(&main_offset, sizeof(long long), 1, f) != 1)
+        goto write_error;
+    if (fwrite(&data_reloc_count, sizeof(long long), 1, f) != 1)
+        goto write_error;
 
     // Write text segment
-    if (fwrite(text_copy, 1, text_size, f) != (size_t)text_size) goto write_error;
+    if (fwrite(text_copy, 1, text_size, f) != (size_t)text_size)
+        goto write_error;
     free(text_copy);
     text_copy = NULL;
 
     // Write data segment
     if (data_size > 0) {
-        if (fwrite(data_copy, 1, data_size, f) != (size_t)data_size) goto write_error;
+        if (fwrite(data_copy, 1, data_size, f) != (size_t)data_size)
+            goto write_error;
     }
     free(data_copy);
     data_copy = NULL;
 
     for (long long i = 0; i < data_reloc_count; i++) {
         long long target_segment = vm->compiler.data_relocs[i].target_segment;
-        if (fwrite(&vm->compiler.data_relocs[i].data_offset,
-                   sizeof(long long), 1, f) != 1) goto write_error;
-        if (fwrite(&target_segment, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&vm->compiler.data_relocs[i].data_offset, sizeof(long long),
+                   1, f) != 1)
+            goto write_error;
+        if (fwrite(&target_segment, sizeof(long long), 1, f) != 1)
+            goto write_error;
         if (fwrite(&vm->compiler.data_relocs[i].target_offset,
-                   sizeof(long long), 1, f) != 1) goto write_error;
-        if (fwrite(&vm->compiler.data_relocs[i].addend,
-                   sizeof(long long), 1, f) != 1) goto write_error;
+                   sizeof(long long), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&vm->compiler.data_relocs[i].addend, sizeof(long long), 1,
+                   f) != 1)
+            goto write_error;
     }
 
-    if (fwrite(&return_buffer_count, sizeof(long long), 1, f) != 1) goto write_error;
-    if (fwrite(&return_buffer_size, sizeof(long long), 1, f) != 1) goto write_error;
+    if (fwrite(&return_buffer_count, sizeof(long long), 1, f) != 1)
+        goto write_error;
+    if (fwrite(&return_buffer_size, sizeof(long long), 1, f) != 1)
+        goto write_error;
     for (long long i = 0; i < return_buffer_count; i++) {
-        if (fwrite(&vm->compiler.return_buffer_offsets[i],
-                   sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&vm->compiler.return_buffer_offsets[i], sizeof(long long), 1,
+                   f) != 1)
+            goto write_error;
     }
 
-    // Write FFI table (name + metadata per entry; func_ptr is resolved at load time)
+    // Write FFI table (name + metadata per entry; func_ptr is resolved at load
+    // time)
     long long ffi_count = vm->compiler.ffi_count;
-    if (fwrite(&ffi_count, sizeof(long long), 1, f) != 1) goto write_error;
+    if (fwrite(&ffi_count, sizeof(long long), 1, f) != 1)
+        goto write_error;
     for (long long i = 0; i < ffi_count; i++) {
-        ForeignFunc *ff = &vm->compiler.ffi_table[i];
-        int name_len = ff->name ? (int)ff->name_len : 0;
-        if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+        ForeignFunc *ff       = &vm->compiler.ffi_table[i];
+        int          name_len = ff->name ? (int)ff->name_len : 0;
+        if (fwrite(&name_len, sizeof(int), 1, f) != 1)
+            goto write_error;
         if (name_len > 0) {
-            if (fwrite(ff->name, 1, name_len, f) != (size_t)name_len) goto write_error;
+            if (fwrite(ff->name, 1, name_len, f) != (size_t)name_len)
+                goto write_error;
         }
-        int num_args = ff->num_args;
-        int returns_double = ff->returns_double;
-        int returns_float = ff->returns_float;
-        int is_variadic = ff->is_variadic;
-        int num_fixed_args = ff->num_fixed_args;
-        uint64_t double_arg_mask = ff->double_arg_mask;
-        int is_dynamic_placeholder = ff->is_dynamic_placeholder;
-        int is_asm_passthru = ff->is_asm_passthru;
-        int asm_src_len = (is_asm_passthru && ff->asm_src)
-                          ? (int)strlen(ff->asm_src) : 0;
-        if (fwrite(&num_args, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&returns_double, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&returns_float, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&is_variadic, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&num_fixed_args, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&double_arg_mask, sizeof(uint64_t), 1, f) != 1) goto write_error;
-        if (fwrite(&is_dynamic_placeholder, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&is_asm_passthru, sizeof(int), 1, f) != 1) goto write_error;
-        if (fwrite(&asm_src_len, sizeof(int), 1, f) != 1) goto write_error;
+        int      num_args               = ff->num_args;
+        int      returns_double         = ff->returns_double;
+        int      returns_float          = ff->returns_float;
+        int      is_variadic            = ff->is_variadic;
+        int      num_fixed_args         = ff->num_fixed_args;
+        uint64_t double_arg_mask        = ff->double_arg_mask;
+        int      is_dynamic_placeholder = ff->is_dynamic_placeholder;
+        int      is_asm_passthru        = ff->is_asm_passthru;
+        int      asm_src_len =
+            (is_asm_passthru && ff->asm_src) ? (int)strlen(ff->asm_src) : 0;
+        if (fwrite(&num_args, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&returns_double, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&returns_float, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&is_variadic, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&num_fixed_args, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&double_arg_mask, sizeof(uint64_t), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&is_dynamic_placeholder, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&is_asm_passthru, sizeof(int), 1, f) != 1)
+            goto write_error;
+        if (fwrite(&asm_src_len, sizeof(int), 1, f) != 1)
+            goto write_error;
         if (asm_src_len > 0) {
             if (fwrite(ff->asm_src, 1, asm_src_len, f) != (size_t)asm_src_len)
                 goto write_error;
@@ -251,43 +286,53 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
     // Write FFI policy (allow list, deny list, disable flag)
     {
         int disable_ffi = vm->disable_all_ffi;
-        if (fwrite(&disable_ffi, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&disable_ffi, sizeof(int), 1, f) != 1)
+            goto write_error;
 
         int allow_count = vm->ffi_allow_count;
-        if (fwrite(&allow_count, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&allow_count, sizeof(int), 1, f) != 1)
+            goto write_error;
         for (int i = 0; i < allow_count; i++) {
             int len = (int)strlen(vm->ffi_allow_list[i]);
-            if (fwrite(&len, sizeof(int), 1, f) != 1) goto write_error;
-            if (fwrite(vm->ffi_allow_list[i], 1, len, f) != (size_t)len) goto write_error;
+            if (fwrite(&len, sizeof(int), 1, f) != 1)
+                goto write_error;
+            if (fwrite(vm->ffi_allow_list[i], 1, len, f) != (size_t)len)
+                goto write_error;
         }
 
         int deny_count = vm->ffi_deny_count;
-        if (fwrite(&deny_count, sizeof(int), 1, f) != 1) goto write_error;
+        if (fwrite(&deny_count, sizeof(int), 1, f) != 1)
+            goto write_error;
         for (int i = 0; i < deny_count; i++) {
             int len = (int)strlen(vm->ffi_deny_list[i]);
-            if (fwrite(&len, sizeof(int), 1, f) != 1) goto write_error;
-            if (fwrite(vm->ffi_deny_list[i], 1, len, f) != (size_t)len) goto write_error;
+            if (fwrite(&len, sizeof(int), 1, f) != 1)
+                goto write_error;
+            if (fwrite(vm->ffi_deny_list[i], 1, len, f) != (size_t)len)
+                goto write_error;
         }
     }
 
     // Write TLS section (V2): template bytes + relocation table (#493)
     {
-        long long tls_size = (long long)vm->tls_template_size;
+        long long tls_size        = (long long)vm->tls_template_size;
         long long tls_reloc_count = vm->compiler.num_tls_relocs;
-        if (fwrite(&tls_size, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&tls_size, sizeof(long long), 1, f) != 1)
+            goto write_error;
 
         if (tls_size > 0) {
             // Strip absolute pointer values (replace with addend, matching the
             // data-segment treatment) so the template is position-independent.
             char *tls_copy = malloc((size_t)tls_size);
             if (!tls_copy) {
-                fprintf(stderr, "error: failed to allocate TLS template buffer\n");
+                fprintf(stderr,
+                        "error: failed to allocate TLS template buffer\n");
                 return -1;
             }
             memcpy(tls_copy, vm->tls_template, (size_t)tls_size);
             for (long long i = 0; i < tls_reloc_count; i++) {
                 long long slot = vm->compiler.tls_relocs[i].tls_offset;
-                *(long long *)(tls_copy + slot) = vm->compiler.tls_relocs[i].addend;
+                *(long long *)(tls_copy + slot) =
+                    vm->compiler.tls_relocs[i].addend;
             }
             if (fwrite(tls_copy, 1, (size_t)tls_size, f) != (size_t)tls_size) {
                 free(tls_copy);
@@ -296,31 +341,40 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
             free(tls_copy);
         }
 
-        if (fwrite(&tls_reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&tls_reloc_count, sizeof(long long), 1, f) != 1)
+            goto write_error;
         for (long long i = 0; i < tls_reloc_count; i++) {
             long long tls_offset    = vm->compiler.tls_relocs[i].tls_offset;
             long long target_seg    = vm->compiler.tls_relocs[i].target_segment;
             long long target_offset = vm->compiler.tls_relocs[i].target_offset;
             long long addend        = vm->compiler.tls_relocs[i].addend;
-            if (fwrite(&tls_offset,    sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&target_seg,    sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&target_offset, sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&addend,        sizeof(long long), 1, f) != 1) goto write_error;
+            if (fwrite(&tls_offset, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&target_seg, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&target_offset, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&addend, sizeof(long long), 1, f) != 1)
+                goto write_error;
         }
     }
 
     // Write exported symbol table [V3]: non-static function definitions (#565).
     {
         long long sym_count = vm->compiler.num_sym_table;
-        if (fwrite(&sym_count, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&sym_count, sizeof(long long), 1, f) != 1)
+            goto write_error;
         for (long long i = 0; i < sym_count; i++) {
-            long long pc_off = (long long)vm->compiler.sym_table[i].pc_offset;
-            int name_len = (int)vm->compiler.sym_table[i].name_len;
-            if (fwrite(&pc_off, sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+            long long pc_off   = (long long)vm->compiler.sym_table[i].pc_offset;
+            int       name_len = (int)vm->compiler.sym_table[i].name_len;
+            if (fwrite(&pc_off, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&name_len, sizeof(int), 1, f) != 1)
+                goto write_error;
             if (name_len > 0) {
-                if (fwrite(vm->compiler.sym_table[i].name, 1, (size_t)name_len, f)
-                        != (size_t)name_len) goto write_error;
+                if (fwrite(vm->compiler.sym_table[i].name, 1, (size_t)name_len,
+                           f) != (size_t)name_len)
+                    goto write_error;
             }
         }
     }
@@ -330,36 +384,49 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
         // Only write unresolved entries.
         long long reloc_count = 0;
         for (int i = 0; i < vm->compiler.num_text_relocs; i++)
-            if (!vm->compiler.text_relocs[i].resolved) reloc_count++;
-        if (fwrite(&reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+            if (!vm->compiler.text_relocs[i].resolved)
+                reloc_count++;
+        if (fwrite(&reloc_count, sizeof(long long), 1, f) != 1)
+            goto write_error;
         for (int i = 0; i < vm->compiler.num_text_relocs; i++) {
-            if (vm->compiler.text_relocs[i].resolved) continue;
+            if (vm->compiler.text_relocs[i].resolved)
+                continue;
             long long loc = (long long)vm->compiler.text_relocs[i].location;
-            int name_len = (int)vm->compiler.text_relocs[i].name_len;
-            if (fwrite(&loc, sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+            int       name_len = (int)vm->compiler.text_relocs[i].name_len;
+            if (fwrite(&loc, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&name_len, sizeof(int), 1, f) != 1)
+                goto write_error;
             if (name_len > 0) {
-                if (fwrite(vm->compiler.text_relocs[i].name, 1, (size_t)name_len, f)
-                        != (size_t)name_len) goto write_error;
+                if (fwrite(vm->compiler.text_relocs[i].name, 1,
+                           (size_t)name_len, f) != (size_t)name_len)
+                    goto write_error;
             }
         }
     }
 
-    // Write address relocations [V3+]: unresolved function-pointer sites (#566).
+    // Write address relocations [V3+]: unresolved function-pointer sites
+    // (#566).
     {
         long long addr_reloc_count = 0;
         for (int i = 0; i < vm->compiler.num_addr_relocs; i++)
-            if (!vm->compiler.addr_relocs[i].resolved) addr_reloc_count++;
-        if (fwrite(&addr_reloc_count, sizeof(long long), 1, f) != 1) goto write_error;
+            if (!vm->compiler.addr_relocs[i].resolved)
+                addr_reloc_count++;
+        if (fwrite(&addr_reloc_count, sizeof(long long), 1, f) != 1)
+            goto write_error;
         for (int i = 0; i < vm->compiler.num_addr_relocs; i++) {
-            if (vm->compiler.addr_relocs[i].resolved) continue;
+            if (vm->compiler.addr_relocs[i].resolved)
+                continue;
             long long loc = (long long)vm->compiler.addr_relocs[i].location;
-            int name_len = (int)vm->compiler.addr_relocs[i].name_len;
-            if (fwrite(&loc, sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&name_len, sizeof(int), 1, f) != 1) goto write_error;
+            int       name_len = (int)vm->compiler.addr_relocs[i].name_len;
+            if (fwrite(&loc, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&name_len, sizeof(int), 1, f) != 1)
+                goto write_error;
             if (name_len > 0) {
-                if (fwrite(vm->compiler.addr_relocs[i].name, 1, (size_t)name_len, f)
-                        != (size_t)name_len) goto write_error;
+                if (fwrite(vm->compiler.addr_relocs[i].name, 1,
+                           (size_t)name_len, f) != (size_t)name_len)
+                    goto write_error;
             }
         }
     }
@@ -370,42 +437,53 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
     // verbatim on load, so offsets remain valid without further relocation.
     {
         long long ctor_count = vm->compiler.ctor_count;
-        if (fwrite(&ctor_count, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&ctor_count, sizeof(long long), 1, f) != 1)
+            goto write_error;
         for (long long i = 0; i < ctor_count; i++) {
-            long long addr = vm->compiler.ctor_list[i].code_addr;
-            int priority = vm->compiler.ctor_list[i].priority;
-            int seq = vm->compiler.ctor_list[i].seq;
-            if (fwrite(&addr, sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&priority, sizeof(int), 1, f) != 1) goto write_error;
-            if (fwrite(&seq, sizeof(int), 1, f) != 1) goto write_error;
+            long long addr     = vm->compiler.ctor_list[i].code_addr;
+            int       priority = vm->compiler.ctor_list[i].priority;
+            int       seq      = vm->compiler.ctor_list[i].seq;
+            if (fwrite(&addr, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&priority, sizeof(int), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&seq, sizeof(int), 1, f) != 1)
+                goto write_error;
         }
 
         long long dtor_count = vm->compiler.dtor_count;
-        if (fwrite(&dtor_count, sizeof(long long), 1, f) != 1) goto write_error;
+        if (fwrite(&dtor_count, sizeof(long long), 1, f) != 1)
+            goto write_error;
         for (long long i = 0; i < dtor_count; i++) {
-            long long addr = vm->compiler.dtor_list[i].code_addr;
-            int priority = vm->compiler.dtor_list[i].priority;
-            int seq = vm->compiler.dtor_list[i].seq;
-            if (fwrite(&addr, sizeof(long long), 1, f) != 1) goto write_error;
-            if (fwrite(&priority, sizeof(int), 1, f) != 1) goto write_error;
-            if (fwrite(&seq, sizeof(int), 1, f) != 1) goto write_error;
+            long long addr     = vm->compiler.dtor_list[i].code_addr;
+            int       priority = vm->compiler.dtor_list[i].priority;
+            int       seq      = vm->compiler.dtor_list[i].seq;
+            if (fwrite(&addr, sizeof(long long), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&priority, sizeof(int), 1, f) != 1)
+                goto write_error;
+            if (fwrite(&seq, sizeof(int), 1, f) != 1)
+                goto write_error;
         }
     }
 
     if (vm->debug_vm) {
-        printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
+        printf("  Text size: %lld bytes (%lld instructions)\n", text_size,
+               num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
-        printf("  TLS template: %zu bytes, %d relocs\n",
-               vm->tls_template_size, vm->compiler.num_tls_relocs);
+        printf("  TLS template: %zu bytes, %d relocs\n", vm->tls_template_size,
+               vm->compiler.num_tls_relocs);
         printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
                return_buffer_size);
         printf("  FFI entries: %lld\n", ffi_count);
-        printf("  FFI allow: %d  deny: %d  disable: %d\n",
-               vm->ffi_allow_count, vm->ffi_deny_count, vm->disable_all_ffi);
+        printf("  FFI allow: %d  deny: %d  disable: %d\n", vm->ffi_allow_count,
+               vm->ffi_deny_count, vm->disable_all_ffi);
         printf("  Symbol table: %d entries\n", vm->compiler.num_sym_table);
-        printf("  Text relocations: %d unresolved\n", vm->compiler.num_text_relocs);
-        printf("  Address relocations: %d unresolved\n", vm->compiler.num_addr_relocs);
+        printf("  Text relocations: %d unresolved\n",
+               vm->compiler.num_text_relocs);
+        printf("  Address relocations: %d unresolved\n",
+               vm->compiler.num_addr_relocs);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -413,8 +491,10 @@ int cc_write_bytecode(VirtualMachine *vm, FILE *f) {
 
 write_error:
     fprintf(stderr, "error: failed to write bytecode: %s\n", strerror(errno));
-    if (data_copy) free(data_copy);
-    if (text_copy) free(text_copy);
+    if (data_copy)
+        free(data_copy);
+    if (text_copy)
+        free(text_copy);
     return -1;
 }
 
@@ -431,7 +511,8 @@ int cc_save_bytecode(VirtualMachine *vm, const char *path) {
 
     FILE *f = fopen(path, "wb");
     if (!f) {
-        fprintf(stderr, "error: failed to open %s for writing: %s\n", path, strerror(errno));
+        fprintf(stderr, "error: failed to open %s for writing: %s\n", path,
+                strerror(errno));
         return -1;
     }
 
@@ -449,15 +530,15 @@ int cc_save_bytecode(VirtualMachine *vm, const char *path) {
 
 static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     const char *cursor = data;
-    const char *end = data + size;
+    const char *end    = data + size;
 
-#define READ_AND_INCR(VAR, TYPE)                                     \
-    if (cursor + sizeof(TYPE) > end) {                               \
-        fprintf(stderr, "error: unexpected end of bytecode data\n"); \
-        return -1;                                                   \
-    }                                                                \
-    TYPE VAR = *(TYPE *)cursor;                                      \
-    cursor += sizeof(TYPE);
+#define READ_AND_INCR(VAR, TYPE)                                               \
+    if (cursor + sizeof(TYPE) > end) {                                         \
+        fprintf(stderr, "error: unexpected end of bytecode data\n");           \
+        return -1;                                                             \
+    }                                                                          \
+    TYPE VAR  = *(TYPE *)cursor;                                               \
+    cursor   += sizeof(TYPE);
 
     // Read magic
     if (cursor + 4 > end || memcmp(cursor, CCCC_MAGIC, 4) != 0) {
@@ -469,7 +550,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     // Read version - only accept the current 32-bit instruction format.
     READ_AND_INCR(version, int);
     if (version != CCCC_VERSION) {
-        fprintf(stderr, "error: unsupported bytecode version %d (expected %d)\n",
+        fprintf(stderr,
+                "error: unsupported bytecode version %d (expected %d)\n",
                 version, CCCC_VERSION);
         return -1;
     }
@@ -487,7 +569,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     if (text_size < 0 || data_size < 0 || data_reloc_count < 0 ||
         data_reloc_count > MAX_CALLS ||
         cursor + text_size + data_size +
-            data_reloc_count * 4 * (long long)sizeof(long long) > end ||
+                data_reloc_count * 4 * (long long)sizeof(long long) >
+            end ||
         text_size > vm->poolsize_max * (long long)sizeof(InstrWord) ||
         text_size % (long long)sizeof(InstrWord) != 0 ||
         data_size > vm->poolsize_max) {
@@ -523,12 +606,12 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     if (data_reloc_count > 0) {
         void *_tmp = realloc(vm->compiler.data_relocs,
                              (size_t)data_reloc_count *
-                             sizeof(*vm->compiler.data_relocs));
+                                 sizeof(*vm->compiler.data_relocs));
         if (!_tmp) {
             fprintf(stderr, "error: out of memory for data relocations\n");
             return -1;
         }
-        vm->compiler.data_relocs = _tmp;
+        vm->compiler.data_relocs     = _tmp;
         vm->compiler.data_relocs_cap = (int)data_reloc_count;
     }
     for (long long i = 0; i < data_reloc_count; i++) {
@@ -565,12 +648,12 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
     }
 
     vm->compiler.return_buffer_count = (int)return_buffer_count;
-    vm->compiler.return_buffer_size = (int)return_buffer_size;
+    vm->compiler.return_buffer_size  = (int)return_buffer_size;
     vm->compiler.return_buffer_index = 0;
-    vm->runtime_return_buffer_index = 0;
+    vm->runtime_return_buffer_index  = 0;
     for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
         vm->compiler.return_buffer_offsets[i] = -1;
-        vm->compiler.return_buffer_pool[i] = NULL;
+        vm->compiler.return_buffer_pool[i]    = NULL;
     }
     for (long long i = 0; i < return_buffer_count; i++) {
         READ_AND_INCR(return_buffer_offset, long long);
@@ -580,20 +663,23 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             return -1;
         }
         vm->compiler.return_buffer_offsets[i] = return_buffer_offset;
-        vm->compiler.return_buffer_pool[i] = vm->data_seg + return_buffer_offset;
+        vm->compiler.return_buffer_pool[i] =
+            vm->data_seg + return_buffer_offset;
     }
 
     // Read FFI table (name + metadata; func_ptr is resolved by the caller via
     // cc_load_libc / load_requested_libraries)
     READ_AND_INCR(ffi_count, long long);
     if (ffi_count < 0 || ffi_count > MAX_CALLS) {
-        fprintf(stderr, "error: invalid FFI count %lld in bytecode\n", ffi_count);
+        fprintf(stderr, "error: invalid FFI count %lld in bytecode\n",
+                ffi_count);
         return -1;
     }
     if (ffi_count > vm->compiler.ffi_capacity) {
         vm->compiler.ffi_capacity = (int)ffi_count;
-        vm->compiler.ffi_table = realloc(vm->compiler.ffi_table,
-            vm->compiler.ffi_capacity * sizeof(ForeignFunc));
+        vm->compiler.ffi_table =
+            realloc(vm->compiler.ffi_table,
+                    vm->compiler.ffi_capacity * sizeof(ForeignFunc));
         if (!vm->compiler.ffi_table) {
             fprintf(stderr, "error: failed to allocate FFI table\n");
             return -1;
@@ -603,11 +689,14 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         READ_AND_INCR(name_len, int);
         // Fixed-width fields: 7 ints + 1 uint64_t (plus optional asm_src bytes)
         if (name_len < 0 || name_len > 4096 ||
-            cursor + name_len + 7 * (long long)sizeof(int) + (long long)sizeof(uint64_t) > end) {
-            fprintf(stderr, "error: invalid FFI entry header at index %lld\n", i);
+            cursor + name_len + 7 * (long long)sizeof(int) +
+                    (long long)sizeof(uint64_t) >
+                end) {
+            fprintf(stderr, "error: invalid FFI entry header at index %lld\n",
+                    i);
             return -1;
         }
-        char *name = NULL;
+        char  *name            = NULL;
         size_t actual_name_len = 0;
         if (name_len > 0) {
             name = malloc((size_t)name_len + 1);
@@ -616,9 +705,9 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 return -1;
             }
             memcpy(name, cursor, (size_t)name_len);
-            name[name_len] = '\0';
-            cursor += name_len;
-            actual_name_len = (size_t)name_len;
+            name[name_len]   = '\0';
+            cursor          += name_len;
+            actual_name_len  = (size_t)name_len;
         }
         READ_AND_INCR(num_args_i, int);
         READ_AND_INCR(returns_double_i, int);
@@ -632,7 +721,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         char *asm_src = NULL;
         if (asm_src_len_i < 0 || asm_src_len_i > 65536 ||
             cursor + asm_src_len_i > end) {
-            fprintf(stderr, "error: invalid asm_src length %d at FFI index %lld\n",
+            fprintf(stderr,
+                    "error: invalid asm_src length %d at FFI index %lld\n",
                     asm_src_len_i, i);
             free(name);
             return -1;
@@ -645,23 +735,23 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 return -1;
             }
             memcpy(asm_src, cursor, (size_t)asm_src_len_i);
-            asm_src[asm_src_len_i] = '\0';
-            cursor += asm_src_len_i;
+            asm_src[asm_src_len_i]  = '\0';
+            cursor                 += asm_src_len_i;
         }
 
-        ForeignFunc *ff = &vm->compiler.ffi_table[i];
-        ff->name = name;
-        ff->name_len = actual_name_len;
-        ff->func_ptr = NULL;
-        ff->num_args = num_args_i;
-        ff->returns_double = returns_double_i;
-        ff->returns_float = returns_float_i;
-        ff->is_variadic = is_variadic_i;
-        ff->num_fixed_args = num_fixed_args_i;
-        ff->double_arg_mask = double_arg_mask;
+        ForeignFunc *ff            = &vm->compiler.ffi_table[i];
+        ff->name                   = name;
+        ff->name_len               = actual_name_len;
+        ff->func_ptr               = NULL;
+        ff->num_args               = num_args_i;
+        ff->returns_double         = returns_double_i;
+        ff->returns_float          = returns_float_i;
+        ff->is_variadic            = is_variadic_i;
+        ff->num_fixed_args         = num_fixed_args_i;
+        ff->double_arg_mask        = double_arg_mask;
         ff->is_dynamic_placeholder = is_dynamic_placeholder_i;
-        ff->is_asm_passthru = is_asm_passthru_i;
-        ff->asm_src = asm_src;
+        ff->is_asm_passthru        = is_asm_passthru_i;
+        ff->asm_src                = asm_src;
     }
     vm->compiler.ffi_count = (int)ffi_count;
 
@@ -678,7 +768,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         for (int i = 0; i < allow_count_i; i++) {
             READ_AND_INCR(len, int);
             if (len < 0 || len > 4096 || cursor + len > end) {
-                fprintf(stderr, "error: invalid FFI allow entry at index %d\n", i);
+                fprintf(stderr, "error: invalid FFI allow entry at index %d\n",
+                        i);
                 return -1;
             }
             char *name = malloc((size_t)len + 1);
@@ -687,8 +778,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 return -1;
             }
             memcpy(name, cursor, (size_t)len);
-            name[len] = '\0';
-            cursor += len;
+            name[len]  = '\0';
+            cursor    += len;
             cc_ffi_allow(vm, name);
             free(name);
         }
@@ -701,7 +792,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         for (int i = 0; i < deny_count_i; i++) {
             READ_AND_INCR(len, int);
             if (len < 0 || len > 4096 || cursor + len > end) {
-                fprintf(stderr, "error: invalid FFI deny entry at index %d\n", i);
+                fprintf(stderr, "error: invalid FFI deny entry at index %d\n",
+                        i);
                 return -1;
             }
             char *name = malloc((size_t)len + 1);
@@ -710,8 +802,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 return -1;
             }
             memcpy(name, cursor, (size_t)len);
-            name[len] = '\0';
-            cursor += len;
+            name[len]  = '\0';
+            cursor    += len;
             cc_ffi_deny(vm, name);
             free(name);
         }
@@ -726,7 +818,8 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         }
         if (tls_size_i > 0) {
             if (cursor + tls_size_i > end) {
-                fprintf(stderr, "error: TLS template extends past end of bytecode\n");
+                fprintf(stderr,
+                        "error: TLS template extends past end of bytecode\n");
                 return -1;
             }
             // Allocate and populate tls_template from the file
@@ -737,9 +830,9 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 return -1;
             }
             memcpy(vm->tls_template, cursor, (size_t)tls_size_i);
-            vm->tls_template_size = (size_t)tls_size_i;
-            vm->tls_template_cap  = (size_t)tls_size_i;
-            cursor += tls_size_i;
+            vm->tls_template_size  = (size_t)tls_size_i;
+            vm->tls_template_cap   = (size_t)tls_size_i;
+            cursor                += tls_size_i;
         } else {
             // No TLS in this bytecode
             vm->tls_template_size = 0;
@@ -747,27 +840,29 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
 
         READ_AND_INCR(tls_reloc_count_i, long long);
         if (tls_reloc_count_i < 0 || tls_reloc_count_i > MAX_CALLS ||
-            cursor + tls_reloc_count_i * 4 * (long long)sizeof(long long) > end) {
-            fprintf(stderr, "error: invalid TLS relocation count in bytecode\n");
+            cursor + tls_reloc_count_i * 4 * (long long)sizeof(long long) >
+                end) {
+            fprintf(stderr,
+                    "error: invalid TLS relocation count in bytecode\n");
             return -1;
         }
         vm->compiler.num_tls_relocs = 0;
         if (tls_reloc_count_i > 0) {
             void *_tmp = realloc(vm->compiler.tls_relocs,
                                  (size_t)tls_reloc_count_i *
-                                 sizeof(*vm->compiler.tls_relocs));
+                                     sizeof(*vm->compiler.tls_relocs));
             if (!_tmp) {
                 fprintf(stderr, "error: out of memory for TLS relocations\n");
                 return -1;
             }
-            vm->compiler.tls_relocs = _tmp;
+            vm->compiler.tls_relocs     = _tmp;
             vm->compiler.tls_relocs_cap = (int)tls_reloc_count_i;
         }
         for (long long i = 0; i < tls_reloc_count_i; i++) {
-            READ_AND_INCR(tls_offset,    long long);
-            READ_AND_INCR(target_seg,    long long);
+            READ_AND_INCR(tls_offset, long long);
+            READ_AND_INCR(target_seg, long long);
             READ_AND_INCR(target_offset, long long);
-            READ_AND_INCR(addend,        long long);
+            READ_AND_INCR(addend, long long);
             if (tls_size_i > 0 &&
                 (tls_offset < 0 ||
                  tls_offset + (long long)sizeof(long long) > tls_size_i ||
@@ -775,20 +870,24 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 fprintf(stderr, "error: invalid TLS relocation record\n");
                 return -1;
             }
-            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset    = tls_offset;
-            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_segment = (int)target_seg;
-            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset  = target_offset;
-            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend         = addend;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].tls_offset =
+                tls_offset;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs]
+                .target_segment = (int)target_seg;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].target_offset =
+                target_offset;
+            vm->compiler.tls_relocs[vm->compiler.num_tls_relocs].addend =
+                addend;
             vm->compiler.num_tls_relocs++;
         }
     }
 
     // Read exported symbol table [V3] (#565).
     // These sections are optional (old .c4 files without them are still valid).
-    vm->compiler.num_sym_table = 0;
+    vm->compiler.num_sym_table   = 0;
     vm->compiler.num_text_relocs = 0;
-    vm->compiler.ctor_count = 0;
-    vm->compiler.dtor_count = 0;
+    vm->compiler.ctor_count      = 0;
+    vm->compiler.dtor_count      = 0;
     if (cursor < end) {
         READ_AND_INCR(sym_count, long long);
         if (sym_count < 0 || sym_count > MAX_CALLS) {
@@ -796,20 +895,20 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             return -1;
         }
         if (sym_count > 0) {
-            void *_tmp = realloc(vm->compiler.sym_table,
-                                 (size_t)sym_count * sizeof(*vm->compiler.sym_table));
+            void *_tmp =
+                realloc(vm->compiler.sym_table,
+                        (size_t)sym_count * sizeof(*vm->compiler.sym_table));
             if (!_tmp) {
                 fprintf(stderr, "error: out of memory for symbol table\n");
                 return -1;
             }
-            vm->compiler.sym_table = _tmp;
+            vm->compiler.sym_table     = _tmp;
             vm->compiler.sym_table_cap = (int)sym_count;
         }
         for (long long i = 0; i < sym_count; i++) {
             READ_AND_INCR(pc_off, long long);
             READ_AND_INCR(sname_len, int);
-            if (sname_len < 0 || sname_len > 4096 ||
-                cursor + sname_len > end) {
+            if (sname_len < 0 || sname_len > 4096 || cursor + sname_len > end) {
                 fprintf(stderr, "error: invalid symbol table entry\n");
                 return -1;
             }
@@ -821,12 +920,14 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                     return -1;
                 }
                 memcpy(sname, cursor, (size_t)sname_len);
-                sname[sname_len] = '\0';
-                cursor += sname_len;
+                sname[sname_len]  = '\0';
+                cursor           += sname_len;
             }
-            vm->compiler.sym_table[vm->compiler.num_sym_table].pc_offset = (Pc)pc_off;
-            vm->compiler.sym_table[vm->compiler.num_sym_table].name      = sname;
-            vm->compiler.sym_table[vm->compiler.num_sym_table].name_len  = (size_t)sname_len;
+            vm->compiler.sym_table[vm->compiler.num_sym_table].pc_offset =
+                (Pc)pc_off;
+            vm->compiler.sym_table[vm->compiler.num_sym_table].name = sname;
+            vm->compiler.sym_table[vm->compiler.num_sym_table].name_len =
+                (size_t)sname_len;
             vm->compiler.num_sym_table++;
         }
 
@@ -839,12 +940,14 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             }
             if (treloc_count > 0) {
                 void *_tmp = realloc(vm->compiler.text_relocs,
-                                     (size_t)treloc_count * sizeof(*vm->compiler.text_relocs));
+                                     (size_t)treloc_count *
+                                         sizeof(*vm->compiler.text_relocs));
                 if (!_tmp) {
-                    fprintf(stderr, "error: out of memory for text relocations\n");
+                    fprintf(stderr,
+                            "error: out of memory for text relocations\n");
                     return -1;
                 }
-                vm->compiler.text_relocs = _tmp;
+                vm->compiler.text_relocs     = _tmp;
                 vm->compiler.text_relocs_cap = (int)treloc_count;
             }
             for (long long i = 0; i < treloc_count; i++) {
@@ -859,17 +962,22 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 if (trname_len > 0) {
                     trname = malloc((size_t)trname_len + 1);
                     if (!trname) {
-                        fprintf(stderr, "error: out of memory for relocation name\n");
+                        fprintf(stderr,
+                                "error: out of memory for relocation name\n");
                         return -1;
                     }
                     memcpy(trname, cursor, (size_t)trname_len);
-                    trname[trname_len] = '\0';
-                    cursor += trname_len;
+                    trname[trname_len]  = '\0';
+                    cursor             += trname_len;
                 }
-                vm->compiler.text_relocs[vm->compiler.num_text_relocs].location = (Pc)trloc;
-                vm->compiler.text_relocs[vm->compiler.num_text_relocs].name     = trname;
-                vm->compiler.text_relocs[vm->compiler.num_text_relocs].name_len = (size_t)trname_len;
-                vm->compiler.text_relocs[vm->compiler.num_text_relocs].resolved = 0;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs]
+                    .location = (Pc)trloc;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs].name =
+                    trname;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs]
+                    .name_len = (size_t)trname_len;
+                vm->compiler.text_relocs[vm->compiler.num_text_relocs]
+                    .resolved = 0;
                 vm->compiler.num_text_relocs++;
             }
         }
@@ -883,12 +991,14 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             }
             if (areloc_count > 0) {
                 void *_tmp = realloc(vm->compiler.addr_relocs,
-                                     (size_t)areloc_count * sizeof(*vm->compiler.addr_relocs));
+                                     (size_t)areloc_count *
+                                         sizeof(*vm->compiler.addr_relocs));
                 if (!_tmp) {
-                    fprintf(stderr, "error: out of memory for address relocations\n");
+                    fprintf(stderr,
+                            "error: out of memory for address relocations\n");
                     return -1;
                 }
-                vm->compiler.addr_relocs = _tmp;
+                vm->compiler.addr_relocs     = _tmp;
                 vm->compiler.addr_relocs_cap = (int)areloc_count;
             }
             for (long long i = 0; i < areloc_count; i++) {
@@ -896,24 +1006,30 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 READ_AND_INCR(arname_len, int);
                 if (arname_len < 0 || arname_len > 4096 ||
                     cursor + arname_len > end) {
-                    fprintf(stderr, "error: invalid address relocation entry\n");
+                    fprintf(stderr,
+                            "error: invalid address relocation entry\n");
                     return -1;
                 }
                 char *arname = NULL;
                 if (arname_len > 0) {
                     arname = malloc((size_t)arname_len + 1);
                     if (!arname) {
-                        fprintf(stderr, "error: out of memory for relocation name\n");
+                        fprintf(stderr,
+                                "error: out of memory for relocation name\n");
                         return -1;
                     }
                     memcpy(arname, cursor, (size_t)arname_len);
-                    arname[arname_len] = '\0';
-                    cursor += arname_len;
+                    arname[arname_len]  = '\0';
+                    cursor             += arname_len;
                 }
-                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].location = (Pc)arloc;
-                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].name     = arname;
-                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].name_len = (size_t)arname_len;
-                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].resolved = 0;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs]
+                    .location = (Pc)arloc;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs].name =
+                    arname;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs]
+                    .name_len = (size_t)arname_len;
+                vm->compiler.addr_relocs[vm->compiler.num_addr_relocs]
+                    .resolved = 0;
                 vm->compiler.num_addr_relocs++;
             }
         }
@@ -929,12 +1045,14 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             }
             if (ctor_count > vm->compiler.ctor_capacity) {
                 void *_tmp = realloc(vm->compiler.ctor_list,
-                                     (size_t)ctor_count * sizeof(*vm->compiler.ctor_list));
+                                     (size_t)ctor_count *
+                                         sizeof(*vm->compiler.ctor_list));
                 if (!_tmp) {
-                    fprintf(stderr, "error: out of memory for constructor list\n");
+                    fprintf(stderr,
+                            "error: out of memory for constructor list\n");
                     return -1;
                 }
-                vm->compiler.ctor_list = _tmp;
+                vm->compiler.ctor_list     = _tmp;
                 vm->compiler.ctor_capacity = (int)ctor_count;
             }
             vm->compiler.ctor_count = 0;
@@ -942,9 +1060,11 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 READ_AND_INCR(caddr, long long);
                 READ_AND_INCR(cpriority, int);
                 READ_AND_INCR(cseq, int);
-                vm->compiler.ctor_list[vm->compiler.ctor_count].code_addr = caddr;
-                vm->compiler.ctor_list[vm->compiler.ctor_count].priority  = cpriority;
-                vm->compiler.ctor_list[vm->compiler.ctor_count].seq       = cseq;
+                vm->compiler.ctor_list[vm->compiler.ctor_count].code_addr =
+                    caddr;
+                vm->compiler.ctor_list[vm->compiler.ctor_count].priority =
+                    cpriority;
+                vm->compiler.ctor_list[vm->compiler.ctor_count].seq = cseq;
                 vm->compiler.ctor_count++;
             }
 
@@ -956,12 +1076,14 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                 }
                 if (dtor_count > vm->compiler.dtor_capacity) {
                     void *_tmp = realloc(vm->compiler.dtor_list,
-                                         (size_t)dtor_count * sizeof(*vm->compiler.dtor_list));
+                                         (size_t)dtor_count *
+                                             sizeof(*vm->compiler.dtor_list));
                     if (!_tmp) {
-                        fprintf(stderr, "error: out of memory for destructor list\n");
+                        fprintf(stderr,
+                                "error: out of memory for destructor list\n");
                         return -1;
                     }
-                    vm->compiler.dtor_list = _tmp;
+                    vm->compiler.dtor_list     = _tmp;
                     vm->compiler.dtor_capacity = (int)dtor_count;
                 }
                 vm->compiler.dtor_count = 0;
@@ -969,9 +1091,11 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
                     READ_AND_INCR(daddr, long long);
                     READ_AND_INCR(dpriority, int);
                     READ_AND_INCR(dseq, int);
-                    vm->compiler.dtor_list[vm->compiler.dtor_count].code_addr = daddr;
-                    vm->compiler.dtor_list[vm->compiler.dtor_count].priority  = dpriority;
-                    vm->compiler.dtor_list[vm->compiler.dtor_count].seq       = dseq;
+                    vm->compiler.dtor_list[vm->compiler.dtor_count].code_addr =
+                        daddr;
+                    vm->compiler.dtor_list[vm->compiler.dtor_count].priority =
+                        dpriority;
+                    vm->compiler.dtor_list[vm->compiler.dtor_count].seq = dseq;
                     vm->compiler.dtor_count++;
                 }
             }
@@ -987,9 +1111,10 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
         return -1;
     }
     // Note: text_seg[0] is metadata (main entry offset), skip it
-    is_operand[0] = 1;  // Mark position 0 as "operand" to skip it
+    is_operand[0] = 1; // Mark position 0 as "operand" to skip it
     for (long long i = 1; i < num_instructions; i++) {
-        if (is_operand[i]) continue;
+        if (is_operand[i])
+            continue;
         int op = vm->text_seg[i];
         int word_count =
             get_instruction_word_count(vm->text_seg, i, num_instructions);
@@ -1010,10 +1135,11 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
 
     free(is_operand);
 
-    // Set up pointers (heap_ptr/heap_end/free_list already set by vm_alloc_segments)
-    vm->text_ptr = (Pc)(text_size / (long long)sizeof(InstrWord)) - 1;
-    vm->data_ptr = vm->data_seg + data_size;
-    vm->text_seg[0] = main_offset;  // Restore main offset
+    // Set up pointers (heap_ptr/heap_end/free_list already set by
+    // vm_alloc_segments)
+    vm->text_ptr    = (Pc)(text_size / (long long)sizeof(InstrWord)) - 1;
+    vm->data_ptr    = vm->data_seg + data_size;
+    vm->text_seg[0] = main_offset; // Restore main offset
 
     for (int i = 0; i < vm->compiler.num_data_relocs; i++) {
         long long value;
@@ -1040,21 +1166,22 @@ static int load_bytecode(VirtualMachine *vm, const char *data, size_t size) {
             value = vm->compiler.tls_relocs[i].target_offset +
                     vm->compiler.tls_relocs[i].addend;
         }
-        *(long long *)(vm->tls_template + vm->compiler.tls_relocs[i].tls_offset) =
-            value;
+        *(long long *)(vm->tls_template +
+                       vm->compiler.tls_relocs[i].tls_offset) = value;
     }
 
     if (vm->debug_vm) {
         printf("Loaded bytecode:\n");
-        printf("  Text size: %lld bytes (%lld instructions)\n", text_size, num_instructions);
+        printf("  Text size: %lld bytes (%lld instructions)\n", text_size,
+               num_instructions);
         printf("  Data size: %lld bytes\n", data_size);
         printf("  Data relocations: %lld\n", data_reloc_count);
-        printf("  TLS template: %zu bytes, %d relocs\n",
-               vm->tls_template_size, vm->compiler.num_tls_relocs);
+        printf("  TLS template: %zu bytes, %d relocs\n", vm->tls_template_size,
+               vm->compiler.num_tls_relocs);
         printf("  Return buffers: %lld x %lld bytes\n", return_buffer_count,
                return_buffer_size);
-        printf("  FFI allow: %d  deny: %d  disable: %d\n",
-               vm->ffi_allow_count, vm->ffi_deny_count, vm->disable_all_ffi);
+        printf("  FFI allow: %d  deny: %d  disable: %d\n", vm->ffi_allow_count,
+               vm->ffi_deny_count, vm->disable_all_ffi);
         printf("  Main offset: %lld\n", main_offset);
     }
 
@@ -1070,7 +1197,8 @@ int cc_load_bytecode(VirtualMachine *vm, const char *path) {
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        fprintf(stderr, "error: failed to open %s: %s\n", path, strerror(errno));
+        fprintf(stderr, "error: failed to open %s: %s\n", path,
+                strerror(errno));
         return -1;
     }
 
@@ -1108,73 +1236,81 @@ int cc_load_bytecode(VirtualMachine *vm, const char *path) {
 // ============================================================================
 
 // Patch one instruction starting at staging VM text position `i` into main VM.
-// `pc_shift` = instruction-index offset (staging PC s maps to main PC s+pc_shift).
-// Returns the total word count of this instruction (opcode + operands), or -1
-// on error.
-static int patch_and_copy_instr(VirtualMachine *stage, VirtualMachine *vm,
-                                 Pc i, Pc pc_shift) {
-    int op = (int)stage->text_seg[i];
-    Pc dest = i + pc_shift;
+// `pc_shift` = instruction-index offset (staging PC s maps to main PC
+// s+pc_shift). Returns the total word count of this instruction (opcode +
+// operands), or -1 on error.
+static int patch_and_copy_instr(VirtualMachine *stage, VirtualMachine *vm, Pc i,
+                                Pc pc_shift) {
+    int op   = (int)stage->text_seg[i];
+    Pc  dest = i + pc_shift;
 
     // Default: copy opcode as-is.
     vm->text_seg[dest] = stage->text_seg[i];
 
     switch (op) {
-    case JMP:
-    case CALL:
-    case CALLT:
-        // Format: [OPCODE] [target_pc:32]
-        vm->text_seg[dest + 1] = stage->text_seg[i + 1] + pc_shift;
-        return 2;
+        case JMP:
+        case CALL:
+        case CALLT:
+            // Format: [OPCODE] [target_pc:32]
+            vm->text_seg[dest + 1] = stage->text_seg[i + 1] + pc_shift;
+            return 2;
 
-    case JZ3:
-    case JNZ3:
-        // Format: [OPCODE] [rs_operand:32] [target_pc:32]
-        vm->text_seg[dest + 1] = stage->text_seg[i + 1]; // register operand, no patch
-        vm->text_seg[dest + 2] = stage->text_seg[i + 2] + pc_shift;
-        return 3;
+        case JZ3:
+        case JNZ3:
+            // Format: [OPCODE] [rs_operand:32] [target_pc:32]
+            vm->text_seg[dest + 1] =
+                stage->text_seg[i + 1]; // register operand, no patch
+            vm->text_seg[dest + 2] = stage->text_seg[i + 2] + pc_shift;
+            return 3;
 
-    case JMPT: {
-        // Format: [JMPT] [table_pc:32] [count:32] [default_pc:32] [pc0..pcN-1]
-        Pc table_pc  = stage->text_seg[i + 1];
-        InstrWord cnt = stage->text_seg[i + 2];
-        Pc default_pc = stage->text_seg[i + 3];
-        vm->text_seg[dest + 1] = table_pc + pc_shift;
-        vm->text_seg[dest + 2] = cnt; // count, not a PC
-        vm->text_seg[dest + 3] = default_pc + pc_shift;
-        int total = 4;
-        // Inline table: entries immediately follow the 3-operand header.
-        if (table_pc == i + 4) {
-            for (InstrWord j = 0; j < cnt; j++) {
-                vm->text_seg[dest + 4 + j] = stage->text_seg[i + 4 + j] + pc_shift;
+        case JMPT: {
+            // Format: [JMPT] [table_pc:32] [count:32] [default_pc:32]
+            // [pc0..pcN-1]
+            Pc        table_pc     = stage->text_seg[i + 1];
+            InstrWord cnt          = stage->text_seg[i + 2];
+            Pc        default_pc   = stage->text_seg[i + 3];
+            vm->text_seg[dest + 1] = table_pc + pc_shift;
+            vm->text_seg[dest + 2] = cnt; // count, not a PC
+            vm->text_seg[dest + 3] = default_pc + pc_shift;
+            int total              = 4;
+            // Inline table: entries immediately follow the 3-operand header.
+            if (table_pc == i + 4) {
+                for (InstrWord j = 0; j < cnt; j++) {
+                    vm->text_seg[dest + 4 + j] =
+                        stage->text_seg[i + 4 + j] + pc_shift;
+                }
+                total += (int)cnt;
             }
-            total += (int)cnt;
+            return total;
         }
-        return total;
-    }
 
-    case LTA3: {
-        // Format: [LTA3] [rd:32] [byte_offset_lo:32] [byte_offset_hi:32]
-        // The immediate is a text-segment BYTE OFFSET (not instruction index).
-        vm->text_seg[dest + 1] = stage->text_seg[i + 1]; // rd operand, no patch
-        long long old_off = cc_make_i64(stage->text_seg[i + 2], stage->text_seg[i + 3]);
-        long long new_off = old_off + (long long)pc_shift * (long long)sizeof(InstrWord);
-        vm->text_seg[dest + 2] = cc_i64_lo(new_off);
-        vm->text_seg[dest + 3] = cc_i64_hi(new_off);
-        return 4;
-    }
-
-    default: {
-        // All other opcodes: copy operand words verbatim (no PC values).
-        int n_ops = cc_opcode_operand_words(op);
-        if (n_ops < 0) {
-            fprintf(stderr, "cc_load_module: unknown opcode %d in module\n", op);
-            return -1;
+        case LTA3: {
+            // Format: [LTA3] [rd:32] [byte_offset_lo:32] [byte_offset_hi:32]
+            // The immediate is a text-segment BYTE OFFSET (not instruction
+            // index).
+            vm->text_seg[dest + 1] =
+                stage->text_seg[i + 1]; // rd operand, no patch
+            long long old_off =
+                cc_make_i64(stage->text_seg[i + 2], stage->text_seg[i + 3]);
+            long long new_off =
+                old_off + (long long)pc_shift * (long long)sizeof(InstrWord);
+            vm->text_seg[dest + 2] = cc_i64_lo(new_off);
+            vm->text_seg[dest + 3] = cc_i64_hi(new_off);
+            return 4;
         }
-        for (int k = 1; k <= n_ops; k++)
-            vm->text_seg[dest + k] = stage->text_seg[i + k];
-        return n_ops + 1;
-    }
+
+        default: {
+            // All other opcodes: copy operand words verbatim (no PC values).
+            int n_ops = cc_opcode_operand_words(op);
+            if (n_ops < 0) {
+                fprintf(stderr, "cc_load_module: unknown opcode %d in module\n",
+                        op);
+                return -1;
+            }
+            for (int k = 1; k <= n_ops; k++)
+                vm->text_seg[dest + k] = stage->text_seg[i + k];
+            return n_ops + 1;
+        }
     }
 }
 
@@ -1184,7 +1320,8 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         return -1;
     }
     if (!vm->text_seg || !vm->data_seg) {
-        fprintf(stderr, "cc_load_module: host VM has no segments (not initialised)\n");
+        fprintf(stderr,
+                "cc_load_module: host VM has no segments (not initialised)\n");
         return -1;
     }
 
@@ -1199,16 +1336,17 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
 
     // Number of code words in the staging VM: text_seg[1..text_ptr].
     // text_seg[0] is the main_offset metadata slot (0 for libraries).
-    Pc stage_code_words = stage.text_ptr;   // words 1..text_ptr
+    Pc stage_code_words = stage.text_ptr; // words 1..text_ptr
 
     // PC shift: staging instruction at index s maps to host index s + pc_shift.
-    Pc pc_shift = vm->text_ptr;             // host's current last-word index
+    Pc pc_shift = vm->text_ptr; // host's current last-word index
 
     // Data byte base in host VM where staging data will land.
     long long data_shift = (long long)(vm->data_ptr - vm->data_seg);
 
     // Text byte shift for LTA3 immediates.
-    long long text_byte_shift = (long long)pc_shift * (long long)sizeof(InstrWord);
+    long long text_byte_shift =
+        (long long)pc_shift * (long long)sizeof(InstrWord);
 
     // TLS base in host VM.
     size_t tls_shift = vm->tls_template_size;
@@ -1222,7 +1360,7 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
             return -1;
         }
         // Scan staging text[1..text_ptr] and copy+patch into host.
-        for (Pc i = 1; i <= stage.text_ptr; ) {
+        for (Pc i = 1; i <= stage.text_ptr;) {
             int words = patch_and_copy_instr(&stage, vm, i, pc_shift);
             if (words < 0) {
                 cc_destroy(&stage);
@@ -1247,9 +1385,9 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
 
     // --- Re-anchor staging data relocations in host data segment ---
     for (int i = 0; i < stage.compiler.num_data_relocs; i++) {
-        long long do_  = stage.compiler.data_relocs[i].data_offset;
-        int      ts    = stage.compiler.data_relocs[i].target_segment;
-        long long to   = stage.compiler.data_relocs[i].target_offset;
+        long long do_    = stage.compiler.data_relocs[i].data_offset;
+        int       ts     = stage.compiler.data_relocs[i].target_segment;
+        long long to     = stage.compiler.data_relocs[i].target_offset;
         long long addend = stage.compiler.data_relocs[i].addend;
 
         long long new_val;
@@ -1262,22 +1400,26 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         // Record in host reloc table (needed for future serialisation).
         int idx = vm->compiler.num_data_relocs;
         if (idx >= vm->compiler.data_relocs_cap) {
-            int new_cap = vm->compiler.data_relocs_cap ? vm->compiler.data_relocs_cap * 2 : 16;
-            void *tmp = realloc(vm->compiler.data_relocs,
-                                (size_t)new_cap * sizeof(*vm->compiler.data_relocs));
+            int   new_cap = vm->compiler.data_relocs_cap
+                                ? vm->compiler.data_relocs_cap * 2
+                                : 16;
+            void *tmp =
+                realloc(vm->compiler.data_relocs,
+                        (size_t)new_cap * sizeof(*vm->compiler.data_relocs));
             if (!tmp) {
-                fprintf(stderr, "cc_load_module: out of memory for data reloc table\n");
+                fprintf(stderr,
+                        "cc_load_module: out of memory for data reloc table\n");
                 cc_destroy(&stage);
                 return -1;
             }
-            vm->compiler.data_relocs = tmp;
+            vm->compiler.data_relocs     = tmp;
             vm->compiler.data_relocs_cap = new_cap;
         }
         vm->compiler.data_relocs[idx].data_offset    = data_shift + do_;
         vm->compiler.data_relocs[idx].target_segment = ts;
-        vm->compiler.data_relocs[idx].target_offset  = (ts == 0)
-            ? data_shift + to : text_byte_shift + to;
-        vm->compiler.data_relocs[idx].addend         = addend;
+        vm->compiler.data_relocs[idx].target_offset =
+            (ts == 0) ? data_shift + to : text_byte_shift + to;
+        vm->compiler.data_relocs[idx].addend = addend;
         vm->compiler.num_data_relocs++;
     }
 
@@ -1286,24 +1428,25 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         size_t new_tls_size = vm->tls_template_size + stage.tls_template_size;
         if (new_tls_size > vm->tls_template_cap) {
             size_t new_cap = new_tls_size * 2;
-            void *tmp = realloc(vm->tls_template, new_cap);
+            void  *tmp     = realloc(vm->tls_template, new_cap);
             if (!tmp) {
-                fprintf(stderr, "cc_load_module: out of memory for TLS template\n");
+                fprintf(stderr,
+                        "cc_load_module: out of memory for TLS template\n");
                 cc_destroy(&stage);
                 return -1;
             }
             vm->tls_template     = tmp;
             vm->tls_template_cap = new_cap;
         }
-        memcpy(vm->tls_template + vm->tls_template_size,
-               stage.tls_template, stage.tls_template_size);
+        memcpy(vm->tls_template + vm->tls_template_size, stage.tls_template,
+               stage.tls_template_size);
         vm->tls_template_size = new_tls_size;
 
         // Re-anchor TLS relocs.
         for (int i = 0; i < stage.compiler.num_tls_relocs; i++) {
-            long long to_  = stage.compiler.tls_relocs[i].tls_offset;
-            int      ts    = stage.compiler.tls_relocs[i].target_segment;
-            long long tgt  = stage.compiler.tls_relocs[i].target_offset;
+            long long to_    = stage.compiler.tls_relocs[i].tls_offset;
+            int       ts     = stage.compiler.tls_relocs[i].target_segment;
+            long long tgt    = stage.compiler.tls_relocs[i].target_offset;
             long long addend = stage.compiler.tls_relocs[i].addend;
 
             long long new_val;
@@ -1315,23 +1458,28 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
 
             int idx = vm->compiler.num_tls_relocs;
             if (idx >= vm->compiler.tls_relocs_cap) {
-                int new_cap = vm->compiler.tls_relocs_cap
-                            ? vm->compiler.tls_relocs_cap * 2 : 16;
-                void *tmp = realloc(vm->compiler.tls_relocs,
-                                    (size_t)new_cap * sizeof(*vm->compiler.tls_relocs));
+                int   new_cap = vm->compiler.tls_relocs_cap
+                                    ? vm->compiler.tls_relocs_cap * 2
+                                    : 16;
+                void *tmp =
+                    realloc(vm->compiler.tls_relocs,
+                            (size_t)new_cap * sizeof(*vm->compiler.tls_relocs));
                 if (!tmp) {
-                    fprintf(stderr, "cc_load_module: out of memory for TLS reloc table\n");
+                    fprintf(
+                        stderr,
+                        "cc_load_module: out of memory for TLS reloc table\n");
                     cc_destroy(&stage);
                     return -1;
                 }
                 vm->compiler.tls_relocs     = tmp;
                 vm->compiler.tls_relocs_cap = new_cap;
             }
-            vm->compiler.tls_relocs[idx].tls_offset     = (long long)tls_shift + to_;
+            vm->compiler.tls_relocs[idx].tls_offset =
+                (long long)tls_shift + to_;
             vm->compiler.tls_relocs[idx].target_segment = ts;
-            vm->compiler.tls_relocs[idx].target_offset  = (ts == 0)
-                ? data_shift + tgt : text_byte_shift + tgt;
-            vm->compiler.tls_relocs[idx].addend         = addend;
+            vm->compiler.tls_relocs[idx].target_offset =
+                (ts == 0) ? data_shift + tgt : text_byte_shift + tgt;
+            vm->compiler.tls_relocs[idx].addend = addend;
             vm->compiler.num_tls_relocs++;
         }
     }
@@ -1355,12 +1503,14 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         stage.compiler.return_buffer_count > 0 &&
         stage.compiler.return_buffer_size > 0) {
         int n = stage.compiler.return_buffer_count;
-        if (n > RETURN_BUFFER_POOL_SIZE) n = RETURN_BUFFER_POOL_SIZE;
+        if (n > RETURN_BUFFER_POOL_SIZE)
+            n = RETURN_BUFFER_POOL_SIZE;
         int adopted = 0;
         for (int i = 0; i < n; i++) {
             long long old_off = stage.compiler.return_buffer_offsets[i];
-            if (old_off < 0) continue;
-            long long new_off = data_shift + old_off;
+            if (old_off < 0)
+                continue;
+            long long new_off                           = data_shift + old_off;
             vm->compiler.return_buffer_offsets[adopted] = new_off;
             vm->compiler.return_buffer_pool[adopted] = vm->data_seg + new_off;
             adopted++;
@@ -1382,7 +1532,8 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
             void *tmp = realloc(vm->compiler.ffi_table,
                                 (size_t)new_total * sizeof(ForeignFunc));
             if (!tmp) {
-                fprintf(stderr, "cc_load_module: out of memory for FFI table\n");
+                fprintf(stderr,
+                        "cc_load_module: out of memory for FFI table\n");
                 cc_destroy(&stage);
                 return -1;
             }
@@ -1404,13 +1555,16 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
     // --- Merge stage's symbol table into host VM (#565) ---
     // Allows chained --link calls to accumulate symbols.
     if (stage.compiler.num_sym_table > 0) {
-        int new_total = vm->compiler.num_sym_table + stage.compiler.num_sym_table;
+        int new_total =
+            vm->compiler.num_sym_table + stage.compiler.num_sym_table;
         if (new_total > vm->compiler.sym_table_cap) {
-            int new_cap = new_total * 2;
-            void *tmp = realloc(vm->compiler.sym_table,
-                                (size_t)new_cap * sizeof(*vm->compiler.sym_table));
+            int   new_cap = new_total * 2;
+            void *tmp =
+                realloc(vm->compiler.sym_table,
+                        (size_t)new_cap * sizeof(*vm->compiler.sym_table));
             if (!tmp) {
-                fprintf(stderr, "cc_load_module: out of memory for symbol table\n");
+                fprintf(stderr,
+                        "cc_load_module: out of memory for symbol table\n");
                 cc_destroy(&stage);
                 return -1;
             }
@@ -1419,41 +1573,48 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
         }
         for (int i = 0; i < stage.compiler.num_sym_table; i++) {
             char *name_copy = stage.compiler.sym_table[i].name
-                ? strdup(stage.compiler.sym_table[i].name) : NULL;
-            int idx = vm->compiler.num_sym_table;
-            vm->compiler.sym_table[idx].pc_offset = stage.compiler.sym_table[i].pc_offset
-                                                   + pc_shift;
-            vm->compiler.sym_table[idx].name      = name_copy;
-            vm->compiler.sym_table[idx].name_len  = stage.compiler.sym_table[i].name_len;
+                                  ? strdup(stage.compiler.sym_table[i].name)
+                                  : NULL;
+            int   idx       = vm->compiler.num_sym_table;
+            vm->compiler.sym_table[idx].pc_offset =
+                stage.compiler.sym_table[i].pc_offset + pc_shift;
+            vm->compiler.sym_table[idx].name = name_copy;
+            vm->compiler.sym_table[idx].name_len =
+                stage.compiler.sym_table[i].name_len;
             vm->compiler.num_sym_table++;
         }
     }
 
-    // --- Resolve host VM's text relocations using the module's symbol table (#565) ---
-    // Patch any CALL operand in the host text that names a symbol now defined
-    // in the freshly-appended module code.
+    // --- Resolve host VM's text relocations using the module's symbol table
+    // (#565) --- Patch any CALL operand in the host text that names a symbol
+    // now defined in the freshly-appended module code.
     for (int i = 0; i < vm->compiler.num_text_relocs; i++) {
-        if (vm->compiler.text_relocs[i].resolved) continue;
+        if (vm->compiler.text_relocs[i].resolved)
+            continue;
         const char *want = vm->compiler.text_relocs[i].name;
-        if (!want) continue;
+        if (!want)
+            continue;
         for (int j = 0; j < stage.compiler.num_sym_table; j++) {
             const char *sym = stage.compiler.sym_table[j].name;
             if (sym && strcmp(sym, want) == 0) {
                 Pc target_pc = stage.compiler.sym_table[j].pc_offset + pc_shift;
                 vm->text_seg[vm->compiler.text_relocs[i].location] = target_pc;
-                vm->compiler.text_relocs[i].resolved = 1;
+                vm->compiler.text_relocs[i].resolved               = 1;
                 break;
             }
         }
     }
 
-    // --- Resolve host VM's addr relocations using the module's symbol table (#566) ---
-    // Patch any LTA3 i64 immediate in the host text that names a symbol now defined
-    // in the freshly-appended module code (function-pointer decay to cross-module fn).
+    // --- Resolve host VM's addr relocations using the module's symbol table
+    // (#566) --- Patch any LTA3 i64 immediate in the host text that names a
+    // symbol now defined in the freshly-appended module code (function-pointer
+    // decay to cross-module fn).
     for (int i = 0; i < vm->compiler.num_addr_relocs; i++) {
-        if (vm->compiler.addr_relocs[i].resolved) continue;
+        if (vm->compiler.addr_relocs[i].resolved)
+            continue;
         const char *want = vm->compiler.addr_relocs[i].name;
-        if (!want) continue;
+        if (!want)
+            continue;
         for (int j = 0; j < stage.compiler.num_sym_table; j++) {
             const char *sym = stage.compiler.sym_table[j].name;
             if (sym && strcmp(sym, want) == 0) {
@@ -1467,8 +1628,9 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
     }
 
     if (vm->debug_vm) {
-        printf("cc_load_module: loaded '%s' (%lld text words, %lld data bytes)\n",
-               path, (long long)stage_code_words, stage_data_size);
+        printf(
+            "cc_load_module: loaded '%s' (%lld text words, %lld data bytes)\n",
+            path, (long long)stage_code_words, stage_data_size);
     }
 
     cc_destroy(&stage);
@@ -1510,8 +1672,8 @@ void cc_collect_link_symbols(VirtualMachine *vm, const char *path) {
     }
 
     for (int i = 0; i < stage.compiler.num_sym_table; i++) {
-        const char *name = stage.compiler.sym_table[i].name;
-        size_t name_len = stage.compiler.sym_table[i].name_len;
+        const char *name     = stage.compiler.sym_table[i].name;
+        size_t      name_len = stage.compiler.sym_table[i].name_len;
         if (!name || name_len == 0)
             continue;
         hashmap_put2(&vm->compiler.link_syms, name, (int)name_len, (void *)1);
@@ -1525,7 +1687,9 @@ static int source_index_cmp(const void *a, const void *b) {
     const SourceIndex *sb = (const SourceIndex *)b;
     if (sa->file != sb->file)
         return ((uintptr_t)sa->file < (uintptr_t)sb->file) ? -1 : 1;
-    return (sa->line_no < sb->line_no) ? -1 : (sa->line_no > sb->line_no) ? 1 : 0;
+    return (sa->line_no < sb->line_no)   ? -1
+           : (sa->line_no > sb->line_no) ? 1
+                                         : 0;
 }
 
 void cc_compile(VirtualMachine *vm, Obj *prog) {
@@ -1544,17 +1708,18 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
         // Initialize source map for debugger (if enabled)
         if (vm->flags & CCCC_ENABLE_DEBUGGER) {
             vm->dbg.source_map_capacity = 1024;
-            vm->dbg.source_map = malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
+            vm->dbg.source_map =
+                malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
             if (!vm->dbg.source_map) {
                 error("could not malloc for source map");
             }
-            vm->dbg.source_map_count = 0;
-            vm->dbg.last_debug_file = NULL;
-            vm->dbg.last_debug_line = -1;
-            vm->dbg.source_index = NULL;
+            vm->dbg.source_map_count   = 0;
+            vm->dbg.last_debug_file    = NULL;
+            vm->dbg.last_debug_line    = -1;
+            vm->dbg.source_index       = NULL;
             vm->dbg.source_index_count = 0;
-            vm->dbg.num_debug_symbols = 0;
-            vm->dbg.num_watchpoints = 0;
+            vm->dbg.num_debug_symbols  = 0;
+            vm->dbg.num_watchpoints    = 0;
         }
     }
 
@@ -1577,7 +1742,7 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
 
         // First pass: count unique (file, line) pairs
         File *last_file = NULL;
-        int last_line = -1;
+        int   last_line = -1;
         for (int i = 0; i < vm->dbg.source_map_count; i++) {
             SourceMap *m = &vm->dbg.source_map[i];
             if (m->file != last_file || m->line_no != last_line) {
@@ -1587,20 +1752,21 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
             }
         }
 
-        vm->dbg.source_index = malloc(vm->dbg.source_index_count * sizeof(SourceIndex));
+        vm->dbg.source_index =
+            malloc(vm->dbg.source_index_count * sizeof(SourceIndex));
         if (!vm->dbg.source_index) {
             error("could not malloc for source index");
         }
 
         // Fill with first PC for each unique (file, line)
-        int idx = 0;
+        int idx   = 0;
         last_file = NULL;
         last_line = -1;
         for (int i = 0; i < vm->dbg.source_map_count; i++) {
             SourceMap *m = &vm->dbg.source_map[i];
             if (m->file != last_file || m->line_no != last_line) {
-                vm->dbg.source_index[idx].file = m->file;
-                vm->dbg.source_index[idx].line_no = m->line_no;
+                vm->dbg.source_index[idx].file     = m->file;
+                vm->dbg.source_index[idx].line_no  = m->line_no;
                 vm->dbg.source_index[idx].first_pc = (Pc)m->pc_offset;
                 idx++;
                 last_file = m->file;
@@ -1609,8 +1775,8 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
         }
 
         // Sort by (file, line_no) for binary search
-        qsort(vm->dbg.source_index, vm->dbg.source_index_count, sizeof(SourceIndex),
-              source_index_cmp);
+        qsort(vm->dbg.source_index, vm->dbg.source_index_count,
+              sizeof(SourceIndex), source_index_cmp);
 
         // Dedup: after sorting, identical (file, line) pairs are adjacent.
         // Keep only the entry with the lowest first_pc per pair.

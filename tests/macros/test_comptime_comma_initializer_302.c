@@ -1,9 +1,10 @@
-// Ticket #302: comptime functions handle comma increments and zero initializers.
+// Ticket #302: comptime functions handle comma increments and zero
+// initializers.
 
 [[cccc::comptime]]
 void comma_increment_repro(void) {
-    char src_buf[2] = "a";
-    char dst_buf[2];
+    char  src_buf[2] = "a";
+    char  dst_buf[2];
     char *dst = dst_buf;
 
     for (char *src = src_buf; *src; src++, dst++)

@@ -16,7 +16,7 @@ typedef int (^IntBlock)(void);
 
 int consume(IntBlock b) {
     IntBlock c = Block_copy(b);
-    int r = c();
+    int      r = c();
     Block_release(c);
     return r;
 }

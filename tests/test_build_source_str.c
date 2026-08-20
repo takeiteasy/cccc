@@ -9,7 +9,7 @@
 int build_main(Builder *ctx) {
     BuildTarget *lib = StaticLib(ctx, "genlib");
     AddSourceStr(lib, "generated.c",
-        "int generated_add(int a, int b) { return a + b; }\n");
+                 "int generated_add(int a, int b) { return a + b; }\n");
 
     return BuildDefault(ctx);
 }

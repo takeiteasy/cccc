@@ -15,7 +15,7 @@ int main(void) {
         return 2;
 
     char buf[1];
-    errno = 0;
+    errno     = 0;
     ssize_t n = read(fds[0], buf, sizeof(buf));
     if (n != -1)
         return 3;

@@ -1,5 +1,5 @@
-// CCCC_FLAGS: --build --build-cache=build/test_header_dep_cache --build-out-dir=build/test_header_dep_out
-// CCCC_EXPECT_STDOUT: header_dep_ok
+// CCCC_FLAGS: --build --build-cache=build/test_header_dep_cache
+// --build-out-dir=build/test_header_dep_out CCCC_EXPECT_STDOUT: header_dep_ok
 //
 // #851: header-dependency (-MMD) tracking, and the CAS soundness rule that
 // must accompany it. Runs three phases against the SAME target inside one
@@ -41,13 +41,13 @@
 [[cccc::build]]
 int build_main(Builder *ctx) {
     const char *outdir = BuildOutDir(ctx);
-    char objdir[512], objpath[512], binpath[512];
+    char        objdir[512], objpath[512], binpath[512];
     snprintf(objdir, sizeof(objdir), "%s/obj/hdrdep_app", outdir);
     snprintf(objpath, sizeof(objpath), "%s/main.o", objdir);
 
     WriteFile(ctx, "build/test_header_dep_src/hdr.h", "#define VAL 42\n");
     WriteFile(ctx, "build/test_header_dep_src/main.c",
-        "#include \"hdr.h\"\nint main(void) { return VAL; }\n");
+              "#include \"hdr.h\"\nint main(void) { return VAL; }\n");
 
     BuildTarget *app = Executable(ctx, "hdrdep_app");
     AddSource(app, "build/test_header_dep_src/main.c");
@@ -55,9 +55,11 @@ int build_main(Builder *ctx) {
     snprintf(binpath, sizeof(binpath), "%s", TargetOutput(app));
 
     // --- Phase 1: initial build ---
-    if (Build(ctx, app) != 0) exit(1);
+    if (Build(ctx, app) != 0)
+        exit(1);
     struct stat st1;
-    if (stat(objpath, &st1) != 0) exit(1);
+    if (stat(objpath, &st1) != 0)
+        exit(1);
 
     // Real wall-clock gap: the feature's own mtime comparisons are
     // second-granularity (plain time_t), so a same-second rebuild can't
@@ -66,12 +68,16 @@ int build_main(Builder *ctx) {
 
     // --- Phase 2: header mtime bump (content unchanged) must not be
     // silently ignored. ---
-    struct utimbuf future = { (time_t)(ST_MTIME(st1) + 120), (time_t)(ST_MTIME(st1) + 120) };
-    if (utime("build/test_header_dep_src/hdr.h", &future) != 0) exit(1);
+    struct utimbuf future = {(time_t)(ST_MTIME(st1) + 120),
+                             (time_t)(ST_MTIME(st1) + 120)};
+    if (utime("build/test_header_dep_src/hdr.h", &future) != 0)
+        exit(1);
 
-    if (Build(ctx, app) != 0) exit(1);
+    if (Build(ctx, app) != 0)
+        exit(1);
     struct stat st2;
-    if (stat(objpath, &st2) != 0) exit(1);
+    if (stat(objpath, &st2) != 0)
+        exit(1);
     if (ST_MTIME(st2) <= ST_MTIME(st1)) {
         printf("FAIL: object not refreshed after header mtime bump\n");
         exit(1);
@@ -80,16 +86,21 @@ int build_main(Builder *ctx) {
     // --- Phase 3: CAS soundness. Wipe the objdir (dropping its .d files)
     // while keeping the shared --build-cache, change the header's real
     // content, and rebuild. ---
-    if (DeleteDir(ctx, objdir) != 0) exit(1);
+    if (DeleteDir(ctx, objdir) != 0)
+        exit(1);
     WriteFile(ctx, "build/test_header_dep_src/hdr.h", "#define VAL 7\n");
 
-    if (Build(ctx, app) != 0) exit(1);
+    if (Build(ctx, app) != 0)
+        exit(1);
 
     int rc = system(binpath);
-    if (rc == -1) exit(1);
+    if (rc == -1)
+        exit(1);
     int exit_code = WEXITSTATUS(rc);
     if (exit_code != 7) {
-        printf("FAIL: binary exited %d, expected 7 (stale cache leaked through)\n", exit_code);
+        printf(
+            "FAIL: binary exited %d, expected 7 (stale cache leaked through)\n",
+            exit_code);
         exit(1);
     }
 

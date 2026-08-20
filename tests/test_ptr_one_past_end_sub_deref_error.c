@@ -9,12 +9,12 @@
 // dereference through the formed pointer must still trap via CHKD.
 #include <stdlib.h>
 int main(void) {
-    int *p = malloc(4 * sizeof(int));   // valid indices 0..3
+    int *p = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!p)
         return 255;
-    int n = -4;
-    int *q = p - n;   // p - (-4) == p + 4, one past the end -- legal to form
-    q[0] = 1;          // dereferencing it -- must still trap
+    int  n = -4;
+    int *q = p - n; // p - (-4) == p + 4, one past the end -- legal to form
+    q[0]   = 1;     // dereferencing it -- must still trap
     free(p);
     return 42;
 }

@@ -14,21 +14,33 @@
 // depth is tracked, and the multi-word bug title ("union" in the ticket)
 // against the struct form, which fails identically.
 
-typedef struct { char n[32]; } A;
-struct UsesA { A m; };
+typedef struct {
+    char n[32];
+} A;
+struct UsesA {
+    A m;
+};
 
-typedef struct { int a[2]; } P, *Pp;
-struct UsesP { P m; Pp p; };
+typedef struct {
+    int a[2];
+} P, *Pp;
+struct UsesP {
+    P  m;
+    Pp p;
+};
 
-union UsesAUnion { A m; int x; };
+union UsesAUnion {
+    A   m;
+    int x;
+};
 
 [[cccc::comptime]]
 int check(void) {
-    Type *ta = GetType("A");
-    Type *tuses_a = GetType("UsesA");
-    Type *tp = GetType("P");
-    Type *tpp = GetType("Pp");
-    Type *tuses_p = GetType("UsesP");
+    Type *ta          = GetType("A");
+    Type *tuses_a     = GetType("UsesA");
+    Type *tp          = GetType("P");
+    Type *tpp         = GetType("Pp");
+    Type *tuses_p     = GetType("UsesP");
     Type *tuses_union = GetType("UsesAUnion");
     if (ta && tuses_a && tp && tpp && tuses_p && tuses_union)
         return 42;

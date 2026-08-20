@@ -6,8 +6,8 @@
 // comment in src/parse.c.
 
 int main(void) {
-    int x = 5;
-    int * [[cccc::single]] p = &x;
-    int * [[cccc::single]] q = p + 1;
+    int x                   = 5;
+    int *[[cccc::single]] p = &x;
+    int *[[cccc::single]] q = p + 1;
     return *q;
 }

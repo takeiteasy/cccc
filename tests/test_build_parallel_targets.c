@@ -7,7 +7,7 @@
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    const char *inc = "examples/build_demo/include";
+    const char  *inc     = "examples/build_demo/include";
 
     BuildTarget *par_sum = StaticLib(ctx, "par_sum");
     AddSource(par_sum, "examples/build_demo/src/lib/sum.c");

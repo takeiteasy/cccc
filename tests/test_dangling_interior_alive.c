@@ -8,7 +8,7 @@ int *interior(int *arr, int i) {
 }
 
 int main(void) {
-    int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
-    int *p = interior(arr, 5);
+    int  arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    int *p      = interior(arr, 5);
     return (*p == 5) ? 42 : 1;
 }

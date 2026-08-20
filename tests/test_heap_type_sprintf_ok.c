@@ -9,18 +9,18 @@
 #include <stdio.h>
 
 int main(void) {
-    int *buf = malloc(sizeof(int) * 2);
-    buf[0] = 1;
-    buf[1] = 2; // stamps buf's whole range as int
+    int *buf   = malloc(sizeof(int) * 2);
+    buf[0]     = 1;
+    buf[1]     = 2;      // stamps buf's whole range as int
 
     char *cbuf = (char *)buf;
     sprintf(cbuf, "ab"); // unbounded write through cbuf: must clear buf's
-                          // whole allocation, not just narrow to a %n-style
-                          // partial clear
+                         // whole allocation, not just narrow to a %n-style
+                         // partial clear
 
     float *fbuf = (float *)buf;
-    fbuf[0] = 3.0f;
-    int result = (int)fbuf[0];
+    fbuf[0]     = 3.0f;
+    int result  = (int)fbuf[0];
     free(buf);
     return (result == 3) ? 42 : 1;
 }

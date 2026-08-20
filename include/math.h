@@ -28,34 +28,34 @@
 #define HUGE_VALL ((long double)HUGE_VAL)
 #endif
 #define INFINITY (__builtin_inf())
-#define NAN (__builtin_nan(""))
+#define NAN      (__builtin_nan(""))
 
 /* fpclassify values */
-#define FP_INFINITE 1
-#define FP_NAN 2
-#define FP_NORMAL 3
+#define FP_INFINITE  1
+#define FP_NAN       2
+#define FP_NORMAL    3
 #define FP_SUBNORMAL 4
-#define FP_ZERO 5
+#define FP_ZERO      5
 
 /* ilogb special values */
-#define FP_ILOGB0 INT_MIN
+#define FP_ILOGB0   INT_MIN
 #define FP_ILOGBNAN INT_MAX
 
 /* math error macros */
-#define MATH_ERRNO 1
+#define MATH_ERRNO     1
 #define MATH_ERREXCEPT 2
 
 /* Fast math availability macros (no-op placeholders) */
-#define FP_FAST_FMA 1
-#define FP_FAST_FMAF 1
-#define FP_FAST_FMAL 1
+#define FP_FAST_FMA          1
+#define FP_FAST_FMAF         1
+#define FP_FAST_FMAL         1
 
-#define isgreater(x, y) ((x) > (y))
+#define isgreater(x, y)      ((x) > (y))
 #define isgreaterequal(x, y) ((x) >= (y))
-#define isless(x, y) ((x) < (y))
-#define islessequal(x, y) ((x) <= (y))
-#define islessgreater(x, y) (((x) < (y)) || ((x) > (y)))
-#define isunordered(x, y) (((x) != (x)) || ((y) != (y)))
+#define isless(x, y)         ((x) < (y))
+#define islessequal(x, y)    ((x) <= (y))
+#define islessgreater(x, y)  (((x) < (y)) || ((x) > (y)))
+#define isunordered(x, y)    (((x) != (x)) || ((y) != (y)))
 
 /* isnan/isinf/signbit/fpclassify (#778): real bit-pattern functions in
  * src/stdlib/math.c, dispatched by argument type like the issignaling/
@@ -99,31 +99,47 @@ int __cccc_fpclassify_d(double);
 #ifdef __STDC_IEC_60559_DFP__
 #include "decimal_math.h"
 
-#define isnan(x) _Generic((x), \
-    float: __cccc_isnan_f, \
-    _Decimal32: isnand32, _Decimal64: isnand64, _Decimal128: isnand128, \
-    default: __cccc_isnan_d)(x)
+#define isnan(x)                                                               \
+    _Generic((x),                                                              \
+        float: __cccc_isnan_f,                                                 \
+        _Decimal32: isnand32,                                                  \
+        _Decimal64: isnand64,                                                  \
+        _Decimal128: isnand128,                                                \
+        default: __cccc_isnan_d)(x)
 
-#define isinf(x) _Generic((x), \
-    float: __cccc_isinf_f, \
-    _Decimal32: isinfd32, _Decimal64: isinfd64, _Decimal128: isinfd128, \
-    default: __cccc_isinf_d)(x)
+#define isinf(x)                                                               \
+    _Generic((x),                                                              \
+        float: __cccc_isinf_f,                                                 \
+        _Decimal32: isinfd32,                                                  \
+        _Decimal64: isinfd64,                                                  \
+        _Decimal128: isinfd128,                                                \
+        default: __cccc_isinf_d)(x)
 
-#define signbit(x) _Generic((x), \
-    float: __cccc_signbit_f, \
-    _Decimal32: signbitd32, _Decimal64: signbitd64, _Decimal128: signbitd128, \
-    default: __cccc_signbit_d)(x)
+#define signbit(x)                                                             \
+    _Generic((x),                                                              \
+        float: __cccc_signbit_f,                                               \
+        _Decimal32: signbitd32,                                                \
+        _Decimal64: signbitd64,                                                \
+        _Decimal128: signbitd128,                                              \
+        default: __cccc_signbit_d)(x)
 
-#define fpclassify(x) _Generic((x), \
-    float: __cccc_fpclassify_f, \
-    _Decimal32: fpclassifyd32, _Decimal64: fpclassifyd64, _Decimal128: fpclassifyd128, \
-    default: __cccc_fpclassify_d)(x)
+#define fpclassify(x)                                                          \
+    _Generic((x),                                                              \
+        float: __cccc_fpclassify_f,                                            \
+        _Decimal32: fpclassifyd32,                                             \
+        _Decimal64: fpclassifyd64,                                             \
+        _Decimal128: fpclassifyd128,                                           \
+        default: __cccc_fpclassify_d)(x)
 
 #else
-#define isnan(x) _Generic((x), float: __cccc_isnan_f, default: __cccc_isnan_d)(x)
-#define isinf(x) _Generic((x), float: __cccc_isinf_f, default: __cccc_isinf_d)(x)
-#define signbit(x) _Generic((x), float: __cccc_signbit_f, default: __cccc_signbit_d)(x)
-#define fpclassify(x) _Generic((x), float: __cccc_fpclassify_f, default: __cccc_fpclassify_d)(x)
+#define isnan(x)                                                               \
+    _Generic((x), float: __cccc_isnan_f, default: __cccc_isnan_d)(x)
+#define isinf(x)                                                               \
+    _Generic((x), float: __cccc_isinf_f, default: __cccc_isinf_d)(x)
+#define signbit(x)                                                             \
+    _Generic((x), float: __cccc_signbit_f, default: __cccc_signbit_d)(x)
+#define fpclassify(x)                                                          \
+    _Generic((x), float: __cccc_fpclassify_f, default: __cccc_fpclassify_d)(x)
 #endif
 
 /* isnormal is deliberately NOT its own _Generic dispatch: fpclassify(x)
@@ -518,11 +534,11 @@ long llogbl(long double);
  * x. Note the return type is an integer type, not the source floating
  * type -- these generalize lround/llround with a configurable rounding
  * direction and width, they are not "round to an integer-valued float". */
-#define FP_INT_UPWARD 0
-#define FP_INT_DOWNWARD 1
-#define FP_INT_TOWARDZERO 2
+#define FP_INT_UPWARD            0
+#define FP_INT_DOWNWARD          1
+#define FP_INT_TOWARDZERO        2
 #define FP_INT_TONEARESTFROMZERO 3
-#define FP_INT_TONEAREST 4
+#define FP_INT_TONEAREST         4
 
 intmax_t fromfp(double, int, unsigned int);
 intmax_t fromfpf(float, int, unsigned int);
@@ -563,13 +579,15 @@ uintmax_t ufromfpxl(long double, int, unsigned int);
 int __cccc_issignaling_f(float);
 int __cccc_issignaling_d(double);
 #endif
-#define issignaling(x) _Generic((x), float: __cccc_issignaling_f, default: __cccc_issignaling_d)(x)
+#define issignaling(x)                                                         \
+    _Generic((x), float: __cccc_issignaling_f, default: __cccc_issignaling_d)(x)
 
 #ifdef __CCCC__
 int __cccc_iseqsig_f(float, float);
 int __cccc_iseqsig_d(double, double);
 #endif
-#define iseqsig(x, y) _Generic((x), float: __cccc_iseqsig_f, default: __cccc_iseqsig_d)((x), (y))
+#define iseqsig(x, y)                                                          \
+    _Generic((x), float: __cccc_iseqsig_f, default: __cccc_iseqsig_d)((x), (y))
 
 #define iscanonical(x) ((void)(x), 1)
 

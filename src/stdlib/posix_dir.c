@@ -5,8 +5,14 @@
 
 #if !defined(_WIN32) && !defined(_WIN64)
 
-static long long wrap_globfree(long long pglob) { globfree((glob_t *)pglob); return 0; }
-static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return 0; }
+static long long wrap_globfree(long long pglob) {
+    globfree((glob_t *)pglob);
+    return 0;
+}
+static long long wrap_regfree(long long preg) {
+    regfree((regex_t *)preg);
+    return 0;
+}
 
 // ---------------------------------------------------------------------------
 // glob()'s errfunc / scandir()'s select+compar callbacks (#738)
@@ -21,30 +27,33 @@ static long long wrap_regfree(long long preg) { regfree((regex_t *)preg); return
 // ---------------------------------------------------------------------------
 
 static _Thread_local long long g_glob_errfunc_value;
-static _Thread_local int g_glob_errfunc_faulted;
+static _Thread_local int       g_glob_errfunc_faulted;
 
 static int glob_errfunc_trampoline(const char *epath, int eerrno) {
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[2] = { (long long)(intptr_t)epath, (long long)eerrno };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_glob_errfunc_value, args, 2, &result) != 0) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long       args[2] = {(long long)(intptr_t)epath, (long long)eerrno};
+    long long       result  = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_glob_errfunc_value, args, 2,
+                                        &result) != 0) {
         g_glob_errfunc_faulted = 1;
-        return 0; /* keep glob() enumerating rather than abort on a faulting errfunc */
+        return 0; /* keep glob() enumerating rather than abort on a faulting
+                     errfunc */
     }
     return (int)result;
 }
 
-static long long wrap_glob(long long pattern, long long flags, long long errfunc, long long pglob) {
+static long long wrap_glob(long long pattern, long long flags,
+                           long long errfunc, long long pglob) {
     long long saved_errfunc = g_glob_errfunc_value;
-    int saved_faulted = g_glob_errfunc_faulted;
-    g_glob_errfunc_value = errfunc;
-    g_glob_errfunc_faulted = 0;
+    int       saved_faulted = g_glob_errfunc_faulted;
+    g_glob_errfunc_value    = errfunc;
+    g_glob_errfunc_faulted  = 0;
 
     int r = glob((const char *)pattern, (int)flags,
-                errfunc ? glob_errfunc_trampoline : NULL, (glob_t *)pglob);
+                 errfunc ? glob_errfunc_trampoline : NULL, (glob_t *)pglob);
 
-    int faulted = g_glob_errfunc_faulted;
-    g_glob_errfunc_value = saved_errfunc;
+    int faulted            = g_glob_errfunc_faulted;
+    g_glob_errfunc_value   = saved_errfunc;
     g_glob_errfunc_faulted = saved_faulted;
     if (faulted)
         errno = EFAULT;
@@ -53,46 +62,50 @@ static long long wrap_glob(long long pattern, long long flags, long long errfunc
 
 static _Thread_local long long g_scandir_select_value;
 static _Thread_local long long g_scandir_compar_value;
-static _Thread_local int g_scandir_faulted;
+static _Thread_local int       g_scandir_faulted;
 
 static int scandir_select_trampoline(const struct dirent *e) {
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[1] = { (long long)(intptr_t)e };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_scandir_select_value, args, 1, &result) != 0) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long       args[1] = {(long long)(intptr_t)e};
+    long long       result  = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_scandir_select_value, args, 1,
+                                        &result) != 0) {
         g_scandir_faulted = 1;
         return 0;
     }
     return (int)result;
 }
 
-static int scandir_compar_trampoline(const struct dirent **a, const struct dirent **b) {
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_scandir_compar_value, args, 2, &result) != 0) {
+static int scandir_compar_trampoline(const struct dirent **a,
+                                     const struct dirent **b) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long       args[2] = {(long long)(intptr_t)a, (long long)(intptr_t)b};
+    long long       result  = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_scandir_compar_value, args, 2,
+                                        &result) != 0) {
         g_scandir_faulted = 1;
         return 0;
     }
     return (int)result;
 }
 
-static long long wrap_scandir(long long dirname, long long namelist, long long select, long long compar) {
-    long long saved_select = g_scandir_select_value;
-    long long saved_compar = g_scandir_compar_value;
-    int saved_faulted = g_scandir_faulted;
-    g_scandir_select_value = select;
-    g_scandir_compar_value = compar;
-    g_scandir_faulted = 0;
+static long long wrap_scandir(long long dirname, long long namelist,
+                              long long select, long long compar) {
+    long long saved_select  = g_scandir_select_value;
+    long long saved_compar  = g_scandir_compar_value;
+    int       saved_faulted = g_scandir_faulted;
+    g_scandir_select_value  = select;
+    g_scandir_compar_value  = compar;
+    g_scandir_faulted       = 0;
 
-    int n = scandir((const char *)dirname, (struct dirent ***)namelist,
-                    select ? scandir_select_trampoline : NULL,
-                    compar ? scandir_compar_trampoline : NULL);
+    int n       = scandir((const char *)dirname, (struct dirent ***)namelist,
+                          select ? scandir_select_trampoline : NULL,
+                          compar ? scandir_compar_trampoline : NULL);
 
     int faulted = g_scandir_faulted;
     g_scandir_select_value = saved_select;
     g_scandir_compar_value = saved_compar;
-    g_scandir_faulted = saved_faulted;
+    g_scandir_faulted      = saved_faulted;
     if (faulted)
         errno = EFAULT;
     return n;
@@ -128,11 +141,11 @@ static long long wrap_scandir(long long dirname, long long namelist, long long s
 // comparator holds the GIL across fts_read()/fts_children() for its whole
 // traversal instead.
 static _Thread_local long long g_fts_compar_value;
-static _Thread_local int g_fts_faulted;
+static _Thread_local int       g_fts_faulted;
 
 #define CCCC_FTS_HANDLE_MAX 16
 typedef struct {
-    FTS *handle;
+    FTS      *handle;
     long long compar;
 } FtsHandleBinding;
 static FtsHandleBinding g_fts_handles[CCCC_FTS_HANDLE_MAX];
@@ -168,28 +181,30 @@ static void fts_handle_unbind(FTS *f) {
 }
 
 static int fts_compar_trampoline(const FTSENT **a, const FTSENT **b) {
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_fts_compar_value, args, 2, &result) != 0) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long       args[2] = {(long long)(intptr_t)a, (long long)(intptr_t)b};
+    long long       result  = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_fts_compar_value, args, 2,
+                                        &result) != 0) {
         g_fts_faulted = 1;
         return 0;
     }
     return (int)result;
 }
 
-static long long wrap_fts_open(long long path_argv, long long options, long long compar) {
-    long long saved_compar = g_fts_compar_value;
-    int saved_faulted = g_fts_faulted;
-    g_fts_compar_value = compar;
-    g_fts_faulted = 0;
+static long long wrap_fts_open(long long path_argv, long long options,
+                               long long compar) {
+    long long saved_compar  = g_fts_compar_value;
+    int       saved_faulted = g_fts_faulted;
+    g_fts_compar_value      = compar;
+    g_fts_faulted           = 0;
 
-    FTS *f = fts_open((char *const *)path_argv, (int)options,
-                      compar ? fts_compar_trampoline : NULL);
+    FTS *f                  = fts_open((char *const *)path_argv, (int)options,
+                                       compar ? fts_compar_trampoline : NULL);
 
-    int faulted = g_fts_faulted;
-    g_fts_compar_value = saved_compar;
-    g_fts_faulted = saved_faulted;
+    int  faulted            = g_fts_faulted;
+    g_fts_compar_value      = saved_compar;
+    g_fts_faulted           = saved_faulted;
     if (faulted)
         errno = EFAULT;
     if (f && compar)
@@ -198,9 +213,9 @@ static long long wrap_fts_open(long long path_argv, long long options, long long
 }
 
 static long long wrap_fts_read(long long ftsp) {
-    FTS *f = (FTS *)(intptr_t)ftsp;
-    long long compar = fts_handle_compar(f);
-    VirtualMachine *vm = cccc_posix_current_vm();
+    FTS            *f      = (FTS *)(intptr_t)ftsp;
+    long long       compar = fts_handle_compar(f);
+    VirtualMachine *vm     = cccc_posix_current_vm();
 
     if (!compar || !vm || !vm->gil_initialized) {
         // No guest comparator bound: safe to release the GIL for the
@@ -217,25 +232,25 @@ static long long wrap_fts_read(long long ftsp) {
     // A comparator is bound: keep the GIL held (the trampoline reenters
     // vm_eval on this thread) and re-arm the thread-local slot, since
     // wrap_fts_open's own set/restore only covered its own call.
-    long long saved_compar = g_fts_compar_value;
-    int saved_faulted = g_fts_faulted;
-    g_fts_compar_value = compar;
-    g_fts_faulted = 0;
+    long long saved_compar  = g_fts_compar_value;
+    int       saved_faulted = g_fts_faulted;
+    g_fts_compar_value      = compar;
+    g_fts_faulted           = 0;
 
-    FTSENT *e = fts_read(f);
+    FTSENT *e               = fts_read(f);
 
-    int faulted = g_fts_faulted;
-    g_fts_compar_value = saved_compar;
-    g_fts_faulted = saved_faulted;
+    int     faulted         = g_fts_faulted;
+    g_fts_compar_value      = saved_compar;
+    g_fts_faulted           = saved_faulted;
     if (faulted)
         errno = EFAULT;
     return (long long)(intptr_t)e;
 }
 
 static long long wrap_fts_children(long long ftsp, long long options) {
-    FTS *f = (FTS *)(intptr_t)ftsp;
-    long long compar = fts_handle_compar(f);
-    VirtualMachine *vm = cccc_posix_current_vm();
+    FTS            *f      = (FTS *)(intptr_t)ftsp;
+    long long       compar = fts_handle_compar(f);
+    VirtualMachine *vm     = cccc_posix_current_vm();
 
     if (!compar || !vm || !vm->gil_initialized) {
         if (!vm || !vm->gil_initialized)
@@ -247,23 +262,24 @@ static long long wrap_fts_children(long long ftsp, long long options) {
         return (long long)(intptr_t)e;
     }
 
-    long long saved_compar = g_fts_compar_value;
-    int saved_faulted = g_fts_faulted;
-    g_fts_compar_value = compar;
-    g_fts_faulted = 0;
+    long long saved_compar  = g_fts_compar_value;
+    int       saved_faulted = g_fts_faulted;
+    g_fts_compar_value      = compar;
+    g_fts_faulted           = 0;
 
-    FTSENT *e = fts_children(f, (int)options);
+    FTSENT *e               = fts_children(f, (int)options);
 
-    int faulted = g_fts_faulted;
-    g_fts_compar_value = saved_compar;
-    g_fts_faulted = saved_faulted;
+    int     faulted         = g_fts_faulted;
+    g_fts_compar_value      = saved_compar;
+    g_fts_faulted           = saved_faulted;
     if (faulted)
         errno = EFAULT;
     return (long long)(intptr_t)e;
 }
 
 static long long wrap_fts_set(long long ftsp, long long f, long long instr) {
-    return (long long)fts_set((FTS *)(intptr_t)ftsp, (FTSENT *)(intptr_t)f, (int)instr);
+    return (long long)fts_set((FTS *)(intptr_t)ftsp, (FTSENT *)(intptr_t)f,
+                              (int)instr);
 }
 
 static long long wrap_fts_close(long long ftsp) {
@@ -273,31 +289,33 @@ static long long wrap_fts_close(long long ftsp) {
 }
 
 void register_posix_dir_functions(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "regcomp",  (void*)regcomp,  3, 0);
-    cc_register_cfunc(vm, "regexec",  (void*)regexec,  5, 0);
-    cc_register_cfunc(vm, "regerror", (void*)regerror, 4, 0);
-    cc_register_cfunc(vm, "regfree",  (void*)wrap_regfree,  1, 0);
-    cc_register_cfunc(vm, "glob",     (void*)wrap_glob, 4, 0);
-    cc_register_cfunc(vm, "globfree", (void*)wrap_globfree, 1, 0);
-    cc_register_cfunc(vm, "scandir",  (void*)wrap_scandir, 4, 0);
+    cc_register_cfunc(vm, "regcomp", (void *)regcomp, 3, 0);
+    cc_register_cfunc(vm, "regexec", (void *)regexec, 5, 0);
+    cc_register_cfunc(vm, "regerror", (void *)regerror, 4, 0);
+    cc_register_cfunc(vm, "regfree", (void *)wrap_regfree, 1, 0);
+    cc_register_cfunc(vm, "glob", (void *)wrap_glob, 4, 0);
+    cc_register_cfunc(vm, "globfree", (void *)wrap_globfree, 1, 0);
+    cc_register_cfunc(vm, "scandir", (void *)wrap_scandir, 4, 0);
 
     // fts.h (#811)
-    cc_register_cfunc(vm, "fts_open",     (void*)wrap_fts_open,     3, 0);
-    cc_register_cfunc(vm, "fts_read",     (void*)wrap_fts_read,     1, 0);
-    cc_register_cfunc(vm, "fts_children", (void*)wrap_fts_children, 2, 0);
-    cc_register_cfunc(vm, "fts_set",      (void*)wrap_fts_set,      3, 0);
-    cc_register_cfunc(vm, "fts_close",    (void*)wrap_fts_close,    1, 0);
+    cc_register_cfunc(vm, "fts_open", (void *)wrap_fts_open, 3, 0);
+    cc_register_cfunc(vm, "fts_read", (void *)wrap_fts_read, 1, 0);
+    cc_register_cfunc(vm, "fts_children", (void *)wrap_fts_children, 2, 0);
+    cc_register_cfunc(vm, "fts_set", (void *)wrap_fts_set, 3, 0);
+    cc_register_cfunc(vm, "fts_close", (void *)wrap_fts_close, 1, 0);
 
-    cc_register_cfunc(vm, "opendir",  (void*)opendir,  1, 0);
-    cc_register_cfunc(vm, "readdir",  (void*)readdir,  1, 0);
-    cc_register_cfunc(vm, "readdir_r",(void*)readdir_r,3, 0);
-    cc_register_cfunc(vm, "closedir", (void*)closedir, 1, 0);
-    cc_register_cfunc(vm, "alphasort",(void*)alphasort,2, 0);
-    cc_register_cfunc(vm, "seekdir",    (void*)seekdir,     2, 0);
-    cc_register_cfunc(vm, "telldir",    (void*)telldir,     1, 0);
-    cc_register_cfunc(vm, "rewinddir",  (void*)rewinddir,   1, 0);
+    cc_register_cfunc(vm, "opendir", (void *)opendir, 1, 0);
+    cc_register_cfunc(vm, "readdir", (void *)readdir, 1, 0);
+    cc_register_cfunc(vm, "readdir_r", (void *)readdir_r, 3, 0);
+    cc_register_cfunc(vm, "closedir", (void *)closedir, 1, 0);
+    cc_register_cfunc(vm, "alphasort", (void *)alphasort, 2, 0);
+    cc_register_cfunc(vm, "seekdir", (void *)seekdir, 2, 0);
+    cc_register_cfunc(vm, "telldir", (void *)telldir, 1, 0);
+    cc_register_cfunc(vm, "rewinddir", (void *)rewinddir, 1, 0);
 }
 
 #else
-void register_posix_dir_functions(VirtualMachine *vm) { (void)vm; }
+void register_posix_dir_functions(VirtualMachine *vm) {
+    (void)vm;
+}
 #endif

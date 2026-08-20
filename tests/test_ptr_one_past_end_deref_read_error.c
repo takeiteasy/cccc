@@ -7,7 +7,7 @@ int main(void) {
     int *p = malloc(4 * sizeof(int));
     if (!p)
         return 255;
-    int x = p[4];   // exactly one past the end -- must still trap
+    int x = p[4]; // exactly one past the end -- must still trap
     free(p);
     return x == 0 ? 42 : 1;
 }

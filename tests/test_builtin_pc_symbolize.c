@@ -31,13 +31,16 @@
 // to the *caller's* function name.  Since the test functions are [[cccc::test]]
 // entries, the caller of each helper *is* the test function.
 
-static void *get_ra0(void) { return __builtin_return_address(0); }
+static void *get_ra0(void) {
+    return __builtin_return_address(0);
+}
 
 // Returns the function-name string for its own address (level 0 → the call
 // site inside the caller, but we want the name of *this* function's body).
-// We capture ra at level 0, which gives the return address *back into the caller*
-// — that address lies inside the caller's function body, so we can check the
-// caller's name.  The helper below captures itself differently for self-naming.
+// We capture ra at level 0, which gives the return address *back into the
+// caller* — that address lies inside the caller's function body, so we can
+// check the caller's name.  The helper below captures itself differently for
+// self-naming.
 static const char *name_of_caller(void) {
     void *ra = __builtin_return_address(0);
     return __builtin_pc_function_name(ra);
@@ -52,7 +55,7 @@ static const char *name_of_caller(void) {
 
 [[cccc::test]]
 void test_pc_function_name_type(void) {
-    void *ra = get_ra0();
+    void       *ra = get_ra0();
     const char *fn = __builtin_pc_function_name(ra);
     // Just ensure it compiles and returns a const char* or NULL.
     (void)fn;
@@ -60,10 +63,10 @@ void test_pc_function_name_type(void) {
 
 [[cccc::test]]
 void test_pc_source_location_type(void) {
-    void *ra = get_ra0();
+    void       *ra   = get_ra0();
     const char *file = NULL;
-    int line = 0;
-    int ok = __builtin_pc_source_location(ra, &file, &line);
+    int         line = 0;
+    int         ok   = __builtin_pc_source_location(ra, &file, &line);
     // Ensure it compiles; return value is 0 without -g.
     (void)ok;
 }
@@ -80,8 +83,8 @@ void test_pc_function_name_null_pc(void) {
 [[cccc::test]]
 void test_pc_source_location_null_pc(void) {
     const char *file = (const char *)0xdeadbeef;
-    int line = 99;
-    int ok = __builtin_pc_source_location(NULL, &file, &line);
+    int         line = 99;
+    int         ok   = __builtin_pc_source_location(NULL, &file, &line);
     AssertEq(ok, 0);
     AssertNull(file);
     AssertEq(line, 0);
@@ -119,10 +122,10 @@ void test_pc_function_name_distinct_helpers(void) {
 
 [[cccc::test]]
 void test_pc_source_location_degrades_without_g(void) {
-    void *ra = get_ra0();
+    void       *ra   = get_ra0();
     const char *file = (const char *)0xdeadbeef;
-    int line = 99;
-    int ok = __builtin_pc_source_location(ra, &file, &line);
+    int         line = 99;
+    int         ok   = __builtin_pc_source_location(ra, &file, &line);
     // Without -g ok == 0 and outputs are zeroed.  With -g ok == 1.
     // In this test file (no -g flag) we assert the no-g behaviour.
     AssertEq(ok, 0);
@@ -135,18 +138,18 @@ void test_pc_source_location_degrades_without_g(void) {
 [[cccc::test]]
 void test_pc_function_name_invalid_pc(void) {
     // A pointer value that is definitely not a valid bytecode offset.
-    void *huge = (void *)(uintptr_t)0xffffffff;
-    const char *fn = __builtin_pc_function_name(huge);
+    void       *huge = (void *)(uintptr_t)0xffffffff;
+    const char *fn   = __builtin_pc_function_name(huge);
     // Should return NULL without crashing.
     AssertNull(fn);
 }
 
 [[cccc::test]]
 void test_pc_source_location_invalid_pc(void) {
-    void *huge = (void *)(uintptr_t)0xffffffff;
+    void       *huge = (void *)(uintptr_t)0xffffffff;
     const char *file = (const char *)1;
-    int line = 1;
-    int ok = __builtin_pc_source_location(huge, &file, &line);
+    int         line = 1;
+    int         ok   = __builtin_pc_source_location(huge, &file, &line);
     AssertEq(ok, 0);
     AssertNull(file);
     AssertEq(line, 0);
@@ -157,7 +160,7 @@ void test_pc_source_location_invalid_pc(void) {
 [[cccc::test]]
 void test_pc_compose_with_return_address(void) {
     // Full pipeline: capture ra then symbolize.
-    void *ra = get_ra0();
+    void       *ra = get_ra0();
     const char *fn = __builtin_pc_function_name(ra);
     // ra points back into *this* test function.
     AssertNotNull(fn);

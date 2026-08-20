@@ -7,8 +7,8 @@
 #include <stdlib.h>
 
 int main(void) {
-    void *p = NULL;
-    int rc = posix_memalign(&p, 64, 256);
+    void *p  = NULL;
+    int   rc = posix_memalign(&p, 64, 256);
     if (rc != 0)
         return 1;
     if (!p)
@@ -27,7 +27,7 @@ int main(void) {
 
     // Not a power of two -> EINVAL, memptr left untouched.
     void *q = (void *)0x1;
-    rc = posix_memalign(&q, 3, 16);
+    rc      = posix_memalign(&q, 3, 16);
     if (rc != EINVAL)
         return 5;
 

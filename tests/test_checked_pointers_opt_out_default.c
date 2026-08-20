@@ -5,9 +5,10 @@
 // and return 42.
 
 int main(void) {
-    int n = 5;
-    int * [[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
-    volatile int i = 5; // one past the declared count -- no check without the flag
+    int n                                  = 5;
+    int *[[cccc::array, cccc::count(n)]] a = (int[5]){1, 2, 3, 4, 5};
+    volatile int i =
+        5; // one past the declared count -- no check without the flag
     int x = a[i];
     (void)x;
     return 42;

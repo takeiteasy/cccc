@@ -15,7 +15,8 @@ static void solve(int n, int *cols, int row) {
         int ok = 1;
         for (int r = 0; r < row; r++) {
             int d = cols[r] - c;
-            if (d < 0) d = -d;
+            if (d < 0)
+                d = -d;
             if (cols[r] == c || d == row - r) {
                 ok = 0;
                 break;

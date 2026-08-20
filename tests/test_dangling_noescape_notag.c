@@ -9,19 +9,19 @@
 static int accumulate(int n) {
     int total = 0;
     for (int i = 0; i < n; i++) {
-        int *p = &total; // address taken, but never escapes this call
-        *p += i;
+        int *p  = &total; // address taken, but never escapes this call
+        *p     += i;
     }
     return total;
 }
 
 int main(void) {
     int arr[4] = {1, 2, 3, 4};
-    int sum = 0;
+    int sum    = 0;
     for (int i = 0; i < 4; i++) {
-        int *elem = &arr[i]; // constant-offset &local, still never escapes
-        sum += *elem;
+        int *elem  = &arr[i]; // constant-offset &local, still never escapes
+        sum       += *elem;
     }
-    int acc = accumulate(5); // 0+1+2+3+4 = 10
+    int acc = accumulate(5);  // 0+1+2+3+4 = 10
     return (sum == 10 && acc == 10) ? 42 : 1;
 }

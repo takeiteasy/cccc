@@ -9,7 +9,7 @@
 // the .c4 output (i.e. folded into the cccc bytecode compile), not on a
 // separate native cc -c line (which is what happens before this fix).
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
     // Library target: defines answer(), no main().  Folded into app.
     BuildTarget *lib = Executable(ctx, "answer_lib");

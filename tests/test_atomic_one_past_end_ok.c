@@ -10,10 +10,10 @@
 #include <stdbool.h>
 #include <stdlib.h>
 int main(void) {
-    _Atomic int *p = malloc(4 * sizeof(int));   // valid indices 0..3
+    _Atomic int *p = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!p)
         return 255;
-    _Atomic int *last = p + 3;   // last valid element -- in bounds
+    _Atomic int *last = p + 3;                // last valid element -- in bounds
 
     atomic_store(last, 10);
     if (atomic_load(last) != 10) {
@@ -27,8 +27,8 @@ int main(void) {
         return 2;
     }
 
-    int expected = 20;
-    bool ok = atomic_compare_exchange_strong(last, &expected, 30);
+    int  expected = 20;
+    bool ok       = atomic_compare_exchange_strong(last, &expected, 30);
     if (!ok || atomic_load(last) != 30) {
         free((void *)p);
         return 3;

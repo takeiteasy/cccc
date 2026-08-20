@@ -16,7 +16,8 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
- This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
+ This file was original part of chibicc by Rui Ueyama (MIT)
+ https://github.com/rui314/chibicc
 */
 
 #include "./internal.h"
@@ -45,17 +46,18 @@ static uint64_t fnv_hash(char *s, int len) {
 // Simple hash function for integer keys
 static uint64_t int_hash(long long key) {
     // Mix the bits using a simple multiplicative hash
-    uint64_t hash = (uint64_t)key;
-    hash ^= hash >> 33;
-    hash *= 0xff51afd7ed558ccd;
-    hash ^= hash >> 33;
-    hash *= 0xc4ceb9fe1a85ec53;
-    hash ^= hash >> 33;
+    uint64_t hash  = (uint64_t)key;
+    hash          ^= hash >> 33;
+    hash          *= 0xff51afd7ed558ccd;
+    hash          ^= hash >> 33;
+    hash          *= 0xc4ceb9fe1a85ec53;
+    hash          ^= hash >> 33;
     return hash;
 }
 
 // Forward declarations for internal raw operations (no key copying)
-static void hashmap_put2_raw(HashMap *map, const char *key, int keylen, void *val);
+static void hashmap_put2_raw(HashMap *map, const char *key, int keylen,
+                             void *val);
 static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen);
 static HashEntry *get_or_insert_entry_int(HashMap *map, long long key);
 
@@ -78,7 +80,7 @@ static void rehash(HashMap *map) {
     map2.buckets = calloc(cap, sizeof(HashEntry));
     if (!map2.buckets) {
         fprintf(stderr, "FATAL: out of memory in HashMap rehash\n");
-        exit(1);  // Cannot continue without memory
+        exit(1); // Cannot continue without memory
     }
     map2.capacity = cap;
 
@@ -102,7 +104,7 @@ static void rehash(HashMap *map) {
             // implementing #673's frame-epoch tracking, whose churn was
             // the first workload to hit it reliably.
             HashEntry *e2 = get_or_insert_entry_int(&map2, (long long)ent->key);
-            e2->val = ent->val;
+            e2->val       = ent->val;
         } else {
             hashmap_put2_raw(&map2, ent->key, ent->keylen, ent->val);
         }
@@ -119,9 +121,9 @@ static bool match(HashEntry *ent, char *key, int keylen) {
     if (!ent->key || ent->key == TOMBSTONE || ent->keylen != keylen)
         return false;
     // Integer keys (keylen == -1) store the value in the pointer itself, so
-    // compare pointer values directly. This path is hit when rehash() re-inserts
-    // int-keyed entries via the raw string path; memcmp(key, key, -1) would
-    // otherwise read with a negative size and corrupt/crash.
+    // compare pointer values directly. This path is hit when rehash()
+    // re-inserts int-keyed entries via the raw string path; memcmp(key, key,
+    // -1) would otherwise read with a negative size and corrupt/crash.
     if (keylen == -1)
         return ent->key == key;
     return memcmp(ent->key, key, keylen) == 0;
@@ -160,9 +162,9 @@ static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen) {
 
     // Reuse the first tombstone we pass over, but only after we are certain the
     // key is not already present further along the probe chain. Inserting at a
-    // tombstone eagerly would create a duplicate entry whenever an existing copy
-    // of the key sits past that tombstone, leaving a stale entry that survives a
-    // later delete (manifested as "#undef doesn't stick", #584).
+    // tombstone eagerly would create a duplicate entry whenever an existing
+    // copy of the key sits past that tombstone, leaving a stale entry that
+    // survives a later delete (manifested as "#undef doesn't stick", #584).
     HashEntry *tombstone = NULL;
 
     for (int i = 0; i < map->capacity; i++) {
@@ -180,21 +182,21 @@ static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen) {
         if (ent->key == NULL) {
             if (tombstone) {
                 // Revive a tombstone slot; map->used already counts it.
-                tombstone->key = key;
+                tombstone->key    = key;
                 tombstone->keylen = keylen;
                 return tombstone;
             }
-            ent->key = key;
+            ent->key    = key;
             ent->keylen = keylen;
             map->used++;
             return ent;
         }
     }
 
-    // The probe chain is full of live entries and tombstones with no empty slot.
-    // If we saw a tombstone we can still reuse it for this key.
+    // The probe chain is full of live entries and tombstones with no empty
+    // slot. If we saw a tombstone we can still reuse it for this key.
     if (tombstone) {
-        tombstone->key = key;
+        tombstone->key    = key;
         tombstone->keylen = keylen;
         return tombstone;
     }
@@ -204,7 +206,8 @@ static HashEntry *get_or_insert_entry_raw(HashMap *map, char *key, int keylen) {
 
 // Wrapper that makes an owned copy of string keys so the HashMap controls
 // their lifetime. Integer keys (keylen == -1) are stored as-is.
-static HashEntry *get_or_insert_entry(HashMap *map, const char *key, int keylen) {
+static HashEntry *get_or_insert_entry(HashMap *map, const char *key,
+                                      int keylen) {
     char *owned_key = (char *)key;
     if (keylen != -1) {
         owned_key = malloc(keylen + 1);
@@ -225,7 +228,7 @@ static HashEntry *get_or_insert_entry(HashMap *map, const char *key, int keylen)
 }
 
 void *hashmap_get2(HashMap *map, const char *key, int keylen) {
-    HashEntry *ent = get_entry(map, (char*)key, keylen);
+    HashEntry *ent = get_entry(map, (char *)key, keylen);
     return ent ? ent->val : NULL;
 }
 
@@ -233,14 +236,15 @@ void *hashmap_get(HashMap *map, const char *key) {
     return hashmap_get2(map, key, strlen(key));
 }
 
-static void hashmap_put2_raw(HashMap *map, const char *key, int keylen, void *val) {
-    HashEntry *ent = get_or_insert_entry_raw(map, (char*)key, keylen);
-    ent->val = val;
+static void hashmap_put2_raw(HashMap *map, const char *key, int keylen,
+                             void *val) {
+    HashEntry *ent = get_or_insert_entry_raw(map, (char *)key, keylen);
+    ent->val       = val;
 }
 
 void hashmap_put2(HashMap *map, const char *key, int keylen, void *val) {
     HashEntry *ent = get_or_insert_entry(map, key, keylen);
-    ent->val = val;
+    ent->val       = val;
 }
 
 void hashmap_put(HashMap *map, const char *key, void *val) {
@@ -248,9 +252,10 @@ void hashmap_put(HashMap *map, const char *key, void *val) {
 }
 
 // Borrowed key variants: the caller guarantees the key outlives the map.
-void hashmap_put2_borrowed(HashMap *map, const char *key, int keylen, void *val) {
-    HashEntry *ent = get_or_insert_entry_raw(map, (char*)key, keylen);
-    ent->val = val;
+void hashmap_put2_borrowed(HashMap *map, const char *key, int keylen,
+                           void *val) {
+    HashEntry *ent = get_or_insert_entry_raw(map, (char *)key, keylen);
+    ent->val       = val;
 }
 
 void hashmap_put_borrowed(HashMap *map, const char *key, void *val) {
@@ -258,14 +263,13 @@ void hashmap_put_borrowed(HashMap *map, const char *key, void *val) {
 }
 
 void hashmap_delete2(HashMap *map, const char *key, int keylen) {
-    HashEntry *ent = get_entry(map, (char*)key, keylen);
+    HashEntry *ent = get_entry(map, (char *)key, keylen);
     if (ent) {
         if (ent->keylen != -1)
             free(ent->key);
         ent->key = TOMBSTONE;
     }
 }
-
 
 void hashmap_delete(HashMap *map, const char *key) {
     hashmap_delete2(map, key, strlen(key));
@@ -277,8 +281,8 @@ void hashmap_delete(HashMap *map, const char *key) {
 static bool match_int(HashEntry *ent, long long key) {
     // For integer keys, we store the key as a pointer value
     // keylen is set to -1 to distinguish from string keys
-    return ent->key && ent->key != TOMBSTONE &&
-           ent->keylen == -1 && (long long)ent->key == key;
+    return ent->key && ent->key != TOMBSTONE && ent->keylen == -1 &&
+           (long long)ent->key == key;
 }
 
 static HashEntry *get_entry_int(HashMap *map, long long key) {
@@ -329,20 +333,20 @@ static HashEntry *get_or_insert_entry_int(HashMap *map, long long key) {
 
         if (ent->key == NULL) {
             if (tombstone) {
-                tombstone->key = (char *)key;
-                tombstone->keylen = -1;  // Mark as integer key
+                tombstone->key    = (char *)key;
+                tombstone->keylen = -1; // Mark as integer key
                 return tombstone;
             }
-            ent->key = (char *)key;
-            ent->keylen = -1;  // Mark as integer key
+            ent->key    = (char *)key;
+            ent->keylen = -1; // Mark as integer key
             map->used++;
             return ent;
         }
     }
 
     if (tombstone) {
-        tombstone->key = (char *)key;
-        tombstone->keylen = -1;  // Mark as integer key
+        tombstone->key    = (char *)key;
+        tombstone->keylen = -1; // Mark as integer key
         return tombstone;
     }
     unreachable();
@@ -356,7 +360,7 @@ void *hashmap_get_int(HashMap *map, long long key) {
 
 void hashmap_put_int(HashMap *map, long long key, void *val) {
     HashEntry *ent = get_or_insert_entry_int(map, key);
-    ent->val = val;
+    ent->val       = val;
 }
 
 // Removes an integer-keyed entry. Does not free ent->val (int-keyed maps
@@ -377,9 +381,9 @@ void hashmap_deinit(HashMap *map) {
             free(ent->key);
     }
     free(map->buckets);
-    map->buckets = NULL;
+    map->buckets  = NULL;
     map->capacity = 0;
-    map->used = 0;
+    map->used     = 0;
 }
 
 // Like hashmap_deinit but does not free keys (for borrowed-key maps).
@@ -387,9 +391,9 @@ void hashmap_deinit_borrowed(HashMap *map) {
     if (!map || !map->buckets)
         return;
     free(map->buckets);
-    map->buckets = NULL;
+    map->buckets  = NULL;
     map->capacity = 0;
-    map->used = 0;
+    map->used     = 0;
 }
 
 // Clone a HashMap for snapshot/restore around a preprocessor sub-pass.
@@ -410,7 +414,8 @@ HashMap hashmap_snapshot(const HashMap *map) {
             if (ent->key && ent->key != TOMBSTONE && ent->keylen != -1) {
                 char *k = malloc(ent->keylen + 1);
                 if (!k) {
-                    fprintf(stderr, "FATAL: out of memory in hashmap_snapshot\n");
+                    fprintf(stderr,
+                            "FATAL: out of memory in hashmap_snapshot\n");
                     exit(1);
                 }
                 memcpy(k, ent->key, ent->keylen + 1);
@@ -452,6 +457,6 @@ void hashmap_foreach(HashMap *map, HashMapIterator iter, void *user_data) {
         // Call user callback
         int result = iter(ent->key, ent->keylen, ent->val, user_data);
         if (result != 0)
-            break;  // User requested stop
+            break; // User requested stop
     }
 }

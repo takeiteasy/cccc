@@ -13,7 +13,7 @@
 
 typedef int (*plan_fn_1048)(int);
 
-static int plan_value_1048;
+static int          plan_value_1048;
 static plan_fn_1048 plan_ptr_1048;
 
 [[cccc::comptime]]

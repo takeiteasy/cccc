@@ -27,7 +27,8 @@
 [[cccc::build]]
 int build_main(Builder *ctx) {
     BuildTarget *rt;
-    BuildTarget *example_gen, *example, *example_lambda, *example_mutual, *check;
+    BuildTarget *example_gen, *example, *example_lambda, *example_mutual,
+        *check;
 
     rt = StaticLib(ctx, "ccccl_rt");
     AddSource(rt, "runtime/ccccl_rt.c");
@@ -37,19 +38,20 @@ int build_main(Builder *ctx) {
     // to cccc (see its file comment for why). Runs once per example --
     // each invocation selects its .lisp source via -DCCCCL_LISP_PATH -- as
     // a single `;`-sequenced RunCustom command.
-    example_gen = RunCustom(ctx, "example_gen",
-        "cccc -c=generated --emit-only src/ccccl_comptime.c "
-        "-Iinclude/ccccl -Iruntime "
-        "-DCCCCL_LISP_PATH='\"examples/append.lisp\"' "
-        "-o build/append.gen.c ; "
-        "cccc -c=generated --emit-only src/ccccl_comptime.c "
-        "-Iinclude/ccccl -Iruntime "
-        "-DCCCCL_LISP_PATH='\"examples/lambda_head.lisp\"' "
-        "-o build/lambda_head.gen.c ; "
-        "cccc -c=generated --emit-only src/ccccl_comptime.c "
-        "-Iinclude/ccccl -Iruntime "
-        "-DCCCCL_LISP_PATH='\"examples/mutual.lisp\"' "
-        "-o build/mutual.gen.c");
+    example_gen =
+        RunCustom(ctx, "example_gen",
+                  "cccc -c=generated --emit-only src/ccccl_comptime.c "
+                  "-Iinclude/ccccl -Iruntime "
+                  "-DCCCCL_LISP_PATH='\"examples/append.lisp\"' "
+                  "-o build/append.gen.c ; "
+                  "cccc -c=generated --emit-only src/ccccl_comptime.c "
+                  "-Iinclude/ccccl -Iruntime "
+                  "-DCCCCL_LISP_PATH='\"examples/lambda_head.lisp\"' "
+                  "-o build/lambda_head.gen.c ; "
+                  "cccc -c=generated --emit-only src/ccccl_comptime.c "
+                  "-Iinclude/ccccl -Iruntime "
+                  "-DCCCCL_LISP_PATH='\"examples/mutual.lisp\"' "
+                  "-o build/mutual.gen.c");
     DeclareOutput(example_gen, "build/append.gen.c");
     DeclareOutput(example_gen, "build/lambda_head.gen.c");
     DeclareOutput(example_gen, "build/mutual.gen.c");

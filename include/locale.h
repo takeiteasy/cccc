@@ -34,12 +34,12 @@
 #ifndef __LOCALE_H
 #define __LOCALE_H
 
-#define LC_ALL 0
-#define LC_COLLATE 1
-#define LC_CTYPE 2
+#define LC_ALL      0
+#define LC_COLLATE  1
+#define LC_CTYPE    2
 #define LC_MONETARY 3
-#define LC_NUMERIC 4
-#define LC_TIME 5
+#define LC_NUMERIC  4
+#define LC_TIME     5
 #define LC_MESSAGES 6
 
 /* LC_*_MASK bits for newlocale()/uselocale() -- see the file comment above
@@ -57,7 +57,7 @@ typedef void *locale_t;
 
 /* Passing this value to any function other than uselocale() is undefined
    behavior. */
-#define LC_GLOBAL_LOCALE ((locale_t)-1)
+#define LC_GLOBAL_LOCALE ((locale_t) - 1)
 
 struct lconv {
     char *decimal_point;
@@ -70,14 +70,14 @@ struct lconv {
     char *mon_grouping;
     char *positive_sign;
     char *negative_sign;
-    char int_frac_digits;
-    char frac_digits;
-    char p_cs_precedes;
-    char p_sep_by_space;
-    char n_cs_precedes;
-    char n_sep_by_space;
-    char p_sign_posn;
-    char n_sign_posn;
+    char  int_frac_digits;
+    char  frac_digits;
+    char  p_cs_precedes;
+    char  p_sep_by_space;
+    char  n_cs_precedes;
+    char  n_sep_by_space;
+    char  p_sign_posn;
+    char  n_sign_posn;
 };
 
 extern char *setlocale(int category, const char *locale);

@@ -9,8 +9,12 @@
 static int order[3];
 static int order_idx;
 
-__attribute__((destructor)) void ddefault(void) { order[order_idx++] = 0; }
-__attribute__((destructor(200))) void d200(void) { order[order_idx++] = 200; }
+__attribute__((destructor)) void ddefault(void) {
+    order[order_idx++] = 0;
+}
+__attribute__((destructor(200))) void d200(void) {
+    order[order_idx++] = 200;
+}
 // Runs last (highest priority runs first among prioritised ones, but here
 // only d101/d200 are prioritised and d101 < d200 in priority number, so
 // d101 -- the lowest-numbered priority -- runs last of the two, and after

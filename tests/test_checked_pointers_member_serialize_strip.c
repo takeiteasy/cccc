@@ -11,7 +11,7 @@
 
 struct S {
     int n;
-    int * [[cccc::array, cccc::count(n)]] p;
+    int *[[cccc::array, cccc::count(n)]] p;
 };
 
 int main(void) {

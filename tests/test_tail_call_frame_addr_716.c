@@ -8,7 +8,8 @@
 // dangles the moment the callee's prologue/body overwrites that stack slot.
 //
 //   int use(double *p){ printf(...); return chk(5, *p); }
-//   int main(void){ double x=4.5; return use(&x); }   // main -> use is a tail call
+//   int main(void){ double x=4.5; return use(&x); }   // main -> use is a tail
+//   call
 //
 // Before the fix, can_emit_tail_call() didn't know an argument could carry
 // the address of a caller local, so `main`'s call into `use` became a
@@ -35,25 +36,35 @@
 // necessarily touched by a *sibling* call's own frame), and the regression
 // test could then pass even without the fix.
 static volatile long g_sink;
-#define CLOBBER_FRAME()                                                      \
-    do {                                                                     \
-        volatile long junk[8];                                               \
-        for (int _i = 0; _i < 8; _i++)                                       \
-            junk[_i] = 0xdeaddead + _i;                                      \
-        g_sink = junk[0]; /* keep the writes from being optimized away */    \
+#define CLOBBER_FRAME()                                                        \
+    do {                                                                       \
+        volatile long junk[8];                                                 \
+        for (int _i = 0; _i < 8; _i++)                                         \
+            junk[_i] = 0xdeaddead + _i;                                        \
+        g_sink = junk[0]; /* keep the writes from being optimized away */      \
     } while (0)
 
 // ─── Route (a): explicit &local as a tail-call argument ───────────────────
 
-static int chk_d(int n, double d) { return (n == 5 && d == 4.5) ? 42 : 0; }
-static int use_addr_d(double *p) { CLOBBER_FRAME(); return chk_d(5, *p); }
+static int chk_d(int n, double d) {
+    return (n == 5 && d == 4.5) ? 42 : 0;
+}
+static int use_addr_d(double *p) {
+    CLOBBER_FRAME();
+    return chk_d(5, *p);
+}
 static int call_use_addr_d(void) {
     double x = 4.5;
     return use_addr_d(&x); // tail call carries &x — must not become CALLT
 }
 
-static int chk_i(int n) { return n == 5 ? 42 : 0; }
-static int use_addr_i(int *p) { CLOBBER_FRAME(); return chk_i(*p); }
+static int chk_i(int n) {
+    return n == 5 ? 42 : 0;
+}
+static int use_addr_i(int *p) {
+    CLOBBER_FRAME();
+    return chk_i(*p);
+}
 static int call_use_addr_i(void) {
     int x = 5;
     return use_addr_i(&x);
@@ -61,27 +72,36 @@ static int call_use_addr_i(void) {
 
 // ─── Pointer arithmetic off a frame-local array ────────────────────────────
 
-static int use_arith(int *p) { CLOBBER_FRAME(); return chk_i(*p); }
+static int use_arith(int *p) {
+    CLOBBER_FRAME();
+    return chk_i(*p);
+}
 static int call_use_arith(void) {
     int buf[2] = {5, 0};
-    int i = 0;
+    int i      = 0;
     return use_arith(buf + i); // buf+i is a frame-local address, not marked
-                                // by mark_addr_escapes -- must still be caught
+                               // by mark_addr_escapes -- must still be caught
 }
 
 // ─── Route (b): frame address laundered through a pointer variable ────────
 
-static int use_ptrvar(int *p) { CLOBBER_FRAME(); return chk_i(*p); }
+static int use_ptrvar(int *p) {
+    CLOBBER_FRAME();
+    return chk_i(*p);
+}
 static int call_use_ptrvar(void) {
-    int x = 5;
-    int *q = &x; // &x escapes via assignment to a pointer lvalue
+    int  x = 5;
+    int *q = &x;          // &x escapes via assignment to a pointer lvalue
     return use_ptrvar(q); // q, not &x, is the syntactic argument
 }
 
 // ─── Positive controls: must stay correct AND keep TCO ─────────────────────
 
 static double g_x = 4.5;
-static int use_global(double *p) { CLOBBER_FRAME(); return chk_d(5, *p); }
+static int use_global(double *p) {
+    CLOBBER_FRAME();
+    return chk_d(5, *p);
+}
 static int call_use_global(void) {
     // Address of a global, not a frame-local: safe even though CALLT still
     // reuses the frame and use_global still clobbers it, because g_x never
@@ -89,7 +109,9 @@ static int call_use_global(void) {
     return use_global(&g_x);
 }
 
-static int use_val(double d) { return chk_d(5, d); }
+static int use_val(double d) {
+    return chk_d(5, d);
+}
 static int call_use_val(void) {
     double x = 4.5;
     return use_val(x); // value, not address — safe regardless of TCO
@@ -98,7 +120,8 @@ static int call_use_val(void) {
 static long tail_sum(long n, long acc) {
     if (n <= 0)
         return acc;
-    return tail_sum(n - 1, acc + n); // pure-value tail recursion — must keep TCO
+    return tail_sum(n - 1,
+                    acc + n); // pure-value tail recursion — must keep TCO
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────

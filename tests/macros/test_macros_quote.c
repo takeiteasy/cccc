@@ -33,11 +33,11 @@ Node *sum_incr(Node *a, Node *b) {
     return __builtin_quote("$$ + $$", a, b);
 }
 
-// ---- __builtin_quote_n: array form ---------------------------------------------
-// Produces: a + b + c
+// ---- __builtin_quote_n: array form
+// --------------------------------------------- Produces: a + b + c
 [[cccc::comptime]]
 Node *add3(Node *a, Node *b, Node *c) {
-    Node *args[3] = { a, b, c };
+    Node *args[3] = {a, b, c};
     return __builtin_quote_n("$1 + $2 + $3", args, 3);
 }
 
@@ -48,7 +48,8 @@ Node *const_expr(void) {
 }
 
 // ---- If-statement template -----------------------------------------------
-// Returns one of two values based on sign; invoked as statement in function body.
+// Returns one of two values based on sign; invoked as statement in function
+// body.
 [[cccc::comptime]]
 Node *clamp_zero(Node *val) {
     return __builtin_quote("if ($1 < 0) return 0; else return $1;", val);
@@ -61,30 +62,38 @@ int clamp(int x) {
 int main(void) {
     // add_mul: 3 + 5 * 3 = 3 + 15 = 18
     int r1 = add_mul(3, 5);
-    if (r1 != 18) return 1;
+    if (r1 != 18)
+        return 1;
 
     // quad: 5*3 + 5 = 15 + 5 = 20
     int r2 = quad(3, 5);
-    if (r2 != 20) return 2;
+    if (r2 != 20)
+        return 2;
 
     // ret_val: function wrapping a statement macro
-    if (get_99() != 99) return 3;
+    if (get_99() != 99)
+        return 3;
 
     // sum_incr ($$): 10 + 20 = 30
     int r4 = sum_incr(10, 20);
-    if (r4 != 30) return 4;
+    if (r4 != 30)
+        return 4;
 
     // add3: 1 + 2 + 3 = 6
     int r5 = add3(1, 2, 3);
-    if (r5 != 6) return 5;
+    if (r5 != 6)
+        return 5;
 
     // const_expr: 6 * 7 = 42
     int r6 = const_expr();
-    if (r6 != 42) return 6;
+    if (r6 != 42)
+        return 6;
 
     // clamp: negative -> 0, positive -> unchanged
-    if (clamp(-5) != 0) return 7;
-    if (clamp(7)  != 7) return 8;
+    if (clamp(-5) != 0)
+        return 7;
+    if (clamp(7) != 7)
+        return 8;
 
     return 42;
 }

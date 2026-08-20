@@ -25,126 +25,126 @@
 // Operator precedence (higher = binds tighter)
 static int get_precedence(NodeKind kind) {
     switch (kind) {
-    case ND_COMMA:
-        return 1;
-    case ND_ASSIGN:
-        return 2;
-    case ND_COND:
-        return 3;
-    case ND_LOGOR:
-        return 4;
-    case ND_LOGAND:
-        return 5;
-    case ND_BITOR:
-        return 6;
-    case ND_BITXOR:
-        return 7;
-    case ND_BITAND:
-        return 8;
-    case ND_EQ:
-    case ND_NE:
-        return 9;
-    case ND_LT:
-    case ND_LE:
-        return 10;
-    case ND_SHL:
-    case ND_SHR:
-        return 11;
-    case ND_ADD:
-    case ND_SUB:
-        return 12;
-    case ND_MUL:
-    case ND_DIV:
-    case ND_MOD:
-        return 13;
-    case ND_NEG:
-    case ND_NOT:
-    case ND_BITNOT:
-    case ND_ADDR:
-    case ND_DEREF:
-    case ND_CAST:
-        return 14;
-    case ND_FUNCALL:
-    case ND_MEMBER:
-        return 15;
-    default:
-        return 16;
+        case ND_COMMA:
+            return 1;
+        case ND_ASSIGN:
+            return 2;
+        case ND_COND:
+            return 3;
+        case ND_LOGOR:
+            return 4;
+        case ND_LOGAND:
+            return 5;
+        case ND_BITOR:
+            return 6;
+        case ND_BITXOR:
+            return 7;
+        case ND_BITAND:
+            return 8;
+        case ND_EQ:
+        case ND_NE:
+            return 9;
+        case ND_LT:
+        case ND_LE:
+            return 10;
+        case ND_SHL:
+        case ND_SHR:
+            return 11;
+        case ND_ADD:
+        case ND_SUB:
+            return 12;
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+            return 13;
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+        case ND_ADDR:
+        case ND_DEREF:
+        case ND_CAST:
+            return 14;
+        case ND_FUNCALL:
+        case ND_MEMBER:
+            return 15;
+        default:
+            return 16;
     }
 }
 
 // Get operator string for binary operations
 static const char *get_binary_op_str(NodeKind kind) {
     switch (kind) {
-    case ND_ADD:
-        return "+";
-    case ND_SUB:
-        return "-";
-    case ND_MUL:
-        return "*";
-    case ND_DIV:
-        return "/";
-    case ND_MOD:
-        return "%";
-    case ND_BITAND:
-        return "&";
-    case ND_BITOR:
-        return "|";
-    case ND_BITXOR:
-        return "^";
-    case ND_SHL:
-        return "<<";
-    case ND_SHR:
-        return ">>";
-    case ND_EQ:
-        return "==";
-    case ND_NE:
-        return "!=";
-    case ND_LT:
-        return "<";
-    case ND_LE:
-        return "<=";
-    case ND_LOGAND:
-        return "&&";
-    case ND_LOGOR:
-        return "||";
-    case ND_ASSIGN:
-        return "=";
-    case ND_COMMA:
-        return ",";
-    default:
-        return "?";
+        case ND_ADD:
+            return "+";
+        case ND_SUB:
+            return "-";
+        case ND_MUL:
+            return "*";
+        case ND_DIV:
+            return "/";
+        case ND_MOD:
+            return "%";
+        case ND_BITAND:
+            return "&";
+        case ND_BITOR:
+            return "|";
+        case ND_BITXOR:
+            return "^";
+        case ND_SHL:
+            return "<<";
+        case ND_SHR:
+            return ">>";
+        case ND_EQ:
+            return "==";
+        case ND_NE:
+            return "!=";
+        case ND_LT:
+            return "<";
+        case ND_LE:
+            return "<=";
+        case ND_LOGAND:
+            return "&&";
+        case ND_LOGOR:
+            return "||";
+        case ND_ASSIGN:
+            return "=";
+        case ND_COMMA:
+            return ",";
+        default:
+            return "?";
     }
 }
 
 // Get operator string for unary operations
 static const char *get_unary_op_str(NodeKind kind) {
     switch (kind) {
-    case ND_NEG:
-        return "-";
-    case ND_NOT:
-        return "!";
-    case ND_BITNOT:
-        return "~";
-    case ND_ADDR:
-        return "&";
-    case ND_DEREF:
-        return "*";
-    default:
-        return "?";
+        case ND_NEG:
+            return "-";
+        case ND_NOT:
+            return "!";
+        case ND_BITNOT:
+            return "~";
+        case ND_ADDR:
+            return "&";
+        case ND_DEREF:
+            return "*";
+        default:
+            return "?";
     }
 }
 
 typedef struct {
     Type **data;
-    int len;
-    int cap;
+    int    len;
+    int    cap;
 } TypeVec;
 
 typedef struct {
     Type *ty;
     char *name;
-    int name_len;
-    Obj *owner_fn;
+    int   name_len;
+    Obj  *owner_fn;
     // #891: mirrors TypeNameRecord.from_include/always_emit (cccc.h) -- used
     // in !generated_only mode (-c=native, -m without -c=generated) to avoid
     // re-emitting a definition the consumer's own #include already provides.
@@ -165,7 +165,7 @@ typedef struct {
 // captured-variable lookup can find it again without re-deriving it. Built
 // once in serialize_block_preamble(), read-only afterward.
 typedef struct {
-    Obj *block_fn;
+    Obj  *block_fn;
     char *env_struct_name; // includes the leading "struct " keyword
 } BlockEnvEntry;
 
@@ -181,11 +181,11 @@ typedef struct {
 // serialize_block_preamble()'s shape exactly, just keyed by the parent
 // function instead of the block literal.
 typedef struct {
-    Obj *owner_fn;
+    Obj  *owner_fn;
     char *env_struct_name; // includes the leading "struct " keyword
     Obj **upvars;
-    int upvars_len;
-    int upvars_cap;
+    int   upvars_len;
+    int   upvars_cap;
 } NestedEnvEntry;
 
 // #1005: break/continue lower to an ND_GOTO with only `unique_label` set (a
@@ -199,11 +199,11 @@ typedef struct {
 // break/continue targeting it, so `==` (not strcmp) is correct and cheap.
 typedef struct SerJumpFrame {
     struct SerJumpFrame *parent;
-    char *brk_label;   // NULL if this construct isn't a break target
-    char *cont_label;  // NULL for switch -- parse.c's switch parsing only
-                        // saves/restores brk_label, never cont_label, so a
-                        // `continue` inside a switch inside a loop must skip
-                        // over the switch frame and resolve to the loop.
+    char *brk_label;  // NULL if this construct isn't a break target
+    char *cont_label; // NULL for switch -- parse.c's switch parsing only
+                      // saves/restores brk_label, never cont_label, so a
+                      // `continue` inside a switch inside a loop must skip
+                      // over the switch frame and resolve to the loop.
 } SerJumpFrame;
 
 // #1015: one renamed enumerator, keyed by the enum Type it belongs to (via
@@ -217,24 +217,27 @@ typedef struct {
 } EnumConstRename;
 
 typedef struct {
-    TypeVec seen;
-    TypeVec defs;
+    TypeVec   seen;
+    TypeVec   defs;
     TypeName *tags;
-    int tags_len;
-    int tags_cap;
+    int       tags_len;
+    int       tags_cap;
     TypeName *typedefs;
-    int typedefs_len;
-    int typedefs_cap;
-    Obj *current_fn;
-    bool generated_only; // skip header typedefs; output is consumed alongside normal headers
+    int       typedefs_len;
+    int       typedefs_cap;
+    Obj      *current_fn;
+    bool generated_only; // skip header typedefs; output is consumed alongside
+                         // normal headers
     // #891: --emit-only suppresses auto-capture (preprocess.c), so under it
     // the primary file's own #include directives are NOT re-emitted -- a
     // header-sourced typedef/tag has no re-emitted #include to collide with
     // and must still be serialized. Only skip has_include gates when this
     // is false.
     bool emit_strict;
-    bool emit_cccc; // --emit-cccc: serialize checked-pointer qualifiers instead of dropping them
-    int anon_local_counter; // names compiler-synthesized temps (e.g. ++/-- desugaring)
+    bool emit_cccc; // --emit-cccc: serialize checked-pointer qualifiers instead
+                    // of dropping them
+    int anon_local_counter;  // names compiler-synthesized temps (e.g. ++/--
+                             // desugaring)
     int anon_global_counter; // names non-string-literal `.L..N` globals (#925)
     // #953: resolved paths of headers actually auto-captured into
     // generated_only (-c=generated) output -- built once in
@@ -244,13 +247,13 @@ typedef struct {
     // (serialize_type_decl, which has no vm parameter) needs the vm the
     // expression serializer takes. Set once in cc_serialize_program.
     VirtualMachine *vm;
-    char **captured_paths;
-    int captured_paths_len;
+    char          **captured_paths;
+    int             captured_paths_len;
     // #965: block-literal env structs -- see BlockEnvEntry and
     // serialize_block_preamble().
     BlockEnvEntry *block_envs;
-    int block_envs_len;
-    int block_envs_cap;
+    int            block_envs_len;
+    int            block_envs_cap;
     // #1074: nested-function env structs -- see NestedEnvEntry and
     // serialize_nested_preamble(). Built (and every illegal non-call
     // reference to a nested function rejected) entirely during that one
@@ -259,8 +262,8 @@ typedef struct {
     // "is this reference legal", only "what does a known-legal one print
     // as".
     NestedEnvEntry *nested_envs;
-    int nested_envs_len;
-    int nested_envs_cap;
+    int             nested_envs_len;
+    int             nested_envs_cap;
     // #989: types promoted from function-local to file scope (a block
     // capture's own struct/union/enum type declared inside a function,
     // needed because its lifted environment struct is emitted at file
@@ -268,7 +271,8 @@ typedef struct {
     // the skip-set serialize_type_defs_for_owner uses to avoid re-emitting
     // a definition the preamble already wrote out.
     TypeVec hoisted;
-    int hoisted_type_counter; // names renamed/synthesized hoisted tags, parallel to anon_global_counter
+    int     hoisted_type_counter; // names renamed/synthesized hoisted tags,
+                                  // parallel to anon_global_counter
     // #1046: struct/union/enum bodies actually printed so far, across BOTH
     // emitters that can print one -- the usage-driven ctx->defs loop in
     // serialize_type_defs_for_owner() and the typedef-dependency-driven
@@ -283,7 +287,7 @@ typedef struct {
     // against) -- both NULL outside any loop/switch, pushed/popped around
     // ND_FOR/ND_DO/ND_SWITCH bodies in serialize_stmt.
     SerJumpFrame *jumps;
-    Node *cur_switch;
+    Node         *cur_switch;
     // #1014: set by rename_colliding_type_tags() iff it actually renamed a
     // colliding struct/union/enum tag -- gates find_tag_name()'s extra
     // completeness-preferring scan so a program with no collision is
@@ -300,8 +304,8 @@ typedef struct {
     // full-definition dup instead. Consulted only by serialize_enum_def via
     // enum_const_spelling().
     EnumConstRename *enum_renames;
-    int enum_renames_len;
-    int enum_renames_cap;
+    int              enum_renames_len;
+    int              enum_renames_cap;
     // #1085: bumped once per va_list-forwarding call-site shim emitted (see
     // ND_FUNCALL below) so nested/repeated occurrences in one TU each get
     // their own __cccc_va_fwd_N local instead of shadowing.
@@ -309,19 +313,20 @@ typedef struct {
 } SerializeContext;
 
 // Forward declaration
-static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
-                           int parent_prec);
+static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                           Node *node, int parent_prec);
 // #1062/#1085: matches CCCC's own struct va_list structurally (defined
 // further down, near its own long comment) -- forward-declared here so
 // ND_FUNCALL (inside serialize_expr's own switch, above the definition
 // textually) can call it too.
 static bool type_is_cccc_va_list(Type *ty);
-static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
-                           int indent);
+static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                           Node *node, int indent);
 // #964: mutually recursive with serialize_stmt -- see the comment on its
 // definition, near ND_BLOCK below.
-static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                     Node *node, int indent);
+static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Node *node,
+                                     int indent);
 
 // #918: usual_arith_conv() (src/type.c) casts BOTH operands of a pointer
 // +/- integer expression to the same pointer type before new_add()/
@@ -343,8 +348,9 @@ static bool node_is_pointerish(Node *n) {
     // #964: TY_VLA decays the same as TY_ARRAY in pointer arithmetic (`v + 1`
     // on a VLA `v`) -- without it here, the ND_ADD/ND_SUB case below falls
     // through to plain binary arithmetic and adds two pointers together.
-    return n && n->ty && (n->ty->kind == TY_PTR || n->ty->kind == TY_ARRAY ||
-                          n->ty->kind == TY_VLA);
+    return n && n->ty &&
+           (n->ty->kind == TY_PTR || n->ty->kind == TY_ARRAY ||
+            n->ty->kind == TY_VLA);
 }
 
 static bool node_is_integerish(Node *n) {
@@ -358,8 +364,10 @@ static bool node_is_integerish(Node *n) {
 
 // Returns true if the node produces no output (effectively a no-op expression).
 static bool is_noop_expr(Node *node) {
-    if (!node) return true;
-    if (node->kind == ND_NULL_EXPR) return true;
+    if (!node)
+        return true;
+    if (node->kind == ND_NULL_EXPR)
+        return true;
     if (node->kind == ND_COMMA)
         return is_noop_expr(node->lhs) && is_noop_expr(node->rhs);
     return false;
@@ -410,9 +418,9 @@ static bool same_type_or_origin(Type *a, Type *b) {
         for (; ma && mb; ma = ma->next, mb = mb->next) {
             if ((ma->name == NULL) != (mb->name == NULL))
                 return false;
-            if (ma->name && (ma->name->len != mb->name->len ||
-                             strncmp(ma->name->loc, mb->name->loc,
-                                     ma->name->len) != 0))
+            if (ma->name &&
+                (ma->name->len != mb->name->len ||
+                 strncmp(ma->name->loc, mb->name->loc, ma->name->len) != 0))
                 return false;
             if (!same_type_or_origin(ma->ty, mb->ty))
                 return false;
@@ -448,7 +456,8 @@ static bool same_type_or_origin(Type *a, Type *b) {
     // even though the two types are, by every measure other than pointer
     // identity, identical.
     if (a && b && a->kind == TY_ARRAY && b->kind == TY_ARRAY)
-        return a->array_len == b->array_len && same_type_or_origin(a->base, b->base);
+        return a->array_len == b->array_len &&
+               same_type_or_origin(a->base, b->base);
 
     if (a && b && a->kind == TY_ENUM && b->kind == TY_ENUM) {
         if (a->struct_tag && b->struct_tag) {
@@ -503,7 +512,7 @@ static void type_vec_push(TypeVec *vec, Type *ty) {
         return;
 
     if (vec->len >= vec->cap) {
-        vec->cap = vec->cap ? vec->cap * 2 : 16;
+        vec->cap  = vec->cap ? vec->cap * 2 : 16;
         vec->data = realloc(vec->data, sizeof(Type *) * vec->cap);
     }
     vec->data[vec->len++] = ty;
@@ -511,23 +520,23 @@ static void type_vec_push(TypeVec *vec, Type *ty) {
 
 static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
                            char *name, int name_len, Obj *owner_fn,
-                           bool from_include, bool always_emit,
-                           char *file_path, bool defines_type) {
+                           bool from_include, bool always_emit, char *file_path,
+                           bool defines_type) {
     if (!ty || !name || name_len <= 0)
         return;
 
     if (*len >= *cap) {
-        *cap = *cap ? *cap * 2 : 16;
+        *cap   = *cap ? *cap * 2 : 16;
         *items = realloc(*items, sizeof(TypeName) * *cap);
     }
 
-    (*items)[*len].ty = ty;
-    (*items)[*len].name = name;
-    (*items)[*len].name_len = name_len;
-    (*items)[*len].owner_fn = owner_fn;
+    (*items)[*len].ty           = ty;
+    (*items)[*len].name         = name;
+    (*items)[*len].name_len     = name_len;
+    (*items)[*len].owner_fn     = owner_fn;
     (*items)[*len].from_include = from_include;
-    (*items)[*len].always_emit = always_emit;
-    (*items)[*len].file_path = file_path;
+    (*items)[*len].always_emit  = always_emit;
+    (*items)[*len].file_path    = file_path;
     (*items)[*len].defines_type = defines_type;
     (*len)++;
 }
@@ -542,9 +551,8 @@ static void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
         else
             type_name_push(&ctx->typedefs, &ctx->typedefs_len,
                            &ctx->typedefs_cap, rec->ty, rec->name,
-                           rec->name_len, rec->owner_fn,
-                           rec->from_include, rec->always_emit, rec->file_path,
-                           rec->defines_type);
+                           rec->name_len, rec->owner_fn, rec->from_include,
+                           rec->always_emit, rec->file_path, rec->defines_type);
     }
 }
 
@@ -585,7 +593,8 @@ static bool same_type_strong(Type *a, Type *b) {
 // #1015: forward-declared here since serialize_enum_def() (below) needs it
 // but its definition, next to rename_colliding_enum_constants(), comes
 // much later in this file.
-static const char *enum_const_spelling(SerializeContext *ctx, Type *ty, const char *name);
+static const char *enum_const_spelling(SerializeContext *ctx, Type *ty,
+                                       const char *name);
 
 // #1047: forward-declared here since serialize_global_var() (below) needs
 // it but its definition, next to function_is_header_supplied() (the
@@ -846,8 +855,8 @@ static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
 // reached yet can have that callee's prototype inserted just ahead of it.
 typedef struct {
     Obj **data;
-    int len;
-    int cap;
+    int   len;
+    int   cap;
 } ObjVec;
 
 static bool obj_vec_contains(ObjVec *vec, Obj *obj) {
@@ -861,7 +870,7 @@ static void obj_vec_push(ObjVec *vec, Obj *obj) {
     if (!obj || obj_vec_contains(vec, obj))
         return;
     if (vec->len == vec->cap) {
-        vec->cap = vec->cap ? vec->cap * 2 : 8;
+        vec->cap  = vec->cap ? vec->cap * 2 : 8;
         vec->data = realloc(vec->data, sizeof(Obj *) * vec->cap);
     }
     vec->data[vec->len++] = obj;
@@ -945,8 +954,7 @@ static bool serialize_flonum_special(FILE *f, long double v, const char *suf) {
 
 static void format_float_literal(char *buf, size_t cap, double v) {
     int n = snprintf(buf, cap, "%.9g", v);
-    if (n > 0 && (size_t)n < cap
-        && !strpbrk(buf, ".eEnN")) {
+    if (n > 0 && (size_t)n < cap && !strpbrk(buf, ".eEnN")) {
         snprintf(buf + n, cap - (size_t)n, ".0");
     }
 }
@@ -962,8 +970,7 @@ static void format_float_literal(char *buf, size_t cap, double v) {
 // exactly with fewer digits, %.21Lg just prints trailing zeros for it.
 static void format_ldouble_literal(char *buf, size_t cap, long double v) {
     int n = snprintf(buf, cap, "%.21Lg", v);
-    if (n > 0 && (size_t)n < cap
-        && !strpbrk(buf, ".eEnN")) {
+    if (n > 0 && (size_t)n < cap && !strpbrk(buf, ".eEnN")) {
         snprintf(buf + n, cap - (size_t)n, ".0");
     }
 }
@@ -977,31 +984,34 @@ static void format_checked_ptr_qualifier(char *buf, size_t cap, Type *ty) {
     if (!ty || ty->checked_kind == CHECKED_NONE)
         return;
     const char *kind_name = ty->checked_kind == CHECKED_SINGLE  ? "single"
-                           : ty->checked_kind == CHECKED_ARRAY   ? "array"
-                                                                  : "ntarray";
-    int n = snprintf(buf, cap, " [[cccc::%s]]", kind_name);
+                            : ty->checked_kind == CHECKED_ARRAY ? "array"
+                                                                : "ntarray";
+    int         n         = snprintf(buf, cap, " [[cccc::%s]]", kind_name);
     if (n < 0 || (size_t)n >= cap)
         return;
     switch (ty->checked_bounds_form) {
-    case CB_COUNT:
-    case CB_BYTE_COUNT:
-        if (ty->checked_bounds_arg1)
-            snprintf(buf + n, cap - (size_t)n, " [[cccc::%s(%.*s)]]",
-                     ty->checked_bounds_form == CB_COUNT ? "count" : "byte_count",
-                     ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc);
-        break;
-    case CB_RANGE:
-        if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
-            snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(%.*s, %.*s)]]",
-                     ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
-                     ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
-        break;
-    case CB_UNKNOWN:
-        snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(unknown)]]");
-        break;
-    case CB_NONE:
-    default:
-        break;
+        case CB_COUNT:
+        case CB_BYTE_COUNT:
+            if (ty->checked_bounds_arg1)
+                snprintf(buf + n, cap - (size_t)n, " [[cccc::%s(%.*s)]]",
+                         ty->checked_bounds_form == CB_COUNT ? "count"
+                                                             : "byte_count",
+                         ty->checked_bounds_arg1->len,
+                         ty->checked_bounds_arg1->loc);
+            break;
+        case CB_RANGE:
+            if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
+                snprintf(
+                    buf + n, cap - (size_t)n, " [[cccc::bounds(%.*s, %.*s)]]",
+                    ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
+                    ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
+            break;
+        case CB_UNKNOWN:
+            snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(unknown)]]");
+            break;
+        case CB_NONE:
+        default:
+            break;
     }
 }
 
@@ -1040,9 +1050,9 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         // one declarator buffer, then recurse on ty->base so nested
         // dimensions accumulate in the right order regardless of whether
         // they are VLA or constant-length TY_ARRAY.
-        char *lenbuf = NULL;
-        size_t lensz = 0;
-        FILE *lf = open_memstream(&lenbuf, &lensz);
+        char  *lenbuf = NULL;
+        size_t lensz  = 0;
+        FILE  *lf     = open_memstream(&lenbuf, &lensz);
         if (ty->vla_len && ctx->vm)
             serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 0);
         fclose(lf);
@@ -1066,10 +1076,10 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         // multi-dimensional VLA, `int (*)[m]`) needs the same `(*name)`
         // grouping a fixed-size array pointer gets, or the `*` binds to the
         // element type and mis-spells it as `int *[m]` (array of pointers).
-        if (ty->base &&
-            (ty->base->kind == TY_ARRAY || ty->base->kind == TY_VLA ||
-             ty->base->kind == TY_FUNC))
-            snprintf(buf, sizeof(buf), "(*%s%s%s)", qual, sep, name ? name : "");
+        if (ty->base && (ty->base->kind == TY_ARRAY ||
+                         ty->base->kind == TY_VLA || ty->base->kind == TY_FUNC))
+            snprintf(buf, sizeof(buf), "(*%s%s%s)", qual, sep,
+                     name ? name : "");
         else
             snprintf(buf, sizeof(buf), "*%s%s%s", qual, sep, name ? name : "");
         serialize_type_decl(f, ctx, ty->base, buf);
@@ -1124,7 +1134,8 @@ static void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
 // serialize_anon_aggregate in the first place, so this predicate is true
 // if and only if that call would be.
 static bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
-    while (ty && (ty->kind == TY_ARRAY || ty->kind == TY_PTR || ty->kind == TY_VLA))
+    while (ty &&
+           (ty->kind == TY_ARRAY || ty->kind == TY_PTR || ty->kind == TY_VLA))
         ty = ty->base;
     if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
         return false;
@@ -1187,8 +1198,8 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // the whole aliased type", i.e. exactly `T *const`, so that alias arm
     // below still needs the leading `const` -- only the un-aliased,
     // structurally-printed TY_PTR fallthrough drops it.
-    bool suppress_ptr_const = ty->kind == TY_PTR &&
-                              !find_typedef_name_exact(ctx, ty);
+    bool suppress_ptr_const =
+        ty->kind == TY_PTR && !find_typedef_name_exact(ctx, ty);
     if (ty->is_const && !suppress_ptr_const)
         fprintf(f, "const ");
 
@@ -1196,10 +1207,10 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // checked pointer's [[cccc::single/array/ntarray]] qualifier is a
     // cccc-internal VM-side check, not a real C construct -- gcc/clang would
     // reject the attribute names outright, and #488 requires -E/-c=generated
-    // native output to be unchanged for a checked declaration ("no change to ABI or
-    // to unchecked callers"). Falls out for free today since this function
-    // only ever emits is_const anyway (is_volatile/is_restrict are likewise
-    // never serialized), but noted explicitly so it isn't "fixed" by a
+    // native output to be unchanged for a checked declaration ("no change to
+    // ABI or to unchecked callers"). Falls out for free today since this
+    // function only ever emits is_const anyway (is_volatile/is_restrict are
+    // likewise never serialized), but noted explicitly so it isn't "fixed" by a
     // future generalization of the qualifier-printing above.
 
     // #999: a scalar (non-aggregate) typedef -- e.g. `typedef unsigned long
@@ -1228,156 +1239,163 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     }
 
     switch (ty->kind) {
-    case TY_VOID:
-        fprintf(f, "void");
-        break;
-    case TY_BOOL:
-        fprintf(f, "_Bool");
-        break;
-    case TY_CHAR:
-        fprintf(f, "%schar", ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_SHORT:
-        fprintf(f, "%sshort", ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_INT:
-        fprintf(f, "%sint", ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_LONG:
-        fprintf(f, "%slong", ty->is_unsigned ? "unsigned " : "");
-        break;
-    case TY_FLOAT:
-        fprintf(f, "float");
-        break;
-    case TY_DOUBLE:
-        fprintf(f, "double");
-        break;
-    case TY_LDOUBLE:
-        fprintf(f, "long double");
-        break;
-    case TY_DECIMAL32:
-        fprintf(f, "_Decimal32");
-        break;
-    case TY_DECIMAL64:
-        fprintf(f, "_Decimal64");
-        break;
-    case TY_DECIMAL128:
-        fprintf(f, "_Decimal128");
-        break;
-    case TY_PTR:
-        serialize_type_decl(f, ctx, ty, "");
-        break;
-    case TY_ARRAY:
-        serialize_type_decl(f, ctx, ty, "");
-        break;
-    case TY_VLA:
-        serialize_type_decl(f, ctx, ty, "");
-        break;
-    case TY_COMPLEX:
-        // `base` is the element float type (see ty_fcomplex/ty_dcomplex/
-        // ty_ldcomplex in type.c), so the spelling falls out of it directly.
-        fprintf(f, "_Complex ");
-        serialize_type(f, ctx, ty->base);
-        break;
-    case TY_VECTOR:
-        // GNU vector: element type + vector_size in *bytes* (ty->size is the
-        // total, which is what vector_size takes -- not vec_len). clang and
-        // gcc both accept the attribute in this position.
-        serialize_type(f, ctx, ty->base);
-        fprintf(f, " __attribute__((vector_size(%d)))", ty->size);
-        break;
-    case TY_STRUCT: {
-        TypeName *tag = find_tag_name(ctx, ty);
-        TypeName *alias = find_typedef_name(ctx, ty);
-        if (tag)
-            fprintf(f, "struct %.*s", tag->name_len, tag->name);
-        else if (alias)
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-        else if ((alias = find_anonymous_typedef_name(ctx, ty)))
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-        else
-            serialize_anon_aggregate(f, ctx, ty);
-        break;
-    }
-    case TY_UNION: {
-        TypeName *tag = find_tag_name(ctx, ty);
-        TypeName *alias = find_typedef_name(ctx, ty);
-        if (tag)
-            fprintf(f, "union %.*s", tag->name_len, tag->name);
-        else if (alias)
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-        else if ((alias = find_anonymous_typedef_name(ctx, ty)))
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-        else
-            serialize_anon_aggregate(f, ctx, ty);
-        break;
-    }
-    case TY_ENUM: {
-        TypeName *tag = find_tag_name(ctx, ty);
-        TypeName *alias = find_typedef_name(ctx, ty);
-        if (tag)
-            fprintf(f, "enum %.*s", tag->name_len, tag->name);
-        else if (alias)
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-        else if ((alias = find_anonymous_typedef_name(ctx, ty)))
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-        else
-            fprintf(f, "int");
-        break;
-    }
-    case TY_FUNC:
-        serialize_type_decl(f, ctx, ty, "");
-        break;
-    case TY_NULLPTR_T:
-        // nullptr_t has the same size/representation as a pointer; emit a
-        // type that is valid without requiring <stddef.h> in the output.
-        fprintf(f, "void *");
-        break;
-    case TY_BITINT:
-        // Emit as the underlying container integer type
-        if (ty->size == 1) fprintf(f, ty->is_unsigned ? "unsigned char" : "signed char");
-        else if (ty->size == 2) fprintf(f, ty->is_unsigned ? "unsigned short" : "short");
-        else if (ty->size == 4) fprintf(f, ty->is_unsigned ? "unsigned int" : "int");
-        else fprintf(f, ty->is_unsigned ? "unsigned long" : "long");
-        break;
-    case TY_BLOCK:
-        // #965: on the default (non `-fblocks`) lowering path a block value
-        // is always a pointer to the common-initial-sequence descriptor
-        // struct emitted by serialize_block_preamble() -- see the "Blocks"
-        // entry in COVERAGE.md's serialized-output-divergences section.
-        // TY_BLOCK never needs a case in serialize_type_decl (unlike
-        // TY_PTR/TY_ARRAY/TY_VLA/TY_FUNC): it's already an atomic
-        // pointer-sized type here, not a container recursing into a base,
-        // so the declarator-building default branch's plain "<type> <name>"
-        // handles it correctly.
-        fprintf(f, "struct __cccc_block *");
-        break;
-    case TY_ERROR:
-    case TY_AUTO:
-        // #963c: both are internal sentinels that must never survive to
-        // serialization. TY_ERROR only exists after a compile error has
-        // already been recorded (which bails out before this function is
-        // ever reached); TY_AUTO (C23 `auto`) is resolved to the inferred
-        // concrete type at parse time, before -m/-c=native/-c=generated's
-        // serialization pass runs. Reaching either case here means an
-        // internal invariant was violated upstream, not that the user wrote
-        // something unsupported -- hence a hard error naming the kind
-        // rather than a silently emitted comment (see the default: arm
-        // below for the general case this guards against).
-        error("cccc: internal error: TypeKind '%s' reached the serializer "
-              "unresolved (should have been eliminated before serialization)",
-              cc_type_kind_name(ty->kind));
-        break;
-    default:
-        // #963c: every TypeKind is expected to have an explicit case above.
-        // This used to emit "/* unknown type */" and keep going, producing
-        // C the host compiler then rejected at the use site -- a delayed,
-        // confusing failure. Fail immediately and name the kind instead, so
-        // the next TypeKind added without a case here is caught at
-        // implementation/test time rather than silently miscompiling.
-        error("cccc: internal error: no serializer case for TypeKind '%s' "
-              "(kind %d)", cc_type_kind_name(ty->kind), ty->kind);
-        break;
+        case TY_VOID:
+            fprintf(f, "void");
+            break;
+        case TY_BOOL:
+            fprintf(f, "_Bool");
+            break;
+        case TY_CHAR:
+            fprintf(f, "%schar", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_SHORT:
+            fprintf(f, "%sshort", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_INT:
+            fprintf(f, "%sint", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_LONG:
+            fprintf(f, "%slong", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_FLOAT:
+            fprintf(f, "float");
+            break;
+        case TY_DOUBLE:
+            fprintf(f, "double");
+            break;
+        case TY_LDOUBLE:
+            fprintf(f, "long double");
+            break;
+        case TY_DECIMAL32:
+            fprintf(f, "_Decimal32");
+            break;
+        case TY_DECIMAL64:
+            fprintf(f, "_Decimal64");
+            break;
+        case TY_DECIMAL128:
+            fprintf(f, "_Decimal128");
+            break;
+        case TY_PTR:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_ARRAY:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_VLA:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_COMPLEX:
+            // `base` is the element float type (see ty_fcomplex/ty_dcomplex/
+            // ty_ldcomplex in type.c), so the spelling falls out of it
+            // directly.
+            fprintf(f, "_Complex ");
+            serialize_type(f, ctx, ty->base);
+            break;
+        case TY_VECTOR:
+            // GNU vector: element type + vector_size in *bytes* (ty->size is
+            // the total, which is what vector_size takes -- not vec_len). clang
+            // and gcc both accept the attribute in this position.
+            serialize_type(f, ctx, ty->base);
+            fprintf(f, " __attribute__((vector_size(%d)))", ty->size);
+            break;
+        case TY_STRUCT: {
+            TypeName *tag   = find_tag_name(ctx, ty);
+            TypeName *alias = find_typedef_name(ctx, ty);
+            if (tag)
+                fprintf(f, "struct %.*s", tag->name_len, tag->name);
+            else if (alias)
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else
+                serialize_anon_aggregate(f, ctx, ty);
+            break;
+        }
+        case TY_UNION: {
+            TypeName *tag   = find_tag_name(ctx, ty);
+            TypeName *alias = find_typedef_name(ctx, ty);
+            if (tag)
+                fprintf(f, "union %.*s", tag->name_len, tag->name);
+            else if (alias)
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else
+                serialize_anon_aggregate(f, ctx, ty);
+            break;
+        }
+        case TY_ENUM: {
+            TypeName *tag   = find_tag_name(ctx, ty);
+            TypeName *alias = find_typedef_name(ctx, ty);
+            if (tag)
+                fprintf(f, "enum %.*s", tag->name_len, tag->name);
+            else if (alias)
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else
+                fprintf(f, "int");
+            break;
+        }
+        case TY_FUNC:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_NULLPTR_T:
+            // nullptr_t has the same size/representation as a pointer; emit a
+            // type that is valid without requiring <stddef.h> in the output.
+            fprintf(f, "void *");
+            break;
+        case TY_BITINT:
+            // Emit as the underlying container integer type
+            if (ty->size == 1)
+                fprintf(f, ty->is_unsigned ? "unsigned char" : "signed char");
+            else if (ty->size == 2)
+                fprintf(f, ty->is_unsigned ? "unsigned short" : "short");
+            else if (ty->size == 4)
+                fprintf(f, ty->is_unsigned ? "unsigned int" : "int");
+            else
+                fprintf(f, ty->is_unsigned ? "unsigned long" : "long");
+            break;
+        case TY_BLOCK:
+            // #965: on the default (non `-fblocks`) lowering path a block value
+            // is always a pointer to the common-initial-sequence descriptor
+            // struct emitted by serialize_block_preamble() -- see the "Blocks"
+            // entry in COVERAGE.md's serialized-output-divergences section.
+            // TY_BLOCK never needs a case in serialize_type_decl (unlike
+            // TY_PTR/TY_ARRAY/TY_VLA/TY_FUNC): it's already an atomic
+            // pointer-sized type here, not a container recursing into a base,
+            // so the declarator-building default branch's plain "<type> <name>"
+            // handles it correctly.
+            fprintf(f, "struct __cccc_block *");
+            break;
+        case TY_ERROR:
+        case TY_AUTO:
+            // #963c: both are internal sentinels that must never survive to
+            // serialization. TY_ERROR only exists after a compile error has
+            // already been recorded (which bails out before this function is
+            // ever reached); TY_AUTO (C23 `auto`) is resolved to the inferred
+            // concrete type at parse time, before -m/-c=native/-c=generated's
+            // serialization pass runs. Reaching either case here means an
+            // internal invariant was violated upstream, not that the user wrote
+            // something unsupported -- hence a hard error naming the kind
+            // rather than a silently emitted comment (see the default: arm
+            // below for the general case this guards against).
+            error(
+                "cccc: internal error: TypeKind '%s' reached the serializer "
+                "unresolved (should have been eliminated before serialization)",
+                cc_type_kind_name(ty->kind));
+            break;
+        default:
+            // #963c: every TypeKind is expected to have an explicit case above.
+            // This used to emit "/* unknown type */" and keep going, producing
+            // C the host compiler then rejected at the use site -- a delayed,
+            // confusing failure. Fail immediately and name the kind instead, so
+            // the next TypeKind added without a case here is caught at
+            // implementation/test time rather than silently miscompiling.
+            error("cccc: internal error: no serializer case for TypeKind '%s' "
+                  "(kind %d)",
+                  cc_type_kind_name(ty->kind), ty->kind);
+            break;
     }
 }
 
@@ -1395,27 +1413,27 @@ static void serialize_string_n(FILE *f, const char *str, int len) {
     for (int i = 0; i < len; i++) {
         unsigned char c = (unsigned char)str[i];
         switch (c) {
-        case '\n':
-            fprintf(f, "\\n");
-            break;
-        case '\r':
-            fprintf(f, "\\r");
-            break;
-        case '\t':
-            fprintf(f, "\\t");
-            break;
-        case '\\':
-            fprintf(f, "\\\\");
-            break;
-        case '"':
-            fprintf(f, "\\\"");
-            break;
-        default:
-            if (c >= 32 && c < 127)
-                fputc(c, f);
-            else
-                fprintf(f, "\\%03o", c);
-            break;
+            case '\n':
+                fprintf(f, "\\n");
+                break;
+            case '\r':
+                fprintf(f, "\\r");
+                break;
+            case '\t':
+                fprintf(f, "\\t");
+                break;
+            case '\\':
+                fprintf(f, "\\\\");
+                break;
+            case '"':
+                fprintf(f, "\\\"");
+                break;
+            default:
+                if (c >= 32 && c < 127)
+                    fputc(c, f);
+                else
+                    fprintf(f, "\\%03o", c);
+                break;
         }
     }
     fprintf(f, "\"");
@@ -1455,7 +1473,8 @@ static const char *find_block_env(SerializeContext *ctx, Obj *block_fn) {
 // pointer, so reading the *value* needs one extra dereference -- the `->`
 // in `(*((T*)p)->__capK)` already binds tighter than the outer `*`, so this
 // is unambiguous without further parenthesization.
-static bool serialize_block_capture_ref(FILE *f, SerializeContext *ctx, Obj *var) {
+static bool serialize_block_capture_ref(FILE *f, SerializeContext *ctx,
+                                        Obj *var) {
     if (!ctx->current_fn || !ctx->current_fn->is_block)
         return false;
     int idx = block_capture_index(ctx->current_fn, var);
@@ -1496,11 +1515,11 @@ static const char *find_nested_env_name(SerializeContext *ctx, Obj *owner_fn) {
 // env's own `__up` field once per intervening level, casting at each hop.
 static char *nested_env_ptr_expr(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *from_fn, Obj *target) {
-    Obj *p = from_fn->parent_fn;
-    char *expr = arena_format(vm, "((%s *)__static_link)",
-                              find_nested_env_name(ctx, p));
+    Obj  *p = from_fn->parent_fn;
+    char *expr =
+        arena_format(vm, "((%s *)__static_link)", find_nested_env_name(ctx, p));
     while (p != target) {
-        p = p->parent_fn;
+        p    = p->parent_fn;
         expr = arena_format(vm, "((%s *)%s->__up)",
                             find_nested_env_name(ctx, p), expr);
     }
@@ -1522,7 +1541,8 @@ static bool serialize_nested_upvar_ref(FILE *f, VirtualMachine *vm,
     // a block's own outer-local reference is already fully handled by
     // serialize_block_capture_ref() above, a distinct, already-correct
     // mechanism; excluded here so it's never double-handled.
-    if (!ctx->current_fn || !ctx->current_fn->is_nested || ctx->current_fn->is_block)
+    if (!ctx->current_fn || !ctx->current_fn->is_nested ||
+        ctx->current_fn->is_block)
         return false;
     for (Obj *v = ctx->current_fn->locals; v; v = v->next)
         if (v == var)
@@ -1530,7 +1550,10 @@ static bool serialize_nested_upvar_ref(FILE *f, VirtualMachine *vm,
     Obj *owner = NULL;
     for (Obj *anc = ctx->current_fn->parent_fn; anc; anc = anc->parent_fn) {
         for (Obj *v = anc->locals; v; v = v->next)
-            if (v == var) { owner = anc; break; }
+            if (v == var) {
+                owner = anc;
+                break;
+            }
         if (owner)
             break;
     }
@@ -1538,12 +1561,18 @@ static bool serialize_nested_upvar_ref(FILE *f, VirtualMachine *vm,
         return false; // defensive only -- see the identical scan below
     NestedEnvEntry *e = NULL;
     for (int i = 0; i < ctx->nested_envs_len; i++)
-        if (ctx->nested_envs[i].owner_fn == owner) { e = &ctx->nested_envs[i]; break; }
+        if (ctx->nested_envs[i].owner_fn == owner) {
+            e = &ctx->nested_envs[i];
+            break;
+        }
     if (!e)
         return false; // defensive only -- owner must already have an entry
     int idx = -1;
     for (int i = 0; i < e->upvars_len; i++)
-        if (e->upvars[i] == var) { idx = i; break; }
+        if (e->upvars[i] == var) {
+            idx = i;
+            break;
+        }
     if (idx < 0)
         return false; // defensive only
 
@@ -1563,7 +1592,8 @@ static bool atomic_serializable_pointee(Node *addr) {
     Type *base = addr->ty->base;
     if (is_flonum(base))
         return false;
-    return base->size == 1 || base->size == 2 || base->size == 4 || base->size == 8;
+    return base->size == 1 || base->size == 2 || base->size == 4 ||
+           base->size == 8;
 }
 
 // #1018 follow-up: C's default argument promotions (C17 6.5.2.2p6/7,
@@ -1602,8 +1632,8 @@ static void print_indent_level(FILE *f, int indent) {
 }
 
 // Serialize an expression
-static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
-                           int parent_prec) {
+static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                           Node *node, int parent_prec) {
     (void)vm; // May be used later
 
     if (!node) {
@@ -1630,1150 +1660,1205 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
     // CCCC's own preprocessor) is the one reading it.
     if (node->va_form != VA_NONE) {
         switch (node->va_form) {
-        case VA_START:
-            fprintf(f, "va_start(");
-            serialize_expr(f, vm, ctx, node->va_ap, 2);
-            fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->va_last, 2);
-            fprintf(f, ")");
-            return;
-        case VA_ARG:
-            fprintf(f, "va_arg(");
-            serialize_expr(f, vm, ctx, node->va_ap, 2);
-            fprintf(f, ", ");
-            serialize_type(f, ctx, va_arg_promoted_type(node->va_type));
-            fprintf(f, ")");
-            return;
-        case VA_COPY:
-            fprintf(f, "va_copy(");
-            serialize_expr(f, vm, ctx, node->va_ap, 2);
-            fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->va_src, 2);
-            fprintf(f, ")");
-            return;
-        case VA_END:
-            fprintf(f, "va_end(");
-            serialize_expr(f, vm, ctx, node->va_ap, 2);
-            fprintf(f, ")");
-            return;
-        default:
-            break;
+            case VA_START:
+                fprintf(f, "va_start(");
+                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                fprintf(f, ", ");
+                serialize_expr(f, vm, ctx, node->va_last, 2);
+                fprintf(f, ")");
+                return;
+            case VA_ARG:
+                fprintf(f, "va_arg(");
+                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                fprintf(f, ", ");
+                serialize_type(f, ctx, va_arg_promoted_type(node->va_type));
+                fprintf(f, ")");
+                return;
+            case VA_COPY:
+                fprintf(f, "va_copy(");
+                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                fprintf(f, ", ");
+                serialize_expr(f, vm, ctx, node->va_src, 2);
+                fprintf(f, ")");
+                return;
+            case VA_END:
+                fprintf(f, "va_end(");
+                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                fprintf(f, ")");
+                return;
+            default:
+                break;
         }
     }
 
-    int node_prec = get_precedence(node->kind);
+    int  node_prec   = get_precedence(node->kind);
     bool need_parens = (node_prec < parent_prec);
 
     if (need_parens)
         fprintf(f, "(");
 
     switch (node->kind) {
-    case ND_NUM:
-        if (node->ty && is_decimal(node->ty)) {
-            // #402: node->fval/val are never populated for a decimal literal
-            // (see tokenize.c) -- dec_digits plus the width-appropriate
-            // suffix is the only way to round-trip it back to valid C source.
-            const char *suffix = dec_width_code(node->ty) == 0 ? "df"
-                                : dec_width_code(node->ty) == 1 ? "dd"
-                                                                 : "dl";
-            fprintf(f, "%s%s", node->dec_digits ? node->dec_digits : "0", suffix);
-        } else if (node->ty && is_flonum(node->ty)) {
-            // #1038: this used to funnel every flonum type -- TY_FLOAT,
-            // TY_DOUBLE and TY_LDOUBLE alike -- through a single unsuffixed
-            // `%Lg` (default 6 significant digits), losing both precision
-            // (e.g. DBL_MAX round-tripped as the text "1.79769e+308") and,
-            // for TY_FLOAT/TY_LDOUBLE, the type entirely (a `1.0f` or
-            // `1.0L` literal re-emitted as a plain double constant).
-            // node->fval is always long double; TY_DOUBLE's %g conversion
-            // needs an explicit (double) cast -- passing a long double to a
-            // non-L conversion is undefined varargs behavior, harmless on
-            // platforms where long double == double (aarch64) but wrong on
-            // x86_64. Mirrors serialize_init_bytes's TY_FLOAT/TY_DOUBLE
-            // arms (this is the ND_NUM/expression-literal counterpart of
-            // that global-initializer path).
-            if (node->ty->kind == TY_FLOAT) {
-                if (!serialize_flonum_special(f, node->fval, "f")) {
-                    char buf[64];
-                    format_float_literal(buf, sizeof buf, (double)node->fval);
-                    fprintf(f, "%sf", buf);
+        case ND_NUM:
+            if (node->ty && is_decimal(node->ty)) {
+                // #402: node->fval/val are never populated for a decimal
+                // literal (see tokenize.c) -- dec_digits plus the
+                // width-appropriate suffix is the only way to round-trip it
+                // back to valid C source.
+                const char *suffix = dec_width_code(node->ty) == 0   ? "df"
+                                     : dec_width_code(node->ty) == 1 ? "dd"
+                                                                     : "dl";
+                fprintf(f, "%s%s", node->dec_digits ? node->dec_digits : "0",
+                        suffix);
+            } else if (node->ty && is_flonum(node->ty)) {
+                // #1038: this used to funnel every flonum type -- TY_FLOAT,
+                // TY_DOUBLE and TY_LDOUBLE alike -- through a single unsuffixed
+                // `%Lg` (default 6 significant digits), losing both precision
+                // (e.g. DBL_MAX round-tripped as the text "1.79769e+308") and,
+                // for TY_FLOAT/TY_LDOUBLE, the type entirely (a `1.0f` or
+                // `1.0L` literal re-emitted as a plain double constant).
+                // node->fval is always long double; TY_DOUBLE's %g conversion
+                // needs an explicit (double) cast -- passing a long double to a
+                // non-L conversion is undefined varargs behavior, harmless on
+                // platforms where long double == double (aarch64) but wrong on
+                // x86_64. Mirrors serialize_init_bytes's TY_FLOAT/TY_DOUBLE
+                // arms (this is the ND_NUM/expression-literal counterpart of
+                // that global-initializer path).
+                if (node->ty->kind == TY_FLOAT) {
+                    if (!serialize_flonum_special(f, node->fval, "f")) {
+                        char buf[64];
+                        format_float_literal(buf, sizeof buf,
+                                             (double)node->fval);
+                        fprintf(f, "%sf", buf);
+                    }
+                } else if (node->ty->kind == TY_LDOUBLE) {
+                    // Builtin family name suffix ("l") and the literal suffix
+                    // ("L") are cased differently --
+                    // __builtin_infl/__builtin_nanl vs. the `L` token suffix --
+                    // don't conflate them.
+                    if (!serialize_flonum_special(f, node->fval, "l")) {
+                        char buf[64];
+                        format_ldouble_literal(buf, sizeof buf, node->fval);
+                        fprintf(f, "%sL", buf);
+                    }
+                } else { // TY_DOUBLE
+                    // #1058: same "force a decimal point" fixup
+                    // format_float_literal/format_ldouble_literal already apply
+                    // for TY_FLOAT/TY_LDOUBLE -- this arm used to print a bare
+                    // %.17g with no fixup at all, so an integral value like
+                    // 55.0 serialized as "55", read back by a real host
+                    // compiler as an *integer* literal. Harmless under an
+                    // enclosing (double) cast, a wrong answer wherever the
+                    // literal's own text is what supplies its type (e.g. a
+                    // double vararg passed positionally, #1018).
+                    if (!serialize_flonum_special(f, node->fval, "")) {
+                        char buf[64];
+                        int  n = snprintf(buf, sizeof buf, "%.17g",
+                                          (double)node->fval);
+                        if (n > 0 && (size_t)n < sizeof buf &&
+                            !strpbrk(buf, ".eEnN"))
+                            snprintf(buf + n, sizeof(buf) - (size_t)n, ".0");
+                        fprintf(f, "%s", buf);
+                    }
                 }
-            } else if (node->ty->kind == TY_LDOUBLE) {
-                // Builtin family name suffix ("l") and the literal suffix
-                // ("L") are cased differently -- __builtin_infl/__builtin_nanl
-                // vs. the `L` token suffix -- don't conflate them.
-                if (!serialize_flonum_special(f, node->fval, "l")) {
-                    char buf[64];
-                    format_ldouble_literal(buf, sizeof buf, node->fval);
-                    fprintf(f, "%sL", buf);
-                }
-            } else { // TY_DOUBLE
-                // #1058: same "force a decimal point" fixup
-                // format_float_literal/format_ldouble_literal already apply
-                // for TY_FLOAT/TY_LDOUBLE -- this arm used to print a bare
-                // %.17g with no fixup at all, so an integral value like
-                // 55.0 serialized as "55", read back by a real host
-                // compiler as an *integer* literal. Harmless under an
-                // enclosing (double) cast, a wrong answer wherever the
-                // literal's own text is what supplies its type (e.g. a
-                // double vararg passed positionally, #1018).
-                if (!serialize_flonum_special(f, node->fval, "")) {
-                    char buf[64];
-                    int n = snprintf(buf, sizeof buf, "%.17g", (double)node->fval);
-                    if (n > 0 && (size_t)n < sizeof buf && !strpbrk(buf, ".eEnN"))
-                        snprintf(buf + n, sizeof(buf) - (size_t)n, ".0");
-                    fprintf(f, "%s", buf);
-                }
-            }
-        } else if (node->ty && is_integer(node->ty)) {
-            // #1031: the old unconditional `%lld` of the raw bit pattern
-            // had two failures for a folded integer literal. (1) An
-            // unsigned 64-bit value >= 2^63 (e.g. 18446744073709551615ULL,
-            // ULLONG_MAX) prints its reinterpreted-as-signed text with no
-            // `U`/`ULL` suffix, so a real host compiler reads it back as a
-            // negative `int` -- a later implicit conversion (e.g. to
-            // double) then produces the wrong value. Confirmed via
-            // test_unsigned_int_to_float_conversion.c. (2) INT64_MIN
-            // itself (-9223372036854775808) isn't a valid signed literal
-            // token at all -- the host warns "integer literal is too
-            // large to be represented in a signed integer type,
-            // interpreting as unsigned" and silently reinterprets it.
-            // Emitting a width/sign-accurate suffix always (not only when
-            // the value would otherwise misparse) also matters for a
-            // partially folded expression: `sizeof(x) - 1` folding to
-            // `8ULL` vs. plain `8` changes a later subtraction from
-            // unsigned-huge to signed -2.
-            //
-            // A negative node->val can only reach here via constant
-            // folding -- a literal `-1` as written in source parses as
-            // ND_NEG(ND_NUM(1)), not a single ND_NUM with val == -1 (see
-            // the #1031-adjacent note near line 1677 below).
-            if (node->ty->is_unsigned) {
-                uint64_t uv = (uint64_t)node->val;
-                // Mask to the type's true width first -- a narrow
-                // unsigned value may have arrived here sign-extended
-                // (serialize_init_bytes does the same narrow-type
-                // sign-extension at its own ND_NUM-adjacent site), and
-                // 1ULL << 64 is UB so the size==8 case must skip the mask
-                // entirely.
-                if (node->ty->size < 8)
-                    uv &= (1ULL << (node->ty->size * 8)) - 1;
-                fprintf(f, "%llu%s", (unsigned long long)uv,
-                        node->ty->size == 8 ? "ULL" : "U");
-            } else if (node->val == INT64_MIN) {
-                // The only spelling a host compiler accepts for the most
-                // negative signed 64-bit value -- a bare
-                // "-9223372036854775808" token is parsed as unary minus
-                // applied to a positive literal one past LLONG_MAX.
-                fprintf(f, "(-9223372036854775807LL - 1)");
-            } else {
-                fprintf(f, "%lld%s", (long long)node->val,
-                        node->ty->size == 8 ? "LL" : "");
-            }
-        } else
-            // A folded null-pointer constant (TY_PTR/TY_NULLPTR_T) or a
-            // node with no type reaches here -- plain decimal text (e.g.
-            // "0") is valid C in either context, no suffix needed.
-            fprintf(f, "%lld", (long long)node->val);
-        break;
-
-    case ND_VAR:
-        if (node->var) {
-            // A dotted `.L..N` name means "anonymous global" (new_anon_gvar,
-            // parse.c) -- shared by string literals, static locals, and
-            // compound literals (#925). Only a genuine string literal
-            // inlines as string text here; the other two are renamed to a
-            // valid identifier and given a real definition by
-            // rename_anon_globals() before this ever runs, so they hit the
-            // plain `fprintf(f, "%s", ...)` fallback below like any other
-            // named var.
-            if (node->var->is_string_literal) {
-                // #918: use the global's actual array length, not NUL
-                // termination -- an anonymous string-literal global can
-                // legitimately contain embedded NULs (wide/multi-part
-                // literals, __func__ splicing, etc).
-                int len = (node->var->ty && node->var->ty->kind == TY_ARRAY)
-                              ? node->var->ty->array_len
-                              : (int)strlen(node->var->init_data);
-                serialize_string_n(f, node->var->init_data, len);
-            } else if (serialize_block_capture_ref(f, ctx, node->var)) {
-                // #965: handled -- var is captured by the block literal
-                // currently being serialized.
-            } else if (serialize_nested_upvar_ref(f, vm, ctx, node->var)) {
-                // #1074: handled -- var is an upvar of the nested function
-                // currently being serialized.
-            } else if (node->var->is_block_var) {
-                // #965: a __block local's stack slot now holds a heap box
-                // pointer (see serialize_function's hoist loop) -- read
-                // through it so the expression's spelled type matches
-                // node->ty (the variable's declared type, not a pointer to
-                // it). Only reached here for a __block var referenced from
-                // *outside* any block capturing it (or from the same
-                // function that declared it); the captured case above
-                // already applies its own dereference.
-                fprintf(f, "(*%s)", node->var->name);
-            } else if (node->var == vm->compiler.builtin_alloca) {
-                // #1024: declare_builtin_functions (parse_decl.c) names this
-                // Obj literally "alloca" so the VM's own symbol table
-                // resolves it -- but that Obj has no source token and no
-                // definition, so the #901 from_include prototype pass never
-                // declares a plain `alloca` for the host compiler to see
-                // ("call to undeclared library function 'alloca'"). Every
-                // native cc that matters (gcc/clang) supplies
-                // __builtin_alloca with no header at all; spell the call
-                // that way here instead of trying to synthesize a
-                // <alloca.h>/<stdlib.h> declaration.
-                fprintf(f, "__builtin_alloca");
-            } else {
-                fprintf(f, "%s", node->var->name);
-            }
-        } else {
-            fprintf(f, "/* unknown_var */");
-        }
-        break;
-
-    case ND_ADD:
-    case ND_SUB: {
-        // #918: pointer arithmetic needs (char *)-based casts, not the
-        // naively-printed operand types -- see the strip_casts()/
-        // node_is_pointerish()/node_is_integerish() comment above.
-        Node *lhs_inner = strip_casts(node->lhs);
-        Node *rhs_inner = strip_casts(node->rhs);
-        bool lhs_ptr = node_is_pointerish(lhs_inner);
-        bool rhs_ptr = node_is_pointerish(rhs_inner);
-        bool lhs_int = node_is_integerish(lhs_inner);
-        bool rhs_int = node_is_integerish(rhs_inner);
-
-        if (node->kind == ND_SUB && lhs_ptr && rhs_ptr) {
-            // ptr - ptr: new_sub() already wraps this whole node in an
-            // outer `(hi - lo) / elemsize` ND_DIV (untouched here) -- only
-            // the pointer subtraction itself needs (char *) casts, so the
-            // host compiler doesn't scale by its own idea of the element
-            // size on top of that division.
-            fprintf(f, "((char *)");
-            serialize_expr(f, vm, ctx, node->lhs, 14);
-            fprintf(f, " - (char *)");
-            serialize_expr(f, vm, ctx, node->rhs, 14);
-            fprintf(f, ")");
-            break;
-        }
-
-        if (lhs_ptr && rhs_int) {
-            // ptr +/- num: rhs is already the byte-scaled offset new_add()/
-            // new_sub() computed (rhs *= sizeof(*ptr)) -- casting the
-            // pointer to (char *) before applying it, then casting the
-            // whole result back to node->ty, keeps the host from scaling
-            // the offset a second time. Print rhs_inner (not node->rhs):
-            // the outer cast usual_arith_conv() wrapped it in is a bogus
-            // (pointer-typed) cast on an integer offset, and printing it
-            // would produce the exact `ptr + (int *)offset` error this
-            // fix exists to avoid.
-            //
-            // #928: node->ty can itself be an array type (e.g. a reflection
-            // MakeSubscript() on an array-typed anon global) -- serialize_type
-            // would print `(int [3])`, and a cast to array type is not valid
-            // C. Cast to pointer-to-element instead; the ND_DEREF this node
-            // is wrapped in still reads the right value through it. #964:
-            // node->ty can also be TY_VLA (`int[n]`), same fix applies.
-            fprintf(f, "(");
-            if (node->ty && (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
-                serialize_type(f, ctx, node->ty->base);
-                fprintf(f, " *");
-            } else {
-                serialize_type(f, ctx, node->ty);
-            }
-            fprintf(f, ")((char *)");
-            serialize_expr(f, vm, ctx, node->lhs, 14);
-            fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_expr(f, vm, ctx, rhs_inner, node_prec + 1);
-            fprintf(f, ")");
-            break;
-        }
-
-        if (node->kind == ND_ADD && rhs_ptr && lhs_int) {
-            // num + ptr: new_add() canonicalizes this to ptr + num, but
-            // set_checked_deref_bounds() builds ND_ADD via new_binary()
-            // directly and does not canonicalize -- handle it defensively.
-            // Print lhs_inner for the same reason as above.
-            // #928: same array-cast fix as the ptr+num arm above; #964
-            // extends it to TY_VLA (a cast to `int[n]` is equally invalid C).
-            fprintf(f, "(");
-            if (node->ty && (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
-                serialize_type(f, ctx, node->ty->base);
-                fprintf(f, " *");
-            } else {
-                serialize_type(f, ctx, node->ty);
-            }
-            fprintf(f, ")((char *)");
-            serialize_expr(f, vm, ctx, node->rhs, 14);
-            fprintf(f, " + ");
-            serialize_expr(f, vm, ctx, lhs_inner, node_prec + 1);
-            fprintf(f, ")");
-            break;
-        }
-
-        // Plain arithmetic (int+int, float+float, ...).
-        serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        fprintf(f, " %s ", get_binary_op_str(node->kind));
-        serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
-        break;
-    }
-
-    case ND_MUL:
-    case ND_DIV:
-    case ND_MOD:
-    case ND_BITAND:
-    case ND_BITOR:
-    case ND_BITXOR:
-    case ND_SHL:
-    case ND_SHR:
-    case ND_EQ:
-    case ND_NE:
-    case ND_LT:
-    case ND_LE:
-    case ND_LOGAND:
-    case ND_LOGOR:
-    case ND_ASSIGN:
-        serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        fprintf(f, " %s ", get_binary_op_str(node->kind));
-        serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
-        break;
-
-    case ND_COMMA:
-        // Skip null sides — ND_NULL_EXPR , X is not valid C.
-        if (is_noop_expr(node->lhs) && is_noop_expr(node->rhs))
-            break;
-        if (is_noop_expr(node->lhs)) {
-            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
-        } else if (is_noop_expr(node->rhs)) {
-            serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        } else {
-            serialize_expr(f, vm, ctx, node->lhs, node_prec);
-            fprintf(f, " , ");
-            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
-        }
-        break;
-
-    case ND_NEG:
-    case ND_NOT:
-    case ND_BITNOT:
-    case ND_ADDR:
-    case ND_DEREF:
-        fprintf(f, "%s", get_unary_op_str(node->kind));
-        serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        break;
-
-    case ND_CAST: {
-        // #1035: include/fenv.h's FE_DFL_ENV sentinel is spelled
-        // `((const fenv_t *)-1)` -- a value src/stdlib/fenv.c's wrap_fe*()
-        // functions recognize and substitute the real host FE_DFL_ENV for
-        // under the VM, but under -c=native the literal -1 pointer reaches
-        // the real host libm directly and gets dereferenced (SIGSEGV). The
-        // generated C's own re-included <fenv.h> falls through to the
-        // host's real header via #include_next (see that file's own
-        // comment), so the bare identifier FE_DFL_ENV resolves in the
-        // output -- emit it instead of the sentinel's numeric encoding.
-        // The AST for a guest `FE_DFL_ENV` use is a *doubled* cast
-        // (`(const fenv_t *)(const fenv_t *)-1`, once from the macro's own
-        // cast and once from however the guest expression casts it again,
-        // e.g. fesetenv's implicit-const-add), so peel through as many
-        // nested casts-to-fenv_t-pointer as present down to the underlying
-        // -1 constant, then swallow the whole outer node.
-        if (node->ty && node->ty->kind == TY_PTR) {
-            Node *inner = node;
-            while (inner->kind == ND_CAST && inner->ty &&
-                   inner->ty->kind == TY_PTR) {
-                TypeName *pointee = find_typedef_name(ctx, inner->ty->base);
-                if (!pointee || pointee->name_len != 6 ||
-                    strncmp(pointee->name, "fenv_t", 6) != 0)
-                    break;
-                inner = inner->lhs;
-            }
-            // A literal -1 parses as ND_NEG(ND_NUM(1)), not a single
-            // ND_NUM with val == -1 -- unwrap one more level.
-            bool matched = false;
-            if (inner != node) {
-                Node *lit = inner;
-                if (lit->kind == ND_NEG && lit->lhs) {
-                    // The literal `1` being negated arrives wrapped in its
-                    // own (implicit int-promotion) ND_CAST(s) -- peel
-                    // those too before checking for ND_NUM(1).
-                    Node *n = lit->lhs;
-                    while (n->kind == ND_CAST && n->lhs)
-                        n = n->lhs;
-                    matched = n->kind == ND_NUM && n->val == 1;
+            } else if (node->ty && is_integer(node->ty)) {
+                // #1031: the old unconditional `%lld` of the raw bit pattern
+                // had two failures for a folded integer literal. (1) An
+                // unsigned 64-bit value >= 2^63 (e.g. 18446744073709551615ULL,
+                // ULLONG_MAX) prints its reinterpreted-as-signed text with no
+                // `U`/`ULL` suffix, so a real host compiler reads it back as a
+                // negative `int` -- a later implicit conversion (e.g. to
+                // double) then produces the wrong value. Confirmed via
+                // test_unsigned_int_to_float_conversion.c. (2) INT64_MIN
+                // itself (-9223372036854775808) isn't a valid signed literal
+                // token at all -- the host warns "integer literal is too
+                // large to be represented in a signed integer type,
+                // interpreting as unsigned" and silently reinterprets it.
+                // Emitting a width/sign-accurate suffix always (not only when
+                // the value would otherwise misparse) also matters for a
+                // partially folded expression: `sizeof(x) - 1` folding to
+                // `8ULL` vs. plain `8` changes a later subtraction from
+                // unsigned-huge to signed -2.
+                //
+                // A negative node->val can only reach here via constant
+                // folding -- a literal `-1` as written in source parses as
+                // ND_NEG(ND_NUM(1)), not a single ND_NUM with val == -1 (see
+                // the #1031-adjacent note near line 1677 below).
+                if (node->ty->is_unsigned) {
+                    uint64_t uv = (uint64_t)node->val;
+                    // Mask to the type's true width first -- a narrow
+                    // unsigned value may have arrived here sign-extended
+                    // (serialize_init_bytes does the same narrow-type
+                    // sign-extension at its own ND_NUM-adjacent site), and
+                    // 1ULL << 64 is UB so the size==8 case must skip the mask
+                    // entirely.
+                    if (node->ty->size < 8)
+                        uv &= (1ULL << (node->ty->size * 8)) - 1;
+                    fprintf(f, "%llu%s", (unsigned long long)uv,
+                            node->ty->size == 8 ? "ULL" : "U");
+                } else if (node->val == INT64_MIN) {
+                    // The only spelling a host compiler accepts for the most
+                    // negative signed 64-bit value -- a bare
+                    // "-9223372036854775808" token is parsed as unary minus
+                    // applied to a positive literal one past LLONG_MAX.
+                    fprintf(f, "(-9223372036854775807LL - 1)");
                 } else {
-                    matched = lit->kind == ND_NUM && lit->val == -1;
+                    fprintf(f, "%lld%s", (long long)node->val,
+                            node->ty->size == 8 ? "LL" : "");
+                }
+            } else
+                // A folded null-pointer constant (TY_PTR/TY_NULLPTR_T) or a
+                // node with no type reaches here -- plain decimal text (e.g.
+                // "0") is valid C in either context, no suffix needed.
+                fprintf(f, "%lld", (long long)node->val);
+            break;
+
+        case ND_VAR:
+            if (node->var) {
+                // A dotted `.L..N` name means "anonymous global"
+                // (new_anon_gvar, parse.c) -- shared by string literals, static
+                // locals, and compound literals (#925). Only a genuine string
+                // literal inlines as string text here; the other two are
+                // renamed to a valid identifier and given a real definition by
+                // rename_anon_globals() before this ever runs, so they hit the
+                // plain `fprintf(f, "%s", ...)` fallback below like any other
+                // named var.
+                if (node->var->is_string_literal) {
+                    // #918: use the global's actual array length, not NUL
+                    // termination -- an anonymous string-literal global can
+                    // legitimately contain embedded NULs (wide/multi-part
+                    // literals, __func__ splicing, etc).
+                    int len = (node->var->ty && node->var->ty->kind == TY_ARRAY)
+                                  ? node->var->ty->array_len
+                                  : (int)strlen(node->var->init_data);
+                    serialize_string_n(f, node->var->init_data, len);
+                } else if (serialize_block_capture_ref(f, ctx, node->var)) {
+                    // #965: handled -- var is captured by the block literal
+                    // currently being serialized.
+                } else if (serialize_nested_upvar_ref(f, vm, ctx, node->var)) {
+                    // #1074: handled -- var is an upvar of the nested function
+                    // currently being serialized.
+                } else if (node->var->is_block_var) {
+                    // #965: a __block local's stack slot now holds a heap box
+                    // pointer (see serialize_function's hoist loop) -- read
+                    // through it so the expression's spelled type matches
+                    // node->ty (the variable's declared type, not a pointer to
+                    // it). Only reached here for a __block var referenced from
+                    // *outside* any block capturing it (or from the same
+                    // function that declared it); the captured case above
+                    // already applies its own dereference.
+                    fprintf(f, "(*%s)", node->var->name);
+                } else if (node->var == vm->compiler.builtin_alloca) {
+                    // #1024: declare_builtin_functions (parse_decl.c) names
+                    // this Obj literally "alloca" so the VM's own symbol table
+                    // resolves it -- but that Obj has no source token and no
+                    // definition, so the #901 from_include prototype pass never
+                    // declares a plain `alloca` for the host compiler to see
+                    // ("call to undeclared library function 'alloca'"). Every
+                    // native cc that matters (gcc/clang) supplies
+                    // __builtin_alloca with no header at all; spell the call
+                    // that way here instead of trying to synthesize a
+                    // <alloca.h>/<stdlib.h> declaration.
+                    fprintf(f, "__builtin_alloca");
+                } else {
+                    fprintf(f, "%s", node->var->name);
+                }
+            } else {
+                fprintf(f, "/* unknown_var */");
+            }
+            break;
+
+        case ND_ADD:
+        case ND_SUB: {
+            // #918: pointer arithmetic needs (char *)-based casts, not the
+            // naively-printed operand types -- see the strip_casts()/
+            // node_is_pointerish()/node_is_integerish() comment above.
+            Node *lhs_inner = strip_casts(node->lhs);
+            Node *rhs_inner = strip_casts(node->rhs);
+            bool  lhs_ptr   = node_is_pointerish(lhs_inner);
+            bool  rhs_ptr   = node_is_pointerish(rhs_inner);
+            bool  lhs_int   = node_is_integerish(lhs_inner);
+            bool  rhs_int   = node_is_integerish(rhs_inner);
+
+            if (node->kind == ND_SUB && lhs_ptr && rhs_ptr) {
+                // ptr - ptr: new_sub() already wraps this whole node in an
+                // outer `(hi - lo) / elemsize` ND_DIV (untouched here) -- only
+                // the pointer subtraction itself needs (char *) casts, so the
+                // host compiler doesn't scale by its own idea of the element
+                // size on top of that division.
+                fprintf(f, "((char *)");
+                serialize_expr(f, vm, ctx, node->lhs, 14);
+                fprintf(f, " - (char *)");
+                serialize_expr(f, vm, ctx, node->rhs, 14);
+                fprintf(f, ")");
+                break;
+            }
+
+            if (lhs_ptr && rhs_int) {
+                // ptr +/- num: rhs is already the byte-scaled offset new_add()/
+                // new_sub() computed (rhs *= sizeof(*ptr)) -- casting the
+                // pointer to (char *) before applying it, then casting the
+                // whole result back to node->ty, keeps the host from scaling
+                // the offset a second time. Print rhs_inner (not node->rhs):
+                // the outer cast usual_arith_conv() wrapped it in is a bogus
+                // (pointer-typed) cast on an integer offset, and printing it
+                // would produce the exact `ptr + (int *)offset` error this
+                // fix exists to avoid.
+                //
+                // #928: node->ty can itself be an array type (e.g. a reflection
+                // MakeSubscript() on an array-typed anon global) --
+                // serialize_type would print `(int [3])`, and a cast to array
+                // type is not valid C. Cast to pointer-to-element instead; the
+                // ND_DEREF this node is wrapped in still reads the right value
+                // through it. #964: node->ty can also be TY_VLA (`int[n]`),
+                // same fix applies.
+                fprintf(f, "(");
+                if (node->ty &&
+                    (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
+                    serialize_type(f, ctx, node->ty->base);
+                    fprintf(f, " *");
+                } else {
+                    serialize_type(f, ctx, node->ty);
+                }
+                fprintf(f, ")((char *)");
+                serialize_expr(f, vm, ctx, node->lhs, 14);
+                fprintf(f, " %s ", get_binary_op_str(node->kind));
+                serialize_expr(f, vm, ctx, rhs_inner, node_prec + 1);
+                fprintf(f, ")");
+                break;
+            }
+
+            if (node->kind == ND_ADD && rhs_ptr && lhs_int) {
+                // num + ptr: new_add() canonicalizes this to ptr + num, but
+                // set_checked_deref_bounds() builds ND_ADD via new_binary()
+                // directly and does not canonicalize -- handle it defensively.
+                // Print lhs_inner for the same reason as above.
+                // #928: same array-cast fix as the ptr+num arm above; #964
+                // extends it to TY_VLA (a cast to `int[n]` is equally invalid
+                // C).
+                fprintf(f, "(");
+                if (node->ty &&
+                    (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
+                    serialize_type(f, ctx, node->ty->base);
+                    fprintf(f, " *");
+                } else {
+                    serialize_type(f, ctx, node->ty);
+                }
+                fprintf(f, ")((char *)");
+                serialize_expr(f, vm, ctx, node->rhs, 14);
+                fprintf(f, " + ");
+                serialize_expr(f, vm, ctx, lhs_inner, node_prec + 1);
+                fprintf(f, ")");
+                break;
+            }
+
+            // Plain arithmetic (int+int, float+float, ...).
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            fprintf(f, " %s ", get_binary_op_str(node->kind));
+            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            break;
+        }
+
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_ASSIGN:
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            fprintf(f, " %s ", get_binary_op_str(node->kind));
+            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            break;
+
+        case ND_COMMA:
+            // Skip null sides — ND_NULL_EXPR , X is not valid C.
+            if (is_noop_expr(node->lhs) && is_noop_expr(node->rhs))
+                break;
+            if (is_noop_expr(node->lhs)) {
+                serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            } else if (is_noop_expr(node->rhs)) {
+                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            } else {
+                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+                fprintf(f, " , ");
+                serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            }
+            break;
+
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+        case ND_ADDR:
+        case ND_DEREF:
+            fprintf(f, "%s", get_unary_op_str(node->kind));
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            break;
+
+        case ND_CAST: {
+            // #1035: include/fenv.h's FE_DFL_ENV sentinel is spelled
+            // `((const fenv_t *)-1)` -- a value src/stdlib/fenv.c's wrap_fe*()
+            // functions recognize and substitute the real host FE_DFL_ENV for
+            // under the VM, but under -c=native the literal -1 pointer reaches
+            // the real host libm directly and gets dereferenced (SIGSEGV). The
+            // generated C's own re-included <fenv.h> falls through to the
+            // host's real header via #include_next (see that file's own
+            // comment), so the bare identifier FE_DFL_ENV resolves in the
+            // output -- emit it instead of the sentinel's numeric encoding.
+            // The AST for a guest `FE_DFL_ENV` use is a *doubled* cast
+            // (`(const fenv_t *)(const fenv_t *)-1`, once from the macro's own
+            // cast and once from however the guest expression casts it again,
+            // e.g. fesetenv's implicit-const-add), so peel through as many
+            // nested casts-to-fenv_t-pointer as present down to the underlying
+            // -1 constant, then swallow the whole outer node.
+            if (node->ty && node->ty->kind == TY_PTR) {
+                Node *inner = node;
+                while (inner->kind == ND_CAST && inner->ty &&
+                       inner->ty->kind == TY_PTR) {
+                    TypeName *pointee = find_typedef_name(ctx, inner->ty->base);
+                    if (!pointee || pointee->name_len != 6 ||
+                        strncmp(pointee->name, "fenv_t", 6) != 0)
+                        break;
+                    inner = inner->lhs;
+                }
+                // A literal -1 parses as ND_NEG(ND_NUM(1)), not a single
+                // ND_NUM with val == -1 -- unwrap one more level.
+                bool matched = false;
+                if (inner != node) {
+                    Node *lit = inner;
+                    if (lit->kind == ND_NEG && lit->lhs) {
+                        // The literal `1` being negated arrives wrapped in its
+                        // own (implicit int-promotion) ND_CAST(s) -- peel
+                        // those too before checking for ND_NUM(1).
+                        Node *n = lit->lhs;
+                        while (n->kind == ND_CAST && n->lhs)
+                            n = n->lhs;
+                        matched = n->kind == ND_NUM && n->val == 1;
+                    } else {
+                        matched = lit->kind == ND_NUM && lit->val == -1;
+                    }
+                }
+                if (matched) {
+                    fprintf(f, "FE_DFL_ENV");
+                    break;
                 }
             }
-            if (matched) {
-                fprintf(f, "FE_DFL_ENV");
+            // Suppress widening integer casts — these are always implicit in C.
+            // Only emit a cast if it crosses a type category or narrows/changes
+            // signedness.
+            Type *dst = node->ty;
+            Type *src = node->lhs ? node->lhs->ty : NULL;
+            // #1068: a bare "(dst_type)float_expr" cast is UB in the *host*
+            // compiler for NaN/out-of-range values, same reason cccc_f64_to_i64
+            // et al exist in src/internal.h for the VM's own F2I3/F2U3 opcodes
+            // (#775/#780) -- the VM defines this conversion as saturating with
+            // FE_INVALID raised, but a real host compiler is free to do
+            // anything, and x86_64 clang/gcc both demonstrably do worse than
+            // "anything": the common branchless double/float->uint64 lowering
+            // spuriously raises FE_INVALID even for an in-range value (measured
+            // directly, x86_64 only -- aarch64's FCVTZS/FCVTZU already saturate
+            // correctly and never raise it, so this is a no-op there). Route
+            // every real-floating -> non-floating cast through one of four
+            // on-demand helpers (serialize_synth_f2i_helpers below) that are a
+            // near-verbatim port of internal.h's own VM helpers, so native
+            // output agrees with the VM by construction. Mirrors
+            // codegen_expr.c's own opcode selection exactly: F2U3 (unsigned
+            // helper) only for an unsigned 64-bit integer destination (matching
+            // is_u64_int(), codegen_emit.c -- narrower unsigned destinations
+            // are already correct via F2I3's signed saturation plus an ordinary
+            // truncating narrow cast, which the outer "(dst_type)" below still
+            // supplies), F2I3 (signed helper) for everything else including
+            // TY_BOOL. A destination wider than 64 bits (an over-64-bit
+            // _BitInt) takes a completely different VM codegen path (raw
+            // bit-copy, not this numeric conversion) and is excluded here to
+            // match. A TY_VECTOR destination is also excluded: that's #1019's
+            // own scalar-broadcast ND_CAST marker just below
+            // (usual_arith_conv's "vector op scalar" internal annotation, not a
+            // genuine value conversion) -- without this exclusion a float
+            // scalar broadcast into a vector op wrongly got routed through the
+            // integer-saturating helper instead of staying a plain float,
+            // corrupting the vector arithmetic itself.
+            bool f2i_native = src && dst && is_flonum(src) && !is_flonum(dst) &&
+                              dst->kind != TY_VECTOR &&
+                              !(dst->kind == TY_BITINT && dst->bit_width > 64);
+            if (f2i_native) {
+                bool u64_dst =
+                    is_integer(dst) && dst->is_unsigned && dst->size == 8;
+                bool        f32_src = src->kind == TY_FLOAT;
+                const char *fn =
+                    u64_dst ? (f32_src ? "__cccc_f2u64_f32" : "__cccc_f2u64")
+                            : (f32_src ? "__cccc_f2i64_f32" : "__cccc_f2i64");
+                fprintf(f, "(");
+                serialize_type(f, ctx, node->ty);
+                fprintf(f, ")%s(", fn);
+                serialize_expr(f, vm, ctx, node->lhs, 2);
+                fprintf(f, ")");
                 break;
             }
-        }
-        // Suppress widening integer casts — these are always implicit in C.
-        // Only emit a cast if it crosses a type category or narrows/changes signedness.
-        Type *dst = node->ty;
-        Type *src = node->lhs ? node->lhs->ty : NULL;
-        // #1068: a bare "(dst_type)float_expr" cast is UB in the *host*
-        // compiler for NaN/out-of-range values, same reason cccc_f64_to_i64
-        // et al exist in src/internal.h for the VM's own F2I3/F2U3 opcodes
-        // (#775/#780) -- the VM defines this conversion as saturating with
-        // FE_INVALID raised, but a real host compiler is free to do
-        // anything, and x86_64 clang/gcc both demonstrably do worse than
-        // "anything": the common branchless double/float->uint64 lowering
-        // spuriously raises FE_INVALID even for an in-range value (measured
-        // directly, x86_64 only -- aarch64's FCVTZS/FCVTZU already saturate
-        // correctly and never raise it, so this is a no-op there). Route
-        // every real-floating -> non-floating cast through one of four
-        // on-demand helpers (serialize_synth_f2i_helpers below) that are a
-        // near-verbatim port of internal.h's own VM helpers, so native
-        // output agrees with the VM by construction. Mirrors codegen_expr.c's
-        // own opcode selection exactly: F2U3 (unsigned helper) only for an
-        // unsigned 64-bit integer destination (matching is_u64_int(),
-        // codegen_emit.c -- narrower unsigned destinations are already
-        // correct via F2I3's signed saturation plus an ordinary truncating
-        // narrow cast, which the outer "(dst_type)" below still supplies),
-        // F2I3 (signed helper) for everything else including TY_BOOL. A
-        // destination wider than 64 bits (an over-64-bit _BitInt) takes a
-        // completely different VM codegen path (raw bit-copy, not this
-        // numeric conversion) and is excluded here to match. A TY_VECTOR
-        // destination is also excluded: that's #1019's own scalar-broadcast
-        // ND_CAST marker just below (usual_arith_conv's "vector op scalar"
-        // internal annotation, not a genuine value conversion) -- without
-        // this exclusion a float scalar broadcast into a vector op wrongly
-        // got routed through the integer-saturating helper instead of
-        // staying a plain float, corrupting the vector arithmetic itself.
-        bool f2i_native = src && dst && is_flonum(src) && !is_flonum(dst) &&
-                          dst->kind != TY_VECTOR &&
-                          !(dst->kind == TY_BITINT && dst->bit_width > 64);
-        if (f2i_native) {
-            bool u64_dst = is_integer(dst) && dst->is_unsigned && dst->size == 8;
-            bool f32_src = src->kind == TY_FLOAT;
-            const char *fn = u64_dst
-                ? (f32_src ? "__cccc_f2u64_f32" : "__cccc_f2u64")
-                : (f32_src ? "__cccc_f2i64_f32" : "__cccc_f2i64");
-            fprintf(f, "(");
-            serialize_type(f, ctx, node->ty);
-            fprintf(f, ")%s(", fn);
-            serialize_expr(f, vm, ctx, node->lhs, 2);
-            fprintf(f, ")");
+            bool dst_int =
+                dst && (dst->kind == TY_BOOL || dst->kind == TY_CHAR ||
+                        dst->kind == TY_SHORT || dst->kind == TY_INT ||
+                        dst->kind == TY_LONG);
+            bool src_int =
+                src && (src->kind == TY_BOOL || src->kind == TY_CHAR ||
+                        src->kind == TY_SHORT || src->kind == TY_INT ||
+                        src->kind == TY_LONG);
+            static const int int_rank[] = {[TY_BOOL]  = 0,
+                                           [TY_CHAR]  = 1,
+                                           [TY_SHORT] = 2,
+                                           [TY_INT]   = 3,
+                                           [TY_LONG]  = 4};
+            bool widening = dst_int && src_int &&
+                            dst->is_unsigned == src->is_unsigned &&
+                            int_rank[dst->kind] >= int_rank[src->kind];
+            // #1019: a scalar operand of a `vector op scalar` binary op gets an
+            // implicit ND_CAST(vector_ty, scalar) inserted by usual_arith_conv
+            // (type.c) as its internal marker for "broadcast this scalar across
+            // the vector's lanes" -- it is not source-level C. GCC/clang
+            // perform that broadcast themselves inside the operator and reject
+            // the same thing spelled as an explicit cast ("invalid conversion
+            // between vector type and integer type of different size"). Emit
+            // the bare scalar operand instead and let the host compiler's own
+            // vector extension do the broadcast, exactly as real vector_size
+            // source would. Only the scalar-source case is suppressed here -- a
+            // vector-to-vector cast (same-type no-op, or a genuine bitcast
+            // between differently-shaped vectors) still needs to print.
+            bool scalar_splat =
+                dst && dst->kind == TY_VECTOR && src && src->kind != TY_VECTOR;
+            if (widening || scalar_splat) {
+                serialize_expr(f, vm, ctx, node->lhs, parent_prec);
+            } else {
+                fprintf(f, "(");
+                serialize_type(f, ctx, node->ty);
+                fprintf(f, ")");
+                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            }
             break;
         }
-        bool dst_int = dst && (dst->kind == TY_BOOL || dst->kind == TY_CHAR ||
-                               dst->kind == TY_SHORT || dst->kind == TY_INT ||
-                               dst->kind == TY_LONG);
-        bool src_int = src && (src->kind == TY_BOOL || src->kind == TY_CHAR ||
-                               src->kind == TY_SHORT || src->kind == TY_INT ||
-                               src->kind == TY_LONG);
-        static const int int_rank[] = {
-            [TY_BOOL]=0, [TY_CHAR]=1, [TY_SHORT]=2, [TY_INT]=3, [TY_LONG]=4
-        };
-        bool widening = dst_int && src_int &&
-                        dst->is_unsigned == src->is_unsigned &&
-                        int_rank[dst->kind] >= int_rank[src->kind];
-        // #1019: a scalar operand of a `vector op scalar` binary op gets an
-        // implicit ND_CAST(vector_ty, scalar) inserted by usual_arith_conv
-        // (type.c) as its internal marker for "broadcast this scalar across
-        // the vector's lanes" -- it is not source-level C. GCC/clang perform
-        // that broadcast themselves inside the operator and reject the same
-        // thing spelled as an explicit cast ("invalid conversion between
-        // vector type and integer type of different size"). Emit the bare
-        // scalar operand instead and let the host compiler's own vector
-        // extension do the broadcast, exactly as real vector_size source
-        // would. Only the scalar-source case is suppressed here -- a
-        // vector-to-vector cast (same-type no-op, or a genuine bitcast
-        // between differently-shaped vectors) still needs to print.
-        bool scalar_splat = dst && dst->kind == TY_VECTOR &&
-                            src && src->kind != TY_VECTOR;
-        if (widening || scalar_splat) {
-            serialize_expr(f, vm, ctx, node->lhs, parent_prec);
-        } else {
-            fprintf(f, "(");
-            serialize_type(f, ctx, node->ty);
-            fprintf(f, ")");
-            serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        }
-        break;
-    }
 
-    case ND_COND:
-        // #1019: GNU per-lane vector select -- the condition is itself a
-        // vector (typically a comparison mask), and each lane independently
-        // picks its then/els element (type.c's ND_COND type-checking, which
-        // requires the arms to be identically-typed vectors here, and
-        // codegen_expr.c's gen_vector_expr both dispatch on this same
-        // is_vector(node->cond->ty) check). GCC accepts `cond ? a : b` with
-        // a vector cond directly; clang rejects it ("used type '...' where
-        // arithmetic or pointer type is required"). Lower to portable mask
-        // arithmetic instead of relying on the GCC-only extension: the
-        // condition's own vector type is guaranteed (type.c) to have the
-        // same lane count/width as the arms, so it doubles as the mask type
-        // and casting an arm to/from it is a same-size bitcast. `!= 0`
-        // implements GCC's "nonzero", not "all-bits-set", per-lane
-        // truthiness rule. Each of cond/then/els is evaluated exactly once.
-        //
-        // An ordinary C ternary with a *scalar* condition and vector arms
-        // (standard C, not this GNU extension) falls through to the plain
-        // `?:` below unchanged -- real clang already accepts that form.
-        if (is_vector(node->cond->ty)) {
-            fprintf(f, "__extension__ ({ ");
-            serialize_type(f, ctx, node->cond->ty);
-            fprintf(f, " __cccc_vsel_m = (");
-            serialize_expr(f, vm, ctx, node->cond, 0);
-            fprintf(f, ") != 0; ");
-            serialize_type(f, ctx, node->ty);
-            fprintf(f, " __cccc_vsel_t = (");
-            serialize_expr(f, vm, ctx, node->then, 0);
-            fprintf(f, "); ");
-            serialize_type(f, ctx, node->ty);
-            fprintf(f, " __cccc_vsel_f = (");
-            serialize_expr(f, vm, ctx, node->els, 0);
-            fprintf(f, "); (");
-            serialize_type(f, ctx, node->ty);
-            fprintf(f, ")((__cccc_vsel_m & (");
-            serialize_type(f, ctx, node->cond->ty);
-            fprintf(f, ")__cccc_vsel_t) | (~__cccc_vsel_m & (");
-            serialize_type(f, ctx, node->cond->ty);
-            fprintf(f, ")__cccc_vsel_f)); })");
-            break;
-        }
-        serialize_expr(f, vm, ctx, node->cond, 0);
-        fprintf(f, " ? ");
-        serialize_expr(f, vm, ctx, node->then, 0);
-        fprintf(f, " : ");
-        serialize_expr(f, vm, ctx, node->els, 0);
-        break;
-
-    case ND_FUNCALL:
-        // #969: __builtin_pc_function_name / __builtin_pc_source_location
-        // lower to a call into a VM-only FFI shim (__cccc_pc_to_name /
-        // __cccc_pc_to_source, cc_load_symbolize_runtime, debugger.c) whose
-        // argument is a VM bytecode offset. Neither the shim nor the symbol
-        // table it reads exists natively, so there is nothing to lower to --
-        // reject here rather than emit a call the host compiler rejects by
-        // its internal name. Deliberately not rejected at parse time
-        // (primary(), parse.c): under -c=generated only *generated* code is
-        // serialized, and a __builtin_pc_* call in VM-only code is legal
-        // there.
-        if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var) {
-            const char *pc_builtin = NULL;
-            if (vm->compiler.builtin_pc_to_name &&
-                node->lhs->var == vm->compiler.builtin_pc_to_name)
-                pc_builtin = "__builtin_pc_function_name";
-            else if (vm->compiler.builtin_pc_to_source &&
-                     node->lhs->var == vm->compiler.builtin_pc_to_source)
-                pc_builtin = "__builtin_pc_source_location";
-            if (pc_builtin) {
-                if (node->tok)
-                    error_tok(vm, node->tok,
-                              "%s cannot be serialized to C: it resolves a "
-                              "VM bytecode offset via the VM's symbol "
-                              "table, which does not exist natively",
-                              pc_builtin);
-                else
-                    error("cccc: %s cannot be serialized to C: it resolves "
-                          "a VM bytecode offset via the VM's symbol table, "
-                          "which does not exist natively", pc_builtin);
-            }
-        }
-        // #1054/#1030: setjmp/longjmp/_setjmp/_longjmp all print as calls to
-        // exactly `_setjmp`/`_longjmp` -- real, plain `extern`-declared
-        // functions on every supported host (unlike plain `setjmp`, a
-        // macro on glibc) -- with the env argument cast to `(void *)`
-        // rather than the implicit `long *` these builtins' VM-side
-        // parameter type would otherwise print (parse_decl.c). See
-        // serialize_synth_setjmp_decls()'s own comment (this file) for why:
-        // it declares exactly these two names, and never replays the
-        // captured `#include <setjmp.h>` line, so nothing else may spell
-        // the callee any other way here.
-        if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
-            ((vm->compiler.builtin_setjmp &&
-              node->lhs->var == vm->compiler.builtin_setjmp) ||
-             (vm->compiler.builtin_longjmp &&
-              node->lhs->var == vm->compiler.builtin_longjmp) ||
-             (vm->compiler.builtin__setjmp &&
-              node->lhs->var == vm->compiler.builtin__setjmp) ||
-             (vm->compiler.builtin__longjmp &&
-              node->lhs->var == vm->compiler.builtin__longjmp))) {
-            bool is_longjmp =
-                (vm->compiler.builtin_longjmp &&
-                 node->lhs->var == vm->compiler.builtin_longjmp) ||
-                (vm->compiler.builtin__longjmp &&
-                 node->lhs->var == vm->compiler.builtin__longjmp);
-            fprintf(f, is_longjmp ? "_longjmp(" : "_setjmp(");
-            Node *arg = node->args;
-            if (arg) {
-                Node *env = arg;
-                while (env->kind == ND_CAST && env->lhs)
-                    env = env->lhs;
-                fprintf(f, "(void *)");
-                serialize_expr(f, vm, ctx, env, node_prec);
-                arg = arg->next;
-            }
-            for (; arg; arg = arg->next) {
-                fprintf(f, ", ");
-                serialize_expr(f, vm, ctx, arg, 2);
-            }
-            fprintf(f, ")");
-            break;
-        }
-        // #1085: any argument whose type is CCCC's own struct va_list must
-        // arrive at the callee as an independent copy, never the caller's
-        // own storage. A struct/union-by-value argument is passed here by
-        // the caller's own address (#714/#1078), so *any* callee that
-        // itself calls va_arg on the parameter -- a CCCC-emitted callee
-        // (which also gets its own copy via #1062's shim, so a second copy
-        // here is redundant but harmless) or, the case this fixes, a host
-        // libc v*-family function (vprintf/vsnprintf/vsscanf/vsyslog/...,
-        // which has no CCCC-emitted prologue to shim into and, on glibc,
-        // has its own array-typed va_list that decays to a pointer in
-        // parameter position, C17 6.7.6.3p7) -- would otherwise silently
-        // advance the *caller's* va_list. Deliberately not narrowed to
-        // "callee has no body" (host libc only): a call through a function
-        // pointer would slip past that predicate and still alias on glibc,
-        // and widening it costs nothing here. Wraps the whole call
-        // (including the #1074 static-link injection just below, so a
-        // nested-function callee stays correct too) in a statement
-        // expression that declares one va_copy'd local per such argument
-        // and substitutes it in the argument list below; no va_end on the
-        // copy, mirroring #1062's own reasoning (verified there that
-        // va_end expands to nothing observable for either va_list
-        // representation this project targets).
-        bool has_va_list_arg = false;
-        for (Node *va_arg_scan = node->args; va_arg_scan; va_arg_scan = va_arg_scan->next) {
-            if (type_is_cccc_va_list(va_arg_scan->ty)) {
-                has_va_list_arg = true;
-                break;
-            }
-        }
-        char va_fwd_names[8][32];
-        if (has_va_list_arg) {
-            fprintf(f, "__extension__ ({ ");
-            int va_fwd_idx = 0;
-            for (Node *arg = node->args; arg; arg = arg->next, va_fwd_idx++) {
-                if (va_fwd_idx >= 8 || !type_is_cccc_va_list(arg->ty))
-                    continue;
-                snprintf(va_fwd_names[va_fwd_idx], sizeof va_fwd_names[va_fwd_idx],
-                         "__cccc_va_fwd_%d", ctx->va_fwd_seq++);
-                fprintf(f, "va_list %s; va_copy(%s, ", va_fwd_names[va_fwd_idx],
-                        va_fwd_names[va_fwd_idx]);
-                serialize_expr(f, vm, ctx, arg, 2);
-                fprintf(f, "); ");
-            }
-        }
-        serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        fprintf(f, "(");
-        // #1074: a direct call to a nested function needs its hidden
-        // __static_link argument supplied explicitly -- the parser already
-        // gave the callee's own signature a leading `void *__static_link`
-        // parameter (parse_decl.c), but nothing else ever passed it. Mirrors
-        // codegen_expr.c's calling_nested value selection exactly: calling
-        // one's own direct child passes that child's own env (declared as
-        // `__cccc_nenv` at the top of the function currently being
-        // serialized, ctx->current_fn -- see serialize_function); calling a
-        // sibling or an ancestor's nested function (only reachable from
-        // inside that ancestor's own nest, so ctx->current_fn must itself be
-        // nested) chases ->__up via nested_env_ptr_expr(). serialize_nested_
-        // preamble() has already rejected, at compile time, every reference
-        // to a nested function that ISN'T a direct callee, so `node->lhs`
-        // here is guaranteed to be exactly this shape whenever the check
-        // below matches.
-        if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
-            node->lhs->var->is_function && node->lhs->var->is_nested &&
-            !node->lhs->var->is_block) {
-            Obj *callee_parent = node->lhs->var->parent_fn;
-            Obj *current_fn = ctx->current_fn;
-            fprintf(f, "(void *)");
-            if (callee_parent == current_fn)
-                fprintf(f, "&__cccc_nenv");
-            else if (current_fn && current_fn->is_nested && !current_fn->is_block)
-                fprintf(f, "%s",
-                        nested_env_ptr_expr(vm, ctx, current_fn, callee_parent));
-            else
-                // Unreachable in valid C (a nested function's name has block
-                // scope, only visible inside its own parent's nest) -- mirror
-                // codegen_expr.c's identical fallback rather than emit
-                // nothing.
-                fprintf(f, "&__cccc_nenv");
-            if (node->args)
-                fprintf(f, ", ");
-        }
-        {
-        int va_fwd_idx = 0;
-        for (Node *arg = node->args; arg; arg = arg->next, va_fwd_idx++) {
-            // #1042(b): a comma-expression argument (e.g. from a macro like
-            // ivalue(r) that expands to one) must stay parenthesized here --
-            // the comma is the argument separator in this context, so an
-            // unparenthesized ND_COMMA silently splits into extra arguments
-            // ("too many arguments to function call"). parent_prec 2 is
-            // above get_precedence(ND_COMMA)'s 1 but below every other node
-            // kind's precedence, so only a bare top-level comma gets wrapped.
+        case ND_COND:
+            // #1019: GNU per-lane vector select -- the condition is itself a
+            // vector (typically a comparison mask), and each lane independently
+            // picks its then/els element (type.c's ND_COND type-checking, which
+            // requires the arms to be identically-typed vectors here, and
+            // codegen_expr.c's gen_vector_expr both dispatch on this same
+            // is_vector(node->cond->ty) check). GCC accepts `cond ? a : b` with
+            // a vector cond directly; clang rejects it ("used type '...' where
+            // arithmetic or pointer type is required"). Lower to portable mask
+            // arithmetic instead of relying on the GCC-only extension: the
+            // condition's own vector type is guaranteed (type.c) to have the
+            // same lane count/width as the arms, so it doubles as the mask type
+            // and casting an arm to/from it is a same-size bitcast. `!= 0`
+            // implements GCC's "nonzero", not "all-bits-set", per-lane
+            // truthiness rule. Each of cond/then/els is evaluated exactly once.
             //
-            // #1085: a va_list-typed argument prints the va_copy'd local
-            // declared just above instead of re-serializing the original
-            // expression -- both for correctness (the callee must see the
-            // copy, not the caller's own storage) and to avoid evaluating a
-            // (rare, but legal) side-effecting va_list expression twice.
-            if (va_fwd_idx < 8 && has_va_list_arg && type_is_cccc_va_list(arg->ty))
-                fprintf(f, "%s", va_fwd_names[va_fwd_idx]);
+            // An ordinary C ternary with a *scalar* condition and vector arms
+            // (standard C, not this GNU extension) falls through to the plain
+            // `?:` below unchanged -- real clang already accepts that form.
+            if (is_vector(node->cond->ty)) {
+                fprintf(f, "__extension__ ({ ");
+                serialize_type(f, ctx, node->cond->ty);
+                fprintf(f, " __cccc_vsel_m = (");
+                serialize_expr(f, vm, ctx, node->cond, 0);
+                fprintf(f, ") != 0; ");
+                serialize_type(f, ctx, node->ty);
+                fprintf(f, " __cccc_vsel_t = (");
+                serialize_expr(f, vm, ctx, node->then, 0);
+                fprintf(f, "); ");
+                serialize_type(f, ctx, node->ty);
+                fprintf(f, " __cccc_vsel_f = (");
+                serialize_expr(f, vm, ctx, node->els, 0);
+                fprintf(f, "); (");
+                serialize_type(f, ctx, node->ty);
+                fprintf(f, ")((__cccc_vsel_m & (");
+                serialize_type(f, ctx, node->cond->ty);
+                fprintf(f, ")__cccc_vsel_t) | (~__cccc_vsel_m & (");
+                serialize_type(f, ctx, node->cond->ty);
+                fprintf(f, ")__cccc_vsel_f)); })");
+                break;
+            }
+            serialize_expr(f, vm, ctx, node->cond, 0);
+            fprintf(f, " ? ");
+            serialize_expr(f, vm, ctx, node->then, 0);
+            fprintf(f, " : ");
+            serialize_expr(f, vm, ctx, node->els, 0);
+            break;
+
+        case ND_FUNCALL:
+            // #969: __builtin_pc_function_name / __builtin_pc_source_location
+            // lower to a call into a VM-only FFI shim (__cccc_pc_to_name /
+            // __cccc_pc_to_source, cc_load_symbolize_runtime, debugger.c) whose
+            // argument is a VM bytecode offset. Neither the shim nor the symbol
+            // table it reads exists natively, so there is nothing to lower to
+            // -- reject here rather than emit a call the host compiler rejects
+            // by its internal name. Deliberately not rejected at parse time
+            // (primary(), parse.c): under -c=generated only *generated* code is
+            // serialized, and a __builtin_pc_* call in VM-only code is legal
+            // there.
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var) {
+                const char *pc_builtin = NULL;
+                if (vm->compiler.builtin_pc_to_name &&
+                    node->lhs->var == vm->compiler.builtin_pc_to_name)
+                    pc_builtin = "__builtin_pc_function_name";
+                else if (vm->compiler.builtin_pc_to_source &&
+                         node->lhs->var == vm->compiler.builtin_pc_to_source)
+                    pc_builtin = "__builtin_pc_source_location";
+                if (pc_builtin) {
+                    if (node->tok)
+                        error_tok(vm, node->tok,
+                                  "%s cannot be serialized to C: it resolves a "
+                                  "VM bytecode offset via the VM's symbol "
+                                  "table, which does not exist natively",
+                                  pc_builtin);
+                    else
+                        error("cccc: %s cannot be serialized to C: it resolves "
+                              "a VM bytecode offset via the VM's symbol table, "
+                              "which does not exist natively",
+                              pc_builtin);
+                }
+            }
+            // #1054/#1030: setjmp/longjmp/_setjmp/_longjmp all print as calls
+            // to exactly `_setjmp`/`_longjmp` -- real, plain `extern`-declared
+            // functions on every supported host (unlike plain `setjmp`, a
+            // macro on glibc) -- with the env argument cast to `(void *)`
+            // rather than the implicit `long *` these builtins' VM-side
+            // parameter type would otherwise print (parse_decl.c). See
+            // serialize_synth_setjmp_decls()'s own comment (this file) for why:
+            // it declares exactly these two names, and never replays the
+            // captured `#include <setjmp.h>` line, so nothing else may spell
+            // the callee any other way here.
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                ((vm->compiler.builtin_setjmp &&
+                  node->lhs->var == vm->compiler.builtin_setjmp) ||
+                 (vm->compiler.builtin_longjmp &&
+                  node->lhs->var == vm->compiler.builtin_longjmp) ||
+                 (vm->compiler.builtin__setjmp &&
+                  node->lhs->var == vm->compiler.builtin__setjmp) ||
+                 (vm->compiler.builtin__longjmp &&
+                  node->lhs->var == vm->compiler.builtin__longjmp))) {
+                bool is_longjmp =
+                    (vm->compiler.builtin_longjmp &&
+                     node->lhs->var == vm->compiler.builtin_longjmp) ||
+                    (vm->compiler.builtin__longjmp &&
+                     node->lhs->var == vm->compiler.builtin__longjmp);
+                fprintf(f, is_longjmp ? "_longjmp(" : "_setjmp(");
+                Node *arg = node->args;
+                if (arg) {
+                    Node *env = arg;
+                    while (env->kind == ND_CAST && env->lhs)
+                        env = env->lhs;
+                    fprintf(f, "(void *)");
+                    serialize_expr(f, vm, ctx, env, node_prec);
+                    arg = arg->next;
+                }
+                for (; arg; arg = arg->next) {
+                    fprintf(f, ", ");
+                    serialize_expr(f, vm, ctx, arg, 2);
+                }
+                fprintf(f, ")");
+                break;
+            }
+            // #1085: any argument whose type is CCCC's own struct va_list must
+            // arrive at the callee as an independent copy, never the caller's
+            // own storage. A struct/union-by-value argument is passed here by
+            // the caller's own address (#714/#1078), so *any* callee that
+            // itself calls va_arg on the parameter -- a CCCC-emitted callee
+            // (which also gets its own copy via #1062's shim, so a second copy
+            // here is redundant but harmless) or, the case this fixes, a host
+            // libc v*-family function (vprintf/vsnprintf/vsscanf/vsyslog/...,
+            // which has no CCCC-emitted prologue to shim into and, on glibc,
+            // has its own array-typed va_list that decays to a pointer in
+            // parameter position, C17 6.7.6.3p7) -- would otherwise silently
+            // advance the *caller's* va_list. Deliberately not narrowed to
+            // "callee has no body" (host libc only): a call through a function
+            // pointer would slip past that predicate and still alias on glibc,
+            // and widening it costs nothing here. Wraps the whole call
+            // (including the #1074 static-link injection just below, so a
+            // nested-function callee stays correct too) in a statement
+            // expression that declares one va_copy'd local per such argument
+            // and substitutes it in the argument list below; no va_end on the
+            // copy, mirroring #1062's own reasoning (verified there that
+            // va_end expands to nothing observable for either va_list
+            // representation this project targets).
+            bool has_va_list_arg = false;
+            for (Node *va_arg_scan = node->args; va_arg_scan;
+                 va_arg_scan       = va_arg_scan->next) {
+                if (type_is_cccc_va_list(va_arg_scan->ty)) {
+                    has_va_list_arg = true;
+                    break;
+                }
+            }
+            char va_fwd_names[8][32];
+            if (has_va_list_arg) {
+                fprintf(f, "__extension__ ({ ");
+                int va_fwd_idx = 0;
+                for (Node *arg = node->args; arg;
+                     arg       = arg->next, va_fwd_idx++) {
+                    if (va_fwd_idx >= 8 || !type_is_cccc_va_list(arg->ty))
+                        continue;
+                    snprintf(va_fwd_names[va_fwd_idx],
+                             sizeof va_fwd_names[va_fwd_idx],
+                             "__cccc_va_fwd_%d", ctx->va_fwd_seq++);
+                    fprintf(f, "va_list %s; va_copy(%s, ",
+                            va_fwd_names[va_fwd_idx], va_fwd_names[va_fwd_idx]);
+                    serialize_expr(f, vm, ctx, arg, 2);
+                    fprintf(f, "); ");
+                }
+            }
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            fprintf(f, "(");
+            // #1074: a direct call to a nested function needs its hidden
+            // __static_link argument supplied explicitly -- the parser already
+            // gave the callee's own signature a leading `void *__static_link`
+            // parameter (parse_decl.c), but nothing else ever passed it.
+            // Mirrors codegen_expr.c's calling_nested value selection exactly:
+            // calling one's own direct child passes that child's own env
+            // (declared as
+            // `__cccc_nenv` at the top of the function currently being
+            // serialized, ctx->current_fn -- see serialize_function); calling a
+            // sibling or an ancestor's nested function (only reachable from
+            // inside that ancestor's own nest, so ctx->current_fn must itself
+            // be nested) chases ->__up via nested_env_ptr_expr().
+            // serialize_nested_ preamble() has already rejected, at compile
+            // time, every reference to a nested function that ISN'T a direct
+            // callee, so `node->lhs` here is guaranteed to be exactly this
+            // shape whenever the check below matches.
+            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                node->lhs->var->is_function && node->lhs->var->is_nested &&
+                !node->lhs->var->is_block) {
+                Obj *callee_parent = node->lhs->var->parent_fn;
+                Obj *current_fn    = ctx->current_fn;
+                fprintf(f, "(void *)");
+                if (callee_parent == current_fn)
+                    fprintf(f, "&__cccc_nenv");
+                else if (current_fn && current_fn->is_nested &&
+                         !current_fn->is_block)
+                    fprintf(f, "%s",
+                            nested_env_ptr_expr(vm, ctx, current_fn,
+                                                callee_parent));
+                else
+                    // Unreachable in valid C (a nested function's name has
+                    // block scope, only visible inside its own parent's nest)
+                    // -- mirror codegen_expr.c's identical fallback rather than
+                    // emit nothing.
+                    fprintf(f, "&__cccc_nenv");
+                if (node->args)
+                    fprintf(f, ", ");
+            }
+            {
+                int va_fwd_idx = 0;
+                for (Node *arg = node->args; arg;
+                     arg       = arg->next, va_fwd_idx++) {
+                    // #1042(b): a comma-expression argument (e.g. from a macro
+                    // like ivalue(r) that expands to one) must stay
+                    // parenthesized here -- the comma is the argument separator
+                    // in this context, so an unparenthesized ND_COMMA silently
+                    // splits into extra arguments
+                    // ("too many arguments to function call"). parent_prec 2 is
+                    // above get_precedence(ND_COMMA)'s 1 but below every other
+                    // node kind's precedence, so only a bare top-level comma
+                    // gets wrapped.
+                    //
+                    // #1085: a va_list-typed argument prints the va_copy'd
+                    // local declared just above instead of re-serializing the
+                    // original expression -- both for correctness (the callee
+                    // must see the copy, not the caller's own storage) and to
+                    // avoid evaluating a (rare, but legal) side-effecting
+                    // va_list expression twice.
+                    if (va_fwd_idx < 8 && has_va_list_arg &&
+                        type_is_cccc_va_list(arg->ty))
+                        fprintf(f, "%s", va_fwd_names[va_fwd_idx]);
+                    else
+                        serialize_expr(f, vm, ctx, arg, 2);
+                    if (arg->next)
+                        fprintf(f, ", ");
+                }
+            }
+            fprintf(f, ")");
+            if (has_va_list_arg)
+                fprintf(f, "; })");
+            break;
+
+        case ND_MEMBER:
+            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            if (node->member && node->member->name)
+                fprintf(f, ".%.*s", node->member->name->len,
+                        node->member->name->loc);
+            else if (!node->member)
+                // Genuinely unresolved -- distinct from the anonymous-member
+                // case below, which is a normal, valid access.
+                fprintf(f, "./* unknown */");
+            // else: node->member is an anonymous struct/union member (its
+            // C11 6.7.2.1p13 members are promoted into the enclosing
+            // aggregate's namespace) -- an intermediate link in a struct_ref()
+            // chain like `x.a` through `struct { struct { int a; }; } x`.
+            // It has no spelling of its own and is transparent in C, so it
+            // must serialize to nothing rather than the placeholder comment
+            // that used to sit here -- that produced `s./* unknown */.i`,
+            // which the host compiler rejects outright.
+            break;
+
+        case ND_STMT_EXPR:
+            fprintf(f, "({\n");
+            for (Node *s = node->body; s; s = s->next) {
+                serialize_stmt(f, vm, ctx, s, 1);
+            }
+            fprintf(f, "})");
+            break;
+
+        case ND_MEMZERO:
+            if (node->var && node->var->is_block_var)
+                // #965: a __block local's slot holds the heap box *pointer*
+                // (see serialize_function's hoist loop), not the storage
+                // itself -- &name/sizeof(name) would zero the 8-byte pointer
+                // slot instead of the real storage. Mirrors codegen's own
+                // is_block_var arm on ND_MEMZERO (codegen.c), the same arm
+                // #982's TY_VLA case was modelled on.
+                fprintf(f, "__builtin_memset(%s, 0, sizeof(*%s))",
+                        node->var->name, node->var->name);
+            else if (node->var)
+                fprintf(f, "__builtin_memset(&%s, 0, sizeof(%s))",
+                        node->var->name, node->var->name);
             else
-                serialize_expr(f, vm, ctx, arg, 2);
-            if (arg->next)
-                fprintf(f, ", ");
-        }
-        }
-        fprintf(f, ")");
-        if (has_va_list_arg)
-            fprintf(f, "; })");
-        break;
+                fprintf(f, "/* memzero */");
+            break;
 
-    case ND_MEMBER:
-        serialize_expr(f, vm, ctx, node->lhs, node_prec);
-        if (node->member && node->member->name)
-            fprintf(f, ".%.*s", node->member->name->len,
-                    node->member->name->loc);
-        else if (!node->member)
-            // Genuinely unresolved -- distinct from the anonymous-member
-            // case below, which is a normal, valid access.
-            fprintf(f, "./* unknown */");
-        // else: node->member is an anonymous struct/union member (its
-        // C11 6.7.2.1p13 members are promoted into the enclosing
-        // aggregate's namespace) -- an intermediate link in a struct_ref()
-        // chain like `x.a` through `struct { struct { int a; }; } x`.
-        // It has no spelling of its own and is transparent in C, so it
-        // must serialize to nothing rather than the placeholder comment
-        // that used to sit here -- that produced `s./* unknown */.i`,
-        // which the host compiler rejects outright.
-        break;
+        case ND_NULL_EXPR:
+            // Empty expression
+            break;
 
-    case ND_STMT_EXPR:
-        fprintf(f, "({\n");
-        for (Node *s = node->body; s; s = s->next) {
-            serialize_stmt(f, vm, ctx, s, 1);
-        }
-        fprintf(f, "})");
-        break;
+        case ND_FRAME_ADDR:
+            // The parser rejects any level but 0, so there is nothing to carry.
+            fprintf(f, "__builtin_frame_address(0)");
+            break;
 
-    case ND_MEMZERO:
-        if (node->var && node->var->is_block_var)
-            // #965: a __block local's slot holds the heap box *pointer*
-            // (see serialize_function's hoist loop), not the storage
-            // itself -- &name/sizeof(name) would zero the 8-byte pointer
-            // slot instead of the real storage. Mirrors codegen's own
-            // is_block_var arm on ND_MEMZERO (codegen.c), the same arm
-            // #982's TY_VLA case was modelled on.
-            fprintf(f, "__builtin_memset(%s, 0, sizeof(*%s))",
-                    node->var->name, node->var->name);
-        else if (node->var)
-            fprintf(f, "__builtin_memset(&%s, 0, sizeof(%s))",
-                    node->var->name, node->var->name);
-        else
-            fprintf(f, "/* memzero */");
-        break;
+        case ND_RETURN_ADDR:
+            // The *value* diverges by design: under the VM this is a bytecode
+            // pc cast to void*, natively it is a real host return address. Both
+            // are "the return address n frames up" in their own runtime, which
+            // is the most faithful mapping available -- see COVERAGE.md.
+            fprintf(f, "__builtin_return_address(%lld)", (long long)node->val);
+            break;
 
-    case ND_NULL_EXPR:
-        // Empty expression
-        break;
+        case ND_UNREACHABLE:
+            // __builtin_unreachable, __builtin_trap and __builtin_debugtrap all
+            // lower to the same BTRAP opcode, so the VM traps for all three and
+            // the original spelling is not recoverable here. __builtin_trap()
+            // is the emission that matches that behaviour;
+            // __builtin_unreachable() would be UB natively and the optimizer
+            // would delete the path.
+            fprintf(f, "__builtin_trap()");
+            break;
 
-    case ND_FRAME_ADDR:
-        // The parser rejects any level but 0, so there is nothing to carry.
-        fprintf(f, "__builtin_frame_address(0)");
-        break;
-
-    case ND_RETURN_ADDR:
-        // The *value* diverges by design: under the VM this is a bytecode pc
-        // cast to void*, natively it is a real host return address. Both are
-        // "the return address n frames up" in their own runtime, which is the
-        // most faithful mapping available -- see COVERAGE.md.
-        fprintf(f, "__builtin_return_address(%lld)", (long long)node->val);
-        break;
-
-    case ND_UNREACHABLE:
-        // __builtin_unreachable, __builtin_trap and __builtin_debugtrap all
-        // lower to the same BTRAP opcode, so the VM traps for all three and
-        // the original spelling is not recoverable here. __builtin_trap() is
-        // the emission that matches that behaviour; __builtin_unreachable()
-        // would be UB natively and the optimizer would delete the path.
-        fprintf(f, "__builtin_trap()");
-        break;
-
-    case ND_BITOP: {
-        // val = (op << 8) | width. popcount/parity encode width 0 (see
-        // parse.c), so the `ll` variant has to come from the argument's own
-        // type -- emitting __builtin_popcount for a 64-bit argument would
-        // compile cleanly and silently truncate.
-        int op = (int)(node->val >> 8);
-        int width = (int)(node->val & 0xff);
-        bool wide = node->lhs && node->lhs->ty && node->lhs->ty->size == 8;
-        const char *name;
-        switch (op) {
-        case 0: name = (width == 64) ? "__builtin_clzll" : "__builtin_clz"; break;
-        case 1: name = (width == 64) ? "__builtin_ctzll" : "__builtin_ctz"; break;
-        case 2: name = wide ? "__builtin_popcountll" : "__builtin_popcount"; break;
-        case 3: name = wide ? "__builtin_parityll" : "__builtin_parity"; break;
-        case 4: name = (width == 64) ? "__builtin_ffsll" : "__builtin_ffs"; break;
-        default:
-            // bswap: `width` is the byte count, not a bit width.
-            name = (width == 2) ? "__builtin_bswap16"
-                 : (width == 4) ? "__builtin_bswap32"
-                                : "__builtin_bswap64";
+        case ND_BITOP: {
+            // val = (op << 8) | width. popcount/parity encode width 0 (see
+            // parse.c), so the `ll` variant has to come from the argument's own
+            // type -- emitting __builtin_popcount for a 64-bit argument would
+            // compile cleanly and silently truncate.
+            int  op    = (int)(node->val >> 8);
+            int  width = (int)(node->val & 0xff);
+            bool wide  = node->lhs && node->lhs->ty && node->lhs->ty->size == 8;
+            const char *name;
+            switch (op) {
+                case 0:
+                    name = (width == 64) ? "__builtin_clzll" : "__builtin_clz";
+                    break;
+                case 1:
+                    name = (width == 64) ? "__builtin_ctzll" : "__builtin_ctz";
+                    break;
+                case 2:
+                    name = wide ? "__builtin_popcountll" : "__builtin_popcount";
+                    break;
+                case 3:
+                    name = wide ? "__builtin_parityll" : "__builtin_parity";
+                    break;
+                case 4:
+                    name = (width == 64) ? "__builtin_ffsll" : "__builtin_ffs";
+                    break;
+                default:
+                    // bswap: `width` is the byte count, not a bit width.
+                    name = (width == 2)   ? "__builtin_bswap16"
+                           : (width == 4) ? "__builtin_bswap32"
+                                          : "__builtin_bswap64";
+                    break;
+            }
+            fprintf(f, "%s(", name);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ")");
             break;
         }
-        fprintf(f, "%s(", name);
-        serialize_expr(f, vm, ctx, node->lhs, 0);
-        fprintf(f, ")");
-        break;
-    }
 
-    case ND_VLA_PTR:
-        // #964: `v` decayed to `v` -- serialize_stmt_list_item()/the
-        // ND_EXPR_STMT case above already replace this node's only
-        // constructor site (the `v = alloca(...)` assignment, parse.c) with
-        // a real declaration, so this is a defensive fallback for any other
-        // use of the variable (e.g. `v[0]` decays through ND_ADD, which
-        // reaches here via node->lhs). `v` is now a genuine C array/VLA
-        // local, so referencing its name is correct in both lvalue and
-        // rvalue position.
-        fprintf(f, "%s", node->var ? node->var->name : "/* unknown_vla */");
-        break;
+        case ND_VLA_PTR:
+            // #964: `v` decayed to `v` -- serialize_stmt_list_item()/the
+            // ND_EXPR_STMT case above already replace this node's only
+            // constructor site (the `v = alloca(...)` assignment, parse.c) with
+            // a real declaration, so this is a defensive fallback for any other
+            // use of the variable (e.g. `v[0]` decays through ND_ADD, which
+            // reaches here via node->lhs). `v` is now a genuine C array/VLA
+            // local, so referencing its name is correct in both lvalue and
+            // rvalue position.
+            fprintf(f, "%s", node->var ? node->var->name : "/* unknown_vla */");
+            break;
 
-    case ND_OVERFLOW_ARITH: {
-        // #964: val: 0=add 1=sub 2=mul (parse.c); lhs/rhs are the operands,
-        // cas_addr the result pointer -- this maps directly onto the same
-        // three GCC/clang builtins the parser accepted, both of which
-        // support this signature natively.
-        static const char *names[] = {
-            "__builtin_add_overflow", "__builtin_sub_overflow", "__builtin_mul_overflow",
-        };
-        const char *name = (node->val >= 0 && node->val <= 2) ? names[node->val]
-                                                               : "__builtin_add_overflow";
-        // #1042(b): every comma below is a real argument separator to a
-        // fixed-arity builtin, same comma-in-arg-position hazard as
-        // ND_FUNCALL.
-        fprintf(f, "%s(", name);
-        serialize_expr(f, vm, ctx, node->lhs, 2);
-        fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->rhs, 2);
-        fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->cas_addr, 2);
-        fprintf(f, ")");
-        break;
-    }
+        case ND_OVERFLOW_ARITH: {
+            // #964: val: 0=add 1=sub 2=mul (parse.c); lhs/rhs are the operands,
+            // cas_addr the result pointer -- this maps directly onto the same
+            // three GCC/clang builtins the parser accepted, both of which
+            // support this signature natively.
+            static const char *names[] = {
+                "__builtin_add_overflow",
+                "__builtin_sub_overflow",
+                "__builtin_mul_overflow",
+            };
+            const char *name = (node->val >= 0 && node->val <= 2)
+                                   ? names[node->val]
+                                   : "__builtin_add_overflow";
+            // #1042(b): every comma below is a real argument separator to a
+            // fixed-arity builtin, same comma-in-arg-position hazard as
+            // ND_FUNCALL.
+            fprintf(f, "%s(", name);
+            serialize_expr(f, vm, ctx, node->lhs, 2);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->rhs, 2);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->cas_addr, 2);
+            fprintf(f, ")");
+            break;
+        }
 
-    case ND_DYNOBJ_SIZE:
-        fprintf(f, "__builtin_dynamic_object_size(");
-        // #1042(b): see ND_OVERFLOW_ARITH above.
-        serialize_expr(f, vm, ctx, node->lhs, 2);
-        fprintf(f, ", %lld)", (long long)node->val);
-        break;
-
-    case ND_ALOAD:
-        // codegen only takes the atomic path for 1/2/4/8-byte non-float
-        // pointees and falls back to a plain load otherwise; mirror that,
-        // since __atomic_load_n does not accept a float or aggregate pointee
-        // and the VM is not being atomic there either.
-        if (atomic_serializable_pointee(node->lhs)) {
-            fprintf(f, "__atomic_load_n(");
+        case ND_DYNOBJ_SIZE:
+            fprintf(f, "__builtin_dynamic_object_size(");
             // #1042(b): see ND_OVERFLOW_ARITH above.
             serialize_expr(f, vm, ctx, node->lhs, 2);
-            fprintf(f, ", __ATOMIC_SEQ_CST)");
-        } else {
-            fprintf(f, "(*(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
-            fprintf(f, "))");
-        }
-        break;
+            fprintf(f, ", %lld)", (long long)node->val);
+            break;
 
-    case ND_ASTORE:
-        // An atomic store in *expression* position has to yield the stored
-        // value (codegen gives it C assignment semantics) but
-        // __atomic_store_n returns void, so the value is threaded through a
-        // statement expression rather than evaluating the operand twice. The
-        // common statement-position case is handled in serialize_stmt and
-        // emits the plain call.
-        if (atomic_serializable_pointee(node->lhs)) {
-            fprintf(f, "__extension__ ({ __typeof__(*(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
-            fprintf(f, ")) __cccc_astore_v = (");
-            serialize_expr(f, vm, ctx, node->rhs, 0);
-            fprintf(f, "); __atomic_store_n(");
-            // #1042(b): real argument separator to the builtin.
+        case ND_ALOAD:
+            // codegen only takes the atomic path for 1/2/4/8-byte non-float
+            // pointees and falls back to a plain load otherwise; mirror that,
+            // since __atomic_load_n does not accept a float or aggregate
+            // pointee and the VM is not being atomic there either.
+            if (atomic_serializable_pointee(node->lhs)) {
+                fprintf(f, "__atomic_load_n(");
+                // #1042(b): see ND_OVERFLOW_ARITH above.
+                serialize_expr(f, vm, ctx, node->lhs, 2);
+                fprintf(f, ", __ATOMIC_SEQ_CST)");
+            } else {
+                fprintf(f, "(*(");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, "))");
+            }
+            break;
+
+        case ND_ASTORE:
+            // An atomic store in *expression* position has to yield the stored
+            // value (codegen gives it C assignment semantics) but
+            // __atomic_store_n returns void, so the value is threaded through a
+            // statement expression rather than evaluating the operand twice.
+            // The common statement-position case is handled in serialize_stmt
+            // and emits the plain call.
+            if (atomic_serializable_pointee(node->lhs)) {
+                fprintf(f, "__extension__ ({ __typeof__(*(");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, ")) __cccc_astore_v = (");
+                serialize_expr(f, vm, ctx, node->rhs, 0);
+                fprintf(f, "); __atomic_store_n(");
+                // #1042(b): real argument separator to the builtin.
+                serialize_expr(f, vm, ctx, node->lhs, 2);
+                fprintf(f, ", __cccc_astore_v, __ATOMIC_SEQ_CST); "
+                           "__cccc_astore_v; })");
+            } else {
+                fprintf(f, "(*(");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, ") = ");
+                // #1042(b): rhs sits after `=` inside one shared enclosing
+                // paren, not its own -- an unparenthesized top-level ND_COMMA
+                // here would bind looser than `=` and change which value the
+                // whole parenthesized expression yields.
+                serialize_expr(f, vm, ctx, node->rhs, 2);
+                fprintf(f, ")");
+            }
+            break;
+
+        case ND_EXCH:
+            // codegen rejects float/odd-size pointees outright for exchange and
+            // compare-and-swap, so these two map 1:1 with no fallback arm.
+            fprintf(f, "__atomic_exchange_n(");
+            // #1042(b): see ND_OVERFLOW_ARITH above.
             serialize_expr(f, vm, ctx, node->lhs, 2);
-            fprintf(f, ", __cccc_astore_v, __ATOMIC_SEQ_CST); __cccc_astore_v; })");
-        } else {
-            fprintf(f, "(*(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
-            fprintf(f, ") = ");
-            // #1042(b): rhs sits after `=` inside one shared enclosing
-            // paren, not its own -- an unparenthesized top-level ND_COMMA
-            // here would bind looser than `=` and change which value the
-            // whole parenthesized expression yields.
+            fprintf(f, ", ");
             serialize_expr(f, vm, ctx, node->rhs, 2);
-            fprintf(f, ")");
-        }
-        break;
+            fprintf(f, ", __ATOMIC_SEQ_CST)");
+            break;
 
-    case ND_EXCH:
-        // codegen rejects float/odd-size pointees outright for exchange and
-        // compare-and-swap, so these two map 1:1 with no fallback arm.
-        fprintf(f, "__atomic_exchange_n(");
-        // #1042(b): see ND_OVERFLOW_ARITH above.
-        serialize_expr(f, vm, ctx, node->lhs, 2);
-        fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->rhs, 2);
-        fprintf(f, ", __ATOMIC_SEQ_CST)");
-        break;
+        case ND_CAS:
+            // (obj, *expected, desired) -> bool, matching codegen's ACAS
+            // contract: cas_old is a *pointer* to the expected value, as
+            // __atomic_compare_ exchange_n also takes. weak = 0.
+            fprintf(f, "__atomic_compare_exchange_n(");
+            // #1042(b): see ND_OVERFLOW_ARITH above.
+            serialize_expr(f, vm, ctx, node->cas_addr, 2);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->cas_old, 2);
+            fprintf(f, ", ");
+            serialize_expr(f, vm, ctx, node->cas_new, 2);
+            fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
+            break;
 
-    case ND_CAS:
-        // (obj, *expected, desired) -> bool, matching codegen's ACAS contract:
-        // cas_old is a *pointer* to the expected value, as __atomic_compare_
-        // exchange_n also takes. weak = 0.
-        fprintf(f, "__atomic_compare_exchange_n(");
-        // #1042(b): see ND_OVERFLOW_ARITH above.
-        serialize_expr(f, vm, ctx, node->cas_addr, 2);
-        fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->cas_old, 2);
-        fprintf(f, ", ");
-        serialize_expr(f, vm, ctx, node->cas_new, 2);
-        fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
-        break;
+        case ND_LABEL_VAL:
+            // [GNU] labels-as-values. node->label is the source identifier, the
+            // same one ND_LABEL/ND_GOTO already serialize.
+            fprintf(f, "&&%s",
+                    node->label ? node->label : "/* unknown label */");
+            break;
 
-    case ND_LABEL_VAL:
-        // [GNU] labels-as-values. node->label is the source identifier, the
-        // same one ND_LABEL/ND_GOTO already serialize.
-        fprintf(f, "&&%s", node->label ? node->label : "/* unknown label */");
-        break;
-
-    case ND_COMPLEX: {
-        // val: 0 = construct from (real, imag), 1 = creal, 2 = cimag,
-        // 3 = conj. The f/l suffix follows the element float type.
-        Type *elem = node->ty;
-        if (elem && elem->kind == TY_COMPLEX && elem->base)
-            elem = elem->base;
-        const char *suffix = !elem                     ? ""
-                           : (elem->kind == TY_FLOAT)  ? "f"
-                           : (elem->kind == TY_LDOUBLE) ? "l"
-                                                        : "";
-        if (node->val == 0) {
-            // __builtin_complex requires both operands to have the same real
-            // floating type, so each is cast to the element type explicitly.
-            fprintf(f, "__builtin_complex((");
-            serialize_type(f, ctx, elem);
-            fprintf(f, ")(");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
-            fprintf(f, "), (");
-            serialize_type(f, ctx, elem);
-            fprintf(f, ")(");
-            serialize_expr(f, vm, ctx, node->rhs, 0);
-            fprintf(f, "))");
-        } else {
-            const char *name = (node->val == 1) ? "creal"
-                             : (node->val == 2) ? "cimag"
-                                                : "conj";
-            fprintf(f, "__builtin_%s%s(", name, suffix);
-            // #1042(b): single-argument builtin -- a bare top-level comma
-            // in the operand would still misparse as an extra argument.
-            serialize_expr(f, vm, ctx, node->lhs, 2);
-            fprintf(f, ")");
-        }
-        break;
-    }
-
-    case ND_CONVERTVECTOR:
-        fprintf(f, "__builtin_convertvector(");
-        // #1042(b): the builtin's own ", " separates the operand from the
-        // target type, same comma-in-arg-position hazard as ND_FUNCALL.
-        serialize_expr(f, vm, ctx, node->lhs, 2);
-        fprintf(f, ", ");
-        serialize_type(f, ctx, node->ty);
-        fprintf(f, ")");
-        break;
-
-    case ND_DECIMAL_TO_CHARS:
-        // #402, CCCC_HAS_DECIMAL builds only. Unlike every other builtin
-        // here there is no host equivalent to lower to -- clang and gcc have
-        // no _Decimal support at all -- so this fails loudly rather than
-        // fabricating a call that would not link.
-        error("cccc: _Decimal is not supported in native/serialized output "
-              "(__builtin_decimal_to_chars has no host equivalent)");
-        break;
-
-    case ND_BLOCK_LITERAL: {
-        // #965: default lowering -- lift + explicit env struct
-        // (serialize_block_preamble, block_capture_index). The env struct
-        // instance lives in node->block_desc_var, an existing local on the
-        // *enclosing* function's frame (block_literal(), parse.c) --
-        // exactly matching the VM's own per-invocation stack descriptor
-        // (ND_BLOCK_LITERAL, codegen.c), so lifetime semantics carry over
-        // unchanged. Building it as a comma expression writes into that
-        // named local (rather than a temporary), which is what keeps the
-        // block value's address stable for the rest of the enclosing
-        // scope.
-        Obj *block_fn = node->block_fn;
-        const char *env = block_fn ? find_block_env(ctx, block_fn) : NULL;
-        if (!node->block_desc_var || !block_fn || !env) {
-            // #963c: this used to fall back to the same
-            // "/* unsupported expr kind N */" comment as the generic
-            // default: arm below -- a silent drop inside a *handled* case,
-            // in the newest code in this file. block_desc_var/block_fn/env
-            // are all set unconditionally by block_literal() (parse.c) and
-            // serialize_block_preamble()'s registration pass before this
-            // function ever runs, so reaching here means one of those
-            // invariants was violated upstream; fail loudly instead of
-            // emitting a null expression.
-            if (node->tok)
-                error_tok(vm, node->tok,
-                          "internal error: block literal is missing its "
-                          "descriptor local, function, or env struct at "
-                          "serialization time");
-            else
-                error("cccc: internal error: block literal is missing its "
-                      "descriptor local, function, or env struct at "
-                      "serialization time");
+        case ND_COMPLEX: {
+            // val: 0 = construct from (real, imag), 1 = creal, 2 = cimag,
+            // 3 = conj. The f/l suffix follows the element float type.
+            Type *elem = node->ty;
+            if (elem && elem->kind == TY_COMPLEX && elem->base)
+                elem = elem->base;
+            const char *suffix = !elem                        ? ""
+                                 : (elem->kind == TY_FLOAT)   ? "f"
+                                 : (elem->kind == TY_LDOUBLE) ? "l"
+                                                              : "";
+            if (node->val == 0) {
+                // __builtin_complex requires both operands to have the same
+                // real floating type, so each is cast to the element type
+                // explicitly.
+                fprintf(f, "__builtin_complex((");
+                serialize_type(f, ctx, elem);
+                fprintf(f, ")(");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, "), (");
+                serialize_type(f, ctx, elem);
+                fprintf(f, ")(");
+                serialize_expr(f, vm, ctx, node->rhs, 0);
+                fprintf(f, "))");
+            } else {
+                const char *name = (node->val == 1)   ? "creal"
+                                   : (node->val == 2) ? "cimag"
+                                                      : "conj";
+                fprintf(f, "__builtin_%s%s(", name, suffix);
+                // #1042(b): single-argument builtin -- a bare top-level comma
+                // in the operand would still misparse as an extra argument.
+                serialize_expr(f, vm, ctx, node->lhs, 2);
+                fprintf(f, ")");
+            }
             break;
         }
-        if (!ctx->current_fn) {
-            // A block literal's descriptor is a *local* -- there is no
-            // enclosing frame to hold one at file scope.
+
+        case ND_CONVERTVECTOR:
+            fprintf(f, "__builtin_convertvector(");
+            // #1042(b): the builtin's own ", " separates the operand from the
+            // target type, same comma-in-arg-position hazard as ND_FUNCALL.
+            serialize_expr(f, vm, ctx, node->lhs, 2);
+            fprintf(f, ", ");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, ")");
+            break;
+
+        case ND_DECIMAL_TO_CHARS:
+            // #402, CCCC_HAS_DECIMAL builds only. Unlike every other builtin
+            // here there is no host equivalent to lower to -- clang and gcc
+            // have no _Decimal support at all -- so this fails loudly rather
+            // than fabricating a call that would not link.
+            error("cccc: _Decimal is not supported in native/serialized output "
+                  "(__builtin_decimal_to_chars has no host equivalent)");
+            break;
+
+        case ND_BLOCK_LITERAL: {
+            // #965: default lowering -- lift + explicit env struct
+            // (serialize_block_preamble, block_capture_index). The env struct
+            // instance lives in node->block_desc_var, an existing local on the
+            // *enclosing* function's frame (block_literal(), parse.c) --
+            // exactly matching the VM's own per-invocation stack descriptor
+            // (ND_BLOCK_LITERAL, codegen.c), so lifetime semantics carry over
+            // unchanged. Building it as a comma expression writes into that
+            // named local (rather than a temporary), which is what keeps the
+            // block value's address stable for the rest of the enclosing
+            // scope.
+            Obj        *block_fn = node->block_fn;
+            const char *env = block_fn ? find_block_env(ctx, block_fn) : NULL;
+            if (!node->block_desc_var || !block_fn || !env) {
+                // #963c: this used to fall back to the same
+                // "/* unsupported expr kind N */" comment as the generic
+                // default: arm below -- a silent drop inside a *handled* case,
+                // in the newest code in this file. block_desc_var/block_fn/env
+                // are all set unconditionally by block_literal() (parse.c) and
+                // serialize_block_preamble()'s registration pass before this
+                // function ever runs, so reaching here means one of those
+                // invariants was violated upstream; fail loudly instead of
+                // emitting a null expression.
+                if (node->tok)
+                    error_tok(vm, node->tok,
+                              "internal error: block literal is missing its "
+                              "descriptor local, function, or env struct at "
+                              "serialization time");
+                else
+                    error("cccc: internal error: block literal is missing its "
+                          "descriptor local, function, or env struct at "
+                          "serialization time");
+                break;
+            }
+            if (!ctx->current_fn) {
+                // A block literal's descriptor is a *local* -- there is no
+                // enclosing frame to hold one at file scope.
+                if (node->tok)
+                    error_tok(vm, node->tok,
+                              "a block literal cannot be serialized at file "
+                              "scope (its descriptor needs an enclosing "
+                              "function's frame)");
+                else
+                    error("cccc: a block literal cannot be serialized at file "
+                          "scope");
+            }
+
+            const char *desc = node->block_desc_var->name;
+            fprintf(f,
+                    "(%s.__invoke = (void *)%s, %s.__size = (long)sizeof(%s)",
+                    desc, block_fn->name, desc, desc);
+            for (int i = 0; i < node->num_block_captures; i++) {
+                Obj *cap = node->block_captures[i];
+                // #994: a by-value capture whose type is an array (accepted by
+                // the parser like clang rejects but this compiler doesn't --
+                // collect_captures_in_node has no guard) can't use plain `=` --
+                // C forbids array assignment. The env struct field is declared
+                // with the real array type (serialize_block_preamble), so copy
+                // through __builtin_memcpy instead; every other capture kind
+                // (scalar, struct/union, block-var pointer) keeps plain `=`,
+                // valid C for all of them.
+                bool is_array_cap =
+                    !cap->is_block_var && cap->ty->kind == TY_ARRAY;
+                if (is_array_cap)
+                    fprintf(f, ", __builtin_memcpy(%s.__cap%d, ", desc, i);
+                else
+                    fprintf(f, ", %s.__cap%d = ", desc, i);
+
+                // Mirrors codegen's ND_BLOCK_LITERAL capture-copy loop
+                // (codegen.c) exactly, three sources in the same order:
+                int enc_idx = (ctx->current_fn->is_block)
+                                  ? block_capture_index(ctx->current_fn, cap)
+                                  : -1;
+                const char *enc_env =
+                    enc_idx >= 0 ? find_block_env(ctx, ctx->current_fn) : NULL;
+                if (enc_idx >= 0 && enc_env) {
+                    // Transitive capture: read from the enclosing block's own
+                    // descriptor via __static_link. Exactly one dereference
+                    // either way -- for an is_block_var capture the parent's
+                    // field already holds the box pointer (copied verbatim
+                    // below); for a plain capture the parent's field holds the
+                    // value itself.
+                    fprintf(f, "((%s *)__static_link)->__cap%d", enc_env,
+                            enc_idx);
+                } else if (cap->is_block_var) {
+                    // Direct __block local in the enclosing stack: copy its box
+                    // pointer verbatim -- the new field is T*, matching it.
+                    fprintf(f, "%s", cap->name);
+                } else {
+                    // Ordinary local or global: copy its value.
+                    fprintf(f, "%s", cap->name);
+                }
+                if (is_array_cap)
+                    fprintf(f, ", sizeof(%s.__cap%d))", desc, i);
+            }
+            fprintf(f, ", (struct __cccc_block *)&%s)", desc);
+            break;
+        }
+
+        case ND_BLOCK_CALL: {
+            // #965: GNU statement expression -- the descriptor pointer is
+            // needed twice (loaded from ->__invoke, then passed again as the
+            // static link), and evaluating node->lhs a second time would be
+            // wrong for a non-idempotent expression (e.g. a block-returning
+            // function call as the callee). gcc and clang both accept
+            // statement expressions, and this file's output is already
+            // GNU-flavoured (__builtin_memset/__builtin_memcpy elsewhere,
+            // ND_STMT_EXPR itself above).
+            fprintf(f, "({ struct __cccc_block *__cccc_blk = (struct "
+                       "__cccc_block *)(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, "); ((");
+            serialize_type(f, ctx, node->ty);
+            fprintf(f, " (*)(void *");
+            Type *block_ty =
+                (node->lhs && node->lhs->ty && node->lhs->ty->kind == TY_BLOCK)
+                    ? node->lhs->ty
+                    : NULL;
+            for (Type *p = block_ty ? block_ty->params : NULL; p; p = p->next) {
+                fprintf(f, ", ");
+                serialize_type(f, ctx, p);
+            }
+            fprintf(f, "))__cccc_blk->__invoke)(__cccc_blk");
+            for (Node *arg = node->args; arg; arg = arg->next) {
+                fprintf(f, ", ");
+                // #1042(b): same comma-in-arg-position hazard as ND_FUNCALL's
+                // argument loop above.
+                serialize_expr(f, vm, ctx, arg, 2);
+            }
+            fprintf(f, "); })");
+            break;
+        }
+
+        case ND_MACRO_CALL:
+        case ND_INIT_SPLICE:
+            // #963c: both are comptime-internal and are consumed before this
+            // function ever runs -- ND_MACRO_CALL is compiled away by
+            // compile_all_macros/cc_eager_expand_macro_call during
+            // cc_expand_macros (main.c), which always runs ahead of the
+            // -m/-c=native/-c=generated serialization pass, and the one path
+            // that could defer one into a global initializer
+            // (has_pending_macro_init, parse.c) is resolved to concrete .data
+            // bytes by cc_finalize_macro_gvar_inits, also inside
+            // cc_expand_macros, before serialization starts. ND_INIT_SPLICE is
+            // likewise expanded away by quote_substitute at comptime. Reaching
+            // either case here means a macro/splice escaped expansion, which is
+            // an internal invariant violation, not user-writable input -- fail
+            // loudly and name the kind rather than emitting a silently-dropped
+            // comment.
             if (node->tok)
                 error_tok(vm, node->tok,
-                          "a block literal cannot be serialized at file "
-                          "scope (its descriptor needs an enclosing "
-                          "function's frame)");
+                          "internal error: %s reached the serializer "
+                          "unexpanded (should have been resolved during "
+                          "macro/comptime expansion)",
+                          cc_node_kind_name(node->kind));
             else
-                error("cccc: a block literal cannot be serialized at file scope");
-        }
-
-        const char *desc = node->block_desc_var->name;
-        fprintf(f, "(%s.__invoke = (void *)%s, %s.__size = (long)sizeof(%s)",
-                desc, block_fn->name, desc, desc);
-        for (int i = 0; i < node->num_block_captures; i++) {
-            Obj *cap = node->block_captures[i];
-            // #994: a by-value capture whose type is an array (accepted by
-            // the parser like clang rejects but this compiler doesn't --
-            // collect_captures_in_node has no guard) can't use plain `=` --
-            // C forbids array assignment. The env struct field is declared
-            // with the real array type (serialize_block_preamble), so copy
-            // through __builtin_memcpy instead; every other capture kind
-            // (scalar, struct/union, block-var pointer) keeps plain `=`,
-            // valid C for all of them.
-            bool is_array_cap = !cap->is_block_var && cap->ty->kind == TY_ARRAY;
-            if (is_array_cap)
-                fprintf(f, ", __builtin_memcpy(%s.__cap%d, ", desc, i);
-            else
-                fprintf(f, ", %s.__cap%d = ", desc, i);
-
-            // Mirrors codegen's ND_BLOCK_LITERAL capture-copy loop
-            // (codegen.c) exactly, three sources in the same order:
-            int enc_idx = (ctx->current_fn->is_block)
-                              ? block_capture_index(ctx->current_fn, cap) : -1;
-            const char *enc_env =
-                enc_idx >= 0 ? find_block_env(ctx, ctx->current_fn) : NULL;
-            if (enc_idx >= 0 && enc_env) {
-                // Transitive capture: read from the enclosing block's own
-                // descriptor via __static_link. Exactly one dereference
-                // either way -- for an is_block_var capture the parent's
-                // field already holds the box pointer (copied verbatim
-                // below); for a plain capture the parent's field holds the
-                // value itself.
-                fprintf(f, "((%s *)__static_link)->__cap%d", enc_env, enc_idx);
-            } else if (cap->is_block_var) {
-                // Direct __block local in the enclosing stack: copy its box
-                // pointer verbatim -- the new field is T*, matching it.
-                fprintf(f, "%s", cap->name);
-            } else {
-                // Ordinary local or global: copy its value.
-                fprintf(f, "%s", cap->name);
-            }
-            if (is_array_cap)
-                fprintf(f, ", sizeof(%s.__cap%d))", desc, i);
-        }
-        fprintf(f, ", (struct __cccc_block *)&%s)", desc);
-        break;
-    }
-
-    case ND_BLOCK_CALL: {
-        // #965: GNU statement expression -- the descriptor pointer is
-        // needed twice (loaded from ->__invoke, then passed again as the
-        // static link), and evaluating node->lhs a second time would be
-        // wrong for a non-idempotent expression (e.g. a block-returning
-        // function call as the callee). gcc and clang both accept
-        // statement expressions, and this file's output is already
-        // GNU-flavoured (__builtin_memset/__builtin_memcpy elsewhere,
-        // ND_STMT_EXPR itself above).
-        fprintf(f, "({ struct __cccc_block *__cccc_blk = (struct __cccc_block *)(");
-        serialize_expr(f, vm, ctx, node->lhs, 0);
-        fprintf(f, "); ((");
-        serialize_type(f, ctx, node->ty);
-        fprintf(f, " (*)(void *");
-        Type *block_ty = (node->lhs && node->lhs->ty &&
-                          node->lhs->ty->kind == TY_BLOCK)
-                             ? node->lhs->ty : NULL;
-        for (Type *p = block_ty ? block_ty->params : NULL; p; p = p->next) {
-            fprintf(f, ", ");
-            serialize_type(f, ctx, p);
-        }
-        fprintf(f, "))__cccc_blk->__invoke)(__cccc_blk");
-        for (Node *arg = node->args; arg; arg = arg->next) {
-            fprintf(f, ", ");
-            // #1042(b): same comma-in-arg-position hazard as ND_FUNCALL's
-            // argument loop above.
-            serialize_expr(f, vm, ctx, arg, 2);
-        }
-        fprintf(f, "); })");
-        break;
-    }
-
-    case ND_MACRO_CALL:
-    case ND_INIT_SPLICE:
-        // #963c: both are comptime-internal and are consumed before this
-        // function ever runs -- ND_MACRO_CALL is compiled away by
-        // compile_all_macros/cc_eager_expand_macro_call during
-        // cc_expand_macros (main.c), which always runs ahead of the
-        // -m/-c=native/-c=generated serialization pass, and the one path
-        // that could defer one into a global initializer
-        // (has_pending_macro_init, parse.c) is resolved to concrete .data
-        // bytes by cc_finalize_macro_gvar_inits, also inside
-        // cc_expand_macros, before serialization starts. ND_INIT_SPLICE is
-        // likewise expanded away by quote_substitute at comptime. Reaching
-        // either case here means a macro/splice escaped expansion, which is
-        // an internal invariant violation, not user-writable input -- fail
-        // loudly and name the kind rather than emitting a silently-dropped
-        // comment.
-        if (node->tok)
-            error_tok(vm, node->tok,
-                      "internal error: %s reached the serializer "
+                error("cccc: internal error: %s reached the serializer "
                       "unexpanded (should have been resolved during "
                       "macro/comptime expansion)",
                       cc_node_kind_name(node->kind));
-        else
-            error("cccc: internal error: %s reached the serializer "
-                  "unexpanded (should have been resolved during "
-                  "macro/comptime expansion)", cc_node_kind_name(node->kind));
-        break;
+            break;
 
-    default:
-        // #963c: every reachable NodeKind is expected to have an explicit
-        // case above (see COVERAGE.md's "Serialized-output divergences"
-        // section for the constructs that are intentionally dropped with a
-        // diagnostic rather than serialized). This used to emit
-        // "/* unsupported expr kind N */" and keep going -- in expression
-        // position that fails the host build loudly, but in statement
-        // position (serialize_stmt's own default: routes here and appends
-        // ";") it produced a syntactically valid null statement: the
-        // construct silently vanished and the native binary returned a
-        // different answer than the VM (#963's whole motivation). Fail
-        // immediately and name the kind instead, so the next NodeKind added
-        // without a case here is caught at implementation/test time rather
-        // than silently miscompiling.
-        if (node->tok)
-            error_tok(vm, node->tok,
-                      "internal error: no serializer case for %s (kind %d)",
-                      cc_node_kind_name(node->kind), node->kind);
-        else
-            error("cccc: internal error: no serializer case for %s (kind %d)",
-                  cc_node_kind_name(node->kind), node->kind);
-        break;
+        default:
+            // #963c: every reachable NodeKind is expected to have an explicit
+            // case above (see COVERAGE.md's "Serialized-output divergences"
+            // section for the constructs that are intentionally dropped with a
+            // diagnostic rather than serialized). This used to emit
+            // "/* unsupported expr kind N */" and keep going -- in expression
+            // position that fails the host build loudly, but in statement
+            // position (serialize_stmt's own default: routes here and appends
+            // ";") it produced a syntactically valid null statement: the
+            // construct silently vanished and the native binary returned a
+            // different answer than the VM (#963's whole motivation). Fail
+            // immediately and name the kind instead, so the next NodeKind added
+            // without a case here is caught at implementation/test time rather
+            // than silently miscompiling.
+            if (node->tok)
+                error_tok(vm, node->tok,
+                          "internal error: no serializer case for %s (kind %d)",
+                          cc_node_kind_name(node->kind), node->kind);
+            else
+                error(
+                    "cccc: internal error: no serializer case for %s (kind %d)",
+                    cc_node_kind_name(node->kind), node->kind);
+            break;
     }
 
     if (need_parens)
@@ -2781,330 +2866,341 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 }
 
 // Serialize a statement
-static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
-                           int indent) {
+static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                           Node *node, int indent) {
     if (!node)
         return;
 
     switch (node->kind) {
-    case ND_RETURN:
-        print_indent_level(f, indent);
-        fprintf(f, "return");
-        if (node->lhs) {
-            fprintf(f, " ");
-            serialize_expr(f, vm, ctx, node->lhs, 0);
-        }
-        fprintf(f, ";\n");
-        break;
+        case ND_RETURN:
+            print_indent_level(f, indent);
+            fprintf(f, "return");
+            if (node->lhs) {
+                fprintf(f, " ");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+            }
+            fprintf(f, ";\n");
+            break;
 
-    case ND_EXPR_STMT:
-        if (is_noop_expr(node->lhs)) break;
-        // #964: `v = alloca(tmp)` is declaration()'s lowering of a VLA local
-        // -- re-emitting it literally would diverge from VM semantics
-        // (alloca in a loop body is not freed per iteration the way a real
-        // VLA is, so a loop declaring a VLA would grow the host stack
-        // unboundedly) and the assignment target isn't a valid C lvalue once
-        // `v` is a genuine array. Emit a real declaration in its place
-        // instead; serialize_stmt_list_item() keeps the enclosing block
-        // unbraced so it stays visible to later statements.
-        if (node_is_vla_ptr_assign(node->lhs)) {
-            Obj *var = node->lhs->lhs->var;
+        case ND_EXPR_STMT:
+            if (is_noop_expr(node->lhs))
+                break;
+            // #964: `v = alloca(tmp)` is declaration()'s lowering of a VLA
+            // local
+            // -- re-emitting it literally would diverge from VM semantics
+            // (alloca in a loop body is not freed per iteration the way a real
+            // VLA is, so a loop declaring a VLA would grow the host stack
+            // unboundedly) and the assignment target isn't a valid C lvalue
+            // once `v` is a genuine array. Emit a real declaration in its place
+            // instead; serialize_stmt_list_item() keeps the enclosing block
+            // unbraced so it stays visible to later statements.
+            if (node_is_vla_ptr_assign(node->lhs)) {
+                Obj *var = node->lhs->lhs->var;
+                print_indent_level(f, indent);
+                serialize_type_decl(f, ctx, var->ty, var->name);
+                fprintf(f, ";\n");
+                break;
+            }
+            // #973 follow-up: the initializer of a pointer-to-VLA local (see
+            // Obj.deferred_vla_ptr_init, cccc.h) was skipped by the hoist loop
+            // above -- this is its recorded in-place declaration site. Emit a
+            // real declaration with the initializer attached instead of a bare
+            // assignment to an as-yet-undeclared name. Identity (not shape)
+            // comparison: node->lhs is a plain ND_ASSIGN like any reassignment
+            // of the same variable would produce, so only the exact node
+            // recorded at parse time is treated as the declaration.
+            if (node_is_deferred_vla_ptr_init(node->lhs)) {
+                Obj *var = node->lhs->lhs->var;
+                print_indent_level(f, indent);
+                serialize_type_decl(f, ctx, var->ty, var->name);
+                fprintf(f, " = ");
+                // #1042(b): this `=` is printed manually, outside
+                // serialize_expr's own ND_ASSIGN case (which already protects
+                // its rhs via node_prec + 1) -- an unparenthesized top-level
+                // ND_COMMA here would bind looser than `=` and initialize the
+                // declaration with the comma's first operand instead of its
+                // value.
+                serialize_expr(f, vm, ctx, node->lhs->rhs, 2);
+                fprintf(f, ";\n");
+                break;
+            }
+            // An atomic store written as its own statement (the usual case)
+            // discards its value, so hand it to the ND_ASTORE statement case
+            // and emit the plain void-returning call rather than the
+            // value-producing statement expression.
+            if (node->lhs && node->lhs->kind == ND_ASTORE) {
+                serialize_stmt(f, vm, ctx, node->lhs, indent);
+                break;
+            }
             print_indent_level(f, indent);
-            serialize_type_decl(f, ctx, var->ty, var->name);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
             fprintf(f, ";\n");
             break;
-        }
-        // #973 follow-up: the initializer of a pointer-to-VLA local (see
-        // Obj.deferred_vla_ptr_init, cccc.h) was skipped by the hoist loop
-        // above -- this is its recorded in-place declaration site. Emit a
-        // real declaration with the initializer attached instead of a bare
-        // assignment to an as-yet-undeclared name. Identity (not shape)
-        // comparison: node->lhs is a plain ND_ASSIGN like any reassignment
-        // of the same variable would produce, so only the exact node
-        // recorded at parse time is treated as the declaration.
-        if (node_is_deferred_vla_ptr_init(node->lhs)) {
-            Obj *var = node->lhs->lhs->var;
+
+        case ND_BLOCK:
             print_indent_level(f, indent);
-            serialize_type_decl(f, ctx, var->ty, var->name);
-            fprintf(f, " = ");
-            // #1042(b): this `=` is printed manually, outside
-            // serialize_expr's own ND_ASSIGN case (which already protects
-            // its rhs via node_prec + 1) -- an unparenthesized top-level
-            // ND_COMMA here would bind looser than `=` and initialize the
-            // declaration with the comma's first operand instead of its
-            // value.
-            serialize_expr(f, vm, ctx, node->lhs->rhs, 2);
-            fprintf(f, ";\n");
+            fprintf(f, "{\n");
+            for (Node *s = node->body; s; s = s->next) {
+                serialize_stmt_list_item(f, vm, ctx, s, indent + 1);
+            }
+            print_indent_level(f, indent);
+            fprintf(f, "}\n");
             break;
-        }
-        // An atomic store written as its own statement (the usual case)
-        // discards its value, so hand it to the ND_ASTORE statement case and
-        // emit the plain void-returning call rather than the value-producing
-        // statement expression.
-        if (node->lhs && node->lhs->kind == ND_ASTORE) {
+
+        case ND_IF:
+            print_indent_level(f, indent);
+            fprintf(f, "if (");
+            serialize_expr(f, vm, ctx, node->cond, 0);
+            fprintf(f, ")\n");
+            serialize_stmt(f, vm, ctx, node->then, indent + 1);
+            if (node->els) {
+                print_indent_level(f, indent);
+                fprintf(f, "else\n");
+                serialize_stmt(f, vm, ctx, node->els, indent + 1);
+            }
+            break;
+
+        case ND_FOR:
+            print_indent_level(f, indent);
+            fprintf(f, "for (");
+            // #927: a declaration-form init (`for (int i = 0; ...)`) parses as
+            // an ND_BLOCK whose body is one ND_EXPR_STMT per declarator
+            // (declaration(), parse.c) -- not an expression, so handing it to
+            // serialize_expr fell through to its default case and silently
+            // dropped the initialization (loop variable left uninitialized;
+            // #963c has since turned that default case into a hard error, so
+            // this exact failure mode can no longer reach the host compiler
+            // silently -- this ND_FOR handling avoids it in the first place by
+            // never calling serialize_expr on the ND_BLOCK at all). The
+            // declarations themselves
+            // are already hoisted to the top of the function by
+            // serialize_function(); only the initializing assignment(s) belong
+            // in the init clause, comma-joined for a multi-declarator init
+            // (`for (int i = 0, j = 1; ...)`). A no-initializer declaration
+            // (`for (int i; ...)`) has an empty body -- emit nothing, matching
+            // a bare `for (;;)`-style empty init clause. A non-declaration init
+            // (`for (i = 0; ...)`) is a bare ND_EXPR_STMT (expr_stmt(),
+            // parse.c) and serializes the same way.
+            if (node->init) {
+                // #964: a VLA declared in a for-loop initializer (`for (int i =
+                // 0, v[n]; ...)`) parses and runs in the VM, but this init
+                // clause is serialized as comma-joined *assignments* below --
+                // C forbids mixing a declaration with expressions there, and
+                // hoisting the declaration out ahead of the loop would change
+                // its scope/lifetime (and can read a variable the init clause
+                // itself assigns). Rejected with a diagnostic rather than
+                // emitted as broken C; doing this properly is tracked as a
+                // follow-up.
+                if (node->init->kind == ND_BLOCK &&
+                    block_defines_vla(node->init))
+                    error_tok(vm, node->tok,
+                              "a variable-length array declared in a for-loop "
+                              "initializer cannot be serialized to C");
+                if (node->init->kind == ND_BLOCK) {
+                    bool first_init = true;
+                    for (Node *s = node->init->body; s; s = s->next) {
+                        if (s->kind != ND_EXPR_STMT || is_noop_expr(s->lhs))
+                            continue;
+                        if (!first_init)
+                            fprintf(f, ", ");
+                        first_init = false;
+                        // #1042(b): this loop already comma-joins multiple
+                        // declarator inits itself (the ", " above) -- an
+                        // unparenthesized ND_COMMA inside one declarator's own
+                        // initializer would be indistinguishable from another
+                        // separator comma.
+                        serialize_expr(f, vm, ctx, s->lhs, 2);
+                    }
+                } else if (node->init->kind == ND_EXPR_STMT) {
+                    if (!is_noop_expr(node->init->lhs))
+                        serialize_expr(f, vm, ctx, node->init->lhs, 0);
+                } else {
+                    serialize_expr(f, vm, ctx, node->init, 0);
+                }
+            }
+            fprintf(f, "; ");
+            if (node->cond)
+                serialize_expr(f, vm, ctx, node->cond, 0);
+            fprintf(f, "; ");
+            if (node->inc)
+                serialize_expr(f, vm, ctx, node->inc, 0);
+            fprintf(f, ")\n");
+            {
+                // #1005: push a jump frame so a break/continue in the body
+                // resolves back to this loop -- see the ND_GOTO arm below.
+                SerJumpFrame frame = {ctx->jumps, node->brk_label,
+                                      node->cont_label};
+                ctx->jumps         = &frame;
+                serialize_stmt(f, vm, ctx, node->then, indent + 1);
+                ctx->jumps = frame.parent;
+            }
+            break;
+
+        case ND_DO:
+            print_indent_level(f, indent);
+            fprintf(f, "do\n");
+            {
+                SerJumpFrame frame = {ctx->jumps, node->brk_label,
+                                      node->cont_label};
+                ctx->jumps         = &frame;
+                serialize_stmt(f, vm, ctx, node->then, indent + 1);
+                ctx->jumps = frame.parent;
+            }
+            print_indent_level(f, indent);
+            fprintf(f, "while (");
+            serialize_expr(f, vm, ctx, node->cond, 0);
+            fprintf(f, ");\n");
+            break;
+
+        case ND_SWITCH:
+            // #1005: previously reconstructed the switch from the case_next
+            // chain instead of serializing node->then -- that walked only the
+            // first statement following each `case`/`default` (everything after
+            // it, including the case's own `break`, was silently dropped),
+            // emitted cases in reverse source order (case_next is prepended at
+            // parse time) with `default:` always forced last (destroying
+            // fallthrough), and dropped GNU case ranges entirely. Serializing
+            // the real body -- mirroring ND_IF/ND_FOR's shape -- fixes all four
+            // at once; ND_CASE below now emits its own label in place and lets
+            // the enclosing ND_BLOCK's ->next walk handle subsequent
+            // statements.
+            print_indent_level(f, indent);
+            fprintf(f, "switch (");
+            serialize_expr(f, vm, ctx, node->cond, 0);
+            fprintf(f, ")\n");
+            {
+                // A switch saves/restores only brk_label at parse time
+                // (parse.c) -- cont_label is deliberately NULL here so a
+                // `continue` inside this switch skips over this frame and
+                // resolves to the nearest enclosing loop, not this switch.
+                SerJumpFrame frame        = {ctx->jumps, node->brk_label, NULL};
+                Node        *saved_switch = ctx->cur_switch;
+                ctx->jumps                = &frame;
+                ctx->cur_switch           = node;
+                serialize_stmt(f, vm, ctx, node->then, indent + 1);
+                ctx->cur_switch = saved_switch;
+                ctx->jumps      = frame.parent;
+            }
+            break;
+
+        case ND_GOTO:
+            print_indent_level(f, indent);
+            if (node->label) {
+                // A real source-level `goto label;` (parse.c sets ->label to
+                // the source identifier; resolve_goto_labels also fills in
+                // ->unique_label, but ->label is authoritative here).
+                fprintf(f, "goto %s;\n", node->label);
+            } else {
+                // #1005: break/continue lower to an ND_GOTO with only
+                // ->unique_label set (parse.c) -- a ".L..N" string that is not
+                // a valid C identifier and, unlike a source goto's target, has
+                // no ND_LABEL anywhere to jump to. Resolve which construct it
+                // targets by walking the jump-frame stack built above (pointer
+                // identity, matching parse.c's own nn_find_target) and emit the
+                // real C keyword instead of a (nonexistent) label reference.
+                const char *kw = NULL;
+                for (SerJumpFrame *fr = ctx->jumps; fr && !kw;
+                     fr               = fr->parent) {
+                    if (fr->brk_label && fr->brk_label == node->unique_label)
+                        kw = "break";
+                    else if (fr->cont_label &&
+                             fr->cont_label == node->unique_label)
+                        kw = "continue";
+                }
+                if (!kw)
+                    error_tok(vm, node->tok,
+                              "internal error: break/continue target not found "
+                              "while serializing");
+                fprintf(f, "%s;\n", kw);
+            }
+            break;
+
+        case ND_LABEL:
+            fprintf(f, "%s:\n", node->label);
             serialize_stmt(f, vm, ctx, node->lhs, indent);
             break;
-        }
-        print_indent_level(f, indent);
-        serialize_expr(f, vm, ctx, node->lhs, 0);
-        fprintf(f, ";\n");
-        break;
 
-    case ND_BLOCK:
-        print_indent_level(f, indent);
-        fprintf(f, "{\n");
-        for (Node *s = node->body; s; s = s->next) {
-            serialize_stmt_list_item(f, vm, ctx, s, indent + 1);
-        }
-        print_indent_level(f, indent);
-        fprintf(f, "}\n");
-        break;
-
-    case ND_IF:
-        print_indent_level(f, indent);
-        fprintf(f, "if (");
-        serialize_expr(f, vm, ctx, node->cond, 0);
-        fprintf(f, ")\n");
-        serialize_stmt(f, vm, ctx, node->then, indent + 1);
-        if (node->els) {
+        case ND_CASE:
             print_indent_level(f, indent);
-            fprintf(f, "else\n");
-            serialize_stmt(f, vm, ctx, node->els, indent + 1);
-        }
-        break;
-
-    case ND_FOR:
-        print_indent_level(f, indent);
-        fprintf(f, "for (");
-        // #927: a declaration-form init (`for (int i = 0; ...)`) parses as
-        // an ND_BLOCK whose body is one ND_EXPR_STMT per declarator
-        // (declaration(), parse.c) -- not an expression, so handing it to
-        // serialize_expr fell through to its default case and silently
-        // dropped the initialization (loop variable left uninitialized;
-        // #963c has since turned that default case into a hard error, so
-        // this exact failure mode can no longer reach the host compiler
-        // silently -- this ND_FOR handling avoids it in the first place by
-        // never calling serialize_expr on the ND_BLOCK at all). The
-        // declarations themselves
-        // are already hoisted to the top of the function by
-        // serialize_function(); only the initializing assignment(s) belong
-        // in the init clause, comma-joined for a multi-declarator init
-        // (`for (int i = 0, j = 1; ...)`). A no-initializer declaration
-        // (`for (int i; ...)`) has an empty body -- emit nothing, matching
-        // a bare `for (;;)`-style empty init clause. A non-declaration init
-        // (`for (i = 0; ...)`) is a bare ND_EXPR_STMT (expr_stmt(),
-        // parse.c) and serializes the same way.
-        if (node->init) {
-            // #964: a VLA declared in a for-loop initializer (`for (int i =
-            // 0, v[n]; ...)`) parses and runs in the VM, but this init
-            // clause is serialized as comma-joined *assignments* below --
-            // C forbids mixing a declaration with expressions there, and
-            // hoisting the declaration out ahead of the loop would change
-            // its scope/lifetime (and can read a variable the init clause
-            // itself assigns). Rejected with a diagnostic rather than
-            // emitted as broken C; doing this properly is tracked as a
-            // follow-up.
-            if (node->init->kind == ND_BLOCK && block_defines_vla(node->init))
-                error_tok(vm, node->tok,
-                         "a variable-length array declared in a for-loop "
-                         "initializer cannot be serialized to C");
-            if (node->init->kind == ND_BLOCK) {
-                bool first_init = true;
-                for (Node *s = node->init->body; s; s = s->next) {
-                    if (s->kind != ND_EXPR_STMT || is_noop_expr(s->lhs))
-                        continue;
-                    if (!first_init)
-                        fprintf(f, ", ");
-                    first_init = false;
-                    // #1042(b): this loop already comma-joins multiple
-                    // declarator inits itself (the ", " above) -- an
-                    // unparenthesized ND_COMMA inside one declarator's own
-                    // initializer would be indistinguishable from another
-                    // separator comma.
-                    serialize_expr(f, vm, ctx, s->lhs, 2);
-                }
-            } else if (node->init->kind == ND_EXPR_STMT) {
-                if (!is_noop_expr(node->init->lhs))
-                    serialize_expr(f, vm, ctx, node->init->lhs, 0);
+            if (ctx->cur_switch && ctx->cur_switch->default_case == node) {
+                fprintf(f, "default:\n");
+            } else if (node->begin == node->end) {
+                fprintf(f, "case %ld:\n", node->begin);
             } else {
-                serialize_expr(f, vm, ctx, node->init, 0);
+                // [GNU] Case ranges, e.g. "case 1 ... 5:"
+                fprintf(f, "case %ld ... %ld:\n", node->begin, node->end);
             }
-        }
-        fprintf(f, "; ");
-        if (node->cond)
-            serialize_expr(f, vm, ctx, node->cond, 0);
-        fprintf(f, "; ");
-        if (node->inc)
-            serialize_expr(f, vm, ctx, node->inc, 0);
-        fprintf(f, ")\n");
-        {
-            // #1005: push a jump frame so a break/continue in the body
-            // resolves back to this loop -- see the ND_GOTO arm below.
-            SerJumpFrame frame = {ctx->jumps, node->brk_label, node->cont_label};
-            ctx->jumps = &frame;
-            serialize_stmt(f, vm, ctx, node->then, indent + 1);
-            ctx->jumps = frame.parent;
-        }
-        break;
+            serialize_stmt(f, vm, ctx, node->lhs, indent);
+            break;
 
-    case ND_DO:
-        print_indent_level(f, indent);
-        fprintf(f, "do\n");
-        {
-            SerJumpFrame frame = {ctx->jumps, node->brk_label, node->cont_label};
-            ctx->jumps = &frame;
-            serialize_stmt(f, vm, ctx, node->then, indent + 1);
-            ctx->jumps = frame.parent;
-        }
-        print_indent_level(f, indent);
-        fprintf(f, "while (");
-        serialize_expr(f, vm, ctx, node->cond, 0);
-        fprintf(f, ");\n");
-        break;
-
-    case ND_SWITCH:
-        // #1005: previously reconstructed the switch from the case_next
-        // chain instead of serializing node->then -- that walked only the
-        // first statement following each `case`/`default` (everything after
-        // it, including the case's own `break`, was silently dropped),
-        // emitted cases in reverse source order (case_next is prepended at
-        // parse time) with `default:` always forced last (destroying
-        // fallthrough), and dropped GNU case ranges entirely. Serializing
-        // the real body -- mirroring ND_IF/ND_FOR's shape -- fixes all four
-        // at once; ND_CASE below now emits its own label in place and lets
-        // the enclosing ND_BLOCK's ->next walk handle subsequent statements.
-        print_indent_level(f, indent);
-        fprintf(f, "switch (");
-        serialize_expr(f, vm, ctx, node->cond, 0);
-        fprintf(f, ")\n");
-        {
-            // A switch saves/restores only brk_label at parse time
-            // (parse.c) -- cont_label is deliberately NULL here so a
-            // `continue` inside this switch skips over this frame and
-            // resolves to the nearest enclosing loop, not this switch.
-            SerJumpFrame frame = {ctx->jumps, node->brk_label, NULL};
-            Node *saved_switch = ctx->cur_switch;
-            ctx->jumps = &frame;
-            ctx->cur_switch = node;
-            serialize_stmt(f, vm, ctx, node->then, indent + 1);
-            ctx->cur_switch = saved_switch;
-            ctx->jumps = frame.parent;
-        }
-        break;
-
-    case ND_GOTO:
-        print_indent_level(f, indent);
-        if (node->label) {
-            // A real source-level `goto label;` (parse.c sets ->label to
-            // the source identifier; resolve_goto_labels also fills in
-            // ->unique_label, but ->label is authoritative here).
-            fprintf(f, "goto %s;\n", node->label);
-        } else {
-            // #1005: break/continue lower to an ND_GOTO with only
-            // ->unique_label set (parse.c) -- a ".L..N" string that is not
-            // a valid C identifier and, unlike a source goto's target, has
-            // no ND_LABEL anywhere to jump to. Resolve which construct it
-            // targets by walking the jump-frame stack built above (pointer
-            // identity, matching parse.c's own nn_find_target) and emit the
-            // real C keyword instead of a (nonexistent) label reference.
-            const char *kw = NULL;
-            for (SerJumpFrame *fr = ctx->jumps; fr && !kw; fr = fr->parent) {
-                if (fr->brk_label && fr->brk_label == node->unique_label)
-                    kw = "break";
-                else if (fr->cont_label && fr->cont_label == node->unique_label)
-                    kw = "continue";
-            }
-            if (!kw)
-                error_tok(vm, node->tok,
-                          "internal error: break/continue target not found "
-                          "while serializing");
-            fprintf(f, "%s;\n", kw);
-        }
-        break;
-
-    case ND_LABEL:
-        fprintf(f, "%s:\n", node->label);
-        serialize_stmt(f, vm, ctx, node->lhs, indent);
-        break;
-
-    case ND_CASE:
-        print_indent_level(f, indent);
-        if (ctx->cur_switch && ctx->cur_switch->default_case == node) {
-            fprintf(f, "default:\n");
-        } else if (node->begin == node->end) {
-            fprintf(f, "case %ld:\n", node->begin);
-        } else {
-            // [GNU] Case ranges, e.g. "case 1 ... 5:"
-            fprintf(f, "case %ld ... %ld:\n", node->begin, node->end);
-        }
-        serialize_stmt(f, vm, ctx, node->lhs, indent);
-        break;
-
-    case ND_GOTO_EXPR:
-        // [GNU] `goto *ptr`. Parsed by stmt() and consuming its own `;`, so
-        // it is a statement here even though the audit files it with the
-        // expression kinds.
-        print_indent_level(f, indent);
-        fprintf(f, "goto *(");
-        serialize_expr(f, vm, ctx, node->lhs, 0);
-        fprintf(f, ");\n");
-        break;
-
-    case ND_ASTORE:
-        // Statement position discards the result, so the plain void-returning
-        // call is enough -- no statement expression needed. See the
-        // ND_ASTORE case in serialize_expr for the value-producing form.
-        print_indent_level(f, indent);
-        if (atomic_serializable_pointee(node->lhs)) {
-            fprintf(f, "__atomic_store_n(");
-            // #1042(b): real argument separator to the builtin.
-            serialize_expr(f, vm, ctx, node->lhs, 2);
-            fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->rhs, 2);
-            fprintf(f, ", __ATOMIC_SEQ_CST);\n");
-        } else {
-            fprintf(f, "*(");
+        case ND_GOTO_EXPR:
+            // [GNU] `goto *ptr`. Parsed by stmt() and consuming its own `;`, so
+            // it is a statement here even though the audit files it with the
+            // expression kinds.
+            print_indent_level(f, indent);
+            fprintf(f, "goto *(");
             serialize_expr(f, vm, ctx, node->lhs, 0);
-            fprintf(f, ") = ");
-            // #1042(b): `= rhs;` here is not wrapped in any enclosing
-            // parens (unlike the expression-position ND_ASTORE case) -- an
-            // unparenthesized top-level ND_COMMA in rhs would bind looser
-            // than `=`, assigning the comma's *first* operand instead of
-            // its value (the last operand), a silent wrong-answer bug, not
-            // merely a compile error.
-            serialize_expr(f, vm, ctx, node->rhs, 2);
+            fprintf(f, ");\n");
+            break;
+
+        case ND_ASTORE:
+            // Statement position discards the result, so the plain
+            // void-returning call is enough -- no statement expression needed.
+            // See the ND_ASTORE case in serialize_expr for the value-producing
+            // form.
+            print_indent_level(f, indent);
+            if (atomic_serializable_pointee(node->lhs)) {
+                fprintf(f, "__atomic_store_n(");
+                // #1042(b): real argument separator to the builtin.
+                serialize_expr(f, vm, ctx, node->lhs, 2);
+                fprintf(f, ", ");
+                serialize_expr(f, vm, ctx, node->rhs, 2);
+                fprintf(f, ", __ATOMIC_SEQ_CST);\n");
+            } else {
+                fprintf(f, "*(");
+                serialize_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, ") = ");
+                // #1042(b): `= rhs;` here is not wrapped in any enclosing
+                // parens (unlike the expression-position ND_ASTORE case) -- an
+                // unparenthesized top-level ND_COMMA in rhs would bind looser
+                // than `=`, assigning the comma's *first* operand instead of
+                // its value (the last operand), a silent wrong-answer bug, not
+                // merely a compile error.
+                serialize_expr(f, vm, ctx, node->rhs, 2);
+                fprintf(f, ";\n");
+            }
+            break;
+
+        case ND_ASM:
+            // asm is the one construct deliberately emitted verbatim even
+            // though the VM does not execute it by default (--asm-passthru opts
+            // into VM execution): there is no way to evaluate host assembly in
+            // the VM, so native output hands it to the host compiler. See
+            // COVERAGE.md.
+            print_indent_level(f, indent);
+            fprintf(f, "asm(");
+            if (node->asm_str)
+                serialize_string_n(f, node->asm_str,
+                                   (int)strlen(node->asm_str));
+            else
+                fprintf(f, "\"\"");
+            fprintf(f, ");\n");
+            break;
+
+        default:
+            // Treat as expression statement. #963c deliberately leaves this
+            // default: arm alone: it is the legitimate route for every
+            // expression-kind NodeKind reaching statement position (there is no
+            // per-kind list to maintain here), not a fallback for an unhandled
+            // kind. It now inherits serialize_expr's own hard error for any
+            // kind that function doesn't recognize, so an unhandled kind still
+            // fails loudly here -- it just fails one call deeper than it used
+            // to, instead of this arm silently emitting a "comment + ;" null
+            // statement (#963's original silent-miscompile symptom).
+            print_indent_level(f, indent);
+            serialize_expr(f, vm, ctx, node, 0);
             fprintf(f, ";\n");
-        }
-        break;
-
-    case ND_ASM:
-        // asm is the one construct deliberately emitted verbatim even though
-        // the VM does not execute it by default (--asm-passthru opts into VM
-        // execution): there is no way to evaluate host assembly in the VM, so
-        // native output hands it to the host compiler. See COVERAGE.md.
-        print_indent_level(f, indent);
-        fprintf(f, "asm(");
-        if (node->asm_str)
-            serialize_string_n(f, node->asm_str, (int)strlen(node->asm_str));
-        else
-            fprintf(f, "\"\"");
-        fprintf(f, ");\n");
-        break;
-
-    default:
-        // Treat as expression statement. #963c deliberately leaves this
-        // default: arm alone: it is the legitimate route for every
-        // expression-kind NodeKind reaching statement position (there is no
-        // per-kind list to maintain here), not a fallback for an unhandled
-        // kind. It now inherits serialize_expr's own hard error for any
-        // kind that function doesn't recognize, so an unhandled kind still
-        // fails loudly here -- it just fails one call deeper than it used
-        // to, instead of this arm silently emitting a "comment + ;" null
-        // statement (#963's original silent-miscompile symptom).
-        print_indent_level(f, indent);
-        serialize_expr(f, vm, ctx, node, 0);
-        fprintf(f, ";\n");
-        break;
+            break;
     }
 }
 
@@ -3119,8 +3215,9 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
 // Only called from statement-list positions -- never the direct body of an
 // if/else/loop/switch, where a declaration can't legally sit anyway (cccc
 // itself already rejects e.g. `if (n) int v[n];`).
-static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                     Node *node, int indent) {
+static void serialize_stmt_list_item(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Node *node,
+                                     int indent) {
     if (node && node->kind == ND_BLOCK && block_defines_vla(node)) {
         for (Node *s = node->body; s; s = s->next)
             serialize_stmt(f, vm, ctx, s, indent);
@@ -3154,7 +3251,8 @@ static bool type_is_cccc_va_list(Type *ty) {
     if (!m || !member_named(m, "reg_count") || !m->ty || m->ty->kind != TY_INT)
         return false;
     m = m->next;
-    if (!m || !member_named(m, "__reserved") || !m->ty || m->ty->kind != TY_ARRAY)
+    if (!m || !member_named(m, "__reserved") || !m->ty ||
+        m->ty->kind != TY_ARRAY)
         return false;
     return m->next == NULL;
 }
@@ -3210,7 +3308,7 @@ static bool type_is_cccc_va_list(Type *ty) {
 // pointer as well). See man/COVERAGE.md's <stdarg.h> row for the full
 // writeup.
 static const char *va_list_shim_param_name(char *buf, size_t bufsz,
-                                            const char *orig) {
+                                           const char *orig) {
     snprintf(buf, bufsz, "__cccc_va_param_%s", orig ? orig : "ap");
     return buf;
 }
@@ -3236,13 +3334,14 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
     // only forces is_static on a nested/block-scope function when no asm
     // label is present (#1039), so fn->is_static alone is accurate here.
 
-    // #1020: __attribute__((constructor[(priority)]))/((destructor[(priority)]))
-    // was never lowered here at all -- under -c=native the function was
-    // emitted as an ordinary function nothing calls, so it simply never
-    // ran. Emitted as a *prefix* attribute (not appended after the
-    // declarator the way asm_label is below): GCC rejects a trailing
-    // attribute on a function *definition* while clang accepts it, so a
-    // suffix form would pass on macOS and fail to compile on Linux.
+    // #1020:
+    // __attribute__((constructor[(priority)]))/((destructor[(priority)])) was
+    // never lowered here at all -- under -c=native the function was emitted as
+    // an ordinary function nothing calls, so it simply never ran. Emitted as a
+    // *prefix* attribute (not appended after the declarator the way asm_label
+    // is below): GCC rejects a trailing attribute on a function *definition*
+    // while clang accepts it, so a suffix form would pass on macOS and fail to
+    // compile on Linux.
     if (fn->is_constructor) {
         if (fn->init_priority == CCCC_NO_INIT_PRIORITY)
             fprintf(f, "__attribute__((constructor)) ");
@@ -3266,9 +3365,9 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
     // serialize_type_decl. Render "name(params)[ asm("label")]" into a
     // buffer first, then hand it to serialize_type_decl as the declarator
     // name so a pointer/function return type nests correctly.
-    char *decl = NULL;
+    char  *decl   = NULL;
     size_t declsz = 0;
-    FILE *df = open_memstream(&decl, &declsz);
+    FILE  *df     = open_memstream(&decl, &declsz);
     fprintf(df, "%s(", fn->name);
 
     bool first = true;
@@ -3285,7 +3384,8 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
             if (fn->body && type_is_cccc_va_list(param->ty)) {
                 char shimbuf[64];
                 serialize_type_decl(df, ctx, param->ty,
-                    va_list_shim_param_name(shimbuf, sizeof shimbuf, param->name));
+                                    va_list_shim_param_name(
+                                        shimbuf, sizeof shimbuf, param->name));
             } else {
                 serialize_type_decl(df, ctx, param->ty, param->name);
             }
@@ -3332,15 +3432,15 @@ static void serialize_function_signature(FILE *f, SerializeContext *ctx,
         fprintf(df, " asm(__CCCC_ASM_PREFIX__ \"%s\")", fn->asm_label);
 
     fclose(df);
-    serialize_type_decl(f, ctx,
-                        (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : ty_int,
-                        decl ? decl : "");
+    serialize_type_decl(
+        f, ctx, (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : ty_int,
+        decl ? decl : "");
     free(decl);
 }
 
 // Serialize a function
-static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                               Obj *fn) {
+static void serialize_function(FILE *f, VirtualMachine *vm,
+                               SerializeContext *ctx, Obj *fn) {
     if (!fn->is_function)
         return;
 
@@ -3353,7 +3453,7 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
 
     if (fn->body) {
         fprintf(f, " {\n");
-        Obj *saved_fn = ctx->current_fn;
+        Obj *saved_fn   = ctx->current_fn;
         ctx->current_fn = fn;
 
         // Function-local typedefs/tags are emitted at the top of the function,
@@ -3383,8 +3483,8 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 continue;
             char shimbuf[64];
             va_list_shim_param_name(shimbuf, sizeof shimbuf, param->name);
-            fprintf(f, "    va_list %s; va_copy(%s, %s);\n",
-                    param->name, param->name, shimbuf);
+            fprintf(f, "    va_list %s; va_copy(%s, %s);\n", param->name,
+                    param->name, shimbuf);
         }
 
         // Local variable declarations
@@ -3420,7 +3520,10 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             // scan for the same reason.
             bool is_actual_param = false;
             for (Obj *p = fn->params; p; p = p->next)
-                if (p == var) { is_actual_param = true; break; }
+                if (p == var) {
+                    is_actual_param = true;
+                    break;
+                }
             if (is_actual_param)
                 continue;
 
@@ -3428,8 +3531,8 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 // Compiler-synthesized temporaries (e.g. from ++/--/op=
                 // desugaring) have an empty name; give them one so they can
                 // be declared and referenced as valid C identifiers.
-                var->name = arena_format(vm, "__cccc_tmp%d",
-                                          ctx->anon_local_counter++);
+                var->name =
+                    arena_format(vm, "__cccc_tmp%d", ctx->anon_local_counter++);
             else if (var->name[0] == '.')
                 // #1034: a local named via new_unique_name() (parse_core.c)
                 // -- a macro/comptime-generated compound literal or block
@@ -3437,20 +3540,23 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 // *global* (rename_anon_globals(), further down this file)
                 // -- is not a legal C identifier either, and unlike the
                 // empty-name case above was never renamed here. Deliberately
-                // a distinct "__cccc_local_" prefix, not rename_anon_globals()'s
-                // own "__cccc_%s_%d" scheme (which draws from a *different*
-                // counter, anon_global_counter) -- reusing that scheme here
-                // would let a renamed global and a renamed local collide on
-                // the identical spelling (e.g. both landing on
+                // a distinct "__cccc_local_" prefix, not
+                // rename_anon_globals()'s own "__cccc_%s_%d" scheme (which
+                // draws from a *different* counter, anon_global_counter) --
+                // reusing that scheme here would let a renamed global and a
+                // renamed local collide on the identical spelling (e.g. both
+                // landing on
                 // "__cccc_anon_0", one per counter) and silently shadow each
                 // other in this function's scope. Same display_name-or-
                 // "anon" tag rule rename_anon_globals() uses, but sharing
                 // anon_local_counter with the __cccc_tmp%d case above (whose
                 // own prefix keeps it out of this collision class too).
-                var->name = arena_format(vm, "__cccc_local_%s_%d",
-                                          (var->display_name && var->display_name[0] != '.')
-                                              ? var->display_name : "anon",
-                                          ctx->anon_local_counter++);
+                var->name = arena_format(
+                    vm, "__cccc_local_%s_%d",
+                    (var->display_name && var->display_name[0] != '.')
+                        ? var->display_name
+                        : "anon",
+                    ctx->anon_local_counter++);
 
             // #926: rename on collision against every *other* local/param
             // in the function -- not just those before it in the raw list,
@@ -3468,8 +3574,8 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
                 for (Obj *other = fn->locals; other; other = other->next) {
                     if (other == var || strcmp(other->name, var->name) != 0)
                         continue;
-                    var->name = arena_format(vm, "%s__cccc_%d", var->name,
-                                             ctx->anon_local_counter++);
+                    var->name     = arena_format(vm, "%s__cccc_%d", var->name,
+                                                 ctx->anon_local_counter++);
                     renamed_again = true;
                     break;
                 }
@@ -3547,7 +3653,7 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             // the base type, one step down `var->ty->base`, and is
             // untouched by this.
             if (var->ty->is_const) {
-                Type *mutable_ty = copy_type(vm, var->ty);
+                Type *mutable_ty     = copy_type(vm, var->ty);
                 mutable_ty->is_const = false;
                 serialize_type_decl(f, ctx, mutable_ty, var->name);
             } else {
@@ -3580,8 +3686,9 @@ static void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ct
             break;
         }
 
-        // Function body — unpack a single ND_BLOCK to avoid double-brace wrapping.
-        // Both the parser and FunctionSetBody store the body as an ND_BLOCK node.
+        // Function body — unpack a single ND_BLOCK to avoid double-brace
+        // wrapping. Both the parser and FunctionSetBody store the body as an
+        // ND_BLOCK node.
         Node *body_stmts;
         if (fn->body && fn->body->kind == ND_BLOCK && !fn->body->next)
             body_stmts = fn->body->body;
@@ -3627,20 +3734,23 @@ static Relocation *serialize_find_reloc(Obj *var, int offset) {
     return NULL;
 }
 
-static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                 Obj *var, Type *ty, int offset);
+static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Obj *var, Type *ty,
+                                 int offset);
 
 // A pointer-typed initializer slot backed by a Relocation (#918 defect C):
 // previously the zeroed init_data bytes were printed verbatim as a null
 // pointer -- silent miscompilation, valid C that runs wrong. `rel->label`
 // names the target Obj by its ->name field.
-static void serialize_reloc_init(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                 Obj *var, Type *ty, Relocation *rel) {
+static void serialize_reloc_init(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Obj *var, Type *ty,
+                                 Relocation *rel) {
     if (!rel->label || !*rel->label)
-        error("cccc: invalid relocation in initializer for global '%s'", var->name);
+        error("cccc: invalid relocation in initializer for global '%s'",
+              var->name);
 
     const char *target_name = *rel->label;
-    Obj *target = serialize_find_global(vm, target_name);
+    Obj        *target      = serialize_find_global(vm, target_name);
     if (!target)
         error("cccc: cannot serialize initializer for global '%s' in native "
               "mode: unresolved relocation target '%s'",
@@ -3651,9 +3761,9 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm, SerializeContext *
     // inline the literal here instead of naming a symbol that doesn't
     // exist in the output.
     if (target->is_string_literal && target->init_data) {
-        int len = (target->ty && target->ty->kind == TY_ARRAY)
-                      ? target->ty->array_len
-                      : (int)strlen(target->init_data);
+        int  len            = (target->ty && target->ty->kind == TY_ARRAY)
+                                  ? target->ty->array_len
+                                  : (int)strlen(target->init_data);
         bool plain_char_ptr = ty->kind == TY_PTR && ty->base &&
                               ty->base->kind == TY_CHAR && rel->addend == 0;
         if (!plain_char_ptr) {
@@ -3689,11 +3799,13 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm, SerializeContext *
 // arrays/vectors/structs/unions. Replaces the old scalar-only dispatch that
 // fell back to the placeholder comment `/* init data */` for every
 // aggregate shape -- text a host compiler rejects outright (#918 defect B).
-static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                 Obj *var, Type *ty, int offset) {
+static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Obj *var, Type *ty,
+                                 int offset) {
     if (!ty)
         error("cccc: cannot serialize initializer for global '%s' in native "
-              "mode: unknown type", var->name);
+              "mode: unknown type",
+              var->name);
 
     if (ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T) {
         Relocation *rel = serialize_find_reloc(var, offset);
@@ -3704,108 +3816,115 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
     }
 
     switch (ty->kind) {
-    case TY_ARRAY:
-        if (ty->base->kind == TY_CHAR && !serialize_find_reloc(var, offset)) {
-            serialize_string_n(f, var->init_data + offset, ty->array_len);
+        case TY_ARRAY:
+            if (ty->base->kind == TY_CHAR &&
+                !serialize_find_reloc(var, offset)) {
+                serialize_string_n(f, var->init_data + offset, ty->array_len);
+                return;
+            }
+            fprintf(f, "{ ");
+            for (int i = 0; i < ty->array_len; i++) {
+                if (i > 0)
+                    fprintf(f, ", ");
+                serialize_init_bytes(f, vm, ctx, var, ty->base,
+                                     offset + i * ty->base->size);
+            }
+            fprintf(f, " }");
+            return;
+
+        case TY_VECTOR:
+            fprintf(f, "{ ");
+            for (int i = 0; i < ty->vec_len; i++) {
+                if (i > 0)
+                    fprintf(f, ", ");
+                serialize_init_bytes(f, vm, ctx, var, ty->base,
+                                     offset + i * ty->base->size);
+            }
+            fprintf(f, " }");
+            return;
+
+        case TY_STRUCT: {
+            fprintf(f, "{ ");
+            bool first = true;
+            for (Member *m = ty->members; m; m = m->next) {
+                if (m->is_bitfield && !m->name)
+                    continue; // anonymous bitfield: padding, nothing to
+                              // designate
+                if (!first)
+                    fprintf(f, ", ");
+                first = false;
+                if (m->name)
+                    fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
+                if (m->is_bitfield) {
+                    int64_t container = 0;
+                    int     sz        = m->ty->size < 8 ? m->ty->size : 8;
+                    memcpy(&container, var->init_data + offset + m->offset, sz);
+                    uint64_t mask = (m->bit_width >= 64)
+                                        ? ~0ULL
+                                        : ((1ULL << m->bit_width) - 1);
+                    uint64_t bits =
+                        ((uint64_t)container >> m->bit_offset) & mask;
+                    fprintf(f, "%lluu", (unsigned long long)bits);
+                } else {
+                    serialize_init_bytes(f, vm, ctx, var, m->ty,
+                                         offset + m->offset);
+                }
+            }
+            fprintf(f, " }");
             return;
         }
-        fprintf(f, "{ ");
-        for (int i = 0; i < ty->array_len; i++) {
-            if (i > 0)
-                fprintf(f, ", ");
-            serialize_init_bytes(f, vm, ctx, var, ty->base,
-                                 offset + i * ty->base->size);
-        }
-        fprintf(f, " }");
-        return;
 
-    case TY_VECTOR:
-        fprintf(f, "{ ");
-        for (int i = 0; i < ty->vec_len; i++) {
-            if (i > 0)
-                fprintf(f, ", ");
-            serialize_init_bytes(f, vm, ctx, var, ty->base,
-                                 offset + i * ty->base->size);
+        case TY_UNION: {
+            // Reconstruct via the largest member (first on a tie) -- byte-exact
+            // whenever some member spans the whole object, which is the normal
+            // case; a union with no full-size member falls through to the
+            // "cannot serialize" error below via the recursive call, since no
+            // member type here can losslessly represent the other members'
+            // bytes either.
+            Member *largest = NULL;
+            for (Member *m = ty->members; m; m = m->next)
+                if (!largest || m->ty->size > largest->ty->size)
+                    largest = m;
+            if (!largest || largest->ty->size < ty->size)
+                error("cccc: cannot serialize initializer for global '%s' in "
+                      "native mode: union has no member spanning the full "
+                      "%d-byte object",
+                      var->name, ty->size);
+            fprintf(f, "{ .%.*s = ", largest->name->len, largest->name->loc);
+            serialize_init_bytes(f, vm, ctx, var, largest->ty, offset);
+            fprintf(f, " }");
+            return;
         }
-        fprintf(f, " }");
-        return;
 
-    case TY_STRUCT: {
-        fprintf(f, "{ ");
-        bool first = true;
-        for (Member *m = ty->members; m; m = m->next) {
-            if (m->is_bitfield && !m->name)
-                continue; // anonymous bitfield: padding, nothing to designate
-            if (!first)
-                fprintf(f, ", ");
-            first = false;
-            if (m->name)
-                fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
-            if (m->is_bitfield) {
-                int64_t container = 0;
-                int sz = m->ty->size < 8 ? m->ty->size : 8;
-                memcpy(&container, var->init_data + offset + m->offset, sz);
-                uint64_t mask = (m->bit_width >= 64)
-                                    ? ~0ULL
-                                    : ((1ULL << m->bit_width) - 1);
-                uint64_t bits = ((uint64_t)container >> m->bit_offset) & mask;
-                fprintf(f, "%lluu", (unsigned long long)bits);
-            } else {
-                serialize_init_bytes(f, vm, ctx, var, m->ty, offset + m->offset);
+        case TY_FLOAT: {
+            float fv;
+            memcpy(&fv, var->init_data + offset, 4);
+            if (!serialize_flonum_special(f, (long double)fv, "f")) {
+                char buf[64];
+                format_float_literal(buf, sizeof buf, (double)fv);
+                fprintf(f, "%sf", buf);
             }
+            return;
         }
-        fprintf(f, " }");
-        return;
-    }
 
-    case TY_UNION: {
-        // Reconstruct via the largest member (first on a tie) -- byte-exact
-        // whenever some member spans the whole object, which is the normal
-        // case; a union with no full-size member falls through to the
-        // "cannot serialize" error below via the recursive call, since no
-        // member type here can losslessly represent the other members'
-        // bytes either.
-        Member *largest = NULL;
-        for (Member *m = ty->members; m; m = m->next)
-            if (!largest || m->ty->size > largest->ty->size)
-                largest = m;
-        if (!largest || largest->ty->size < ty->size)
-            error("cccc: cannot serialize initializer for global '%s' in "
-                  "native mode: union has no member spanning the full "
-                  "%d-byte object", var->name, ty->size);
-        fprintf(f, "{ .%.*s = ", largest->name->len, largest->name->loc);
-        serialize_init_bytes(f, vm, ctx, var, largest->ty, offset);
-        fprintf(f, " }");
-        return;
-    }
-
-    case TY_FLOAT: {
-        float fv; memcpy(&fv, var->init_data + offset, 4);
-        if (!serialize_flonum_special(f, (long double)fv, "f")) {
-            char buf[64];
-            format_float_literal(buf, sizeof buf, (double)fv);
-            fprintf(f, "%sf", buf);
+        case TY_DOUBLE:
+        case TY_LDOUBLE: {
+            // TY_LDOUBLE shares TY_DOUBLE's 8-byte read and unsuffixed %g here,
+            // matching this function's pre-#918 behavior exactly -- a latent
+            // long-double-precision/suffix gap, but pre-existing and unrelated
+            // to #918's scope. Still present after #1038 (which fixed the
+            // ND_NUM/expression-literal counterpart of this same gap, not this
+            // global-initializer path) -- left alone here for the same reason:
+            // out of scope, tracked separately, not touched incidentally.
+            double dv;
+            memcpy(&dv, var->init_data + offset, 8);
+            if (!serialize_flonum_special(f, (long double)dv, ""))
+                fprintf(f, "%.17g", dv);
+            return;
         }
-        return;
-    }
 
-    case TY_DOUBLE:
-    case TY_LDOUBLE: {
-        // TY_LDOUBLE shares TY_DOUBLE's 8-byte read and unsuffixed %g here,
-        // matching this function's pre-#918 behavior exactly -- a latent
-        // long-double-precision/suffix gap, but pre-existing and unrelated
-        // to #918's scope. Still present after #1038 (which fixed the
-        // ND_NUM/expression-literal counterpart of this same gap, not this
-        // global-initializer path) -- left alone here for the same reason:
-        // out of scope, tracked separately, not touched incidentally.
-        double dv; memcpy(&dv, var->init_data + offset, 8);
-        if (!serialize_flonum_special(f, (long double)dv, ""))
-            fprintf(f, "%.17g", dv);
-        return;
-    }
-
-    default:
-        break;
+        default:
+            break;
     }
 
     if (is_decimal(ty)) {
@@ -3813,8 +3932,8 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
         // CCCC_HAS_DECIMAL=1 (the same build that could have produced
         // these bytes in the first place); cccc_dec_format returns -1
         // in the off build, which can't happen here.
-        char buf[80];
-        int w = dec_width_code(ty);
+        char        buf[80];
+        int         w      = dec_width_code(ty);
         const char *suffix = w == 0 ? "df" : w == 1 ? "dd" : "dl";
         if (cccc_dec_format(buf, sizeof buf, var->init_data + offset, w) >= 0)
             fprintf(f, "%s%s", buf, suffix);
@@ -3825,14 +3944,15 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
 
     if (ty->kind == TY_BOOL || ty->kind == TY_CHAR || ty->kind == TY_SHORT ||
         ty->kind == TY_INT || ty->kind == TY_LONG || ty->kind == TY_ENUM ||
-        ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T || ty->kind == TY_BLOCK) {
+        ty->kind == TY_PTR || ty->kind == TY_NULLPTR_T ||
+        ty->kind == TY_BLOCK) {
         // #965: TY_BLOCK is 8 bytes, pointer-shaped (see block_type(),
         // type.c) -- a block value can only be a compile-time-constant
         // global initializer as a null pointer anyway (the VM's own
         // is_const_expr rejects a real block literal there before this is
         // ever reached), so it reads exactly like TY_PTR.
         int64_t iv = 0;
-        int sz = ty->size < 8 ? ty->size : 8;
+        int     sz = ty->size < 8 ? ty->size : 8;
         memcpy(&iv, var->init_data + offset, sz);
         if (sz < 8 && ty->kind != TY_PTR && ty->kind != TY_NULLPTR_T &&
             (iv >> (sz * 8 - 1)) & 1)
@@ -3846,7 +3966,8 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
     // but-wrong initializer is the bug class being fixed, not a shape to
     // reproduce for cases this function doesn't yet handle).
     error("cccc: cannot serialize initializer for global '%s' in native "
-          "mode: unsupported initializer type (kind %d)", var->name, ty->kind);
+          "mode: unsupported initializer type (kind %d)",
+          var->name, ty->kind);
 }
 
 // Serialize global variable
@@ -3876,7 +3997,10 @@ static const char *pthread_initializer_macro(SerializeContext *ctx, Obj *var) {
     // Only pthread_mutex_t/pthread_cond_t are declared in include/pthread.h
     // today -- rwlock/once have no CCCC type or FFI wrappers at all yet, so
     // there's no initializer image for either to collide with.
-    static const struct { const char *type_name; const char *macro; } table[] = {
+    static const struct {
+        const char *type_name;
+        const char *macro;
+    } table[] = {
         {"pthread_mutex_t", "PTHREAD_MUTEX_INITIALIZER"},
         {"pthread_cond_t", "PTHREAD_COND_INITIALIZER"},
     };
@@ -3897,8 +4021,8 @@ static const char *pthread_initializer_macro(SerializeContext *ctx, Obj *var) {
     return macro;
 }
 
-static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                 Obj *var) {
+static void serialize_global_var(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Obj *var) {
     if (var->is_function)
         return;
 
@@ -3978,7 +4102,7 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return;
 
-    TypeName *tag = find_tag_name(ctx, ty);
+    TypeName *tag   = find_tag_name(ctx, ty);
     TypeName *alias = find_typedef_name(ctx, ty);
 
     if (!tag && alias)
@@ -4023,7 +4147,7 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty || ty->kind != TY_ENUM)
         return;
 
-    TypeName *tag = find_tag_name(ctx, ty);
+    TypeName *tag   = find_tag_name(ctx, ty);
     TypeName *alias = find_typedef_name(ctx, ty);
 
     if (!tag && alias)
@@ -4077,10 +4201,12 @@ static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
 // apart -- see hoist_local_type_to_file_scope()).
 static bool type_has_file_scope_name(SerializeContext *ctx, Type *ty) {
     for (int i = 0; i < ctx->tags_len; i++)
-        if (ctx->tags[i].owner_fn == NULL && same_type_or_origin(ctx->tags[i].ty, ty))
+        if (ctx->tags[i].owner_fn == NULL &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
             return true;
     for (int i = 0; i < ctx->typedefs_len; i++)
-        if (ctx->typedefs[i].owner_fn == NULL && same_type_or_origin(ctx->typedefs[i].ty, ty))
+        if (ctx->typedefs[i].owner_fn == NULL &&
+            same_type_or_origin(ctx->typedefs[i].ty, ty))
             return true;
     return false;
 }
@@ -4143,7 +4269,7 @@ static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
         }
 
     char *chosen_name;
-    int chosen_len;
+    int   chosen_len;
     if (existing_tag) {
         bool collides = false;
         for (int i = 0; i < ctx->tags_len && !collides; i++) {
@@ -4158,17 +4284,17 @@ static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
         }
         if (!collides) {
             chosen_name = existing_tag->name;
-            chosen_len = existing_tag->name_len;
+            chosen_len  = existing_tag->name_len;
         } else {
-            chosen_name = arena_format(vm, "__cccc_local_%.*s_%d",
-                                       existing_tag->name_len, existing_tag->name,
-                                       ctx->hoisted_type_counter++);
+            chosen_name =
+                arena_format(vm, "__cccc_local_%.*s_%d", existing_tag->name_len,
+                             existing_tag->name, ctx->hoisted_type_counter++);
             chosen_len = (int)strlen(chosen_name);
         }
     } else {
         chosen_name = arena_format(vm, "__cccc_local_anon_%d",
                                    ctx->hoisted_type_counter++);
-        chosen_len = (int)strlen(chosen_name);
+        chosen_len  = (int)strlen(chosen_name);
     }
 
     // #989: two different functions each declaring an identical `struct P`
@@ -4182,7 +4308,7 @@ static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     for (int i = 0; i < ctx->tags_len; i++)
         if (same_type_or_origin(ctx->tags[i].ty, ty)) {
             ctx->tags[i].owner_fn = NULL;
-            ctx->tags[i].name = chosen_name;
+            ctx->tags[i].name     = chosen_name;
             ctx->tags[i].name_len = chosen_len;
         }
     for (int i = 0; i < ctx->typedefs_len; i++)
@@ -4197,7 +4323,7 @@ static void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
         type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty,
                        chosen_name, chosen_len, NULL, false, true, NULL, true);
 
-    Obj *saved_fn = ctx->current_fn;
+    Obj *saved_fn   = ctx->current_fn;
     ctx->current_fn = NULL;
     if (ty->kind == TY_ENUM)
         serialize_enum_def(f, ctx, ty);
@@ -4237,7 +4363,7 @@ static bool path_is_captured(SerializeContext *ctx, const char *path) {
 }
 
 static bool aggregate_typedef_is_definition(SerializeContext *ctx,
-                                            TypeName *alias) {
+                                            TypeName         *alias) {
     if (!alias->ty)
         return false;
     if (alias->ty->kind != TY_STRUCT && alias->ty->kind != TY_UNION &&
@@ -4258,7 +4384,7 @@ static bool aggregate_typedef_is_definition(SerializeContext *ctx,
 // on the exact same rule -- a divergent copy here is how #892's AttrTarget
 // regression happened.
 static bool typedef_alias_header_suppressed(SerializeContext *ctx,
-                                            TypeName *alias) {
+                                            TypeName         *alias) {
     return !ctx->generated_only && !ctx->emit_strict && alias->from_include &&
            !alias->always_emit;
 }
@@ -4271,7 +4397,7 @@ static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
         return;
 
     char name[256];
-    int len = alias->name_len;
+    int  len = alias->name_len;
     if (len >= (int)sizeof(name))
         len = sizeof(name) - 1;
     memcpy(name, alias->name, len);
@@ -4290,7 +4416,7 @@ static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
     // different typedef further down the same origin chain (a real,
     // distinct alias-of-an-alias) still resolves normally.
     Type *real_ty = alias->ty;
-    alias->ty = NULL;
+    alias->ty     = NULL;
     fprintf(f, "typedef ");
     serialize_type_decl(f, ctx, real_ty, name);
     fprintf(f, ";\n\n");
@@ -4331,11 +4457,13 @@ static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
     if (!ty)
         return;
     if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
-        ensure_typedef_for_type_emitted(f, ctx, ty->base, owner_fn, typedef_done);
+        ensure_typedef_for_type_emitted(f, ctx, ty->base, owner_fn,
+                                        typedef_done);
         return;
     }
     if (ty->kind == TY_FUNC) {
-        ensure_typedef_for_type_emitted(f, ctx, ty->return_ty, owner_fn, typedef_done);
+        ensure_typedef_for_type_emitted(f, ctx, ty->return_ty, owner_fn,
+                                        typedef_done);
         for (Type *p = ty->params; p; p = p->next)
             ensure_typedef_for_type_emitted(f, ctx, p, owner_fn, typedef_done);
         return;
@@ -4373,7 +4501,8 @@ static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
         if (!find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
             !find_anonymous_typedef_name(ctx, ty))
             for (Member *m = ty->members; m; m = m->next)
-                ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn, typedef_done);
+                ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
+                                                typedef_done);
         return;
     }
     if (ty->kind == TY_ENUM) {
@@ -4404,7 +4533,7 @@ static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
         return;
     typedef_done[idx] = true;
 
-    TypeName *td = &ctx->typedefs[idx];
+    TypeName *td      = &ctx->typedefs[idx];
     // A typedef belonging to a different owner_fn scope than the one this
     // pass is currently emitting isn't this call's job to print (mirrors
     // the existing owner_fn filters on both loops below) -- structurally
@@ -4419,7 +4548,7 @@ static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
     // whatever OTHER typedef this one's own spelling depends on (a chain
     // like `typedef lu_byte TStatus;`) before this one.
     Type *real_ty = td->ty;
-    td->ty = NULL;
+    td->ty        = NULL;
     ensure_typedef_for_type_emitted(f, ctx, real_ty, owner_fn, typedef_done);
     td->ty = real_ty;
 
@@ -4454,12 +4583,12 @@ static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
 
 static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                           Obj *owner_fn) {
-    Obj *saved_fn = ctx->current_fn;
-    ctx->current_fn = owner_fn;
+    Obj *saved_fn      = ctx->current_fn;
+    ctx->current_fn    = owner_fn;
 
     bool *typedef_done = ctx->typedefs_len > 0
-        ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
-        : NULL;
+                             ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
+                             : NULL;
 
     for (int i = 0; i < ctx->defs.len; i++) {
         Type *ty = ctx->defs.data[i];
@@ -4476,7 +4605,7 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // Types with no tag and no typedef alias have nothing to refer back
         // to them by, so they're serialized inline at their point of use
         // (e.g. `struct { int x; } pt;`) instead of as a standalone def.
-        TypeName *tag = find_tag_name(ctx, ty);
+        TypeName *tag   = find_tag_name(ctx, ty);
         TypeName *alias = find_typedef_name(ctx, ty);
         if (!tag && !alias && !find_anonymous_typedef_name(ctx, ty))
             continue;
@@ -4506,9 +4635,11 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // when a tag exists -- see that function's comment. A tagless
         // typedef alias has exactly one record and no such ambiguity, so
         // `alias` (from find_typedef_name() above) is used unchanged.
-        TypeName *provenance_source = tag ? find_tag_name_for_provenance(ctx, ty) : alias;
+        TypeName *provenance_source =
+            tag ? find_tag_name_for_provenance(ctx, ty) : alias;
         if (!ctx->emit_strict && provenance_source &&
-            provenance_source->from_include && !provenance_source->always_emit &&
+            provenance_source->from_include &&
+            !provenance_source->always_emit &&
             (!ctx->generated_only ||
              path_is_captured(ctx, provenance_source->file_path)))
             // #1031: this is correct for member *access* -- the replayed
@@ -4596,14 +4727,19 @@ static const struct {
     const char *name;
     const char *def;
 } native_accessor_shims[] = {
-    {"__cccc_stdin",      "static FILE *__cccc_stdin(void) { return stdin; }\n"},
-    {"__cccc_stdout",     "static FILE *__cccc_stdout(void) { return stdout; }\n"},
-    {"__cccc_stderr",     "static FILE *__cccc_stderr(void) { return stderr; }\n"},
-    {"__cccc_errno_ptr",  "static int *__cccc_errno_ptr(void) { return &errno; }\n"},
-    {"__cccc_optarg_ptr", "static char **__cccc_optarg_ptr(void) { return &optarg; }\n"},
-    {"__cccc_optind_ptr", "static int *__cccc_optind_ptr(void) { return &optind; }\n"},
-    {"__cccc_opterr_ptr", "static int *__cccc_opterr_ptr(void) { return &opterr; }\n"},
-    {"__cccc_optopt_ptr", "static int *__cccc_optopt_ptr(void) { return &optopt; }\n"},
+    {"__cccc_stdin", "static FILE *__cccc_stdin(void) { return stdin; }\n"},
+    {"__cccc_stdout", "static FILE *__cccc_stdout(void) { return stdout; }\n"},
+    {"__cccc_stderr", "static FILE *__cccc_stderr(void) { return stderr; }\n"},
+    {"__cccc_errno_ptr",
+     "static int *__cccc_errno_ptr(void) { return &errno; }\n"},
+    {"__cccc_optarg_ptr",
+     "static char **__cccc_optarg_ptr(void) { return &optarg; }\n"},
+    {"__cccc_optind_ptr",
+     "static int *__cccc_optind_ptr(void) { return &optind; }\n"},
+    {"__cccc_opterr_ptr",
+     "static int *__cccc_opterr_ptr(void) { return &opterr; }\n"},
+    {"__cccc_optopt_ptr",
+     "static int *__cccc_optopt_ptr(void) { return &optopt; }\n"},
     // #1021: include/math.h's isnan/isinf/signbit/fpclassify are themselves
     // #defined as `_Generic((x), float: __cccc_isnan_f, default:
     // __cccc_isnan_d)(x)` etc -- a shim body that read the plain macro name
@@ -4622,14 +4758,22 @@ static const struct {
     // Spelled as literals here, not the FP_* macro names, so this stays
     // correct even on a platform where a real host <math.h>'s FP_* values
     // don't match CCCC's own.
-    {"__cccc_isnan_f",      "static int __cccc_isnan_f(float x) { return __builtin_isnan(x); }\n"},
-    {"__cccc_isnan_d",      "static int __cccc_isnan_d(double x) { return __builtin_isnan(x); }\n"},
-    {"__cccc_isinf_f",      "static int __cccc_isinf_f(float x) { return __builtin_isinf(x); }\n"},
-    {"__cccc_isinf_d",      "static int __cccc_isinf_d(double x) { return __builtin_isinf(x); }\n"},
-    {"__cccc_signbit_f",    "static int __cccc_signbit_f(float x) { return __builtin_signbit(x); }\n"},
-    {"__cccc_signbit_d",    "static int __cccc_signbit_d(double x) { return __builtin_signbit(x); }\n"},
-    {"__cccc_fpclassify_f", "static int __cccc_fpclassify_f(float x) { return __builtin_fpclassify(2, 1, 3, 4, 5, x); }\n"},
-    {"__cccc_fpclassify_d", "static int __cccc_fpclassify_d(double x) { return __builtin_fpclassify(2, 1, 3, 4, 5, x); }\n"},
+    {"__cccc_isnan_f",
+     "static int __cccc_isnan_f(float x) { return __builtin_isnan(x); }\n"},
+    {"__cccc_isnan_d",
+     "static int __cccc_isnan_d(double x) { return __builtin_isnan(x); }\n"},
+    {"__cccc_isinf_f",
+     "static int __cccc_isinf_f(float x) { return __builtin_isinf(x); }\n"},
+    {"__cccc_isinf_d",
+     "static int __cccc_isinf_d(double x) { return __builtin_isinf(x); }\n"},
+    {"__cccc_signbit_f",
+     "static int __cccc_signbit_f(float x) { return __builtin_signbit(x); }\n"},
+    {"__cccc_signbit_d", "static int __cccc_signbit_d(double x) { return "
+                         "__builtin_signbit(x); }\n"},
+    {"__cccc_fpclassify_f", "static int __cccc_fpclassify_f(float x) { return "
+                            "__builtin_fpclassify(2, 1, 3, 4, 5, x); }\n"},
+    {"__cccc_fpclassify_d", "static int __cccc_fpclassify_d(double x) { return "
+                            "__builtin_fpclassify(2, 1, 3, 4, 5, x); }\n"},
     // #1021: include/float.h:73 defines `FLT_ROUNDS` itself as a call to
     // this shim (`#define FLT_ROUNDS (__cccc_flt_rounds())`) -- so a body
     // reading FLT_ROUNDS would textually expand right back into a call to
@@ -4659,16 +4803,16 @@ static const struct {
     // against FLT_ROUNDS were already folded against that encoding at
     // guest compile time -- same asymmetry the __cccc_fpclassify_* shims
     // above already document for FP_*.
-    {"__cccc_flt_rounds",   "#include <fenv.h>\n"
-                             "static int __cccc_flt_rounds(void) {\n"
-                             "    switch (fegetround()) {\n"
-                             "    case FE_TOWARDZERO: return 0;\n"
-                             "    case FE_TONEAREST:  return 1;\n"
-                             "    case FE_UPWARD:     return 2;\n"
-                             "    case FE_DOWNWARD:   return 3;\n"
-                             "    default:            return -1;\n"
-                             "    }\n"
-                             "}\n"},
+    {"__cccc_flt_rounds", "#include <fenv.h>\n"
+                          "static int __cccc_flt_rounds(void) {\n"
+                          "    switch (fegetround()) {\n"
+                          "    case FE_TOWARDZERO: return 0;\n"
+                          "    case FE_TONEAREST:  return 1;\n"
+                          "    case FE_UPWARD:     return 2;\n"
+                          "    case FE_DOWNWARD:   return 3;\n"
+                          "    default:            return -1;\n"
+                          "    }\n"
+                          "}\n"},
     // #1052: issignaling(x)/iseqsig(x,y) (include/math.h:530-541) are
     // CCCC-internal _Generic-dispatched macros with no real libc/libm
     // symbol behind them -- same shape as isnan/isinf/etc above, needing a
@@ -4686,34 +4830,45 @@ static const struct {
     // headers above -- iseqsig()'s own call site has no guarantee already
     // reached; #include it directly in the shim text (legal mid-file,
     // harmless if repeated thanks to the header's own include guard).
-    {"__cccc_issignaling_f", "static int __cccc_issignaling_f(float x) {\n"
-                              "    union { float f; unsigned int u; } __v; __v.f = x;\n"
-                              "    unsigned int u = __v.u;\n"
-                              "    return ((u & 0x7F800000U) == 0x7F800000U) && (u & 0x003FFFFFU) != 0 && !(u & 0x00400000U);\n"
-                              "}\n"},
-    {"__cccc_issignaling_d", "static int __cccc_issignaling_d(double x) {\n"
-                              "    union { double d; unsigned long long u; } __v; __v.d = x;\n"
-                              "    unsigned long long u = __v.u;\n"
-                              "    return ((u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (u & 0x0007FFFFFFFFFFFFULL) != 0 && !(u & 0x0008000000000000ULL);\n"
-                              "}\n"},
+    {"__cccc_issignaling_f",
+     "static int __cccc_issignaling_f(float x) {\n"
+     "    union { float f; unsigned int u; } __v; __v.f = x;\n"
+     "    unsigned int u = __v.u;\n"
+     "    return ((u & 0x7F800000U) == 0x7F800000U) && (u & 0x003FFFFFU) != 0 "
+     "&& !(u & 0x00400000U);\n"
+     "}\n"},
+    {"__cccc_issignaling_d",
+     "static int __cccc_issignaling_d(double x) {\n"
+     "    union { double d; unsigned long long u; } __v; __v.d = x;\n"
+     "    unsigned long long u = __v.u;\n"
+     "    return ((u & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (u "
+     "& 0x0007FFFFFFFFFFFFULL) != 0 && !(u & 0x0008000000000000ULL);\n"
+     "}\n"},
     {"__cccc_iseqsig_f", "#include <fenv.h>\n"
-                          "static int __cccc_iseqsig_f(float x, float y) {\n"
-                          "    union { float f; unsigned int u; } __vx, __vy; __vx.f = x; __vy.f = y;\n"
-                          "    unsigned int ux = __vx.u, uy = __vy.u;\n"
-                          "    int sx = ((ux & 0x7F800000U) == 0x7F800000U) && (ux & 0x003FFFFFU) != 0 && !(ux & 0x00400000U);\n"
-                          "    int sy = ((uy & 0x7F800000U) == 0x7F800000U) && (uy & 0x003FFFFFU) != 0 && !(uy & 0x00400000U);\n"
-                          "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
-                          "    return x == y;\n"
-                          "}\n"},
-    {"__cccc_iseqsig_d", "#include <fenv.h>\n"
-                          "static int __cccc_iseqsig_d(double x, double y) {\n"
-                          "    union { double d; unsigned long long u; } __vx, __vy; __vx.d = x; __vy.d = y;\n"
-                          "    unsigned long long ux = __vx.u, uy = __vy.u;\n"
-                          "    int sx = ((ux & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (ux & 0x0007FFFFFFFFFFFFULL) != 0 && !(ux & 0x0008000000000000ULL);\n"
-                          "    int sy = ((uy & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && (uy & 0x0007FFFFFFFFFFFFULL) != 0 && !(uy & 0x0008000000000000ULL);\n"
-                          "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
-                          "    return x == y;\n"
-                          "}\n"},
+                         "static int __cccc_iseqsig_f(float x, float y) {\n"
+                         "    union { float f; unsigned int u; } __vx, __vy; "
+                         "__vx.f = x; __vy.f = y;\n"
+                         "    unsigned int ux = __vx.u, uy = __vy.u;\n"
+                         "    int sx = ((ux & 0x7F800000U) == 0x7F800000U) && "
+                         "(ux & 0x003FFFFFU) != 0 && !(ux & 0x00400000U);\n"
+                         "    int sy = ((uy & 0x7F800000U) == 0x7F800000U) && "
+                         "(uy & 0x003FFFFFU) != 0 && !(uy & 0x00400000U);\n"
+                         "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
+                         "    return x == y;\n"
+                         "}\n"},
+    {"__cccc_iseqsig_d",
+     "#include <fenv.h>\n"
+     "static int __cccc_iseqsig_d(double x, double y) {\n"
+     "    union { double d; unsigned long long u; } __vx, __vy; __vx.d = x; "
+     "__vy.d = y;\n"
+     "    unsigned long long ux = __vx.u, uy = __vy.u;\n"
+     "    int sx = ((ux & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && "
+     "(ux & 0x0007FFFFFFFFFFFFULL) != 0 && !(ux & 0x0008000000000000ULL);\n"
+     "    int sy = ((uy & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && "
+     "(uy & 0x0007FFFFFFFFFFFFULL) != 0 && !(uy & 0x0008000000000000ULL);\n"
+     "    if (sx || sy) feraiseexcept(FE_INVALID);\n"
+     "    return x == y;\n"
+     "}\n"},
     // #1069: include/stdlib.h defines MB_CUR_MAX itself as a call to this
     // shim (`#define MB_CUR_MAX (__cccc_mb_cur_max())`) -- same
     // infinite-recursion trap as FLT_ROUNDS/isnan/etc above, since a
@@ -4744,7 +4899,8 @@ static const struct {
     {"__cccc_mb_cur_max",
 #if defined(__linux__)
      "extern size_t __ctype_get_mb_cur_max(void);\n"
-     "static size_t __cccc_mb_cur_max(void) { return __ctype_get_mb_cur_max(); }\n"
+     "static size_t __cccc_mb_cur_max(void) { return __ctype_get_mb_cur_max(); "
+     "}\n"
 #else
      "extern int __mb_cur_max;\n"
      "static size_t __cccc_mb_cur_max(void) { return (size_t)__mb_cur_max; }\n"
@@ -4754,7 +4910,9 @@ static const struct {
 
 static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
     bool any = false;
-    for (size_t i = 0; i < sizeof(native_accessor_shims) / sizeof(native_accessor_shims[0]); i++) {
+    for (size_t i = 0;
+         i < sizeof(native_accessor_shims) / sizeof(native_accessor_shims[0]);
+         i++) {
         for (Obj *obj = prog; obj; obj = obj->next) {
             if (!obj->is_function || !obj->is_used)
                 continue;
@@ -4780,7 +4938,8 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
 // double-macro stringize idiom so it works with the token being empty (an
 // empty macro argument stringizes to "", not an error). Emitted once, only
 // when some function actually carries an asm label, and ahead of every
-// asm-labeled declaration since it's used there as `asm(__CCCC_ASM_PREFIX__ "name")`.
+// asm-labeled declaration since it's used there as `asm(__CCCC_ASM_PREFIX__
+// "name")`.
 //
 // Deliberately does NOT check obj->is_used: serialize_function_signature
 // prints the asm(...) clause purely off fn->asm_label, with no is_used
@@ -4804,7 +4963,8 @@ static void serialize_asm_prefix_preamble(FILE *f, Obj *prog) {
         return;
     fprintf(f, "#define __cccc_asm_str2(x) #x\n"
                "#define __cccc_asm_str1(x) __cccc_asm_str2(x)\n"
-               "#define __CCCC_ASM_PREFIX__ __cccc_asm_str1(__USER_LABEL_PREFIX__)\n\n");
+               "#define __CCCC_ASM_PREFIX__ "
+               "__cccc_asm_str1(__USER_LABEL_PREFIX__)\n\n");
 }
 
 // #925/#928: new_anon_gvar() (parse.c) and reflect_new_anon_gvar()
@@ -4815,12 +4975,13 @@ static void serialize_asm_prefix_preamble(FILE *f, Obj *prog) {
 // collection/emission pass, so every later `is_string_literal`/dotted-name
 // check sees the final state. Also runs under generated_only (-c=generated):
 // #928 found that reflection API compound-literal/init-struct globals built
-// while running under -c=generated (e.g. a comptime macro calling CompoundLiteral()/
-// InitArray()/InitStruct() at file scope) hit this exact gap when renaming
-// was skipped here -- the emit-event walk's own dotted-name skip (see
-// `obj->name[0] != '.'` further down) only prevented emitting a bogus
+// while running under -c=generated (e.g. a comptime macro calling
+// CompoundLiteral()/ InitArray()/InitStruct() at file scope) hit this exact gap
+// when renaming was skipped here -- the emit-event walk's own dotted-name skip
+// (see `obj->name[0] != '.'` further down) only prevented emitting a bogus
 // reference, it never gave the global a real name or definition.
-static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext *ctx) {
+static void rename_anon_globals(VirtualMachine *vm, Obj *prog,
+                                SerializeContext *ctx) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         // #965: a lifted block literal function (block_literal(), parse.c)
         // is named ".L..N" from the same new_unique_name() counter as a
@@ -4846,9 +5007,10 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog, SerializeContext 
         // literal) -- fall back to a plain "anon" tag rather than
         // splicing the dot into the new name too.
         const char *tag = (obj->display_name && obj->display_name[0] != '.')
-                              ? obj->display_name : "anon";
-        obj->name = arena_format(vm, "__cccc_%s_%d", tag,
-                                 ctx->anon_global_counter++);
+                              ? obj->display_name
+                              : "anon";
+        obj->name =
+            arena_format(vm, "__cccc_%s_%d", tag, ctx->anon_global_counter++);
         // An anonymous global (compound literal or static local) can never
         // be referenced from another translation unit -- internal linkage
         // makes the #918 forward-declaration pass ahead of global
@@ -4924,12 +5086,14 @@ static bool files_are_same(const char *a, const char *b) {
 static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
                                           SerializeContext *ctx) {
     HashMap anchors = {0}; // name -> the non-static Obj* that owns it
-    HashMap claimed = {0}; // name -> first static Obj* claiming it (old semantics)
+    HashMap claimed = {
+        0}; // name -> first static Obj* claiming it (old semantics)
 
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
             continue;
-        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        bool is_defining =
+            obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining)
             continue;
         if (!hashmap_get(&anchors, obj->name))
@@ -4943,7 +5107,8 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         // collide with another TU's same-named one -- a bodyless static
         // function prototype or a tentative (non-defining) declaration
         // prints nothing a host compiler would reject twice.
-        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        bool is_defining =
+            obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining)
             continue;
 
@@ -4969,11 +5134,13 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         // function's own hoisted Obj (#1075's other shape: two distinct
         // same-named nested functions, or a nested one colliding with an
         // outer static of the same name -- both now legal same-file C).
-        const char *first_file = first->tok && first->tok->file ? first->tok->file->name : NULL;
-        const char *this_file = obj->tok && obj->tok->file ? obj->tok->file->name : NULL;
-        bool same_file = files_are_same(first_file, this_file);
+        const char *first_file =
+            first->tok && first->tok->file ? first->tok->file->name : NULL;
+        const char *this_file =
+            obj->tok && obj->tok->file ? obj->tok->file->name : NULL;
+        bool same_file       = files_are_same(first_file, this_file);
         bool nested_involved = (obj->is_nested && !obj->is_block) ||
-                                (first->is_nested && !first->is_block);
+                               (first->is_nested && !first->is_block);
         if (same_file && !nested_involved)
             continue;
         obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
@@ -5050,15 +5217,17 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
                                        SerializeContext *ctx) {
     // One entry per distinct colliding group discovered so far.
     typedef struct {
-        Type *rep;          // representative (first-seen) Type* for this group
-        int name_len;
+        Type *rep;        // representative (first-seen) Type* for this group
+        int   name_len;
         char *name;
-        int first_seen;     // lower = created earlier (creation-order index)
-        bool header_exposed; // a from_include tag/typedef record names this group
-        bool extern_ref;     // an externally-visible definition's type reaches this group
+        int   first_seen; // lower = created earlier (creation-order index)
+        bool  header_exposed; // a from_include tag/typedef record names this
+                              // group
+        bool extern_ref; // an externally-visible definition's type reaches this
+                         // group
     } TagGroup;
-    TagGroup *groups = NULL;
-    int groups_len = 0, groups_cap = 0;
+    TagGroup *groups     = NULL;
+    int       groups_len = 0, groups_cap = 0;
     // Names seen more than once by more than one distinct group -- only
     // these need renaming at all.
     bool *collided = NULL;
@@ -5070,9 +5239,12 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     // tie-break.
     for (int i = ctx->tags_len - 1; i >= 0; i--) {
         TypeName *rec = &ctx->tags[i];
-        if (rec->owner_fn != NULL) // function-local: hoist_local_type_to_file_scope()'s territory
+        if (rec->owner_fn !=
+            NULL) // function-local: hoist_local_type_to_file_scope()'s
+                  // territory
             continue;
-        if (!type_is_complete_tagged(rec->ty)) // an incomplete record must never define/claim a group
+        if (!type_is_complete_tagged(rec->ty)) // an incomplete record must
+                                               // never define/claim a group
             continue;
 
         // A record only ever joins an *existing* group when it names the
@@ -5094,16 +5266,17 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
 
         if (groups_len == groups_cap) {
             groups_cap = groups_cap ? groups_cap * 2 : 8;
-            groups = realloc(groups, sizeof(TagGroup) * groups_cap);
-            collided = realloc(collided, sizeof(bool) * groups_cap);
+            groups     = realloc(groups, sizeof(TagGroup) * groups_cap);
+            collided   = realloc(collided, sizeof(bool) * groups_cap);
         }
-        groups[groups_len].rep = rec->ty;
+        groups[groups_len].rep      = rec->ty;
         groups[groups_len].name_len = rec->name_len;
-        groups[groups_len].name = rec->name;
-        groups[groups_len].first_seen = groups_len; // creation order, since we walk creation-ordered
+        groups[groups_len].name     = rec->name;
+        groups[groups_len].first_seen =
+            groups_len; // creation order, since we walk creation-ordered
         groups[groups_len].header_exposed = false;
-        groups[groups_len].extern_ref = false;
-        collided[groups_len] = false;
+        groups[groups_len].extern_ref     = false;
+        collided[groups_len]              = false;
         groups_len++;
     }
 
@@ -5114,7 +5287,8 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     for (int g1 = 0; g1 < groups_len; g1++)
         for (int g2 = g1 + 1; g2 < groups_len; g2++)
             if (groups[g1].name_len == groups[g2].name_len &&
-                strncmp(groups[g1].name, groups[g2].name, groups[g1].name_len) == 0) {
+                strncmp(groups[g1].name, groups[g2].name,
+                        groups[g1].name_len) == 0) {
                 collided[g1] = true;
                 collided[g2] = true;
             }
@@ -5143,7 +5317,8 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
         if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
             continue;
         for (int g = 0; g < groups_len; g++)
-            if (collided[g] && same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+            if (collided[g] &&
+                same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
                 groups[g].header_exposed = true;
     }
 
@@ -5153,7 +5328,8 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_static)
             continue;
-        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        bool is_defining =
+            obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining || !obj->ty)
             continue;
         for (int g = 0; g < groups_len; g++)
@@ -5166,7 +5342,8 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     // colliding groups, then prefer extern_ref, then lowest first_seen.
     for (int g = 0; g < groups_len; g++) {
         if (!collided[g] || groups[g].rep == NULL)
-            continue; // already resolved as part of an earlier group's pass, or not a collider
+            continue; // already resolved as part of an earlier group's pass, or
+                      // not a collider
 
         // Gather every group sharing this exact name.
         int members[64];
@@ -5174,7 +5351,8 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
         for (int g2 = g; g2 < groups_len && members_len < 64; g2++)
             if (collided[g2] && groups[g2].rep &&
                 groups[g2].name_len == groups[g].name_len &&
-                strncmp(groups[g2].name, groups[g].name, groups[g].name_len) == 0)
+                strncmp(groups[g2].name, groups[g].name, groups[g].name_len) ==
+                    0)
                 members[members_len++] = g2;
         if (members_len < 2)
             continue;
@@ -5203,24 +5381,27 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
         for (int m = 0; m < members_len; m++) {
             int idx = members[m];
             if (idx == keeper) {
-                groups[idx].rep = NULL; // mark resolved, skip on future outer iterations
+                groups[idx].rep =
+                    NULL; // mark resolved, skip on future outer iterations
                 continue;
             }
-            char *new_name = arena_format(vm, "%.*s__cccc_dup%d",
-                                          groups[idx].name_len, groups[idx].name,
-                                          ctx->anon_global_counter++);
-            int new_len = (int)strlen(new_name);
-            Type *victim = groups[idx].rep;
+            char *new_name =
+                arena_format(vm, "%.*s__cccc_dup%d", groups[idx].name_len,
+                             groups[idx].name, ctx->anon_global_counter++);
+            int   new_len = (int)strlen(new_name);
+            Type *victim  = groups[idx].rep;
             for (int i = 0; i < ctx->tags_len; i++)
                 if (same_type_strong(ctx->tags[i].ty, victim)) {
-                    ctx->tags[i].name = new_name;
+                    ctx->tags[i].name     = new_name;
                     ctx->tags[i].name_len = new_len;
                 }
             for (int i = 0; i < ctx->typedefs_len; i++)
-                if (!(ctx->typedefs[i].from_include && !ctx->typedefs[i].always_emit) &&
+                if (!(ctx->typedefs[i].from_include &&
+                      !ctx->typedefs[i].always_emit) &&
                     same_type_strong(ctx->typedefs[i].ty, victim))
-                    ctx->typedefs[i].name = new_name, ctx->typedefs[i].name_len = new_len;
-            groups[idx].rep = NULL; // mark resolved
+                    ctx->typedefs[i].name     = new_name,
+                    ctx->typedefs[i].name_len = new_len;
+            groups[idx].rep  = NULL; // mark resolved
             ctx->tag_renamed = true;
         }
     }
@@ -5263,9 +5444,9 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
                                             SerializeContext *ctx) {
     typedef struct {
         Type *rep;
-        int first_seen;
-        bool header_exposed;
-        bool extern_ref;
+        int   first_seen;
+        bool  header_exposed;
+        bool  extern_ref;
         // #1017: the from_include record's file_path, captured alongside
         // header_exposed below -- names the header in the residual warning
         // when this group collides with an un-renameable Obj. May stay NULL
@@ -5273,8 +5454,8 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         // warning falls back to not naming a header.
         const char *header_path;
     } EnumGroup;
-    EnumGroup *groups = NULL;
-    int groups_len = 0, groups_cap = 0;
+    EnumGroup *groups     = NULL;
+    int        groups_len = 0, groups_cap = 0;
 
     // #1016: neither this pass nor rename_colliding_type_tags()/
     // rename_colliding_static_names() looks at the other's namespace, but C
@@ -5306,11 +5487,12 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
     // common index -- used only as a last-resort tie-break, the same rigor
     // rename_colliding_type_tags() itself relies on for its own first_seen).
     for (int pass = 0; pass < 2; pass++) {
-        TypeName *recs = pass == 0 ? ctx->tags : ctx->typedefs;
-        int recs_len = pass == 0 ? ctx->tags_len : ctx->typedefs_len;
+        TypeName *recs     = pass == 0 ? ctx->tags : ctx->typedefs;
+        int       recs_len = pass == 0 ? ctx->tags_len : ctx->typedefs_len;
         for (int i = recs_len - 1; i >= 0; i--) {
             TypeName *rec = &recs[i];
-            if (rec->owner_fn != NULL) // function-local: not this pass's concern
+            if (rec->owner_fn !=
+                NULL) // function-local: not this pass's concern
                 continue;
             if (!rec->ty || rec->ty->kind != TY_ENUM)
                 continue;
@@ -5328,13 +5510,13 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
 
             if (groups_len == groups_cap) {
                 groups_cap = groups_cap ? groups_cap * 2 : 8;
-                groups = realloc(groups, sizeof(EnumGroup) * groups_cap);
+                groups     = realloc(groups, sizeof(EnumGroup) * groups_cap);
             }
-            groups[groups_len].rep = rec->ty;
-            groups[groups_len].first_seen = groups_len;
+            groups[groups_len].rep            = rec->ty;
+            groups[groups_len].first_seen     = groups_len;
             groups[groups_len].header_exposed = false;
-            groups[groups_len].extern_ref = false;
-            groups[groups_len].header_path = NULL;
+            groups[groups_len].extern_ref     = false;
+            groups[groups_len].header_path    = NULL;
             groups_len++;
         }
     }
@@ -5375,7 +5557,8 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_static)
             continue;
-        bool is_defining = obj->is_function ? obj->body != NULL : obj->is_definition;
+        bool is_defining =
+            obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining || !obj->ty)
             continue;
         for (int g = 0; g < groups_len; g++)
@@ -5385,10 +5568,11 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
 
     // Every distinct enumerator name declared by at least one group,
     // resolved exactly once below.
-    char **names = NULL;
-    int names_len = 0, names_cap = 0;
+    char **names     = NULL;
+    int    names_len = 0, names_cap = 0;
     for (int g = 0; g < groups_len; g++)
-        for (EnumConstant *ec = groups[g].rep->enum_constants; ec; ec = ec->next) {
+        for (EnumConstant *ec = groups[g].rep->enum_constants; ec;
+             ec               = ec->next) {
             if (!ec->name)
                 continue;
             bool seen = false;
@@ -5401,7 +5585,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
                 continue;
             if (names_len == names_cap) {
                 names_cap = names_cap ? names_cap * 2 : 16;
-                names = realloc(names, sizeof(char *) * names_cap);
+                names     = realloc(names, sizeof(char *) * names_cap);
             }
             names[names_len++] = ec->name;
         }
@@ -5413,7 +5597,8 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         int members[64];
         int members_len = 0;
         for (int g = 0; g < groups_len && members_len < 64; g++) {
-            for (EnumConstant *ec = groups[g].rep->enum_constants; ec; ec = ec->next)
+            for (EnumConstant *ec = groups[g].rep->enum_constants; ec;
+                 ec               = ec->next)
                 if (ec->name && strcmp(ec->name, name) == 0) {
                     members[members_len++] = g;
                     break;
@@ -5475,31 +5660,41 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
             if (obj_collision && groups[idx].header_exposed) {
                 if (colliding_obj->tok) {
                     if (groups[idx].header_path)
-                        warn_tok(vm, colliding_obj->tok, CCCC_WARN_NATIVE_NAME_COLLISION,
-                                "enumerator '%s' is declared by an enum reached through a "
-                                "replayed #include ('%s') and cannot be renamed; the "
-                                "file-scope '%s' declared here cannot be renamed either, "
-                                "so the generated C will not compile",
-                                name, groups[idx].header_path, name);
+                        warn_tok(vm, colliding_obj->tok,
+                                 CCCC_WARN_NATIVE_NAME_COLLISION,
+                                 "enumerator '%s' is declared by an enum "
+                                 "reached through a "
+                                 "replayed #include ('%s') and cannot be "
+                                 "renamed; the "
+                                 "file-scope '%s' declared here cannot be "
+                                 "renamed either, "
+                                 "so the generated C will not compile",
+                                 name, groups[idx].header_path, name);
                     else
-                        warn_tok(vm, colliding_obj->tok, CCCC_WARN_NATIVE_NAME_COLLISION,
-                                "enumerator '%s' is declared by an enum reached through a "
-                                "replayed #include and cannot be renamed; the file-scope "
-                                "'%s' declared here cannot be renamed either, so the "
-                                "generated C will not compile",
-                                name, name);
+                        warn_tok(vm, colliding_obj->tok,
+                                 CCCC_WARN_NATIVE_NAME_COLLISION,
+                                 "enumerator '%s' is declared by an enum "
+                                 "reached through a "
+                                 "replayed #include and cannot be renamed; the "
+                                 "file-scope "
+                                 "'%s' declared here cannot be renamed either, "
+                                 "so the "
+                                 "generated C will not compile",
+                                 name, name);
                 }
                 continue;
             }
             char *new_name = arena_format(vm, "%s__cccc_dup%d", name,
                                           ctx->anon_global_counter++);
             if (ctx->enum_renames_len >= ctx->enum_renames_cap) {
-                ctx->enum_renames_cap = ctx->enum_renames_cap ? ctx->enum_renames_cap * 2 : 8;
-                ctx->enum_renames = realloc(ctx->enum_renames,
-                                            sizeof(EnumConstRename) * ctx->enum_renames_cap);
+                ctx->enum_renames_cap =
+                    ctx->enum_renames_cap ? ctx->enum_renames_cap * 2 : 8;
+                ctx->enum_renames =
+                    realloc(ctx->enum_renames,
+                            sizeof(EnumConstRename) * ctx->enum_renames_cap);
             }
-            ctx->enum_renames[ctx->enum_renames_len].rep = groups[idx].rep;
-            ctx->enum_renames[ctx->enum_renames_len].orig = (char *)name;
+            ctx->enum_renames[ctx->enum_renames_len].rep      = groups[idx].rep;
+            ctx->enum_renames[ctx->enum_renames_len].orig     = (char *)name;
             ctx->enum_renames[ctx->enum_renames_len].new_name = new_name;
             ctx->enum_renames_len++;
         }
@@ -5517,7 +5712,8 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
 // unchanged when nothing was renamed for this (ty, name) pair, so a
 // program with no enumerator collision serializes byte-identically to
 // before this pass existed.
-static const char *enum_const_spelling(SerializeContext *ctx, Type *ty, const char *name) {
+static const char *enum_const_spelling(SerializeContext *ctx, Type *ty,
+                                       const char *name) {
     if (!name)
         return name;
     for (int i = 0; i < ctx->enum_renames_len; i++)
@@ -5530,12 +5726,13 @@ static const char *enum_const_spelling(SerializeContext *ctx, Type *ty, const ch
 // #953: hashmap_foreach callback collecting emit_include_paths' values
 // (resolved paths of auto-captured #include directives) into
 // ctx->captured_paths for path_is_captured() to scan.
-static int collect_captured_path(char *key, int keylen, void *val, void *user_data) {
+static int collect_captured_path(char *key, int keylen, void *val,
+                                 void *user_data) {
     (void)key;
     (void)keylen;
     SerializeContext *ctx = user_data;
-    ctx->captured_paths = realloc(ctx->captured_paths,
-                                  sizeof(char *) * (ctx->captured_paths_len + 1));
+    ctx->captured_paths   = realloc(
+        ctx->captured_paths, sizeof(char *) * (ctx->captured_paths_len + 1));
     ctx->captured_paths[ctx->captured_paths_len++] = val;
     return 0;
 }
@@ -5609,14 +5806,15 @@ static bool has_colliding_user_decl(VirtualMachine *vm, Obj *prog,
     return false;
 }
 
-static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog) {
+static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm,
+                                          Obj *prog) {
     SynthLibcDeclArray *reg = &vm->compiler.synth_libc_decls;
-    const char *emitted[32];
-    int emitted_len = 0;
-    bool any = false;
+    const char         *emitted[32];
+    int                 emitted_len = 0;
+    bool                any         = false;
     for (int i = 0; i < reg->len; i++) {
-        SynthLibcDecl *entry = &reg->data[i];
-        bool called = false;
+        SynthLibcDecl *entry  = &reg->data[i];
+        bool           called = false;
         for (Obj *obj = prog; obj && !called; obj = obj->next) {
             if (!obj->is_function || !obj->body)
                 continue;
@@ -5669,10 +5867,13 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm, Obj *prog
 // This also matches VM semantics exactly: the VM's own SETJMP/LONGJMP
 // opcodes never touch a signal mask (ops.c), the same behavior `_setjmp`/
 // `_longjmp` document (parse_decl.c's own comment on this).
-static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm, Obj *prog) {
+static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
+                                         Obj *prog) {
     Obj *family[4] = {
-        vm->compiler.builtin_setjmp, vm->compiler.builtin_longjmp,
-        vm->compiler.builtin__setjmp, vm->compiler.builtin__longjmp,
+        vm->compiler.builtin_setjmp,
+        vm->compiler.builtin_longjmp,
+        vm->compiler.builtin__setjmp,
+        vm->compiler.builtin__longjmp,
     };
     bool used = false;
     for (Obj *obj = prog; obj && !used; obj = obj->next) {
@@ -5685,7 +5886,8 @@ static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm, Obj *prog)
     if (!used)
         return;
     fprintf(f, "extern int _setjmp(void *);\n");
-    fprintf(f, "extern void _longjmp(void *, int) __attribute__((noreturn));\n\n");
+    fprintf(f,
+            "extern void _longjmp(void *, int) __attribute__((noreturn));\n\n");
 }
 
 // #1068: real-floating -> non-floating cast helpers, emitted on demand for
@@ -5717,23 +5919,28 @@ static const char *const f2i64_def =
     "static long long __cccc_f2i64(double x) {\n"
     "#pragma STDC FENV_ACCESS ON\n"
     "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
-    "    if (x >= 9223372036854775808.0) { feraiseexcept(FE_INVALID); return 9223372036854775807LL; }\n"
-    "    if (x < -9223372036854775808.0) { feraiseexcept(FE_INVALID); return (-9223372036854775807LL - 1); }\n"
+    "    if (x >= 9223372036854775808.0) { feraiseexcept(FE_INVALID); return "
+    "9223372036854775807LL; }\n"
+    "    if (x < -9223372036854775808.0) { feraiseexcept(FE_INVALID); return "
+    "(-9223372036854775807LL - 1); }\n"
     "    return (long long)x;\n"
     "}\n";
 static const char *const f2i64_f32_def =
     "static long long __cccc_f2i64_f32(float x) {\n"
     "#pragma STDC FENV_ACCESS ON\n"
     "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
-    "    if (x >= 9223372036854775808.0f) { feraiseexcept(FE_INVALID); return 9223372036854775807LL; }\n"
-    "    if (x < -9223372036854775808.0f) { feraiseexcept(FE_INVALID); return (-9223372036854775807LL - 1); }\n"
+    "    if (x >= 9223372036854775808.0f) { feraiseexcept(FE_INVALID); return "
+    "9223372036854775807LL; }\n"
+    "    if (x < -9223372036854775808.0f) { feraiseexcept(FE_INVALID); return "
+    "(-9223372036854775807LL - 1); }\n"
     "    return (long long)x;\n"
     "}\n";
 static const char *const f2u64_def =
     "static unsigned long long __cccc_f2u64(double x) {\n"
     "#pragma STDC FENV_ACCESS ON\n"
     "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
-    "    if (x >= 18446744073709551616.0) { feraiseexcept(FE_INVALID); return 0xFFFFFFFFFFFFFFFFULL; }\n"
+    "    if (x >= 18446744073709551616.0) { feraiseexcept(FE_INVALID); return "
+    "0xFFFFFFFFFFFFFFFFULL; }\n"
     "    if (x <= -1.0) { feraiseexcept(FE_INVALID); return 0; }\n"
     "    unsigned long long r = (unsigned long long)x;\n"
     "    feclearexcept(FE_INVALID);\n"
@@ -5743,7 +5950,8 @@ static const char *const f2u64_f32_def =
     "static unsigned long long __cccc_f2u64_f32(float x) {\n"
     "#pragma STDC FENV_ACCESS ON\n"
     "    if (x != x) { feraiseexcept(FE_INVALID); return 0; }\n"
-    "    if (x >= 18446744073709551616.0f) { feraiseexcept(FE_INVALID); return 0xFFFFFFFFFFFFFFFFULL; }\n"
+    "    if (x >= 18446744073709551616.0f) { feraiseexcept(FE_INVALID); return "
+    "0xFFFFFFFFFFFFFFFFULL; }\n"
     "    if (x <= -1.0f) { feraiseexcept(FE_INVALID); return 0; }\n"
     "    unsigned long long r = (unsigned long long)x;\n"
     "    feclearexcept(FE_INVALID);\n"
@@ -5767,7 +5975,8 @@ static void node_scan_f2i_native(Node *node, F2ISynthNeed *need) {
         if (src && dst && is_flonum(src) && !is_flonum(dst) &&
             dst->kind != TY_VECTOR &&
             !(dst->kind == TY_BITINT && dst->bit_width > 64)) {
-            bool u64_dst = is_integer(dst) && dst->is_unsigned && dst->size == 8;
+            bool u64_dst =
+                is_integer(dst) && dst->is_unsigned && dst->size == 8;
             bool f32_src = src->kind == TY_FLOAT;
             if (u64_dst && f32_src)
                 need->want_u64_f32 = true;
@@ -5798,7 +6007,8 @@ static void serialize_synth_f2i_helpers(FILE *f, Obj *prog) {
             continue;
         node_scan_f2i_native(obj->body, &need);
     }
-    if (!need.want_i64 && !need.want_i64_f32 && !need.want_u64 && !need.want_u64_f32)
+    if (!need.want_i64 && !need.want_i64_f32 && !need.want_u64 &&
+        !need.want_u64_f32)
         return;
     fprintf(f, "#include <fenv.h>\n\n");
     if (need.want_i64)
@@ -5828,14 +6038,20 @@ static void serialize_synth_f2i_helpers(FILE *f, Obj *prog) {
 // stddef.h). nullptr_t excluded (C23-only, typeof(nullptr)-defined, no
 // repro); stdint.h's fixed-width names left for their own ticket if a repro
 // turns up.
-static const struct { const char *name; const char *header; } synth_typedef_headers[] = {
+static const struct {
+    const char *name;
+    const char *header;
+} synth_typedef_headers[] = {
     {"size_t", "stddef.h"},
     {"ptrdiff_t", "stddef.h"},
     {"wchar_t", "stddef.h"},
 };
 
-static const char *synth_typedef_header_for_name(const char *name, int name_len) {
-    for (size_t i = 0; i < sizeof(synth_typedef_headers) / sizeof(synth_typedef_headers[0]); i++) {
+static const char *synth_typedef_header_for_name(const char *name,
+                                                 int         name_len) {
+    for (size_t i = 0;
+         i < sizeof(synth_typedef_headers) / sizeof(synth_typedef_headers[0]);
+         i++) {
         const char *cand = synth_typedef_headers[i].name;
         if ((int)strlen(cand) == name_len && !strncmp(cand, name, name_len))
             return synth_typedef_headers[i].header;
@@ -5852,7 +6068,8 @@ static const char *synth_typedef_header_for_name(const char *name, int name_len)
 // which ordinary function's Type this is being checked against. This is only
 // asking "does *any* recorded typedef, anywhere, identify this exact Type,"
 // which is scope-independent.
-static TypeName *find_typedef_record_any_scope(SerializeContext *ctx, Type *ty) {
+static TypeName *find_typedef_record_any_scope(SerializeContext *ctx,
+                                               Type             *ty) {
     if (!ctx || !ty)
         return NULL;
     for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
@@ -5901,7 +6118,8 @@ static bool type_needs_synth_typedef_header(SerializeContext *ctx, Type *ty,
         return false;
     TypeName *tn = find_typedef_record_any_scope(ctx, ty);
     if (tn && typedef_alias_header_suppressed(ctx, tn)) {
-        const char *want = synth_typedef_header_for_name(tn->name, tn->name_len);
+        const char *want =
+            synth_typedef_header_for_name(tn->name, tn->name_len);
         if (want && !strcmp(want, header) &&
             !has_colliding_user_typedef(ctx, tn->name, tn->name_len))
             return true;
@@ -5935,11 +6153,14 @@ static bool node_needs_synth_typedef_header(SerializeContext *ctx, Node *node,
         return false;
     if (type_needs_synth_typedef_header(ctx, node->ty, header, seen))
         return true;
-    if (node->var && type_needs_synth_typedef_header(ctx, node->var->ty, header, seen))
+    if (node->var &&
+        type_needs_synth_typedef_header(ctx, node->var->ty, header, seen))
         return true;
-    if (node->member && type_needs_synth_typedef_header(ctx, node->member->ty, header, seen))
+    if (node->member &&
+        type_needs_synth_typedef_header(ctx, node->member->ty, header, seen))
         return true;
-    if (node->func_ty && type_needs_synth_typedef_header(ctx, node->func_ty, header, seen))
+    if (node->func_ty &&
+        type_needs_synth_typedef_header(ctx, node->func_ty, header, seen))
         return true;
 
     return node_needs_synth_typedef_header(ctx, node->lhs, header, seen) ||
@@ -5970,13 +6191,16 @@ static bool obj_needs_synth_typedef_header(SerializeContext *ctx, Obj *obj,
     return node_needs_synth_typedef_header(ctx, obj->body, header, seen);
 }
 
-static void serialize_synth_typedef_includes(FILE *f, SerializeContext *ctx, Obj *prog) {
+static void serialize_synth_typedef_includes(FILE *f, SerializeContext *ctx,
+                                             Obj *prog) {
     const char *emitted[8];
-    int emitted_len = 0;
-    bool any = false;
-    for (size_t i = 0; i < sizeof(synth_typedef_headers) / sizeof(synth_typedef_headers[0]); i++) {
-        const char *header = synth_typedef_headers[i].header;
-        bool already = false;
+    int         emitted_len = 0;
+    bool        any         = false;
+    for (size_t i = 0;
+         i < sizeof(synth_typedef_headers) / sizeof(synth_typedef_headers[0]);
+         i++) {
+        const char *header  = synth_typedef_headers[i].header;
+        bool        already = false;
         for (int j = 0; j < emitted_len; j++)
             if (!strcmp(emitted[j], header)) {
                 already = true;
@@ -6084,23 +6308,24 @@ static bool nested_var_is_own(Obj *fn, Obj *var) {
 }
 
 // #1074: find (or, on first use, create) `owner`'s NestedEnvEntry.
-static NestedEnvEntry *find_or_create_nested_env(VirtualMachine *vm,
+static NestedEnvEntry *find_or_create_nested_env(VirtualMachine   *vm,
                                                  SerializeContext *ctx,
-                                                 Obj *owner) {
+                                                 Obj              *owner) {
     for (int i = 0; i < ctx->nested_envs_len; i++)
         if (ctx->nested_envs[i].owner_fn == owner)
             return &ctx->nested_envs[i];
     if (ctx->nested_envs_len == ctx->nested_envs_cap) {
-        ctx->nested_envs_cap = ctx->nested_envs_cap ? ctx->nested_envs_cap * 2 : 8;
-        ctx->nested_envs = realloc(ctx->nested_envs,
-                                   sizeof(NestedEnvEntry) * ctx->nested_envs_cap);
+        ctx->nested_envs_cap =
+            ctx->nested_envs_cap ? ctx->nested_envs_cap * 2 : 8;
+        ctx->nested_envs = realloc(ctx->nested_envs, sizeof(NestedEnvEntry) *
+                                                         ctx->nested_envs_cap);
     }
-    NestedEnvEntry *e = &ctx->nested_envs[ctx->nested_envs_len++];
-    e->owner_fn = owner;
+    NestedEnvEntry *e  = &ctx->nested_envs[ctx->nested_envs_len++];
+    e->owner_fn        = owner;
     e->env_struct_name = arena_format(vm, "struct __cccc_nenv_%s", owner->name);
-    e->upvars = NULL;
-    e->upvars_len = 0;
-    e->upvars_cap = 0;
+    e->upvars          = NULL;
+    e->upvars_len      = 0;
+    e->upvars_cap      = 0;
     return e;
 }
 
@@ -6112,8 +6337,8 @@ static int add_nested_upvar(Obj ***upvars_out, int *len, int *cap, Obj *var) {
         if (upvars[i] == var)
             return i;
     if (*len == *cap) {
-        *cap = *cap ? *cap * 2 : 4;
-        upvars = realloc(upvars, sizeof(Obj *) * (*cap));
+        *cap        = *cap ? *cap * 2 : 4;
+        upvars      = realloc(upvars, sizeof(Obj *) * (*cap));
         *upvars_out = upvars;
     }
     upvars[*len] = var;
@@ -6133,7 +6358,10 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
                                 Obj *fn, Node *node, Obj *var) {
     Obj *owner = NULL;
     for (Obj *anc = fn->parent_fn; anc; anc = anc->parent_fn) {
-        if (nested_var_is_own(anc, var)) { owner = anc; break; }
+        if (nested_var_is_own(anc, var)) {
+            owner = anc;
+            break;
+        }
     }
     if (!owner)
         return; // defensive only -- the real scope chain guarantees this
@@ -6159,7 +6387,8 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
                   "cannot serialize to native code: pointer-to-VLA local "
                   "'%s', read by a nested function, is declared too late "
                   "for the static-link environment to capture its address "
-                  "(#1074)", var->name);
+                  "(#1074)",
+                  var->name);
         return;
     }
     // #965: a __block-storage local's own C storage is already a pointer
@@ -6170,7 +6399,8 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
         error_tok(vm, node->tok ? node->tok : fn->tok,
                   "cannot serialize to native code: __block-storage local "
                   "'%s' cannot also be captured by a nested function's "
-                  "static link (#1074)", var->name);
+                  "static link (#1074)",
+                  var->name);
         return;
     }
 
@@ -6216,7 +6446,8 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
                           "direct callee of a call to it -- its native "
                           "signature carries a hidden static-link "
                           "parameter, so it has no portable function-"
-                          "pointer type (#1074)", node->var->name);
+                          "pointer type (#1074)",
+                          node->var->name);
         }
 
         // #1074 follow-up: a block literal directly inside a genuinely
@@ -6241,14 +6472,16 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
                               "literal inside a nested function capturing "
                               "'%s', a variable owned by one of that "
                               "function's own ancestors, is not supported "
-                              "(#1074 follow-up)", cap->name);
+                              "(#1074 follow-up)",
+                              cap->name);
             }
         }
 
         bool lhs_is_direct_nested_call =
-            node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
-            node->lhs->var && node->lhs->var->is_function &&
-            node->lhs->var->is_nested && !node->lhs->var->is_block;
+            node->kind == ND_FUNCALL && node->lhs &&
+            node->lhs->kind == ND_VAR && node->lhs->var &&
+            node->lhs->var->is_function && node->lhs->var->is_nested &&
+            !node->lhs->var->is_block;
         if (!lhs_is_direct_nested_call)
             collect_nested_refs(vm, ctx, fn, node->lhs);
         collect_nested_refs(vm, ctx, fn, node->rhs);
@@ -6327,7 +6560,8 @@ static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
             char field_name[16];
             snprintf(field_name, sizeof(field_name), "__uv%d", j);
             fprintf(f, "    ");
-            serialize_type_decl(f, ctx, pointer_to(vm, e->upvars[j]->ty), field_name);
+            serialize_type_decl(f, ctx, pointer_to(vm, e->upvars[j]->ty),
+                                field_name);
             fprintf(f, ";\n");
         }
         fprintf(f, "};\n\n");
@@ -6370,9 +6604,9 @@ static void free_nested_envs(SerializeContext *ctx) {
 // alone; the env-struct loop (and its #989 hoist pass) still only makes
 // sense when there's an actual block literal to describe, so those stay
 // gated on `any_block`.
-static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                                     Obj *prog) {
-    bool any_block = false;
+static void serialize_block_preamble(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Obj *prog) {
+    bool any_block       = false;
     bool uses_block_type = false;
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_function && obj->is_block)
@@ -6388,16 +6622,18 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
     // ordinary (non-macro-generated) function never reaches the output, so
     // scanning it here would emit a copy-impl/free declaration nothing
     // actually calls.
-    bool copy_used = false;
+    bool copy_used    = false;
     bool release_used = false;
-    for (Obj *obj = prog; obj && (!copy_used || !release_used); obj = obj->next) {
+    for (Obj *obj = prog; obj && (!copy_used || !release_used);
+         obj      = obj->next) {
         if (!obj->is_function || !obj->body)
             continue;
         bool reachable = !ctx->generated_only || obj->is_macro_generated;
         if (!reachable)
             continue;
         if (!copy_used && vm->compiler.builtin_block_copy)
-            copy_used = node_calls_obj(obj->body, vm->compiler.builtin_block_copy);
+            copy_used =
+                node_calls_obj(obj->body, vm->compiler.builtin_block_copy);
         if (!release_used && vm->compiler.builtin_free)
             release_used = node_calls_obj(obj->body, vm->compiler.builtin_free);
     }
@@ -6438,7 +6674,7 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
     }
 
     static const char *BLOCK_FN_PREFIX = "__cccc_block_";
-    size_t prefix_len = strlen(BLOCK_FN_PREFIX);
+    size_t             prefix_len      = strlen(BLOCK_FN_PREFIX);
 
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || !obj->is_block)
@@ -6447,8 +6683,10 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
         // obj->name was rewritten to "__cccc_block_<N>" by
         // rename_anon_globals() just above -- reuse its numeric suffix so
         // the env struct name pairs with it without extra state.
-        const char *suffix = (strncmp(obj->name, BLOCK_FN_PREFIX, prefix_len) == 0)
-                                 ? obj->name + prefix_len : obj->name;
+        const char *suffix =
+            (strncmp(obj->name, BLOCK_FN_PREFIX, prefix_len) == 0)
+                ? obj->name + prefix_len
+                : obj->name;
         char *env_name = arena_format(vm, "struct __cccc_block_env_%s", suffix);
 
         fprintf(f, "%s {\n    void *__invoke;\n    long __size;\n", env_name);
@@ -6460,7 +6698,8 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
             // renaming on collision) by the loop above, before this one
             // runs -- see hoist_local_type_to_file_scope(). Previously
             // (#965) this was a hard error; the fix landed here.
-            Type *field_ty = cap->is_block_var ? pointer_to(vm, cap->ty) : cap->ty;
+            Type *field_ty =
+                cap->is_block_var ? pointer_to(vm, cap->ty) : cap->ty;
             char field_name[32];
             snprintf(field_name, sizeof(field_name), "__cap%d", i);
             fprintf(f, "    ");
@@ -6470,11 +6709,12 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
         fprintf(f, "};\n\n");
 
         if (ctx->block_envs_len == ctx->block_envs_cap) {
-            ctx->block_envs_cap = ctx->block_envs_cap ? ctx->block_envs_cap * 2 : 8;
-            ctx->block_envs = realloc(ctx->block_envs,
-                                      sizeof(BlockEnvEntry) * ctx->block_envs_cap);
+            ctx->block_envs_cap =
+                ctx->block_envs_cap ? ctx->block_envs_cap * 2 : 8;
+            ctx->block_envs = realloc(ctx->block_envs, sizeof(BlockEnvEntry) *
+                                                           ctx->block_envs_cap);
         }
-        ctx->block_envs[ctx->block_envs_len].block_fn = obj;
+        ctx->block_envs[ctx->block_envs_len].block_fn        = obj;
         ctx->block_envs[ctx->block_envs_len].env_struct_name = env_name;
         ctx->block_envs_len++;
     }
@@ -6482,12 +6722,12 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm, SerializeConte
 emit_copy_and_free:
     if (copy_used) {
         fprintf(f,
-            "static void *__cccc_block_copy_impl(void *__d) {\n"
-            "    long __n = ((struct __cccc_block *)__d)->__size;\n"
-            "    void *__c = __builtin_malloc((unsigned long)__n);\n"
-            "    if (__c) __builtin_memcpy(__c, __d, (unsigned long)__n);\n"
-            "    return __c;\n"
-            "}\n\n");
+                "static void *__cccc_block_copy_impl(void *__d) {\n"
+                "    long __n = ((struct __cccc_block *)__d)->__size;\n"
+                "    void *__c = __builtin_malloc((unsigned long)__n);\n"
+                "    if (__c) __builtin_memcpy(__c, __d, (unsigned long)__n);\n"
+                "    return __c;\n"
+                "}\n\n");
     }
     // #990: vm->compiler.builtin_free is a synthesized `free` prototype
     // with no obj->tok (parse.c's Block_release path falls back to it when
@@ -6536,8 +6776,8 @@ static bool file_is_command_line_input(VirtualMachine *vm, const char *name) {
     return cc_file_is_command_line_input(vm, name);
 }
 
-static bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
-                                        Obj *obj) {
+static bool function_is_header_supplied(VirtualMachine   *vm,
+                                        SerializeContext *ctx, Obj *obj) {
     if (!obj->is_static || !obj->body || obj->is_macro_generated)
         return false;
     Token *t = obj->tok;
@@ -6612,20 +6852,22 @@ static bool line_is_conditional_directive(const char *line) {
     return false;
 }
 
-void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated_only) {
+void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
+                          bool generated_only) {
     if (!f || !prog)
         return;
 
     SerializeContext ctx = {.generated_only = generated_only,
-                           .emit_strict = vm->compiler.emit_strict != 0,
-                           .emit_cccc = vm->compiler.emit_cccc,
-                           .vm = vm};
+                            .emit_strict    = vm->compiler.emit_strict != 0,
+                            .emit_cccc      = vm->compiler.emit_cccc,
+                            .vm             = vm};
     if (generated_only)
-        hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path, &ctx);
+        hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path,
+                        &ctx);
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
-    rename_colliding_static_names(vm, prog, &ctx); // #1002
-    rename_colliding_type_tags(vm, prog, &ctx); // #1014
+    rename_colliding_static_names(vm, prog, &ctx);   // #1002
+    rename_colliding_type_tags(vm, prog, &ctx);      // #1014
     rename_colliding_enum_constants(vm, prog, &ctx); // #1015
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
@@ -6696,7 +6938,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             if (ev->kind != CCCC_EMIT_OBJECT)
                 continue;
             Obj *obj = ev->obj;
-            if (!obj || !obj->is_macro_generated || obj->is_function || obj->name[0] == '.')
+            if (!obj || !obj->is_macro_generated || obj->is_function ||
+                obj->name[0] == '.')
                 continue;
             // #1023: see type_needs_anon_aggregate's comment on the #918
             // loop below -- an untagged, alias-less struct/union global
@@ -6785,17 +7028,18 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     // routing syntax (@comptime/@shared/@emit/@build/@test, or the
     // [[cccc::...]] spellings) is never re-emitted here -- a downstream
     // system compiler opening that file directly would choke on syntax it
-    // doesn't understand (see run_native_backend, main.c). serialize_typedef_alias
-    // / serialize_type_defs_for_owner compensate by no longer treating that
-    // file's types as from_include, so their definitions are still emitted
-    // below instead of being silently dropped.
+    // doesn't understand (see run_native_backend, main.c).
+    // serialize_typedef_alias / serialize_type_defs_for_owner compensate by no
+    // longer treating that file's types as from_include, so their definitions
+    // are still emitted below instead of being silently dropped.
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
-        char *line = vm->compiler.emit_directives.data[i];
+        char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
         // --emit-cccc: re-emit cccc-only includes too -- the caller has
         // opted into dialect-fidelity output, so a downstream reader is
         // expected to understand the routing syntax those files carry.
-        if (!vm->compiler.emit_cccc && resolved && cc_file_is_cccc_only(vm, resolved)) {
+        if (!vm->compiler.emit_cccc && resolved &&
+            cc_file_is_cccc_only(vm, resolved)) {
             // #1003: <decimal_math.h>'s static inline wrappers all bottom
             // out in `extern __cccc_dec_*` symbols that exist only inside
             // the VM's FFI runtime (src/stdlib/decimal_math.c) -- unlike
@@ -6883,7 +7127,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         serialize_native_accessor_shims(f, prog);
     serialize_asm_prefix_preamble(f, prog);
 
-    // Serialize file-scope type definitions before declarations that reference them.
+    // Serialize file-scope type definitions before declarations that reference
+    // them.
     serialize_type_defs_for_owner(f, &ctx, NULL);
 
     // #965/#993: see the comment on the generated_only branch's own call
@@ -7032,7 +7277,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
                 // primary_file-only comparison -- see that function's
                 // comment. Variable renamed from from_primary to
                 // from_input to match.
-                bool from_input = t && t->file &&
+                bool from_input =
+                    t && t->file &&
                     (file_is_command_line_input(vm, t->file->name) ||
                      cc_file_is_cccc_only(vm, t->file->name));
                 if (!from_input)
@@ -7062,4 +7308,3 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
     free(ctx.emitted_defs.data);
     free(ctx.enum_renames); // #1016: was missing from this list
 }
-

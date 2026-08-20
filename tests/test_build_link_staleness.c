@@ -1,6 +1,6 @@
-// CCCC_FLAGS: --build --build-cache=build/test_link_staleness_cache --build-out-dir=build/test_link_staleness_out
-// CCCC_EXPECT_STDOUT: \(up to date\) linkstale_app
-// CCCC_EXPECT_STDOUT: link_staleness_ok
+// CCCC_FLAGS: --build --build-cache=build/test_link_staleness_cache
+// --build-out-dir=build/test_link_staleness_out CCCC_EXPECT_STDOUT: \(up to
+// date\) linkstale_app CCCC_EXPECT_STDOUT: link_staleness_ok
 //
 // #851: link-step staleness. Only kind=bytecode targets had any incremental
 // check at the link/archive step before this; a native EXE relinked
@@ -27,16 +27,20 @@ int build_main(Builder *ctx) {
     AddSource(app, "examples/build_demo/src/lib/sum.c");
     AddInclude(app, "examples/build_demo/include");
 
-    if (Build(ctx, app) != 0) return 1;
+    if (Build(ctx, app) != 0)
+        return 1;
 
     const char *binpath = TargetOutput(app);
     struct stat st1;
-    if (stat(binpath, &st1) != 0) return 1;
+    if (stat(binpath, &st1) != 0)
+        return 1;
 
-    if (Build(ctx, app) != 0) return 1;
+    if (Build(ctx, app) != 0)
+        return 1;
 
     struct stat st2;
-    if (stat(binpath, &st2) != 0) return 1;
+    if (stat(binpath, &st2) != 0)
+        return 1;
 
     if (ST_MTIME(st2) != ST_MTIME(st1)) {
         printf("FAIL: binary relinked when nothing changed\n");

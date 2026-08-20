@@ -3,13 +3,14 @@
 // CCCC_EXPECT_STDOUT: int generated_attr_target\(void\);
 // CCCC_REJECT_STDOUT: @emit
 // CCCC_REJECT_STDOUT: @comptime
-#include @emit <stddef.h>
+#include @emit < stddef.h>
 
-@comptime
-void gen(void) {
+@comptime void gen(void) {
     PublishNode(MakeFunction("generated_attr_target", GetType("int")));
 }
 
 gen();
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

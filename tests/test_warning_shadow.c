@@ -8,7 +8,7 @@ int check(int parameter) {
     int local = 2;
     {
         int parameter = 3;
-        int local = 4;
+        int local     = 4;
         return value + parameter + local + 34;
     }
 }

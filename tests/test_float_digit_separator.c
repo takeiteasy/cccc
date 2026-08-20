@@ -14,26 +14,34 @@
 // before calling strtold() on it, following #776's fix.
 int main(void) {
     // Separator in the integer part of the mantissa, before an exponent.
-    if (1'000e5 != 1000e5) return 1;
+    if (1'000e5 != 1000e5)
+        return 1;
 
     // Separator in the fractional part.
-    if (1.0'00 != 1.000) return 2;
+    if (1.0'00 != 1.000)
+        return 2;
 
     // Separator inside the exponent digits themselves.
-    if (1e1'0 != 1e10) return 3;
+    if (1e1'0 != 1e10)
+        return 3;
 
     // Separators in integer part, fractional part, and exponent all at once.
-    if (1'2.3'4e1'0 != 12.34e10) return 4;
+    if (1'2.3'4e1'0 != 12.34e10)
+        return 4;
 
     // Hex float with a separator in the mantissa.
-    if (0x1'0p3 != 0x10p3) return 5;
+    if (0x1'0p3 != 0x10p3)
+        return 5;
 
     // Separator plus an explicit float suffix.
-    if (1'0e1f != 100.0f) return 6;
+    if (1'0e1f != 100.0f)
+        return 6;
 
     // Controls that already worked before the fix -- must keep working.
-    if (1000e5 != 1000e5) return 7;
-    if (1.000 != 1.000) return 8;
+    if (1000e5 != 1000e5)
+        return 7;
+    if (1.000 != 1.000)
+        return 8;
 
     return 42;
 }

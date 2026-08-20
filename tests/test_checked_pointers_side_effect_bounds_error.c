@@ -5,7 +5,7 @@
 // src/parse.c.
 
 int main(void) {
-    int i = 0;
-    int * [[cccc::array, cccc::count(i++)]] a = (int[3]){1, 2, 3};
+    int i                                    = 0;
+    int *[[cccc::array, cccc::count(i++)]] a = (int[3]){1, 2, 3};
     return a[0];
 }

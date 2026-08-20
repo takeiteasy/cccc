@@ -14,33 +14,34 @@
 // a valid, live pointer and must run to completion under -3.
 struct S {
     float f;
-    int i;
+    int   i;
 };
 
 int main(void) {
-    int x = 5;
+    int  x  = 5;
     int *pi = &x;
-    *pi;          // bare discarded int deref
-    (void)*pi;    // explicit (void)-discard
+    *pi;       // bare discarded int deref
+    (void)*pi; // explicit (void)-discard
 
-    float fx = 5.0f;
+    float  fx = 5.0f;
     float *pf = &fx;
     *pf;
     (void)*pf;
 
-    double dx = 5.0;
+    double  dx = 5.0;
     double *pd = &dx;
     *pd;
 
-    struct S s = {1.0f, 2};
+    struct S  s  = {1.0f, 2};
     struct S *ps = &s;
-    ps->f;  // discarded member load through a pointer (float)
-    ps->i;  // discarded member load through a pointer (int)
-    s.f;    // discarded member load, no pointer indirection (float)
+    ps->f; // discarded member load through a pointer (float)
+    ps->i; // discarded member load through a pointer (int)
+    s.f;   // discarded member load, no pointer indirection (float)
 
     float arr[3] = {1, 2, 3};
-    int idx = 1;
-    arr[idx]; // discarded indexed load (exercises emit_indexed_load_if_possible)
+    int   idx    = 1;
+    arr[idx];         // discarded indexed load (exercises
+                      // emit_indexed_load_if_possible)
 
     int z = (*pi, 3); // discarded deref as a comma-operator LHS
 

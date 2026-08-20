@@ -5,9 +5,9 @@
  * then includes the real sys/cdefs.h from the system include path.
  *
  * The order matters because sys/cdefs.h uses __GNUC__ and __has_attribute
- * to define macros that CCCC cannot parse (like __attribute__((__always_inline__))).
- * By including Availability.h first, we ensure __has_attribute returns 0
- * and __attribute__ is stripped.
+ * to define macros that CCCC cannot parse (like
+ * __attribute__((__always_inline__))). By including Availability.h first, we
+ * ensure __has_attribute returns 0 and __attribute__ is stripped.
  *
  * #1083: the Availability.h include below is only needed for CCCC's own
  * preprocessing (see that file's own #ifdef __CCCC__ comment) -- under

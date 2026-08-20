@@ -5,7 +5,7 @@
 // contain a .c4 path, confirming the bytecode compilation pipeline is used
 // instead of the native cc/ar/ld toolchain.
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_exe(Builder *ctx) {
     BuildTarget *t = Executable(ctx, "hello");
     AddSource(t, "examples/build_demo/src/main.c");

@@ -14,8 +14,8 @@ static int compile_only_from_string(const char *src, size_t len) {
     VirtualMachine vm;
     cc_init(&vm, 0);
     vm.compiler.compile_only = true;
-    vm.collect_errors = true;
-    vm.max_errors = 5;
+    vm.collect_errors        = true;
+    vm.max_errors            = 5;
 
     // Standard headers resolve from the embedded src/std.c table (see
     // search_include_paths / man/HEADERS.md); no -I needed here.
@@ -37,7 +37,7 @@ static int compile_only_from_string(const char *src, size_t len) {
         return 1;
     }
     memcpy(buf, src, len);
-    buf[len] = '\0';
+    buf[len]   = '\0';
 
     Token *tok = tokenize_string(&vm, "<fuzz>", buf);
     if (!tok) {
@@ -62,7 +62,7 @@ static int compile_only_from_string(const char *src, size_t len) {
     }
 
     // Execute inline macros
-    Token *tokens[1] = { tok };
+    Token *tokens[1] = {tok};
     cc_execute_inline_macros(&vm, tokens, 1);
 
     // Parse

@@ -1,7 +1,7 @@
 // CCCC_FLAGS: -c=generated -o /dev/stdout
 // CCCC_EXPECT_STDOUT: #ifdef _WIN32.*int generated_answer\(void\);.*#endif
 // CCCC_REJECT_STDOUT: #endif.*int generated_answer\(void\);
-#include @emit <stddef.h>
+#include @emit < stddef.h>
 
 [[cccc::comptime]]
 void gen(void) {
@@ -14,4 +14,6 @@ void gen(void) {
 gen();
 #endif @emit
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

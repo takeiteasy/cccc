@@ -12,7 +12,7 @@
 // `== 0` comparison against an already-zero default-level block might.
 int main(void) {
     int n = 2, m = 2;
-    int v[n][m] = {{1, 2}};   // second row omitted entirely
+    int v[n][m] = {{1, 2}}; // second row omitted entirely
     int omitted = v[1][1];
     return omitted == 0 ? 42 : (omitted == (int)0xCDCDCDCD ? 2 : 1);
 }

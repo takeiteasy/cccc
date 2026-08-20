@@ -6,6 +6,7 @@
 typedef float v4sf __attribute__((vector_size(16)));
 
 int main(void) {
-    v4sf a = (v4sf){[2] = 3.0f}; // error: designated init on non-aggregate vector
+    v4sf a =
+        (v4sf){[2] = 3.0f}; // error: designated init on non-aggregate vector
     return (int)a[2];
 }

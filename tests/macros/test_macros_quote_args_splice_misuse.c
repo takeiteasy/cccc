@@ -1,10 +1,13 @@
 // EXPECT_COMPILE_ERROR
 // Test ticket #194: using $@N as a sub-expression within a call argument
-// (rather than as a direct top-level argument) must produce a compile-time error.
+// (rather than as a direct top-level argument) must produce a compile-time
+// error.
 
 #include "stdarg.h"
 
-int sum_ints(int count, ...) { return 0; }
+int sum_ints(int count, ...) {
+    return 0;
+}
 
 [[cccc::comptime]]
 Node *bad_arg_splice(Node *x) {

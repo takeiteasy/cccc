@@ -33,7 +33,7 @@ int build_main(Builder *ctx) {
     // --- optional: a generated source via AddSourceStr (#542) ---
     // (Writes examples/build_demo/src/version.c under <out_dir>/gen/)
     AddSourceStr(core, "version.c",
-        "const char *build_version(void) { return \"demo\"; }\n");
+                 "const char *build_version(void) { return \"demo\"; }\n");
 
     // --- optional: probe for zlib and use it if available (#543) ---
     // if (HaveTool(ctx, "pkg-config") && PkgConfig(greet, "zlib") == 0)
@@ -41,9 +41,11 @@ int build_main(Builder *ctx) {
 
     // --- custom codegen step (#544) ---
     // Runs before the core library is compiled (DependsOn = ordering only).
-    BuildTarget *gen = RunCustom(ctx, "gen-headers",
-        "echo '/* generated */' > examples/build_demo/include/gen.h");
-    DependsOn(core, gen); // core waits for gen-headers; no -lgen-headers linker flag
+    BuildTarget *gen =
+        RunCustom(ctx, "gen-headers",
+                  "echo '/* generated */' > examples/build_demo/include/gen.h");
+    DependsOn(core,
+              gen); // core waits for gen-headers; no -lgen-headers linker flag
 
     // --- main executable ---
     BuildTarget *app = Executable(ctx, "app");

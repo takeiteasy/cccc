@@ -8,5 +8,9 @@
 // real compiler behaviour, not just cosmetic attribute spelling), so
 // [[cccc::emit]] -- a marker attribute output_attr() actually strips/emits
 // -- is the attribute this flag can meaningfully preserve.
-[[cccc::emit]] int u(void) { return 0; }
-int main(void) { return 42; }
+[[cccc::emit]] int u(void) {
+    return 0;
+}
+int main(void) {
+    return 42;
+}

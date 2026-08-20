@@ -3,7 +3,9 @@
 
 #pragma cccc comptime
 
-int comptime_helper(void) { return 1; }
+int comptime_helper(void) {
+    return 1;
+}
 
 #pragma cccc comptime end
 

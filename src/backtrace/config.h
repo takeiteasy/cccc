@@ -4,7 +4,7 @@
 
 /* ELF size: 64-bit on all supported targets. */
 #if defined(__linux__)
-# define BACKTRACE_ELF_SIZE 64
+#define BACKTRACE_ELF_SIZE 64
 #endif
 
 /* Use __atomic builtins (Clang/GCC on all CCCC targets). */
@@ -21,8 +21,8 @@
 
 /* dl_iterate_phdr is available on Linux (glibc/musl). */
 #if defined(__linux__)
-# define HAVE_DL_ITERATE_PHDR 1
-# define HAVE_LINK_H 1
+#define HAVE_DL_ITERATE_PHDR 1
+#define HAVE_LINK_H          1
 #endif
 
 /* _Unwind_GetIPInfo is provided by the Clang/GCC runtime on both platforms. */
@@ -36,23 +36,23 @@
 
 /* Mach-O / dyld path API (macOS only). */
 #if defined(__APPLE__)
-# define HAVE_MACH_O_DYLD_H 1
+#define HAVE_MACH_O_DYLD_H 1
 #endif
 
 /* Standard POSIX headers present on all targets. */
-#define HAVE_DLFCN_H 1
-#define HAVE_INTTYPES_H 1
-#define HAVE_MEMORY_H 1
-#define HAVE_STDINT_H 1
-#define HAVE_STDLIB_H 1
-#define HAVE_STRING_H 1
-#define HAVE_STRINGS_H 1
-#define HAVE_SYS_STAT_H 1
+#define HAVE_DLFCN_H     1
+#define HAVE_INTTYPES_H  1
+#define HAVE_MEMORY_H    1
+#define HAVE_STDINT_H    1
+#define HAVE_STDLIB_H    1
+#define HAVE_STRING_H    1
+#define HAVE_STRINGS_H   1
+#define HAVE_SYS_STAT_H  1
 #define HAVE_SYS_TYPES_H 1
-#define HAVE_UNISTD_H 1
-#define HAVE_LSTAT 1
-#define HAVE_READLINK 1
-#define STDC_HEADERS 1
+#define HAVE_UNISTD_H    1
+#define HAVE_LSTAT       1
+#define HAVE_READLINK    1
+#define STDC_HEADERS     1
 
 /* lzma / zlib / zstd decompression — not needed for our use case. */
 /* #undef HAVE_LIBLZMA */

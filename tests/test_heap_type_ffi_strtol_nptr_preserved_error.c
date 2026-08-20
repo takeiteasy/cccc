@@ -22,7 +22,7 @@ int main(void) {
     strtol(buf, &endptr, 10); // arg0 (nptr) == buf: same allocation as tail
 
     float *ftail = (float *)(buf + 32);
-    float v = *ftail; // load as float: mismatches the still-stamped int tail
+    float  v = *ftail; // load as float: mismatches the still-stamped int tail
     free(buf);
     return (int)v;
 }

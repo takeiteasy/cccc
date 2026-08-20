@@ -7,8 +7,8 @@
 // nothing can dangle. A plain, non-escaping local pointer like this used to
 // abort with "DANGLING POINTER DETECTED"; it must now run to completion.
 int main(void) {
-    int n = 0;
+    int  n = 0;
     int *p = &n;
-    *p = 5;
+    *p     = 5;
     return n == 5 ? 42 : 1;
 }

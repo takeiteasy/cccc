@@ -33,18 +33,24 @@
 // (a) The ticket's own repro shape, with a DIFFERENT body than the outer
 // `add` so a wrong binding (calling the outer instead of the nested one,
 // or vice versa) is visible in the result, not just in whether it compiles.
-int add(int a, int b) { return a + b; }
+int add(int a, int b) {
+    return a + b;
+}
 
 // (b) The outer function called from another, unrelated file-scope
 // function -- must stay bound to the real outer `add`, unaffected by any
 // later nested `add` definition inside main().
-int uses_outer_add(void) { return add(10, 5); } // 15
+int uses_outer_add(void) {
+    return add(10, 5);
+} // 15
 
 int test_shadowed_definition(void) {
     // Nested `add` shadows the outer one for the rest of this block --
     // deliberately a different arithmetic (a + b + 1) so a mis-binding to
     // the outer `add` is caught by the expected value below.
-    int add(int a, int b) { return a + b + 1; }
+    int add(int a, int b) {
+        return a + b + 1;
+    }
 
     int r = add(40, 1); // nested: 40 + 1 + 1 == 42
     if (r != 42)
@@ -71,7 +77,9 @@ int test_recursive_shadow(void) {
 // `attr->is_static` arm already used find_func_in_current_scope()); kept
 // as a regression guard now that the non-static path shares similar logic.
 int test_static_nested_shadow(void) {
-    static int add(int a, int b) { return a + b + 100; }
+    static int add(int a, int b) {
+        return a + b + 100;
+    }
     if (add(1, 1) != 102)
         return 3;
     return 0;
@@ -102,7 +110,8 @@ int main(void) {
     if ((r = test_prototype_still_binds_outer()) != 0)
         return 20 + r;
 
-    if (add(40, 2) != 42) // outer add still intact at file scope after all of the above
+    if (add(40, 2) !=
+        42) // outer add still intact at file scope after all of the above
         return 30;
 
     return 42;

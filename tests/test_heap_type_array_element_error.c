@@ -6,8 +6,8 @@
 #include <stdlib.h>
 
 int main(void) {
-    int *a = malloc(4 * sizeof(int));
-    a[2] = 7; // stamps a[2]'s byte range (offset 8) as int
+    int *a    = malloc(4 * sizeof(int));
+    a[2]      = 7;     // stamps a[2]'s byte range (offset 8) as int
     float *fp = (float *)a;
     return (int)fp[2]; // load as float: mismatches the stamped int type
 }

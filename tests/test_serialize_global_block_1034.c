@@ -14,7 +14,9 @@
 
 [[cccc::comptime]]
 Node *emit_counter_helpers(void) {
-    return Quote("{ struct Counter { int n; }; void counter_init(struct Counter *c) { c->n = 0; } void counter_bump(struct Counter *c, int by) { c->n += by; } }");
+    return Quote("{ struct Counter { int n; }; void counter_init(struct "
+                 "Counter *c) { c->n = 0; } void counter_bump(struct Counter "
+                 "*c, int by) { c->n += by; } }");
 }
 
 emit_counter_helpers();

@@ -7,21 +7,25 @@ typedef struct {
 } Dims;
 
 typedef union {
-    int i;
+    int           i;
     unsigned char bytes[4];
 } Data;
 
 [[cccc::comptime]]
-int compute_width(void) { return 1280; }
+int compute_width(void) {
+    return 1280;
+}
 
 [[cccc::comptime]]
-int compute_value(void) { return 0x5678; }
+int compute_value(void) {
+    return 0x5678;
+}
 
 [[cccc::comptime]]
-Dims dims = { compute_width(), 720 };
+Dims dims = {compute_width(), 720};
 
 [[cccc::comptime]]
-Data data = { compute_value() };
+Data data = {compute_value()};
 
 [[cccc::comptime]]
 Node *get_width(void) {

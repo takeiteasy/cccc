@@ -3,11 +3,14 @@
 // header-exposed. This group must be renamed regardless of input-file
 // order, since only the header-exposed group (dup_tag_1014_impl.c) can
 // keep the plain `struct DyGC1014` spelling.
-struct DyGC1014 { double d; char pad; };
+struct DyGC1014 {
+    double d;
+    char   pad;
+};
 
 int priv_use_1014(void) {
     struct DyGC1014 x;
-    x.d = 1.0;
+    x.d   = 1.0;
     x.pad = 'a';
     return (int)x.d;
 }

@@ -23,20 +23,20 @@ typedef struct __cccc_DIR DIR;
 
 #ifdef __APPLE__
 struct dirent {
-    ino_t d_ino;
+    ino_t              d_ino;
     unsigned long long d_seekoff;
-    unsigned short d_reclen;
-    unsigned short d_namlen;
-    unsigned char d_type;
-    char d_name[1024];
+    unsigned short     d_reclen;
+    unsigned short     d_namlen;
+    unsigned char      d_type;
+    char               d_name[1024];
 };
 #else
 struct dirent {
-    ino_t d_ino;
-    off_t d_off;
+    ino_t          d_ino;
+    off_t          d_off;
     unsigned short d_reclen;
-    unsigned char d_type;
-    char d_name[256];
+    unsigned char  d_type;
+    char           d_name[256];
 };
 #endif
 
@@ -50,6 +50,7 @@ extern void rewinddir(DIR *dirp);
 extern int alphasort(const struct dirent **a, const struct dirent **b);
 extern int scandir(const char *dirname, struct dirent ***namelist,
                    int (*select)(const struct dirent *),
-                   int (*compar)(const struct dirent **, const struct dirent **));
+                   int (*compar)(const struct dirent **,
+                                 const struct dirent **));
 
 #endif /* __DIRENT_H */

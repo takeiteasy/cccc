@@ -27,27 +27,37 @@ static float scalar_chain(float x) {
 
 int main(void) {
     v4sf ones;
-    ones[0] = 1.0f; ones[1] = 1.0f; ones[2] = 1.0f; ones[3] = 1.0f;
+    ones[0] = 1.0f;
+    ones[1] = 1.0f;
+    ones[2] = 1.0f;
+    ones[3] = 1.0f;
 
     float s = scalar_chain(3.0f); // 7.0
-    v4sf v = ones * s;            // scalar broadcast via vector*scalar
-    if (v[0] != 7.0f) return 1;
-    if (v[3] != 7.0f) return 2;
+    v4sf  v = ones * s;           // scalar broadcast via vector*scalar
+    if (v[0] != 7.0f)
+        return 1;
+    if (v[3] != 7.0f)
+        return 2;
 
     // Reuse s in further scalar math after the splat consumed it, forcing
     // register reuse/aliasing across the vector-opcode boundary.
     float t = s + 10.0f; // 17.0
-    if (t != 17.0f) return 3;
+    if (t != 17.0f)
+        return 3;
 
     v4sf w = ones * t; // splat via arithmetic broadcast
-    if (w[0] != 17.0f) return 4;
-    if (w[2] != 17.0f) return 5;
+    if (w[0] != 17.0f)
+        return 4;
+    if (w[2] != 17.0f)
+        return 5;
 
     float u = t - s; // 10.0
-    if (u != 10.0f) return 6;
+    if (u != 10.0f)
+        return 6;
 
     v4sf combined = v + w; // 7+17 = 24 in every lane
-    if (combined[1] != 24.0f) return 7;
+    if (combined[1] != 24.0f)
+        return 7;
 
     return 42;
 }

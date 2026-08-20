@@ -29,7 +29,8 @@ static int sum(int count, ...) {
 int test_stack_canary_variadic(void) {
     if (sum(3, 10, 20, 12) != 42)
         return 1;
-    // Enough varargs to spill past the register area into the caller stack area.
+    // Enough varargs to spill past the register area into the caller stack
+    // area.
     if (sum(10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10) != 55)
         return 2;
     return 42;

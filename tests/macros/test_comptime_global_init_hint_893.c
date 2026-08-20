@@ -7,8 +7,8 @@
 // "undefined variable", pointing at [[cccc::comptime]] variables (#188) or
 // #define @shared as the supported ways to make the value visible.
 
-static int other = 5;
-static int *p = &other;
+static int  other = 5;
+static int *p     = &other;
 
 [[cccc::comptime]]
 void gen(void) {
@@ -16,4 +16,6 @@ void gen(void) {
 }
 gen();
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

@@ -7,7 +7,7 @@
 // For testing purposes, we'll use a simple header from a known stable URL
 // In real usage, this could be any valid C header file
 
-#include <https://raw.githubusercontent.com/nothings/stb/master/stb_sprintf.h>
+#include <https: //raw.githubusercontent.com/nothings/stb/master/stb_sprintf.h>
 
 int main() {
     // If the include worked, stb_sprintf should be available

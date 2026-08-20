@@ -8,7 +8,7 @@ int existing_function(void) {
 [[cccc::comptime]]
 Node *clobber_existing(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("existing_function", int_ty);
+    Obj  *fn     = MakeFunction("existing_function", int_ty);
     FunctionSetBody(fn, MakeReturn(MakeIntLiteral(42)));
     return MakeIntLiteral(0);
 }

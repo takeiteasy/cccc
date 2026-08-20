@@ -6,8 +6,7 @@ int [[deprecated]] old_value = 1;
 
 int check(int unused_parameter) {
     int value = 41;
-unused_label:
-    ;
+unused_label:;
     return value + old_value;
 }
 

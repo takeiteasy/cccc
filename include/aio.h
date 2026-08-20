@@ -39,31 +39,33 @@
 
 #ifdef __APPLE__
 struct aiocb {
-    int    aio_fildes;
-    off_t  aio_offset;
-    volatile void *aio_buf;
-    size_t aio_nbytes;
-    int    aio_reqprio;
+    int             aio_fildes;
+    off_t           aio_offset;
+    volatile void  *aio_buf;
+    size_t          aio_nbytes;
+    int             aio_reqprio;
     struct sigevent aio_sigevent;
-    int    aio_lio_opcode;
+    int             aio_lio_opcode;
 };
 _Static_assert(sizeof(struct aiocb) == 80, "macOS aiocb layout mismatch");
 #else
 struct aiocb {
-    int    aio_fildes;
-    int    aio_lio_opcode;
-    int    aio_reqprio;
-    int    __pad0;
-    volatile void *aio_buf;
-    size_t aio_nbytes;
+    int             aio_fildes;
+    int             aio_lio_opcode;
+    int             aio_reqprio;
+    int             __pad0;
+    volatile void  *aio_buf;
+    size_t          aio_nbytes;
     struct sigevent aio_sigevent;
-    char   __glibc_internal[32]; /* glibc's internal next/abs_prio/policy/error_code/return_value */
-    off_t  aio_offset;
-    char   __glibc_reserved[32];
+    char
+        __glibc_internal[32]; /* glibc's internal
+                                 next/abs_prio/policy/error_code/return_value */
+    off_t aio_offset;
+    char  __glibc_reserved[32];
 };
 _Static_assert(sizeof(struct aiocb) == 168, "glibc aiocb layout mismatch");
 _Static_assert(offsetof(struct aiocb, aio_offset) == 128,
-              "glibc aiocb aio_offset offset mismatch");
+               "glibc aiocb aio_offset offset mismatch");
 #endif
 
 /* aio_cancel() return values, lio_listio() operation codes, and
@@ -81,23 +83,23 @@ _Static_assert(offsetof(struct aiocb, aio_offset) == 128,
 #define AIO_CANCELED    0x2
 #define AIO_NOTCANCELED 0x4
 
-#define LIO_NOP   0x0
-#define LIO_READ  0x1
-#define LIO_WRITE 0x2
+#define LIO_NOP         0x0
+#define LIO_READ        0x1
+#define LIO_WRITE       0x2
 
-#define LIO_NOWAIT 0x1
-#define LIO_WAIT   0x2
+#define LIO_NOWAIT      0x1
+#define LIO_WAIT        0x2
 #else
 #define AIO_CANCELED    0
 #define AIO_NOTCANCELED 1
 #define AIO_ALLDONE     2
 
-#define LIO_READ  0
-#define LIO_WRITE 1
-#define LIO_NOP   2
+#define LIO_READ        0
+#define LIO_WRITE       1
+#define LIO_NOP         2
 
-#define LIO_WAIT   0
-#define LIO_NOWAIT 1
+#define LIO_WAIT        0
+#define LIO_NOWAIT      1
 #endif
 
 extern int aio_cancel(int fd, struct aiocb *aiocbp);

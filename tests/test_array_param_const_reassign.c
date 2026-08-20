@@ -4,4 +4,6 @@ void f(int a[const 5]) {
     int x[5];
     a = x; // error: cannot assign to const-qualified pointer
 }
-int main(void) { return 0; }
+int main(void) {
+    return 0;
+}

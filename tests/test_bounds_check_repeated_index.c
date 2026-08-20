@@ -38,8 +38,11 @@ static int fdiff(int *p) {
 
 int main(void) {
     int arr[4] = {1, 2, 3, 4};
-    if (f3(arr) != 9) return 1;
-    if (f5(arr) != 15) return 2;
-    if (fdiff(arr) != 9) return 3;
+    if (f3(arr) != 9)
+        return 1;
+    if (f5(arr) != 15)
+        return 2;
+    if (fdiff(arr) != 9)
+        return 3;
     return 42;
 }

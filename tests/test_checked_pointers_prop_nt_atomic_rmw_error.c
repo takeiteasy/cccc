@@ -7,7 +7,8 @@
 
 int main(void) {
     int n = 3;
-    _Atomic char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    _Atomic char *[[cccc::ntarray, cccc::count(n)]] s =
+        (char[4]){'a', 'b', 'c', 0};
     _Atomic char *q = s;
     q[3] += 1; // _Atomic RMW into the propagated terminator slot -- traps
     return 0;

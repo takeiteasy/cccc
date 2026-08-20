@@ -11,9 +11,12 @@
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    BuildTarget *gen = RunCustom(ctx, "gen-extra",
-        "rm -rf build/test_glob_deferred_gen && mkdir -p build/test_glob_deferred_gen && "
-        "printf 'int extra_val(void) { return 7; }\\n' > build/test_glob_deferred_gen/gen_extra.c");
+    BuildTarget *gen =
+        RunCustom(ctx, "gen-extra",
+                  "rm -rf build/test_glob_deferred_gen && mkdir -p "
+                  "build/test_glob_deferred_gen && "
+                  "printf 'int extra_val(void) { return 7; }\\n' > "
+                  "build/test_glob_deferred_gen/gen_extra.c");
 
     BuildTarget *app = Executable(ctx, "glob_deferred_app");
     AddSource(app, "examples/build_demo/src/main.c");

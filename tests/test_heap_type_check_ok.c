@@ -5,8 +5,8 @@
 #include <stdlib.h>
 
 int main(void) {
-    int *p = malloc(sizeof(int));
-    *p = 42;
+    int *p     = malloc(sizeof(int));
+    *p         = 42;
     int result = *p;
     free(p);
     return result;

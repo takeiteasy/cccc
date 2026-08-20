@@ -12,13 +12,13 @@
 #include <stdlib.h>
 
 static void mk(void **out, int *found) {
-    *out = malloc(40);
+    *out   = malloc(40);
     *found = 1;
 }
 
 int main(void) {
     void *p;
-    int found;
+    int   found;
     mk(&p, &found);
     if (!found)
         return 1;

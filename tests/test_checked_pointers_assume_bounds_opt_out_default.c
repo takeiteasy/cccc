@@ -5,8 +5,8 @@
 // return 42 (the OOB read itself is also unchecked without the flag).
 
 int main(void) {
-    int * [[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
-    int * [[cccc::array, cccc::count(10)]] q;
+    int *[[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
+    int *[[cccc::array, cccc::count(10)]] q;
     q = p; // no flag -- no check at all
     (void)q;
     return 42;

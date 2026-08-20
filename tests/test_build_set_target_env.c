@@ -12,11 +12,13 @@
 [[cccc::build]]
 int build_main(Builder *ctx) {
     WriteFile(ctx, "build/gen/echo_cc.sh",
-        "#!/bin/sh\n"
-        "echo \"saw CCCC_TEST_ENV_MARKER=$CCCC_TEST_ENV_MARKER\"\n"
-        "exec cc \"$@\"\n");
-    WriteFile(ctx, "build/gen/target_env_main.c", "int main(void) { return 0; }\n");
-    BuildTarget *chmod_step = RunCustom(ctx, "chmod_echo_cc", "chmod +x build/gen/echo_cc.sh");
+              "#!/bin/sh\n"
+              "echo \"saw CCCC_TEST_ENV_MARKER=$CCCC_TEST_ENV_MARKER\"\n"
+              "exec cc \"$@\"\n");
+    WriteFile(ctx, "build/gen/target_env_main.c",
+              "int main(void) { return 0; }\n");
+    BuildTarget *chmod_step =
+        RunCustom(ctx, "chmod_echo_cc", "chmod +x build/gen/echo_cc.sh");
 
     BuildTarget *app = Executable(ctx, "envapp");
     AddSource(app, "build/gen/target_env_main.c");

@@ -9,4 +9,6 @@
 // to parse <file>" and bailing with exit_code left at its default 0 --
 // silent success dressed up as a bogus failure message. Verified this
 // exact program printed that error and exited 0 (not 42) before the fix.
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

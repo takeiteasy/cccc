@@ -6,7 +6,7 @@
 
 int main(void) {
     volatile double zero = 0.0;
-    double r = 1.0 / zero;
+    double          r    = 1.0 / zero;
     (void)r;
     return 42;
 }

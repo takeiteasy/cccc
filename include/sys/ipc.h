@@ -24,10 +24,10 @@
 #include "sys/types.h"
 
 struct ipc_perm {
-    uid_t uid;   /* [XSI] owner's user ID */
-    gid_t gid;   /* [XSI] owner's group ID */
-    uid_t cuid;  /* [XSI] creator's user ID */
-    gid_t cgid;  /* [XSI] creator's group ID */
+    uid_t  uid;  /* [XSI] owner's user ID */
+    gid_t  gid;  /* [XSI] owner's group ID */
+    uid_t  cuid; /* [XSI] creator's user ID */
+    gid_t  cgid; /* [XSI] creator's group ID */
     mode_t mode; /* [XSI] read/write permission */
 };
 /* Only the five POSIX-mandated members are exposed -- the kernel-internal

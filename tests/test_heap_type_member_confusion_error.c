@@ -6,16 +6,16 @@
 #include <stdlib.h>
 
 struct S {
-    int a;
+    int   a;
     float b;
 };
 
 int main(void) {
     struct S *s = malloc(sizeof(struct S));
-    s->a = 20;
-    s->b = 22.0f;      // stamps s->b's byte range (offset 4) as float
-    int *p = (int *)&s->b; // same bytes, reinterpreted as int*
-    int result = *p;   // load as int: mismatches the stamped float type
+    s->a        = 20;
+    s->b        = 22.0f;        // stamps s->b's byte range (offset 4) as float
+    int *p      = (int *)&s->b; // same bytes, reinterpreted as int*
+    int  result = *p; // load as int: mismatches the stamped float type
     free(s);
     return result;
 }

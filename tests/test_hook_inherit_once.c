@@ -5,7 +5,9 @@
 static int once_count = 0;
 
 [[cccc::test_setup(suite = "a", once, inherit)]]
-void setup_once_a(void) { once_count++; }
+void setup_once_a(void) {
+    once_count++;
+}
 
 #pragma cccc suite begin "a"
 
@@ -21,6 +23,6 @@ void test_in_a_b_still_once(void) {
     AssertEq(once_count, 1); // still 1 — not re-fired for the sub-suite
 }
 
-#pragma cccc suite end  // end b
+#pragma cccc suite end       // end b
 
-#pragma cccc suite end  // end a
+#pragma cccc suite end       // end a

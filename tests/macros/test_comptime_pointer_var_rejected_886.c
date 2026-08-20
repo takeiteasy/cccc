@@ -9,4 +9,6 @@
 char *s = "hello";
 #pragma cccc comptime end
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

@@ -13,12 +13,12 @@
 #include <stdbool.h>
 #include <stdlib.h>
 int main(void) {
-    _Atomic int *obj = malloc(sizeof(int));
-    int *backing = malloc(4 * sizeof(int));   // valid indices 0..3
+    _Atomic int *obj     = malloc(sizeof(int));
+    int         *backing = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!obj || !backing)
         return 255;
-    *obj = 0;
-    int *expected = backing + 4;   // exactly one past the end -- legal to form
+    *obj          = 0;
+    int *expected = backing + 4; // exactly one past the end -- legal to form
     // dereferencing `expected` -- must trap
     bool ok = atomic_compare_exchange_strong(obj, expected, 1);
     free((void *)obj);

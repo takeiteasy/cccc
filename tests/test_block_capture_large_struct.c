@@ -11,8 +11,10 @@ struct S {
 
 int main(void) {
     struct S t;
-    t.a = 1;
-    t.b = 42;
-    int (^blk)(void) = ^{ return (int)t.b; };
+    t.a              = 1;
+    t.b              = 42;
+    int (^blk)(void) = ^{
+      return (int)t.b;
+    };
     return blk();
 }

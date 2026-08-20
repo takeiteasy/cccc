@@ -25,7 +25,7 @@ int main(void) {
 
     {
         typedef long LocalAlias;
-        int value = 42;
+        int          value = 42;
 
         if (read_value() != 42)
             return 1;

@@ -1,9 +1,10 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: bytecode round-trip, C4 ABI, include routing
-// Source tests: test_bytecode_32bit_roundtrip, test_c4_abi_rehydrate, test_include_route_build_skip
+// Source tests: test_bytecode_32bit_roundtrip, test_c4_abi_rehydrate,
+// test_include_route_build_skip
 
 #include "stdarg.h"
-#include [[cccc::build]] "fixtures/build_only.h"
+#include[[cccc::build]] "fixtures/build_only.h"
 
 // [from test_bytecode_32bit_roundtrip]
 static int callee(int x) {
@@ -119,8 +120,8 @@ int test_c4_abi_rehydrate(void) {
         return 5;
 
     int *g = global_array();
-    g[0] = 21;
-    g[1] = 21;
+    g[0]   = 21;
+    g[1]   = 21;
     if (globals[0] + globals[1] != 42)
         return 6;
 

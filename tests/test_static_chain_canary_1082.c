@@ -20,7 +20,9 @@
 // only helps depth >= 2 while breaking the base case.
 static int depth1(void) {
     int g = 7;
-    int level1(int a) { return g + a; }
+    int level1(int a) {
+        return g + a;
+    }
     return level1(3);
 }
 
@@ -28,7 +30,9 @@ static int depth1(void) {
 static int depth2(void) {
     int g = 7;
     int level1(int a) {
-        int level2(int b) { return g + a + b; }
+        int level2(int b) {
+            return g + a + b;
+        }
         return level2(2);
     }
     return level1(1);
@@ -41,7 +45,9 @@ static int depth3(void) {
     int g = 7;
     int l1(int a) {
         int l2(int b) {
-            int l3(int c) { return g + a + b + c; }
+            int l3(int c) {
+                return g + a + b + c;
+            }
             return l3(3);
         }
         return l2(2);
@@ -60,10 +66,14 @@ static int depth3(void) {
 static int sibling_chain(void) {
     int g = 7;
     int l1(int a) {
-        int sib(int x) { return g + a + x; }
+        int sib(int x) {
+            return g + a + x;
+        }
         int l2(int b) {
             int l3(int c) {
-                int l4(int d) { return sib(d); }
+                int l4(int d) {
+                    return sib(d);
+                }
                 return l4(c);
             }
             return l3(b);
@@ -74,9 +84,13 @@ static int sibling_chain(void) {
 }
 
 int main(void) {
-    if (depth1() != 10) return 1;
-    if (depth2() != 10) return 2;
-    if (depth3() != 13) return 3;
-    if (sibling_chain() != 12) return 4;
+    if (depth1() != 10)
+        return 1;
+    if (depth2() != 10)
+        return 2;
+    if (depth3() != 13)
+        return 3;
+    if (sibling_chain() != 12)
+        return 4;
     return 42;
 }

@@ -14,8 +14,12 @@
 static int order[3];
 static int order_idx;
 
-static void h2(void) { order[order_idx++] = 2; }
-static void h3(void) { order[order_idx++] = 3; }
+static void h2(void) {
+    order[order_idx++] = 2;
+}
+static void h3(void) {
+    order[order_idx++] = 3;
+}
 
 // Registered first, so LIFO means it must run LAST -- once h2/h3 have
 // already recorded their positions, so this is the one that can verify the

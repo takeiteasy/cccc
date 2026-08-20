@@ -1,8 +1,8 @@
 // Expected return: 42
 #include <pthread.h>
 
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static int counter = 0;
+static pthread_mutex_t mutex   = PTHREAD_MUTEX_INITIALIZER;
+static int             counter = 0;
 
 static void *worker(void *arg) {
     int n = *(int *)arg;
@@ -18,7 +18,7 @@ static void *worker(void *arg) {
 
 int main(void) {
     pthread_t a, b;
-    int n = 21;
+    int       n = 21;
 
     if (pthread_create(&a, 0, worker, &n) != 0)
         return 1;

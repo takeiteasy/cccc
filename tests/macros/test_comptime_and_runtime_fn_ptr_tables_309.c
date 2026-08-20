@@ -2,10 +2,14 @@
 // runtime program's own function-pointer table relocations.
 
 [[cccc::comptime]]
-int chandler_a(void) { return 10; }
+int chandler_a(void) {
+    return 10;
+}
 
 [[cccc::comptime]]
-int chandler_b(void) { return 20; }
+int chandler_b(void) {
+    return 20;
+}
 
 [[cccc::comptime]]
 int cdispatch(int i) {
@@ -22,8 +26,12 @@ Node *cdispatch_ok(void) {
     return MakeIntLiteral(0);
 }
 
-int rhandler_a(void) { return 100; }
-int rhandler_b(void) { return 200; }
+int rhandler_a(void) {
+    return 100;
+}
+int rhandler_b(void) {
+    return 200;
+}
 
 static int (*const rtable[])(void) = {rhandler_a, rhandler_b};
 

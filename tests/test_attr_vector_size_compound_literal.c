@@ -10,28 +10,36 @@
 
 typedef float v4sf __attribute__((vector_size(16)));
 
-v4sf global_lit = (v4sf){1.0f, 2.0f, 3.0f, 4.0f};
+v4sf          global_lit = (v4sf){1.0f, 2.0f, 3.0f, 4.0f};
 
 int main(void) {
     // Local (auto-storage) compound literal used directly in an expression.
     v4sf a = (v4sf){1.0f, 2.0f, 3.0f, 4.0f};
-    if (a[0] != 1.0f) return 1;
-    if (a[3] != 4.0f) return 2;
+    if (a[0] != 1.0f)
+        return 1;
+    if (a[3] != 4.0f)
+        return 2;
 
     v4sf sum = a + (v4sf){10.0f, 10.0f, 10.0f, 10.0f};
-    if (sum[0] != 11.0f) return 3;
-    if (sum[3] != 14.0f) return 4;
+    if (sum[0] != 11.0f)
+        return 3;
+    if (sum[3] != 14.0f)
+        return 4;
 
     // `static` compound literal (GNU/C23 storage-class-specified compound
     // literal -- an anonymous global under the hood, per
     // compound_literal_type's storage-class handling in parse.c).
     v4sf *bp = &(static v4sf){5.0f, 6.0f, 7.0f, 8.0f};
-    if ((*bp)[0] != 5.0f) return 5;
-    if ((*bp)[3] != 8.0f) return 6;
+    if ((*bp)[0] != 5.0f)
+        return 5;
+    if ((*bp)[3] != 8.0f)
+        return 6;
 
     // File-scope compound literal as the entire initializer.
-    if (global_lit[0] != 1.0f) return 7;
-    if (global_lit[3] != 4.0f) return 8;
+    if (global_lit[0] != 1.0f)
+        return 7;
+    if (global_lit[3] != 4.0f)
+        return 8;
 
     return 42;
 }

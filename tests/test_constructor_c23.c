@@ -15,6 +15,7 @@ int g = 0;
 }
 
 int main(void) {
-    if (g != 7) return 1;
+    if (g != 7)
+        return 1;
     return 42;
 }

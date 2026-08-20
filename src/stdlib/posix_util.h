@@ -128,7 +128,8 @@
 
 VirtualMachine *cccc_posix_current_vm(void);
 void cccc_posix_save_and_release_gil(VirtualMachine *vm, ExecState *state);
-void cccc_posix_acquire_and_restore_gil(VirtualMachine *vm, const ExecState *state);
+void cccc_posix_acquire_and_restore_gil(VirtualMachine  *vm,
+                                        const ExecState *state);
 
 // pselect()'s/ppoll's/spawn's sigdefault-sigmask sigmask can't be passed
 // through: the guest's sigset_t is its own 4-byte bitmask (signals 1..31,
@@ -140,7 +141,8 @@ void cccc_posix_acquire_and_restore_gil(VirtualMachine *vm, const ExecState *sta
 // CCCC's SIG* constants already match the host's numbering
 // (include/signal.h is #ifdef __APPLE__-guarded per platform), so signo
 // translates unchanged.
-void cccc_posix_guest_sigset_to_host(unsigned int guest_mask, sigset_t *host_set);
+void cccc_posix_guest_sigset_to_host(unsigned int guest_mask,
+                                     sigset_t    *host_set);
 
 // Defined in posix_aio.c (SIGEV_THREAD cookie machinery, shared with
 // posix_mqueue.c -- struct sigevent has the same layout regardless of

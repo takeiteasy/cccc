@@ -21,6 +21,6 @@ int main(void) {
     // survived, this mismatches and aborts; if the clear ran, the shadow
     // reads back TY_VOID and the load is unchecked.
     float *f = (float *)&gbuf;
-    float v = *f;
+    float  v = *f;
     return (v == v) ? 42 : 1; // always true; just needs to reach here
 }

@@ -40,13 +40,13 @@ Node *clone_bounds_node(VirtualMachine *vm, Node *n) {
     if (!n)
         return NULL;
     Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *c = *n;
+    *c      = *n;
     c->next = NULL;
-    c->lhs = clone_bounds_node(vm, n->lhs);
-    c->rhs = clone_bounds_node(vm, n->rhs);
+    c->lhs  = clone_bounds_node(vm, n->lhs);
+    c->rhs  = clone_bounds_node(vm, n->rhs);
     c->cond = clone_bounds_node(vm, n->cond);
     c->then = clone_bounds_node(vm, n->then);
-    c->els = clone_bounds_node(vm, n->els);
+    c->els  = clone_bounds_node(vm, n->els);
     return c;
 }
 
@@ -64,19 +64,20 @@ static Node *clone_member_bounds_node(VirtualMachine *vm, Node *n, Node *obj) {
     if (!n)
         return NULL;
     if (n->kind == ND_VAR && n->var && n->var->checked_self_member) {
-        Node *member_node = new_unary(vm, ND_MEMBER, clone_bounds_node(vm, obj), n->tok);
+        Node *member_node =
+            new_unary(vm, ND_MEMBER, clone_bounds_node(vm, obj), n->tok);
         member_node->member = n->var->checked_self_member;
         add_type(vm, member_node);
         return member_node;
     }
     Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *c = *n;
+    *c      = *n;
     c->next = NULL;
-    c->lhs = clone_member_bounds_node(vm, n->lhs, obj);
-    c->rhs = clone_member_bounds_node(vm, n->rhs, obj);
+    c->lhs  = clone_member_bounds_node(vm, n->lhs, obj);
+    c->rhs  = clone_member_bounds_node(vm, n->rhs, obj);
     c->cond = clone_member_bounds_node(vm, n->cond, obj);
     c->then = clone_member_bounds_node(vm, n->then, obj);
-    c->els = clone_member_bounds_node(vm, n->els, obj);
+    c->els  = clone_member_bounds_node(vm, n->els, obj);
     return c;
 }
 
@@ -104,25 +105,25 @@ static Node *clone_member_bounds_node(VirtualMachine *vm, Node *n, Node *obj) {
 // propagate_checked_bounds() for the assignment-propagation case, which is
 // a separate mechanism layered on top, not part of this lookup).
 typedef struct {
-    Obj *var;
+    Obj    *var;
     Member *mem;
-    Node *obj; // member root's own object expression; NULL unless .mem is set
+    Node   *obj; // member root's own object expression; NULL unless .mem is set
 } CheckedBase;
 
 static CheckedBase find_checked_base(Node *n) {
     while (n) {
         switch (n->kind) {
-        case ND_VAR:
-            return (CheckedBase){.var = n->var};
-        case ND_MEMBER:
-            return (CheckedBase){.mem = n->member, .obj = n->lhs};
-        case ND_ADD:
-        case ND_SUB:
-        case ND_CAST:
-            n = n->lhs;
-            continue;
-        default:
-            return (CheckedBase){0};
+            case ND_VAR:
+                return (CheckedBase){.var = n->var};
+            case ND_MEMBER:
+                return (CheckedBase){.mem = n->member, .obj = n->lhs};
+            case ND_ADD:
+            case ND_SUB:
+            case ND_CAST:
+                n = n->lhs;
+                continue;
+            default:
+                return (CheckedBase){0};
         }
     }
     return (CheckedBase){0};
@@ -158,13 +159,15 @@ static bool checked_base_is_declared(CheckedBase base) {
 // by Node.checked_bounds_obj_init. A trivial object expression (a bare
 // local, `s.a.b`) is left untouched and cloned directly, since re-cloning
 // it costs nothing (see checked_obj_is_trivial()).
-static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base, Token *tok) {
+static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base,
+                                    Token *tok) {
     if (base.var) {
         Node *p = new_var_node(vm, base.var, tok);
         add_type(vm, p);
         return p;
     }
-    Node *member_node = new_unary(vm, ND_MEMBER, clone_bounds_node(vm, base.obj), tok);
+    Node *member_node =
+        new_unary(vm, ND_MEMBER, clone_bounds_node(vm, base.obj), tok);
     member_node->member = base.mem;
     add_type(vm, member_node);
     return member_node;
@@ -183,14 +186,14 @@ static bool checked_obj_is_trivial(Node *n) {
     if (!n)
         return true;
     switch (n->kind) {
-    case ND_VAR:
-        return true;
-    case ND_MEMBER:
-    case ND_DEREF:
-    case ND_CAST:
-        return checked_obj_is_trivial(n->lhs);
-    default:
-        return false;
+        case ND_VAR:
+            return true;
+        case ND_MEMBER:
+        case ND_DEREF:
+        case ND_CAST:
+            return checked_obj_is_trivial(n->lhs);
+        default:
+            return false;
     }
 }
 
@@ -212,7 +215,8 @@ static bool checked_obj_is_trivial(Node *n) {
 // safely skip the hoist and fall back to the original re-clone-in-place
 // behavior, rather than building an invalid ND_ADDR over it.
 static bool checked_obj_is_addressable(Node *n) {
-    return n && (n->kind == ND_VAR || n->kind == ND_MEMBER || n->kind == ND_DEREF);
+    return n &&
+           (n->kind == ND_VAR || n->kind == ND_MEMBER || n->kind == ND_DEREF);
 }
 
 // Computes the checked-pointer bounds range to enforce for an access rooted
@@ -265,8 +269,9 @@ static bool checked_nt_pointee_supported(Type *base_ty) {
 
 static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty);
 
-static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *access_ty,
-                                   Token *tok, Node **out_lo, Node **out_hi, bool *out_nt,
+static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
+                                   Type *access_ty, Token *tok, Node **out_lo,
+                                   Node **out_hi, bool *out_nt,
                                    Node **out_obj_init, Obj *hoist_fn) {
     *out_lo = NULL;
     *out_hi = NULL;
@@ -305,26 +310,33 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
     // taking `&obj` is only well-formed for an lvalue; anything else falls
     // back to the original re-clone behavior, unchanged).
     if (out_obj_init && base.mem && (vm->flags & CCCC_CHECKED_BOUNDS) &&
-        (hoist_fn || vm->compiler.current_fn) && !checked_obj_is_trivial(base.obj) &&
+        (hoist_fn || vm->compiler.current_fn) &&
+        !checked_obj_is_trivial(base.obj) &&
         checked_obj_is_addressable(base.obj)) {
-        Obj *t = hoist_fn ? new_checked_prop_temp(vm, hoist_fn, pointer_to(vm, base.obj->ty))
-                          : new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
-        Node *addr = new_unary(vm, ND_ADDR, clone_bounds_node(vm, base.obj), tok);
+        Obj  *t = hoist_fn ? new_checked_prop_temp(vm, hoist_fn,
+                                                   pointer_to(vm, base.obj->ty))
+                           : new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
+        Node *addr =
+            new_unary(vm, ND_ADDR, clone_bounds_node(vm, base.obj), tok);
         add_type(vm, addr);
-        Node *init = new_binary(vm, ND_ASSIGN, new_var_node(vm, t, tok), addr, tok);
+        Node *init =
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, t, tok), addr, tok);
         add_type(vm, init);
-        *out_obj_init = init;
+        *out_obj_init  = init;
         Node *obj_temp = new_unary(vm, ND_DEREF, new_var_node(vm, t, tok), tok);
         add_type(vm, obj_temp);
         base.obj = obj_temp;
     }
 
-    CheckedKind kind = base.var ? base.var->checked_kind : base.mem->ty->checked_kind;
-    CheckedBoundsForm form =
-        base.var ? base.var->checked_bounds_form : base.mem->ty->checked_bounds_form;
-    Node *resolved_lo = base.var ? base.var->checked_bounds_lo : base.mem->checked_bounds_lo;
-    Node *resolved_hi = base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
-    Type *base_ty = access_ty->base;
+    CheckedKind kind =
+        base.var ? base.var->checked_kind : base.mem->ty->checked_kind;
+    CheckedBoundsForm form = base.var ? base.var->checked_bounds_form
+                                      : base.mem->ty->checked_bounds_form;
+    Node             *resolved_lo =
+        base.var ? base.var->checked_bounds_lo : base.mem->checked_bounds_lo;
+    Node *resolved_hi =
+        base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
+    Type   *base_ty   = access_ty->base;
     int64_t elem_size = base_ty ? get_vm_size(base_ty) : 1;
 
     if (kind == CHECKED_SINGLE) {
@@ -338,7 +350,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
         // whose ->ty is already non-NULL without visiting its children, so
         // pre-setting ->ty on a binary node would leave its operands
         // untyped and crash codegen.
-        *out_lo = checked_base_self_expr(vm, base, tok);
+        *out_lo  = checked_base_self_expr(vm, base, tok);
         Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok),
                               new_long(vm, elem_size, tok), tok);
         add_type(vm, hi);
@@ -348,80 +360,89 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
 
     // CHECKED_ARRAY / CHECKED_NTARRAY
     switch (form) {
-    case CB_NONE:
-    case CB_UNKNOWN:
-        return; // nothing declared/trusted -- no runtime check
-    case CB_RANGE: {
-        // Absolute [lo, hi) -- already resolved (and typed) at declaration
-        // time; clone_bounds_node() copies ->ty along with everything else.
-        // A checked base whose declaration path never resolved its bounds
-        // (e.g. a block-scope `static` local, or any future declaration
-        // shape that copies checked_kind/checked_bounds_form without also
-        // being wired to resolve them) has these left NULL -- treat that
-        // exactly like CB_NONE/CB_UNKNOWN rather than feeding a NULL Node*
-        // into clone_bounds_node()/add_type() below and crashing the
-        // compiler.
-        if (!resolved_lo || !resolved_hi)
-            return;
-        *out_lo = base.mem ? clone_member_bounds_node(vm, resolved_lo, base.obj)
-                            : clone_bounds_node(vm, resolved_lo);
-        Node *hi = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
-                             : clone_bounds_node(vm, resolved_hi);
-        // #938: the terminator slot is the elem_size bytes beginning at the
-        // declared end of the range -- for bounds(lo,hi) that end is `hi`
-        // itself, so widen it by one element exactly as CB_COUNT/
-        // CB_BYTE_COUNT do below.
-        if (kind == CHECKED_NTARRAY) {
-            hi = new_binary(vm, ND_ADD, hi, new_long(vm, elem_size, tok), tok);
-            add_type(vm, hi);
-            if (checked_nt_pointee_supported(base_ty))
-                *out_nt = true;
-        }
-        *out_hi = hi;
-        return;
-    }
-    case CB_COUNT:
-    case CB_BYTE_COUNT: {
-        if (!resolved_hi)
-            return; // see the CB_RANGE comment above
-        // lo = the base's own live value at this access; hi = base +
-        // n[*elem_size]. #938: ntarray widens by one element for the
-        // terminator slot -- the elem_size bytes beginning at the declared
-        // end of the range -- under all three bounds forms (#483 originally
-        // shipped this for count(n) only; man/SAFETY.md documents the
-        // unified rule).
-        *out_lo = checked_base_self_expr(vm, base, tok);
-        Node *n = base.mem ? clone_member_bounds_node(vm, resolved_hi, base.obj)
-                            : clone_bounds_node(vm, resolved_hi); // already typed
-        Node *count_bytes;
-        if (form == CB_BYTE_COUNT) {
-            count_bytes = n;
+        case CB_NONE:
+        case CB_UNKNOWN:
+            return; // nothing declared/trusted -- no runtime check
+        case CB_RANGE: {
+            // Absolute [lo, hi) -- already resolved (and typed) at declaration
+            // time; clone_bounds_node() copies ->ty along with everything else.
+            // A checked base whose declaration path never resolved its bounds
+            // (e.g. a block-scope `static` local, or any future declaration
+            // shape that copies checked_kind/checked_bounds_form without also
+            // being wired to resolve them) has these left NULL -- treat that
+            // exactly like CB_NONE/CB_UNKNOWN rather than feeding a NULL Node*
+            // into clone_bounds_node()/add_type() below and crashing the
+            // compiler.
+            if (!resolved_lo || !resolved_hi)
+                return;
+            *out_lo  = base.mem
+                           ? clone_member_bounds_node(vm, resolved_lo, base.obj)
+                           : clone_bounds_node(vm, resolved_lo);
+            Node *hi = base.mem
+                           ? clone_member_bounds_node(vm, resolved_hi, base.obj)
+                           : clone_bounds_node(vm, resolved_hi);
+            // #938: the terminator slot is the elem_size bytes beginning at the
+            // declared end of the range -- for bounds(lo,hi) that end is `hi`
+            // itself, so widen it by one element exactly as CB_COUNT/
+            // CB_BYTE_COUNT do below.
             if (kind == CHECKED_NTARRAY) {
-                count_bytes = new_binary(vm, ND_ADD, count_bytes,
+                hi = new_binary(vm, ND_ADD, hi, new_long(vm, elem_size, tok),
+                                tok);
+                add_type(vm, hi);
+                if (checked_nt_pointee_supported(base_ty))
+                    *out_nt = true;
+            }
+            *out_hi = hi;
+            return;
+        }
+        case CB_COUNT:
+        case CB_BYTE_COUNT: {
+            if (!resolved_hi)
+                return; // see the CB_RANGE comment above
+            // lo = the base's own live value at this access; hi = base +
+            // n[*elem_size]. #938: ntarray widens by one element for the
+            // terminator slot -- the elem_size bytes beginning at the declared
+            // end of the range -- under all three bounds forms (#483 originally
+            // shipped this for count(n) only; man/SAFETY.md documents the
+            // unified rule).
+            *out_lo = checked_base_self_expr(vm, base, tok);
+            Node *n = base.mem
+                          ? clone_member_bounds_node(vm, resolved_hi, base.obj)
+                          : clone_bounds_node(vm, resolved_hi); // already typed
+            Node *count_bytes;
+            if (form == CB_BYTE_COUNT) {
+                count_bytes = n;
+                if (kind == CHECKED_NTARRAY) {
+                    count_bytes = new_binary(vm, ND_ADD, count_bytes,
+                                             new_long(vm, elem_size, tok), tok);
+                    add_type(vm, count_bytes);
+                }
+            } else if (kind == CHECKED_NTARRAY) {
+                Node *n_plus_1 =
+                    new_binary(vm, ND_ADD, n, new_long(vm, 1, tok), tok);
+                add_type(vm, n_plus_1);
+                count_bytes = new_binary(vm, ND_MUL, n_plus_1,
+                                         new_long(vm, elem_size, tok), tok);
+                add_type(vm, count_bytes);
+            } else {
+                count_bytes = new_binary(vm, ND_MUL, n,
                                          new_long(vm, elem_size, tok), tok);
                 add_type(vm, count_bytes);
             }
-        } else if (kind == CHECKED_NTARRAY) {
-            Node *n_plus_1 = new_binary(vm, ND_ADD, n, new_long(vm, 1, tok), tok);
-            add_type(vm, n_plus_1);
-            count_bytes = new_binary(vm, ND_MUL, n_plus_1,
-                                     new_long(vm, elem_size, tok), tok);
-            add_type(vm, count_bytes);
-        } else {
-            count_bytes = new_binary(vm, ND_MUL, n, new_long(vm, elem_size, tok), tok);
-            add_type(vm, count_bytes);
+            // #923/#938/#939: this access can land on the widened terminator
+            // slot -- flag it for CHKNT/CHKNTZ's store-side null-terminator
+            // guard, for any pointee checked_nt_pointee_supported() can
+            // actually guard (see its comment for the excluded types and why).
+            if (kind == CHECKED_NTARRAY &&
+                checked_nt_pointee_supported(base_ty))
+                *out_nt = true;
+            Node *hi =
+                new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok),
+                           count_bytes, tok);
+            add_type(vm, hi);
+            *out_hi = hi;
+            return;
         }
-        // #923/#938/#939: this access can land on the widened terminator
-        // slot -- flag it for CHKNT/CHKNTZ's store-side null-terminator
-        // guard, for any pointee checked_nt_pointee_supported() can
-        // actually guard (see its comment for the excluded types and why).
-        if (kind == CHECKED_NTARRAY && checked_nt_pointee_supported(base_ty))
-            *out_nt = true;
-        Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok), count_bytes, tok);
-        add_type(vm, hi);
-        *out_hi = hi;
-        return;
-    }
     }
 }
 
@@ -431,14 +452,16 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base, Type *a
 // resolvable bounds (#770/#484/#921). Thin wrapper around
 // find_checked_base()/compute_checked_bounds() -- see #919's
 // propagate_checked_bounds() for the other caller of compute_checked_bounds().
-void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token *tok) {
+void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
+                              Token *tok) {
     CheckedBase base = find_checked_base(addr);
     if (!checked_base_is_declared(base))
         return;
-    Type *pty = base.var ? base.var->ty : base.mem->ty;
+    Type *pty                  = base.var ? base.var->ty : base.mem->ty;
     deref->checked_access_size = pty->base ? get_vm_size(pty->base) : 1;
     compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
-                           &deref->checked_bounds_hi, &deref->checked_nt_terminator,
+                           &deref->checked_bounds_hi,
+                           &deref->checked_nt_terminator,
                            &deref->checked_bounds_obj_init, NULL);
 }
 
@@ -509,8 +532,8 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token
 // once a rewrite is actually being committed. Kind 2 (a chained source) can
 // never produce an init -- it reads back already-snapshotted temp vars, not
 // a member expression -- so *out_obj_init is left NULL on that path.
-static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok,
-                                       Node **out_lo, Node **out_hi,
+static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
+                                       Token *tok, Node **out_lo, Node **out_hi,
                                        bool *out_optional, bool *out_nt,
                                        int64_t *out_nt_elem, Obj *hoist_fn,
                                        Node **out_obj_init) {
@@ -523,13 +546,13 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
         if (base.mem && node_has_side_effects(base.obj))
             return false;
         Type *pty = base.var ? base.var->ty : base.mem->ty;
-        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt, out_obj_init,
-                               hoist_fn);
+        compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt,
+                               out_obj_init, hoist_fn);
         if (!(*out_lo && *out_hi))
             return false;
         *out_optional = false;
         Type *base_ty = pty->base;
-        *out_nt_elem = *out_nt ? (base_ty ? get_vm_size(base_ty) : 1) : 0;
+        *out_nt_elem  = *out_nt ? (base_ty ? get_vm_size(base_ty) : 1) : 0;
         return true;
     }
     // #941: kind 2 -- a chained propagation source. base.var is non-NULL
@@ -559,8 +582,8 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
             add_type(vm, *out_hi);
         }
         *out_optional = base.var->checked_prop_optional;
-        *out_nt_elem = base.var->checked_prop_nt_elem;
-        *out_nt = *out_nt_elem != 0;
+        *out_nt_elem  = base.var->checked_prop_nt_elem;
+        *out_nt       = *out_nt_elem != 0;
         return true;
     }
     return false;
@@ -609,54 +632,56 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs, Token *tok
 static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         switch (node->kind) {
-        case ND_ASSIGN:
-            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
-                node->lhs->var->checked_prop_candidate) {
-                Obj *var = node->lhs->var;
-                if (node != var->checked_prop_init_assign &&
-                    find_checked_base(node->rhs).var == var)
-                    break; // self-rooted -- neutral, see comment above
-                Node *lo, *hi;
-                bool src_optional, src_nt;
-                int64_t src_nt_elem;
-                if (checked_prop_source_bounds(vm, node->rhs, node->tok, &lo, &hi,
-                                               &src_optional, &src_nt, &src_nt_elem,
-                                               NULL, NULL)) {
-                    var->checked_prop_scan_saw_rooted = true;
-                    var->checked_prop_scan_src_optional |= src_optional;
-                    // #943: fold this store's NT fact into the round's
-                    // running element size, order-independently within the
-                    // round -- see checked_prop_scan_saw_non_nt's comment in
-                    // cccc.h for why both directions need their own seen-flag
-                    // rather than just comparing against `elem == 0`. A
-                    // non-checked-rooted store never reaches this branch at
-                    // all (see the `else` below), so it can't contradict an
-                    // NT fact already seen -- it just isn't live on that
-                    // path.
-                    if (src_nt) {
-                        if (var->checked_prop_scan_nt_elem == 0)
-                            var->checked_prop_scan_nt_elem = src_nt_elem;
-                        else if (var->checked_prop_scan_nt_elem != src_nt_elem)
-                            var->checked_prop_scan_nt_conflict = true;
-                        if (var->checked_prop_scan_saw_non_nt)
-                            var->checked_prop_scan_nt_conflict = true;
+            case ND_ASSIGN:
+                if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                    node->lhs->var->checked_prop_candidate) {
+                    Obj *var = node->lhs->var;
+                    if (node != var->checked_prop_init_assign &&
+                        find_checked_base(node->rhs).var == var)
+                        break; // self-rooted -- neutral, see comment above
+                    Node   *lo, *hi;
+                    bool    src_optional, src_nt;
+                    int64_t src_nt_elem;
+                    if (checked_prop_source_bounds(
+                            vm, node->rhs, node->tok, &lo, &hi, &src_optional,
+                            &src_nt, &src_nt_elem, NULL, NULL)) {
+                        var->checked_prop_scan_saw_rooted    = true;
+                        var->checked_prop_scan_src_optional |= src_optional;
+                        // #943: fold this store's NT fact into the round's
+                        // running element size, order-independently within the
+                        // round -- see checked_prop_scan_saw_non_nt's comment
+                        // in cccc.h for why both directions need their own
+                        // seen-flag rather than just comparing against `elem ==
+                        // 0`. A non-checked-rooted store never reaches this
+                        // branch at all (see the `else` below), so it can't
+                        // contradict an NT fact already seen -- it just isn't
+                        // live on that path.
+                        if (src_nt) {
+                            if (var->checked_prop_scan_nt_elem == 0)
+                                var->checked_prop_scan_nt_elem = src_nt_elem;
+                            else if (var->checked_prop_scan_nt_elem !=
+                                     src_nt_elem)
+                                var->checked_prop_scan_nt_conflict = true;
+                            if (var->checked_prop_scan_saw_non_nt)
+                                var->checked_prop_scan_nt_conflict = true;
+                        } else {
+                            var->checked_prop_scan_saw_non_nt = true;
+                            if (var->checked_prop_scan_nt_elem != 0)
+                                var->checked_prop_scan_nt_conflict = true;
+                        }
                     } else {
-                        var->checked_prop_scan_saw_non_nt = true;
-                        if (var->checked_prop_scan_nt_elem != 0)
-                            var->checked_prop_scan_nt_conflict = true;
+                        var->checked_prop_scan_saw_unrooted = true;
                     }
-                } else {
-                    var->checked_prop_scan_saw_unrooted = true;
                 }
-            }
-            break;
-        case ND_ADDR:
-            if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
-                node->lhs->var->checked_prop_candidate && !node->is_rmw_temp_addr)
-                node->lhs->var->checked_prop_unsafe = true;
-            break;
-        default:
-            break;
+                break;
+            case ND_ADDR:
+                if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
+                    node->lhs->var->checked_prop_candidate &&
+                    !node->is_rmw_temp_addr)
+                    node->lhs->var->checked_prop_unsafe = true;
+                break;
+            default:
+                break;
         }
         checked_prop_poison_scan(vm, node->lhs);
         checked_prop_poison_scan(vm, node->rhs);
@@ -684,10 +709,10 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
 // never looked up by name, only ever referenced directly through the Obj*
 // stored on Obj.checked_prop_lo/hi.
 static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty) {
-    Obj *var = new_var(vm, "", 0, ty);
+    Obj *var      = new_var(vm, "", 0, ty);
     var->is_local = true;
-    var->next = fn->locals;
-    fn->locals = var;
+    var->next     = fn->locals;
+    fn->locals    = var;
     return var;
 }
 
@@ -711,9 +736,12 @@ static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty) {
 // did). Would need re-deriving if this ever switched to appending instead.
 static void checked_prop_alloc_temps(VirtualMachine *vm, Obj *fn) {
     for (Obj *v = fn->locals; v; v = v->next)
-        if (v->checked_prop_candidate && !v->checked_prop_unsafe && !v->checked_prop_lo) {
-            v->checked_prop_lo = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
-            v->checked_prop_hi = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+        if (v->checked_prop_candidate && !v->checked_prop_unsafe &&
+            !v->checked_prop_lo) {
+            v->checked_prop_lo =
+                new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+            v->checked_prop_hi =
+                new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
         }
 }
 
@@ -726,7 +754,8 @@ static void checked_prop_alloc_temps(VirtualMachine *vm, Obj *fn) {
 // snapshot reach plain CHKR instead of CHKRO fails LOUD (a spurious trap on
 // correct code) rather than silently disabling the check -- deliberate, see
 // the design note at propagate_checked_bounds() below.
-static Node *checked_prop_sentinel_node(VirtualMachine *vm, bool is_hi, Token *tok) {
+static Node *checked_prop_sentinel_node(VirtualMachine *vm, bool is_hi,
+                                        Token *tok) {
     return new_num(vm, is_hi ? 0 : -1, tok);
 }
 
@@ -761,18 +790,19 @@ static Node *checked_prop_sentinel_node(VirtualMachine *vm, bool is_hi, Token *t
 // new_checked_prop_temp() temp rather than re-evaluating `k` once for `lo`
 // and again for `hi`. This is the actual rewrite (not a probe), so the
 // hoist is requested unconditionally here.
-static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assign_node) {
-    Obj *var = assign_node->lhs->var;
-    Node *lo, *hi, *src_obj_init;
-    bool src_optional, src_nt;
+static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
+                                        Node *assign_node) {
+    Obj    *var = assign_node->lhs->var;
+    Node   *lo, *hi, *src_obj_init;
+    bool    src_optional, src_nt;
     int64_t src_nt_elem;
     // NT-ness isn't needed here -- walk 3 (checked_prop_attach_scan())
     // consults the candidate's own frozen checked_prop_nt_elem directly,
     // rather than recomputing per-store like lo/hi -- so src_nt/src_nt_elem
     // are discarded.
-    bool is_source = checked_prop_source_bounds(vm, assign_node->rhs, assign_node->tok,
-                                                &lo, &hi, &src_optional, &src_nt,
-                                                &src_nt_elem, fn, &src_obj_init);
+    bool is_source = checked_prop_source_bounds(
+        vm, assign_node->rhs, assign_node->tok, &lo, &hi, &src_optional,
+        &src_nt, &src_nt_elem, fn, &src_obj_init);
     Token *tok = assign_node->tok;
     if (is_source && lo && hi) {
         // Rooted store -- unchanged #919/#941 behavior below; lo/hi are
@@ -800,11 +830,13 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assig
         return;
     }
 
-    Node *store_lo = new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_lo, tok),
-                                new_cast(vm, lo, pointer_to(vm, ty_char)), tok);
+    Node *store_lo =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_lo, tok),
+                   new_cast(vm, lo, pointer_to(vm, ty_char)), tok);
     add_type(vm, store_lo);
-    Node *store_hi = new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_hi, tok),
-                                new_cast(vm, hi, pointer_to(vm, ty_char)), tok);
+    Node *store_hi =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_hi, tok),
+                   new_cast(vm, hi, pointer_to(vm, ty_char)), tok);
     add_type(vm, store_hi);
     Node *snapshot = new_binary(vm, ND_COMMA, store_lo, store_hi, tok);
     add_type(vm, snapshot);
@@ -817,14 +849,14 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn, Node *assig
         add_type(vm, snapshot);
     }
 
-    Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *orig = *assign_node;
-    orig->next = NULL;
+    Node *orig  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *orig       = *assign_node;
+    orig->next  = NULL;
 
     Node *comma = new_binary(vm, ND_COMMA, snapshot, orig, tok);
     add_type(vm, comma);
-    Node *saved_next = assign_node->next;
-    *assign_node = *comma;
+    Node *saved_next  = assign_node->next;
+    *assign_node      = *comma;
     assign_node->next = saved_next;
 }
 
@@ -910,9 +942,11 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
             CheckedBase base = find_checked_base(node->lhs);
             if (base.var && base.var->checked_prop_candidate &&
                 !base.var->checked_prop_unsafe && base.var->checked_prop_lo) {
-                Node *lo = new_var_node(vm, base.var->checked_prop_lo, node->tok);
+                Node *lo =
+                    new_var_node(vm, base.var->checked_prop_lo, node->tok);
                 add_type(vm, lo);
-                Node *hi = new_var_node(vm, base.var->checked_prop_hi, node->tok);
+                Node *hi =
+                    new_var_node(vm, base.var->checked_prop_hi, node->tok);
                 add_type(vm, hi);
                 node->checked_bounds_lo = lo;
                 node->checked_bounds_hi = hi;
@@ -922,11 +956,13 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
                 // through CHKRO, not plain CHKR -- see emit_chkr()'s
                 // comment in codegen.c.
                 node->checked_bounds_optional = base.var->checked_prop_optional;
-                Type *access_ty = node->lhs->ty;
+                Type *access_ty               = node->lhs->ty;
                 Type *pointee_ty = access_ty ? access_ty->base : NULL;
-                node->checked_access_size = pointee_ty ? get_vm_size(pointee_ty) : 1;
+                node->checked_access_size =
+                    pointee_ty ? get_vm_size(pointee_ty) : 1;
                 if (base.var->checked_prop_nt_elem != 0 &&
-                    node->checked_access_size == base.var->checked_prop_nt_elem &&
+                    node->checked_access_size ==
+                        base.var->checked_prop_nt_elem &&
                     checked_nt_pointee_supported(pointee_ty))
                     node->checked_nt_terminator = true;
 
@@ -938,19 +974,25 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
                 if (node->checked_rmw_mirror) {
                     Node *mirror = node->checked_rmw_mirror;
                     if (mirror->kind == ND_DEREF) {
-                        mirror->checked_bounds_lo = clone_bounds_node(vm, node->checked_bounds_lo);
-                        mirror->checked_bounds_hi = clone_bounds_node(vm, node->checked_bounds_hi);
-                        mirror->checked_bounds_optional = node->checked_bounds_optional;
+                        mirror->checked_bounds_lo =
+                            clone_bounds_node(vm, node->checked_bounds_lo);
+                        mirror->checked_bounds_hi =
+                            clone_bounds_node(vm, node->checked_bounds_hi);
+                        mirror->checked_bounds_optional =
+                            node->checked_bounds_optional;
                         mirror->checked_access_size = node->checked_access_size;
-                        mirror->checked_nt_terminator = node->checked_nt_terminator;
+                        mirror->checked_nt_terminator =
+                            node->checked_nt_terminator;
                     } else {
                         // ND_CAS (the `_Atomic` desugar) -- lo is deliberately
                         // omitted, matching to_assign()'s own direct-access
                         // ND_CAS copy (it has no gen_addr-driven CHKR path to
                         // feed lo into).
-                        mirror->checked_bounds_hi = clone_bounds_node(vm, node->checked_bounds_hi);
+                        mirror->checked_bounds_hi =
+                            clone_bounds_node(vm, node->checked_bounds_hi);
                         mirror->checked_access_size = node->checked_access_size;
-                        mirror->checked_nt_terminator = node->checked_nt_terminator;
+                        mirror->checked_nt_terminator =
+                            node->checked_nt_terminator;
                     }
                 }
             }
@@ -997,20 +1039,23 @@ static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
         if (!(v->checked_prop_candidate && !v->checked_prop_unsafe &&
               v->checked_prop_optional))
             continue;
-        Node *store_lo = new_binary(vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_lo, tok),
-                                    new_cast(vm, checked_prop_sentinel_node(vm, false, tok),
-                                             pointer_to(vm, ty_char)),
-                                    tok);
+        Node *store_lo =
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_lo, tok),
+                       new_cast(vm, checked_prop_sentinel_node(vm, false, tok),
+                                pointer_to(vm, ty_char)),
+                       tok);
         add_type(vm, store_lo);
-        Node *store_hi = new_binary(vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_hi, tok),
-                                    new_cast(vm, checked_prop_sentinel_node(vm, true, tok),
-                                             pointer_to(vm, ty_char)),
-                                    tok);
+        Node *store_hi =
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_hi, tok),
+                       new_cast(vm, checked_prop_sentinel_node(vm, true, tok),
+                                pointer_to(vm, ty_char)),
+                       tok);
         add_type(vm, store_hi);
-        Node *init = new_unary(vm, ND_EXPR_STMT,
-                               new_binary(vm, ND_COMMA, store_lo, store_hi, tok), tok);
+        Node *init =
+            new_unary(vm, ND_EXPR_STMT,
+                      new_binary(vm, ND_COMMA, store_lo, store_hi, tok), tok);
         add_type(vm, init->lhs);
-        init->next = fn->body->body;
+        init->next     = fn->body->body;
         fn->body->body = init;
     }
 }
@@ -1123,19 +1168,19 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     // probe path (skip building *out_lo/*out_hi entirely when the caller is
     // checked_prop_poison_scan(), which only reads the return value) would
     // avoid the rebuild.
-    int prev_survivors = -1, prev_optional = -1, prev_nt = -1;
+    int  prev_survivors = -1, prev_optional = -1, prev_nt = -1;
     bool converged = false;
     for (int round = 0; round < CHECKED_PROP_MAX_ROUNDS; round++) {
         for (Obj *v = fn->locals; v; v = v->next)
             if (v->checked_prop_candidate) {
-                v->checked_prop_unsafe = false;
-                v->checked_prop_scan_saw_rooted = false;
+                v->checked_prop_unsafe            = false;
+                v->checked_prop_scan_saw_rooted   = false;
                 v->checked_prop_scan_saw_unrooted = false;
                 v->checked_prop_scan_src_optional = false;
                 // #943: reset alongside the other per-round scratch fields
                 // -- see their comments in cccc.h.
-                v->checked_prop_scan_nt_elem = 0;
-                v->checked_prop_scan_saw_non_nt = false;
+                v->checked_prop_scan_nt_elem     = 0;
+                v->checked_prop_scan_saw_non_nt  = false;
                 v->checked_prop_scan_nt_conflict = false;
             }
         checked_prop_poison_scan(vm, fn->body);
@@ -1165,8 +1210,9 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
                     v->checked_prop_unsafe = true;
                 v->checked_prop_chain_src = !v->checked_prop_unsafe;
                 if (!v->checked_prop_unsafe) {
-                    v->checked_prop_optional = v->checked_prop_scan_saw_unrooted ||
-                                               v->checked_prop_scan_src_optional;
+                    v->checked_prop_optional =
+                        v->checked_prop_scan_saw_unrooted ||
+                        v->checked_prop_scan_src_optional;
                     survivors++;
                     if (v->checked_prop_optional)
                         optional_survivors++;
@@ -1179,21 +1225,23 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
                     // only be trusted once IT stabilised as of the previous
                     // round -- same reasoning as checked_prop_chain_src.
                     v->checked_prop_nt_elem =
-                        v->checked_prop_scan_nt_conflict ? 0 : v->checked_prop_scan_nt_elem;
+                        v->checked_prop_scan_nt_conflict
+                            ? 0
+                            : v->checked_prop_scan_nt_elem;
                     if (v->checked_prop_nt_elem != 0)
                         nt_survivors++;
                 } else {
                     v->checked_prop_nt_elem = 0;
                 }
             }
-        if (survivors == prev_survivors && optional_survivors == prev_optional &&
-            nt_survivors == prev_nt) {
+        if (survivors == prev_survivors &&
+            optional_survivors == prev_optional && nt_survivors == prev_nt) {
             converged = true;
             break;
         }
         prev_survivors = survivors;
-        prev_optional = optional_survivors;
-        prev_nt = nt_survivors;
+        prev_optional  = optional_survivors;
+        prev_nt        = nt_survivors;
     }
     // Defensive: if the cap was hit before convergence, force every
     // remaining survivor to OPT rather than trusting a possibly-incomplete
@@ -1207,7 +1255,7 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
         for (Obj *v = fn->locals; v; v = v->next)
             if (v->checked_prop_candidate && !v->checked_prop_unsafe) {
                 v->checked_prop_optional = true;
-                v->checked_prop_nt_elem = 0;
+                v->checked_prop_nt_elem  = 0;
             }
 
     // #941 phase B: allocate every survivor's snapshot temps up front (see
@@ -1248,19 +1296,22 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
 // an rhs that might still change it (e.g. `arr[k].p = f_that_bumps_k();`).
 // Instead it's carried on Node.checked_assign_dst_obj_init (src/cccc.h) for
 // codegen's post-store CHKAB site to re-run immediately before dst_lo/hi.
-static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn, Node *assign_node,
-                                          Node *dst_lo, Node *dst_hi,
-                                          Node *src_lo, Node *src_hi,
-                                          Node *src_obj_init, Node *dst_obj_init) {
-    Token *tok = assign_node->tok;
-    Obj *slo_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
-    Obj *shi_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
+                                          Node *assign_node, Node *dst_lo,
+                                          Node *dst_hi, Node *src_lo,
+                                          Node *src_hi, Node *src_obj_init,
+                                          Node *dst_obj_init) {
+    Token *tok     = assign_node->tok;
+    Obj   *slo_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+    Obj   *shi_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
 
-    Node *store_slo = new_binary(vm, ND_ASSIGN, new_var_node(vm, slo_var, tok),
-                                 new_cast(vm, src_lo, pointer_to(vm, ty_char)), tok);
+    Node  *store_slo =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, slo_var, tok),
+                   new_cast(vm, src_lo, pointer_to(vm, ty_char)), tok);
     add_type(vm, store_slo);
-    Node *store_shi = new_binary(vm, ND_ASSIGN, new_var_node(vm, shi_var, tok),
-                                 new_cast(vm, src_hi, pointer_to(vm, ty_char)), tok);
+    Node *store_shi =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, shi_var, tok),
+                   new_cast(vm, src_hi, pointer_to(vm, ty_char)), tok);
     add_type(vm, store_shi);
     Node *snapshot = new_binary(vm, ND_COMMA, store_slo, store_shi, tok);
     add_type(vm, snapshot);
@@ -1270,20 +1321,20 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn, Node *ass
     }
 
     Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *orig = *assign_node;
+    *orig      = *assign_node;
     orig->next = NULL;
-    orig->checked_assign_dst_lo = dst_lo;
-    orig->checked_assign_dst_hi = dst_hi;
+    orig->checked_assign_dst_lo       = dst_lo;
+    orig->checked_assign_dst_hi       = dst_hi;
     orig->checked_assign_dst_obj_init = dst_obj_init;
-    orig->checked_assign_src_lo = new_var_node(vm, slo_var, tok);
+    orig->checked_assign_src_lo       = new_var_node(vm, slo_var, tok);
     add_type(vm, orig->checked_assign_src_lo);
     orig->checked_assign_src_hi = new_var_node(vm, shi_var, tok);
     add_type(vm, orig->checked_assign_src_hi);
 
     Node *comma = new_binary(vm, ND_COMMA, snapshot, orig, tok);
     add_type(vm, comma);
-    Node *saved_next = assign_node->next;
-    *assign_node = *comma;
+    Node *saved_next  = assign_node->next;
+    *assign_node      = *comma;
     assign_node->next = saved_next;
 }
 
@@ -1296,48 +1347,54 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn, Node *ass
 // checked_prop_rewrite_scan() -- recurse into rhs first, then rewrite, then
 // `continue` past the resulting ND_COMMA wrapper's own copy of this same
 // ND_ASSIGN so the generic descent below doesn't match and rewrite it again.
-static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn, Node *node) {
+static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
+                                       Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_ASSIGN && node->lhs &&
             (node->lhs->kind == ND_VAR || node->lhs->kind == ND_MEMBER)) {
             CheckedBase dst_base = find_checked_base(node->lhs);
             if (checked_base_is_declared(dst_base) &&
                 !(dst_base.mem && node_has_side_effects(dst_base.obj))) {
-                Type *dst_pty = dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
+                Type *dst_pty =
+                    dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
                 Node *dst_lo, *dst_hi;
-                bool dst_nt;
+                bool  dst_nt;
                 // #947: probe with NULL first -- a failed test below (no
                 // usable dst/src bounds) must not allocate a hoist temp for
                 // a rewrite that never happens. Only recomputed with the
                 // hoist enabled once the rewrite is actually committed.
-                compute_checked_bounds(vm, dst_base, dst_pty, node->tok, &dst_lo, &dst_hi,
-                                      &dst_nt, NULL, NULL);
+                compute_checked_bounds(vm, dst_base, dst_pty, node->tok,
+                                       &dst_lo, &dst_hi, &dst_nt, NULL, NULL);
                 if (dst_lo && dst_hi) {
-                    Node *src_lo, *src_hi;
-                    bool src_optional, src_nt;
-                    int64_t src_nt_elem;
+                    Node       *src_lo, *src_hi;
+                    bool        src_optional, src_nt;
+                    int64_t     src_nt_elem;
                     CheckedBase src_base = find_checked_base(node->rhs);
-                    bool is_source = checked_base_is_declared(src_base) &&
-                        checked_prop_source_bounds(vm, node->rhs, node->tok, &src_lo, &src_hi,
-                                                   &src_optional, &src_nt, &src_nt_elem,
-                                                   NULL, NULL);
+                    bool        is_source =
+                        checked_base_is_declared(src_base) &&
+                        checked_prop_source_bounds(
+                            vm, node->rhs, node->tok, &src_lo, &src_hi,
+                            &src_optional, &src_nt, &src_nt_elem, NULL, NULL);
                     if (is_source && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // #947: recompute both sides now with the hoist
                         // allocator live -- the probe above only proved
                         // this rewrite is going to happen.
-                        Node *dst_obj_init, *src_obj_init;
-                        bool dst_nt2, src_nt2;
+                        Node   *dst_obj_init, *src_obj_init;
+                        bool    dst_nt2, src_nt2;
                         int64_t src_nt_elem2;
-                        compute_checked_bounds(vm, dst_base, dst_pty, node->tok, &dst_lo,
-                                              &dst_hi, &dst_nt2, &dst_obj_init, fn);
-                        checked_prop_source_bounds(vm, node->rhs, node->tok, &src_lo, &src_hi,
-                                                   &src_optional, &src_nt2, &src_nt_elem2,
-                                                   fn, &src_obj_init);
-                        verify_checked_assign_rewrite(vm, fn, node, dst_lo, dst_hi,
-                                                      src_lo, src_hi, src_obj_init,
-                                                      dst_obj_init);
-                        continue; // node is now the wrapper; parts already scanned
+                        compute_checked_bounds(vm, dst_base, dst_pty, node->tok,
+                                               &dst_lo, &dst_hi, &dst_nt2,
+                                               &dst_obj_init, fn);
+                        checked_prop_source_bounds(
+                            vm, node->rhs, node->tok, &src_lo, &src_hi,
+                            &src_optional, &src_nt2, &src_nt_elem2, fn,
+                            &src_obj_init);
+                        verify_checked_assign_rewrite(
+                            vm, fn, node, dst_lo, dst_hi, src_lo, src_hi,
+                            src_obj_init, dst_obj_init);
+                        continue; // node is now the wrapper; parts already
+                                  // scanned
                     }
                 }
             }
@@ -1425,10 +1482,10 @@ bool is_attr_name(Token *tok, char *name) {
 static Token *capture_checked_bounds_args(VirtualMachine *vm, Token *tok,
                                           Token **arg1, Token **arg2) {
     Token *paren_tok = tok;
-    tok = skip(vm, tok, "(");
-    *arg1 = tok;
-    *arg2 = NULL;
-    int depth = 0;
+    tok              = skip(vm, tok, "(");
+    *arg1            = tok;
+    *arg2            = NULL;
+    int depth        = 0;
     while (tok && tok->kind != TK_EOF) {
         if (equal(tok, "(")) {
             depth++;
@@ -1460,8 +1517,8 @@ static Token *capture_checked_bounds_args(VirtualMachine *vm, Token *tok,
 // attributes (e.g. a bounds form without array/ntarray, or on a `single`
 // pointer) is checked once per '*', after all of this level's attributes
 // have been parsed -- see the checked-pointer post-check in pointers().
-Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok,
-                                     Token *tok, Type *ty, const char *name) {
+Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
+                              Type *ty, const char *name) {
     if (!ty || ty->kind != TY_PTR)
         error_tok(vm, name_tok,
                   "'%s' must be written immediately after '*' "
@@ -1473,8 +1530,8 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok,
         if (equal(tok, "("))
             error_tok(vm, name_tok, "'%s' takes no arguments", name);
         ty->checked_kind = !strcmp(name, "single")  ? CHECKED_SINGLE
-                          : !strcmp(name, "array")   ? CHECKED_ARRAY
-                                                      : CHECKED_NTARRAY;
+                           : !strcmp(name, "array") ? CHECKED_ARRAY
+                                                    : CHECKED_NTARRAY;
         return tok;
     }
 

@@ -15,7 +15,9 @@ typedef struct {
     long c;
 } S;
 
-void use(S *p) { p->a = 1; }
+void use(S *p) {
+    p->a = 1;
+}
 
 static int dead(void) {
     S s = {0, 0, 0};
@@ -31,7 +33,9 @@ static int live(void) {
 }
 
 int main(void) {
-    if (dead() != 1) return 1;
-    if (live() != 11) return 2;
+    if (dead() != 1)
+        return 1;
+    if (live() != 11)
+        return 2;
     return 42;
 }

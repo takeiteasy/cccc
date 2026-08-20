@@ -8,7 +8,7 @@
 int g;
 
 int main(void) {
-    g = 7;                        // stamps &g's effective type as int
-    float *fp = (float *)&g;      // same address, reinterpreted
-    return (int)*fp;              // load as float: mismatches the stamped int type
+    g         = 7;           // stamps &g's effective type as int
+    float *fp = (float *)&g; // same address, reinterpreted
+    return (int)*fp;         // load as float: mismatches the stamped int type
 }

@@ -31,15 +31,15 @@
 #include "reflection_ffi_protos.inc"
 
 // Aliases so the public API types match reflection.h
-typedef Type Type;
-typedef Node Node;
-typedef Obj Obj;
-typedef Member Member;
+typedef Type         Type;
+typedef Node         Node;
+typedef Obj          Obj;
+typedef Member       Member;
 typedef EnumConstant EnumConstant;
-typedef Token Token;
-typedef TypeKind TypeKind;
-typedef NodeKind NodeKind;
-typedef AttrTarget AttrTarget;
+typedef Token        Token;
+typedef TypeKind     TypeKind;
+typedef NodeKind     NodeKind;
+typedef AttrTarget   AttrTarget;
 
 // Compiler-internal global tracking the VM live for the current compile.
 // Seeded once in cc_init and save/restored around macro execution windows
@@ -52,11 +52,12 @@ VirtualMachine *__builtin_current_vm = NULL;
 // Internal Helpers (replicate static functions from parse.c)
 // ============================================================================
 
-static Obj *reflect_new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+static Obj *reflect_new_var(VirtualMachine *vm, char *name, int name_len,
+                            Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
-    var->name = name;
-    var->ty = ty;
+    var->name  = name;
+    var->ty    = ty;
     var->align = ty->align;
     return var;
 }
@@ -86,19 +87,19 @@ Token *__builtin_ast_synthetic_token(const char *label) {
     if (!label || !label[0])
         label = "generated";
 
-    char *display_name = arena_format(vm, "<cccc macro: %s>", label);
-    char *contents = arena_format(vm, "%s\n", label);
-    File *file = new_file(vm, display_name, 0, contents);
+    char  *display_name = arena_format(vm, "<cccc macro: %s>", label);
+    char  *contents     = arena_format(vm, "%s\n", label);
+    File  *file         = new_file(vm, display_name, 0, contents);
 
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
-    tok->kind = TK_IDENT;
-    tok->loc = contents;
-    tok->len = (int)strlen(label);
-    tok->file = file;
+    tok->kind     = TK_IDENT;
+    tok->loc      = contents;
+    tok->len      = (int)strlen(label);
+    tok->file     = file;
     tok->filename = file->display_name;
-    tok->line_no = 1;
-    tok->col_no = 1;
+    tok->line_no  = 1;
+    tok->col_no   = 1;
     return tok;
 }
 
@@ -118,11 +119,12 @@ Node *__builtin_ast_copy_location(Node *dst, Node *src) {
     return dst;
 }
 
-static Obj *reflect_new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
-    Obj *var = reflect_new_var(vm, name, name_len, ty);
-    var->next = vm->compiler.globals;
-    var->is_static = true;
-    var->is_definition = true;
+static Obj *reflect_new_gvar(VirtualMachine *vm, char *name, int name_len,
+                             Type *ty) {
+    Obj *var             = reflect_new_var(vm, name, name_len, ty);
+    var->next            = vm->compiler.globals;
+    var->is_static       = true;
+    var->is_definition   = true;
     vm->compiler.globals = var;
     return var;
 }
@@ -139,7 +141,8 @@ static Obj *reflect_new_anon_gvar(VirtualMachine *vm, Type *ty) {
 // Walk the current scope chain for a struct/union/enum tag OR typedef
 // registered under `name`. Factored out of __builtin_ast_find_type so it
 // can be retried once after a #894 demand-driven splice attempt.
-static Type *find_type_in_scope(VirtualMachine *vm, const char *name, size_t name_len) {
+static Type *find_type_in_scope(VirtualMachine *vm, const char *name,
+                                size_t name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         // First search struct/union/enum tags
         for (TagScopeNode *node = sc->tags; node; node = node->next) {
@@ -166,7 +169,7 @@ Type *__builtin_ast_find_type(const char *name) {
 
     size_t name_len = strlen(name);
 
-    Type *ty = find_type_in_scope(vm, name, name_len);
+    Type  *ty       = find_type_in_scope(vm, name, name_len);
     if (ty)
         return ty;
 
@@ -193,18 +196,18 @@ Type *__builtin_ast_get_type(const char *name) {
 
     const struct {
         const char *name;
-        Type *type;
+        Type       *type;
     } builtins[] = {
-        {"void",   ty_void},
-        {"char",   ty_char},
-        {"short",  ty_short},
-        {"int",    ty_int},
-        {"long",   ty_long},
-        {"float",  ty_float},
+        {"void", ty_void},
+        {"char", ty_char},
+        {"short", ty_short},
+        {"int", ty_int},
+        {"long", ty_long},
+        {"float", ty_float},
         {"double", ty_double},
-        {"_Bool",  ty_bool},
-        {"_Decimal32",  ty_decimal32},
-        {"_Decimal64",  ty_decimal64},
+        {"_Bool", ty_bool},
+        {"_Decimal32", ty_decimal32},
+        {"_Decimal64", ty_decimal64},
         {"_Decimal128", ty_decimal128},
     };
 
@@ -220,9 +223,13 @@ TypeKind __builtin_ast_type_kind(Type *ty) {
     return ty ? ty->kind : TY_VOID;
 }
 
-int __builtin_ast_type_size(Type *ty) { return ty ? ty->size : 0; }
+int __builtin_ast_type_size(Type *ty) {
+    return ty ? ty->size : 0;
+}
 
-int __builtin_ast_type_align(Type *ty) { return ty ? ty->align : 0; }
+int __builtin_ast_type_align(Type *ty) {
+    return ty ? ty->align : 0;
+}
 
 bool __builtin_ast_type_is_unsigned(Type *ty) {
     return ty ? ty->is_unsigned : false;
@@ -305,9 +312,9 @@ const char *__builtin_ast_type_name(Type *ty) {
     // Extract string from token into an arena-allocated buffer -- a shared
     // static buffer would alias across calls (e.g. for callers building a
     // name array across multiple types).
-    VirtualMachine *vm = __builtin_current_vm;
-    int len = name->len;
-    char *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    VirtualMachine *vm     = __builtin_current_vm;
+    int             len    = name->len;
+    char           *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
     memcpy(buffer, name->loc, len);
     buffer[len] = '\0';
     return buffer;
@@ -327,18 +334,41 @@ const char *__builtin_ast_type_c_name(Type *ty) {
 
     const char *base = NULL;
     switch (ty->kind) {
-    case TY_BOOL: base = "bool"; break;
-    case TY_CHAR: base = ty->is_unsigned ? "uchar" : "char"; break;
-    case TY_SHORT: base = ty->is_unsigned ? "ushort" : "short"; break;
-    case TY_INT: base = ty->is_unsigned ? "uint" : "int"; break;
-    case TY_LONG: base = ty->is_unsigned ? "ulong" : "long"; break;
-    case TY_FLOAT: base = "float"; break;
-    case TY_DOUBLE: base = "double"; break;
-    case TY_LDOUBLE: base = "ldouble"; break;
-    case TY_DECIMAL32: base = "_Decimal32"; break;
-    case TY_DECIMAL64: base = "_Decimal64"; break;
-    case TY_DECIMAL128: base = "_Decimal128"; break;
-    default: break;
+        case TY_BOOL:
+            base = "bool";
+            break;
+        case TY_CHAR:
+            base = ty->is_unsigned ? "uchar" : "char";
+            break;
+        case TY_SHORT:
+            base = ty->is_unsigned ? "ushort" : "short";
+            break;
+        case TY_INT:
+            base = ty->is_unsigned ? "uint" : "int";
+            break;
+        case TY_LONG:
+            base = ty->is_unsigned ? "ulong" : "long";
+            break;
+        case TY_FLOAT:
+            base = "float";
+            break;
+        case TY_DOUBLE:
+            base = "double";
+            break;
+        case TY_LDOUBLE:
+            base = "ldouble";
+            break;
+        case TY_DECIMAL32:
+            base = "_Decimal32";
+            break;
+        case TY_DECIMAL64:
+            base = "_Decimal64";
+            break;
+        case TY_DECIMAL128:
+            base = "_Decimal128";
+            break;
+        default:
+            break;
     }
     if (base)
         return arena_strdup(vm, base);
@@ -391,8 +421,7 @@ EnumConstant *__builtin_ast_enum_at(Type *enum_type, int index) {
     return ec;
 }
 
-EnumConstant *__builtin_ast_enum_find(Type *enum_type,
-                                    const char *name) {
+EnumConstant *__builtin_ast_enum_find(Type *enum_type, const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
     (void)vm;
     if (!enum_type || enum_type->kind != TY_ENUM || !name)
@@ -413,7 +442,9 @@ int64_t __builtin_ast_enum_constant_value(EnumConstant *ec) {
     return ec ? ec->value : 0;
 }
 
-const char *__builtin_ast_enum_name(Type *e) { return __builtin_ast_type_name(e); }
+const char *__builtin_ast_enum_name(Type *e) {
+    return __builtin_ast_type_name(e);
+}
 
 int __builtin_ast_enum_value_count(Type *e) {
     int count = __builtin_ast_enum_count(e);
@@ -448,8 +479,7 @@ int __builtin_ast_struct_member_count(Type *struct_type) {
     return count;
 }
 
-Member *__builtin_ast_struct_member_at(Type *struct_type,
-                                        int index) {
+Member *__builtin_ast_struct_member_at(Type *struct_type, int index) {
     VirtualMachine *vm = __builtin_current_vm;
     (void)vm;
     if (!struct_type || index < 0)
@@ -463,8 +493,7 @@ Member *__builtin_ast_struct_member_at(Type *struct_type,
     return m;
 }
 
-Member *__builtin_ast_struct_member_find(Type *struct_type,
-                                        const char *name) {
+Member *__builtin_ast_struct_member_find(Type *struct_type, const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
     (void)vm;
     if (!struct_type || !name)
@@ -488,17 +517,21 @@ const char *__builtin_ast_member_name(Member *m) {
     // must return a stable, distinct pointer (e.g. for callers building a
     // const char *fields[] array across StructMemberAt iterations) --
     // a shared static buffer would alias across calls.
-    VirtualMachine *vm = __builtin_current_vm;
-    int len = m->name->len;
-    char *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
+    VirtualMachine *vm     = __builtin_current_vm;
+    int             len    = m->name->len;
+    char           *buffer = arena_alloc(&vm->compiler.parser_arena, len + 1);
     memcpy(buffer, m->name->loc, len);
     buffer[len] = '\0';
     return buffer;
 }
 
-Type *__builtin_ast_member_type(Member *m) { return m ? m->ty : NULL; }
+Type *__builtin_ast_member_type(Member *m) {
+    return m ? m->ty : NULL;
+}
 
-int __builtin_ast_member_offset(Member *m) { return m ? m->offset : 0; }
+int __builtin_ast_member_offset(Member *m) {
+    return m ? m->offset : 0;
+}
 
 bool __builtin_ast_member_is_bitfield(Member *m) {
     return m ? m->is_bitfield : false;
@@ -511,19 +544,18 @@ int __builtin_ast_member_bitfield_width(Member *m) {
 // Ticket #235: OffsetofChain(ty, "a", "b", ...) — sum of member offsets
 // walking nested struct/union members, e.g. offsetof(ty, a.b). Returns -1
 // if any name in the chain cannot be resolved.
-int64_t __builtin_ast_offsetof_chain(Type *ty,
-                                   const char **names, int n) {
+int64_t __builtin_ast_offsetof_chain(Type *ty, const char **names, int n) {
     if (!ty || !names || n <= 0)
         return -1;
 
-    int64_t total = 0;
-    Type *cur_ty = ty;
+    int64_t total  = 0;
+    Type   *cur_ty = ty;
     for (int i = 0; i < n; i++) {
         Member *m = __builtin_ast_struct_member_find(cur_ty, names[i]);
         if (!m)
             return -1;
-        total += m->offset;
-        cur_ty = m->ty;
+        total  += m->offset;
+        cur_ty  = m->ty;
     }
     return total;
 }
@@ -532,7 +564,8 @@ int64_t __builtin_ast_offsetof_chain(Type *ty,
 // Global Symbol Introspection
 // ============================================================================
 
-static Obj *find_global_in_list(VirtualMachine *vm, const char *name, size_t name_len) {
+static Obj *find_global_in_list(VirtualMachine *vm, const char *name,
+                                size_t name_len) {
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
         if (strlen(obj->name) == name_len &&
             strncmp(obj->name, name, name_len) == 0)
@@ -547,7 +580,7 @@ Obj *__builtin_ast_find_global(const char *name) {
         return NULL;
 
     size_t name_len = strlen(name);
-    Obj *obj = find_global_in_list(vm, name, name_len);
+    Obj   *obj      = find_global_in_list(vm, name, name_len);
     if (obj)
         return obj;
 
@@ -587,9 +620,13 @@ Obj *__builtin_ast_global_at(int index) {
     return obj;
 }
 
-const char *__builtin_ast_obj_name(Obj *obj) { return obj ? obj->name : NULL; }
+const char *__builtin_ast_obj_name(Obj *obj) {
+    return obj ? obj->name : NULL;
+}
 
-Type *__builtin_ast_obj_type(Obj *obj) { return obj ? obj->ty : NULL; }
+Type *__builtin_ast_obj_type(Obj *obj) {
+    return obj ? obj->ty : NULL;
+}
 
 bool __builtin_ast_obj_is_function(Obj *obj) {
     return obj ? obj->is_function : false;
@@ -599,7 +636,9 @@ bool __builtin_ast_obj_is_definition(Obj *obj) {
     return obj ? obj->is_definition : false;
 }
 
-bool __builtin_ast_obj_is_static(Obj *obj) { return obj ? obj->is_static : false; }
+bool __builtin_ast_obj_is_static(Obj *obj) {
+    return obj ? obj->is_static : false;
+}
 
 int __builtin_attr_target_kind(AttrTarget *target) {
     return target ? target->kind : 0;
@@ -629,7 +668,7 @@ static Node *alloc_node(VirtualMachine *vm, NodeKind kind) {
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
-    node->tok = vm ? vm->compiler.macro_call_tok : NULL;
+    node->tok  = vm ? vm->compiler.macro_call_tok : NULL;
     return node;
 }
 
@@ -643,8 +682,8 @@ Node *__builtin_ast_int_literal(int64_t value) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_NUM);
-    node->val = value;
-    node->ty = ty_long;
+    node->val  = value;
+    node->ty   = ty_long;
     return node;
 }
 
@@ -655,7 +694,7 @@ Node *__builtin_ast_float_literal(double value) {
 
     Node *node = alloc_node(vm, ND_NUM);
     node->fval = value;
-    node->ty = ty_double;
+    node->ty   = ty_double;
     return node;
 }
 
@@ -676,20 +715,21 @@ Node *__builtin_ast_string_literal(const char *str) {
     // source. This is the reflection API's programmatic equivalent -- same
     // contract (raw string bytes in init_data), so it needs the same flag,
     // or the serializer's `-c=generated` path (which doesn't run the
-    // -m/-c=native-only rename_anon_globals pre-pass) treats it as an unrecognized dotted
-    // name instead of inlining it as string text.
+    // -m/-c=native-only rename_anon_globals pre-pass) treats it as an
+    // unrecognized dotted name instead of inlining it as string text.
     var->is_string_literal = true;
 
     // Allocate space in the data segment and copy the string data
     // This is critical: we must place the data in the segment NOW,
     // not just set init_data (which is only used during initial emit_program)
     long long offset = vm->data_ptr - vm->data_seg;
-    offset = (offset + 7) & ~7; // Align to 8 bytes
-    vm->data_ptr = vm->data_seg + offset;
+    offset           = (offset + 7) & ~7; // Align to 8 bytes
+    vm->data_ptr     = vm->data_seg + offset;
     if (vm_data_ensure(vm, (long long)(len + 1)) != 0)
-        error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
+        error("codegen: data segment overflow (limit: %d bytes)",
+              vm->poolsize_max);
 
-    var->offset = offset;
+    var->offset    = offset;
     var->init_data = (char *)vm->data_ptr; // Point directly to data segment
 
     // Copy string to data segment
@@ -698,8 +738,8 @@ Node *__builtin_ast_string_literal(const char *str) {
 
     // Create a variable reference node
     Node *node = alloc_node(vm, ND_VAR);
-    node->var = var;
-    node->ty = ty;
+    node->var  = var;
+    node->ty   = ty;
     return node;
 }
 
@@ -725,7 +765,10 @@ Node *__builtin_ast_string_literal(const char *str) {
 // there covers both centrally instead of duplicating the check at every
 // call site. See vm->compiler.synth_libc_decls / serialize_synth_libc_
 // includes (serialize.c).
-static const struct { const char *name; const char *header; } synth_libc_headers[] = {
+static const struct {
+    const char *name;
+    const char *header;
+} synth_libc_headers[] = {
     {"memcpy", "string.h"}, {"memmove", "string.h"}, {"memcmp", "string.h"},
     {"strlen", "string.h"}, {"strcmp", "string.h"},
 };
@@ -747,7 +790,8 @@ static void register_synth_libc_call(VirtualMachine *vm, Obj *obj) {
         cc_file_is_command_line_input(vm, obj->tok->file->name))
         return;
     const char *header = NULL;
-    for (size_t i = 0; i < sizeof(synth_libc_headers) / sizeof(synth_libc_headers[0]); i++) {
+    for (size_t i = 0;
+         i < sizeof(synth_libc_headers) / sizeof(synth_libc_headers[0]); i++) {
         if (!strcmp(obj->name, synth_libc_headers[i].name)) {
             header = synth_libc_headers[i].header;
             break;
@@ -762,12 +806,12 @@ static void register_synth_libc_call(VirtualMachine *vm, Obj *obj) {
             return; // already registered
 
     if (reg->len == reg->capacity) {
-        int new_capacity = reg->capacity ? reg->capacity * 2 : 8;
-        SynthLibcDecl *new_data = arena_alloc(&vm->compiler.parser_arena,
-                                              sizeof(SynthLibcDecl) * new_capacity);
+        int            new_capacity = reg->capacity ? reg->capacity * 2 : 8;
+        SynthLibcDecl *new_data     = arena_alloc(
+            &vm->compiler.parser_arena, sizeof(SynthLibcDecl) * new_capacity);
         if (reg->data)
             memcpy(new_data, reg->data, sizeof(SynthLibcDecl) * reg->len);
-        reg->data = new_data;
+        reg->data     = new_data;
         reg->capacity = new_capacity;
     }
     reg->data[reg->len++] = (SynthLibcDecl){.obj = obj, .header = header};
@@ -775,7 +819,8 @@ static void register_synth_libc_call(VirtualMachine *vm, Obj *obj) {
 
 // Scope-then-globals lookup behind __builtin_ast_var_ref. Factored out so
 // it can be retried once after a #894 demand-driven splice attempt.
-static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_len) {
+static Node *var_ref_lookup(VirtualMachine *vm, const char *name,
+                            size_t name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
         for (VarScopeNode *node = sc->vars; node; node = node->next) {
             if (node->name_len == (int)name_len &&
@@ -784,8 +829,8 @@ static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_le
                     node->var->is_used = true;
                     register_synth_libc_call(vm, node->var); // #1050
                     Node *n = alloc_node(vm, ND_VAR);
-                    n->var = node->var;
-                    n->ty = node->var->ty;
+                    n->var  = node->var;
+                    n->ty   = node->var->ty;
                     return n;
                 }
             }
@@ -798,8 +843,8 @@ static Node *var_ref_lookup(VirtualMachine *vm, const char *name, size_t name_le
         global->is_used = true;
         register_synth_libc_call(vm, global); // #1050
         Node *n = alloc_node(vm, ND_VAR);
-        n->var = global;
-        n->ty = global->ty;
+        n->var  = global;
+        n->ty   = global->ty;
         return n;
     }
 
@@ -812,7 +857,7 @@ Node *__builtin_ast_var_ref(const char *name) {
         return NULL;
 
     size_t name_len = strlen(name);
-    Node *n = var_ref_lookup(vm, name, name_len);
+    Node  *n        = var_ref_lookup(vm, name, name_len);
     if (n)
         return n;
 
@@ -839,9 +884,9 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name) {
         if (strlen(param->name) == name_len &&
             strncmp(param->name, name, name_len) == 0) {
             param->is_used = true;
-            Node *n = alloc_node(vm, ND_VAR);
-            n->var = param;
-            n->ty = param->ty;
+            Node *n        = alloc_node(vm, ND_VAR);
+            n->var         = param;
+            n->ty          = param->ty;
             return n;
         }
     }
@@ -853,15 +898,14 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name) {
 // AST Node Construction - Expressions
 // ============================================================================
 
-Node *__builtin_ast_binary(NodeKind op, Node *left,
-                            Node *right) {
+Node *__builtin_ast_binary(NodeKind op, Node *left, Node *right) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !left || !right)
         return NULL;
 
     Node *node = alloc_node(vm, op);
-    node->lhs = left;
-    node->rhs = right;
+    node->lhs  = left;
+    node->rhs  = right;
     // Type will be determined by add_type pass
     return node;
 }
@@ -872,7 +916,7 @@ Node *__builtin_ast_unary(NodeKind op, Node *operand) {
         return NULL;
 
     Node *node = alloc_node(vm, op);
-    node->lhs = operand;
+    node->lhs  = operand;
     return node;
 }
 
@@ -882,8 +926,8 @@ Node *__builtin_ast_cast(Node *expr, Type *target_type) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_CAST);
-    node->lhs = expr;
-    node->ty = target_type;
+    node->lhs  = expr;
+    node->ty   = target_type;
     return node;
 }
 
@@ -897,7 +941,7 @@ Node *__builtin_ast_return(Node *expr) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_RETURN);
-    node->lhs = expr;
+    node->lhs  = expr;
     return node;
 }
 
@@ -909,8 +953,8 @@ Node *__builtin_ast_block(Node **stmts, int count) {
     Node *node = alloc_node(vm, ND_BLOCK);
 
     // Link statements together
-    Node head = {};
-    Node *cur = &head;
+    Node  head = {};
+    Node *cur  = &head;
     for (int i = 0; i < count && stmts[i]; i++) {
         cur = cur->next = stmts[i];
     }
@@ -935,8 +979,7 @@ Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt) {
     return block;
 }
 
-Node *__builtin_ast_if(Node *cond, Node *then_body,
-                        Node *else_body) {
+Node *__builtin_ast_if(Node *cond, Node *then_body, Node *else_body) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !cond)
         return NULL;
@@ -944,7 +987,7 @@ Node *__builtin_ast_if(Node *cond, Node *then_body,
     Node *node = alloc_node(vm, ND_IF);
     node->cond = cond;
     node->then = then_body;
-    node->els = else_body;
+    node->els  = else_body;
     return node;
 }
 
@@ -957,16 +1000,15 @@ Node *__builtin_ast_switch(Node *cond) {
     if (!vm || !cond)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_SWITCH);
-    node->cond = cond;
-    node->case_next = NULL;
+    Node *node         = alloc_node(vm, ND_SWITCH);
+    node->cond         = cond;
+    node->case_next    = NULL;
     node->default_case = NULL;
-    node->then = alloc_node(vm, ND_BLOCK);
+    node->then         = alloc_node(vm, ND_BLOCK);
     return node;
 }
 
-void __builtin_ast_switch_add_case(Node *switch_node, Node *value,
-                                Node *body) {
+void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !switch_node || !value || !body)
         return;
@@ -979,11 +1021,11 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value,
     // type-checked by the parser) and errors out at the macro call site if
     // it isn't a compile-time constant -- previously this took value->val
     // directly, which silently read 0 for anything but an ND_NUM literal.
-    Node *case_node = alloc_node(vm, ND_CASE);
-    int64_t v = cc_eval(vm, value);
-    case_node->begin = v;
-    case_node->end = v;
-    case_node->lhs = body;
+    Node   *case_node = alloc_node(vm, ND_CASE);
+    int64_t v         = cc_eval(vm, value);
+    case_node->begin  = v;
+    case_node->end    = v;
+    case_node->lhs    = body;
 
     // #815/#816: reject a case value that collides with one already on the
     // switch, same as the parser does for hand-written switches. Must run
@@ -992,13 +1034,12 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value,
     check_case_conflict(vm, switch_node->case_next, case_node);
 
     // Add to switch's case list
-    case_node->case_next = switch_node->case_next;
+    case_node->case_next   = switch_node->case_next;
     switch_node->case_next = case_node;
     __builtin_ast_block_add_stmt(switch_node->then, case_node);
 }
 
-void __builtin_ast_switch_set_default(Node *switch_node,
-                                    Node *body) {
+void __builtin_ast_switch_set_default(Node *switch_node, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !switch_node || !body)
         return;
@@ -1012,8 +1053,8 @@ void __builtin_ast_switch_set_default(Node *switch_node,
         __builtin_macro_error_at(switch_node,
                                  "multiple default labels in one switch");
 
-    Node *def = alloc_node(vm, ND_CASE);
-    def->lhs = body;
+    Node *def                 = alloc_node(vm, ND_CASE);
+    def->lhs                  = body;
     switch_node->default_case = def;
     __builtin_ast_block_add_stmt(switch_node->then, def);
 }
@@ -1028,7 +1069,7 @@ Node *__builtin_ast_expr_stmt(Node *expr) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_EXPR_STMT);
-    node->lhs = expr;
+    node->lhs  = expr;
     return node;
 }
 
@@ -1038,7 +1079,7 @@ Node *__builtin_ast_expr_stmt(Node *expr) {
 
 void __builtin_macro_error_at(Node *node, const char *fmt, ...) {
     VirtualMachine *vm = __builtin_current_vm;
-    va_list ap;
+    va_list         ap;
     va_start(ap, fmt);
     char buf[4096];
     vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -1052,7 +1093,7 @@ void __builtin_macro_error_at(Node *node, const char *fmt, ...) {
 
 void __builtin_macro_warning_at(Node *node, const char *fmt, ...) {
     VirtualMachine *vm = __builtin_current_vm;
-    va_list ap;
+    va_list         ap;
     va_start(ap, fmt);
     char buf[4096];
     vsnprintf(buf, sizeof(buf), fmt, ap);
@@ -1061,9 +1102,10 @@ void __builtin_macro_warning_at(Node *node, const char *fmt, ...) {
     if (node && node->tok) {
         warn_tok(vm, node->tok, CCCC_WARN_CCCC_MACRO, "%s", buf);
     } else if (vm && (vm->compiler.warnings & CCCC_WARN_CCCC_MACRO)) {
-        bool as_error = (vm->warnings_as_errors &&
-                         !(vm->compiler.warning_no_errors & CCCC_WARN_CCCC_MACRO)) ||
-                        (vm->compiler.warning_errors & CCCC_WARN_CCCC_MACRO);
+        bool as_error =
+            (vm->warnings_as_errors &&
+             !(vm->compiler.warning_no_errors & CCCC_WARN_CCCC_MACRO)) ||
+            (vm->compiler.warning_errors & CCCC_WARN_CCCC_MACRO);
         if (as_error)
             error("%s", buf);
         else
@@ -1087,16 +1129,16 @@ static Node *make_local_var_node(VirtualMachine *vm, char *name, Type *ty) {
         return NULL;
     }
 
-    Obj *var = reflect_new_var(vm, name, strlen(name), ty);
+    Obj *var      = reflect_new_var(vm, name, strlen(name), ty);
     var->is_local = true;
     // Prepend to vm->compiler.locals, not fn->locals directly.
     // cc_expand_macros flushes vm->compiler.locals back into fn->locals at the
     // end of each function, and push_fn/pop_fn manages this for WithFn blocks.
-    var->next = vm->compiler.locals;
+    var->next           = vm->compiler.locals;
     vm->compiler.locals = var;
 
-    Node *node = alloc_node(vm, ND_VAR);
-    node->var = var;
+    Node *node          = alloc_node(vm, ND_VAR);
+    node->var           = var;
     return node;
 }
 
@@ -1130,8 +1172,8 @@ Node *__builtin_ast_assign(Node *target, Node *value) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_ASSIGN);
-    node->lhs = target;
-    node->rhs = value;
+    node->lhs  = target;
+    node->rhs  = value;
     return node;
 }
 
@@ -1151,8 +1193,8 @@ Node *__builtin_ast_member(Node *obj, const char *name) {
     if (!mem)
         return NULL;
 
-    Node *node = alloc_node(vm, ND_MEMBER);
-    node->lhs = obj;
+    Node *node   = alloc_node(vm, ND_MEMBER);
+    node->lhs    = obj;
     node->member = mem;
     return node;
 }
@@ -1176,10 +1218,10 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     if (ty->kind != TY_FUNC)
         return NULL; // callee is not a function type
 
-    Node *node = alloc_node(vm, ND_FUNCALL);
-    node->lhs = callee;
+    Node *node    = alloc_node(vm, ND_FUNCALL);
+    node->lhs     = callee;
     node->func_ty = ty;
-    node->ty = ty->return_ty;
+    node->ty      = ty->return_ty;
 
     // Chain argument nodes via ->next, resolving each argument's type and
     // casting to the corresponding parameter type (mirrors funcall() in
@@ -1190,8 +1232,8 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     // those argument positions (reusing the same node across multiple
     // funcalls corrupts earlier calls' arg chains).
     Type *param_ty = ty->params;
-    Node head = {};
-    Node *cur = &head;
+    Node  head     = {};
+    Node *cur      = &head;
     for (int i = 0; i < n && args[i]; i++) {
         Node *arg = args[i];
         add_type(vm, arg);
@@ -1208,7 +1250,8 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     return node;
 }
 
-// __builtin_ast_while: while(cond) body — represented as ND_FOR with init/inc NULL
+// __builtin_ast_while: while(cond) body — represented as ND_FOR with init/inc
+// NULL
 Node *__builtin_ast_while(Node *cond, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !cond)
@@ -1221,8 +1264,7 @@ Node *__builtin_ast_while(Node *cond, Node *body) {
     return node;
 }
 
-Node *__builtin_ast_for(Node *init, Node *cond,
-                       Node *inc, Node *body) {
+Node *__builtin_ast_for(Node *init, Node *cond, Node *inc, Node *body) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
         return NULL;
@@ -1230,7 +1272,7 @@ Node *__builtin_ast_for(Node *init, Node *cond,
     Node *node = alloc_node(vm, ND_FOR);
     node->init = init;
     node->cond = cond;
-    node->inc = inc;
+    node->inc  = inc;
     node->then = body;
     return node;
 }
@@ -1256,15 +1298,14 @@ static inline int reflect_align_to(int n, int align) {
 }
 
 // MakeCond(cond, then, else) — ternary ?: expression
-Node *__builtin_ast_cond(Node *cond, Node *then_expr,
-                          Node *else_expr) {
+Node *__builtin_ast_cond(Node *cond, Node *then_expr, Node *else_expr) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !cond || !then_expr || !else_expr)
         return NULL;
     Node *node = alloc_node(vm, ND_COND);
     node->cond = cond;
     node->then = then_expr;
-    node->els = else_expr;
+    node->els  = else_expr;
     // Type is resolved by add_type pass
     return node;
 }
@@ -1278,8 +1319,8 @@ Node *__builtin_ast_null(void) {
     if (!zero)
         return NULL;
     Node *node = alloc_node(vm, ND_CAST);
-    node->lhs = zero;
-    node->ty = pointer_to(vm, ty_void);
+    node->lhs  = zero;
+    node->ty   = pointer_to(vm, ty_void);
     return node;
 }
 
@@ -1312,7 +1353,8 @@ Node *__builtin_ast_sizeof_expr(Node *expr) {
 
 // MakeSubscript(arr, idx) — arr[idx], desugared as *(arr + idx * sizeof(*arr))
 // Mirrors new_add() in parse.c: the index must be pre-scaled by the element
-// size so that codegen emits a plain integer ADD (it does not scale internally).
+// size so that codegen emits a plain integer ADD (it does not scale
+// internally).
 Node *__builtin_ast_subscript(Node *arr, Node *idx) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !arr || !idx)
@@ -1334,30 +1376,30 @@ Node *__builtin_ast_subscript(Node *arr, Node *idx) {
     if (ptr->ty && ptr->ty->base) {
         int elem_size = ptr->ty->base->size;
         // Build: num * elem_size
-        Node *scale = alloc_node(vm, ND_NUM);
-        scale->val = elem_size;
-        scale->ty = ty_long;
+        Node *scale  = alloc_node(vm, ND_NUM);
+        scale->val   = elem_size;
+        scale->ty    = ty_long;
         Node *scaled = alloc_node(vm, ND_MUL);
-        scaled->lhs = num;
-        scaled->rhs = scale;
-        scaled->ty = num->ty ? num->ty : ty_long;
+        scaled->lhs  = num;
+        scaled->rhs  = scale;
+        scaled->ty   = num->ty ? num->ty : ty_long;
         // Build: ptr + scaled
         Node *add = alloc_node(vm, ND_ADD);
-        add->lhs = ptr;
-        add->rhs = scaled;
-        add->ty = ptr->ty; // pointer result type
+        add->lhs  = ptr;
+        add->rhs  = scaled;
+        add->ty   = ptr->ty; // pointer result type
         // Dereference: *(ptr + scaled)
         Node *deref = alloc_node(vm, ND_DEREF);
-        deref->lhs = add;
+        deref->lhs  = add;
         return deref;
     }
 
     // Fallback: integer subscript (unusual but safe)
-    Node *add = alloc_node(vm, ND_ADD);
-    add->lhs = ptr;
-    add->rhs = num;
+    Node *add   = alloc_node(vm, ND_ADD);
+    add->lhs    = ptr;
+    add->rhs    = num;
     Node *deref = alloc_node(vm, ND_DEREF);
-    deref->lhs = add;
+    deref->lhs  = add;
     return deref;
 }
 
@@ -1372,7 +1414,8 @@ Node *__builtin_ast_comma(Node *lhs, Node *rhs) {
 
 // Write a single constant scalar value to buf[0..ty->size-1].
 // Calls cc_eval / cc_eval_double which error() on non-constant expressions.
-static void reflect_write_constexpr(VirtualMachine *vm, char *buf, Type *ty, Node *node) {
+static void reflect_write_constexpr(VirtualMachine *vm, char *buf, Type *ty,
+                                    Node *node) {
     if (is_flonum(ty)) {
         double v = cc_eval_double(vm, node);
         if (ty->kind == TY_FLOAT)
@@ -1383,20 +1426,31 @@ static void reflect_write_constexpr(VirtualMachine *vm, char *buf, Type *ty, Nod
     }
     int64_t v = cc_eval(vm, node);
     switch (ty->size) {
-    case 1: *(int8_t *)buf  = (int8_t)v;  break;
-    case 2: *(int16_t *)buf = (int16_t)v; break;
-    case 4: *(int32_t *)buf = (int32_t)v; break;
-    case 8: *(int64_t *)buf = v;          break;
-    default:
-        error_tok(vm, node ? node->tok : NULL,
-                  "unsupported element size %d in file-scope compound literal", ty->size);
+        case 1:
+            *(int8_t *)buf = (int8_t)v;
+            break;
+        case 2:
+            *(int16_t *)buf = (int16_t)v;
+            break;
+        case 4:
+            *(int32_t *)buf = (int32_t)v;
+            break;
+        case 8:
+            *(int64_t *)buf = v;
+            break;
+        default:
+            error_tok(
+                vm, node ? node->tok : NULL,
+                "unsupported element size %d in file-scope compound literal",
+                ty->size);
     }
 }
 
 // Create an anonymous static global var for a file-scope compound literal.
 // Returns ND_VAR(anon_gvar); gen() will copy init_data into the data segment.
-static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty, Node **inits, int n) {
-    Obj *var = reflect_new_anon_gvar(vm, ty);
+static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty,
+                                        Node **inits, int n) {
+    Obj *var       = reflect_new_anon_gvar(vm, ty);
     var->is_static = true;
     // #928: mark this reachable via the -c=generated emit-event walk
     // (cc_record_emit_object, macros.c) the same way MakeFunction/MakeGlobalVar
@@ -1404,21 +1458,28 @@ static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty, Node **ini
     // gvar this node references.
     var->is_macro_generated = true;
 
-    char *buf = arena_alloc(&vm->compiler.parser_arena, ty->size);
+    char *buf               = arena_alloc(&vm->compiler.parser_arena, ty->size);
     memset(buf, 0, ty->size);
     var->init_data = buf;
 
     if (ty->kind == TY_ARRAY) {
         int elem_sz = ty->base->size;
         for (int i = 0; i < n && i < ty->array_len; i++) {
-            if (!inits[i]) continue;
+            if (!inits[i])
+                continue;
             reflect_write_constexpr(vm, buf + i * elem_sz, ty->base, inits[i]);
         }
     } else if (ty->kind == TY_STRUCT) {
         int i = 0;
         for (Member *m = ty->members; m && i < n; m = m->next) {
-            if (!m->name) { i++; continue; }
-            if (!inits[i]) { i++; continue; }
+            if (!m->name) {
+                i++;
+                continue;
+            }
+            if (!inits[i]) {
+                i++;
+                continue;
+            }
             reflect_write_constexpr(vm, buf + m->offset, m->ty, inits[i]);
             i++;
         }
@@ -1427,36 +1488,37 @@ static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty, Node **ini
     }
 
     Node *node = alloc_node(vm, ND_VAR);
-    node->var = var;
-    node->ty = ty;
+    node->var  = var;
+    node->ty   = ty;
     return node;
 }
 
 // CompoundLiteral(ty, ...) — positional compound literal: zero + assign chain
 // Mirrors parse.c:4375 compound literal lowering.
-// At function scope: emits stack-var + ND_ASSIGN chain (supports non-constant values).
-// At file scope: emits static anon gvar with constant init_data (ticket #304).
+// At function scope: emits stack-var + ND_ASSIGN chain (supports non-constant
+// values). At file scope: emits static anon gvar with constant init_data
+// (ticket #304).
 Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty)
         return NULL;
     Token *tok = vm->compiler.macro_call_tok;
-    Obj *fn = vm->compiler.current_fn;
+    Obj   *fn  = vm->compiler.current_fn;
     if (!fn)
         return make_gvar_compound_literal(vm, ty, inits, n);
 
-    char *name = reflect_unique_name(vm);
-    Obj *var = reflect_new_var(vm, name, strlen(name), ty);
+    char *name    = reflect_unique_name(vm);
+    Obj  *var     = reflect_new_var(vm, name, strlen(name), ty);
     var->is_local = true;
     // Prepend to vm->compiler.locals (not fn->locals) so cc_expand_macros
     // picks up the new var when it flushes: fn->locals = vm->compiler.locals.
-    var->next = vm->compiler.locals;
+    var->next           = vm->compiler.locals;
     vm->compiler.locals = var;
 
-    Node *zero = alloc_node(vm, ND_MEMZERO);
-    zero->var = var;
+    Node *zero          = alloc_node(vm, ND_MEMZERO);
+    zero->var           = var;
 
-    Node *chain = NULL;
+    Node *chain         = NULL;
     if (n > 0 && inits) {
         for (int i = 0; i < n - 1; i++)
             if (inits[i])
@@ -1466,23 +1528,23 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
         chain = inits[0];
     }
 
-    Node *splice = alloc_node(vm, ND_INIT_SPLICE);
-    splice->tok = tok;
-    splice->var = var;
+    Node *splice             = alloc_node(vm, ND_INIT_SPLICE);
+    splice->tok              = tok;
+    splice->var              = var;
     splice->init_start_index = 0;
-    Node *assignments = node_expand_init_splice(vm, splice, chain);
+    Node *assignments        = node_expand_init_splice(vm, splice, chain);
 
-    Node *init_comma = alloc_node(vm, ND_COMMA);
-    init_comma->lhs = zero;
-    init_comma->rhs = assignments;
+    Node *init_comma         = alloc_node(vm, ND_COMMA);
+    init_comma->lhs          = zero;
+    init_comma->rhs          = assignments;
 
-    Node *var_ref = alloc_node(vm, ND_VAR);
-    var_ref->var = var;
-    var_ref->ty = ty;
+    Node *var_ref            = alloc_node(vm, ND_VAR);
+    var_ref->var             = var;
+    var_ref->ty              = ty;
 
-    Node *result = alloc_node(vm, ND_COMMA);
-    result->lhs = init_comma;
-    result->rhs = var_ref;
+    Node *result             = alloc_node(vm, ND_COMMA);
+    result->lhs              = init_comma;
+    result->rhs              = var_ref;
     add_type(vm, result);
     return result;
 }
@@ -1499,8 +1561,8 @@ Node *__builtin_ast_init_array(Type *elem_ty, Node **elems, int n) {
 // InitStruct(ty, fields, values, n) — designated struct/union init
 // Partial init is fine: unmentioned fields remain zero.
 // At file scope: emits static anon gvar with constant init_data (ticket #304).
-Node *__builtin_ast_init_struct(Type *ty, const char **fields,
-                                Node **values, int n) {
+Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
+                                int n) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty || n <= 0)
         return NULL;
@@ -1509,36 +1571,41 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
     Obj *fn = vm->compiler.current_fn;
     if (!fn) {
         // File scope: static anon gvar with constant init_data
-        Obj *var = reflect_new_anon_gvar(vm, ty);
+        Obj *var       = reflect_new_anon_gvar(vm, ty);
         var->is_static = true;
         // #928: see make_gvar_compound_literal()'s identical comment --
-        // needed so the -c=generated emit-event walk ever emits a definition for this.
+        // needed so the -c=generated emit-event walk ever emits a definition
+        // for this.
         var->is_macro_generated = true;
         char *buf = arena_alloc(&vm->compiler.parser_arena, ty->size);
         memset(buf, 0, ty->size);
         var->init_data = buf;
         for (int i = 0; i < n; i++) {
-            if (!fields[i] || !values[i]) continue;
-            Member *mem = (Member *)__builtin_ast_struct_member_find(ty, fields[i]);
-            if (!mem) return NULL;
+            if (!fields[i] || !values[i])
+                continue;
+            Member *mem =
+                (Member *)__builtin_ast_struct_member_find(ty, fields[i]);
+            if (!mem)
+                return NULL;
             reflect_write_constexpr(vm, buf + mem->offset, mem->ty, values[i]);
         }
         Node *node = alloc_node(vm, ND_VAR);
-        node->var = var;
-        node->ty = ty;
+        node->var  = var;
+        node->ty   = ty;
         return node;
     }
 
-    char *name = reflect_unique_name(vm);
-    Obj *var = reflect_new_var(vm, name, strlen(name), ty);
-    var->is_local = true;
-    var->next = vm->compiler.locals;
+    char *name          = reflect_unique_name(vm);
+    Obj  *var           = reflect_new_var(vm, name, strlen(name), ty);
+    var->is_local       = true;
+    var->next           = vm->compiler.locals;
     vm->compiler.locals = var;
 
-    Node *zero = alloc_node(vm, ND_MEMZERO);
-    zero->var = var;
+    Node *zero          = alloc_node(vm, ND_MEMZERO);
+    zero->var           = var;
 
-    // Emit assignments only for the specified fields; ND_MEMZERO handles the rest.
+    // Emit assignments only for the specified fields; ND_MEMZERO handles the
+    // rest.
     Node *assignments = alloc_node(vm, ND_NULL_EXPR);
     for (int i = 0; i < n; i++) {
         if (!fields[i] || !values[i])
@@ -1547,37 +1614,37 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
         if (!mem)
             return NULL;
 
-        Node *var_ref = alloc_node(vm, ND_VAR);
-        var_ref->var = var;
-        var_ref->ty = ty;
+        Node *var_ref    = alloc_node(vm, ND_VAR);
+        var_ref->var     = var;
+        var_ref->ty      = ty;
 
-        Node *mem_node = alloc_node(vm, ND_MEMBER);
-        mem_node->lhs = var_ref;
+        Node *mem_node   = alloc_node(vm, ND_MEMBER);
+        mem_node->lhs    = var_ref;
         mem_node->member = mem;
         add_type(vm, mem_node);
 
         Node *assign = alloc_node(vm, ND_ASSIGN);
-        assign->lhs = mem_node;
-        assign->rhs = values[i];
+        assign->lhs  = mem_node;
+        assign->rhs  = values[i];
         add_type(vm, assign);
 
         Node *comma = alloc_node(vm, ND_COMMA);
-        comma->lhs = assignments;
-        comma->rhs = assign;
+        comma->lhs  = assignments;
+        comma->rhs  = assign;
         assignments = comma;
     }
 
     Node *init_comma = alloc_node(vm, ND_COMMA);
-    init_comma->lhs = zero;
-    init_comma->rhs = assignments;
+    init_comma->lhs  = zero;
+    init_comma->rhs  = assignments;
 
-    Node *var_ref = alloc_node(vm, ND_VAR);
-    var_ref->var = var;
-    var_ref->ty = ty;
+    Node *var_ref    = alloc_node(vm, ND_VAR);
+    var_ref->var     = var;
+    var_ref->ty      = ty;
 
-    Node *result = alloc_node(vm, ND_COMMA);
-    result->lhs = init_comma;
-    result->rhs = var_ref;
+    Node *result     = alloc_node(vm, ND_COMMA);
+    result->lhs      = init_comma;
+    result->rhs      = var_ref;
     add_type(vm, result);
     return result;
 }
@@ -1591,23 +1658,26 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields,
 // Nested struct/union members are recursed into (flat serialization).
 // Bitfields are skipped (TODO #<follow-up>: bit-packed serialization).
 static void reflect_serialize_members(VirtualMachine *vm, Node *block, Type *ty,
-                                       Node *expr, Node *buf_char, int base_offset) {
+                                      Node *expr, Node *buf_char,
+                                      int base_offset) {
     for (Member *m = ty->members; m; m = m->next) {
         if (!m->name || m->is_bitfield)
             continue;
 
         Node *field = __builtin_ast_member(expr, __builtin_ast_member_name(m));
-        int off = base_offset + m->offset;
+        int   off   = base_offset + m->offset;
 
         if (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) {
             reflect_serialize_members(vm, block, m->ty, field, buf_char, off);
             continue;
         }
 
-        Node *dst = __builtin_ast_unary(ND_ADDR,
+        Node *dst = __builtin_ast_unary(
+            ND_ADDR,
             __builtin_ast_subscript(buf_char, __builtin_ast_int_literal(off)));
-        Node *src = __builtin_ast_unary(ND_ADDR, field);
-        Node *call = __builtin_ast_funcall(__builtin_ast_var_ref("memcpy"),
+        Node *src  = __builtin_ast_unary(ND_ADDR, field);
+        Node *call = __builtin_ast_funcall(
+            __builtin_ast_var_ref("memcpy"),
             (Node *[]){dst, src, __builtin_ast_int_literal(m->ty->size)}, 3);
         __builtin_ast_block_add_stmt(block, __builtin_ast_expr_stmt(call));
     }
@@ -1628,14 +1698,15 @@ Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
     add_type(vm, expr);
     add_type(vm, buf);
 
-    Node *block = __builtin_ast_block(NULL, 0);
+    Node *block    = __builtin_ast_block(NULL, 0);
     Node *buf_char = __builtin_ast_cast(buf, pointer_to(vm, ty_char));
 
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
         reflect_serialize_members(vm, block, ty, expr, buf_char, 0);
     } else {
-        Node *src = __builtin_ast_unary(ND_ADDR, expr);
-        Node *call = __builtin_ast_funcall(__builtin_ast_var_ref("memcpy"),
+        Node *src  = __builtin_ast_unary(ND_ADDR, expr);
+        Node *call = __builtin_ast_funcall(
+            __builtin_ast_var_ref("memcpy"),
             (Node *[]){buf, src, __builtin_ast_int_literal(ty->size)}, 3);
         __builtin_ast_block_add_stmt(block, __builtin_ast_expr_stmt(call));
     }
@@ -1669,16 +1740,16 @@ Node *__builtin_ast_enum_to_string_switch(Type *ty, Node *expr) {
     add_type(vm, expr);
 
     Node *sw = __builtin_ast_switch(expr);
-    int n = __builtin_ast_enum_value_count(ty);
+    int   n  = __builtin_ast_enum_value_count(ty);
     for (int i = 0; i < n; i++) {
-        const char *name = __builtin_ast_enum_value_name(ty, i);
-        int64_t val = __builtin_ast_enum_value(ty, i);
-        Node *value_node = __builtin_ast_int_literal(val);
+        const char *name       = __builtin_ast_enum_value_name(ty, i);
+        int64_t     val        = __builtin_ast_enum_value(ty, i);
+        Node       *value_node = __builtin_ast_int_literal(val);
         Node *body = __builtin_ast_return(__builtin_ast_string_literal(name));
         __builtin_ast_switch_add_case(sw, value_node, body);
     }
-    __builtin_ast_switch_set_default(sw,
-        __builtin_ast_return(__builtin_ast_string_literal("")));
+    __builtin_ast_switch_set_default(
+        sw, __builtin_ast_return(__builtin_ast_string_literal("")));
 
     return sw;
 }
@@ -1694,21 +1765,22 @@ Node *__builtin_ast_enum_from_string_chain(Type *ty, Node *expr) {
     add_type(vm, expr);
 
     Node *block = __builtin_ast_block(NULL, 0);
-    int n = __builtin_ast_enum_value_count(ty);
+    int   n     = __builtin_ast_enum_value_count(ty);
     for (int i = 0; i < n; i++) {
-        const char *name = __builtin_ast_enum_value_name(ty, i);
-        int64_t val = __builtin_ast_enum_value(ty, i);
+        const char *name    = __builtin_ast_enum_value_name(ty, i);
+        int64_t     val     = __builtin_ast_enum_value(ty, i);
 
-        Node *str_lit = __builtin_ast_string_literal(name);
-        Node *cmp = __builtin_ast_funcall(__builtin_ast_var_ref("strcmp"),
-            (Node *[]){expr, str_lit}, 2);
-        Node *cond = __builtin_ast_binary(ND_EQ, cmp, __builtin_ast_int_literal(0));
-        Node *then = __builtin_ast_return(__builtin_ast_int_literal(val));
+        Node       *str_lit = __builtin_ast_string_literal(name);
+        Node       *cmp = __builtin_ast_funcall(__builtin_ast_var_ref("strcmp"),
+                                                (Node *[]){expr, str_lit}, 2);
+        Node       *cond =
+            __builtin_ast_binary(ND_EQ, cmp, __builtin_ast_int_literal(0));
+        Node *then    = __builtin_ast_return(__builtin_ast_int_literal(val));
         Node *if_node = __builtin_ast_if(cond, then, NULL);
         __builtin_ast_block_add_stmt(block, if_node);
     }
-    __builtin_ast_block_add_stmt(block,
-        __builtin_ast_return(__builtin_ast_int_literal(-1)));
+    __builtin_ast_block_add_stmt(
+        block, __builtin_ast_return(__builtin_ast_int_literal(-1)));
 
     add_type(vm, block);
     return block;
@@ -1723,7 +1795,7 @@ Type *__builtin_ast_make_const(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty)
         return NULL;
-    Type *result = copy_type(vm, ty);
+    Type *result     = copy_type(vm, ty);
     result->is_const = true;
     return result;
 }
@@ -1733,7 +1805,7 @@ Type *__builtin_ast_make_volatile(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty)
         return NULL;
-    Type *result = copy_type(vm, ty);
+    Type *result        = copy_type(vm, ty);
     result->is_volatile = true;
     return result;
 }
@@ -1747,19 +1819,19 @@ Type *__builtin_ast_make_volatile(Type *ty) {
 // pointer_to() or copy_type()) since they get chained via ->next here --
 // never pass a shared singleton (ty_int, ty_long, ...) directly.
 static Type *make_func_type_params(VirtualMachine *vm, Type *return_type,
-                                    Type **params, int nparams) {
+                                   Type **params, int nparams) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
-    ty->kind = TY_FUNC;
+    ty->kind      = TY_FUNC;
     ty->return_ty = return_type;
-    ty->size = 8;
-    ty->align = 8;
+    ty->size      = 8;
+    ty->align     = 8;
 
-    Type head = {0};
-    Type *cur = &head;
+    Type  head    = {0};
+    Type *cur     = &head;
     for (int i = 0; i < nparams; i++) {
         cur->next = params[i];
-        cur = cur->next;
+        cur       = cur->next;
     }
     ty->params = head.next;
     return ty;
@@ -1774,8 +1846,8 @@ static Type *make_func_type(VirtualMachine *vm, Type *return_type) {
 // GenerateMap/reduce/filter). Each entry in param_types is copy_type()'d
 // before being chained via ->next, so passing shared singletons (ty_int, a
 // struct's own elem_ty, ...) here never mutates them.
-Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
-                                        Type **param_types, int nparams) {
+Type *__builtin_ast_make_func_ptr_type(Type *return_ty, Type **param_types,
+                                       int nparams) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !return_ty)
         return NULL;
@@ -1791,9 +1863,9 @@ Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
 }
 
 // Synthesize a minimal extern declaration for a libc function directly into
-// vm->compiler.globals, so __builtin_ast_var_ref/__builtin_ast_funcall can build
-// calls to it (e.g. for Serialize's memcpy) even when the target TU doesn't
-// #include <string.h>. The FFI registration for these functions is
+// vm->compiler.globals, so __builtin_ast_var_ref/__builtin_ast_funcall can
+// build calls to it (e.g. for Serialize's memcpy) even when the target TU
+// doesn't #include <string.h>. The FFI registration for these functions is
 // unconditional (register_string_functions); only the AST-level Obj is
 // missing without the #include.
 //
@@ -1805,18 +1877,18 @@ Type *__builtin_ast_make_func_ptr_type(Type *return_ty,
 // var_ref_lookup() regardless of whether a name resolves through this
 // synthesis path or through reflection.h's own #include <string.h> (see
 // that function's comment for why both shapes exist).
-static void ensure_libc_fn_decl(VirtualMachine *vm, const char *name, Type *return_ty,
-                                 Type **params, int nparams) {
+static void ensure_libc_fn_decl(VirtualMachine *vm, const char *name,
+                                Type *return_ty, Type **params, int nparams) {
     if (__builtin_ast_find_global(name))
         return;
 
     Obj *fn = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(fn, 0, sizeof(Obj));
-    fn->name = arena_strdup(vm, name);
-    fn->ty = make_func_type_params(vm, return_ty, params, nparams);
-    fn->align = 8;
+    fn->name        = arena_strdup(vm, name);
+    fn->ty          = make_func_type_params(vm, return_ty, params, nparams);
+    fn->align       = 8;
     fn->is_function = true;
-    fn->next = vm->compiler.globals;
+    fn->next        = vm->compiler.globals;
     vm->compiler.globals = fn;
 }
 
@@ -1830,19 +1902,19 @@ void __builtin_ensure_string_h_decls(void) {
 
     Type *voidp_a = pointer_to(vm, ty_void);
     Type *voidp_b = pointer_to(vm, ty_void);
-    Type *size1 = copy_type(vm, ty_ulong);
+    Type *size1   = copy_type(vm, ty_ulong);
     ensure_libc_fn_decl(vm, "memcpy", pointer_to(vm, ty_void),
                         (Type *[]){voidp_a, voidp_b, size1}, 3);
 
     voidp_a = pointer_to(vm, ty_void);
     voidp_b = pointer_to(vm, ty_void);
-    size1 = copy_type(vm, ty_ulong);
+    size1   = copy_type(vm, ty_ulong);
     ensure_libc_fn_decl(vm, "memmove", pointer_to(vm, ty_void),
                         (Type *[]){voidp_a, voidp_b, size1}, 3);
 
     voidp_a = pointer_to(vm, ty_void);
     voidp_b = pointer_to(vm, ty_void);
-    size1 = copy_type(vm, ty_ulong);
+    size1   = copy_type(vm, ty_ulong);
     ensure_libc_fn_decl(vm, "memcmp", ty_int,
                         (Type *[]){voidp_a, voidp_b, size1}, 3);
 
@@ -1850,23 +1922,21 @@ void __builtin_ensure_string_h_decls(void) {
     ensure_libc_fn_decl(vm, "strlen", copy_type(vm, ty_ulong),
                         (Type *[]){charp}, 1);
 
-    charp = pointer_to(vm, ty_char);
+    charp        = pointer_to(vm, ty_char);
     Type *charp2 = pointer_to(vm, ty_char);
-    ensure_libc_fn_decl(vm, "strcmp", ty_int,
-                        (Type *[]){charp, charp2}, 2);
+    ensure_libc_fn_decl(vm, "strcmp", ty_int, (Type *[]){charp, charp2}, 2);
 }
 
-Obj *__builtin_ast_function(const char *name,
-                            Type *return_type) {
+Obj *__builtin_ast_function(const char *name, Type *return_type) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !name || !return_type)
         return NULL;
 
     // Check if there's already a forward declaration for this function
     size_t name_len = strlen(name);
-    Obj *existing = NULL;
+    Obj   *existing = NULL;
 
-    Obj *lists[] = { vm->compiler.globals, vm->compiler.macro_globals };
+    Obj   *lists[]  = {vm->compiler.globals, vm->compiler.macro_globals};
     for (int i = 0; i < 2 && !existing; i++) {
         for (Obj *obj = lists[i]; obj; obj = obj->next) {
             if (obj->is_function && strlen(obj->name) == name_len &&
@@ -1884,7 +1954,7 @@ Obj *__builtin_ast_function(const char *name,
                   name);
 
         // Update existing forward declaration to be a definition
-        existing->is_definition = true;
+        existing->is_definition      = true;
         existing->is_macro_generated = true;
         // Update return type if needed
         if (existing->ty && existing->ty->kind == TY_FUNC) {
@@ -1899,18 +1969,18 @@ Obj *__builtin_ast_function(const char *name,
     // Create the function object
     Obj *fn = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(fn, 0, sizeof(Obj));
-    fn->name = arena_strdup(vm, name);
-    fn->ty = func_type;
-    fn->align = 8;
-    fn->is_function = true;
-    fn->is_definition = true;
-    fn->is_static = false;
+    fn->name               = arena_strdup(vm, name);
+    fn->ty                 = func_type;
+    fn->align              = 8;
+    fn->is_function        = true;
+    fn->is_definition      = true;
+    fn->is_static          = false;
     fn->is_macro_generated = true;
 
     // Add to globals list. The function is not made visible to the parser
     // until source declares it, inline macro prototype synthesis declares it,
     // or __builtin_ast_publish() publishes it explicitly.
-    fn->next = vm->compiler.globals;
+    fn->next             = vm->compiler.globals;
     vm->compiler.globals = fn;
 
     return fn;
@@ -1918,7 +1988,7 @@ Obj *__builtin_ast_function(const char *name,
 
 static Node *reflect_noop_node(VirtualMachine *vm) {
     Node *noop = alloc_node(vm, ND_NULL_EXPR);
-    noop->ty = ty_void;
+    noop->ty   = ty_void;
     return noop;
 }
 
@@ -1951,20 +2021,20 @@ Node *__builtin_ast_publish(Obj *obj, Token *tok) {
                           obj->is_function ? "function" : "global variable",
                           obj->name);
             error("conflicting declaration for generated %s '%s'",
-                  obj->is_function ? "function" : "global variable",
-                  obj->name);
+                  obj->is_function ? "function" : "global variable", obj->name);
         }
     }
 
     VarScopeNode *decl =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(decl, 0, sizeof(VarScopeNode));
-    decl->name = obj->name;
-    decl->name_len = name_len;
-    decl->var = obj;
-    decl->next = vm->compiler.scope->vars;
+    decl->name               = obj->name;
+    decl->name_len           = name_len;
+    decl->var                = obj;
+    decl->next               = vm->compiler.scope->vars;
     vm->compiler.scope->vars = decl;
-    hashmap_put2_borrowed(&vm->compiler.scope->var_map, decl->name, decl->name_len, decl);
+    hashmap_put2_borrowed(&vm->compiler.scope->var_map, decl->name,
+                          decl->name_len, decl);
     if (vm->compiler.macro_emit_recording)
         cc_record_emit_object(vm, obj);
 
@@ -1985,8 +2055,7 @@ Node *__builtin_ast_publish_type(Type *ty, Token *tok) {
     return reflect_noop_node(vm);
 }
 
-void __builtin_ast_function_add_param(Obj *fn, const char *name,
-                                Type *type) {
+void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !fn || !name || !type)
         return;
@@ -1994,9 +2063,9 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name,
     // Create parameter local variable
     Obj *param = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(param, 0, sizeof(Obj));
-    param->name = arena_strdup(vm, name);
-    param->ty = type;
-    param->align = type->align;
+    param->name     = arena_strdup(vm, name);
+    param->ty       = type;
+    param->align    = type->align;
     param->is_local = true;
     param->is_param = true;
 
@@ -2050,7 +2119,7 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
 
     if (node->kind == ND_BLOCK_LITERAL && node->block_fn) {
         if (node->block_fn->parent_fn == NULL) {
-            node->block_fn->parent_fn = fn;
+            node->block_fn->parent_fn     = fn;
             node->block_fn->nesting_depth = fn->nesting_depth + 1;
         }
         // #995: a lifted block function is created via new_gvar() and never
@@ -2138,8 +2207,8 @@ static Obj *collect_stray_body_local(Node *node, Obj *stray_locals, Obj *fn) {
             !obj_in_list(node->block_desc_var, fn->params))
             found = node->block_desc_var;
         if (!found && node->block_fn)
-            found = collect_stray_body_local(node->block_fn->body,
-                                             stray_locals, node->block_fn);
+            found = collect_stray_body_local(node->block_fn->body, stray_locals,
+                                             node->block_fn);
     }
     if (found)
         return found;
@@ -2186,7 +2255,7 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     if (body->kind != ND_BLOCK) {
         Node *block = alloc_node(vm, ND_BLOCK);
         block->body = body;
-        fn->body = block;
+        fn->body    = block;
     } else {
         fn->body = body;
     }
@@ -2229,7 +2298,7 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     // fn, or a body assembled across several builder calls, accumulates
     // rather than dropping an earlier batch.
     if (vm->compiler.current_fn == NULL && vm->compiler.locals != NULL) {
-        Obj *new_locals = vm->compiler.locals;
+        Obj *new_locals     = vm->compiler.locals;
         vm->compiler.locals = NULL;
 
         if (fn->locals == NULL) {
@@ -2270,8 +2339,8 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     // hard-error naming the fix instead.
     if (vm->compiler.current_fn != NULL && vm->compiler.current_fn != fn &&
         vm->compiler.locals != NULL) {
-        Obj *stray = collect_stray_body_local(fn->body, vm->compiler.locals,
-                                              fn);
+        Obj *stray =
+            collect_stray_body_local(fn->body, vm->compiler.locals, fn);
         if (stray) {
             // error_tok (used elsewhere in this file, e.g. #969's
             // __builtin_pc_* rejection) needs a real token to report a
@@ -2295,7 +2364,7 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
                   "the call in WithFn(%s) { FunctionSetBody(...); }",
                   stray->name, fn->name,
                   vm->compiler.current_fn->name ? vm->compiler.current_fn->name
-                                                 : "<anonymous>",
+                                                : "<anonymous>",
                   fn->name);
         }
     }
@@ -2322,8 +2391,7 @@ void __builtin_ast_function_set_variadic(Obj *fn, bool is_variadic) {
 // FunctionPrototype(name, ret) — create a forward declaration (no body).
 // The same params API (FunctionAddParam) applies; use
 // PublishNode to make it visible in scope.
-Obj *__builtin_ast_function_prototype(const char *name,
-                                    Type *return_type) {
+Obj *__builtin_ast_function_prototype(const char *name, Type *return_type) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !name || !return_type)
         return NULL;
@@ -2331,7 +2399,7 @@ Obj *__builtin_ast_function_prototype(const char *name,
     size_t name_len = strlen(name);
 
     // If a forward-declaration or prototype already exists, return it.
-    Obj *lists[] = { vm->compiler.globals, vm->compiler.macro_globals };
+    Obj *lists[] = {vm->compiler.globals, vm->compiler.macro_globals};
     for (int i = 0; i < 2; i++) {
         for (Obj *obj = lists[i]; obj; obj = obj->next) {
             if (obj->is_function && strlen(obj->name) == name_len &&
@@ -2343,18 +2411,18 @@ Obj *__builtin_ast_function_prototype(const char *name,
 
     Type *func_type = make_func_type(vm, return_type);
 
-    Obj *fn = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    Obj  *fn        = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(fn, 0, sizeof(Obj));
-    fn->name = arena_strdup(vm, name);
-    fn->ty = func_type;
-    fn->align = 8;
-    fn->is_function = true;
-    fn->is_definition = false; // prototype, no body
-    fn->is_static = false;
+    fn->name               = arena_strdup(vm, name);
+    fn->ty                 = func_type;
+    fn->align              = 8;
+    fn->is_function        = true;
+    fn->is_definition      = false; // prototype, no body
+    fn->is_static          = false;
     fn->is_macro_generated = true;
 
-    fn->next = vm->compiler.globals;
-    vm->compiler.globals = fn;
+    fn->next               = vm->compiler.globals;
+    vm->compiler.globals   = fn;
     return fn;
 }
 
@@ -2370,11 +2438,12 @@ void __builtin_ast_add_attribute(Obj *fn, const char *attr_text) {
     cc_apply_attr_to_fn(vm, fn, attr_text, vm->compiler.macro_call_tok);
 }
 
-// Thin helper for MarkAsBuildTarget(fn, kind) — composes the kind string at runtime
-// so the macro doesn't need string concatenation.
+// Thin helper for MarkAsBuildTarget(fn, kind) — composes the kind string at
+// runtime so the macro doesn't need string concatenation.
 void __builtin_ast_add_build_target_attr(Obj *fn, const char *kind) {
     char buf[64];
-    snprintf(buf, sizeof(buf), "cccc::build_target(kind=%s)", kind ? kind : "native");
+    snprintf(buf, sizeof(buf), "cccc::build_target(kind=%s)",
+             kind ? kind : "native");
     __builtin_ast_add_attribute(fn, buf);
 }
 
@@ -2399,11 +2468,12 @@ Obj *__builtin_ast_global_var(const char *name, Type *ty) {
             strncmp(obj->name, name, name_len) == 0) {
             if (obj->is_definition)
                 error("expected unique generated global name, got existing "
-                      "definition '%s'", name);
-            obj->is_definition = true;
+                      "definition '%s'",
+                      name);
+            obj->is_definition      = true;
             obj->is_macro_generated = true;
-            obj->ty = ty;
-            obj->align = ty->align;
+            obj->ty                 = ty;
+            obj->align              = ty->align;
             if (vm->compiler.macro_emit_recording)
                 cc_record_emit_object(vm, obj);
             return obj;
@@ -2412,16 +2482,17 @@ Obj *__builtin_ast_global_var(const char *name, Type *ty) {
 
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
-    var->name = arena_strdup(vm, name);
-    var->ty = ty;
-    var->align = ty->align;
-    var->is_function = false;
+    var->name          = arena_strdup(vm, name);
+    var->ty            = ty;
+    var->align         = ty->align;
+    var->is_function   = false;
     var->is_definition = true;
-    var->is_static = false; // default: external linkage; call _set_static to change
+    var->is_static =
+        false; // default: external linkage; call _set_static to change
     var->is_macro_generated = true;
 
-    var->next = vm->compiler.globals;
-    vm->compiler.globals = var;
+    var->next               = vm->compiler.globals;
+    vm->compiler.globals    = var;
     if (vm->compiler.macro_emit_recording)
         cc_record_emit_object(vm, var);
     return var;
@@ -2430,8 +2501,8 @@ Obj *__builtin_ast_global_var(const char *name, Type *ty) {
 // Set the initial data for a global variable.  data[0..len-1] is copied into
 // the arena.  The variable's type must have ty->size == len; use
 // MakeArray(char_ty, len) to ensure the sizes match.
-void __builtin_ast_global_var_set_init_data(Obj *var,
-                                        const char *data, int len) {
+void __builtin_ast_global_var_set_init_data(Obj *var, const char *data,
+                                            int len) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !var || !data || len <= 0)
         return;
@@ -2454,8 +2525,9 @@ void __builtin_ast_global_var_set_static(Obj *var, bool is_static) {
 // Macro execution is single-threaded so a module-level stack is fine.
 #define CCCC_FN_CONTEXT_STACK_DEPTH 16
 static Obj *_fn_context_stack[CCCC_FN_CONTEXT_STACK_DEPTH];
-static Obj *_fn_locals_stack[CCCC_FN_CONTEXT_STACK_DEPTH]; // saved vm->compiler.locals
-static int  _fn_context_depth = 0;
+static Obj
+    *_fn_locals_stack[CCCC_FN_CONTEXT_STACK_DEPTH]; // saved vm->compiler.locals
+static int _fn_context_depth = 0;
 
 // Push a new function context: saves current_fn and vm->compiler.locals, then
 // switches both to fn.  Any vars allocated inside the WithFn block (e.g. from
@@ -2470,11 +2542,11 @@ void __builtin_ast_push_fn(Obj *fn) {
               CCCC_FN_CONTEXT_STACK_DEPTH);
         return;
     }
-    int d = _fn_context_depth++;
-    _fn_context_stack[d] = vm->compiler.current_fn;
-    _fn_locals_stack[d]  = vm->compiler.locals;  // save outer locals pointer
+    int d                   = _fn_context_depth++;
+    _fn_context_stack[d]    = vm->compiler.current_fn;
+    _fn_locals_stack[d]     = vm->compiler.locals; // save outer locals pointer
     vm->compiler.current_fn = fn;
-    vm->compiler.locals = fn->locals;            // switch to inner fn's locals
+    vm->compiler.locals     = fn->locals; // switch to inner fn's locals
 }
 
 // Pop the most recently pushed function context.  Flushes any vars that were
@@ -2492,9 +2564,9 @@ void __builtin_ast_pop_fn(void) {
     // Flush vars added inside the block back into the inner function.
     if (vm->compiler.current_fn)
         vm->compiler.current_fn->locals = vm->compiler.locals;
-    int d = --_fn_context_depth;
+    int d                   = --_fn_context_depth;
     vm->compiler.current_fn = _fn_context_stack[d];
-    vm->compiler.locals     = _fn_locals_stack[d];  // restore outer locals
+    vm->compiler.locals     = _fn_locals_stack[d]; // restore outer locals
 }
 
 // ============================================================================
@@ -2502,7 +2574,8 @@ void __builtin_ast_pop_fn(void) {
 // ============================================================================
 
 // __builtin_generate_sum(elem_ty): publishes
-//   T sum_T(T *arr, size_t n) { T total = 0; for (...) total += arr[i]; return total; }
+//   T sum_T(T *arr, size_t n) { T total = 0; for (...) total += arr[i]; return
+//   total; }
 void __builtin_generate_sum(Type *elem_ty) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !elem_ty)
@@ -2513,27 +2586,35 @@ void __builtin_generate_sum(Type *elem_ty) {
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
 
     Type *size_ty = __builtin_ast_get_type("size_t");
-    Obj *fn = __builtin_ast_function(gname, elem_ty);
-    __builtin_ast_function_add_param(fn, "arr", __builtin_ast_make_pointer(elem_ty));
+    Obj  *fn      = __builtin_ast_function(gname, elem_ty);
+    __builtin_ast_function_add_param(fn, "arr",
+                                     __builtin_ast_make_pointer(elem_ty));
     __builtin_ast_function_add_param(fn, "n", size_ty);
 
     __builtin_ast_push_fn(fn);
 
     Node *total = __builtin_ast_local_var("total", elem_ty);
-    Node *i = __builtin_ast_local_var("i", size_ty);
+    Node *i     = __builtin_ast_local_var("i", size_ty);
 
     Node *block = __builtin_ast_block(NULL, 0);
-    __builtin_ast_block_add_stmt(block,
-        __builtin_ast_expr_stmt(__builtin_ast_assign(total, __builtin_ast_int_literal(0))));
+    __builtin_ast_block_add_stmt(
+        block, __builtin_ast_expr_stmt(
+                   __builtin_ast_assign(total, __builtin_ast_int_literal(0))));
 
-    Node *init = __builtin_ast_expr_stmt(__builtin_ast_assign(i, __builtin_ast_int_literal(0)));
-    Node *cond = __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
-    Node *inc = __builtin_ast_assign(i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
-    Node *body = __builtin_ast_expr_stmt(__builtin_ast_assign(total,
-        __builtin_ast_binary(ND_ADD, total,
+    Node *init = __builtin_ast_expr_stmt(
+        __builtin_ast_assign(i, __builtin_ast_int_literal(0)));
+    Node *cond =
+        __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
+    Node *inc = __builtin_ast_assign(
+        i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
+    Node *body = __builtin_ast_expr_stmt(__builtin_ast_assign(
+        total,
+        __builtin_ast_binary(
+            ND_ADD, total,
             __builtin_ast_subscript(__builtin_ast_param_ref(fn, "arr"), i))));
 
-    __builtin_ast_block_add_stmt(block, __builtin_ast_for(init, cond, inc, body));
+    __builtin_ast_block_add_stmt(block,
+                                 __builtin_ast_for(init, cond, inc, body));
     __builtin_ast_block_add_stmt(block, __builtin_ast_return(total));
 
     __builtin_ast_function_set_body(fn, block);
@@ -2543,7 +2624,8 @@ void __builtin_generate_sum(Type *elem_ty) {
 }
 
 // __builtin_generate_map(elem_ty): publishes
-//   void map_T(T *arr, size_t n, T *out, T (*f)(T)) { for (...) out[i] = f(arr[i]); }
+//   void map_T(T *arr, size_t n, T *out, T (*f)(T)) { for (...) out[i] =
+//   f(arr[i]); }
 void __builtin_generate_map(Type *elem_ty) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !elem_ty)
@@ -2554,29 +2636,39 @@ void __builtin_generate_map(Type *elem_ty) {
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
 
     Type *size_ty = __builtin_ast_get_type("size_t");
-    Type *cb_ty = __builtin_ast_make_func_ptr_type(elem_ty, (Type *[]){elem_ty}, 1);
+    Type *cb_ty =
+        __builtin_ast_make_func_ptr_type(elem_ty, (Type *[]){elem_ty}, 1);
 
     Obj *fn = __builtin_ast_function(gname, __builtin_ast_get_type("void"));
-    __builtin_ast_function_add_param(fn, "arr", __builtin_ast_make_pointer(elem_ty));
+    __builtin_ast_function_add_param(fn, "arr",
+                                     __builtin_ast_make_pointer(elem_ty));
     __builtin_ast_function_add_param(fn, "n", size_ty);
-    __builtin_ast_function_add_param(fn, "out", __builtin_ast_make_pointer(elem_ty));
+    __builtin_ast_function_add_param(fn, "out",
+                                     __builtin_ast_make_pointer(elem_ty));
     __builtin_ast_function_add_param(fn, "f", cb_ty);
 
     __builtin_ast_push_fn(fn);
 
-    Node *i = __builtin_ast_local_var("i", size_ty);
+    Node *i     = __builtin_ast_local_var("i", size_ty);
 
     Node *block = __builtin_ast_block(NULL, 0);
-    Node *init = __builtin_ast_expr_stmt(__builtin_ast_assign(i, __builtin_ast_int_literal(0)));
-    Node *cond = __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
-    Node *inc = __builtin_ast_assign(i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
+    Node *init  = __builtin_ast_expr_stmt(
+        __builtin_ast_assign(i, __builtin_ast_int_literal(0)));
+    Node *cond =
+        __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
+    Node *inc = __builtin_ast_assign(
+        i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
 
-    Node *call = __builtin_ast_funcall(__builtin_ast_param_ref(fn, "f"),
-        (Node *[]){__builtin_ast_subscript(__builtin_ast_param_ref(fn, "arr"), i)}, 1);
+    Node *call =
+        __builtin_ast_funcall(__builtin_ast_param_ref(fn, "f"),
+                              (Node *[]){__builtin_ast_subscript(
+                                  __builtin_ast_param_ref(fn, "arr"), i)},
+                              1);
     Node *body = __builtin_ast_expr_stmt(__builtin_ast_assign(
         __builtin_ast_subscript(__builtin_ast_param_ref(fn, "out"), i), call));
 
-    __builtin_ast_block_add_stmt(block, __builtin_ast_for(init, cond, inc, body));
+    __builtin_ast_block_add_stmt(block,
+                                 __builtin_ast_for(init, cond, inc, body));
 
     __builtin_ast_function_set_body(fn, block);
     __builtin_ast_pop_fn();
@@ -2598,32 +2690,42 @@ void __builtin_generate_reduce(Type *elem_ty) {
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
 
     Type *size_ty = __builtin_ast_get_type("size_t");
-    Type *cb_ty = __builtin_ast_make_func_ptr_type(elem_ty, (Type *[]){elem_ty, elem_ty}, 2);
+    Type *cb_ty   = __builtin_ast_make_func_ptr_type(
+        elem_ty, (Type *[]){elem_ty, elem_ty}, 2);
 
     Obj *fn = __builtin_ast_function(gname, elem_ty);
-    __builtin_ast_function_add_param(fn, "arr", __builtin_ast_make_pointer(elem_ty));
+    __builtin_ast_function_add_param(fn, "arr",
+                                     __builtin_ast_make_pointer(elem_ty));
     __builtin_ast_function_add_param(fn, "n", size_ty);
     __builtin_ast_function_add_param(fn, "init", elem_ty);
     __builtin_ast_function_add_param(fn, "f", cb_ty);
 
     __builtin_ast_push_fn(fn);
 
-    Node *acc = __builtin_ast_local_var("acc", elem_ty);
-    Node *i = __builtin_ast_local_var("i", size_ty);
+    Node *acc   = __builtin_ast_local_var("acc", elem_ty);
+    Node *i     = __builtin_ast_local_var("i", size_ty);
 
     Node *block = __builtin_ast_block(NULL, 0);
-    __builtin_ast_block_add_stmt(block,
-        __builtin_ast_expr_stmt(__builtin_ast_assign(acc, __builtin_ast_param_ref(fn, "init"))));
+    __builtin_ast_block_add_stmt(
+        block, __builtin_ast_expr_stmt(__builtin_ast_assign(
+                   acc, __builtin_ast_param_ref(fn, "init"))));
 
-    Node *init_stmt = __builtin_ast_expr_stmt(__builtin_ast_assign(i, __builtin_ast_int_literal(0)));
-    Node *cond = __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
-    Node *inc = __builtin_ast_assign(i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
+    Node *init_stmt = __builtin_ast_expr_stmt(
+        __builtin_ast_assign(i, __builtin_ast_int_literal(0)));
+    Node *cond =
+        __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
+    Node *inc = __builtin_ast_assign(
+        i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
 
-    Node *call = __builtin_ast_funcall(__builtin_ast_param_ref(fn, "f"),
-        (Node *[]){acc, __builtin_ast_subscript(__builtin_ast_param_ref(fn, "arr"), i)}, 2);
+    Node *call = __builtin_ast_funcall(
+        __builtin_ast_param_ref(fn, "f"),
+        (Node *[]){acc, __builtin_ast_subscript(
+                            __builtin_ast_param_ref(fn, "arr"), i)},
+        2);
     Node *body = __builtin_ast_expr_stmt(__builtin_ast_assign(acc, call));
 
-    __builtin_ast_block_add_stmt(block, __builtin_ast_for(init_stmt, cond, inc, body));
+    __builtin_ast_block_add_stmt(block,
+                                 __builtin_ast_for(init_stmt, cond, inc, body));
     __builtin_ast_block_add_stmt(block, __builtin_ast_return(acc));
 
     __builtin_ast_function_set_body(fn, block);
@@ -2648,42 +2750,61 @@ void __builtin_generate_filter(Type *elem_ty) {
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
 
     Type *size_ty = __builtin_ast_get_type("size_t");
-    Type *cb_ty = __builtin_ast_make_func_ptr_type(__builtin_ast_get_type("_Bool"), (Type *[]){elem_ty}, 1);
+    Type *cb_ty   = __builtin_ast_make_func_ptr_type(
+        __builtin_ast_get_type("_Bool"), (Type *[]){elem_ty}, 1);
 
     Obj *fn = __builtin_ast_function(gname, __builtin_ast_get_type("void"));
-    __builtin_ast_function_add_param(fn, "arr", __builtin_ast_make_pointer(elem_ty));
+    __builtin_ast_function_add_param(fn, "arr",
+                                     __builtin_ast_make_pointer(elem_ty));
     __builtin_ast_function_add_param(fn, "n", size_ty);
-    __builtin_ast_function_add_param(fn, "out", __builtin_ast_make_pointer(elem_ty));
-    __builtin_ast_function_add_param(fn, "out_n", __builtin_ast_make_pointer(size_ty));
+    __builtin_ast_function_add_param(fn, "out",
+                                     __builtin_ast_make_pointer(elem_ty));
+    __builtin_ast_function_add_param(fn, "out_n",
+                                     __builtin_ast_make_pointer(size_ty));
     __builtin_ast_function_add_param(fn, "pred", cb_ty);
 
     __builtin_ast_push_fn(fn);
 
-    Node *i = __builtin_ast_local_var("i", size_ty);
+    Node *i     = __builtin_ast_local_var("i", size_ty);
     Node *count = __builtin_ast_local_var("count", size_ty);
 
     Node *block = __builtin_ast_block(NULL, 0);
-    __builtin_ast_block_add_stmt(block,
-        __builtin_ast_expr_stmt(__builtin_ast_assign(count, __builtin_ast_int_literal(0))));
+    __builtin_ast_block_add_stmt(
+        block, __builtin_ast_expr_stmt(
+                   __builtin_ast_assign(count, __builtin_ast_int_literal(0))));
 
-    Node *init = __builtin_ast_expr_stmt(__builtin_ast_assign(i, __builtin_ast_int_literal(0)));
-    Node *cond = __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
-    Node *inc = __builtin_ast_assign(i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
+    Node *init = __builtin_ast_expr_stmt(
+        __builtin_ast_assign(i, __builtin_ast_int_literal(0)));
+    Node *cond =
+        __builtin_ast_binary(ND_LT, i, __builtin_ast_param_ref(fn, "n"));
+    Node *inc = __builtin_ast_assign(
+        i, __builtin_ast_binary(ND_ADD, i, __builtin_ast_int_literal(1)));
 
     Node *elem = __builtin_ast_subscript(__builtin_ast_param_ref(fn, "arr"), i);
-    Node *pred_call = __builtin_ast_funcall(__builtin_ast_param_ref(fn, "pred"), (Node *[]){elem}, 1);
+    Node *pred_call = __builtin_ast_funcall(__builtin_ast_param_ref(fn, "pred"),
+                                            (Node *[]){elem}, 1);
 
     Node *then_block = __builtin_ast_block(NULL, 0);
-    __builtin_ast_block_add_stmt(then_block, __builtin_ast_expr_stmt(__builtin_ast_assign(
-        __builtin_ast_subscript(__builtin_ast_param_ref(fn, "out"), count), elem)));
-    __builtin_ast_block_add_stmt(then_block, __builtin_ast_expr_stmt(__builtin_ast_assign(
-        count, __builtin_ast_binary(ND_ADD, count, __builtin_ast_int_literal(1)))));
+    __builtin_ast_block_add_stmt(
+        then_block,
+        __builtin_ast_expr_stmt(__builtin_ast_assign(
+            __builtin_ast_subscript(__builtin_ast_param_ref(fn, "out"), count),
+            elem)));
+    __builtin_ast_block_add_stmt(
+        then_block,
+        __builtin_ast_expr_stmt(__builtin_ast_assign(
+            count, __builtin_ast_binary(ND_ADD, count,
+                                        __builtin_ast_int_literal(1)))));
 
     Node *body = __builtin_ast_if(pred_call, then_block, NULL);
 
-    __builtin_ast_block_add_stmt(block, __builtin_ast_for(init, cond, inc, body));
-    __builtin_ast_block_add_stmt(block, __builtin_ast_expr_stmt(__builtin_ast_assign(
-        __builtin_ast_unary(ND_DEREF, __builtin_ast_param_ref(fn, "out_n")), count)));
+    __builtin_ast_block_add_stmt(block,
+                                 __builtin_ast_for(init, cond, inc, body));
+    __builtin_ast_block_add_stmt(
+        block,
+        __builtin_ast_expr_stmt(__builtin_ast_assign(
+            __builtin_ast_unary(ND_DEREF, __builtin_ast_param_ref(fn, "out_n")),
+            count)));
 
     __builtin_ast_function_set_body(fn, block);
     __builtin_ast_pop_fn();
@@ -2698,18 +2819,17 @@ void __builtin_generate_filter(Type *elem_ty) {
 #define CCCC_AST_CONTEXT_STACK_DEPTH 16
 
 static Node *_block_context_stack[CCCC_AST_CONTEXT_STACK_DEPTH];
-static int _block_context_depth = 0;
+static int   _block_context_depth = 0;
 static Type *_struct_context_stack[CCCC_AST_CONTEXT_STACK_DEPTH];
-static int _struct_context_depth = 0;
+static int   _struct_context_depth = 0;
 static Node *_switch_context_stack[CCCC_AST_CONTEXT_STACK_DEPTH];
-static int _switch_context_depth = 0;
+static int   _switch_context_depth = 0;
 static Type *_enum_context_stack[CCCC_AST_CONTEXT_STACK_DEPTH];
-static int _enum_context_depth = 0;
+static int   _enum_context_depth = 0;
 
 Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
-                                    Type *field_type);
-void __builtin_ast_enum_add_constant(Type *ty, const char *name,
-                                  int64_t value);
+                                     Type *field_type);
+void __builtin_ast_enum_add_constant(Type *ty, const char *name, int64_t value);
 
 void __builtin_ast_push_block(Node *block) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -2733,8 +2853,9 @@ void __builtin_ast_push_struct(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
     (void)vm;
     if (_struct_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
-        error("__builtin_ast_push_struct: struct context stack overflow (max %d)",
-              CCCC_AST_CONTEXT_STACK_DEPTH);
+        error(
+            "__builtin_ast_push_struct: struct context stack overflow (max %d)",
+            CCCC_AST_CONTEXT_STACK_DEPTH);
         return;
     }
     _struct_context_stack[_struct_context_depth++] = ty;
@@ -2751,8 +2872,9 @@ void __builtin_ast_push_switch(Node *switch_node) {
     VirtualMachine *vm = __builtin_current_vm;
     (void)vm;
     if (_switch_context_depth >= CCCC_AST_CONTEXT_STACK_DEPTH) {
-        error("__builtin_ast_push_switch: switch context stack overflow (max %d)",
-              CCCC_AST_CONTEXT_STACK_DEPTH);
+        error(
+            "__builtin_ast_push_switch: switch context stack overflow (max %d)",
+            CCCC_AST_CONTEXT_STACK_DEPTH);
         return;
     }
     _switch_context_stack[_switch_context_depth++] = switch_node;
@@ -2791,20 +2913,18 @@ Node *__builtin_ast_block_add_current_stmt(Node *stmt) {
 }
 
 Type *__builtin_ast_struct_add_current_field(const char *name,
-                                            Type *field_type) {
+                                             Type       *field_type) {
     if (_struct_context_depth <= 0)
         return NULL;
     return __builtin_ast_struct_add_field(
-        _struct_context_stack[_struct_context_depth - 1], name,
-        field_type);
+        _struct_context_stack[_struct_context_depth - 1], name, field_type);
 }
 
-void __builtin_ast_switch_add_current_case(Node *value,
-                                       Node *body) {
+void __builtin_ast_switch_add_current_case(Node *value, Node *body) {
     if (_switch_context_depth <= 0)
         return;
-    __builtin_ast_switch_add_case(_switch_context_stack[_switch_context_depth - 1],
-                              value, body);
+    __builtin_ast_switch_add_case(
+        _switch_context_stack[_switch_context_depth - 1], value, body);
 }
 
 void __builtin_ast_switch_set_current_default(Node *body) {
@@ -2814,12 +2934,11 @@ void __builtin_ast_switch_set_current_default(Node *body) {
         _switch_context_stack[_switch_context_depth - 1], body);
 }
 
-void __builtin_ast_enum_add_current_constant(const char *name,
-                                         int value) {
+void __builtin_ast_enum_add_current_constant(const char *name, int value) {
     if (_enum_context_depth <= 0)
         return;
-    __builtin_ast_enum_add_constant(_enum_context_stack[_enum_context_depth - 1],
-                                name, value);
+    __builtin_ast_enum_add_constant(
+        _enum_context_stack[_enum_context_depth - 1], name, value);
 }
 
 // ============================================================================
@@ -2844,9 +2963,9 @@ const char *__builtin_dump_tree_to_string(Node *node) {
     if (!vm || !node)
         return NULL;
 
-    char *buf = NULL;
+    char  *buf  = NULL;
     size_t size = 0;
-    FILE *f = open_memstream(&buf, &size);
+    FILE  *f    = open_memstream(&buf, &size);
     if (!f)
         return NULL;
     cc_dump_node(f, node, /*verbose=*/0);
@@ -2874,11 +2993,13 @@ static void emit_ast_gen_list(FILE *f, Node *node) {
     }
     // Count nodes
     int n = 0;
-    for (Node *p = node; p; p = p->next) n++;
+    for (Node *p = node; p; p = p->next)
+        n++;
     fprintf(f, "(Node*[]){");
     for (Node *p = node; p; p = p->next) {
         emit_ast_gen(f, p);
-        if (p->next) fprintf(f, ", ");
+        if (p->next)
+            fprintf(f, ", ");
     }
     fprintf(f, "}, %d", n);
 }
@@ -2890,128 +3011,135 @@ static void emit_ast_gen(FILE *f, Node *node) {
     }
 
     switch (node->kind) {
-    case ND_NUM:
-        if (node->ty && (node->ty->kind == TY_FLOAT ||
-                         node->ty->kind == TY_DOUBLE ||
-                         node->ty->kind == TY_LDOUBLE))
-            fprintf(f, "__builtin_ast_float_literal(VM, %Lg)", node->fval);
-        else
-            fprintf(f, "__builtin_ast_int_literal(VM, %lld)", (long long)node->val);
-        break;
-    case ND_VAR:
-        if (node->var && node->var->name)
-            fprintf(f, "__builtin_ast_var_ref(VM, \"%s\")", node->var->name);
-        else
-            fprintf(f, "/* VAR(?) */");
-        break;
-    case ND_ASSIGN:
-        fprintf(f, "__builtin_ast_assign(VM, ");
-        emit_ast_gen(f, node->lhs);
-        fprintf(f, ", ");
-        emit_ast_gen(f, node->rhs);
-        fprintf(f, ")");
-        break;
-    case ND_MEMBER:
-        fprintf(f, "__builtin_ast_member(VM, ");
-        emit_ast_gen(f, node->lhs);
-        // Extract member name from the Token stored in member->name
-        if (node->member && node->member->name)
-            fprintf(f, ", \"%.*s\")", node->member->name->len,
-                    node->member->name->loc);
-        else
-            fprintf(f, ", \"?\")");
-        break;
-    case ND_FUNCALL:
-        fprintf(f, "__builtin_ast_funcall(VM, ");
-        emit_ast_gen(f, node->lhs);
-        fprintf(f, ", ");
-        emit_ast_gen_list(f, node->args);
-        fprintf(f, ")");
-        break;
-    case ND_FOR:
-        if (!node->init && !node->inc) {
-            // Looks like a while loop
-            fprintf(f, "__builtin_ast_while(VM, ");
-            emit_ast_gen(f, node->cond);
-            fprintf(f, ", ");
-            emit_ast_gen(f, node->then);
-            fprintf(f, ")");
-        } else {
-            fprintf(f, "__builtin_ast_for(VM, ");
-            emit_ast_gen(f, node->init);
-            fprintf(f, ", ");
-            emit_ast_gen(f, node->cond);
-            fprintf(f, ", ");
-            emit_ast_gen(f, node->inc);
-            fprintf(f, ", ");
-            emit_ast_gen(f, node->then);
-            fprintf(f, ")");
-        }
-        break;
-    case ND_DO:
-        fprintf(f, "__builtin_ast_do_while(VM, ");
-        emit_ast_gen(f, node->then);
-        fprintf(f, ", ");
-        emit_ast_gen(f, node->cond);
-        fprintf(f, ")");
-        break;
-    case ND_RETURN:
-        fprintf(f, "__builtin_ast_return(VM, ");
-        emit_ast_gen(f, node->lhs);
-        fprintf(f, ")");
-        break;
-    case ND_IF:
-        fprintf(f, "__builtin_ast_if(VM, ");
-        emit_ast_gen(f, node->cond);
-        fprintf(f, ", ");
-        emit_ast_gen(f, node->then);
-        fprintf(f, ", ");
-        emit_ast_gen(f, node->els);
-        fprintf(f, ")");
-        break;
-    case ND_BLOCK:
-        fprintf(f, "__builtin_ast_block(VM, (Node*[]){");
-        {
-            int i = 0;
-            for (Node *s = node->body; s; s = s->next) {
-                if (i++) fprintf(f, ", ");
-                emit_ast_gen(f, s);
-            }
-        }
-        fprintf(f, "}, %d)", ({
-            int n = 0; for (Node *s = node->body; s; s = s->next) n++; n;
-        }));
-        break;
-    case ND_EXPR_STMT:
-        fprintf(f, "__builtin_ast_expr_stmt(VM, ");
-        emit_ast_gen(f, node->lhs);
-        fprintf(f, ")");
-        break;
-    case ND_CAST:
-        // The target type cannot be fully reconstructed from the AST alone —
-        // emit a placeholder comment for the type argument.
-        fprintf(f, "__builtin_ast_cast(VM, ");
-        emit_ast_gen(f, node->lhs);
-        fprintf(f, ", /* type */ NULL)");
-        break;
-    default:
-        // Binary / unary operators: emit via __builtin_ast_binary / __builtin_ast_unary
-        if (node->lhs && node->rhs) {
-            fprintf(f, "__builtin_ast_binary(VM, _%s, ",
-                    cc_node_kind_name(node->kind));
+        case ND_NUM:
+            if (node->ty &&
+                (node->ty->kind == TY_FLOAT || node->ty->kind == TY_DOUBLE ||
+                 node->ty->kind == TY_LDOUBLE))
+                fprintf(f, "__builtin_ast_float_literal(VM, %Lg)", node->fval);
+            else
+                fprintf(f, "__builtin_ast_int_literal(VM, %lld)",
+                        (long long)node->val);
+            break;
+        case ND_VAR:
+            if (node->var && node->var->name)
+                fprintf(f, "__builtin_ast_var_ref(VM, \"%s\")",
+                        node->var->name);
+            else
+                fprintf(f, "/* VAR(?) */");
+            break;
+        case ND_ASSIGN:
+            fprintf(f, "__builtin_ast_assign(VM, ");
             emit_ast_gen(f, node->lhs);
             fprintf(f, ", ");
             emit_ast_gen(f, node->rhs);
             fprintf(f, ")");
-        } else if (node->lhs) {
-            fprintf(f, "__builtin_ast_unary(VM, _%s, ",
-                    cc_node_kind_name(node->kind));
+            break;
+        case ND_MEMBER:
+            fprintf(f, "__builtin_ast_member(VM, ");
+            emit_ast_gen(f, node->lhs);
+            // Extract member name from the Token stored in member->name
+            if (node->member && node->member->name)
+                fprintf(f, ", \"%.*s\")", node->member->name->len,
+                        node->member->name->loc);
+            else
+                fprintf(f, ", \"?\")");
+            break;
+        case ND_FUNCALL:
+            fprintf(f, "__builtin_ast_funcall(VM, ");
+            emit_ast_gen(f, node->lhs);
+            fprintf(f, ", ");
+            emit_ast_gen_list(f, node->args);
+            fprintf(f, ")");
+            break;
+        case ND_FOR:
+            if (!node->init && !node->inc) {
+                // Looks like a while loop
+                fprintf(f, "__builtin_ast_while(VM, ");
+                emit_ast_gen(f, node->cond);
+                fprintf(f, ", ");
+                emit_ast_gen(f, node->then);
+                fprintf(f, ")");
+            } else {
+                fprintf(f, "__builtin_ast_for(VM, ");
+                emit_ast_gen(f, node->init);
+                fprintf(f, ", ");
+                emit_ast_gen(f, node->cond);
+                fprintf(f, ", ");
+                emit_ast_gen(f, node->inc);
+                fprintf(f, ", ");
+                emit_ast_gen(f, node->then);
+                fprintf(f, ")");
+            }
+            break;
+        case ND_DO:
+            fprintf(f, "__builtin_ast_do_while(VM, ");
+            emit_ast_gen(f, node->then);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->cond);
+            fprintf(f, ")");
+            break;
+        case ND_RETURN:
+            fprintf(f, "__builtin_ast_return(VM, ");
             emit_ast_gen(f, node->lhs);
             fprintf(f, ")");
-        } else {
-            fprintf(f, "/* %s */", cc_node_kind_name(node->kind));
-        }
-        break;
+            break;
+        case ND_IF:
+            fprintf(f, "__builtin_ast_if(VM, ");
+            emit_ast_gen(f, node->cond);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->then);
+            fprintf(f, ", ");
+            emit_ast_gen(f, node->els);
+            fprintf(f, ")");
+            break;
+        case ND_BLOCK:
+            fprintf(f, "__builtin_ast_block(VM, (Node*[]){");
+            {
+                int i = 0;
+                for (Node *s = node->body; s; s = s->next) {
+                    if (i++)
+                        fprintf(f, ", ");
+                    emit_ast_gen(f, s);
+                }
+            }
+            fprintf(f, "}, %d)", ({
+                        int n = 0;
+                        for (Node *s = node->body; s; s = s->next)
+                            n++;
+                        n;
+                    }));
+            break;
+        case ND_EXPR_STMT:
+            fprintf(f, "__builtin_ast_expr_stmt(VM, ");
+            emit_ast_gen(f, node->lhs);
+            fprintf(f, ")");
+            break;
+        case ND_CAST:
+            // The target type cannot be fully reconstructed from the AST alone
+            // — emit a placeholder comment for the type argument.
+            fprintf(f, "__builtin_ast_cast(VM, ");
+            emit_ast_gen(f, node->lhs);
+            fprintf(f, ", /* type */ NULL)");
+            break;
+        default:
+            // Binary / unary operators: emit via __builtin_ast_binary /
+            // __builtin_ast_unary
+            if (node->lhs && node->rhs) {
+                fprintf(f, "__builtin_ast_binary(VM, _%s, ",
+                        cc_node_kind_name(node->kind));
+                emit_ast_gen(f, node->lhs);
+                fprintf(f, ", ");
+                emit_ast_gen(f, node->rhs);
+                fprintf(f, ")");
+            } else if (node->lhs) {
+                fprintf(f, "__builtin_ast_unary(VM, _%s, ",
+                        cc_node_kind_name(node->kind));
+                emit_ast_gen(f, node->lhs);
+                fprintf(f, ")");
+            } else {
+                fprintf(f, "/* %s */", cc_node_kind_name(node->kind));
+            }
+            break;
     }
 }
 
@@ -3030,9 +3158,9 @@ const char *__builtin_dump_ast_gen_to_string(Node *node) {
     if (!vm || !node)
         return NULL;
 
-    char *buf = NULL;
+    char  *buf  = NULL;
     size_t size = 0;
-    FILE *f = open_memstream(&buf, &size);
+    FILE  *f    = open_memstream(&buf, &size);
     if (!f)
         return NULL;
     emit_ast_gen(f, node);
@@ -3064,12 +3192,12 @@ static int quote_splice_kind(Token *tok) {
         if (tok->loc[i] < '0' || tok->loc[i] > '9')
             return 0;
     char buf[32];
-    int numlen = tok->len - 1;
+    int  numlen = tok->len - 1;
     if (numlen > 20)
         return 0; // absurdly large index: not a splice point
     memcpy(buf, tok->loc + 1, numlen);
     buf[numlen] = '\0';
-    int n = atoi(buf);
+    int n       = atoi(buf);
     return n > 0 ? n : 0;
 }
 
@@ -3080,41 +3208,47 @@ static int quote_splice_kind(Token *tok) {
 //   - sets *splice_mask (bit k-1) for each $@k splice index seen
 //   - returns the maximum index referenced (0 if no splice points)
 //   - returns -1 on mixing error
-static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *splice_mask) {
-    bool has_positional = false;
+static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks,
+                                  uint64_t *splice_mask) {
+    bool has_positional  = false;
     bool has_incremental = false;
-    int max_index = 0;
-    int incr_counter = 0;
-    if (splice_mask) *splice_mask = 0;
+    int  max_index       = 0;
+    int  incr_counter    = 0;
+    if (splice_mask)
+        *splice_mask = 0;
 
     for (Token *t = toks; t && t->kind != TK_EOF; t = t->next) {
         // Check for $@ splice syntax: a lone '$' ident followed by '@' punct.
         // $@N  → positional splice (index N)
         // $@   → incremental splice (next sequential index)
-        if (t->kind == TK_IDENT && t->len == 1 && t->loc[0] == '$' &&
-            t->next && t->next->kind == TK_PUNCT &&
-            t->next->len == 1 && t->next->loc[0] == '@') {
+        if (t->kind == TK_IDENT && t->len == 1 && t->loc[0] == '$' && t->next &&
+            t->next->kind == TK_PUNCT && t->next->len == 1 &&
+            t->next->loc[0] == '@') {
             Token *at_tok  = t->next;
             Token *num_tok = at_tok->next;
-            int k;
+            int    k;
 
             if (num_tok && num_tok->kind == TK_NUM) {
                 // $@N positional splice
                 has_positional = true;
                 if (has_incremental) {
-                    error_tok(vm, t, "__builtin_quote: cannot mix positional ($@N) and incremental "
-                          "($@ / $$) splice syntax in one template");
+                    error_tok(vm, t,
+                              "__builtin_quote: cannot mix positional ($@N) "
+                              "and incremental "
+                              "($@ / $$) splice syntax in one template");
                     return -1;
                 }
                 // Parse the index from the number token's text
-                int numlen = (num_tok->len < 20) ? num_tok->len : 20;
+                int  numlen = (num_tok->len < 20) ? num_tok->len : 20;
                 char buf[32];
                 memcpy(buf, num_tok->loc, numlen);
                 buf[numlen] = '\0';
-                k = atoi(buf);
+                k           = atoi(buf);
                 if (k <= 0) {
-                    error_tok(vm, t, "__builtin_quote: $@0 is not a valid splice index "
-                          "(splice indices start at 1)");
+                    error_tok(
+                        vm, t,
+                        "__builtin_quote: $@0 is not a valid splice index "
+                        "(splice indices start at 1)");
                     return -1;
                 }
                 // Collapse three tokens ($ @ N) into one token.
@@ -3122,26 +3256,29 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
                 // error diagnostics can compute the correct column offset.
                 // Since "$@N" is literally in the template text, spanning
                 // t->loc through the end of num_tok covers the exact text.
-                t->len = (int)(num_tok->loc + num_tok->len - t->loc);
+                t->len  = (int)(num_tok->loc + num_tok->len - t->loc);
                 t->next = num_tok->next; // skip @ and N tokens
             } else {
                 // $@ incremental splice
                 has_incremental = true;
                 if (has_positional) {
-                    error_tok(vm, t, "__builtin_quote: cannot mix positional ($@N) and incremental "
-                          "($@ / $$) splice syntax in one template");
+                    error_tok(vm, t,
+                              "__builtin_quote: cannot mix positional ($@N) "
+                              "and incremental "
+                              "($@ / $$) splice syntax in one template");
                     return -1;
                 }
                 incr_counter++;
                 k = incr_counter;
                 // Collapse two tokens ($ @) into one named $@k
                 char *newname = arena_format(vm, "$@%d", k);
-                t->loc = newname;
-                t->len = (int)strlen(newname);
-                t->next = at_tok->next; // skip @ token
+                t->loc        = newname;
+                t->len        = (int)strlen(newname);
+                t->next       = at_tok->next; // skip @ token
             }
 
-            if (k > max_index) max_index = k;
+            if (k > max_index)
+                max_index = k;
             if (splice_mask && k >= 1 && k <= 64)
                 *splice_mask |= (uint64_t)1 << (k - 1);
             continue;
@@ -3149,29 +3286,34 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
 
         // Regular $N / $$ scalar splice points
         int k = quote_splice_kind(t);
-        if (k == 0) continue;
+        if (k == 0)
+            continue;
 
         if (k == -1) {
             // $$ incremental
             has_incremental = true;
             if (has_positional) {
-                error_tok(vm, t, "__builtin_quote: cannot mix $N positional and $$ incremental "
-                      "splice syntax in one template");
+                error_tok(vm, t,
+                          "__builtin_quote: cannot mix $N positional and $$ "
+                          "incremental "
+                          "splice syntax in one template");
                 return -1;
             }
             incr_counter++;
             // Rewrite this token's loc/len to "$<incr_counter>"
             char *newname = arena_format(vm, "$%d", incr_counter);
-            t->loc = newname;
-            t->len = (int)strlen(newname);
+            t->loc        = newname;
+            t->len        = (int)strlen(newname);
             if (incr_counter > max_index)
                 max_index = incr_counter;
         } else {
             // $N positional
             has_positional = true;
             if (has_incremental) {
-                error_tok(vm, t, "__builtin_quote: cannot mix $N positional and $$ incremental "
-                      "splice syntax in one template");
+                error_tok(vm, t,
+                          "__builtin_quote: cannot mix $N positional and $$ "
+                          "incremental "
+                          "splice syntax in one template");
                 return -1;
             }
             if (k > max_index)
@@ -3185,7 +3327,7 @@ static int quote_scan_and_rewrite(VirtualMachine *vm, Token *toks, uint64_t *spl
 // (arena-allocated).  Typed from the corresponding argument node if
 // available, else ty_long.
 static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
-                                    Node *arg_node) {
+                                   Node *arg_node) {
     int name_len = (int)strlen(name);
 
     // Derive type from the argument node if available
@@ -3198,8 +3340,8 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
 
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
-    var->name = name;
-    var->ty = ty;
+    var->name  = name;
+    var->ty    = ty;
     var->align = ty->align;
     // #894: a $k/$@k quote placeholder behaves like a local pseudo-variable
     // (scoped to this one quote_core call, never a real global with
@@ -3212,11 +3354,11 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
     VarScopeNode *snode =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(snode, 0, sizeof(VarScopeNode));
-    snode->var = var;
-    snode->name = name;
+    snode->var      = var;
+    snode->name     = name;
     snode->name_len = name_len;
-    snode->next = sc->vars;
-    sc->vars = snode;
+    snode->next     = sc->vars;
+    sc->vars        = snode;
 
     // Also register in the hashmap so find_var can locate the placeholder
     // even after push_scope initializes sc->var_map (which happens when the
@@ -3228,22 +3370,27 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
 
 // Substitution walk state
 typedef struct {
-    VirtualMachine *vm;                   // compiler context (needed for ND_INIT_SPLICE expansion)
-    Obj *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
-    Obj *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
+    VirtualMachine
+          *vm; // compiler context (needed for ND_INIT_SPLICE expansion)
+    Obj   *placeholder_vars[64]; // placeholder_vars[i] = Obj for $(i+1)
+    Obj   *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
     Node **arg_nodes;
-    int n_args;
+    int    n_args;
 } QuoteSubstState;
 
 // If stmt is an ND_EXPR_STMT whose sole expression is a reference to a splice
 // placeholder $@k, return the caller's node chain for index k.  Otherwise NULL.
 static Node *splice_chain_for(QuoteSubstState *s, Node *stmt);
 
-// Like splice_chain_for but for a bare expression-position arg (ND_VAR directly,
-// not wrapped in ND_EXPR_STMT).  Returns true and sets *out_chain if arg is a
-// $@k placeholder; false otherwise.  *out_chain may be NULL for an empty splice.
-static bool splice_chain_for_arg(QuoteSubstState *s, Node *arg, Node **out_chain) {
-    if (!arg || arg->kind != ND_VAR || !arg->var) return false;
+// Like splice_chain_for but for a bare expression-position arg (ND_VAR
+// directly, not wrapped in ND_EXPR_STMT).  Returns true and sets *out_chain if
+// arg is a
+// $@k placeholder; false otherwise.  *out_chain may be NULL for an empty
+// splice.
+static bool splice_chain_for_arg(QuoteSubstState *s, Node *arg,
+                                 Node **out_chain) {
+    if (!arg || arg->kind != ND_VAR || !arg->var)
+        return false;
     for (int i = 0; i < s->n_args && i < 64; i++) {
         if (s->splice_vars[i] && arg->var == s->splice_vars[i]) {
             *out_chain = s->arg_nodes[i];
@@ -3254,14 +3401,16 @@ static bool splice_chain_for_arg(QuoteSubstState *s, Node *arg, Node **out_chain
 }
 
 static Node *splice_chain_for(QuoteSubstState *s, Node *stmt) {
-    if (!stmt || stmt->kind != ND_EXPR_STMT) return NULL;
+    if (!stmt || stmt->kind != ND_EXPR_STMT)
+        return NULL;
     Node *inner = stmt->lhs;
-    if (!inner || inner->kind != ND_VAR || !inner->var) return NULL;
+    if (!inner || inner->kind != ND_VAR || !inner->var)
+        return NULL;
     for (int i = 0; i < s->n_args && i < 64; i++) {
         if (s->splice_vars[i] && inner->var == s->splice_vars[i])
             return s->arg_nodes[i]; // chain head (may be NULL = empty splice)
     }
-    return NULL; // not a splice placeholder
+    return NULL;                    // not a splice placeholder
 }
 
 // Walk the parsed tree and replace ND_VAR placeholder nodes with arg nodes.
@@ -3283,10 +3432,13 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
         // (Direct arg-list and initializer positions are handled elsewhere.)
         for (int i = 0; i < s->n_args && i < 64; i++) {
             if (s->splice_vars[i] && node->var == s->splice_vars[i]) {
-                error_tok(s->vm, node->tok, "__builtin_quote: $@%d is only valid in statement-list "
-                      "position (inside a block { }), as a direct call "
-                      "argument, or as the sole element of a compound-literal "
-                      "initializer; cannot be used as a sub-expression", i + 1);
+                error_tok(
+                    s->vm, node->tok,
+                    "__builtin_quote: $@%d is only valid in statement-list "
+                    "position (inside a block { }), as a direct call "
+                    "argument, or as the sole element of a compound-literal "
+                    "initializer; cannot be used as a sub-expression",
+                    i + 1);
                 return node; // return unchanged to avoid a NULL crash
             }
         }
@@ -3327,26 +3479,30 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
     // body is a statement chain linked via ->next.
     // Splice placeholders in body position expand to N statements.
     if (node->body) {
-        Node head_val = {};
-        Node *cur = &head_val;
-        for (Node *st = node->body; st; ) {
+        Node  head_val = {};
+        Node *cur      = &head_val;
+        for (Node *st = node->body; st;) {
             Node *next_st = st->next;
-            st->next = NULL; // isolate before recursing
+            st->next      = NULL; // isolate before recursing
 
-            Node *chain = splice_chain_for(s, st);
+            Node *chain   = splice_chain_for(s, st);
             if (chain) {
                 // Append the entire caller-provided chain
                 Node *tail = chain;
-                while (tail->next) tail = tail->next;
+                while (tail->next)
+                    tail = tail->next;
                 cur->next = chain;
-                cur = tail;
+                cur       = tail;
             } else {
                 Node *sub = quote_substitute(s, st);
-                if (sub) { cur->next = sub; cur = sub; }
+                if (sub) {
+                    cur->next = sub;
+                    cur       = sub;
+                }
             }
             st = next_st;
         }
-        cur->next = NULL;
+        cur->next  = NULL;
         node->body = head_val.next;
     }
 
@@ -3356,31 +3512,38 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
         bool has_splice = false;
         for (Node *a = node->args; a; a = a->next) {
             Node *dummy;
-            if (splice_chain_for_arg(s, a, &dummy)) { has_splice = true; break; }
+            if (splice_chain_for_arg(s, a, &dummy)) {
+                has_splice = true;
+                break;
+            }
         }
 
         if (has_splice) {
-            Node head_val = {};
-            Node *cur = &head_val;
-            for (Node *a = node->args; a; ) {
+            Node  head_val = {};
+            Node *cur      = &head_val;
+            for (Node *a = node->args; a;) {
                 Node *next_a = a->next;
-                a->next = NULL;
+                a->next      = NULL;
 
                 Node *chain;
                 if (splice_chain_for_arg(s, a, &chain)) {
                     if (chain) {
                         Node *tail = chain;
-                        while (tail->next) tail = tail->next;
+                        while (tail->next)
+                            tail = tail->next;
                         cur->next = chain;
-                        cur = tail;
+                        cur       = tail;
                     }
                     // Empty splice: arg disappears (chain == NULL → no-op)
                 } else {
                     Node *sub = quote_substitute(s, a);
-                    if (sub) { cur->next = sub; cur = sub; }
+                    if (sub) {
+                        cur->next = sub;
+                        cur       = sub;
+                    }
                 }
                 cur->next = NULL;
-                a = next_a;
+                a         = next_a;
             }
             node->args = head_val.next;
         } else {
@@ -3395,8 +3558,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
     for (Node *c = node->case_next; c; c = c->case_next)
         c->lhs = quote_substitute(s, c->lhs);
     if (node->default_case)
-        node->default_case->lhs =
-            quote_substitute(s, node->default_case->lhs);
+        node->default_case->lhs = quote_substitute(s, node->default_case->lhs);
 
     return node;
 }
@@ -3426,8 +3588,7 @@ static void quote_rebind_macro_scope(Node *node, Scope *old_scope,
     for (Node *c = node->case_next; c; c = c->case_next)
         quote_rebind_macro_scope(c->lhs, old_scope, new_scope);
     if (node->default_case)
-        quote_rebind_macro_scope(node->default_case->lhs, old_scope,
-                                 new_scope);
+        quote_rebind_macro_scope(node->default_case->lhs, old_scope, new_scope);
 }
 
 // Determine lexically whether an unbraced template holds more than one
@@ -3466,9 +3627,8 @@ static bool quote_is_stmt(Token *tok) {
     // Statement-initiating keywords
     if (tok->kind == TK_KEYWORD) {
         static const char *stmt_kws[] = {
-            "return", "if", "while", "for", "do", "switch",
-            "break", "continue", "goto", "case", "default", NULL
-        };
+            "return", "if",       "while", "for",  "do",      "switch",
+            "break",  "continue", "goto",  "case", "default", NULL};
         for (int i = 0; stmt_kws[i]; i++)
             if (equal(tok, (char *)stmt_kws[i]))
                 return true;
@@ -3505,8 +3665,8 @@ static void recheck_spliced_funcalls(VirtualMachine *vm, Node *node) {
         return;
     node->has_splice_arg = false;
 
-    Type *param_ty = node->func_ty->params;
-    Node **ap = &node->args;
+    Type  *param_ty      = node->func_ty->params;
+    Node **ap            = &node->args;
     while (*ap) {
         if (!param_ty) {
             if (!node->func_ty->is_variadic)
@@ -3519,18 +3679,18 @@ static void recheck_spliced_funcalls(VirtualMachine *vm, Node *node) {
             warn_implicit_conversion(vm, a, param_ty, node->tok);
             Node *cast_node = new_cast(vm, a, param_ty);
             cast_node->next = a->next;
-            *ap = cast_node;
+            *ap             = cast_node;
         }
         param_ty = param_ty->next;
-        ap = &(*ap)->next;
+        ap       = &(*ap)->next;
     }
     if (param_ty)
         error_tok(vm, node->tok, "too few arguments (after splice expansion)");
 }
 
 // Shared implementation for both public entry points.
-static Node *quote_core(VirtualMachine *vm, const char *tmpl,
-                             Node **nodes, int n) {
+static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
+                        int n) {
     if (!vm || !tmpl)
         return NULL;
 
@@ -3551,7 +3711,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
     // each running exactly once, over the final chain only.
     if (quote_is_multi_stmt(toks)) {
         char *braced = arena_format(vm, "{ %s }", tmpl);
-        toks = tokenize_string(vm, (char *)"<quote>", braced);
+        toks         = tokenize_string(vm, (char *)"<quote>", braced);
         if (!toks)
             return NULL;
         convert_pp_tokens(vm, toks);
@@ -3559,46 +3719,49 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
 
     // 2. Scan, validate mixing, rewrite $$ / $@ / $@N
     uint64_t splice_mask = 0;
-    int max_index = quote_scan_and_rewrite(vm, toks, &splice_mask);
+    int      max_index   = quote_scan_and_rewrite(vm, toks, &splice_mask);
     if (max_index < 0)
         return NULL; // mixing error already reported
 
     // 3. Validate count (the array form enforces this; variadic derives n)
     if (max_index > n) {
-        error_tok(vm, toks, "__builtin_quote: template references $%d but only %d argument%s supplied",
-              max_index, n, n == 1 ? "" : "s");
+        error_tok(vm, toks,
+                  "__builtin_quote: template references $%d but only %d "
+                  "argument%s supplied",
+                  max_index, n, n == 1 ? "" : "s");
         return NULL;
     }
 
     // 4. Build placeholder scope on the stack
     Scope quote_scope;
     memset(&quote_scope, 0, sizeof(Scope));
-    quote_scope.next = vm->compiler.scope;
+    quote_scope.next   = vm->compiler.scope;
     vm->compiler.scope = &quote_scope;
 
     QuoteSubstState subst;
     memset(&subst, 0, sizeof(subst));
-    subst.vm       = vm;
+    subst.vm        = vm;
     subst.arg_nodes = nodes;
-    subst.n_args = (n < 64) ? n : 64;
+    subst.n_args    = (n < 64) ? n : 64;
 
     // Register scalar placeholders $k for all referenced indices
     for (int k = 1; k <= max_index; k++) {
-        Node *arg = (k - 1 < n) ? nodes[k - 1] : NULL;
+        Node *arg  = (k - 1 < n) ? nodes[k - 1] : NULL;
         char *name = arena_format(vm, "$%d", k);
-        Obj *var = quote_push_placeholder(vm, &quote_scope, name, arg);
+        Obj  *var  = quote_push_placeholder(vm, &quote_scope, name, arg);
         subst.placeholder_vars[k - 1] = var;
     }
 
     // Register splice placeholders $@k for each $@k / $@ index seen
     for (int k = 1; k <= max_index && k <= 64; k++) {
-        if (!(splice_mask & ((uint64_t)1 << (k - 1)))) continue;
+        if (!(splice_mask & ((uint64_t)1 << (k - 1))))
+            continue;
         char *name = arena_format(vm, "$@%d", k);
         // Type doesn't matter for splice placeholders — the whole
         // ND_EXPR_STMT wrapper is discarded during substitution.
         Obj *var = quote_push_placeholder(vm, &quote_scope, name, NULL);
         var->is_splice_placeholder = true;
-        subst.splice_vars[k - 1] = var;
+        subst.splice_vars[k - 1]   = var;
     }
 
     // 5. Parse (auto-detect expr vs stmt)
@@ -3620,11 +3783,11 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
     // before this call -- forcing in_macro_mode itself was tried first and
     // broke exactly that case (a comptime-to-comptime call written inside a
     // quoted template).
-    bool saved_splice_active = vm->compiler.comptime_splice_active;
+    bool saved_splice_active            = vm->compiler.comptime_splice_active;
     vm->compiler.comptime_splice_active = true;
-    Token *rest = NULL;
-    Node *result = NULL;
-    bool parsed_as_stmt = quote_is_stmt(toks);
+    Token *rest                         = NULL;
+    Node  *result                       = NULL;
+    bool   parsed_as_stmt               = quote_is_stmt(toks);
     if (parsed_as_stmt) {
         result = cc_parse_stmt(vm, &rest, toks);
     } else {
@@ -3663,7 +3826,8 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl,
     result = quote_substitute(&subst, result);
 
     // 7b. Re-apply parameter casts and validate arity for any ND_FUNCALL nodes
-    //     that deferred their checks because a $@k splice placeholder was present.
+    //     that deferred their checks because a $@k splice placeholder was
+    //     present.
     recheck_spliced_funcalls(vm, result);
 
     // 8. Re-run add_type so spliced-in types propagate correctly
@@ -3687,11 +3851,12 @@ Node *__builtin_quote(const char *tmpl, ...) {
     // Scan the raw template string to derive max splice index without
     // tokenising (avoids double arena allocation in quote_core).
     // Handles $N, $$, $@N, and $@ forms.
-    int max_index = 0;
+    int max_index  = 0;
     int incr_count = 0;
 
     for (const char *p = tmpl; *p; p++) {
-        if (*p != '$') continue;
+        if (*p != '$')
+            continue;
         const char *q = p + 1;
         if (*q == '$') {
             // $$ incremental scalar splice
@@ -3730,7 +3895,7 @@ Node *__builtin_quote(const char *tmpl, ...) {
     }
 
     // Collect exactly max_index nodes from va_args
-    int n = (max_index < 64) ? max_index : 64;
+    int   n = (max_index < 64) ? max_index : 64;
     Node *arg_buf[64];
     memset(arg_buf, 0, sizeof(arg_buf));
 
@@ -3754,11 +3919,13 @@ Node *__builtin_node_list(Node **nodes, int count) {
     Node *head = nodes[0];
     Node *cur  = head;
     for (int i = 1; i < count; i++) {
-        if (!nodes[i]) break;
+        if (!nodes[i])
+            break;
         cur->next = nodes[i];
-        cur = cur->next;
+        cur       = cur->next;
     }
-    if (cur) cur->next = NULL;
+    if (cur)
+        cur->next = NULL;
     return head;
 }
 
@@ -3768,19 +3935,20 @@ Node *__builtin_node_list(Node **nodes, int count) {
 
 // Helper: synthesize a Token for use as a name field in Type/Member.
 // The token's loc is an arena-allocated copy of name so it outlives the call.
-static Token *reflect_make_name_token(VirtualMachine *vm, const char *name, int name_len) {
+static Token *reflect_make_name_token(VirtualMachine *vm, const char *name,
+                                      int name_len) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
     tok->kind = TK_IDENT;
-    tok->loc = arena_strdup(vm, name);
-    tok->len = name_len;
+    tok->loc  = arena_strdup(vm, name);
+    tok->len  = name_len;
     return tok;
 }
 
 // Helper: expose a struct/union/enum type by tag name so FindType(name)
 // resolves it. Mirrors push_tag_scope + record_type_name in parse.c.
-static void reflect_push_tag_scope(VirtualMachine *vm, const char *name, int name_len,
-                                   Type *ty) {
+static void reflect_push_tag_scope(VirtualMachine *vm, const char *name,
+                                   int name_len, Type *ty) {
     if (!vm || !vm->compiler.scope)
         return;
 
@@ -3788,10 +3956,10 @@ static void reflect_push_tag_scope(VirtualMachine *vm, const char *name, int nam
     TagScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
     memset(node, 0, sizeof(TagScopeNode));
-    node->name = arena_strdup(vm, name);
-    node->name_len = name_len;
-    node->ty = ty;
-    node->next = vm->compiler.scope->tags;
+    node->name               = arena_strdup(vm, name);
+    node->name_len           = name_len;
+    node->ty                 = ty;
+    node->next               = vm->compiler.scope->tags;
     vm->compiler.scope->tags = node;
     hashmap_put2_borrowed(&vm->compiler.scope->tag_map, node->name,
                           node->name_len, node);
@@ -3800,33 +3968,33 @@ static void reflect_push_tag_scope(VirtualMachine *vm, const char *name, int nam
     TypeNameRecord *rec =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TypeNameRecord));
     memset(rec, 0, sizeof(TypeNameRecord));
-    rec->ty = ty;
-    rec->name = node->name;
+    rec->ty       = ty;
+    rec->name     = node->name;
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
-    rec->is_tag = true;
+    rec->is_tag   = true;
     // #891: comptime/reflection-synthesized -- no primary-file token to
     // check provenance against, and it must never be silently dropped from
     // -c=native / -M output the way a header-sourced type now is.
-    rec->always_emit = true;
-    rec->next = vm->compiler.type_names;
+    rec->always_emit        = true;
+    rec->next               = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
 
 // Helper: expose a typedef by name so FindType(name) resolves it.
 // Mirrors push_scope(...)->type_def = ty + record_type_name in parse.c.
-static void reflect_push_typedef_scope(VirtualMachine *vm, const char *name, int name_len,
-                                       Type *ty) {
+static void reflect_push_typedef_scope(VirtualMachine *vm, const char *name,
+                                       int name_len, Type *ty) {
     if (!vm || !vm->compiler.scope)
         return;
 
     VarScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(node, 0, sizeof(VarScopeNode));
-    node->name = arena_strdup(vm, name);
-    node->name_len = name_len;
-    node->type_def = ty;
-    node->next = vm->compiler.scope->vars;
+    node->name               = arena_strdup(vm, name);
+    node->name_len           = name_len;
+    node->type_def           = ty;
+    node->next               = vm->compiler.scope->vars;
     vm->compiler.scope->vars = node;
     hashmap_put2_borrowed(&vm->compiler.scope->var_map, node->name,
                           node->name_len, node);
@@ -3835,14 +4003,14 @@ static void reflect_push_typedef_scope(VirtualMachine *vm, const char *name, int
     TypeNameRecord *rec =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TypeNameRecord));
     memset(rec, 0, sizeof(TypeNameRecord));
-    rec->ty = ty;
-    rec->name = node->name;
+    rec->ty       = ty;
+    rec->name     = node->name;
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
-    rec->is_tag = false;
+    rec->is_tag   = false;
     // #891: see the matching comment in reflect_push_tag_scope above.
-    rec->always_emit = true;
-    rec->next = vm->compiler.type_names;
+    rec->always_emit        = true;
+    rec->next               = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
 
@@ -3852,11 +4020,12 @@ Type *__builtin_ast_make_struct(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !name)
         return NULL;
-    Type *ty = struct_type(vm);
-    int name_len = (int)strlen(name);
-    ty->name = reflect_make_name_token(vm, name, name_len);
-    ty->struct_tag = ty->name; // #900: survives any later declarator name-overwrite
-    ty->size = 0;
+    Type *ty       = struct_type(vm);
+    int   name_len = (int)strlen(name);
+    ty->name       = reflect_make_name_token(vm, name, name_len);
+    ty->struct_tag =
+        ty->name; // #900: survives any later declarator name-overwrite
+    ty->size  = 0;
     ty->align = 1;
     reflect_push_tag_scope(vm, name, name_len, ty);
     return ty;
@@ -3867,11 +4036,12 @@ Type *__builtin_ast_make_union(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !name)
         return NULL;
-    Type *ty = union_type(vm);
-    int name_len = (int)strlen(name);
-    ty->name = reflect_make_name_token(vm, name, name_len);
-    ty->struct_tag = ty->name; // #900: survives any later declarator name-overwrite
-    ty->size = 0;
+    Type *ty       = union_type(vm);
+    int   name_len = (int)strlen(name);
+    ty->name       = reflect_make_name_token(vm, name, name_len);
+    ty->struct_tag =
+        ty->name; // #900: survives any later declarator name-overwrite
+    ty->size  = 0;
     ty->align = 1;
     reflect_push_tag_scope(vm, name, name_len, ty);
     return ty;
@@ -3880,19 +4050,19 @@ Type *__builtin_ast_make_union(const char *name) {
 // StructAddField(ty, name, field_type) — append a field to a struct or
 // union type and recompute the aggregate size/alignment.
 Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
-                                   Type *field_type) {
+                                     Type *field_type) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty || !name || !field_type)
         return NULL;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return NULL;
 
-    int name_len = (int)strlen(name);
+    int     name_len = (int)strlen(name);
 
-    Member *mem = arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
+    Member *mem      = arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
     memset(mem, 0, sizeof(Member));
-    mem->ty = field_type;
-    mem->name = reflect_make_name_token(vm, name, name_len);
+    mem->ty    = field_type;
+    mem->name  = reflect_make_name_token(vm, name, name_len);
     mem->align = field_type->align;
 
     // Append to the end of the members list to maintain declaration order
@@ -3907,30 +4077,34 @@ Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
 
     // Recompute layout for all fields from scratch
     if (ty->kind == TY_STRUCT) {
-        int bits = 0;
+        int bits      = 0;
         int new_align = 1;
         for (Member *m = ty->members; m; m = m->next) {
-            bits = reflect_align_to(bits, m->align * 8);
-            m->offset = bits / 8;
-            bits += m->ty->size * 8;
+            bits       = reflect_align_to(bits, m->align * 8);
+            m->offset  = bits / 8;
+            bits      += m->ty->size * 8;
             if (new_align < m->align)
                 new_align = m->align;
         }
         ty->align = new_align;
-        ty->size = reflect_align_to(bits, ty->align * 8) / 8;
-        if (ty->size == 0) ty->size = 1; // empty struct -> 1 byte
+        ty->size  = reflect_align_to(bits, ty->align * 8) / 8;
+        if (ty->size == 0)
+            ty->size = 1; // empty struct -> 1 byte
     } else {
         // Union: all members at offset 0, size = max member size
-        int new_size = 0;
+        int new_size  = 0;
         int new_align = 1;
         for (Member *m = ty->members; m; m = m->next) {
             m->offset = 0;
-            if (new_align < m->align) new_align = m->align;
-            if (new_size < m->ty->size) new_size = m->ty->size;
+            if (new_align < m->align)
+                new_align = m->align;
+            if (new_size < m->ty->size)
+                new_size = m->ty->size;
         }
         ty->align = new_align;
-        ty->size = reflect_align_to(new_size, new_align);
-        if (ty->size == 0) ty->size = 1;
+        ty->size  = reflect_align_to(new_size, new_align);
+        if (ty->size == 0)
+            ty->size = 1;
     }
 
     return ty;
@@ -3942,10 +4116,11 @@ Type *__builtin_ast_make_enum(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !name)
         return NULL;
-    Type *ty = enum_type(vm);
-    int name_len = (int)strlen(name);
-    ty->name = reflect_make_name_token(vm, name, name_len);
-    ty->enum_tag = ty->name; // #900: survives any later declarator name-overwrite
+    Type *ty       = enum_type(vm);
+    int   name_len = (int)strlen(name);
+    ty->name       = reflect_make_name_token(vm, name, name_len);
+    ty->enum_tag =
+        ty->name; // #900: survives any later declarator name-overwrite
     reflect_push_tag_scope(vm, name, name_len, ty);
     return ty;
 }
@@ -3953,7 +4128,7 @@ Type *__builtin_ast_make_enum(const char *name) {
 // EnumAddConstant(ty, name, value) — add a named constant to an enum
 // type and expose it as an integer constant in current scope.
 void __builtin_ast_enum_add_constant(Type *ty, const char *name,
-                                  int64_t value) {
+                                     int64_t value) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty || !name || ty->kind != TY_ENUM)
         return;
@@ -3964,7 +4139,7 @@ void __builtin_ast_enum_add_constant(Type *ty, const char *name,
     EnumConstant *ec =
         arena_alloc(&vm->compiler.parser_arena, sizeof(EnumConstant));
     memset(ec, 0, sizeof(EnumConstant));
-    ec->name = arena_strdup(vm, name);
+    ec->name  = arena_strdup(vm, name);
     ec->value = value;
     if (!ty->enum_constants) {
         ty->enum_constants = ec;
@@ -3982,11 +4157,11 @@ void __builtin_ast_enum_add_constant(Type *ty, const char *name,
     VarScopeNode *sc =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(sc, 0, sizeof(VarScopeNode));
-    sc->name = arena_strdup(vm, name);
-    sc->name_len = name_len;
-    sc->enum_ty = ty;
-    sc->enum_val = value;
-    sc->next = vm->compiler.scope->vars;
+    sc->name                 = arena_strdup(vm, name);
+    sc->name_len             = name_len;
+    sc->enum_ty              = ty;
+    sc->enum_val             = value;
+    sc->next                 = vm->compiler.scope->vars;
     vm->compiler.scope->vars = sc;
     hashmap_put2_borrowed(&vm->compiler.scope->var_map, sc->name, sc->name_len,
                           sc);
@@ -4021,25 +4196,31 @@ static ComptimeVar *find_comptime_var(VirtualMachine *vm, const char *name) {
 
 int64_t __builtin_get_comptime_int(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name) return 0;
+    if (!vm || !name)
+        return 0;
     ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || cv->is_struct) return 0;
+    if (!cv || !cv->is_evaluated || cv->is_struct)
+        return 0;
     return cv->is_float ? (int64_t)cv->float_val : cv->int_val;
 }
 
 double __builtin_get_comptime_float(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name) return 0.0;
+    if (!vm || !name)
+        return 0.0;
     ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || cv->is_struct) return 0.0;
+    if (!cv || !cv->is_evaluated || cv->is_struct)
+        return 0.0;
     return cv->is_float ? cv->float_val : (double)cv->int_val;
 }
 
 Node *__builtin_get_comptime_var(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name) return NULL;
+    if (!vm || !name)
+        return NULL;
     ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || cv->is_struct) return NULL;
+    if (!cv || !cv->is_evaluated || cv->is_struct)
+        return NULL;
     if (cv->is_float)
         return __builtin_ast_float_literal(cv->float_val);
     return __builtin_ast_int_literal(cv->int_val);
@@ -4047,26 +4228,29 @@ Node *__builtin_get_comptime_var(const char *name) {
 
 Node *__builtin_get_comptime_ptr(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name) return NULL;
+    if (!vm || !name)
+        return NULL;
     ComptimeVar *cv = find_comptime_var(vm, name);
-    if (!cv || !cv->is_evaluated || !cv->ptr_obj) return NULL;
+    if (!cv || !cv->is_evaluated || !cv->ptr_obj)
+        return NULL;
 
-    Node *var = alloc_node(vm, ND_VAR);
-    var->var = cv->ptr_obj;
-    var->ty = cv->ptr_obj->ty;
+    Node *var  = alloc_node(vm, ND_VAR);
+    var->var   = cv->ptr_obj;
+    var->ty    = cv->ptr_obj->ty;
 
     Node *addr = alloc_node(vm, ND_ADDR);
-    addr->lhs = var;
+    addr->lhs  = var;
     add_type(vm, addr);
     return addr;
 }
 
-Node *__builtin_get_comptime_member(const char *var_name,
-                                  const char *field) {
+Node *__builtin_get_comptime_member(const char *var_name, const char *field) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !var_name || !field) return NULL;
+    if (!vm || !var_name || !field)
+        return NULL;
     ComptimeVar *cv = find_comptime_var(vm, var_name);
-    if (!cv || !cv->is_evaluated || !cv->is_struct) return NULL;
+    if (!cv || !cv->is_evaluated || !cv->is_struct)
+        return NULL;
     size_t flen = strlen(field);
     for (ComptimeVarMember *m = cv->members; m; m = m->next) {
         if (m->name && strlen(m->name) == flen &&
@@ -4081,9 +4265,11 @@ Node *__builtin_get_comptime_member(const char *var_name,
 
 Node *__builtin_get_constexpr_value(const char *name) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !name) return NULL;
+    if (!vm || !name)
+        return NULL;
     Obj *obj = (Obj *)__builtin_ast_find_global(name);
-    if (!obj || !obj->is_constexpr || !obj->init_expr) return NULL;
+    if (!obj || !obj->is_constexpr || !obj->init_expr)
+        return NULL;
     if (obj->ty->kind >= TY_FLOAT)
         return __builtin_ast_float_literal(cc_eval_double(vm, obj->init_expr));
     return __builtin_ast_int_literal(cc_eval(vm, obj->init_expr));

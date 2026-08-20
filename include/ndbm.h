@@ -64,8 +64,8 @@ _Static_assert(sizeof(datum) == 16, "datum layout mismatch");
 
 extern DBM *dbm_open(const char *file, int open_flags, mode_t file_mode);
 extern void dbm_close(DBM *db);
-extern int  dbm_error(DBM *db);
-extern int  dbm_clearerr(DBM *db);
+extern int dbm_error(DBM *db);
+extern int dbm_clearerr(DBM *db);
 
 /* Scalar-only FFI helpers backing the by-value shims below (registered in
    src/stdlib/posix.c, not part of the public ndbm API -- guest code
@@ -75,13 +75,13 @@ extern void __cccc_dbm_fetch(DBM *db, const void *kptr, size_t klen,
                              void **out_dptr, size_t *out_dsize);
 extern void __cccc_dbm_firstkey(DBM *db, void **out_dptr, size_t *out_dsize);
 extern void __cccc_dbm_nextkey(DBM *db, void **out_dptr, size_t *out_dsize);
-extern int  __cccc_dbm_delete(DBM *db, const void *kptr, size_t klen);
-extern int  __cccc_dbm_store(DBM *db, const void *kptr, size_t klen,
-                             const void *vptr, size_t vlen, int flags);
+extern int __cccc_dbm_delete(DBM *db, const void *kptr, size_t klen);
+extern int __cccc_dbm_store(DBM *db, const void *kptr, size_t klen,
+                            const void *vptr, size_t vlen, int flags);
 
 static inline datum dbm_fetch(DBM *db, datum key) {
     datum r;
-    r.dptr = 0;
+    r.dptr  = 0;
     r.dsize = 0;
     __cccc_dbm_fetch(db, key.dptr, key.dsize, &r.dptr, &r.dsize);
     return r;
@@ -89,7 +89,7 @@ static inline datum dbm_fetch(DBM *db, datum key) {
 
 static inline datum dbm_firstkey(DBM *db) {
     datum r;
-    r.dptr = 0;
+    r.dptr  = 0;
     r.dsize = 0;
     __cccc_dbm_firstkey(db, &r.dptr, &r.dsize);
     return r;
@@ -97,7 +97,7 @@ static inline datum dbm_firstkey(DBM *db) {
 
 static inline datum dbm_nextkey(DBM *db) {
     datum r;
-    r.dptr = 0;
+    r.dptr  = 0;
     r.dsize = 0;
     __cccc_dbm_nextkey(db, &r.dptr, &r.dsize);
     return r;
@@ -108,7 +108,8 @@ static inline int dbm_delete(DBM *db, datum key) {
 }
 
 static inline int dbm_store(DBM *db, datum key, datum content, int flags) {
-    return __cccc_dbm_store(db, key.dptr, key.dsize, content.dptr, content.dsize, flags);
+    return __cccc_dbm_store(db, key.dptr, key.dsize, content.dptr,
+                            content.dsize, flags);
 }
 
 #endif /* __APPLE__ || __CCCC_HAS_NDBM__ */

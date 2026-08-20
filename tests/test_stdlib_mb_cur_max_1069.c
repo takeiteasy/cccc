@@ -42,9 +42,9 @@ int main(void) {
     // A single-byte char round-trips through mbtowc/wctomb under the "C"
     // locale, ties MB_CUR_MAX to the actual mb* passthroughs rather than
     // just the macro's own text.
-    char buf[MB_LEN_MAX];
+    char    buf[MB_LEN_MAX];
     wchar_t wc = 0;
-    int n = mbtowc(&wc, "A", MB_CUR_MAX);
+    int     n  = mbtowc(&wc, "A", MB_CUR_MAX);
     if (n != 1 || wc != L'A')
         return 3;
     n = wctomb(buf, wc);

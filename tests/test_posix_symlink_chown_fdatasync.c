@@ -25,38 +25,49 @@
 
 int main(void) {
     const char *target = "/tmp/cccc_test_symlink_chown_target";
-    const char *link = "/tmp/cccc_test_symlink_chown_link";
+    const char *link   = "/tmp/cccc_test_symlink_chown_link";
 
     unlink(target);
     unlink(link);
 
     int fd = open(target, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd < 0) return 1;
-    if (write(fd, "hi", 2) != 2) return 2;
+    if (fd < 0)
+        return 1;
+    if (write(fd, "hi", 2) != 2)
+        return 2;
     close(fd);
 
     // symlink + readlink round-trip.
-    if (symlink(target, link) != 0) return 3;
+    if (symlink(target, link) != 0)
+        return 3;
 
     char buf[256];
     memset(buf, 0, sizeof(buf));
     ssize_t n = readlink(link, buf, sizeof(buf) - 1);
-    if (n < 0) return 4;
-    if (strcmp(buf, target) != 0) return 5;
+    if (n < 0)
+        return 4;
+    if (strcmp(buf, target) != 0)
+        return 5;
 
     struct stat st;
-    if (lstat(link, &st) != 0) return 6;
-    if (!S_ISLNK(st.st_mode)) return 7;
+    if (lstat(link, &st) != 0)
+        return 6;
+    if (!S_ISLNK(st.st_mode))
+        return 7;
 
     // chown: self-chown (own euid/egid) is always permitted.
-    if (chown(target, geteuid(), getegid()) != 0) return 8;
+    if (chown(target, geteuid(), getegid()) != 0)
+        return 8;
 
     fd = open(target, O_WRONLY);
-    if (fd < 0) return 9;
-    if (write(fd, "!!", 2) != 2) return 10;
+    if (fd < 0)
+        return 9;
+    if (write(fd, "!!", 2) != 2)
+        return 10;
 
 #ifdef __linux__
-    if (fdatasync(fd) != 0) return 11;
+    if (fdatasync(fd) != 0)
+        return 11;
 #endif
     close(fd);
 

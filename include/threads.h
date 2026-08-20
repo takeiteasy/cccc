@@ -69,39 +69,44 @@ enum {
 typedef _Atomic int once_flag;
 #define ONCE_FLAG_INIT 0
 
-#define call_once(flag, func) \
-    do { if (!(*(flag))) { *(flag) = 1; (func)(); } } while (0)
+#define call_once(flag, func)                                                  \
+    do {                                                                       \
+        if (!(*(flag))) {                                                      \
+            *(flag) = 1;                                                       \
+            (func)();                                                          \
+        }                                                                      \
+    } while (0)
 
 /* ---- Thread lifecycle ---- */
-int    thrd_create(thrd_t *thr, thrd_start_t func, void *arg);
-int    thrd_join(thrd_t thr, int *res);
-void   thrd_exit(int res);
-int    thrd_detach(thrd_t thr);
-void   thrd_yield(void);
-int    thrd_sleep(const struct timespec *duration, struct timespec *remaining);
+int thrd_create(thrd_t *thr, thrd_start_t func, void *arg);
+int thrd_join(thrd_t thr, int *res);
+void thrd_exit(int res);
+int thrd_detach(thrd_t thr);
+void thrd_yield(void);
+int thrd_sleep(const struct timespec *duration, struct timespec *remaining);
 thrd_t thrd_current(void);
-int    thrd_equal(thrd_t a, thrd_t b);
+int thrd_equal(thrd_t a, thrd_t b);
 
 /* ---- Mutex ---- */
-int  mtx_init(mtx_t *mtx, int type);
-int  mtx_lock(mtx_t *mtx);
-int  mtx_trylock(mtx_t *mtx);
-int  mtx_timedlock(mtx_t *mtx, const struct timespec *ts);
-int  mtx_unlock(mtx_t *mtx);
+int mtx_init(mtx_t *mtx, int type);
+int mtx_lock(mtx_t *mtx);
+int mtx_trylock(mtx_t *mtx);
+int mtx_timedlock(mtx_t *mtx, const struct timespec *ts);
+int mtx_unlock(mtx_t *mtx);
 void mtx_destroy(mtx_t *mtx);
 
 /* ---- Condition variable ---- */
-int  cnd_init(cnd_t *cond);
-int  cnd_wait(cnd_t *cond, mtx_t *mtx);
-int  cnd_signal(cnd_t *cond);
-int  cnd_broadcast(cnd_t *cond);
-int  cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *ts);
+int cnd_init(cnd_t *cond);
+int cnd_wait(cnd_t *cond, mtx_t *mtx);
+int cnd_signal(cnd_t *cond);
+int cnd_broadcast(cnd_t *cond);
+int cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *ts);
 void cnd_destroy(cnd_t *cond);
 
 /* ---- Thread-specific storage ---- */
-int   tss_create(tss_t *key, tss_dtor_t dtor);
+int tss_create(tss_t *key, tss_dtor_t dtor);
 void *tss_get(tss_t key);
-int   tss_set(tss_t key, void *val);
-void  tss_delete(tss_t key);
+int tss_set(tss_t key, void *val);
+void tss_delete(tss_t key);
 
 #endif

@@ -4,10 +4,10 @@
 
 int main() {
     // Error 1: Variable name omitted
-    int , y;
+    int, y;
 
     // Error 2: Another variable name omitted
-    double , z;
+    double, z;
 
     // Valid declaration should still parse
     int valid = 42;

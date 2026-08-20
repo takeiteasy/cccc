@@ -55,17 +55,20 @@
 static int test_vsnprintf_basic(int count, ...) {
     va_list ap;
     va_start(ap, count);
-    int first = va_arg(ap, int);        // consumes 10, ap now positioned at 20
+    int  first = va_arg(ap, int); // consumes 10, ap now positioned at 20
     char buf[32];
     vsnprintf(buf, sizeof buf, "%d", ap); // must format "20" without
-                                           // advancing ap itself
-    int second = va_arg(ap, int);       // ap must still read 20 -- the same
-                                         // value vsnprintf itself just read,
-                                         // not something past it
+                                          // advancing ap itself
+    int second = va_arg(ap, int);         // ap must still read 20 -- the same
+                                          // value vsnprintf itself just read,
+                                          // not something past it
     va_end(ap);
-    if (first != 10) return 1;
-    if (strcmp(buf, "20") != 0) return 2;
-    if (second != 20) return 3;
+    if (first != 10)
+        return 1;
+    if (strcmp(buf, "20") != 0)
+        return 2;
+    if (second != 20)
+        return 3;
     return 0;
 }
 
@@ -81,18 +84,21 @@ static int test_vsnprintf_basic(int count, ...) {
 static int measure_then_format(char *buf, int bufsz, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    int needed = vsnprintf(0, 0, fmt, ap);
+    int needed  = vsnprintf(0, 0, fmt, ap);
     int written = vsnprintf(buf, (unsigned long)bufsz, fmt, ap);
     va_end(ap);
-    if (needed != written) return -1;
+    if (needed != written)
+        return -1;
     return written;
 }
 
 static int test_measure_then_format(void) {
     char buf[64];
-    int n = measure_then_format(buf, sizeof buf, "%d-%s-%d", 7, "mid", 99);
-    if (n < 0) return 1;
-    if (strcmp(buf, "7-mid-99") != 0) return 2;
+    int  n = measure_then_format(buf, sizeof buf, "%d-%s-%d", 7, "mid", 99);
+    if (n < 0)
+        return 1;
+    if (strcmp(buf, "7-mid-99") != 0)
+        return 2;
     return 0;
 }
 
@@ -101,15 +107,18 @@ static int test_measure_then_format(void) {
 static int test_vfprintf_forward(int count, ...) {
     va_list ap;
     va_start(ap, count);
-    int first = va_arg(ap, int); // consumes 10, ap now positioned at 20
-    FILE *f = fopen("/dev/null", "w");
-    if (!f) return 1;
-    vfprintf(f, "%d", ap); // must write 20 without advancing ap
+    int   first = va_arg(ap, int); // consumes 10, ap now positioned at 20
+    FILE *f     = fopen("/dev/null", "w");
+    if (!f)
+        return 1;
+    vfprintf(f, "%d", ap);        // must write 20 without advancing ap
     fclose(f);
     int second = va_arg(ap, int); // ap must still read 20
     va_end(ap);
-    if (first != 10) return 2;
-    if (second != 20) return 3;
+    if (first != 10)
+        return 2;
+    if (second != 20)
+        return 3;
     return 0;
 }
 
@@ -119,15 +128,18 @@ static int test_vfprintf_forward(int count, ...) {
 static int test_vsscanf_forward(int count, ...) {
     va_list ap;
     va_start(ap, count);
-    int got = vsscanf("42", "%d", ap);   // writes through the pointer arg
-    int *reread = va_arg(ap, int *);     // ap must be UNCHANGED -- still
-                                          // positioned at the same
-                                          // (unconsumed) pointer argument
+    int  got    = vsscanf("42", "%d", ap); // writes through the pointer arg
+    int *reread = va_arg(ap, int *);       // ap must be UNCHANGED -- still
+                                           // positioned at the same
+                                           // (unconsumed) pointer argument
     va_end(ap);
-    if (got != 1) return 1;
-    if (!reread) return 2;
-    if (*reread != 42) return 3; // confirms vsscanf really did write
-                                  // through this pointer
+    if (got != 1)
+        return 1;
+    if (!reread)
+        return 2;
+    if (*reread != 42)
+        return 3; // confirms vsscanf really did write
+                  // through this pointer
     return 0;
 }
 
@@ -137,21 +149,28 @@ static int test_vsscanf_forward(int count, ...) {
 static int test_untouched_control(int count, ...) {
     va_list ap;
     va_start(ap, count);
-    int first = va_arg(ap, int);
+    int first  = va_arg(ap, int);
     int second = va_arg(ap, int);
     va_end(ap);
-    if (first != 10) return 1;
-    if (second != 20) return 2;
+    if (first != 10)
+        return 1;
+    if (second != 20)
+        return 2;
     return 0;
 }
 
 int main(void) {
     int r;
     int scanf_target = -1;
-    if ((r = test_vsnprintf_basic(2, 10, 20)) != 0) return r;
-    if ((r = test_measure_then_format()) != 0) return 10 + r;
-    if ((r = test_vfprintf_forward(2, 10, 20)) != 0) return 20 + r;
-    if ((r = test_vsscanf_forward(1, &scanf_target)) != 0) return 30 + r;
-    if ((r = test_untouched_control(2, 10, 20)) != 0) return 40 + r;
+    if ((r = test_vsnprintf_basic(2, 10, 20)) != 0)
+        return r;
+    if ((r = test_measure_then_format()) != 0)
+        return 10 + r;
+    if ((r = test_vfprintf_forward(2, 10, 20)) != 0)
+        return 20 + r;
+    if ((r = test_vsscanf_forward(1, &scanf_target)) != 0)
+        return 30 + r;
+    if ((r = test_untouched_control(2, 10, 20)) != 0)
+        return 40 + r;
     return 42;
 }

@@ -11,11 +11,11 @@
 // gate being absent or silently inverted; every other test here runs with
 // the gate open.
 int main(void) {
-    int k = 4;
+    int       k    = 4;
     long long prev = -1;
     for (int i = 0; i < 10; i++) {
         int u[k];
-        u[0] = i;
+        u[0]           = i;
         long long addr = (long long)&u[0];
         if (addr <= prev)
             return 1;

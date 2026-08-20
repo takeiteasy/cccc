@@ -11,8 +11,8 @@
 
 int main(void) {
     int *arr = malloc(sizeof(int) * 4);
-    arr[2] = 3;
-    arr[3] = 4; // stamps only arr[2..3] (the tail) as int
+    arr[2]   = 3;
+    arr[3]   = 4; // stamps only arr[2..3] (the tail) as int
 
     // endptr write lands at &arr[0], a sizeof(char*) extent -- must clear
     // just the head, not the whole allocation.
@@ -20,7 +20,7 @@ int main(void) {
     strtoull("123", endptr, 10);
 
     float *tail = (float *)&arr[2];
-    float v = *tail; // load as float: mismatches the still-stamped int tail
+    float  v    = *tail; // load as float: mismatches the still-stamped int tail
     free(arr);
     return (int)v;
 }

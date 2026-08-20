@@ -32,7 +32,6 @@
 #define CCCC_FILENO fileno
 #endif
 
-
 // Host-side dirname, for the -I forwarded to the native compiler below.
 // Doesn't mutate its argument (unlike POSIX dirname()) and doesn't need
 // <libgen.h> (which is a CCCC-guest-only polyfill, not a host header here).
@@ -45,7 +44,7 @@ static char *host_dirname_dup(const char *path) {
     if (slash == path)
         return strdup("/");
     size_t len = (size_t)(slash - path);
-    char *dir = malloc(len + 1);
+    char  *dir = malloc(len + 1);
     memcpy(dir, path, len);
     dir[len] = '\0';
     return dir;
@@ -64,16 +63,16 @@ static char *host_dirname_dup(const char *path) {
 // no-canonicalization contract.
 typedef struct {
     ArgVec *cc_args;
-    char **seen;
-    int seen_len;
-    int seen_cap;
+    char  **seen;
+    int     seen_len;
+    int     seen_cap;
 } NativeIncludeDirCtx;
 
 static int push_input_dir_i(char *key, int keylen, void *val, void *user_data) {
     (void)keylen;
     (void)val;
     NativeIncludeDirCtx *ctx = user_data;
-    char *dir = host_dirname_dup(key);
+    char                *dir = host_dirname_dup(key);
     for (int i = 0; i < ctx->seen_len; i++) {
         if (strcmp(ctx->seen[i], dir) == 0) {
             free(dir);
@@ -82,7 +81,7 @@ static int push_input_dir_i(char *key, int keylen, void *val, void *user_data) {
     }
     if (ctx->seen_len == ctx->seen_cap) {
         ctx->seen_cap = ctx->seen_cap ? ctx->seen_cap * 2 : 8;
-        ctx->seen = realloc(ctx->seen, sizeof(char *) * ctx->seen_cap);
+        ctx->seen     = realloc(ctx->seen, sizeof(char *) * ctx->seen_cap);
     }
     ctx->seen[ctx->seen_len++] = dir;
     argv_push(ctx->cc_args, "-I");
@@ -100,9 +99,9 @@ static int push_input_dir_i(char *key, int keylen, void *val, void *user_data) {
 // afterward, mirroring push_compile_flags()'s own StringArray pattern
 // (src/build.c).
 static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
-                             const char *prefix, const char *value) {
-    size_t len = strlen(prefix) + strlen(value) + 1;
-    char *flag = malloc(len);
+                            const char *prefix, const char *value) {
+    size_t len  = strlen(prefix) + strlen(value) + 1;
+    char  *flag = malloc(len);
     if (!flag)
         error("failed to allocate native cc flag");
     snprintf(flag, len, "%s%s", prefix, value);
@@ -138,44 +137,44 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
 // them; Ubuntu GCC 13.3.0 rejects "23"/"gnu23" outright but accepts
 // "2x"/"gnu2x" and every other listed spelling.
 static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
-                                               bool explicit_std) {
+                                             bool explicit_std) {
     static bool probed = false;
-    static bool found = false;
+    static bool found  = false;
     static char cached[16];
     if (probed)
         return found ? cached : NULL;
-    probed = true;
+    probed             = true;
 
     const char *prefix = vm->compiler.c_std_gnu ? "gnu" : "c";
     const char *suffixes[6];
-    int n = 0;
+    int         n = 0;
     switch (vm->compiler.c_std) {
-    case CCCC_STD_C23:
-        suffixes[n++] = "23";
-        suffixes[n++] = "2x";
-        if (!explicit_std) {
+        case CCCC_STD_C23:
+            suffixes[n++] = "23";
+            suffixes[n++] = "2x";
+            if (!explicit_std) {
+                suffixes[n++] = "17";
+                suffixes[n++] = "11";
+            }
+            break;
+        case CCCC_STD_C17:
             suffixes[n++] = "17";
+            suffixes[n++] = "18";
+            if (!explicit_std)
+                suffixes[n++] = "11";
+            break;
+        case CCCC_STD_C11:
             suffixes[n++] = "11";
-        }
-        break;
-    case CCCC_STD_C17:
-        suffixes[n++] = "17";
-        suffixes[n++] = "18";
-        if (!explicit_std)
-            suffixes[n++] = "11";
-        break;
-    case CCCC_STD_C11:
-        suffixes[n++] = "11";
-        suffixes[n++] = "1x";
-        break;
-    case CCCC_STD_C99:
-        suffixes[n++] = "99";
-        suffixes[n++] = "9x";
-        break;
-    case CCCC_STD_C89:
-        suffixes[n++] = "89";
-        suffixes[n++] = "90";
-        break;
+            suffixes[n++] = "1x";
+            break;
+        case CCCC_STD_C99:
+            suffixes[n++] = "99";
+            suffixes[n++] = "9x";
+            break;
+        case CCCC_STD_C89:
+            suffixes[n++] = "89";
+            suffixes[n++] = "90";
+            break;
     }
 
     for (int i = 0; i < n; i++) {
@@ -183,8 +182,8 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
         snprintf(cand, sizeof(cand), "%s%s", prefix, suffixes[i]);
         char probe_flag[24];
         snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand);
-        char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag,
-                               "-x", "c", "/dev/null", NULL};
+        char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag, "-x",
+                              "c",        "/dev/null",     NULL};
         if (run_argv_quiet(probe_argv) == 0) {
             snprintf(cached, sizeof(cached), "%s", cand);
             found = true;
@@ -194,9 +193,9 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
     return NULL;
 }
 
-static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
-                              const char **inc_paths, int inc_paths_count,
-                              const char **sys_inc_paths,
+static int run_native_backend(VirtualMachine *vm, Obj *prog,
+                              const char *out_file, const char **inc_paths,
+                              int inc_paths_count, const char **sys_inc_paths,
                               int sys_inc_paths_count, const char **lib_paths,
                               int lib_paths_count, const char **libs,
                               int libs_count, const char **defines,
@@ -204,8 +203,9 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
                               int undefs_count, const char *std_arg,
                               bool emit_cccc) {
     if (!out_file) {
-        fprintf(stderr,
-                "error: -c=native requires -o <file> (no executable path given)\n");
+        fprintf(
+            stderr,
+            "error: -c=native requires -o <file> (no executable path given)\n");
         return 1;
     }
 
@@ -274,8 +274,8 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
         return 1;
     }
 
-    ArgVec cc_args = {0};
-    StringArray owned = {0}; // #1065: heap-backed flags freed after the spawn
+    ArgVec      cc_args = {0};
+    StringArray owned   = {0}; // #1065: heap-backed flags freed after the spawn
     argv_push(&cc_args, cc);
     argv_push(&cc_args, source_path);
     argv_push(&cc_args, "-o");
@@ -288,7 +288,8 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     // back to the user's literal spelling, unprobed, only if none of that
     // standard's own spellings are accepted (today's pre-fix behaviour,
     // so this can never turn a working compile into a failing one).
-    const char *resolved_std = native_resolve_std_ladder(vm, cc, std_arg != NULL);
+    const char *resolved_std =
+        native_resolve_std_ladder(vm, cc, std_arg != NULL);
     if (!resolved_std)
         resolved_std = std_arg;
     if (resolved_std)
@@ -302,7 +303,8 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_fil
     // the primary one, #1006 widened auto-capture to every input file) so
     // re-emitted quoted includes still find it.
     NativeIncludeDirCtx incdir_ctx = {&cc_args, NULL, 0, 0};
-    hashmap_foreach(&vm->compiler.command_line_inputs, push_input_dir_i, &incdir_ctx);
+    hashmap_foreach(&vm->compiler.command_line_inputs, push_input_dir_i,
+                    &incdir_ctx);
     for (int i = 0; i < inc_paths_count; i++) {
         argv_push(&cc_args, "-I");
         argv_push(&cc_args, inc_paths[i]);
@@ -409,117 +411,187 @@ static void usage(const char *argv0, int exit_code) {
     printf("Usage: %s [options] file...\n\n", argv0);
     printf("Options:\n");
     printf("\t-h/--help                Show this message\n");
-    printf("\t   --version             Print version, git describe, host triple, and enabled features\n");
+    printf("\t   --version             Print version, git describe, host "
+           "triple, and enabled features\n");
     printf("\t-I/--include <path>      Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
-    printf("\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
-           "non-owned standard headers\n");
+    printf(
+        "\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
+        "non-owned standard headers\n");
     printf("\t   --no-builtin-includes Do not fall back to CCCC's own bundled "
            "headers for non-owned standard headers (requires "
            "--use-system-headers)\n");
-    printf("\t   --sysroot <path>      Set SDK root; adds <path>/usr/include to "
-           "system include paths and implies --use-system-headers\n");
-    printf("\t-L/--library-path <path> Add <path> to dynamic library search paths\n");
+    printf(
+        "\t   --sysroot <path>      Set SDK root; adds <path>/usr/include to "
+        "system include paths and implies --use-system-headers\n");
+    printf("\t-L/--library-path <path> Add <path> to dynamic library search "
+           "paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
-    printf("\t   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) built with -c=bytecode\n");
+    printf("\t   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) "
+           "built with -c=bytecode\n");
 #ifdef CCCC_HAS_CURL
-    printf("\t   --url-cache-dir <path> Directory for caching #include <https://...> fetches\n");
+    printf("\t   --url-cache-dir <path> Directory for caching #include "
+           "<https://...> fetches\n");
     printf("\t   --url-cache-clear     Clear the URL include cache and exit\n");
 #endif
     printf("\t-D/--define <macro>[=def] Define a macro\n");
     printf("\t-U/--undef <macro>       Undefine a macro\n");
     printf("\t-a/--ast                 Dump AST\n");
     printf("\t-p/--print-tokens        Print preprocessed tokens to stdout\n");
-    printf("\t-E/--preprocess          Output preprocessed source code (traditional "
+    printf("\t-E/--preprocess          Output preprocessed source code "
+           "(traditional "
            "C -E)\n");
-    printf("\t-m/--dump-expanded       Output macro-expanded source code (for gcc "
-           "compatibility)\n");
-    printf("\t   --emit-only           With -c=generated: only emit explicitly tagged "
+    printf(
+        "\t-m/--dump-expanded       Output macro-expanded source code (for gcc "
+        "compatibility)\n");
+    printf("\t   --emit-only           With -c=generated: only emit explicitly "
+           "tagged "
            "content ([[cccc::emit]])\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
            "auto, c23, gnu, msvc, strip\n");
-    printf("\t   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, "
+    printf("\t   --emit-cccc           Preserve CCCC dialect syntax "
+           "([[cccc::...]], @-attrs, "
            "checked-pointer\n");
-    printf("\t                         qualifiers, cccc-only #includes) in -E/-m/-c=native/"
+    printf("\t                         qualifiers, cccc-only #includes) in "
+           "-E/-m/-c=native/"
            "-c=generated output\n");
-    printf("\t                         instead of stripping it to portable C. With -c=native, "
+    printf("\t                         instead of stripping it to portable C. "
+           "With -c=native, "
            "the usual\n");
-    printf("\t                         cc/clang/gcc PATH search is disabled -- CCCC_NATIVE_CC "
+    printf("\t                         cc/clang/gcc PATH search is disabled -- "
+           "CCCC_NATIVE_CC "
            "must name a\n");
-    printf("\t                         compiler that understands the dialect explicitly\n");
+    printf("\t                         compiler that understands the dialect "
+           "explicitly\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
-    printf("\t-J/--ffi-decls           Emit parsed function/struct/enum declarations "
-            "as JSON (for FFI wrapper generation)\n");
+    printf("\t-J/--ffi-decls           Emit parsed function/struct/enum "
+           "declarations "
+           "as JSON (for FFI wrapper generation)\n");
     printf("\t-X/--no-preprocess       Disable preprocessing step\n");
     printf("\t-S/--no-stdlib           Do not link standard library\n");
-    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), "
+    printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: "
+           "native (default), "
            "bytecode, generated\n");
-    printf("\t                         native: build a native executable via CCCC_NATIVE_CC\n");
-    printf("\t                                 (cc, clang, or gcc); writes to -o file, or ./a.out\n");
+    printf("\t                         native: build a native executable via "
+           "CCCC_NATIVE_CC\n");
+    printf("\t                                 (cc, clang, or gcc); writes to "
+           "-o file, or ./a.out\n");
     printf("\t                                 if -o omitted\n");
-    printf("\t                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted\n");
-    printf("\t                         generated: serialize the runtime TU + macro-generated\n");
-    printf("\t                                    objects to C; writes to -o file, or ./a.gen.c\n");
+    printf("\t                         bytecode: write .c4 to -o file, or "
+           "./a.c4 if -o omitted\n");
+    printf("\t                         generated: serialize the runtime TU + "
+           "macro-generated\n");
+    printf("\t                                    objects to C; writes to -o "
+           "file, or ./a.gen.c\n");
     printf("\t                                    if -o omitted\n");
-    printf("\t                         Aliases: bytecode=bc=c4, native=n, generated=gen=g. Use\n");
-    printf("\t                         -cbytecode or --compile=bytecode (short form must be\n");
-    printf("\t                         attached; long form may use '=' or separate arg).\n");
-    printf("\t   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL\n");
-    printf("\t                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)\n");
-    printf("\t                         before compiling. Refuses to compile (nonzero exit, no\n");
-    printf("\t                         artifact written) if the run crashes, hits a VM-detected\n");
-    printf("\t                         safety violation, or hangs; the exit code itself is not\n");
-    printf("\t                         checked. Implies -c=native when no -c is given; an\n");
-    printf("\t                         explicit -c=FMT still picks the format\n");
-    printf("\t-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.\n");
-    printf("\t                         For -c=bytecode, defaults to ./a.c4 if omitted. For\n");
-    printf("\t                         -c=generated, defaults to ./a.gen.c if omitted.\n");
+    printf("\t                         Aliases: bytecode=bc=c4, native=n, "
+           "generated=gen=g. Use\n");
+    printf("\t                         -cbytecode or --compile=bytecode (short "
+           "form must be\n");
+    printf("\t                         attached; long form may use '=' or "
+           "separate arg).\n");
+    printf("\t   --test-run[=LEVEL]    Run the program under the VM "
+           "(safety=max by default; LEVEL\n");
+    printf("\t                         accepts none/basic/standard/max or "
+           "0/1/2/3, same as --safety=)\n");
+    printf("\t                         before compiling. Refuses to compile "
+           "(nonzero exit, no\n");
+    printf("\t                         artifact written) if the run crashes, "
+           "hits a VM-detected\n");
+    printf("\t                         safety violation, or hangs; the exit "
+           "code itself is not\n");
+    printf("\t                         checked. Implies -c=native when no -c "
+           "is given; an\n");
+    printf(
+        "\t                         explicit -c=FMT still picks the format\n");
+    printf("\t-o/--out <file>          Output file. For -c=native, defaults to "
+           "./a.out if omitted.\n");
+    printf("\t                         For -c=bytecode, defaults to ./a.c4 if "
+           "omitted. For\n");
+    printf("\t                         -c=generated, defaults to ./a.gen.c if "
+           "omitted.\n");
     printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
-    printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)\n");
-    printf("\t-r/--repl                Start an interactive read-eval-print loop (no input file)\n");
-    printf("\t-e/--entry <name>        Set the entry-point function (default: main)\n");
-    printf("\t   --vm-profile          Count executed VM opcodes and print a report\n");
-    printf("\t                         Combine with --json to also dump the profile as JSON to stdout\n");
+    printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on "
+           "crash (for test harnesses)\n");
+    printf("\t-r/--repl                Start an interactive read-eval-print "
+           "loop (no input file)\n");
+    printf("\t-e/--entry <name>        Set the entry-point function (default: "
+           "main)\n");
+    printf("\t   --vm-profile          Count executed VM opcodes and print a "
+           "report\n");
+    printf("\t                         Combine with --json to also dump the "
+           "profile as JSON to stdout\n");
     printf("\nTesting Options:\n");
-    printf("\t-t/--testing             Discover and run [[cccc::test]] functions\n");
-    printf("\t   --test-c4             Bytecode round-trip: compile, save .c4, reload, then run tests\n");
-    printf("\t                         (implies --testing; exercises FFI-table and bytecode persistence)\n");
-    printf("\t   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)\n");
-    printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);\n");
-    printf("\t                         glob metacharacters (*?[) switch to fnmatch (implies --testing)\n");
-    printf("\t   --list-tests          List test names without running (implies --testing)\n");
+    printf("\t-t/--testing             Discover and run [[cccc::test]] "
+           "functions\n");
+    printf("\t   --test-c4             Bytecode round-trip: compile, save .c4, "
+           "reload, then run tests\n");
+    printf("\t                         (implies --testing; exercises FFI-table "
+           "and bytecode persistence)\n");
+    printf("\t   --test=GLOB           Run only tests whose name matches GLOB "
+           "(implies --testing)\n");
+    printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites "
+           "(prefix match);\n");
+    printf("\t                         glob metacharacters (*?[) switch to "
+           "fnmatch (implies --testing)\n");
+    printf("\t   --list-tests          List test names without running "
+           "(implies --testing)\n");
     printf("\t   --fail-fast           Stop after the first failing test\n");
-    printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no timeout;\n");
+    printf("\t   --test-timeout=N      Per-test timeout in seconds (0 = no "
+           "timeout;\n");
     printf("\t                         individual tests may override via\n");
     printf("\t                         [[cccc::test(timeout = ms)]])\n");
-    printf("\t   --test-format=FMT     Output format for test results: tap (default), plain, json\n");
+    printf("\t   --test-format=FMT     Output format for test results: tap "
+           "(default), plain, json\n");
     printf("\nBuild Options:\n");
-    printf("\t-b/--build               Run the input as a build script (declares native targets)\n");
-    printf("\t   --build-entry=NAME    Build entry function to invoke (default: build_main)\n");
-    printf("\t   --build-out-dir=PATH  Output directory for build artifacts (default: build/)\n");
-    printf("\t   --build-dry-run       Print the toolchain command lines without executing them\n");
-    printf("\t   --build-target=NAME   Build only the named target and its transitive dependencies\n");
-    printf("\t   --build-tool-allow=N  Allowlist of tool names runnable via RunCustom/HaveTool/PkgConfig/CaptureCommand\n");
-    printf("\t                         Accepts comma-separated or repeated flags. Default: allow all.\n");
-    printf("\t   --build-jobs=N        Compile up to N source files in parallel per target (default: 1)\n");
-    printf("\t   --build-keep-going    Continue building independent targets after a failure\n");
-    printf("\t   --build-quiet         Suppress per-step command lines; only show errors and summary\n");
-    printf("\t   --build-verbose       Print per-target headers and all command lines\n");
-    printf("\t   --build-list-targets  List [[cccc::build_target]] factory names and exit\n");
-    printf("\t   --build-profile=NAME  Set build profile: debug | release | relwithdebinfo | minsizerel\n");
-    printf("\t   --build-triple=TRIPLE Cross-compile target triple (e.g. aarch64-linux-gnu; clang only)\n");
-    printf("\t   --build-cc=COMPILER   Override CC binary for all targets (e.g. aarch64-linux-gnu-gcc)\n");
-    printf("\t   --build-cache[=PATH]  Enable incremental builds: mtime+content-hash cache.\n");
-    printf("\t                         Default cache dir: <out-dir>/.cccc-cache\n");
-    printf("\t   --build-option=K=V    Pass a typed build option to the build script (GetBuildOption/HaveBuildOption).\n");
-    printf("\t                         Accepts repeated flags: --build-option=foo=bar --build-option=baz=1\n");
-    printf("\t   --build-install       After a successful build copy artifacts registered with InstallArtifact\n");
-    printf("\t                         to the install prefix (default: PREFIX env var or /usr/local).\n");
-    printf("\t   -- [args...]          Forward positional args to the build entry (BuildArgc/BuildArgv).\n");
+    printf("\t-b/--build               Run the input as a build script "
+           "(declares native targets)\n");
+    printf("\t   --build-entry=NAME    Build entry function to invoke "
+           "(default: build_main)\n");
+    printf("\t   --build-out-dir=PATH  Output directory for build artifacts "
+           "(default: build/)\n");
+    printf("\t   --build-dry-run       Print the toolchain command lines "
+           "without executing them\n");
+    printf("\t   --build-target=NAME   Build only the named target and its "
+           "transitive dependencies\n");
+    printf("\t   --build-tool-allow=N  Allowlist of tool names runnable via "
+           "RunCustom/HaveTool/PkgConfig/CaptureCommand\n");
+    printf("\t                         Accepts comma-separated or repeated "
+           "flags. Default: allow all.\n");
+    printf("\t   --build-jobs=N        Compile up to N source files in "
+           "parallel per target (default: 1)\n");
+    printf("\t   --build-keep-going    Continue building independent targets "
+           "after a failure\n");
+    printf("\t   --build-quiet         Suppress per-step command lines; only "
+           "show errors and summary\n");
+    printf("\t   --build-verbose       Print per-target headers and all "
+           "command lines\n");
+    printf("\t   --build-list-targets  List [[cccc::build_target]] factory "
+           "names and exit\n");
+    printf("\t   --build-profile=NAME  Set build profile: debug | release | "
+           "relwithdebinfo | minsizerel\n");
+    printf("\t   --build-triple=TRIPLE Cross-compile target triple (e.g. "
+           "aarch64-linux-gnu; clang only)\n");
+    printf("\t   --build-cc=COMPILER   Override CC binary for all targets "
+           "(e.g. aarch64-linux-gnu-gcc)\n");
+    printf("\t   --build-cache[=PATH]  Enable incremental builds: "
+           "mtime+content-hash cache.\n");
+    printf("\t                         Default cache dir: "
+           "<out-dir>/.cccc-cache\n");
+    printf("\t   --build-option=K=V    Pass a typed build option to the build "
+           "script (GetBuildOption/HaveBuildOption).\n");
+    printf("\t                         Accepts repeated flags: "
+           "--build-option=foo=bar --build-option=baz=1\n");
+    printf("\t   --build-install       After a successful build copy artifacts "
+           "registered with InstallArtifact\n");
+    printf("\t                         to the install prefix (default: PREFIX "
+           "env var or /usr/local).\n");
+    printf("\t   -- [args...]          Forward positional args to the build "
+           "entry (BuildArgc/BuildArgv).\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -529,104 +601,179 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-Werror=<name>      Treat one warning category as an error\n");
     printf("\t-Wno-error=<name>   Do not promote one warning category\n");
     printf("\nSafety Levels (preset flag combinations):\n");
-    printf("\t-0/--safety=none     No safety checks (VM heap stays on by default; add -V to also "
+    printf("\t-0/--safety=none     No safety checks (VM heap stays on by "
+           "default; add -V to also "
            "use the host allocator)\n");
-    printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% overhead)\n");
-    printf("\t-2/--safety=standard Comprehensive development safety (~20-40%% overhead)\n");
-    printf("\t-3/--safety=max      All safety features for deep debugging (~60-100%%+ overhead)\n");
+    printf("\t-1/--safety=basic    Essential low-overhead checks (~5-10%% "
+           "overhead)\n");
+    printf("\t-2/--safety=standard Comprehensive development safety (~20-40%% "
+           "overhead)\n");
+    printf("\t-3/--safety=max      All safety features for deep debugging "
+           "(~60-100%%+ overhead)\n");
     printf("\nMemory Safety Options (can be combined with safety levels):\n");
     printf("\t-B/--bounds-checks           Runtime array bounds checking\n");
-    printf("\t   --checked-pointers        Runtime range checks for checked-pointer\n"
-           "\t                             ([[cccc::single/array/ntarray]]) accesses\n");
+    printf("\t   --checked-pointers        Runtime range checks for "
+           "checked-pointer\n"
+           "\t                             ([[cccc::single/array/ntarray]]) "
+           "accesses\n");
     printf("\t   --uaf-detection           Use-after-free detection\n");
-    printf("\t   --control-flow-integrity  Control-flow integrity (indirect call validation)\n");
-    printf("\t   --type-checks             Runtime type checking on pointer dereferences\n");
+    printf("\t   --control-flow-integrity  Control-flow integrity (indirect "
+           "call validation)\n");
+    printf("\t   --type-checks             Runtime type checking on pointer "
+           "dereferences\n");
     printf("\t   --uninitialized-detection Uninitialized variable detection\n");
     printf("\t   --overflow-checks         Detect signed integer overflow\n");
     printf("\t   --stack-canaries          Stack overflow protection\n");
     printf("\t   --heap-canaries           Heap overflow protection\n");
-    printf("\t-M/--memory-leak-detection   Track allocations and report leaks at exit\n");
-    printf("\t   --stack-instrumentation   Track stack variable lifetimes and accesses\n");
-    printf("\t   --stack-errors            Enable runtime errors for stack instrumentation\n");
-    printf("\t-P/--pointer-sanitizer       Enable all pointer checks (bounds, UAF, type)\n");
-    printf("\t   --dangling-pointers       Detect use of stack pointers after function return\n");
-    printf("\t   --alignment-checks        Validate pointer alignment for type\n");
-    printf("\t   --provenance-tracking     Track pointer origin and validate operations\n");
-    printf("\t   --invalid-arithmetic      Detect pointer arithmetic outside object bounds\n");
-    printf("\t   --format-string-checks    Validate format strings in printf-family functions\n");
-    printf("\t   --random-canaries         Use random stack canaries (prevents predictable bypass)\n");
-    printf("\t   --memory-poisoning        Poison allocated/freed memory (0xCD/0xDD patterns)\n");
-    printf("\t   --memory-tagging          Temporal memory tagging (track pointer generation tags)\n");
-    printf("\t-T/--thread-safety           Threading safety diagnostics: race detection, lock-order\n"
-           "\t                             inversion, double-lock, and atomic cast warnings\n");
-    printf("\t-V/--no-vm-heap             VM heap is on by default; pass -V to route malloc/free\n");
-    printf("\t                             through the host allocator instead. Not compatible with\n");
-    printf("\t                             -1/-2/-3 (or --safety=basic/standard/max), or with\n");
-    printf("\t                             --bounds-checks/--uaf-detection/--type-checks/\n");
-    printf("\t                             --heap-canaries/--memory-leak-detection/--memory-tagging,\n");
+    printf("\t-M/--memory-leak-detection   Track allocations and report leaks "
+           "at exit\n");
+    printf("\t   --stack-instrumentation   Track stack variable lifetimes and "
+           "accesses\n");
+    printf("\t   --stack-errors            Enable runtime errors for stack "
+           "instrumentation\n");
+    printf("\t-P/--pointer-sanitizer       Enable all pointer checks (bounds, "
+           "UAF, type)\n");
+    printf("\t   --dangling-pointers       Detect use of stack pointers after "
+           "function return\n");
+    printf(
+        "\t   --alignment-checks        Validate pointer alignment for type\n");
+    printf("\t   --provenance-tracking     Track pointer origin and validate "
+           "operations\n");
+    printf("\t   --invalid-arithmetic      Detect pointer arithmetic outside "
+           "object bounds\n");
+    printf("\t   --format-string-checks    Validate format strings in "
+           "printf-family functions\n");
+    printf("\t   --random-canaries         Use random stack canaries (prevents "
+           "predictable bypass)\n");
+    printf("\t   --memory-poisoning        Poison allocated/freed memory "
+           "(0xCD/0xDD patterns)\n");
+    printf("\t   --memory-tagging          Temporal memory tagging (track "
+           "pointer generation tags)\n");
+    printf("\t-T/--thread-safety           Threading safety diagnostics: race "
+           "detection, lock-order\n"
+           "\t                             inversion, double-lock, and atomic "
+           "cast warnings\n");
+    printf("\t-V/--no-vm-heap             VM heap is on by default; pass -V to "
+           "route malloc/free\n");
+    printf("\t                             through the host allocator instead. "
+           "Not compatible with\n");
+    printf("\t                             -1/-2/-3 (or "
+           "--safety=basic/standard/max), or with\n");
+    printf("\t                             "
+           "--bounds-checks/--uaf-detection/--type-checks/\n");
+    printf("\t                             "
+           "--heap-canaries/--memory-leak-detection/--memory-tagging,\n");
     printf("\t                             which require it\n");
     printf("\nFFI Safety Options:\n");
-    printf("\t   --ffi-allow=list       Allow only comma-separated native function names\n");
-    printf("\t   --ffi-deny=list        Deny comma-separated native function names\n");
-    printf("\t-F/--disable-ffi          Block all registered and dynamic native calls\n");
-    printf("\t   --ffi-errors-fatal     Abort execution on FFI policy violations\n");
-    printf("\t   --ffi-type-checking    Validate registered FFI call arity at runtime\n");
+    printf("\t   --ffi-allow=list       Allow only comma-separated native "
+           "function names\n");
+    printf("\t   --ffi-deny=list        Deny comma-separated native function "
+           "names\n");
+    printf("\t-F/--disable-ffi          Block all registered and dynamic "
+           "native calls\n");
+    printf("\t   --ffi-errors-fatal     Abort execution on FFI policy "
+           "violations\n");
+    printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
+           "runtime\n");
     printf("\nLanguage Standard:\n");
-    printf("\t-s/--std=<std>       Select C language standard (default: gnu23)\n");
-    printf("\t                     Supported: c89/c90, c99, c11, c17/c18, c23/c2x\n");
-    printf("\t                     GNU variants: gnu89/gnu90, gnu99, gnu11, gnu17/gnu18, gnu23/gnu2x\n");
-    printf("\t                     Gates predefined macros, tokenizer syntax (e.g. C23 "
+    printf(
+        "\t-s/--std=<std>       Select C language standard (default: gnu23)\n");
+    printf("\t                     Supported: c89/c90, c99, c11, c17/c18, "
+           "c23/c2x\n");
+    printf("\t                     GNU variants: gnu89/gnu90, gnu99, gnu11, "
+           "gnu17/gnu18, gnu23/gnu2x\n");
+    printf("\t                     Gates predefined macros, tokenizer syntax "
+           "(e.g. C23 "
            "attributes/\n");
-    printf("\t                     digit separators), and preprocessor features per standard\n");
+    printf("\t                     digit separators), and preprocessor "
+           "features per standard\n");
     printf("\nPreprocessor Options:\n");
-    printf("\t   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)\n");
-    printf("\t   --embed-hard-limit         Make #embed limit a hard error instead of warning\n");
-    printf("\t   --macro-recursion-limit=N  Limit recursive comptime macro expansion (default: 256, 0=unlimited)\n");
-    printf("\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
-    printf("\t-C/--no-comptime              Skip the comptime/macro phase entirely (for\n");
-    printf("\t                              large TUs that don't use [[cccc::comptime]])\n");
-    printf("\t   --comptime-include-all     Forward all #define macros to the comptime pass,\n");
-    printf("\t                              and widen the declaration index to include\n");
-    printf("\t                              system headers (both default off; declarations\n");
-    printf("\t                              from non-system headers already resolve\n");
+    printf("\t   --embed-limit=SIZE         Set #embed file size warning limit "
+           "(e.g., 50MB, 100mb, default: 10MB)\n");
+    printf("\t   --embed-hard-limit         Make #embed limit a hard error "
+           "instead of warning\n");
+    printf("\t   --macro-recursion-limit=N  Limit recursive comptime macro "
+           "expansion (default: 256, 0=unlimited)\n");
+    printf(
+        "\t-n/--max-errors=N             Cap diagnostics at N (default: 20)\n");
+    printf("\t-C/--no-comptime              Skip the comptime/macro phase "
+           "entirely (for\n");
+    printf("\t                              large TUs that don't use "
+           "[[cccc::comptime]])\n");
+    printf("\t   --comptime-include-all     Forward all #define macros to the "
+           "comptime pass,\n");
+    printf("\t                              and widen the declaration index to "
+           "include\n");
+    printf("\t                              system headers (both default off; "
+           "declarations\n");
+    printf("\t                              from non-system headers already "
+           "resolve\n");
     printf("\t                              on demand without this flag)\n");
     printf("\t   --allow-comptime-pp-bleed  Allow #define/#undef inside one\n");
-    printf("\t                              [[cccc::comptime]] function body to remain\n");
-    printf("\t                              visible to other comptime function bodies\n");
-    printf("\t                              (pre-#283 behavior; default is isolated)\n");
+    printf("\t                              [[cccc::comptime]] function body "
+           "to remain\n");
+    printf("\t                              visible to other comptime function "
+           "bodies\n");
+    printf("\t                              (pre-#283 behavior; default is "
+           "isolated)\n");
     printf("\nOptimization:\n");
-    printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization (default: disabled)\n");
-    printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, 3=aggressive, 4=fused\n");
+    printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
+           "(default: disabled)\n");
+    printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
+           "3=aggressive, 4=fused\n");
     printf("\t                             1: constant folding (-ffold)\n");
-    printf("\t                             2: +peephole, +CSE (-fpeephole -fcse)\n");
-    printf("\t                             3: +copy-prop, +DCE (-fcopy-prop -fdce)\n");
-    printf("\t                             4: +opcode fusion, +redundant extension elimination (-ffuse -felim-ext)\n");
-    printf("\t-f<pass>                     Enable a single optimisation pass regardless of -O level.\n");
-    printf("\t-fno-<pass>                  Disable a pass even if enabled by -O.\n");
-    printf("\t                             Passes: fold, peephole, copy-prop, dce, cse, fuse, elim-ext\n");
-    printf("\t                             Examples: -O3 -fno-cse, -O0 -fpeephole, "
+    printf("\t                             2: +peephole, +CSE (-fpeephole "
+           "-fcse)\n");
+    printf("\t                             3: +copy-prop, +DCE (-fcopy-prop "
+           "-fdce)\n");
+    printf("\t                             4: +opcode fusion, +redundant "
+           "extension elimination (-ffuse -felim-ext)\n");
+    printf("\t-f<pass>                     Enable a single optimisation pass "
+           "regardless of -O level.\n");
+    printf("\t-fno-<pass>                  Disable a pass even if enabled by "
+           "-O.\n");
+    printf("\t                             Passes: fold, peephole, copy-prop, "
+           "dce, cse, fuse, elim-ext\n");
+    printf("\t                             Examples: -O3 -fno-cse, -O0 "
+           "-fpeephole, "
            "-ffold -fdce\n");
-    printf("\t                             Long-form aliases also accepted: --ffold, --fpeephole, "
+    printf("\t                             Long-form aliases also accepted: "
+           "--ffold, --fpeephole, "
            "--fcopy-prop,\n");
-    printf("\t                             --fdce, --fcse, --ffuse, --felim-ext, and their "
+    printf("\t                             --fdce, --fcse, --ffuse, "
+           "--felim-ext, and their "
            "--fno-* counterparts\n");
-    printf("\t--fma                        Enable single-rounding FMA (-ffuse implied; may change FP results)\n");
-    printf("\t--trap-fp-divzero            Abort on float division by zero instead of IEEE +-Inf/NaN\n");
-    printf("\t--posix-emulation            Enable lossy/approximate emulation of POSIX functions the\n");
-    printf("\t                             host doesn't natively support (e.g. ppoll() on macOS). Off\n");
-    printf("\t                             by default: such functions are undeclared/unregistered,\n");
-    printf("\t                             matching a native compiler on the same host. Also restores\n");
-    printf("\t                             raw ioctl() passthrough for request codes outside the\n");
-    printf("\t                             layout-verified allowlist (off by default there too). VM-only.\n");
-    printf("\t--inline-limit=N             Limit inlining to N AST nodes (default: 20, 0=disable)\n");
-    printf("\nStatic Bytecode Analysis (compile or load input, walk text segment, exit):\n");
-    printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)\n");
+    printf("\t--fma                        Enable single-rounding FMA (-ffuse "
+           "implied; may change FP results)\n");
+    printf("\t--trap-fp-divzero            Abort on float division by zero "
+           "instead of IEEE +-Inf/NaN\n");
+    printf("\t--posix-emulation            Enable lossy/approximate emulation "
+           "of POSIX functions the\n");
+    printf("\t                             host doesn't natively support (e.g. "
+           "ppoll() on macOS). Off\n");
+    printf("\t                             by default: such functions are "
+           "undeclared/unregistered,\n");
+    printf("\t                             matching a native compiler on the "
+           "same host. Also restores\n");
+    printf("\t                             raw ioctl() passthrough for request "
+           "codes outside the\n");
+    printf("\t                             layout-verified allowlist (off by "
+           "default there too). VM-only.\n");
+    printf("\t--inline-limit=N             Limit inlining to N AST nodes "
+           "(default: 20, 0=disable)\n");
+    printf("\nStatic Bytecode Analysis (compile or load input, walk text "
+           "segment, exit):\n");
+    printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
+           "default 2)\n");
     printf("\t--ngrams-top=N          Show top N sequences (default 25)\n");
-    printf("\t--ngrams-per-file       Print a per-input section in addition to the aggregate\n");
-    printf("\t--fusion-candidates[=N] Use-def fusion candidate analysis (top N, default 50)\n");
+    printf("\t--ngrams-per-file       Print a per-input section in addition to "
+           "the aggregate\n");
+    printf("\t--fusion-candidates[=N] Use-def fusion candidate analysis (top "
+           "N, default 50)\n");
     printf("\t                        JSON output via -j/--json\n");
     printf("\nInline Assembly:\n");
-    printf("\t-A/--asm-passthru   Compile asm(\"...\") statements via native C compiler\n");
+    printf("\t-A/--asm-passthru   Compile asm(\"...\") statements via native C "
+           "compiler\n");
     printf("\t                    and execute them via FFI (default: no-op)\n");
     printf("\nExample:\n");
     printf("\t%s -o hello hello.c\n", argv0);
@@ -637,7 +784,8 @@ static void usage(const char *argv0, int exit_code) {
 }
 
 static void configure_ffi_name_list(VirtualMachine *vm, const char *list,
-                                    void (*add)(VirtualMachine *, const char *)) {
+                                    void (*add)(VirtualMachine *,
+                                                const char *)) {
     const char *p = list;
     while (p && *p) {
         while (*p == ',' || isspace((unsigned char)*p))
@@ -649,8 +797,8 @@ static void configure_ffi_name_list(VirtualMachine *vm, const char *list,
         while (end > start && isspace((unsigned char)end[-1]))
             end--;
         if (end > start) {
-            size_t len = (size_t)(end - start);
-            char *name = malloc(len + 1);
+            size_t len  = (size_t)(end - start);
+            char  *name = malloc(len + 1);
             if (!name)
                 error("failed to allocate FFI policy name");
             memcpy(name, start, len);
@@ -696,8 +844,9 @@ static char *find_requested_library(const char *name, const char **paths,
     return strdup(libname);
 }
 
-static int load_requested_libraries(VirtualMachine *vm, const char **libs, int libs_count,
-                                    const char **paths, int paths_count) {
+static int load_requested_libraries(VirtualMachine *vm, const char **libs,
+                                    int libs_count, const char **paths,
+                                    int paths_count) {
     for (int i = 0; i < libs_count; i++) {
         char *path = find_requested_library(libs[i], paths, paths_count);
         if (!path)
@@ -748,13 +897,14 @@ static void register_dynamic_externs(VirtualMachine *vm, Obj *prog) {
             ffi_index_by_name(vm, extern_name) >= 0)
             continue;
 
-        int nargs = count_params(obj->ty->params);
+        int nargs          = count_params(obj->ty->params);
         int returns_double = is_flonum(obj->ty->return_ty);
         if (obj->ty->is_variadic)
             cc_register_variadic_cfunc(vm, extern_name, (void *)1, nargs,
                                        returns_double);
         else
-            cc_register_cfunc(vm, extern_name, (void *)1, nargs, returns_double);
+            cc_register_cfunc(vm, extern_name, (void *)1, nargs,
+                              returns_double);
         vm->compiler.ffi_table[vm->compiler.ffi_count - 1]
             .is_dynamic_placeholder = 1;
     }
@@ -766,8 +916,7 @@ static int verify_dynamic_externs(VirtualMachine *vm) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
         if (ff->is_dynamic_placeholder &&
             (!ff->func_ptr || ff->func_ptr == (void *)1)) {
-            fprintf(stderr,
-                    "error: unresolved dynamic library symbol '%s'\n",
+            fprintf(stderr, "error: unresolved dynamic library symbol '%s'\n",
                     ff->name);
             ok = 0;
         }
@@ -783,8 +932,10 @@ static int verify_dynamic_externs(VirtualMachine *vm) {
 // single-.c4 run path and the multi-.c4 --ngrams/--fusion-candidates
 // analysis path (#902) so the message can't drift between the two.
 static void report_link_with_prebuilt_c4(const char *path) {
-    fprintf(stderr, "error: --link is not supported when running a "
-                    "prebuilt .c4 file (%s)\n", path);
+    fprintf(stderr,
+            "error: --link is not supported when running a "
+            "prebuilt .c4 file (%s)\n",
+            path);
 }
 
 // apply_link_pass: run the bytecode linker pass for every --link lib.c4a,
@@ -808,7 +959,8 @@ static int apply_link_pass(VirtualMachine *vm, const char **paths, int count) {
         if (!vm->compiler.text_relocs[i].resolved) {
             fprintf(stderr, "error: unresolved external: %s\n",
                     vm->compiler.text_relocs[i].name
-                    ? vm->compiler.text_relocs[i].name : "(unknown)");
+                        ? vm->compiler.text_relocs[i].name
+                        : "(unknown)");
             ok = 0;
         }
     }
@@ -817,7 +969,8 @@ static int apply_link_pass(VirtualMachine *vm, const char **paths, int count) {
         if (!vm->compiler.addr_relocs[i].resolved) {
             fprintf(stderr, "error: unresolved function pointer: %s\n",
                     vm->compiler.addr_relocs[i].name
-                    ? vm->compiler.addr_relocs[i].name : "(unknown)");
+                        ? vm->compiler.addr_relocs[i].name
+                        : "(unknown)");
             ok = 0;
         }
     }
@@ -826,8 +979,8 @@ static int apply_link_pass(VirtualMachine *vm, const char **paths, int count) {
 
 static char *read_stdin_to_tmp(void) {
 #if defined(_WIN32)
-    char tmpPath[MAX_PATH + 1];
-    char tmpFile[MAX_PATH + 1];
+    char  tmpPath[MAX_PATH + 1];
+    char  tmpFile[MAX_PATH + 1];
     DWORD len = GetTempPathA(MAX_PATH, tmpPath);
     if (len == 0 || len > MAX_PATH)
         return NULL;
@@ -838,7 +991,7 @@ static char *read_stdin_to_tmp(void) {
                     FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (h == INVALID_HANDLE_VALUE)
         return NULL;
-    char buf[4096];
+    char   buf[4096];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), stdin)) > 0) {
         DWORD written = 0;
@@ -858,10 +1011,10 @@ static char *read_stdin_to_tmp(void) {
     return _strdup(tmpFile);
 #else
     char template[] = "/tmp/cccc-stdin-XXXXXX";
-    int fd = mkstemp(template);
+    int  fd         = mkstemp(template);
     if (fd < 0)
         return NULL;
-    char buf[4096];
+    char    buf[4096];
     ssize_t n;
     while ((n = read(STDIN_FILENO, buf, sizeof(buf))) > 0) {
         ssize_t w = 0;
@@ -900,7 +1053,7 @@ static void parse_define(VirtualMachine *vm, char *arg) {
     char *eq = strchr(arg, '=');
     if (eq) {
         size_t name_len = (size_t)(eq - arg);
-        char *name = malloc(name_len + 1);
+        char  *name     = malloc(name_len + 1);
         if (!name)
             error("failed to allocate -D name");
         memcpy(name, arg, name_len);
@@ -912,7 +1065,7 @@ static void parse_define(VirtualMachine *vm, char *arg) {
 }
 
 static size_t parse_size(const char *str, const char *flag_name) {
-    char *endptr;
+    char  *endptr;
     double value = strtod(str, &endptr);
 
     if (value < 0) {
@@ -949,48 +1102,50 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
                                  uint64_t *warning_errors,
                                  uint64_t *warning_no_errors,
                                  uint64_t *warning_sticky_errors,
-                                 int *warnings_as_errors) {
+                                 int      *warnings_as_errors) {
     if (strcmp(arg, "error") == 0) {
         *warnings_as_errors = 1;
-        *warning_no_errors = 0;
+        *warning_no_errors  = 0;
         return;
     }
 
     if (strncmp(arg, "error=", 6) == 0) {
         const char *name = arg + 6;
-        uint64_t mask = cccc_warning_mask_for_name(name);
+        uint64_t    mask = cccc_warning_mask_for_name(name);
         if (!mask || cccc_warning_is_group_name(name)) {
-            fprintf(stderr, "error: unknown warning option '-Werror=%s'\n", name);
+            fprintf(stderr, "error: unknown warning option '-Werror=%s'\n",
+                    name);
             exit(1);
         }
-        *warnings |= mask;
-        *warning_errors |= mask;
-        *warning_no_errors &= ~mask;
+        *warnings              |= mask;
+        *warning_errors        |= mask;
+        *warning_no_errors     &= ~mask;
         *warning_sticky_errors |= mask;
         return;
     }
 
     if (strncmp(arg, "no-error=", 9) == 0) {
         const char *name = arg + 9;
-        uint64_t mask = cccc_warning_mask_for_name(name);
+        uint64_t    mask = cccc_warning_mask_for_name(name);
         if (!mask || cccc_warning_is_group_name(name)) {
-            fprintf(stderr, "error: unknown warning option '-Wno-error=%s'\n", name);
+            fprintf(stderr, "error: unknown warning option '-Wno-error=%s'\n",
+                    name);
             exit(1);
         }
         // -Werror=<name> is sticky: a later -Wno-error=<name> cannot demote it.
         // Use -Wno-<name> to fully disable (clearing the sticky bit too).
         if (!(*warning_sticky_errors & mask)) {
-            *warning_errors &= ~mask;
+            *warning_errors    &= ~mask;
             *warning_no_errors |= mask;
         }
         return;
     }
 
-    bool disable = false;
-    const char *name = arg;
+    bool        disable = false;
+    const char *name    = arg;
     if (strncmp(arg, "no-", 3) == 0) {
         disable = true;
-        name = arg + 3;
+        name    = arg + 3;
     }
 
     uint64_t mask = cccc_warning_mask_for_name(name);
@@ -1000,9 +1155,9 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
     }
 
     if (disable) {
-        *warnings &= ~mask;
-        *warning_errors &= ~mask;
-        *warning_no_errors &= ~mask;
+        *warnings              &= ~mask;
+        *warning_errors        &= ~mask;
+        *warning_no_errors     &= ~mask;
         *warning_sticky_errors &= ~mask;
     } else {
         *warnings |= mask;
@@ -1030,7 +1185,7 @@ static char **build_source_argv(int *prog_argc, int argc, const char *argv[],
 }
 
 static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
-                             const char *argv[], int dashdash) {
+                            const char *argv[], int dashdash) {
     if (dashdash >= 0)
         *prog_argc = argc - dashdash; // input_file + everything after "--"
     else
@@ -1054,7 +1209,10 @@ static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
 // keyed off the ffi_errors_fatal bool rather than this flags word -- listing
 // it here too would claim it's merely "ignored" when it actually still
 // errors).
-static const struct { uint32_t bit; const char *name; } ignored_vm_flag_names[] = {
+static const struct {
+    uint32_t    bit;
+    const char *name;
+} ignored_vm_flag_names[] = {
     {CCCC_BOUNDS_CHECKS, "--bounds-checks"},
     {CCCC_CHECKED_BOUNDS, "--checked-pointers"},
     {CCCC_UAF_DETECTION, "--uaf-detection"},
@@ -1088,20 +1246,26 @@ static const struct { uint32_t bit; const char *name; } ignored_vm_flag_names[] 
 // `flags` that names a VM-only feature, then returns `flags` with those
 // bits cleared -- the caller passes the result on instead of the flags
 // enforcement can't actually apply to (#924: -c=native/-m/-c=generated used
-// to hard error here; now they warn and continue, matching how a real C compiler
-// treats an option it can't honour).
+// to hard error here; now they warn and continue, matching how a real C
+// compiler treats an option it can't honour).
 static uint32_t warn_ignored_vm_flags(uint32_t flags, const char *context) {
     uint32_t relevant = 0;
-    for (size_t i = 0; i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]); i++)
+    for (size_t i = 0;
+         i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]);
+         i++)
         relevant |= ignored_vm_flag_names[i].bit;
     if (!(flags & relevant))
         return flags;
-    fprintf(stderr, "warning: %s ignores VM runtime safety/debug options (", context);
+    fprintf(stderr, "warning: %s ignores VM runtime safety/debug options (",
+            context);
     bool first = true;
-    for (size_t i = 0; i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]); i++) {
+    for (size_t i = 0;
+         i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]);
+         i++) {
         if (!(flags & ignored_vm_flag_names[i].bit))
             continue;
-        fprintf(stderr, "%s%s", first ? "" : ", ", ignored_vm_flag_names[i].name);
+        fprintf(stderr, "%s%s", first ? "" : ", ",
+                ignored_vm_flag_names[i].name);
         first = false;
     }
     fprintf(stderr, "): they are enforced by the CCCC VM only\n");
@@ -1115,125 +1279,140 @@ int main(int argc, const char *argv[]) {
     cc_host_backtrace_init(argv[0]);
     cc_host_backtrace_install_fatal();
 
-    int exit_code = 0;
-    const char **input_files = NULL;
-    int input_files_count = 0;
-    Obj **volatile input_progs = NULL;
-    Token **volatile input_tokens = NULL;
-    const char **inc_paths = NULL; // -I
-    int inc_paths_count = 0;
-    const char **sys_inc_paths = NULL; // -isystem
-    int sys_inc_paths_count = 0;
-    const char **lib_paths = NULL; // -L / --library-path
-    int lib_paths_count = 0;
-    const char **libs = NULL; // --library
-    int libs_count = 0;
-    const char **defines = NULL; // -D
-    int defines_count = 0;
-    const char **undefs = NULL; // -U
-    int undefs_count = 0;
-    char *out_file = NULL;     // -o (single)
-    int dump_ast = 0;          // -a
-    int disassemble = 0;       // -d
-    int verbose = 0;           // -v
-    uint32_t flags = CCCC_VM_HEAP; // CCCCFlags bitfield for runtime features; VM heap is on by default (#665)
-    uint32_t cli_flags_mask = 0; // Bits explicitly set via CLI; wins over #pragma cccc config(...) (#357)
-    bool safety_level_gt0 = false; // True if -1/-2/-3 or --safety=basic/standard/max was requested (#665)
-    bool vm_heap_disable_requested = false; // True if -V/--no-vm-heap was passed (now toggles the heap off) (#665)
-    bool cli_opt_level_set = false; // True if -O/--optimize was passed on the CLI (#357)
-    int print_tokens = 0;      // -p
-    int preprocess_only = 0;   // -E
-    int dump_expanded_only = 0; // -m
-    int emit_generated_only = 0; // -c=generated
-    int emit_only = 0;           // --emit-only
-    int skip_preprocess = 0;   // -X
-    int skip_stdlib = 0;       // -S
-    int output_json = 0;       // -j (general "emit JSON" flag)
-    int output_ffi_decls = 0;  // -J/--ffi-decls
+    int          exit_code           = 0;
+    const char **input_files         = NULL;
+    int          input_files_count   = 0;
+    Obj **volatile input_progs       = NULL;
+    Token **volatile input_tokens    = NULL;
+    const char **inc_paths           = NULL; // -I
+    int          inc_paths_count     = 0;
+    const char **sys_inc_paths       = NULL; // -isystem
+    int          sys_inc_paths_count = 0;
+    const char **lib_paths           = NULL; // -L / --library-path
+    int          lib_paths_count     = 0;
+    const char **libs                = NULL; // --library
+    int          libs_count          = 0;
+    const char **defines             = NULL; // -D
+    int          defines_count       = 0;
+    const char **undefs              = NULL; // -U
+    int          undefs_count        = 0;
+    char        *out_file            = NULL; // -o (single)
+    int          dump_ast            = 0;    // -a
+    int          disassemble         = 0;    // -d
+    int          verbose             = 0;    // -v
+    uint32_t flags = CCCC_VM_HEAP; // CCCCFlags bitfield for runtime features;
+                                   // VM heap is on by default (#665)
+    uint32_t cli_flags_mask = 0;   // Bits explicitly set via CLI; wins over
+                                   // #pragma cccc config(...) (#357)
+    bool safety_level_gt0 =
+        false; // True if -1/-2/-3 or --safety=basic/standard/max was requested
+               // (#665)
+    bool vm_heap_disable_requested =
+        false; // True if -V/--no-vm-heap was passed (now toggles the heap off)
+               // (#665)
+    bool cli_opt_level_set =
+        false; // True if -O/--optimize was passed on the CLI (#357)
+    int print_tokens        = 0;  // -p
+    int preprocess_only     = 0;  // -E
+    int dump_expanded_only  = 0;  // -m
+    int emit_generated_only = 0;  // -c=generated
+    int emit_only           = 0;  // --emit-only
+    int skip_preprocess     = 0;  // -X
+    int skip_stdlib         = 0;  // -S
+    int output_json         = 0;  // -j (general "emit JSON" flag)
+    int output_ffi_decls    = 0;  // -J/--ffi-decls
 #ifdef CCCC_HAS_CURL
-    char *url_cache_dir = NULL; // --url-cache-dir
-    int url_cache_clear = 0;    // --url-cache-clear
+    char *url_cache_dir   = NULL; // --url-cache-dir
+    int   url_cache_clear = 0;    // --url-cache-clear
 #endif
-    CCCCAttrTarget attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
-    int emit_cccc_mode = 0;     // --emit-cccc
-    int test_run_mode = 0;      // --test-run[=LEVEL]
-    uint64_t test_run_flags = 0; // safety preset bits for --test-run's VM smoke test
-    int compile_only = 0;      // -c (set whenever -c/--compile is given; semantics:
-                                //   "compile, do not execute". -c=bytecode writes bytecode,
-                                //   -c=native hands off to the system compiler.)
-    int max_errors = 20;        // --max-errors (default: 20)
-    int warnings_as_errors = 0; // -Werror / --Werror
-    uint64_t warnings = 0;
-    uint64_t warning_errors = 0;
-    uint64_t warning_no_errors = 0;
-    uint64_t warning_sticky_errors = 0; // bits pinned by -Werror=<name>; resist -Wno-error=<name>
-    size_t embed_limit = 0;     // --embed-limit (0 = use default)
-    int embed_hard_error = 0;   // --embed-hard-limit
-    int macro_recursion_limit = -1; // --macro-recursion-limit
-    int repl_mode = 0;          // -r / --repl
-    int opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
-    int ffp_contract_fma = 0;  // --fma
-    uint32_t opt_f_enable  = 0; // passes forced ON  by -f<pass>
-    uint32_t opt_f_disable = 0; // passes forced OFF by -fno-<pass>
-    uint32_t opt_f_mask    = 0; // all bits touched by -f/-fno- CLI args (#612)
-    int inline_node_limit = 20; // --inline-limit (default 20, 0=disable)
-    int asm_passthru = 0;       // --asm-passthru
-    const char *std_arg = NULL; // --std=<standard>
+    CCCCAttrTarget attr_target    = CCCC_ATTR_TARGET_AUTO; // --attr-target
+    int            emit_cccc_mode = 0;                     // --emit-cccc
+    int            test_run_mode  = 0;                     // --test-run[=LEVEL]
+    uint64_t       test_run_flags =
+        0; // safety preset bits for --test-run's VM smoke test
+    int compile_only =
+        0; // -c (set whenever -c/--compile is given; semantics:
+           //   "compile, do not execute". -c=bytecode writes bytecode,
+           //   -c=native hands off to the system compiler.)
+    int      max_errors         = 20; // --max-errors (default: 20)
+    int      warnings_as_errors = 0;  // -Werror / --Werror
+    uint64_t warnings           = 0;
+    uint64_t warning_errors     = 0;
+    uint64_t warning_no_errors  = 0;
+    uint64_t warning_sticky_errors =
+        0; // bits pinned by -Werror=<name>; resist -Wno-error=<name>
+    size_t embed_limit           = 0;  // --embed-limit (0 = use default)
+    int    embed_hard_error      = 0;  // --embed-hard-limit
+    int    macro_recursion_limit = -1; // --macro-recursion-limit
+    int    repl_mode             = 0;  // -r / --repl
+    int    opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
+    int    ffp_contract_fma = 0; // --fma
+    uint32_t opt_f_enable   = 0; // passes forced ON  by -f<pass>
+    uint32_t opt_f_disable  = 0; // passes forced OFF by -fno-<pass>
+    uint32_t opt_f_mask     = 0; // all bits touched by -f/-fno- CLI args (#612)
+    int      inline_node_limit  = 20; // --inline-limit (default 20, 0=disable)
+    int      asm_passthru       = 0;  // --asm-passthru
+    const char  *std_arg        = NULL; // --std=<standard>
     const char **ffi_allow_args = NULL;
-    int ffi_allow_args_count = 0;
-    const char **ffi_deny_args = NULL;
-    int ffi_deny_args_count = 0;
-    int disable_all_ffi = 0;
-    int ffi_errors_fatal = 0;
-    int enable_ffi_type_checking = 0;
-    int vm_profile = 0;
-    int vm_profile_text = 0;
-    const char *vm_profile_mode = NULL;
-    const char *vm_profile_input = NULL;
-    int vm_profile_ran = 0;
-    const char *entry_name = NULL; // -e / --entry
-    enum { COMPILE_NONE, COMPILE_BYTECODE, COMPILE_NATIVE, COMPILE_GENERATED } compile_format = COMPILE_NONE;
-    int no_comptime = 0;           // --no-comptime / -C
-    int comptime_include_all = 0; // --comptime-include-all
-    int allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
-    int run_ngrams = 0;            // 0 = off; 2 or 3 = enabled with n-gram size
-    int ngrams_top = 25;
-    int ngrams_per_file = 0;
-    int run_fusion = 0;            // 0 = off; >0 = enabled, value is top-N
-    CcNgramState *ngram_state = NULL;
-    CcFusionState *fusion_state = NULL;
-    int testing_mode = 0;          // --testing
-    int test_c4_mode = 0;          // --test-c4
-    const char *test_glob = NULL;  // --test=GLOB
-    const char *suite_filter = NULL; // --test-suite=NAME
-    int list_tests = 0;            // --list-tests
-    int fail_fast = 0;             // --fail-fast
-    int test_timeout = 0;          // --test-timeout=N
-    CcTestFormat test_format = TEST_FORMAT_TAP; // --test-format=FORMAT
-    int build_mode = 0;            // --build
-    const char *build_entry = NULL;   // --build-entry=NAME
-    const char *build_target = NULL;  // --build-target=NAME
-    const char *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
-    int build_dry_run = 0;         // --build-dry-run
-    int build_verbose = 0;         // --build-verbose
-    int build_quiet = 0;           // --build-quiet
-    int build_keep_going = 0;      // --build-keep-going
-    int build_jobs = 1;            // --build-jobs=N
-    int build_list_targets = 0;    // --build-list-targets (#540)
-    const char *build_profile = NULL; // --build-profile=NAME (#548)
-    const char *build_triple = NULL;  // --build-triple=TRIPLE (#547)
-    const char *build_cc = NULL;      // --build-cc=COMPILER (#547)
-    const char *build_cache = NULL;   // --build-cache[=PATH] (#546)
-    const char **build_tool_allow = NULL; // --build-tool-allow=name,...
-    int build_tool_allow_count = 0;
-    const char **build_options = NULL;    // --build-option=key=value (#559)
-    int build_options_count = 0;
-    int build_install = 0;                // --build-install (#560)
-    const char **link_paths = NULL;       // --link lib.c4a (#565)
-    int link_paths_count = 0;
-    bool use_system_headers = false;  // --use-system-headers
-    bool no_builtin_includes = false; // --no-builtin-includes
-    const char *sysroot = NULL;       // --sysroot <path>
+    int          ffi_allow_args_count     = 0;
+    const char **ffi_deny_args            = NULL;
+    int          ffi_deny_args_count      = 0;
+    int          disable_all_ffi          = 0;
+    int          ffi_errors_fatal         = 0;
+    int          enable_ffi_type_checking = 0;
+    int          vm_profile               = 0;
+    int          vm_profile_text          = 0;
+    const char  *vm_profile_mode          = NULL;
+    const char  *vm_profile_input         = NULL;
+    int          vm_profile_ran           = 0;
+    const char  *entry_name               = NULL; // -e / --entry
+    enum {
+        COMPILE_NONE,
+        COMPILE_BYTECODE,
+        COMPILE_NATIVE,
+        COMPILE_GENERATED
+    } compile_format                       = COMPILE_NONE;
+    int            no_comptime             = 0; // --no-comptime / -C
+    int            comptime_include_all    = 0; // --comptime-include-all
+    int            allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
+    int            run_ngrams = 0; // 0 = off; 2 or 3 = enabled with n-gram size
+    int            ngrams_top = 25;
+    int            ngrams_per_file = 0;
+    int            run_fusion      = 0; // 0 = off; >0 = enabled, value is top-N
+    CcNgramState  *ngram_state     = NULL;
+    CcFusionState *fusion_state    = NULL;
+    int            testing_mode    = 0; // --testing
+    int            test_c4_mode    = 0; // --test-c4
+    const char    *test_glob       = NULL;            // --test=GLOB
+    const char    *suite_filter    = NULL;            // --test-suite=NAME
+    int            list_tests      = 0;               // --list-tests
+    int            fail_fast       = 0;               // --fail-fast
+    int            test_timeout    = 0;               // --test-timeout=N
+    CcTestFormat   test_format     = TEST_FORMAT_TAP; // --test-format=FORMAT
+    int            build_mode      = 0;               // --build
+    const char    *build_entry     = NULL;            // --build-entry=NAME
+    const char    *build_target    = NULL;            // --build-target=NAME
+    const char  *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
+    int          build_dry_run = 0;    // --build-dry-run
+    int          build_verbose = 0;    // --build-verbose
+    int          build_quiet   = 0;    // --build-quiet
+    int          build_keep_going       = 0;    // --build-keep-going
+    int          build_jobs             = 1;    // --build-jobs=N
+    int          build_list_targets     = 0;    // --build-list-targets (#540)
+    const char  *build_profile          = NULL; // --build-profile=NAME (#548)
+    const char  *build_triple           = NULL; // --build-triple=TRIPLE (#547)
+    const char  *build_cc               = NULL; // --build-cc=COMPILER (#547)
+    const char  *build_cache            = NULL; // --build-cache[=PATH] (#546)
+    const char **build_tool_allow       = NULL; // --build-tool-allow=name,...
+    int          build_tool_allow_count = 0;
+    const char **build_options       = NULL;  // --build-option=key=value (#559)
+    int          build_options_count = 0;
+    int          build_install       = 0;     // --build-install (#560)
+    const char **link_paths          = NULL;  // --link lib.c4a (#565)
+    int          link_paths_count    = 0;
+    bool         use_system_headers  = false; // --use-system-headers
+    bool         no_builtin_includes = false; // --no-builtin-includes
+    const char  *sysroot             = NULL;  // --sysroot <path>
 
     if (argc <= 1)
         usage(argv[0], 1);
@@ -1330,745 +1509,830 @@ int main(int argc, const char *argv[]) {
         {"build-dry-run", no_argument, 0, 1076},
         {"build-target", required_argument, 0, 1077},
         {"build-tool-allow", required_argument, 0, 1082},
-        {"build-jobs",       required_argument, 0, 1083},
-        {"build-keep-going", no_argument,       0, 1084},
-        {"build-quiet",      no_argument,       0, 1085},
-        {"build-verbose",    no_argument,       0, 1086},
-        {"build-list-targets", no_argument,    0, 1087},
-        {"build-profile",    required_argument, 0, 1088},
-        {"build-triple",     required_argument, 0, 1089},
-        {"build-cc",         required_argument, 0, 1090},
-        {"build-cache",      optional_argument, 0, 1091},
-        {"build-option",     required_argument, 0, 1092},
-        {"build-install",    no_argument,       0, 1093},
-        {"link",             required_argument, 0, 1094},
-        // Per-pass optimisation enables/disables (long-form aliases for -f<pass>)
-        {"ffold",            no_argument, 0, 1096},
-        {"fpeephole",        no_argument, 0, 1097},
-        {"fcopy-prop",       no_argument, 0, 1098},
-        {"fdce",             no_argument, 0, 1099},
-        {"fcse",             no_argument, 0, 1100},
-        {"ffuse",            no_argument, 0, 1101},
-        {"fno-fold",         no_argument, 0, 1102},
-        {"fno-peephole",     no_argument, 0, 1103},
-        {"fno-copy-prop",    no_argument, 0, 1104},
-        {"fno-dce",          no_argument, 0, 1105},
-        {"fno-cse",          no_argument, 0, 1106},
-        {"fno-fuse",         no_argument, 0, 1107},
-        {"felim-ext",        no_argument, 0, 1108},
-        {"fno-elim-ext",     no_argument, 0, 1109},
+        {"build-jobs", required_argument, 0, 1083},
+        {"build-keep-going", no_argument, 0, 1084},
+        {"build-quiet", no_argument, 0, 1085},
+        {"build-verbose", no_argument, 0, 1086},
+        {"build-list-targets", no_argument, 0, 1087},
+        {"build-profile", required_argument, 0, 1088},
+        {"build-triple", required_argument, 0, 1089},
+        {"build-cc", required_argument, 0, 1090},
+        {"build-cache", optional_argument, 0, 1091},
+        {"build-option", required_argument, 0, 1092},
+        {"build-install", no_argument, 0, 1093},
+        {"link", required_argument, 0, 1094},
+        // Per-pass optimisation enables/disables (long-form aliases for
+        // -f<pass>)
+        {"ffold", no_argument, 0, 1096},
+        {"fpeephole", no_argument, 0, 1097},
+        {"fcopy-prop", no_argument, 0, 1098},
+        {"fdce", no_argument, 0, 1099},
+        {"fcse", no_argument, 0, 1100},
+        {"ffuse", no_argument, 0, 1101},
+        {"fno-fold", no_argument, 0, 1102},
+        {"fno-peephole", no_argument, 0, 1103},
+        {"fno-copy-prop", no_argument, 0, 1104},
+        {"fno-dce", no_argument, 0, 1105},
+        {"fno-cse", no_argument, 0, 1106},
+        {"fno-fuse", no_argument, 0, 1107},
+        {"felim-ext", no_argument, 0, 1108},
+        {"fno-elim-ext", no_argument, 0, 1109},
         // System-header mode
-        {"use-system-headers", no_argument,       0, 1112},
-        {"no-builtin-includes", no_argument,      0, 1113},
-        {"sysroot",            required_argument, 0, 1114},
-        {"trap-fp-divzero",  no_argument, 0, 1116},
-        {"version",          no_argument, 0, 1118},
+        {"use-system-headers", no_argument, 0, 1112},
+        {"no-builtin-includes", no_argument, 0, 1113},
+        {"sysroot", required_argument, 0, 1114},
+        {"trap-fp-divzero", no_argument, 0, 1116},
+        {"version", no_argument, 0, 1118},
         {0, 0, 0, 0}};
 
     // Find "--" separator: args after it are forwarded to the compiled program
     int dashdash = -1;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--") == 0) { dashdash = i; break; }
+        if (strcmp(argv[i], "--") == 0) {
+            dashdash = i;
+            break;
+        }
     }
-    int getopt_argc = (dashdash >= 0) ? dashdash : argc;
-    const char *optstring = "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::FbTmptn:rs:ABf:w";
+    int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
+    const char *optstring =
+        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::FbTmptn:rs:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
                               long_options, NULL)) != -1) {
         switch (opt) {
-        case 'h':
-            usage(argv[0], 0);
-            break;
-        case 1118: // --version
-            print_version();
-            exit(0);
-        case '0':
-            // Safety level 0: None - explicitly clear all safety flags, but
-            // VM heap stays on by default (#665); use -V to turn it off too.
-            flags = CCCC_VM_HEAP;
-            safety_level_gt0 = false;
-            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
-            break;
-        case '1':
-            // Safety level 1: Basic - essential low-overhead checks
-            flags |= CCCC_SAFETY_BASIC;
-            safety_level_gt0 = true;
-            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
-            break;
-        case '2':
-            // Safety level 2: Standard - comprehensive development safety
-            flags |= CCCC_SAFETY_STANDARD;
-            safety_level_gt0 = true;
-            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
-            break;
-        case '3':
-            // Safety level 3: Maximum - all safety features
-            flags |= CCCC_SAFETY_MAX;
-            safety_level_gt0 = true;
-            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
-            break;
-        case 1012:
-            // --safety=<level> flag
-            if (strncmp(optarg, "none", sizeof("none")) == 0 ||
-                strncmp(optarg, "0", sizeof("0")) == 0) {
-                flags = CCCC_VM_HEAP;
-                safety_level_gt0 = false;
-            } else if (strncmp(optarg, "basic", sizeof("basic")) == 0 ||
-                       strncmp(optarg, "1", sizeof("1")) == 0) {
-                flags |= CCCC_SAFETY_BASIC;
-                safety_level_gt0 = true;
-            } else if (strncmp(optarg, "standard", sizeof("standard")) == 0 ||
-                       strncmp(optarg, "2", sizeof("2")) == 0) {
-                flags |= CCCC_SAFETY_STANDARD;
-                safety_level_gt0 = true;
-            } else if (strncmp(optarg, "max", sizeof("max")) == 0 ||
-                       strncmp(optarg, "3", sizeof("3")) == 0) {
-                flags |= CCCC_SAFETY_MAX;
-                safety_level_gt0 = true;
-            } else {
-                fprintf(stderr,
-                        "error: invalid safety level '%s' (use "
-                        "none/basic/standard/max or 0/1/2/3)\n",
-                        optarg);
-                usage(argv[0], 1);
-            }
-            cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
-            break;
-        case 'o':
-            if (out_file) {
-                fprintf(stderr, "error: only one -o/--out allowed\n");
-                usage(argv[0], 1);
-            }
-            out_file = strdup(optarg);
-            break;
-        case 'e':
-            entry_name = optarg;
-            break;
-        case 'd':
-            disassemble = 1;
-            break;
-        case 'v':
-            verbose = 1;
-            break;
-        case 'a':
-            dump_ast = 1;
-            break;
-        case 'g':
-            flags |= CCCC_ENABLE_DEBUGGER;
-            break;
-        case 'I':
-            inc_paths =
-                realloc(inc_paths, sizeof(*inc_paths) * (inc_paths_count + 1));
-            inc_paths[inc_paths_count++] = strdup(optarg);
-            break;
-        case 'L':
-            lib_paths =
-                realloc(lib_paths, sizeof(*lib_paths) * (lib_paths_count + 1));
-            lib_paths[lib_paths_count++] = strdup(optarg);
-            break;
-        case 'i': // --isystem
-            sys_inc_paths =
-                realloc(sys_inc_paths,
-                        sizeof(*sys_inc_paths) * (sys_inc_paths_count + 1));
-            sys_inc_paths[sys_inc_paths_count++] = strdup(optarg);
-            break;
-        case 'l': // --library
-            libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
-            libs[libs_count++] = strdup(optarg);
-            break;
-        case 'D':
-            defines = realloc(defines, sizeof(*defines) * (defines_count + 1));
-            defines[defines_count++] = strdup(optarg);
-            break;
-        case 'U':
-            undefs = realloc(undefs, sizeof(*undefs) * (undefs_count + 1));
-            undefs[undefs_count++] = strdup(optarg);
-            break;
-        case 'B': // --bounds-checks
-            flags |= CCCC_BOUNDS_CHECKS;
-            cli_flags_mask |= CCCC_BOUNDS_CHECKS;
-            break;
-        case 1119: // --checked-pointers (#770/#482-484)
-            // Deliberately not "--checked-bounds" -- too easily confused
-            // with -B/--bounds-checks above, which is a different,
-            // allocation-size-derived check (CHKB). Deliberately not in
-            // CCCC_ALL_SAFETY/any -0.._3 preset either (see CCCC_CHECKED_BOUNDS's
-            // comment in cccc.h): checked-pointer types and their compile-time
-            // arithmetic rules are always on, but CHKR is opt-in only.
-            flags |= CCCC_CHECKED_BOUNDS;
-            cli_flags_mask |= CCCC_CHECKED_BOUNDS;
-            break;
-        case 1078: // --uaf-detection
-            flags |= CCCC_UAF_DETECTION;
-            cli_flags_mask |= CCCC_UAF_DETECTION;
-            break;
-        case 1079: // --type-checks
-            flags |= CCCC_TYPE_CHECKS;
-            cli_flags_mask |= CCCC_TYPE_CHECKS;
-            break;
-        case 1038: // --uninitialized-detection
-            flags |= CCCC_UNINIT_DETECTION;
-            break;
-        case 1034: // --overflow-checks
-            flags |= CCCC_OVERFLOW_CHECKS;
-            cli_flags_mask |= CCCC_OVERFLOW_CHECKS;
-            break;
+            case 'h':
+                usage(argv[0], 0);
+                break;
+            case 1118: // --version
+                print_version();
+                exit(0);
+            case '0':
+                // Safety level 0: None - explicitly clear all safety flags, but
+                // VM heap stays on by default (#665); use -V to turn it off
+                // too.
+                flags             = CCCC_VM_HEAP;
+                safety_level_gt0  = false;
+                cli_flags_mask   |= CCCC_SAFETY_PRESET_BITS;
+                break;
+            case '1':
+                // Safety level 1: Basic - essential low-overhead checks
+                flags            |= CCCC_SAFETY_BASIC;
+                safety_level_gt0  = true;
+                cli_flags_mask   |= CCCC_SAFETY_PRESET_BITS;
+                break;
+            case '2':
+                // Safety level 2: Standard - comprehensive development safety
+                flags            |= CCCC_SAFETY_STANDARD;
+                safety_level_gt0  = true;
+                cli_flags_mask   |= CCCC_SAFETY_PRESET_BITS;
+                break;
+            case '3':
+                // Safety level 3: Maximum - all safety features
+                flags            |= CCCC_SAFETY_MAX;
+                safety_level_gt0  = true;
+                cli_flags_mask   |= CCCC_SAFETY_PRESET_BITS;
+                break;
+            case 1012:
+                // --safety=<level> flag
+                if (strncmp(optarg, "none", sizeof("none")) == 0 ||
+                    strncmp(optarg, "0", sizeof("0")) == 0) {
+                    flags            = CCCC_VM_HEAP;
+                    safety_level_gt0 = false;
+                } else if (strncmp(optarg, "basic", sizeof("basic")) == 0 ||
+                           strncmp(optarg, "1", sizeof("1")) == 0) {
+                    flags            |= CCCC_SAFETY_BASIC;
+                    safety_level_gt0  = true;
+                } else if (strncmp(optarg, "standard", sizeof("standard")) ==
+                               0 ||
+                           strncmp(optarg, "2", sizeof("2")) == 0) {
+                    flags            |= CCCC_SAFETY_STANDARD;
+                    safety_level_gt0  = true;
+                } else if (strncmp(optarg, "max", sizeof("max")) == 0 ||
+                           strncmp(optarg, "3", sizeof("3")) == 0) {
+                    flags            |= CCCC_SAFETY_MAX;
+                    safety_level_gt0  = true;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid safety level '%s' (use "
+                            "none/basic/standard/max or 0/1/2/3)\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
+                cli_flags_mask |= CCCC_SAFETY_PRESET_BITS;
+                break;
+            case 'o':
+                if (out_file) {
+                    fprintf(stderr, "error: only one -o/--out allowed\n");
+                    usage(argv[0], 1);
+                }
+                out_file = strdup(optarg);
+                break;
+            case 'e':
+                entry_name = optarg;
+                break;
+            case 'd':
+                disassemble = 1;
+                break;
+            case 'v':
+                verbose = 1;
+                break;
+            case 'a':
+                dump_ast = 1;
+                break;
+            case 'g':
+                flags |= CCCC_ENABLE_DEBUGGER;
+                break;
+            case 'I':
+                inc_paths = realloc(inc_paths,
+                                    sizeof(*inc_paths) * (inc_paths_count + 1));
+                inc_paths[inc_paths_count++] = strdup(optarg);
+                break;
+            case 'L':
+                lib_paths = realloc(lib_paths,
+                                    sizeof(*lib_paths) * (lib_paths_count + 1));
+                lib_paths[lib_paths_count++] = strdup(optarg);
+                break;
+            case 'i': // --isystem
+                sys_inc_paths =
+                    realloc(sys_inc_paths,
+                            sizeof(*sys_inc_paths) * (sys_inc_paths_count + 1));
+                sys_inc_paths[sys_inc_paths_count++] = strdup(optarg);
+                break;
+            case 'l': // --library
+                libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
+                libs[libs_count++] = strdup(optarg);
+                break;
+            case 'D':
+                defines =
+                    realloc(defines, sizeof(*defines) * (defines_count + 1));
+                defines[defines_count++] = strdup(optarg);
+                break;
+            case 'U':
+                undefs = realloc(undefs, sizeof(*undefs) * (undefs_count + 1));
+                undefs[undefs_count++] = strdup(optarg);
+                break;
+            case 'B': // --bounds-checks
+                flags          |= CCCC_BOUNDS_CHECKS;
+                cli_flags_mask |= CCCC_BOUNDS_CHECKS;
+                break;
+            case 1119: // --checked-pointers (#770/#482-484)
+                // Deliberately not "--checked-bounds" -- too easily confused
+                // with -B/--bounds-checks above, which is a different,
+                // allocation-size-derived check (CHKB). Deliberately not in
+                // CCCC_ALL_SAFETY/any -0.._3 preset either (see
+                // CCCC_CHECKED_BOUNDS's comment in cccc.h): checked-pointer
+                // types and their compile-time arithmetic rules are always on,
+                // but CHKR is opt-in only.
+                flags          |= CCCC_CHECKED_BOUNDS;
+                cli_flags_mask |= CCCC_CHECKED_BOUNDS;
+                break;
+            case 1078: // --uaf-detection
+                flags          |= CCCC_UAF_DETECTION;
+                cli_flags_mask |= CCCC_UAF_DETECTION;
+                break;
+            case 1079: // --type-checks
+                flags          |= CCCC_TYPE_CHECKS;
+                cli_flags_mask |= CCCC_TYPE_CHECKS;
+                break;
+            case 1038: // --uninitialized-detection
+                flags |= CCCC_UNINIT_DETECTION;
+                break;
+            case 1034: // --overflow-checks
+                flags          |= CCCC_OVERFLOW_CHECKS;
+                cli_flags_mask |= CCCC_OVERFLOW_CHECKS;
+                break;
 
-        case 1039: // --stack-canaries
-            flags |= CCCC_STACK_CANARIES;
-            cli_flags_mask |= CCCC_STACK_CANARIES;
-            break;
-        case 1080: // --heap-canaries
-            flags |= CCCC_HEAP_CANARIES;
-            cli_flags_mask |= CCCC_HEAP_CANARIES;
-            break;
-        case 'P': // --pointer-sanitizer
-            flags |= CCCC_POINTER_SANITIZER;
-            cli_flags_mask |= CCCC_POINTER_SANITIZER;
-            break;
-        case 'M': // --memory-leak-detection
-            flags |= CCCC_MEMORY_LEAK_DETECT;
-            cli_flags_mask |= CCCC_MEMORY_LEAK_DETECT;
-            break;
-        case 1043: // --stack-instrumentation
-            flags |= CCCC_STACK_INSTR;
-            break;
-        case 1001:
-            flags |= CCCC_DANGLING_DETECT;
-            break;
-        case 1002:
-            flags |= CCCC_ALIGNMENT_CHECKS;
-            break;
-        case 1003:
-            flags |= CCCC_PROVENANCE_TRACK;
-            break;
-        case 1004:
-            flags |= CCCC_INVALID_ARITH;
-            break;
-        case 1005:
-            flags |= CCCC_STACK_INSTR_ERRORS;
-            break;
-        case 1044: // --format-string-checks
-            flags |= CCCC_FORMAT_STR_CHECKS;
-            warnings |= CCCC_WARN_FORMAT;
-            break;
-        case 1081: // --random-canaries
-            flags |= CCCC_RANDOM_CANARIES;
-            break;
-        case 1007:
-            flags |= CCCC_MEMORY_POISONING;
-            break;
-        case 1045: // --memory-tagging
-            flags |= CCCC_MEMORY_TAGGING;
-            cli_flags_mask |= CCCC_MEMORY_TAGGING;
-            break;
-        case 'T': // --thread-safety
-            flags |= CCCC_THREAD_SAFETY;
-            break;
-        case 'V':
-            // VM heap is on by default (#665); -V/--no-vm-heap now toggles it
-            // off. Resolved after the option loop since it must see the
-            // final safety level regardless of flag order.
-            vm_heap_disable_requested = true;
-            break;
-        case 'C':
-            no_comptime = 1;
-            break;
-        case 1111: // --control-flow-integrity (long form only)
-            flags |= CCCC_CFI;
-            break;
-        case 'p':
-            print_tokens = 1;
-            break;
-        case 'E':
-            preprocess_only = 1;
-            break;
-        case 'm':
-            dump_expanded_only = 1;
-            break;
-        case 'X':
-            skip_preprocess = 1;
-            break;
-        case 'S':
-            skip_stdlib = 1;
-            break;
-        case 'j':
-            output_json = 1;
-            break;
-        case 'c': { // -c[FMT]/--compile[=FMT]
-            // Bare -c / --compile defaults to native. The optional
-            // argument selects the format. Note: GNU getopt's `::` only
-            // supports attached form for short options (e.g. `-cnative`),
-            // not `-c=native`. The long form accepts `--compile=native`
-            // and `--compile native` (the latter as a separate arg). Strip
-            // a leading `=` to be friendly to BSD getopt / `-c=native`
-            // callers even though GNU's getopt rejects that form outright.
-            const char *fmt = optarg;
-            if (fmt && fmt[0] == '=')
-                fmt++;
-            if (!fmt || !*fmt) {
-                compile_format = COMPILE_NATIVE;
-                compile_only = 1;
-            } else if (strcmp(fmt, "bytecode") == 0 || strcmp(fmt, "bc") == 0 ||
-                       strcmp(fmt, "c4") == 0) {
-                compile_format = COMPILE_BYTECODE;
-                compile_only = 1;
-            } else if (strcmp(fmt, "native") == 0 || strcmp(fmt, "n") == 0) {
-                compile_format = COMPILE_NATIVE;
-                compile_only = 1;
-            } else if (strcmp(fmt, "generated") == 0 || strcmp(fmt, "gen") == 0 ||
-                       strcmp(fmt, "g") == 0) {
-                // -c=generated (#936): folds the old standalone -G/
-                // --emit-generated into the -c namespace. Unlike native/
-                // bytecode this does NOT set compile_only -- it reuses the
-                // dump_expanded_only/emit_generated_only serialization path
-                // below (same as -m), which historically has never been
-                // gated by compile_only. Flipping compile_only here would
-                // change behavior at every site that branches on it (the
-                // --repl/--build/--ngrams validation blocks, deferred_link,
-                // etc.) for no reason -- -c=generated is a serialize-and-exit
-                // mode, not a "hand off to another backend" mode like
-                // native/bytecode are. compile_format is only consulted here
-                // to pick -c=generated's default output filename.
-                compile_format = COMPILE_GENERATED;
+            case 1039: // --stack-canaries
+                flags          |= CCCC_STACK_CANARIES;
+                cli_flags_mask |= CCCC_STACK_CANARIES;
+                break;
+            case 1080: // --heap-canaries
+                flags          |= CCCC_HEAP_CANARIES;
+                cli_flags_mask |= CCCC_HEAP_CANARIES;
+                break;
+            case 'P': // --pointer-sanitizer
+                flags          |= CCCC_POINTER_SANITIZER;
+                cli_flags_mask |= CCCC_POINTER_SANITIZER;
+                break;
+            case 'M': // --memory-leak-detection
+                flags          |= CCCC_MEMORY_LEAK_DETECT;
+                cli_flags_mask |= CCCC_MEMORY_LEAK_DETECT;
+                break;
+            case 1043: // --stack-instrumentation
+                flags |= CCCC_STACK_INSTR;
+                break;
+            case 1001:
+                flags |= CCCC_DANGLING_DETECT;
+                break;
+            case 1002:
+                flags |= CCCC_ALIGNMENT_CHECKS;
+                break;
+            case 1003:
+                flags |= CCCC_PROVENANCE_TRACK;
+                break;
+            case 1004:
+                flags |= CCCC_INVALID_ARITH;
+                break;
+            case 1005:
+                flags |= CCCC_STACK_INSTR_ERRORS;
+                break;
+            case 1044: // --format-string-checks
+                flags    |= CCCC_FORMAT_STR_CHECKS;
+                warnings |= CCCC_WARN_FORMAT;
+                break;
+            case 1081: // --random-canaries
+                flags |= CCCC_RANDOM_CANARIES;
+                break;
+            case 1007:
+                flags |= CCCC_MEMORY_POISONING;
+                break;
+            case 1045: // --memory-tagging
+                flags          |= CCCC_MEMORY_TAGGING;
+                cli_flags_mask |= CCCC_MEMORY_TAGGING;
+                break;
+            case 'T': // --thread-safety
+                flags |= CCCC_THREAD_SAFETY;
+                break;
+            case 'V':
+                // VM heap is on by default (#665); -V/--no-vm-heap now toggles
+                // it off. Resolved after the option loop since it must see the
+                // final safety level regardless of flag order.
+                vm_heap_disable_requested = true;
+                break;
+            case 'C':
+                no_comptime = 1;
+                break;
+            case 1111: // --control-flow-integrity (long form only)
+                flags |= CCCC_CFI;
+                break;
+            case 'p':
+                print_tokens = 1;
+                break;
+            case 'E':
+                preprocess_only = 1;
+                break;
+            case 'm':
                 dump_expanded_only = 1;
-                emit_generated_only = 1;
-            } else {
-                fprintf(stderr,
-                        "error: invalid --compile format '%s' "
-                        "(use 'bytecode', 'native', or 'generated')\n",
-                        fmt);
-                usage(argv[0], 1);
+                break;
+            case 'X':
+                skip_preprocess = 1;
+                break;
+            case 'S':
+                skip_stdlib = 1;
+                break;
+            case 'j':
+                output_json = 1;
+                break;
+            case 'c': { // -c[FMT]/--compile[=FMT]
+                // Bare -c / --compile defaults to native. The optional
+                // argument selects the format. Note: GNU getopt's `::` only
+                // supports attached form for short options (e.g. `-cnative`),
+                // not `-c=native`. The long form accepts `--compile=native`
+                // and `--compile native` (the latter as a separate arg). Strip
+                // a leading `=` to be friendly to BSD getopt / `-c=native`
+                // callers even though GNU's getopt rejects that form outright.
+                const char *fmt = optarg;
+                if (fmt && fmt[0] == '=')
+                    fmt++;
+                if (!fmt || !*fmt) {
+                    compile_format = COMPILE_NATIVE;
+                    compile_only   = 1;
+                } else if (strcmp(fmt, "bytecode") == 0 ||
+                           strcmp(fmt, "bc") == 0 || strcmp(fmt, "c4") == 0) {
+                    compile_format = COMPILE_BYTECODE;
+                    compile_only   = 1;
+                } else if (strcmp(fmt, "native") == 0 ||
+                           strcmp(fmt, "n") == 0) {
+                    compile_format = COMPILE_NATIVE;
+                    compile_only   = 1;
+                } else if (strcmp(fmt, "generated") == 0 ||
+                           strcmp(fmt, "gen") == 0 || strcmp(fmt, "g") == 0) {
+                    // -c=generated (#936): folds the old standalone -G/
+                    // --emit-generated into the -c namespace. Unlike native/
+                    // bytecode this does NOT set compile_only -- it reuses the
+                    // dump_expanded_only/emit_generated_only serialization path
+                    // below (same as -m), which historically has never been
+                    // gated by compile_only. Flipping compile_only here would
+                    // change behavior at every site that branches on it (the
+                    // --repl/--build/--ngrams validation blocks, deferred_link,
+                    // etc.) for no reason -- -c=generated is a
+                    // serialize-and-exit mode, not a "hand off to another
+                    // backend" mode like native/bytecode are. compile_format is
+                    // only consulted here to pick -c=generated's default output
+                    // filename.
+                    compile_format      = COMPILE_GENERATED;
+                    dump_expanded_only  = 1;
+                    emit_generated_only = 1;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --compile format '%s' "
+                            "(use 'bytecode', 'native', or 'generated')\n",
+                            fmt);
+                    usage(argv[0], 1);
+                }
+                break;
             }
-            break;
-        }
 #ifdef CCCC_HAS_CURL
-        case 1008:
-            url_cache_dir = strdup(optarg);
-            break;
-        case 1009:
-            url_cache_clear = 1;
-            break;
+            case 1008:
+                url_cache_dir = strdup(optarg);
+                break;
+            case 1009:
+                url_cache_clear = 1;
+                break;
 #endif
-        case 'n': // --max-errors
-            max_errors = atoi(optarg);
-            if (max_errors <= 0) {
-                fprintf(stderr,
-                        "error: --max-errors must be a positive integer\n");
-                usage(argv[0], 1);
-            }
-            break;
-        case 'w': // --Werror
-            warnings_as_errors = 1;
-            warning_no_errors = 0;
-            break;
-        case 'W':
-            parse_warning_option(optarg, &warnings, &warning_errors,
-                                 &warning_no_errors, &warning_sticky_errors,
-                                 &warnings_as_errors);
-            break;
-        case 1048: // --embed-limit
-            embed_limit = parse_size(optarg, "--embed-limit");
-            break;
-        case 1060: // --embed-hard-limit
-            embed_hard_error = 1;
-            break;
-        case 'O': // --optimize / -O (also matches --optimize via long_options)
-            if (optarg == NULL) {
-                // Just -O or --optimize without argument means -O1
-                opt_level = 1;
-            } else if (optarg[0] >= '0' && optarg[0] <= '4' &&
-                       optarg[1] == '\0') {
-                opt_level = optarg[0] - '0';
-            } else {
-                fprintf(stderr,
+            case 'n': // --max-errors
+                max_errors = atoi(optarg);
+                if (max_errors <= 0) {
+                    fprintf(stderr,
+                            "error: --max-errors must be a positive integer\n");
+                    usage(argv[0], 1);
+                }
+                break;
+            case 'w': // --Werror
+                warnings_as_errors = 1;
+                warning_no_errors  = 0;
+                break;
+            case 'W':
+                parse_warning_option(optarg, &warnings, &warning_errors,
+                                     &warning_no_errors, &warning_sticky_errors,
+                                     &warnings_as_errors);
+                break;
+            case 1048: // --embed-limit
+                embed_limit = parse_size(optarg, "--embed-limit");
+                break;
+            case 1060: // --embed-hard-limit
+                embed_hard_error = 1;
+                break;
+            case 'O':  // --optimize / -O (also matches --optimize via
+                       // long_options)
+                if (optarg == NULL) {
+                    // Just -O or --optimize without argument means -O1
+                    opt_level = 1;
+                } else if (optarg[0] >= '0' && optarg[0] <= '4' &&
+                           optarg[1] == '\0') {
+                    opt_level = optarg[0] - '0';
+                } else {
+                    fprintf(
+                        stderr,
                         "error: invalid optimization level '%s' (use 0, 1, 2, "
                         "3, or 4)\n",
                         optarg);
-                usage(argv[0], 1);
-            }
-            cli_opt_level_set = true;
-            break;
-        case 1072: // --fma
-            opt_f_enable |= CCCC_OPT_FUSE;
-            ffp_contract_fma = 1;
-            flags |= CCCC_FMA;
-            break;
-        case 1117: // --posix-emulation
-            flags |= CCCC_POSIX_EMULATION;
-            break;
-        case 'r': // --repl
-            repl_mode = 1;
-            break;
-        case 1115: { // --macro-recursion-limit
-            char *end = NULL;
-            long val = strtol(optarg, &end, 10);
-            if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
-                fprintf(stderr,
-                        "error: --macro-recursion-limit must be a "
-                        "non-negative integer\n");
-                usage(argv[0], 1);
-            }
-            macro_recursion_limit = (int)val;
-            break;
-        }
-        case 's': // --std=<standard>
-            std_arg = optarg;
-            break;
-        case 1052: // --ffi-allow
-            ffi_allow_args = realloc(ffi_allow_args, sizeof(*ffi_allow_args) *
-                                                         (ffi_allow_args_count + 1));
-            ffi_allow_args[ffi_allow_args_count++] = strdup(optarg);
-            break;
-        case 1053: // --ffi-deny
-            ffi_deny_args = realloc(ffi_deny_args, sizeof(*ffi_deny_args) *
-                                                     (ffi_deny_args_count + 1));
-            ffi_deny_args[ffi_deny_args_count++] = strdup(optarg);
-            break;
-        case 'F': // --disable-ffi
-            disable_all_ffi = 1;
-            break;
-        case 1055: // --ffi-errors-fatal
-            ffi_errors_fatal = 1;
-            flags |= CCCC_FFI_ERRORS_FATAL;
-            break;
-        case 1116: // --trap-fp-divzero
-            flags |= CCCC_TRAP_FP_DIVZERO;
-            cli_flags_mask |= CCCC_TRAP_FP_DIVZERO;
-            break;
-        case 1024:
-            enable_ffi_type_checking = 1;
-            break;
-        case 1056: // --vm-profile
-            vm_profile = 1;
-            vm_profile_text = 1;
-            break;
-        case 1057: { // --ngrams[=N]
-            if (optarg == NULL) {
-                run_ngrams = 2;
-            } else if (optarg[0] >= '0' && optarg[0] <= '9' && optarg[1] == '\0') {
-                run_ngrams = optarg[0] - '0';
-            } else {
-                fprintf(stderr,
-                        "error: invalid --ngrams value '%s' (use 2 or 3)\n",
-                        optarg);
-                usage(argv[0], 1);
-            }
-            if (run_ngrams != 2 && run_ngrams != 3) {
-                fprintf(stderr,
-                        "error: --ngrams must be 2 or 3 (got %d)\n", run_ngrams);
-                usage(argv[0], 1);
-            }
-            break;
-        }
-        case 1030: { // --ngrams-top=N
-            char *end = NULL;
-            long val = strtol(optarg, &end, 10);
-            if (!optarg[0] || *end != '\0' || val <= 0 || val > INT32_MAX) {
-                fprintf(stderr,
-                        "error: --ngrams-top must be a positive integer\n");
-                usage(argv[0], 1);
-            }
-            ngrams_top = (int)val;
-            break;
-        }
-        case 1031: // --ngrams-per-file
-            ngrams_per_file = 1;
-            break;
-        case 1050: // --comptime-include-all
-            comptime_include_all = 1;
-            break;
-        case 1051: { // --inline-limit
-            char *end = NULL;
-            long val = strtol(optarg, &end, 10);
-            if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
-                fprintf(stderr,
-                        "error: --inline-limit must be a non-negative integer\n");
-                usage(argv[0], 1);
-            }
-            inline_node_limit = (int)val;
-            break;
-        }
-        case 'A': // --asm-passthru
-            asm_passthru = 1;
-            break;
-        case 't': // --testing
-            testing_mode = 1;
-            break;
-        case 1110: // --test-c4
-            test_c4_mode = 1;
-            testing_mode = 1;
-            break;
-        case 1061: // --test=GLOB
-            test_glob = optarg;
-            testing_mode = 1;
-            break;
-        case 1062: // --test-suite=NAME
-            suite_filter = optarg;
-            testing_mode = 1;
-            break;
-        case 1063: // --list-tests
-            list_tests = 1;
-            testing_mode = 1;
-            break;
-        case 1064: // --fail-fast
-            fail_fast = 1;
-            testing_mode = 1;
-            break;
-        case 1065: // --test-timeout=N
-            test_timeout = atoi(optarg);
-            testing_mode = 1;
-            break;
-        case 1067: // --emit-only
-            emit_only = 1;
-            break;
-        case 1068: // --allow-comptime-pp-bleed
-            allow_comptime_pp_bleed = 1;
-            break;
-        case 1069: // --attr-target=auto|c23|gnu|msvc|strip
-            if (strcmp(optarg, "auto") == 0) {
-                attr_target = CCCC_ATTR_TARGET_AUTO;
-            } else if (strcmp(optarg, "c23") == 0) {
-                attr_target = CCCC_ATTR_TARGET_C23;
-            } else if (strcmp(optarg, "gnu") == 0) {
-                attr_target = CCCC_ATTR_TARGET_GNU;
-            } else if (strcmp(optarg, "msvc") == 0) {
-                attr_target = CCCC_ATTR_TARGET_MSVC;
-            } else if (strcmp(optarg, "strip") == 0) {
-                attr_target = CCCC_ATTR_TARGET_STRIP;
-            } else {
-                fprintf(stderr,
-                        "error: invalid --attr-target '%s' "
-                        "(use 'auto', 'c23', 'gnu', 'msvc', or 'strip')\n",
-                        optarg);
-                usage(argv[0], 1);
-            }
-            break;
-        case 1120: // --emit-cccc
-            emit_cccc_mode = 1;
-            break;
-        case 1121: { // --test-run[=LEVEL]
-            test_run_mode = 1;
-            const char *level = optarg;
-            if (level && level[0] == '=')
-                level++;
-            if (!level || !*level || strcmp(level, "max") == 0 ||
-                strcmp(level, "3") == 0) {
-                test_run_flags = CCCC_SAFETY_MAX;
-            } else if (strcmp(level, "none") == 0 || strcmp(level, "0") == 0) {
-                test_run_flags = CCCC_VM_HEAP;
-            } else if (strcmp(level, "basic") == 0 || strcmp(level, "1") == 0) {
-                test_run_flags = CCCC_SAFETY_BASIC;
-            } else if (strcmp(level, "standard") == 0 || strcmp(level, "2") == 0) {
-                test_run_flags = CCCC_SAFETY_STANDARD;
-            } else {
-                fprintf(stderr,
-                        "error: invalid --test-run level '%s' (use "
-                        "none/basic/standard/max or 0/1/2/3)\n",
-                        level);
-                usage(argv[0], 1);
-            }
-            break;
-        }
-        case 1071: // --no-debug-on-crash
-            flags |= CCCC_NO_DEBUG_ON_CRASH;
-            break;
-        case 'b': // --build
-            build_mode = 1;
-            break;
-        case 1074: // --build-entry=NAME
-            build_entry = optarg;
-            build_mode = 1;
-            break;
-        case 1075: // --build-out-dir=PATH
-            build_out_dir = optarg;
-            build_mode = 1;
-            break;
-        case 1076: // --build-dry-run
-            build_dry_run = 1;
-            build_mode = 1;
-            break;
-        case 1077: // --build-target=NAME
-            build_target = optarg;
-            build_mode = 1;
-            break;
-        case 1082: { // --build-tool-allow=name[,name,...]
-            // Accept comma-separated names: --build-tool-allow=cc,ar,pkg-config
-            // or repeated flags: --build-tool-allow=cc --build-tool-allow=ar
-            char *tmp = strdup(optarg);
-            char *saveptr = NULL;
-            char *tok = strtok_r(tmp, ",", &saveptr);
-            while (tok) {
-                build_tool_allow = realloc(build_tool_allow,
-                                           sizeof(*build_tool_allow) *
-                                           (build_tool_allow_count + 1));
-                build_tool_allow[build_tool_allow_count++] = strdup(tok);
-                tok = strtok_r(NULL, ",", &saveptr);
-            }
-            free(tmp);
-            build_mode = 1;
-            break;
-        }
-        case 1083: { // --build-jobs=N
-            int n = atoi(optarg);
-            if (n < 1) {
-                fprintf(stderr, "error: --build-jobs requires a positive integer\n");
-                usage(argv[0], 1);
-            }
-            build_jobs = n;
-            build_mode = 1;
-            break;
-        }
-        case 1084: // --build-keep-going
-            build_keep_going = 1;
-            build_mode = 1;
-            break;
-        case 1085: // --build-quiet
-            build_quiet = 1;
-            build_mode = 1;
-            break;
-        case 1086: // --build-verbose
-            build_verbose = 1;
-            build_mode = 1;
-            break;
-        case 1087: // --build-list-targets
-            build_list_targets = 1;
-            build_mode = 1;
-            break;
-        case 1088: // --build-profile=NAME
-            build_profile = optarg;
-            build_mode = 1;
-            break;
-        case 1089: // --build-triple=TRIPLE
-            build_triple = optarg;
-            build_mode = 1;
-            break;
-        case 1090: // --build-cc=COMPILER
-            build_cc = optarg;
-            build_mode = 1;
-            break;
-        case 1091: // --build-cache[=PATH]
-            build_cache = optarg ? optarg : "";
-            build_mode = 1;
-            break;
-        case 1092: { // --build-option=key[=value]
-            const char **tmp = realloc(build_options,
-                                       (build_options_count + 1) * sizeof(*build_options));
-            if (!tmp) { fprintf(stderr, "error: out of memory\n"); return 1; }
-            build_options = tmp;
-            build_options[build_options_count++] = optarg;
-            build_mode = 1;
-            break;
-        }
-        case 1093: // --build-install
-            build_install = 1;
-            build_mode = 1;
-            break;
-        case 1094: { // --link lib.c4a (#565)
-            void *tmp = realloc(link_paths,
-                                (size_t)(link_paths_count + 1) * sizeof(*link_paths));
-            if (!tmp) { fprintf(stderr, "error: out of memory\n"); return 1; }
-            link_paths = tmp;
-            link_paths[link_paths_count++] = optarg;
-            break;
-        }
-        case 1066: // --test-format=FORMAT
-            if (strcmp(optarg, "tap") == 0) {
-                test_format = TEST_FORMAT_TAP;
-            } else if (strcmp(optarg, "plain") == 0) {
-                test_format = TEST_FORMAT_PLAIN;
-            } else if (strcmp(optarg, "json") == 0) {
-                test_format = TEST_FORMAT_JSON;
-            } else {
-                fprintf(stderr, "error: invalid --test-format '%s' "
-                        "(use 'tap', 'plain', or 'json')\n", optarg);
-                usage(argv[0], 1);
-            }
-            testing_mode = 1;
-            break;
-        case 1058: { // --fusion-candidates[=N]
-            if (optarg == NULL) {
-                run_fusion = 1;
-            } else {
-                char *end = NULL;
-                long val = strtol(optarg, &end, 10);
-                if (!optarg[0] || *end != '\0' || val <= 0 || val > INT32_MAX) {
-                    fprintf(stderr,
-                            "error: --fusion-candidates top-N must be a "
-                            "positive integer\n");
                     usage(argv[0], 1);
                 }
-                run_fusion = (int)val;
-            }
-            break;
-        }
-        case 'f': { // -f<pass> / -fno-<pass>  (e.g. -ffold, -fno-cse)
-            static const struct { const char *name; CcccOptPass bit; } pass_table[] = {
-                {"fold",      CCCC_OPT_FOLD},
-                {"peephole",  CCCC_OPT_PEEPHOLE},
-                {"copy-prop", CCCC_OPT_COPY_PROP},
-                {"dce",       CCCC_OPT_DCE},
-                {"cse",       CCCC_OPT_CSE},
-                {"fuse",      CCCC_OPT_FUSE},
-                {"elim-ext",  CCCC_OPT_ELIM_EXT},
-                {NULL, 0}
-            };
-            bool neg = (strncmp(optarg, "no-", 3) == 0);
-            const char *name = neg ? optarg + 3 : optarg;
-            bool matched = false;
-            for (int k = 0; pass_table[k].name; k++) {
-                if (strcmp(name, pass_table[k].name) == 0) {
-                    if (neg) opt_f_disable |= (uint32_t)pass_table[k].bit;
-                    else     opt_f_enable  |= (uint32_t)pass_table[k].bit;
-                    opt_f_mask |= (uint32_t)pass_table[k].bit;
-                    matched = true;
-                    break;
+                cli_opt_level_set = true;
+                break;
+            case 1072: // --fma
+                opt_f_enable     |= CCCC_OPT_FUSE;
+                ffp_contract_fma  = 1;
+                flags            |= CCCC_FMA;
+                break;
+            case 1117:   // --posix-emulation
+                flags |= CCCC_POSIX_EMULATION;
+                break;
+            case 'r':    // --repl
+                repl_mode = 1;
+                break;
+            case 1115: { // --macro-recursion-limit
+                char *end = NULL;
+                long  val = strtol(optarg, &end, 10);
+                if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
+                    fprintf(stderr, "error: --macro-recursion-limit must be a "
+                                    "non-negative integer\n");
+                    usage(argv[0], 1);
                 }
+                macro_recursion_limit = (int)val;
+                break;
             }
-            if (!matched) {
-                fprintf(stderr,
-                        "error: unknown optimisation pass '-f%s'\n"
-                        "       valid: fold, peephole, copy-prop, dce, cse, fuse "
-                        "(prefix 'no-' to disable)\n",
-                        optarg);
+            case 's':  // --std=<standard>
+                std_arg = optarg;
+                break;
+            case 1052: // --ffi-allow
+                ffi_allow_args =
+                    realloc(ffi_allow_args, sizeof(*ffi_allow_args) *
+                                                (ffi_allow_args_count + 1));
+                ffi_allow_args[ffi_allow_args_count++] = strdup(optarg);
+                break;
+            case 1053: // --ffi-deny
+                ffi_deny_args =
+                    realloc(ffi_deny_args,
+                            sizeof(*ffi_deny_args) * (ffi_deny_args_count + 1));
+                ffi_deny_args[ffi_deny_args_count++] = strdup(optarg);
+                break;
+            case 'F':  // --disable-ffi
+                disable_all_ffi = 1;
+                break;
+            case 1055: // --ffi-errors-fatal
+                ffi_errors_fatal  = 1;
+                flags            |= CCCC_FFI_ERRORS_FATAL;
+                break;
+            case 1116: // --trap-fp-divzero
+                flags          |= CCCC_TRAP_FP_DIVZERO;
+                cli_flags_mask |= CCCC_TRAP_FP_DIVZERO;
+                break;
+            case 1024:
+                enable_ffi_type_checking = 1;
+                break;
+            case 1056: // --vm-profile
+                vm_profile      = 1;
+                vm_profile_text = 1;
+                break;
+            case 1057: { // --ngrams[=N]
+                if (optarg == NULL) {
+                    run_ngrams = 2;
+                } else if (optarg[0] >= '0' && optarg[0] <= '9' &&
+                           optarg[1] == '\0') {
+                    run_ngrams = optarg[0] - '0';
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --ngrams value '%s' (use 2 or 3)\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
+                if (run_ngrams != 2 && run_ngrams != 3) {
+                    fprintf(stderr, "error: --ngrams must be 2 or 3 (got %d)\n",
+                            run_ngrams);
+                    usage(argv[0], 1);
+                }
+                break;
+            }
+            case 1030: { // --ngrams-top=N
+                char *end = NULL;
+                long  val = strtol(optarg, &end, 10);
+                if (!optarg[0] || *end != '\0' || val <= 0 || val > INT32_MAX) {
+                    fprintf(stderr,
+                            "error: --ngrams-top must be a positive integer\n");
+                    usage(argv[0], 1);
+                }
+                ngrams_top = (int)val;
+                break;
+            }
+            case 1031:   // --ngrams-per-file
+                ngrams_per_file = 1;
+                break;
+            case 1050:   // --comptime-include-all
+                comptime_include_all = 1;
+                break;
+            case 1051: { // --inline-limit
+                char *end = NULL;
+                long  val = strtol(optarg, &end, 10);
+                if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
+                    fprintf(stderr, "error: --inline-limit must be a "
+                                    "non-negative integer\n");
+                    usage(argv[0], 1);
+                }
+                inline_node_limit = (int)val;
+                break;
+            }
+            case 'A':  // --asm-passthru
+                asm_passthru = 1;
+                break;
+            case 't':  // --testing
+                testing_mode = 1;
+                break;
+            case 1110: // --test-c4
+                test_c4_mode = 1;
+                testing_mode = 1;
+                break;
+            case 1061: // --test=GLOB
+                test_glob    = optarg;
+                testing_mode = 1;
+                break;
+            case 1062: // --test-suite=NAME
+                suite_filter = optarg;
+                testing_mode = 1;
+                break;
+            case 1063: // --list-tests
+                list_tests   = 1;
+                testing_mode = 1;
+                break;
+            case 1064: // --fail-fast
+                fail_fast    = 1;
+                testing_mode = 1;
+                break;
+            case 1065: // --test-timeout=N
+                test_timeout = atoi(optarg);
+                testing_mode = 1;
+                break;
+            case 1067: // --emit-only
+                emit_only = 1;
+                break;
+            case 1068: // --allow-comptime-pp-bleed
+                allow_comptime_pp_bleed = 1;
+                break;
+            case 1069: // --attr-target=auto|c23|gnu|msvc|strip
+                if (strcmp(optarg, "auto") == 0) {
+                    attr_target = CCCC_ATTR_TARGET_AUTO;
+                } else if (strcmp(optarg, "c23") == 0) {
+                    attr_target = CCCC_ATTR_TARGET_C23;
+                } else if (strcmp(optarg, "gnu") == 0) {
+                    attr_target = CCCC_ATTR_TARGET_GNU;
+                } else if (strcmp(optarg, "msvc") == 0) {
+                    attr_target = CCCC_ATTR_TARGET_MSVC;
+                } else if (strcmp(optarg, "strip") == 0) {
+                    attr_target = CCCC_ATTR_TARGET_STRIP;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --attr-target '%s' "
+                            "(use 'auto', 'c23', 'gnu', 'msvc', or 'strip')\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
+                break;
+            case 1120:   // --emit-cccc
+                emit_cccc_mode = 1;
+                break;
+            case 1121: { // --test-run[=LEVEL]
+                test_run_mode     = 1;
+                const char *level = optarg;
+                if (level && level[0] == '=')
+                    level++;
+                if (!level || !*level || strcmp(level, "max") == 0 ||
+                    strcmp(level, "3") == 0) {
+                    test_run_flags = CCCC_SAFETY_MAX;
+                } else if (strcmp(level, "none") == 0 ||
+                           strcmp(level, "0") == 0) {
+                    test_run_flags = CCCC_VM_HEAP;
+                } else if (strcmp(level, "basic") == 0 ||
+                           strcmp(level, "1") == 0) {
+                    test_run_flags = CCCC_SAFETY_BASIC;
+                } else if (strcmp(level, "standard") == 0 ||
+                           strcmp(level, "2") == 0) {
+                    test_run_flags = CCCC_SAFETY_STANDARD;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --test-run level '%s' (use "
+                            "none/basic/standard/max or 0/1/2/3)\n",
+                            level);
+                    usage(argv[0], 1);
+                }
+                break;
+            }
+            case 1071: // --no-debug-on-crash
+                flags |= CCCC_NO_DEBUG_ON_CRASH;
+                break;
+            case 'b':  // --build
+                build_mode = 1;
+                break;
+            case 1074: // --build-entry=NAME
+                build_entry = optarg;
+                build_mode  = 1;
+                break;
+            case 1075: // --build-out-dir=PATH
+                build_out_dir = optarg;
+                build_mode    = 1;
+                break;
+            case 1076: // --build-dry-run
+                build_dry_run = 1;
+                build_mode    = 1;
+                break;
+            case 1077: // --build-target=NAME
+                build_target = optarg;
+                build_mode   = 1;
+                break;
+            case 1082: { // --build-tool-allow=name[,name,...]
+                // Accept comma-separated names:
+                // --build-tool-allow=cc,ar,pkg-config or repeated flags:
+                // --build-tool-allow=cc --build-tool-allow=ar
+                char *tmp     = strdup(optarg);
+                char *saveptr = NULL;
+                char *tok     = strtok_r(tmp, ",", &saveptr);
+                while (tok) {
+                    build_tool_allow = realloc(
+                        build_tool_allow, sizeof(*build_tool_allow) *
+                                              (build_tool_allow_count + 1));
+                    build_tool_allow[build_tool_allow_count++] = strdup(tok);
+                    tok = strtok_r(NULL, ",", &saveptr);
+                }
+                free(tmp);
+                build_mode = 1;
+                break;
+            }
+            case 1083: { // --build-jobs=N
+                int n = atoi(optarg);
+                if (n < 1) {
+                    fprintf(
+                        stderr,
+                        "error: --build-jobs requires a positive integer\n");
+                    usage(argv[0], 1);
+                }
+                build_jobs = n;
+                build_mode = 1;
+                break;
+            }
+            case 1084: // --build-keep-going
+                build_keep_going = 1;
+                build_mode       = 1;
+                break;
+            case 1085: // --build-quiet
+                build_quiet = 1;
+                build_mode  = 1;
+                break;
+            case 1086: // --build-verbose
+                build_verbose = 1;
+                build_mode    = 1;
+                break;
+            case 1087: // --build-list-targets
+                build_list_targets = 1;
+                build_mode         = 1;
+                break;
+            case 1088: // --build-profile=NAME
+                build_profile = optarg;
+                build_mode    = 1;
+                break;
+            case 1089: // --build-triple=TRIPLE
+                build_triple = optarg;
+                build_mode   = 1;
+                break;
+            case 1090: // --build-cc=COMPILER
+                build_cc   = optarg;
+                build_mode = 1;
+                break;
+            case 1091: // --build-cache[=PATH]
+                build_cache = optarg ? optarg : "";
+                build_mode  = 1;
+                break;
+            case 1092: { // --build-option=key[=value]
+                const char **tmp =
+                    realloc(build_options,
+                            (build_options_count + 1) * sizeof(*build_options));
+                if (!tmp) {
+                    fprintf(stderr, "error: out of memory\n");
+                    return 1;
+                }
+                build_options                        = tmp;
+                build_options[build_options_count++] = optarg;
+                build_mode                           = 1;
+                break;
+            }
+            case 1093: // --build-install
+                build_install = 1;
+                build_mode    = 1;
+                break;
+            case 1094: { // --link lib.c4a (#565)
+                void *tmp = realloc(link_paths, (size_t)(link_paths_count + 1) *
+                                                    sizeof(*link_paths));
+                if (!tmp) {
+                    fprintf(stderr, "error: out of memory\n");
+                    return 1;
+                }
+                link_paths                     = tmp;
+                link_paths[link_paths_count++] = optarg;
+                break;
+            }
+            case 1066: // --test-format=FORMAT
+                if (strcmp(optarg, "tap") == 0) {
+                    test_format = TEST_FORMAT_TAP;
+                } else if (strcmp(optarg, "plain") == 0) {
+                    test_format = TEST_FORMAT_PLAIN;
+                } else if (strcmp(optarg, "json") == 0) {
+                    test_format = TEST_FORMAT_JSON;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --test-format '%s' "
+                            "(use 'tap', 'plain', or 'json')\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
+                testing_mode = 1;
+                break;
+            case 1058: { // --fusion-candidates[=N]
+                if (optarg == NULL) {
+                    run_fusion = 1;
+                } else {
+                    char *end = NULL;
+                    long  val = strtol(optarg, &end, 10);
+                    if (!optarg[0] || *end != '\0' || val <= 0 ||
+                        val > INT32_MAX) {
+                        fprintf(stderr,
+                                "error: --fusion-candidates top-N must be a "
+                                "positive integer\n");
+                        usage(argv[0], 1);
+                    }
+                    run_fusion = (int)val;
+                }
+                break;
+            }
+            case 'f': { // -f<pass> / -fno-<pass>  (e.g. -ffold, -fno-cse)
+                static const struct {
+                    const char *name;
+                    CcccOptPass bit;
+                } pass_table[]      = {{"fold", CCCC_OPT_FOLD},
+                                       {"peephole", CCCC_OPT_PEEPHOLE},
+                                       {"copy-prop", CCCC_OPT_COPY_PROP},
+                                       {"dce", CCCC_OPT_DCE},
+                                       {"cse", CCCC_OPT_CSE},
+                                       {"fuse", CCCC_OPT_FUSE},
+                                       {"elim-ext", CCCC_OPT_ELIM_EXT},
+                                       {NULL, 0}};
+                bool        neg     = (strncmp(optarg, "no-", 3) == 0);
+                const char *name    = neg ? optarg + 3 : optarg;
+                bool        matched = false;
+                for (int k = 0; pass_table[k].name; k++) {
+                    if (strcmp(name, pass_table[k].name) == 0) {
+                        if (neg)
+                            opt_f_disable |= (uint32_t)pass_table[k].bit;
+                        else
+                            opt_f_enable |= (uint32_t)pass_table[k].bit;
+                        opt_f_mask |= (uint32_t)pass_table[k].bit;
+                        matched     = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    fprintf(stderr,
+                            "error: unknown optimisation pass '-f%s'\n"
+                            "       valid: fold, peephole, copy-prop, dce, "
+                            "cse, fuse "
+                            "(prefix 'no-' to disable)\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
+                break;
+            }
+            case 'J':
+                output_ffi_decls = 1;
+                break;
+            case 1096:
+                opt_f_enable |= CCCC_OPT_FOLD;
+                opt_f_mask   |= CCCC_OPT_FOLD;
+                break; // --ffold
+            case 1097:
+                opt_f_enable |= CCCC_OPT_PEEPHOLE;
+                opt_f_mask   |= CCCC_OPT_PEEPHOLE;
+                break; // --fpeephole
+            case 1098:
+                opt_f_enable |= CCCC_OPT_COPY_PROP;
+                opt_f_mask   |= CCCC_OPT_COPY_PROP;
+                break; // --fcopy-prop
+            case 1099:
+                opt_f_enable |= CCCC_OPT_DCE;
+                opt_f_mask   |= CCCC_OPT_DCE;
+                break; // --fdce
+            case 1100:
+                opt_f_enable |= CCCC_OPT_CSE;
+                opt_f_mask   |= CCCC_OPT_CSE;
+                break; // --fcse
+            case 1101:
+                opt_f_enable |= CCCC_OPT_FUSE;
+                opt_f_mask   |= CCCC_OPT_FUSE;
+                break; // --ffuse
+            case 1102:
+                opt_f_disable |= CCCC_OPT_FOLD;
+                opt_f_mask    |= CCCC_OPT_FOLD;
+                break; // --fno-fold
+            case 1103:
+                opt_f_disable |= CCCC_OPT_PEEPHOLE;
+                opt_f_mask    |= CCCC_OPT_PEEPHOLE;
+                break; // --fno-peephole
+            case 1104:
+                opt_f_disable |= CCCC_OPT_COPY_PROP;
+                opt_f_mask    |= CCCC_OPT_COPY_PROP;
+                break; // --fno-copy-prop
+            case 1105:
+                opt_f_disable |= CCCC_OPT_DCE;
+                opt_f_mask    |= CCCC_OPT_DCE;
+                break; // --fno-dce
+            case 1106:
+                opt_f_disable |= CCCC_OPT_CSE;
+                opt_f_mask    |= CCCC_OPT_CSE;
+                break; // --fno-cse
+            case 1107:
+                opt_f_disable |= CCCC_OPT_FUSE;
+                opt_f_mask    |= CCCC_OPT_FUSE;
+                break; // --fno-fuse
+            case 1108:
+                opt_f_enable |= CCCC_OPT_ELIM_EXT;
+                opt_f_mask   |= CCCC_OPT_ELIM_EXT;
+                break; // --felim-ext
+            case 1109:
+                opt_f_disable |= CCCC_OPT_ELIM_EXT;
+                opt_f_mask    |= CCCC_OPT_ELIM_EXT;
+                break; // --fno-elim-ext
+            case 1112:
+                use_system_headers = true;
+                break; // --use-system-headers
+            case 1113:
+                no_builtin_includes = true;
+                break; // --no-builtin-includes
+            case 1114:
+                sysroot            = optarg;
+                use_system_headers = true;
+                break; // --sysroot
+            case '?':
+                if (optopt)
+                    fprintf(stderr, "error: option -%c requires an argument\n",
+                            optopt);
+                else if (optind > 0 && argv[optind - 1] &&
+                         argv[optind - 1][0] == '-')
+                    fprintf(stderr, "error: unknown option %s\n",
+                            argv[optind - 1]);
+                else
+                    fprintf(stderr, "error: unknown parsing error\n");
                 usage(argv[0], 1);
-            }
-            break;
-        }
-        case 'J':
-            output_ffi_decls = 1;
-            break;
-        case 1096: opt_f_enable  |= CCCC_OPT_FOLD;      opt_f_mask |= CCCC_OPT_FOLD;      break; // --ffold
-        case 1097: opt_f_enable  |= CCCC_OPT_PEEPHOLE;  opt_f_mask |= CCCC_OPT_PEEPHOLE;  break; // --fpeephole
-        case 1098: opt_f_enable  |= CCCC_OPT_COPY_PROP; opt_f_mask |= CCCC_OPT_COPY_PROP; break; // --fcopy-prop
-        case 1099: opt_f_enable  |= CCCC_OPT_DCE;       opt_f_mask |= CCCC_OPT_DCE;       break; // --fdce
-        case 1100: opt_f_enable  |= CCCC_OPT_CSE;       opt_f_mask |= CCCC_OPT_CSE;       break; // --fcse
-        case 1101: opt_f_enable  |= CCCC_OPT_FUSE;      opt_f_mask |= CCCC_OPT_FUSE;      break; // --ffuse
-        case 1102: opt_f_disable |= CCCC_OPT_FOLD;      opt_f_mask |= CCCC_OPT_FOLD;      break; // --fno-fold
-        case 1103: opt_f_disable |= CCCC_OPT_PEEPHOLE;  opt_f_mask |= CCCC_OPT_PEEPHOLE;  break; // --fno-peephole
-        case 1104: opt_f_disable |= CCCC_OPT_COPY_PROP; opt_f_mask |= CCCC_OPT_COPY_PROP; break; // --fno-copy-prop
-        case 1105: opt_f_disable |= CCCC_OPT_DCE;       opt_f_mask |= CCCC_OPT_DCE;       break; // --fno-dce
-        case 1106: opt_f_disable |= CCCC_OPT_CSE;       opt_f_mask |= CCCC_OPT_CSE;       break; // --fno-cse
-        case 1107: opt_f_disable |= CCCC_OPT_FUSE;      opt_f_mask |= CCCC_OPT_FUSE;      break; // --fno-fuse
-        case 1108: opt_f_enable  |= CCCC_OPT_ELIM_EXT;  opt_f_mask |= CCCC_OPT_ELIM_EXT;  break; // --felim-ext
-        case 1109: opt_f_disable |= CCCC_OPT_ELIM_EXT;  opt_f_mask |= CCCC_OPT_ELIM_EXT;  break; // --fno-elim-ext
-        case 1112: use_system_headers = true; break;  // --use-system-headers
-        case 1113: no_builtin_includes = true; break; // --no-builtin-includes
-        case 1114: sysroot = optarg; use_system_headers = true; break; // --sysroot
-        case '?':
-            if (optopt)
-                fprintf(stderr, "error: option -%c requires an argument\n",
-                        optopt);
-            else if (optind > 0 && argv[optind - 1] &&
-                     argv[optind - 1][0] == '-')
-                fprintf(stderr, "error: unknown option %s\n", argv[optind - 1]);
-            else
-                fprintf(stderr, "error: unknown parsing error\n");
-            usage(argv[0], 1);
-            break;
-        default:
-            usage(argv[0], 1);
+                break;
+            default:
+                usage(argv[0], 1);
         }
     }
 
@@ -2095,18 +2359,18 @@ int main(int argc, const char *argv[]) {
         uint32_t vm_heap_dependent =
             flags & (CCCC_VM_HEAP_TRIGGERS & ~(uint32_t)CCCC_VM_HEAP);
         if (vm_heap_dependent) {
-            fprintf(stderr,
-                    "error: -V/--no-vm-heap cannot be combined with "
-                    "--bounds-checks/--uaf-detection/--type-checks/"
-                    "--heap-canaries/--memory-leak-detection or memory "
-                    "tagging; those checks require the VM heap\n");
+            fprintf(stderr, "error: -V/--no-vm-heap cannot be combined with "
+                            "--bounds-checks/--uaf-detection/--type-checks/"
+                            "--heap-canaries/--memory-leak-detection or memory "
+                            "tagging; those checks require the VM heap\n");
             usage(argv[0], 1);
         }
-        flags &= ~CCCC_VM_HEAP;
+        flags          &= ~CCCC_VM_HEAP;
         cli_flags_mask |= CCCC_VM_HEAP;
     }
 
-    /* Remaining arguments are input files (positional, up to "--" if present) */
+    /* Remaining arguments are input files (positional, up to "--" if present)
+     */
     for (int i = optind; i < getopt_argc; i++) {
         const char *a = argv[i];
         if (strncmp(a, "-", sizeof("-")) == 0) {
@@ -2165,9 +2429,9 @@ int main(int argc, const char *argv[]) {
             usage(argv[0], 1);
         }
         if (build_mode || testing_mode || run_ngrams || run_fusion ||
-            compile_format != COMPILE_NONE || disassemble ||
-            preprocess_only || dump_expanded_only || print_tokens ||
-            output_json || output_ffi_decls || dump_ast || vm_profile) {
+            compile_format != COMPILE_NONE || disassemble || preprocess_only ||
+            dump_expanded_only || print_tokens || output_json ||
+            output_ffi_decls || dump_ast || vm_profile) {
             fprintf(stderr,
                     "error: --repl cannot be combined with --build, --testing, "
                     "--ngrams/--fusion-candidates, -c (incl. -c=native), -d, "
@@ -2181,11 +2445,12 @@ int main(int argc, const char *argv[]) {
         // declared targets. VM-only and output modes do not apply here.
         if (compile_format != COMPILE_NONE || disassemble || opt_level != 0 ||
             opt_f_enable || opt_f_disable || vm_profile || out_file ||
-            preprocess_only || dump_expanded_only || print_tokens || output_json ||
-            output_ffi_decls || dump_ast) {
+            preprocess_only || dump_expanded_only || print_tokens ||
+            output_json || output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --build cannot be combined with VM/output options "
-                    "(-c, -d, -O<n>, -f<pass>, --vm-profile, -o, -E, -m, --ast, ...)\n");
+                    "(-c, -d, -O<n>, -f<pass>, --vm-profile, -o, -E, -m, "
+                    "--ast, ...)\n");
             usage(argv[0], 1);
         }
         if (flags & CCCC_ENABLE_DEBUGGER) {
@@ -2197,14 +2462,14 @@ int main(int argc, const char *argv[]) {
     if (compile_format == COMPILE_NATIVE) {
         if (preprocess_only || dump_expanded_only || print_tokens ||
             output_json || output_ffi_decls || dump_ast) {
-            fprintf(stderr,
-                    "error: -c=native cannot be combined with frontend output modes\n");
+            fprintf(stderr, "error: -c=native cannot be combined with frontend "
+                            "output modes\n");
             usage(argv[0], 1);
         }
-        if (disassemble || entry_name || opt_level != 0 ||
-            opt_f_enable || opt_f_disable || vm_profile) {
-            fprintf(stderr,
-                    "error: -c=native cannot be combined with VM bytecode options\n");
+        if (disassemble || entry_name || opt_level != 0 || opt_f_enable ||
+            opt_f_disable || vm_profile) {
+            fprintf(stderr, "error: -c=native cannot be combined with VM "
+                            "bytecode options\n");
             usage(argv[0], 1);
         }
         // #924: VM-only safety/debug flags used to be a hard error here.
@@ -2222,8 +2487,8 @@ int main(int argc, const char *argv[]) {
             flags = warn_ignored_vm_flags(flags, "-c=native");
         if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
             ffi_errors_fatal || enable_ffi_type_checking) {
-            fprintf(stderr,
-                    "error: -c=native cannot be combined with CCCC FFI policy options\n");
+            fprintf(stderr, "error: -c=native cannot be combined with CCCC FFI "
+                            "policy options\n");
             usage(argv[0], 1);
         }
         for (int i = 0; i < input_files_count; i++) {
@@ -2231,7 +2496,8 @@ int main(int argc, const char *argv[]) {
             if (len > 3 &&
                 strncmp(input_files[i] + len - 3, ".c4", sizeof(".c4")) == 0) {
                 fprintf(stderr,
-                        "error: -c=native expects C source input, not bytecode '%s'\n",
+                        "error: -c=native expects C source input, not bytecode "
+                        "'%s'\n",
                         input_files[i]);
                 usage(argv[0], 1);
             }
@@ -2256,8 +2522,9 @@ int main(int argc, const char *argv[]) {
     if (run_ngrams || run_fusion) {
         // Static analysis is mutually exclusive with execution / output modes.
         if (run_ngrams && run_fusion) {
-            fprintf(stderr,
-                    "error: --ngrams and --fusion-candidates cannot be combined\n");
+            fprintf(
+                stderr,
+                "error: --ngrams and --fusion-candidates cannot be combined\n");
             usage(argv[0], 1);
         }
         if (preprocess_only || dump_expanded_only || print_tokens ||
@@ -2307,8 +2574,8 @@ int main(int argc, const char *argv[]) {
     // itself if it invokes cccc directly.
     bool auto_debug_on_crash =
         !(flags & CCCC_ENABLE_DEBUGGER) && !(flags & CCCC_NO_DEBUG_ON_CRASH) &&
-        !testing_mode && !build_mode &&
-        CCCC_ISATTY(CCCC_FILENO(stdin)) && CCCC_ISATTY(CCCC_FILENO(stdout));
+        !testing_mode && !build_mode && CCCC_ISATTY(CCCC_FILENO(stdin)) &&
+        CCCC_ISATTY(CCCC_FILENO(stdout));
     if (auto_debug_on_crash)
         flags |= CCCC_ENABLE_DEBUGGER;
 
@@ -2316,11 +2583,11 @@ int main(int argc, const char *argv[]) {
     cc_init(&vm, flags);
     if (auto_debug_on_crash)
         vm.dbg.crash_debug_auto = true;
-    vm.compiler.cli_flags_mask = cli_flags_mask;
+    vm.compiler.cli_flags_mask    = cli_flags_mask;
     vm.compiler.cli_opt_level_set = cli_opt_level_set;
-    vm.compiler.native_mode = (compile_format == COMPILE_NATIVE);
-    vm.compiler.compile_only = compile_only;
-    vm.compiler.deferred_link = (link_paths_count > 0 && !compile_only);
+    vm.compiler.native_mode       = (compile_format == COMPILE_NATIVE);
+    vm.compiler.compile_only      = compile_only;
+    vm.compiler.deferred_link     = (link_paths_count > 0 && !compile_only);
     // #882: pre-scan every --link library's exported symbols before gen()
     // runs, so codegen can prefer a guest definition that --link will
     // supply over a same-named host FFI symbol. Also covers the
@@ -2330,25 +2597,25 @@ int main(int argc, const char *argv[]) {
         for (int i = 0; i < link_paths_count; i++)
             cc_collect_link_symbols(&vm, link_paths[i]);
     }
-    vm.compiler.asm_passthru = asm_passthru;
-    vm.compiler.no_comptime = no_comptime;
-    vm.compiler.comptime_include_all = comptime_include_all;
+    vm.compiler.asm_passthru            = asm_passthru;
+    vm.compiler.no_comptime             = no_comptime;
+    vm.compiler.comptime_include_all    = comptime_include_all;
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
-    vm.compiler.emit_strict = emit_only;
-    vm.compiler.attr_target = attr_target;
-    vm.compiler.emit_cccc = (bool)emit_cccc_mode;
-    vm.compiler.entry_name = (char *)entry_name;
-    vm.compiler.testing_mode = (bool)testing_mode;
-    vm.compiler.build_mode = (bool)build_mode;
+    vm.compiler.emit_strict             = emit_only;
+    vm.compiler.attr_target             = attr_target;
+    vm.compiler.emit_cccc               = (bool)emit_cccc_mode;
+    vm.compiler.entry_name              = (char *)entry_name;
+    vm.compiler.testing_mode            = (bool)testing_mode;
+    vm.compiler.build_mode              = (bool)build_mode;
     init_mode_macros(&vm);
     vm.compiler.diagnostic_json = output_json;
-    vm.disable_all_ffi = disable_all_ffi;
-    vm.ffi_errors_fatal = ffi_errors_fatal;
+    vm.disable_all_ffi          = disable_all_ffi;
+    vm.ffi_errors_fatal         = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
-    vm.vm_profile_enabled = vm_profile;
+    vm.vm_profile_enabled       = vm_profile;
     if (vm_profile) {
-        vm.vm_profile_trigram_counts = calloc(
-            (size_t)OP_COUNT * OP_COUNT * OP_COUNT, sizeof(uint64_t));
+        vm.vm_profile_trigram_counts =
+            calloc((size_t)OP_COUNT * OP_COUNT * OP_COUNT, sizeof(uint64_t));
         // Failure is non-fatal: trigram section will be skipped in JSON output
     }
     for (int i = 0; i < ffi_allow_args_count; i++)
@@ -2406,8 +2673,8 @@ int main(int argc, const char *argv[]) {
             }
             if (run_ngrams) {
                 CcAnalyzeNgramOptions opts = {
-                    .n = run_ngrams,
-                    .top_n = ngrams_top,
+                    .n        = run_ngrams,
+                    .top_n    = ngrams_top,
                     .per_file = ngrams_per_file,
                 };
                 ngram_state = cc_analyze_ngram_begin(&opts);
@@ -2428,7 +2695,7 @@ int main(int argc, const char *argv[]) {
             } else {
                 CcAnalyzeFusionOptions opts = {
                     .top_n = run_fusion,
-                    .json = output_json,
+                    .json  = output_json,
                 };
                 fusion_state = cc_analyze_fusion_begin(&opts);
                 for (int i = 0; i < input_files_count; i++) {
@@ -2452,7 +2719,7 @@ int main(int argc, const char *argv[]) {
 
     if (input_files_count == 1) {
         const char *input_file = input_files[0];
-        size_t len = strlen(input_file);
+        size_t      len        = strlen(input_file);
         if (len > 3 &&
             strncmp(input_file + len - 3, ".c4", sizeof(".c4")) == 0) {
             if (link_paths_count > 0) {
@@ -2500,13 +2767,13 @@ int main(int argc, const char *argv[]) {
 
             // Run the loaded bytecode. The loaded program sees its own .c4
             // path as argv[0], plus explicit args after "--" if present.
-            int prog_argc = 0;
+            int    prog_argc = 0;
             char **prog_argv =
                 build_c4_argv(&prog_argc, input_file, argc, argv, dashdash);
-            exit_code = cc_run(&vm, prog_argc, prog_argv);
-            vm_profile_mode = "c4";
+            exit_code        = cc_run(&vm, prog_argc, prog_argv);
+            vm_profile_mode  = "c4";
             vm_profile_input = input_file;
-            vm_profile_ran = 1;
+            vm_profile_ran   = 1;
             free(prog_argv);
             goto BAIL;
         }
@@ -2523,27 +2790,27 @@ int main(int argc, const char *argv[]) {
     }
 
     // Set optimization level and per-pass overrides
-    vm.compiler.opt_level    = opt_level;
-    vm.compiler.ffp_contract_fma = ffp_contract_fma;
-    vm.compiler.opt_f_enable  = opt_f_enable;
-    vm.compiler.opt_f_disable = opt_f_disable;
-    vm.compiler.cli_f_mask    = opt_f_mask;
+    vm.compiler.opt_level         = opt_level;
+    vm.compiler.ffp_contract_fma  = ffp_contract_fma;
+    vm.compiler.opt_f_enable      = opt_f_enable;
+    vm.compiler.opt_f_disable     = opt_f_disable;
+    vm.compiler.cli_f_mask        = opt_f_mask;
     vm.compiler.inline_node_limit = inline_node_limit;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;
 
     // Apply --std=<standard> if specified, then re-emit std macros
     if (std_arg) {
-        CStdVersion ver = CCCC_STD_C17;
-        bool is_gnu = true;
-        const char *s = std_arg;
+        CStdVersion ver    = CCCC_STD_C17;
+        bool        is_gnu = true;
+        const char *s      = std_arg;
         // Consume optional "gnu" / "c" prefix
         if (strncmp(s, "gnu", 3) == 0) {
-            is_gnu = true;
-            s += 3;
+            is_gnu  = true;
+            s      += 3;
         } else if (s[0] == 'c') {
-            is_gnu = false;
-            s += 1;
+            is_gnu  = false;
+            s      += 1;
         } else {
             fprintf(stderr, "error: unknown C standard '%s'\n", std_arg);
             usage(argv[0], 1);
@@ -2563,7 +2830,7 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "error: unknown C standard '%s'\n", std_arg);
             usage(argv[0], 1);
         }
-        vm.compiler.c_std = ver;
+        vm.compiler.c_std     = ver;
         vm.compiler.c_std_gnu = is_gnu;
         define_std_macros(&vm);
     }
@@ -2583,15 +2850,15 @@ int main(int argc, const char *argv[]) {
     }
 #endif
 
-    vm.collect_errors = true;
-    vm.max_errors = max_errors;
+    vm.collect_errors     = true;
+    vm.max_errors         = max_errors;
     vm.warnings_as_errors = warnings_as_errors;
     // --thread-safety implicitly enables the discarded-qualifiers warning so
     // _Atomic cast stripping is diagnosed without requiring -Wall.
     if (flags & CCCC_THREAD_SAFETY)
         warnings |= CCCC_WARN_DISCARDED_QUALIFIERS;
-    vm.compiler.warnings = warnings;
-    vm.compiler.warning_errors = warning_errors;
+    vm.compiler.warnings          = warnings;
+    vm.compiler.warning_errors    = warning_errors;
     vm.compiler.warning_no_errors = warning_no_errors;
     jmp_buf err_buf;
     vm.error_jmp_buf = &err_buf;
@@ -2600,9 +2867,8 @@ int main(int argc, const char *argv[]) {
     if (setjmp(err_buf) != 0) {
         // Error occurred during compilation
         cc_print_all_errors(&vm);
-        exit_code = vm.dbg.host_fault_signal
-                        ? 128 + vm.dbg.host_fault_signal
-                        : 1;
+        exit_code =
+            vm.dbg.host_fault_signal ? 128 + vm.dbg.host_fault_signal : 1;
         goto BAIL;
     }
 
@@ -2626,7 +2892,7 @@ int main(int argc, const char *argv[]) {
     // Implies --use-system-headers.
     if (sysroot) {
         struct stat _st;
-        char sysroot_inc[4096];
+        char        sysroot_inc[4096];
         snprintf(sysroot_inc, sizeof(sysroot_inc), "%s/usr/include", sysroot);
         if (!stat(sysroot_inc, &_st))
             cc_system_include(&vm, sysroot_inc);
@@ -2648,16 +2914,17 @@ int main(int argc, const char *argv[]) {
 
     // #888: snapshot the macro table here, right after -D/-U processing and
     // before the primary file is preprocessed. A same-named source #define
-    // later overwrites the -D entry in vm.compiler.macros; isolate_comptime_macros
-    // then strips it (define_tok != NULL) and the -D value is gone from the
-    // comptime pass. This snapshot lets isolate_comptime_macros re-apply any
-    // -D that got shadowed that way. macro_snapshot_backup (macros.c) is
-    // taken later, after the runtime preprocess, so it is already polluted
-    // with source #defines and cannot be reused for this.
-    vm.compiler.cli_macro_snapshot = hashmap_snapshot(&vm.compiler.macros);
+    // later overwrites the -D entry in vm.compiler.macros;
+    // isolate_comptime_macros then strips it (define_tok != NULL) and the -D
+    // value is gone from the comptime pass. This snapshot lets
+    // isolate_comptime_macros re-apply any -D that got shadowed that way.
+    // macro_snapshot_backup (macros.c) is taken later, after the runtime
+    // preprocess, so it is already polluted with source #defines and cannot be
+    // reused for this.
+    vm.compiler.cli_macro_snapshot     = hashmap_snapshot(&vm.compiler.macros);
     vm.compiler.has_cli_macro_snapshot = true;
 
-    vm.compiler.skip_preprocess = skip_preprocess;
+    vm.compiler.skip_preprocess        = skip_preprocess;
 
     // #1002 (investigation): record every command-line input path before
     // preprocessing any of them, so the serializer can ask "was this Obj
@@ -2668,7 +2935,7 @@ int main(int argc, const char *argv[]) {
     // strings are strdup'd once at argv-parsing time and outlive the vm.
     for (int i = 0; i < input_files_count; i++)
         hashmap_put_borrowed(&vm.compiler.command_line_inputs, input_files[i],
-                              (void *)(intptr_t)1);
+                             (void *)(intptr_t)1);
 
     input_tokens = calloc(input_files_count, sizeof(Token *));
     for (int i = 0; i < input_files_count; i++) {
@@ -2724,7 +2991,7 @@ int main(int argc, const char *argv[]) {
             Token *last = test_decls;
             while (last->next && last->next->kind != TK_EOF)
                 last = last->next;
-            last->next = input_tokens[i];
+            last->next      = input_tokens[i];
             input_tokens[i] = test_decls;
         }
     }
@@ -2862,7 +3129,7 @@ int main(int argc, const char *argv[]) {
         Obj *tail = vm.compiler.macro_globals;
         while (tail->next)
             tail = tail->next;
-        tail->next = merged_prog;
+        tail->next  = merged_prog;
         merged_prog = vm.compiler.macro_globals;
     }
 
@@ -2901,7 +3168,8 @@ int main(int argc, const char *argv[]) {
         // attributes these flags gate are already unconditionally stripped
         // from serialized output (#482/#488 ABI transparency), so the flag
         // is genuinely a no-op here, not a conflict.
-        vm.flags = warn_ignored_vm_flags(vm.flags, emit_generated_only ? "-c=generated" : "-m");
+        vm.flags = warn_ignored_vm_flags(
+            vm.flags, emit_generated_only ? "-c=generated" : "-m");
         // #999: this path (-m / -c=generated) bails out before cc_compile()
         // ever runs, so vm.compiler.globals still holds whatever the *last*
         // TU's own parse() call left it as (each TU's parse() resets it to
@@ -2944,7 +3212,7 @@ int main(int argc, const char *argv[]) {
     // vm.compiler.pragma_link_libs each own their own strings (both are freed
     // independently at cleanup).
     for (int i = 0; i < vm.compiler.pragma_link_libs.len; i++) {
-        libs = realloc(libs, sizeof(*libs) * (libs_count + 1));
+        libs               = realloc(libs, sizeof(*libs) * (libs_count + 1));
         libs[libs_count++] = strdup(vm.compiler.pragma_link_libs.data[i]);
     }
 
@@ -3009,11 +3277,12 @@ int main(int argc, const char *argv[]) {
     // forking unconditionally keeps one code path for both.
     if (test_run_mode) {
 #if defined(_WIN32)
-        fprintf(stderr, "error: --test-run is not supported on this platform\n");
+        fprintf(stderr,
+                "error: --test-run is not supported on this platform\n");
         exit_code = 1;
         goto BAIL;
 #else
-        int prog_argc = 0;
+        int    prog_argc = 0;
         char **prog_argv =
             build_source_argv(&prog_argc, argc, argv, optind, dashdash);
         pid_t pid = fork();
@@ -3087,11 +3356,13 @@ int main(int argc, const char *argv[]) {
     // swallowing `-c -o foo.c4`.
     if (testing_mode) {
         if (test_c4_mode) {
-            // In-process bytecode round-trip: compile → save .c4 → reload → run tests.
-            // test_fns/test_setups survive cc_load_bytecode (not stored in .c4); text_ptr
-            // is reset correctly (bytecode.c:925); only FFI func_ptrs need restoration.
-            int n_ffi = vm.compiler.ffi_count;
-            void **ffi_ptrs = n_ffi > 0 ? malloc((size_t)n_ffi * sizeof(void *)) : NULL;
+            // In-process bytecode round-trip: compile → save .c4 → reload → run
+            // tests. test_fns/test_setups survive cc_load_bytecode (not stored
+            // in .c4); text_ptr is reset correctly (bytecode.c:925); only FFI
+            // func_ptrs need restoration.
+            int    n_ffi = vm.compiler.ffi_count;
+            void **ffi_ptrs =
+                n_ffi > 0 ? malloc((size_t)n_ffi * sizeof(void *)) : NULL;
             if (n_ffi > 0 && !ffi_ptrs) {
                 fprintf(stderr, "error: --test-c4: out of memory\n");
                 exit_code = 1;
@@ -3102,27 +3373,34 @@ int main(int argc, const char *argv[]) {
 
             char *c4_tmp = make_tmp_path(".c4");
             if (!c4_tmp) {
-                fprintf(stderr, "error: --test-c4: failed to create temp file\n");
+                fprintf(stderr,
+                        "error: --test-c4: failed to create temp file\n");
                 free(ffi_ptrs);
                 exit_code = 1;
                 goto BAIL;
             }
             if (cc_save_bytecode(&vm, c4_tmp) != 0) {
                 fprintf(stderr, "error: --test-c4: failed to save bytecode\n");
-                unlink(c4_tmp); free(c4_tmp); free(ffi_ptrs);
+                unlink(c4_tmp);
+                free(c4_tmp);
+                free(ffi_ptrs);
                 exit_code = 1;
                 goto BAIL;
             }
             if (cc_load_bytecode(&vm, c4_tmp) != 0) {
-                fprintf(stderr, "error: --test-c4: failed to reload bytecode\n");
-                unlink(c4_tmp); free(c4_tmp); free(ffi_ptrs);
+                fprintf(stderr,
+                        "error: --test-c4: failed to reload bytecode\n");
+                unlink(c4_tmp);
+                free(c4_tmp);
+                free(ffi_ptrs);
                 exit_code = 1;
                 goto BAIL;
             }
             unlink(c4_tmp);
             free(c4_tmp);
 
-            int n_after = vm.compiler.ffi_count < n_ffi ? vm.compiler.ffi_count : n_ffi;
+            int n_after =
+                vm.compiler.ffi_count < n_ffi ? vm.compiler.ffi_count : n_ffi;
             for (int i = 0; i < n_after; i++)
                 vm.compiler.ffi_table[i].func_ptr = ffi_ptrs[i];
             free(ffi_ptrs);
@@ -3155,40 +3433,48 @@ int main(int argc, const char *argv[]) {
         }
 
         CcNativeCompileArgs build_defaults = {
-            .inc_paths      = inc_paths,      .inc_paths_count = inc_paths_count,
-            .sys_inc_paths  = sys_inc_paths,  .sys_inc_paths_count = sys_inc_paths_count,
-            .lib_paths      = lib_paths,      .lib_paths_count = lib_paths_count,
-            .libs           = libs,           .libs_count = libs_count,
-            .defines        = defines,        .defines_count = defines_count,
-            .undefs         = undefs,         .undefs_count = undefs_count,
-            .std_arg        = std_arg,
+            .inc_paths           = inc_paths,
+            .inc_paths_count     = inc_paths_count,
+            .sys_inc_paths       = sys_inc_paths,
+            .sys_inc_paths_count = sys_inc_paths_count,
+            .lib_paths           = lib_paths,
+            .lib_paths_count     = lib_paths_count,
+            .libs                = libs,
+            .libs_count          = libs_count,
+            .defines             = defines,
+            .defines_count       = defines_count,
+            .undefs              = undefs,
+            .undefs_count        = undefs_count,
+            .std_arg             = std_arg,
         };
         CcBuildOptions build_opts = {
-            .entry_name       = build_entry,
-            .target_name      = build_target,
-            .out_dir          = build_out_dir,
-            .verbose          = verbose,
-            .build_verbose    = build_verbose,
-            .quiet            = build_quiet,
-            .keep_going       = build_keep_going,
-            .dry_run          = build_dry_run,
-            .jobs             = build_jobs,
-            .defaults         = &build_defaults,
-            .tool_allow       = build_tool_allow,
-            .tool_allow_count = build_tool_allow_count,
-            .list_targets     = build_list_targets,
-            .profile          = build_profile,
-            .cross_triple     = build_triple,
-            .cross_cc         = build_cc,
-            .build_cache          = build_cache,
-            .cccc_self            = argv[0],
-            .build_options        = build_options,
-            .build_options_count  = build_options_count,
-            .build_install        = build_install,
-            .user_args            = (dashdash >= 0 && dashdash + 1 < argc)
-                                        ? argv + dashdash + 1 : NULL,
-            .user_args_count      = (dashdash >= 0 && dashdash + 1 < argc)
-                                        ? argc - dashdash - 1 : 0,
+            .entry_name          = build_entry,
+            .target_name         = build_target,
+            .out_dir             = build_out_dir,
+            .verbose             = verbose,
+            .build_verbose       = build_verbose,
+            .quiet               = build_quiet,
+            .keep_going          = build_keep_going,
+            .dry_run             = build_dry_run,
+            .jobs                = build_jobs,
+            .defaults            = &build_defaults,
+            .tool_allow          = build_tool_allow,
+            .tool_allow_count    = build_tool_allow_count,
+            .list_targets        = build_list_targets,
+            .profile             = build_profile,
+            .cross_triple        = build_triple,
+            .cross_cc            = build_cc,
+            .build_cache         = build_cache,
+            .cccc_self           = argv[0],
+            .build_options       = build_options,
+            .build_options_count = build_options_count,
+            .build_install       = build_install,
+            .user_args           = (dashdash >= 0 && dashdash + 1 < argc)
+                                       ? argv + dashdash + 1
+                                       : NULL,
+            .user_args_count     = (dashdash >= 0 && dashdash + 1 < argc)
+                                       ? argc - dashdash - 1
+                                       : 0,
         };
 
         int build_code = cc_run_build(&vm, merged_prog, &build_opts);
@@ -3205,9 +3491,10 @@ int main(int argc, const char *argv[]) {
         // compile_only, so that pass is a no-op here and the library output
         // still retains its text relocations for a later --link to resolve.
         if (link_paths_count > 0 && compile_only) {
-            fprintf(stderr,
-                    "warning: --link has no effect when combined with -c bytecode "
-                    "(library output retains its text relocations)\n");
+            fprintf(
+                stderr,
+                "warning: --link has no effect when combined with -c bytecode "
+                "(library output retains its text relocations)\n");
         }
         if (!out_file) {
             // Match cc/clang/gcc's a.out convention: -c=bytecode with no -o
@@ -3215,8 +3502,7 @@ int main(int argc, const char *argv[]) {
             out_file = strdup("a.c4");
         }
         if (cc_save_bytecode(&vm, out_file) != 0) {
-            fprintf(stderr, "error: failed to save bytecode to %s\n",
-                    out_file);
+            fprintf(stderr, "error: failed to save bytecode to %s\n", out_file);
             exit_code = 1;
             goto BAIL;
         }
@@ -3254,14 +3540,13 @@ int main(int argc, const char *argv[]) {
     if (run_ngrams || run_fusion) {
         if (run_ngrams) {
             CcAnalyzeNgramOptions opts = {
-                .n = run_ngrams,
-                .top_n = ngrams_top,
+                .n        = run_ngrams,
+                .top_n    = ngrams_top,
                 .per_file = ngrams_per_file,
             };
             ngram_state = cc_analyze_ngram_begin(&opts);
-            const char *label = input_files_count == 1
-                                     ? input_files[0]
-                                     : "<merged source>";
+            const char *label =
+                input_files_count == 1 ? input_files[0] : "<merged source>";
             cc_analyze_ngram_feed(ngram_state, vm.text_seg,
                                   (long long)vm.text_ptr + 1, label, stdout);
             cc_analyze_ngram_finish(ngram_state, stdout);
@@ -3269,15 +3554,13 @@ int main(int argc, const char *argv[]) {
         } else {
             CcAnalyzeFusionOptions opts = {
                 .top_n = run_fusion,
-                .json = output_json,
+                .json  = output_json,
             };
             fusion_state = cc_analyze_fusion_begin(&opts);
-            const char *label = input_files_count == 1
-                                     ? input_files[0]
-                                     : "<merged source>";
+            const char *label =
+                input_files_count == 1 ? input_files[0] : "<merged source>";
             cc_analyze_fusion_feed(fusion_state, vm.text_seg,
-                                   (long long)vm.text_ptr + 1, label,
-                                   stdout);
+                                   (long long)vm.text_ptr + 1, label, stdout);
             cc_analyze_fusion_finish(fusion_state, stdout);
             fusion_state = NULL;
         }
@@ -3300,13 +3583,13 @@ int main(int argc, const char *argv[]) {
 
     // Run the program. If "--" was given, forward only args after it; otherwise
     // fall back to the old behaviour of passing all positional args.
-    int prog_argc = 0;
+    int    prog_argc = 0;
     char **prog_argv =
         build_source_argv(&prog_argc, argc, argv, optind, dashdash);
-    exit_code = cc_run(&vm, prog_argc, prog_argv);
-    vm_profile_mode = "source";
+    exit_code        = cc_run(&vm, prog_argc, prog_argv);
+    vm_profile_mode  = "source";
     vm_profile_input = input_files_count == 1 ? input_files[0] : "multiple";
-    vm_profile_ran = 1;
+    vm_profile_ran   = 1;
     free(prog_argv);
 
 BAIL:
@@ -3324,7 +3607,8 @@ BAIL:
     }
     cc_destroy(&vm);
     // Defensive: free analysis state if it was allocated but not finalized
-    // (shouldn't happen given the dispatch flow, but keeps leak-checkers happy).
+    // (shouldn't happen given the dispatch flow, but keeps leak-checkers
+    // happy).
     if (ngram_state) {
         cc_analyze_ngram_finish(ngram_state, stdout);
     }

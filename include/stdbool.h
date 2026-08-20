@@ -5,8 +5,8 @@
 
 #if __STDC_VERSION__ < 202311L
 /* Before C23, bool/true/false are macros aliasing _Bool/1/0 */
-#define bool _Bool
-#define true 1
+#define bool  _Bool
+#define true  1
 #define false 0
 #endif
 

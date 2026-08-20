@@ -7,7 +7,7 @@
 [[cccc::comptime]]
 void gen_next(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("next_after", int_ty);
+    Obj  *fn     = MakeFunction("next_after", int_ty);
     FunctionAddParam(fn, "n", int_ty);
     Node *n = MakeParamRef(fn, "n");
     WithFn(fn) {

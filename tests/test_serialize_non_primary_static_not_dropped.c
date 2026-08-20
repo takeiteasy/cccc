@@ -15,8 +15,12 @@
 // this exact shape failed with "call to undeclared function". Fixed via
 // file_is_command_line_input(), keyed off every command-line input path,
 // not just the first.
-static int test_1002_helper(void) { return 22; }
+static int test_1002_helper(void) {
+    return 22;
+}
 
 int multi_tu_1002_fixture_entry(void);
 
-int main(void) { return multi_tu_1002_fixture_entry() + test_1002_helper(); }
+int main(void) {
+    return multi_tu_1002_fixture_entry() + test_1002_helper();
+}

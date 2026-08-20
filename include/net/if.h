@@ -19,8 +19,8 @@
 #define IFNAMSIZ    IF_NAMESIZE
 
 struct if_nameindex {
-    unsigned int  if_index;
-    char         *if_name;
+    unsigned int if_index;
+    char        *if_name;
 };
 
 extern unsigned int if_nametoindex(const char *ifname);

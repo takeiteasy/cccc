@@ -16,10 +16,10 @@ static double mrand(unsigned long *s) {
 
 int main(void) {
     unsigned long s = 0x9E3779B97F4A7C15ULL;
-    long n = BENCH_N;
-    a = malloc(n * n * sizeof(double));
-    b = malloc(n * n * sizeof(double));
-    c = malloc(n * n * sizeof(double));
+    long          n = BENCH_N;
+    a               = malloc(n * n * sizeof(double));
+    b               = malloc(n * n * sizeof(double));
+    c               = malloc(n * n * sizeof(double));
     for (long i = 0; i < n * n; i++) {
         a[i] = mrand(&s) - 0.5;
         b[i] = mrand(&s) - 0.5;

@@ -5,4 +5,6 @@
 // that TU2 (the test file itself) is the *non-primary* translation unit,
 // which is where #1006's drops (a file-scope typedef treated as
 // header-supplied; a non-primary TU's own #include never replayed) bit.
-int multi_tu_typedef_1006_a(void) { return 1; }
+int multi_tu_typedef_1006_a(void) {
+    return 1;
+}

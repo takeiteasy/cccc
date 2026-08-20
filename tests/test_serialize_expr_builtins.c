@@ -39,7 +39,7 @@ unsigned long remaining(char *p) {
 int main(void) {
     void *fp = __builtin_frame_address(0);
     void *ra = __builtin_return_address(0);
-    char buf[64];
+    char  buf[64];
     (void)ra;
     (void)remaining(buf);
     return fp ? trapper(1) : 1;

@@ -43,19 +43,19 @@ void init_url_cache(VirtualMachine *vm) {
         // Set default cache directory to platform-specific temp path
         char *temp_dir = NULL;
 
-        #ifdef _WIN32
+#ifdef _WIN32
         // Windows: use TEMP or TMP environment variable
         temp_dir = getenv("TEMP");
         if (!temp_dir)
             temp_dir = getenv("TMP");
         if (!temp_dir)
             temp_dir = "C:\\Temp";
-        #else
+#else
         // Unix-like (Linux/macOS): use TMPDIR environment variable or /tmp
         temp_dir = getenv("TMPDIR");
         if (!temp_dir)
             temp_dir = "/tmp";
-        #endif
+#endif
 
         vm->compiler.url_cache_dir = format("%s/.cccc", temp_dir);
     }
@@ -63,12 +63,12 @@ void init_url_cache(VirtualMachine *vm) {
     // Create cache directory if it doesn't exist
     struct stat st;
     if (stat(vm->compiler.url_cache_dir, &st) != 0) {
-        // Directory doesn't exist, create it
-        #ifdef _WIN32
+// Directory doesn't exist, create it
+#ifdef _WIN32
         mkdir(vm->compiler.url_cache_dir);
-        #else
+#else
         mkdir(vm->compiler.url_cache_dir, 0755);
-        #endif
+#endif
     }
 }
 
@@ -93,7 +93,7 @@ void clear_url_cache(VirtualMachine *vm) {
 
 static unsigned long hash_url(const char *url) {
     unsigned long hash = 5381;
-    int c;
+    int           c;
     while ((c = *url++))
         hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
     return hash;
@@ -102,7 +102,7 @@ static unsigned long hash_url(const char *url) {
 static char *get_url_cache_path(VirtualMachine *vm, const char *url) {
     // Extract filename from URL if possible
     const char *last_slash = strrchr(url, '/');
-    const char *filename = last_slash ? last_slash + 1 : "downloaded.h";
+    const char *filename   = last_slash ? last_slash + 1 : "downloaded.h";
 
     // If no extension or too long, use hash
     const char *dot = strrchr(filename, '.');
@@ -117,7 +117,8 @@ static char *get_url_cache_path(VirtualMachine *vm, const char *url) {
 }
 
 // Callback for curl to write data to file
-static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *stream) {
+static size_t write_callback(void *ptr, size_t size, size_t nmemb,
+                             void *stream) {
     return fwrite(ptr, size, nmemb, (FILE *)stream);
 }
 
@@ -155,7 +156,8 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)URL_TIMEOUT);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L); // Verify SSL certificates
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER,
+                     1L); // Verify SSL certificates
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "cccc-compiler/1.0");
 

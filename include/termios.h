@@ -17,24 +17,24 @@ struct termios {
     tcflag_t c_oflag;
     tcflag_t c_cflag;
     tcflag_t c_lflag;
-    cc_t c_cc[NCCS];
-    speed_t c_ispeed;
-    speed_t c_ospeed;
+    cc_t     c_cc[NCCS];
+    speed_t  c_ispeed;
+    speed_t  c_ospeed;
 };
 #else
-typedef unsigned int tcflag_t;
+typedef unsigned int  tcflag_t;
 typedef unsigned char cc_t;
-typedef unsigned int speed_t;
+typedef unsigned int  speed_t;
 #define NCCS 32
 struct termios {
     tcflag_t c_iflag;
     tcflag_t c_oflag;
     tcflag_t c_cflag;
     tcflag_t c_lflag;
-    cc_t c_line;
-    cc_t c_cc[NCCS];
-    speed_t c_ispeed;
-    speed_t c_ospeed;
+    cc_t     c_line;
+    cc_t     c_cc[NCCS];
+    speed_t  c_ispeed;
+    speed_t  c_ospeed;
 };
 #endif
 
@@ -67,45 +67,45 @@ struct termios {
 #define VMIN     16
 #define VTIME    17
 
-#define IGNBRK  0x00000001
-#define BRKINT  0x00000002
-#define IGNPAR  0x00000004
-#define PARMRK  0x00000008
-#define INPCK   0x00000010
-#define ISTRIP  0x00000020
-#define INLCR   0x00000040
-#define IGNCR   0x00000080
-#define ICRNL   0x00000100
-#define IXON    0x00000200
-#define IXOFF   0x00000400
-#define IXANY   0x00000800
+#define IGNBRK   0x00000001
+#define BRKINT   0x00000002
+#define IGNPAR   0x00000004
+#define PARMRK   0x00000008
+#define INPCK    0x00000010
+#define ISTRIP   0x00000020
+#define INLCR    0x00000040
+#define IGNCR    0x00000080
+#define ICRNL    0x00000100
+#define IXON     0x00000200
+#define IXOFF    0x00000400
+#define IXANY    0x00000800
 
-#define OPOST   0x00000001
-#define ONLCR   0x00000002
-#define OCRNL   0x00000010
-#define ONOCR   0x00000020
-#define ONLRET  0x00000040
+#define OPOST    0x00000001
+#define ONLCR    0x00000002
+#define OCRNL    0x00000010
+#define ONOCR    0x00000020
+#define ONLRET   0x00000040
 
-#define CS5     0x00000000
-#define CS6     0x00000100
-#define CS7     0x00000200
-#define CS8     0x00000300
-#define CSTOPB  0x00000400
-#define CREAD   0x00000800
-#define PARENB  0x00001000
-#define PARODD  0x00002000
-#define HUPCL   0x00004000
-#define CLOCAL  0x00008000
+#define CS5      0x00000000
+#define CS6      0x00000100
+#define CS7      0x00000200
+#define CS8      0x00000300
+#define CSTOPB   0x00000400
+#define CREAD    0x00000800
+#define PARENB   0x00001000
+#define PARODD   0x00002000
+#define HUPCL    0x00004000
+#define CLOCAL   0x00008000
 
-#define ECHO    0x00000008
-#define ECHOE   0x00000002
-#define ECHOK   0x00000004
-#define ECHONL  0x00000010
-#define ICANON  0x00000100
-#define IEXTEN  0x00000400
-#define ISIG    0x00000080
-#define NOFLSH  0x80000000
-#define TOSTOP  0x00400000
+#define ECHO     0x00000008
+#define ECHOE    0x00000002
+#define ECHOK    0x00000004
+#define ECHONL   0x00000010
+#define ICANON   0x00000100
+#define IEXTEN   0x00000400
+#define ISIG     0x00000080
+#define NOFLSH   0x80000000
+#define TOSTOP   0x00400000
 
 #define B0       0
 #define B9600    9600
@@ -132,45 +132,45 @@ struct termios {
 #define VMIN     6
 #define VTIME    5
 
-#define IGNBRK  0000001
-#define BRKINT  0000002
-#define IGNPAR  0000004
-#define PARMRK  0000010
-#define INPCK   0000020
-#define ISTRIP  0000040
-#define INLCR   0000100
-#define IGNCR   0000200
-#define ICRNL   0000400
-#define IXON    0002000
-#define IXOFF   0010000
-#define IXANY   0004000
+#define IGNBRK   0000001
+#define BRKINT   0000002
+#define IGNPAR   0000004
+#define PARMRK   0000010
+#define INPCK    0000020
+#define ISTRIP   0000040
+#define INLCR    0000100
+#define IGNCR    0000200
+#define ICRNL    0000400
+#define IXON     0002000
+#define IXOFF    0010000
+#define IXANY    0004000
 
-#define OPOST   0000001
-#define ONLCR   0000004
-#define OCRNL   0000010
-#define ONOCR   0000020
-#define ONLRET  0000040
+#define OPOST    0000001
+#define ONLCR    0000004
+#define OCRNL    0000010
+#define ONOCR    0000020
+#define ONLRET   0000040
 
-#define CS5     0000000
-#define CS6     0000020
-#define CS7     0000040
-#define CS8     0000060
-#define CSTOPB  0000100
-#define CREAD   0000200
-#define PARENB  0000400
-#define PARODD  0001000
-#define HUPCL   0002000
-#define CLOCAL  0004000
+#define CS5      0000000
+#define CS6      0000020
+#define CS7      0000040
+#define CS8      0000060
+#define CSTOPB   0000100
+#define CREAD    0000200
+#define PARENB   0000400
+#define PARODD   0001000
+#define HUPCL    0002000
+#define CLOCAL   0004000
 
-#define ECHO    0000010
-#define ECHOE   0000020
-#define ECHOK   0000040
-#define ECHONL  0000100
-#define ICANON  0000002
-#define IEXTEN  0100000
-#define ISIG    0000001
-#define NOFLSH  0000200
-#define TOSTOP  0000400
+#define ECHO     0000010
+#define ECHOE    0000020
+#define ECHOK    0000040
+#define ECHONL   0000100
+#define ICANON   0000002
+#define IEXTEN   0100000
+#define ISIG     0000001
+#define NOFLSH   0000200
+#define TOSTOP   0000400
 
 #define B0       0000000
 #define B9600    0000015
@@ -190,10 +190,10 @@ extern int tcsetattr(int fildes, int optional_actions,
 #define TCOFLUSH  1
 #define TCIOFLUSH 2
 
-#define TCOOFF 0
-#define TCOON  1
-#define TCIOFF 2
-#define TCION  3
+#define TCOOFF    0
+#define TCOON     1
+#define TCIOFF    2
+#define TCION     3
 
 extern speed_t cfgetispeed(const struct termios *termios_p);
 extern speed_t cfgetospeed(const struct termios *termios_p);

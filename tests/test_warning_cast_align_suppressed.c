@@ -2,9 +2,9 @@
 // CCCC_REJECT_STDERR: warning:
 
 int main(void) {
-    char buf[4] = {0};
-    char *cp = buf;
-    int *ip = (int *)cp;
+    char  buf[4] = {0};
+    char *cp     = buf;
+    int  *ip     = (int *)cp;
     (void)ip;
     return 42;
 }

@@ -45,7 +45,7 @@
 // https://github.com/rui314/chibicc/wiki/cpp.algo.pdf
 
 #include "./internal.h"
-#include <fenv.h> // host <fenv.h>, for init_fenv_macros() (#771)
+#include <fenv.h>  // host <fenv.h>, for init_fenv_macros() (#771)
 #include <errno.h> // host <errno.h>, for init_errno_macros() (#813)
 
 #define MAX_PP_NESTING 1000
@@ -53,56 +53,63 @@
 typedef struct MacroParam MacroParam;
 struct MacroParam {
     MacroParam *next;
-    char *name;
+    char       *name;
 };
 
 typedef struct MacroArg MacroArg;
 struct MacroArg {
     MacroArg *next;
-    char *name;
-    bool is_va_args;
-    Token *tok;
+    char     *name;
+    bool      is_va_args;
+    Token    *tok;
 };
 
 typedef Token *macro_handler_fn(VirtualMachine *, Token *);
 
 typedef struct Macro Macro;
 struct Macro {
-    char *name;
-    bool is_objlike; // Object-like or function-like
-    MacroParam *params;
-    char *va_args_name;
-    Token *body;
+    char             *name;
+    bool              is_objlike; // Object-like or function-like
+    MacroParam       *params;
+    char             *va_args_name;
+    Token            *body;
     macro_handler_fn *handler;
-    int use_count;    // number of times this macro has been expanded
+    int               use_count; // number of times this macro has been expanded
     Token *define_tok; // token at the #define site (the macro name token)
-    bool is_shared;    // #888: #define @shared NAME -- survives isolate_comptime_macros
+    bool   is_shared;  // #888: #define @shared NAME -- survives
+                       // isolate_comptime_macros
 };
 
 static Token *preprocess2(VirtualMachine *vm, Token *tok);
 static Macro *find_macro(VirtualMachine *vm, Token *tok);
 static bool probe_function_definition(Token *tok);
 static bool file_exists(char *path);
-static char *format_relative_path(VirtualMachine *vm, char *base_file, char *filename);
+static char *format_relative_path(VirtualMachine *vm, char *base_file,
+                                  char *filename);
 static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 
-static bool is_hash(Token *tok) { return tok->at_bol && equal(tok, "#"); }
+static bool is_hash(Token *tok) {
+    return tok->at_bol && equal(tok, "#");
+}
 
 static ComptimeCtxEntry *ctx_top(VirtualMachine *vm) {
     return vm->compiler.ctx_stack_len
-        ? &vm->compiler.ctx_stack[vm->compiler.ctx_stack_len - 1] : NULL;
+               ? &vm->compiler.ctx_stack[vm->compiler.ctx_stack_len - 1]
+               : NULL;
 }
 
 static void ctx_push(VirtualMachine *vm, ComptimeCtxType type, bool needs_end,
                      File *file, Token *open_tok) {
     if (vm->compiler.ctx_stack_len == vm->compiler.ctx_stack_cap) {
-        vm->compiler.ctx_stack_cap = vm->compiler.ctx_stack_cap ? vm->compiler.ctx_stack_cap * 2 : 4;
-        vm->compiler.ctx_stack = realloc(vm->compiler.ctx_stack,
-            vm->compiler.ctx_stack_cap * sizeof(ComptimeCtxEntry));
+        vm->compiler.ctx_stack_cap =
+            vm->compiler.ctx_stack_cap ? vm->compiler.ctx_stack_cap * 2 : 4;
+        vm->compiler.ctx_stack =
+            realloc(vm->compiler.ctx_stack,
+                    vm->compiler.ctx_stack_cap * sizeof(ComptimeCtxEntry));
     }
     vm->compiler.ctx_stack[vm->compiler.ctx_stack_len++] =
         (ComptimeCtxEntry){type, needs_end, file, open_tok};
@@ -117,8 +124,8 @@ static void ctx_pop(VirtualMachine *vm) {
 // suite_pop can truncate back without re-joining.  open_tok is saved to
 // produce a useful "unclosed suite begin" error pointing at the pragma line.
 static void suite_push(VirtualMachine *vm, const char *name, Token *open_tok) {
-    size_t prev = vm->compiler.current_suite
-                      ? strlen(vm->compiler.current_suite) : 0;
+    size_t prev =
+        vm->compiler.current_suite ? strlen(vm->compiler.current_suite) : 0;
     // Grow the entry-stack if needed.
     if (vm->compiler.suite_stack_len == vm->compiler.suite_stack_cap) {
         vm->compiler.suite_stack_cap =
@@ -126,16 +133,17 @@ static void suite_push(VirtualMachine *vm, const char *name, Token *open_tok) {
         vm->compiler.suite_len_stack =
             realloc(vm->compiler.suite_len_stack,
                     vm->compiler.suite_stack_cap *
-                    sizeof(*vm->compiler.suite_len_stack));
+                        sizeof(*vm->compiler.suite_len_stack));
     }
     vm->compiler.suite_len_stack[vm->compiler.suite_stack_len++] =
-        (struct SuiteLenEntry){ prev, open_tok };
+        (struct SuiteLenEntry){prev, open_tok};
     // Build new composite path: prev + "/" + name (or just name at depth 0).
     size_t namelen = strlen(name);
-    size_t sep     = prev ? 1 : 0;  // '/' separator needed when joining
+    size_t sep     = prev ? 1 : 0; // '/' separator needed when joining
     size_t need    = prev + sep + namelen + 1;
-    char *buf = realloc(vm->compiler.current_suite, need);
-    if (sep) buf[prev] = '/';
+    char  *buf     = realloc(vm->compiler.current_suite, need);
+    if (sep)
+        buf[prev] = '/';
     memcpy(buf + prev + sep, name, namelen + 1);
     vm->compiler.current_suite = buf;
 }
@@ -143,7 +151,8 @@ static void suite_push(VirtualMachine *vm, const char *name, Token *open_tok) {
 // Pop the innermost suite level, restoring current_suite to its previous path.
 // Must only be called when suite_stack_len > 0.
 static void suite_pop(VirtualMachine *vm) {
-    size_t prev = vm->compiler.suite_len_stack[--vm->compiler.suite_stack_len].prev_len;
+    size_t prev =
+        vm->compiler.suite_len_stack[--vm->compiler.suite_stack_len].prev_len;
     if (prev == 0) {
         // Popped back to top-level: no active suite.
         free(vm->compiler.current_suite);
@@ -159,11 +168,15 @@ static void suite_pop(VirtualMachine *vm) {
 // other (#283). Pushed/popped by TK_MACRO_SCOPE_PUSH/POP marker tokens
 // synthesized in build_combined_macro_tokens.
 static void macro_scope_push(VirtualMachine *vm, HashMap snap) {
-    if (vm->compiler.macro_scope_stack_len == vm->compiler.macro_scope_stack_cap) {
+    if (vm->compiler.macro_scope_stack_len ==
+        vm->compiler.macro_scope_stack_cap) {
         vm->compiler.macro_scope_stack_cap =
-            vm->compiler.macro_scope_stack_cap ? vm->compiler.macro_scope_stack_cap * 2 : 4;
-        vm->compiler.macro_scope_stack = realloc(vm->compiler.macro_scope_stack,
-            vm->compiler.macro_scope_stack_cap * sizeof(HashMap));
+            vm->compiler.macro_scope_stack_cap
+                ? vm->compiler.macro_scope_stack_cap * 2
+                : 4;
+        vm->compiler.macro_scope_stack =
+            realloc(vm->compiler.macro_scope_stack,
+                    vm->compiler.macro_scope_stack_cap * sizeof(HashMap));
     }
     vm->compiler.macro_scope_stack[vm->compiler.macro_scope_stack_len++] = snap;
 }
@@ -208,30 +221,31 @@ static char *copy_raw_directive_line(VirtualMachine *vm, Token *start) {
     return arena_strndup(vm, start->loc, end - start->loc);
 }
 
-static char *copy_routed_directive_line(VirtualMachine *vm, Token *hash, Token *route_start,
-                                        Token *route_end) {
+static char *copy_routed_directive_line(VirtualMachine *vm, Token *hash,
+                                        Token *route_start, Token *route_end) {
     (void)route_start;
     Token *directive = hash->next;
-    size_t cap = 64;
-    size_t len = 0;
-    char *line = arena_alloc(&vm->compiler.parser_arena, cap);
-#define APPEND_BYTES(ptr, n) do {                                      \
-        size_t need = len + (size_t)(n) + 1;                            \
-        if (need > cap) {                                               \
-            char *next = arena_alloc(&vm->compiler.parser_arena, need * 2); \
-            memcpy(next, line, len);                                    \
-            line = next;                                                \
-            cap = need * 2;                                             \
-        }                                                               \
-        memcpy(line + len, (ptr), (size_t)(n));                         \
-        len += (size_t)(n);                                             \
-        line[len] = '\0';                                               \
+    size_t cap       = 64;
+    size_t len       = 0;
+    char  *line      = arena_alloc(&vm->compiler.parser_arena, cap);
+#define APPEND_BYTES(ptr, n)                                                   \
+    do {                                                                       \
+        size_t need = len + (size_t)(n) + 1;                                   \
+        if (need > cap) {                                                      \
+            char *next = arena_alloc(&vm->compiler.parser_arena, need * 2);    \
+            memcpy(next, line, len);                                           \
+            line = next;                                                       \
+            cap  = need * 2;                                                   \
+        }                                                                      \
+        memcpy(line + len, (ptr), (size_t)(n));                                \
+        len       += (size_t)(n);                                              \
+        line[len]  = '\0';                                                     \
     } while (0)
     APPEND_BYTES("#", 1);
     APPEND_BYTES(directive->loc, directive->len);
     bool wrote_space = false;
     for (Token *t = route_end; t && t->kind != TK_EOF && !t->at_bol;
-         t = t->next) {
+         t        = t->next) {
         if (!wrote_space || t->has_space)
             APPEND_BYTES(" ", 1);
         APPEND_BYTES(t->loc, t->len);
@@ -258,8 +272,7 @@ static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         return false;
     Token *p = tok->next->next;
     if (!equal(p, "cccc") || !p->next || !equal(p->next, ":") ||
-        !p->next->next || !equal(p->next->next, ":") ||
-        !p->next->next->next)
+        !p->next->next || !equal(p->next->next, ":") || !p->next->next->next)
         return false;
     p = p->next->next->next;
     IncludeRoute r;
@@ -275,11 +288,11 @@ static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         r = INCLUDE_ROUTE_TEST;
     else
         return false;
-    if (!p->next || !equal(p->next, "]") ||
-        !p->next->next || !equal(p->next->next, "]"))
+    if (!p->next || !equal(p->next, "]") || !p->next->next ||
+        !equal(p->next->next, "]"))
         return false;
     *route = r;
-    *rest = p->next->next->next;
+    *rest  = p->next->next->next;
     return true;
 }
 
@@ -303,12 +316,11 @@ static bool is_at_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
 }
 
 static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
-    if (!equal(tok, "__attribute__") ||
-        !tok->next || !equal(tok->next, "(") ||
+    if (!equal(tok, "__attribute__") || !tok->next || !equal(tok->next, "(") ||
         !tok->next->next || !equal(tok->next->next, "(") ||
         !tok->next->next->next)
         return false;
-    Token *p = tok->next->next->next;
+    Token       *p = tok->next->next->next;
     IncludeRoute r;
     if (equal(p, "comptime"))
         r = INCLUDE_ROUTE_COMPTIME;
@@ -322,11 +334,11 @@ static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         r = INCLUDE_ROUTE_TEST;
     else
         return false;
-    if (!p->next || !equal(p->next, ")") ||
-        !p->next->next || !equal(p->next->next, ")"))
+    if (!p->next || !equal(p->next, ")") || !p->next->next ||
+        !equal(p->next->next, ")"))
         return false;
     *route = r;
-    *rest = p->next->next->next;
+    *rest  = p->next->next->next;
     return true;
 }
 
@@ -350,7 +362,10 @@ static bool is_private_header_tag(const char *filename) {
     if (!filename)
         return false;
     static const char *tags[] = {
-        "<implicit-reflection.h>", "<building.h>", "<testing.h>", "<quote>",
+        "<implicit-reflection.h>",
+        "<building.h>",
+        "<testing.h>",
+        "<quote>",
         NULL,
     };
     for (int i = 0; tags[i]; i++)
@@ -401,7 +416,8 @@ static bool file_is_cccc_only_closure(VirtualMachine *vm, const char *filename,
     hashmap_put(visited, filename, (void *)1);
     if (hashmap_get(&vm->compiler.cccc_only_files, filename))
         return true;
-    StringArray *children = hashmap_get(&vm->compiler.include_children, filename);
+    StringArray *children =
+        hashmap_get(&vm->compiler.include_children, filename);
     if (!children)
         return false;
     for (int i = 0; i < children->len; i++)
@@ -412,7 +428,7 @@ static bool file_is_cccc_only_closure(VirtualMachine *vm, const char *filename,
 
 bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename) {
     HashMap visited = {0};
-    bool result = file_is_cccc_only_closure(vm, filename, &visited);
+    bool    result  = file_is_cccc_only_closure(vm, filename, &visited);
     hashmap_deinit(&visited);
     return result;
 }
@@ -478,9 +494,11 @@ void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm) {
     hashmap_deinit(&vm->compiler.pragma_once);
     memset(&vm->compiler.pragma_once, 0, sizeof(vm->compiler.pragma_once));
     hashmap_deinit(&vm->compiler.include_guards);
-    memset(&vm->compiler.include_guards, 0, sizeof(vm->compiler.include_guards));
+    memset(&vm->compiler.include_guards, 0,
+           sizeof(vm->compiler.include_guards));
     hashmap_deinit(&vm->compiler.included_headers);
-    memset(&vm->compiler.included_headers, 0, sizeof(vm->compiler.included_headers));
+    memset(&vm->compiler.included_headers, 0,
+           sizeof(vm->compiler.included_headers));
     hashmap_deinit(&vm->compiler.guard_macros);
     memset(&vm->compiler.guard_macros, 0, sizeof(vm->compiler.guard_macros));
 
@@ -489,8 +507,8 @@ void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm) {
 
 static IncludeRoute read_include_route(Token **tok_ptr) {
     IncludeRoute route = INCLUDE_ROUTE_NORMAL;
-    Token *rest = NULL;
-    Token *tok = *tok_ptr;
+    Token       *rest  = NULL;
+    Token       *tok   = *tok_ptr;
     // Route attributes must appear on the same line as the directive. A token
     // with at_bol=true starts a new line and cannot be part of the current
     // directive — so it is never a route attribute. Without this guard,
@@ -512,30 +530,30 @@ static bool is_pragma_cccc(Token *hash) {
     return tok && equal(tok, "pragma") && equal(tok->next, "cccc");
 }
 
-
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *t = *tok;
-    t->next = NULL;
+    *t       = *tok;
+    t->next  = NULL;
     return t;
 }
 
 static Token *new_eof(VirtualMachine *vm, Token *tok) {
     Token *t = copy_token(vm, tok);
-    t->kind = TK_EOF;
-    t->len = 0;
+    t->kind  = TK_EOF;
+    t->len   = 0;
     return t;
 }
 
 // Extract a [[cccc::comptime]] / __attribute__((comptime)) function definition
-// and store it. Returns the token after the function definition (or original token on failure).
+// and store it. Returns the token after the function definition (or original
+// token on failure).
 static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
-                                     bool is_macro_entry,
+                                     bool  is_macro_entry,
                                      char *attribute_name) {
     // Expected format: <return_type> <function_name>(<params>) { <body> }
     // tok should be the first token of the function definition
 
-    Token *start = tok;
+    Token *start         = tok;
     Token *func_name_tok = NULL;
 
     // Skip to the function name: find identifier followed by '('
@@ -553,12 +571,12 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
         return start;
     }
 
-    bool is_variadic = false;
-    int fixed_param_count = 0;
+    bool is_variadic       = false;
+    int  fixed_param_count = 0;
     {
         Token *param_start = func_name_tok->next->next;
-        Token *param_end = func_name_tok->next;
-        int depth = 1;
+        Token *param_end   = func_name_tok->next;
+        int    depth       = 1;
         while (param_end && param_end->kind != TK_EOF) {
             param_end = param_end->next;
             if (equal(param_end, "("))
@@ -571,7 +589,8 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
         }
 
         if (!param_end || param_end->kind == TK_EOF) {
-            error_tok(vm, func_name_tok, "[[cccc::comptime]]: unterminated parameter list");
+            error_tok(vm, func_name_tok,
+                      "[[cccc::comptime]]: unterminated parameter list");
             return start;
         }
 
@@ -582,8 +601,8 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
                              param_start->next == param_end;
             if (!only_void) {
                 bool saw_segment_token = false;
-                int paren = 0;
-                int bracket = 0;
+                int  paren             = 0;
+                int  bracket           = 0;
                 for (Token *t = param_start; t && t != param_end; t = t->next) {
                     if (equal(t, "("))
                         paren++;
@@ -625,7 +644,7 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
 
     // Now find the opening brace of the function body
     int paren_depth = 0;
-    tok = func_name_tok->next; // Start at '('
+    tok             = func_name_tok->next; // Start at '('
 
     // Skip parameter list
     while (tok && tok->kind != TK_EOF) {
@@ -649,16 +668,15 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
         tok = tok->next;
 
     if (!equal(tok, "{")) {
-        error_tok(vm, start,
-                  "[[cccc::comptime]]: expected function body");
+        error_tok(vm, start, "[[cccc::comptime]]: expected function body");
         return start;
     }
 
     Token *body_start = start;
 
     // Find the closing brace (matching the opening brace)
-    int brace_depth = 0;
-    Token *body_end = tok;
+    int    brace_depth = 0;
+    Token *body_end    = tok;
     while (tok && tok->kind != TK_EOF) {
         if (equal(tok, "{"))
             brace_depth++;
@@ -673,10 +691,10 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
     }
 
     // Copy tokens from start to body_end
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
     for (Token *t = body_start; t != body_end && t->kind != TK_EOF;
-         t = t->next) {
+         t        = t->next) {
         cur = cur->next = copy_token(vm, t);
     }
     cur->next = new_eof(vm, body_end ? body_end : tok);
@@ -685,7 +703,8 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
     convert_pp_tokens(vm, head.next);
 
     // Detect void return type: check whether the return-type token is 'void'
-    // without a following '*' (which would be a void* pointer, not void return).
+    // without a following '*' (which would be a void* pointer, not void
+    // return).
     bool is_void_macro = false;
     {
         Token *t = start;
@@ -704,11 +723,13 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
     // handlers shipped under the same attribute name, and prevents duplicate
     // registrations when reflection.h's handlers are (re-)preprocessed.
     if (attribute_name) {
-        for (MacroFn *existing = vm->compiler.macro_fns; existing; existing = existing->next) {
+        for (MacroFn *existing = vm->compiler.macro_fns; existing;
+             existing          = existing->next) {
             if (existing->is_attribute_handler && existing->attribute_name &&
                 strcmp(existing->attribute_name, attribute_name) == 0) {
                 if (vm->debug_vm)
-                    printf("Skipping comptime function '%s' for attribute '%s' (already claimed by '%s')\n",
+                    printf("Skipping comptime function '%s' for attribute '%s' "
+                           "(already claimed by '%s')\n",
                            name, attribute_name, existing->name);
                 return body_end ? body_end : tok;
             }
@@ -716,26 +737,25 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
     }
 
     // Create MacroFn entry
-    MacroFn *pm =
-        arena_alloc(&vm->compiler.parser_arena, sizeof(MacroFn));
+    MacroFn *pm = arena_alloc(&vm->compiler.parser_arena, sizeof(MacroFn));
     memset(pm, 0, sizeof(MacroFn));
-    pm->name = name;
-    pm->body_tokens = head.next;
-    pm->compiled_fn = NULL;
-    pm->is_compiled = false;
-    pm->is_macro_entry = is_macro_entry;
-    pm->is_void_macro = is_void_macro;
-    pm->is_variadic = is_variadic;
+    pm->name                 = name;
+    pm->body_tokens          = head.next;
+    pm->compiled_fn          = NULL;
+    pm->is_compiled          = false;
+    pm->is_macro_entry       = is_macro_entry;
+    pm->is_void_macro        = is_void_macro;
+    pm->is_variadic          = is_variadic;
     pm->is_attribute_handler = attribute_name != NULL;
-    pm->attribute_name = attribute_name;
-    pm->fixed_param_count = fixed_param_count;
-    pm->next = vm->compiler.macro_fns;
-    vm->compiler.macro_fns = pm;
+    pm->attribute_name       = attribute_name;
+    pm->fixed_param_count    = fixed_param_count;
+    pm->next                 = vm->compiler.macro_fns;
+    vm->compiler.macro_fns   = pm;
 
     if (vm->debug_vm) {
         if (pm->is_attribute_handler)
-            printf("Captured comptime function '%s' for attribute '%s'\n",
-                   name, pm->attribute_name);
+            printf("Captured comptime function '%s' for attribute '%s'\n", name,
+                   pm->attribute_name);
         else
             printf("Captured comptime function '%s'\n", name);
     }
@@ -753,14 +773,18 @@ static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
     // Find the variable name: the last identifier before '=' or ';' at depth 0.
     char *name = NULL;
     {
-        Token *probe = tok;
-        Token *last_ident = NULL;
-        int brace_depth = 0, bracket_depth = 0;
+        Token *probe       = tok;
+        Token *last_ident  = NULL;
+        int    brace_depth = 0, bracket_depth = 0;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, "{")) brace_depth++;
-            else if (equal(probe, "}")) brace_depth--;
-            else if (equal(probe, "[")) bracket_depth++;
-            else if (equal(probe, "]")) bracket_depth--;
+            if (equal(probe, "{"))
+                brace_depth++;
+            else if (equal(probe, "}"))
+                brace_depth--;
+            else if (equal(probe, "["))
+                bracket_depth++;
+            else if (equal(probe, "]"))
+                bracket_depth--;
             else if (brace_depth == 0 && bracket_depth == 0) {
                 if (equal(probe, "=") || equal(probe, ";"))
                     break;
@@ -784,17 +808,21 @@ static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
     // Check for '*' at depth 0 before the variable name.
     {
         Token *probe = tok;
-        int depth = 0;
+        int    depth = 0;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, "{")) depth++;
-            else if (equal(probe, "}")) depth--;
+            if (equal(probe, "{"))
+                depth++;
+            else if (equal(probe, "}"))
+                depth--;
             else if (depth == 0) {
-                if (equal(probe, "=") || equal(probe, ";")) break;
+                if (equal(probe, "=") || equal(probe, ";"))
+                    break;
                 if (equal(probe, "*")) {
-                    error_tok(vm, probe,
-                              "__attribute__((comptime)): pointer/string variables "
-                              "are not supported yet (ticket #188 scope: "
-                              "int/float/struct only)");
+                    error_tok(
+                        vm, probe,
+                        "__attribute__((comptime)): pointer/string variables "
+                        "are not supported yet (ticket #188 scope: "
+                        "int/float/struct only)");
                     return start;
                 }
             }
@@ -803,14 +831,16 @@ static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
     }
 
     // Extract tokens up to and including the terminating ';'.
-    Token head = {};
-    Token *cur = &head;
+    Token  head     = {};
+    Token *cur      = &head;
     Token *body_end = NULL;
     {
         int brace_depth = 0;
         for (Token *t = start; t && t->kind != TK_EOF; t = t->next) {
-            if (equal(t, "{")) brace_depth++;
-            else if (equal(t, "}")) brace_depth--;
+            if (equal(t, "{"))
+                brace_depth++;
+            else if (equal(t, "}"))
+                brace_depth--;
             cur = cur->next = copy_token(vm, t);
             if (brace_depth == 0 && equal(t, ";")) {
                 body_end = t->next;
@@ -819,8 +849,9 @@ static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
         }
     }
     if (!body_end) {
-        error_tok(vm, start,
-                  "__attribute__((comptime)): variable declaration not terminated");
+        error_tok(
+            vm, start,
+            "__attribute__((comptime)): variable declaration not terminated");
         return start;
     }
     cur->next = new_eof(vm, body_end);
@@ -829,9 +860,9 @@ static Token *extract_comptime_var(VirtualMachine *vm, Token *tok) {
     ComptimeVar *cv =
         arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeVar));
     memset(cv, 0, sizeof(ComptimeVar));
-    cv->name = name;
-    cv->decl_tokens = head.next;
-    cv->next = vm->compiler.comptime_vars;
+    cv->name                   = name;
+    cv->decl_tokens            = head.next;
+    cv->next                   = vm->compiler.comptime_vars;
     vm->compiler.comptime_vars = cv;
 
     if (vm->debug_vm)
@@ -850,8 +881,8 @@ static Hideset *new_hideset(VirtualMachine *vm, char *name) {
 static bool hideset_contains(Hideset *hs, char *s, int len);
 
 static Hideset *hideset_union(VirtualMachine *vm, Hideset *hs1, Hideset *hs2) {
-    Hideset head = {};
-    Hideset *cur = &head;
+    Hideset  head = {};
+    Hideset *cur  = &head;
 
     for (; hs1; hs1 = hs1->next)
         if (!hideset_contains(head.next, hs1->name, strlen(hs1->name)))
@@ -869,9 +900,10 @@ static bool hideset_contains(Hideset *hs, char *s, int len) {
     return false;
 }
 
-static Hideset *hideset_intersection(VirtualMachine *vm, Hideset *hs1, Hideset *hs2) {
-    Hideset head = {};
-    Hideset *cur = &head;
+static Hideset *hideset_intersection(VirtualMachine *vm, Hideset *hs1,
+                                     Hideset *hs2) {
+    Hideset  head = {};
+    Hideset *cur  = &head;
 
     for (; hs1; hs1 = hs1->next)
         if (hideset_contains(hs2, hs1->name, strlen(hs1->name)))
@@ -880,11 +912,11 @@ static Hideset *hideset_intersection(VirtualMachine *vm, Hideset *hs1, Hideset *
 }
 
 static Token *add_hideset(VirtualMachine *vm, Token *tok, Hideset *hs) {
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     for (; tok; tok = tok->next) {
-        Token *t = copy_token(vm, tok);
+        Token *t   = copy_token(vm, tok);
         t->hideset = hideset_union(vm, t->hideset, hs);
         cur = cur->next = t;
     }
@@ -896,8 +928,8 @@ static Token *append(VirtualMachine *vm, Token *tok1, Token *tok2) {
     if (tok1->kind == TK_EOF)
         return tok2;
 
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     for (; tok1->kind != TK_EOF; tok1 = tok1->next)
         cur = cur->next = copy_token(vm, tok1);
@@ -956,7 +988,7 @@ static char *quote_string(VirtualMachine *vm, char *str) {
     char *buf = arena_alloc(&vm->compiler.parser_arena, bufsize);
     memset(buf, 0, bufsize);
     char *p = buf;
-    *p++ = '"';
+    *p++    = '"';
     for (int i = 0; str[i]; i++) {
         if (str[i] == '\\' || str[i] == '"')
             *p++ = '\\';
@@ -977,14 +1009,14 @@ static Token *new_str_token(VirtualMachine *vm, char *str, Token *tmpl) {
 // an EOF token and then returns them. This function is used to
 // create a new list of tokens for `#if` arguments.
 static Token *copy_line(VirtualMachine *vm, Token **rest, Token *tok) {
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     for (; !tok->at_bol; tok = tok->next)
         cur = cur->next = copy_token(vm, tok);
 
     cur->next = new_eof(vm, tok);
-    *rest = tok;
+    *rest     = tok;
     return head.next;
 }
 
@@ -995,28 +1027,28 @@ static Token *new_num_token(VirtualMachine *vm, int val, Token *tmpl) {
 }
 
 // Generate comma-separated token sequence from binary data
-static Token *generate_embed_tokens(VirtualMachine *vm, unsigned char *data, size_t size,
-                                    Token *tmpl) {
+static Token *generate_embed_tokens(VirtualMachine *vm, unsigned char *data,
+                                    size_t size, Token *tmpl) {
     if (size == 0)
         return NULL;
 
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     for (size_t i = 0; i < size; i++) {
         // Create numeric token for this byte
         Token *num_stream = new_num_token(vm, data[i], tmpl);
         // Only take the first token (the number), not EOF
         Token *num = copy_token(vm, num_stream);
-        num->next = NULL;
+        num->next  = NULL;
         cur = cur->next = num;
 
         // Add comma separator (except after last byte)
         if (i < size - 1) {
             Token *comma = copy_token(vm, tmpl);
-            comma->kind = TK_PUNCT;
-            comma->len = 1;
-            comma->loc = ",";
+            comma->kind  = TK_PUNCT;
+            comma->len   = 1;
+            comma->loc   = ",";
             cur = cur->next = comma;
         }
     }
@@ -1048,19 +1080,20 @@ static bool starts_with_comma(Token *tok) {
 // Helper: Create a comma token
 static Token *make_comma_token(VirtualMachine *vm, Token *tmpl) {
     Token *comma = copy_token(vm, tmpl);
-    comma->kind = TK_PUNCT;
-    comma->len = 1;
-    comma->loc = ",";
-    comma->next = NULL;
+    comma->kind  = TK_PUNCT;
+    comma->len   = 1;
+    comma->loc   = ",";
+    comma->next  = NULL;
     return comma;
 }
 
 // Helper: Append tokens to current position, updating file/line info
-static Token *append_tokens(VirtualMachine *vm, Token *cur, Token *tokens, Token *tmpl) {
+static Token *append_tokens(VirtualMachine *vm, Token *cur, Token *tokens,
+                            Token *tmpl) {
     for (Token *t = tokens; t; t = t->next) {
         Token *copy = copy_token(vm, t);
         if (tmpl) {
-            copy->file = tmpl->file;
+            copy->file    = tmpl->file;
             copy->line_no = tmpl->line_no;
         }
         copy->next = NULL;
@@ -1074,7 +1107,7 @@ static char *escape_c_string(VirtualMachine *vm, const char *s) {
     for (const char *p = s; *p; p++)
         len += (*p == '\\' || *p == '"') ? 2 : 1;
     char *out = arena_alloc(&vm->compiler.parser_arena, len + 1);
-    char *q = out;
+    char *q   = out;
     for (const char *p = s; *p; p++) {
         if (*p == '\\' || *p == '"')
             *q++ = '\\';
@@ -1084,16 +1117,16 @@ static char *escape_c_string(VirtualMachine *vm, const char *s) {
     return out;
 }
 
-static Token *append_emit_marker_tokens(VirtualMachine *vm, Token *cur, Token *tmpl,
-                                        char *line) {
-    char *escaped = escape_c_string(vm, line);
-    char *src = arena_format(vm, "__builtin_emit_line__(\"%s\");\n", escaped);
+static Token *append_emit_marker_tokens(VirtualMachine *vm, Token *cur,
+                                        Token *tmpl, char *line) {
+    char  *escaped = escape_c_string(vm, line);
+    char  *src = arena_format(vm, "__builtin_emit_line__(\"%s\");\n", escaped);
     Token *tokens = tokenize_string(vm, "<cccc-emit>", src);
     for (Token *t = tokens; t && t->kind != TK_EOF; t = t->next) {
-        Token *copy = copy_token(vm, t);
-        copy->file = tmpl->file;
+        Token *copy   = copy_token(vm, t);
+        copy->file    = tmpl->file;
         copy->line_no = tmpl->line_no;
-        copy->next = NULL;
+        copy->next    = NULL;
         cur = cur->next = copy;
     }
     return cur;
@@ -1104,19 +1137,18 @@ static Token *copy_token_list(VirtualMachine *vm, Token *tokens, Token *tmpl) {
     if (!tokens)
         return NULL;
 
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
-    cur = append_tokens(vm, cur, tokens, tmpl);
+    cur         = append_tokens(vm, cur, tokens, tmpl);
 
     return head.next;
 }
 
 // Generate #embed tokens with prefix, suffix, and if_empty support
-static Token *
-generate_embed_tokens_with_params(VirtualMachine *vm, unsigned char *data, size_t size,
-                                  Token *prefix_tokens, Token *suffix_tokens,
-                                  Token *if_empty_tokens, Token *tmpl) {
+static Token *generate_embed_tokens_with_params(
+    VirtualMachine *vm, unsigned char *data, size_t size, Token *prefix_tokens,
+    Token *suffix_tokens, Token *if_empty_tokens, Token *tmpl) {
     // If empty, use if_empty tokens (ignore prefix/suffix)
     if (size == 0) {
         return if_empty_tokens ? copy_token_list(vm, if_empty_tokens, tmpl)
@@ -1124,8 +1156,8 @@ generate_embed_tokens_with_params(VirtualMachine *vm, unsigned char *data, size_
     }
 
     // Non-empty: assemble prefix + bytes + suffix
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     // Add prefix tokens
     if (prefix_tokens) {
@@ -1164,31 +1196,33 @@ static bool consume_pp_name(VirtualMachine *vm, Token **rest, Token *tok,
         return false;
 
     Token *first = tok;
-    tok = tok->next;
+    tok          = tok->next;
 
     if (equal(tok, "::") || (equal(tok, ":") && equal(tok->next, ":"))) {
         tok = equal(tok, "::") ? tok->next : tok->next->next;
         if (tok->kind != TK_IDENT)
             error_tok(vm, tok, "expected identifier after '::'");
         *vendor = arena_strndup(vm, first->loc, first->len);
-        *name = arena_strndup(vm, tok->loc, tok->len);
-        *rest = tok->next;
+        *name   = arena_strndup(vm, tok->loc, tok->len);
+        *rest   = tok->next;
         return true;
     }
 
     *vendor = NULL;
-    *name = arena_strndup(vm, first->loc, first->len);
-    *rest = tok;
+    *name   = arena_strndup(vm, first->loc, first->len);
+    *rest   = tok;
     return true;
 }
 
-static char *resolve_include_probe(VirtualMachine *vm, Token *start, char *filename,
-                                   int filename_len, bool is_dquote) {
+static char *resolve_include_probe(VirtualMachine *vm, Token *start,
+                                   char *filename, int filename_len,
+                                   bool is_dquote) {
     if (filename[0] == '/')
         return filename;
 
     if (is_dquote) {
-        char *relative_path = format_relative_path(vm, start->file->name, filename);
+        char *relative_path =
+            format_relative_path(vm, start->file->name, filename);
         if (file_exists(relative_path))
             return relative_path;
     }
@@ -1203,17 +1237,17 @@ static char *resolve_include_probe(VirtualMachine *vm, Token *start, char *filen
 
 static int eval_has_include(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    tok = skip(vm, tok->next, "(");
+    tok          = skip(vm, tok->next, "(");
 
-    bool is_dquote;
-    int filename_len;
+    bool  is_dquote;
+    int   filename_len;
     char *filename =
         read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
-    tok = skip(vm, tok, ")");
+    tok   = skip(vm, tok, ")");
     *rest = tok;
 
-    char *path = resolve_include_probe(vm, start, filename, filename_len,
-                                       is_dquote);
+    char *path =
+        resolve_include_probe(vm, start, filename, filename_len, is_dquote);
     return path && file_exists(path);
 }
 
@@ -1234,61 +1268,66 @@ static bool is_has_feature_supported(VirtualMachine *vm, char *name) {
 }
 
 typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
-typedef struct { const char *name; AttrCategory cat; bool has_attr; long date; } AttrInfo;
+typedef struct {
+    const char  *name;
+    AttrCategory cat;
+    bool         has_attr;
+    long         date;
+} AttrInfo;
 
 static const AttrInfo known_attrs[] = {
     // CCCC-specific (cccc:: scoped) — vendor attrs report 1, not a date
-    {"comptime",      ATTR_CCCC, true,  1},
-    {"emit",          ATTR_CCCC, true,  1},
-    {"optimize",      ATTR_CCCC, true,  1},
-    {"test",          ATTR_CCCC, true,  1},
-    {"test_setup",    ATTR_CCCC, true,  1},
-    {"test_teardown", ATTR_CCCC, true,  1},
+    {"comptime", ATTR_CCCC, true, 1},
+    {"emit", ATTR_CCCC, true, 1},
+    {"optimize", ATTR_CCCC, true, 1},
+    {"test", ATTR_CCCC, true, 1},
+    {"test_setup", ATTR_CCCC, true, 1},
+    {"test_teardown", ATTR_CCCC, true, 1},
     // Checked C-style checked-pointer attributes (#770/#482-484). Only
     // meaningful in post-'*' qualifier position (see pointers() in parse.c);
     // listed here so @single/@array/... route to [[cccc::...]] instead of
     // __attribute__((...)) and __has_c_attribute(cccc::array) etc. work.
-    {"single",     ATTR_CCCC, true, 1},
-    {"array",      ATTR_CCCC, true, 1},
-    {"ntarray",    ATTR_CCCC, true, 1},
-    {"count",      ATTR_CCCC, true, 1},
+    {"single", ATTR_CCCC, true, 1},
+    {"array", ATTR_CCCC, true, 1},
+    {"ntarray", ATTR_CCCC, true, 1},
+    {"count", ATTR_CCCC, true, 1},
     {"byte_count", ATTR_CCCC, true, 1},
-    {"bounds",     ATTR_CCCC, true, 1},
+    {"bounds", ATTR_CCCC, true, 1},
     // Macro standard library attribute handlers (ticket #235)
-    {"serialize",            ATTR_CCCC, true,  1},
-    {"deserialize",          ATTR_CCCC, true,  1},
-    {"enum_to_string",       ATTR_CCCC, true,  1},
-    {"enum_from_string",     ATTR_CCCC, true,  1},
-    {"generate_getters",     ATTR_CCCC, true,  1},
-    {"generate_setters",     ATTR_CCCC, true,  1},
-    {"generate_constructor", ATTR_CCCC, true,  1},
+    {"serialize", ATTR_CCCC, true, 1},
+    {"deserialize", ATTR_CCCC, true, 1},
+    {"enum_to_string", ATTR_CCCC, true, 1},
+    {"enum_from_string", ATTR_CCCC, true, 1},
+    {"generate_getters", ATTR_CCCC, true, 1},
+    {"generate_setters", ATTR_CCCC, true, 1},
+    {"generate_constructor", ATTR_CCCC, true, 1},
     // Standard C23 ([[name]]) — return C23 version date per N3220 §6.10.10.2
-    {"maybe_unused",      ATTR_STD, false, 202311L},
-    {"deprecated",        ATTR_STD, true,  202311L},
-    {"noreturn",          ATTR_STD, true,  202311L},
-    {"nodiscard",         ATTR_STD, false, 202311L},
+    {"maybe_unused", ATTR_STD, false, 202311L},
+    {"deprecated", ATTR_STD, true, 202311L},
+    {"noreturn", ATTR_STD, true, 202311L},
+    {"nodiscard", ATTR_STD, false, 202311L},
     // fallthrough has a GNU __attribute__ form with real compiler semantics
     // (matches GCC/Clang __has_attribute), so has_attr=true here even though
     // it's listed under the C23 std table for __has_c_attribute's date value.
-    {"fallthrough",       ATTR_STD, true,  202311L},
+    {"fallthrough", ATTR_STD, true, 202311L},
     {"no_unique_address", ATTR_STD, false, 202311L},
     // GNU-only (__attribute__((name)))
-    {"aligned",          ATTR_GNU, true,  0},
-    {"packed",           ATTR_GNU, true,  0},
-    {"unused",           ATTR_GNU, true,  0},
-    {"__unused__",       ATTR_GNU, true,  0},
-    {"__deprecated__",   ATTR_GNU, true,  0},
-    {"format",           ATTR_GNU, true,  0},
+    {"aligned", ATTR_GNU, true, 0},
+    {"packed", ATTR_GNU, true, 0},
+    {"unused", ATTR_GNU, true, 0},
+    {"__unused__", ATTR_GNU, true, 0},
+    {"__deprecated__", ATTR_GNU, true, 0},
+    {"format", ATTR_GNU, true, 0},
     // Genuinely-implemented GNU attributes with real compiler semantics
     // (ticket #681) — these were missing from this table despite being
     // fully handled in src/parse.c, so __has_attribute wrongly reported 0.
-    {"cleanup",            ATTR_GNU, true, 0},
-    {"error",              ATTR_GNU, true, 0},
-    {"warning",            ATTR_GNU, true, 0},
-    {"nonnull",            ATTR_GNU, true, 0},
-    {"returns_nonnull",    ATTR_GNU, true, 0},
-    {"pure",               ATTR_GNU, true, 0},
-    {"const",              ATTR_GNU, true, 0},
+    {"cleanup", ATTR_GNU, true, 0},
+    {"error", ATTR_GNU, true, 0},
+    {"warning", ATTR_GNU, true, 0},
+    {"nonnull", ATTR_GNU, true, 0},
+    {"returns_nonnull", ATTR_GNU, true, 0},
+    {"pure", ATTR_GNU, true, 0},
+    {"const", ATTR_GNU, true, 0},
     {"warn_unused_result", ATTR_GNU, true, 0},
     // Recognized but architecturally inert (ticket #657): no ELF/Mach-O
     // output, no linker, no per-function ISA codegen, no inliner, no
@@ -1296,22 +1335,22 @@ static const AttrInfo known_attrs[] = {
     // optimizer, no machine-mode type system. Parsed and ignored via the
     // generic attribute fallback (src/parse.c), but reported as
     // recognized so __has_attribute matches real GCC/Clang.
-    {"visibility",       ATTR_GNU, true,  0},
-    {"section",          ATTR_GNU, true,  0},
-    {"weak",             ATTR_GNU, true,  0},
-    {"alias",            ATTR_GNU, true,  0},
-    {"target",           ATTR_GNU, true,  0},
-    {"always_inline",    ATTR_GNU, true,  0},
-    {"noinline",         ATTR_GNU, true,  0},
-    {"flatten",          ATTR_GNU, true,  0},
-    {"cold",             ATTR_GNU, true,  0},
-    {"hot",              ATTR_GNU, true,  0},
-    {"used",             ATTR_GNU, true,  0},
-    {"may_alias",        ATTR_GNU, true,  0},
-    {"mode",             ATTR_GNU, true,  0},
+    {"visibility", ATTR_GNU, true, 0},
+    {"section", ATTR_GNU, true, 0},
+    {"weak", ATTR_GNU, true, 0},
+    {"alias", ATTR_GNU, true, 0},
+    {"target", ATTR_GNU, true, 0},
+    {"always_inline", ATTR_GNU, true, 0},
+    {"noinline", ATTR_GNU, true, 0},
+    {"flatten", ATTR_GNU, true, 0},
+    {"cold", ATTR_GNU, true, 0},
+    {"hot", ATTR_GNU, true, 0},
+    {"used", ATTR_GNU, true, 0},
+    {"may_alias", ATTR_GNU, true, 0},
+    {"mode", ATTR_GNU, true, 0},
     {"transparent_union", ATTR_GNU, true, 0},
-    {"constructor",      ATTR_GNU, true,  0},
-    {"destructor",       ATTR_GNU, true,  0},
+    {"constructor", ATTR_GNU, true, 0},
+    {"destructor", ATTR_GNU, true, 0},
     {NULL, 0, false, 0},
 };
 
@@ -1327,7 +1366,7 @@ static const AttrInfo *find_attr_info(char *name) {
     size_t len = strlen(name);
     if (len >= 5 && len < 64 && name[0] == '_' && name[1] == '_' &&
         name[len - 1] == '_' && name[len - 2] == '_') {
-        char inner[64];
+        char   inner[64];
         size_t inner_len = len - 4;
         memcpy(inner, name + 2, inner_len);
         inner[inner_len] = '\0';
@@ -1413,13 +1452,17 @@ static bool is_has_builtin_supported(char *name) {
 
 static long is_has_c_attribute_supported(char *vendor, char *name) {
     const AttrInfo *a = find_attr_info(name);
-    if (!a) return 0;
-    if (!vendor) return (a->cat == ATTR_STD) ? a->date : 0;
-    if (!strcmp(vendor, "cccc")) return (a->cat == ATTR_CCCC) ? a->date : 0;
+    if (!a)
+        return 0;
+    if (!vendor)
+        return (a->cat == ATTR_STD) ? a->date : 0;
+    if (!strcmp(vendor, "cccc"))
+        return (a->cat == ATTR_CCCC) ? a->date : 0;
     return 0;
 }
 
-static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok, char *kind) {
+static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
+                         char *kind) {
     tok = skip(vm, tok->next, "(");
 
     char *vendor;
@@ -1434,10 +1477,10 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok, char *kin
         if (tok->kind != TK_IDENT)
             error_tok(vm, tok, "expected vendor identifier");
         vendor = arena_strndup(vm, tok->loc, tok->len);
-        tok = tok->next;
+        tok    = tok->next;
     }
 
-    tok = skip(vm, tok, ")");
+    tok   = skip(vm, tok, ")");
     *rest = tok;
 
     if (!strcmp(kind, "__has_feature") || !strcmp(kind, "__has_extension"))
@@ -1452,22 +1495,23 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok, char *kin
 }
 
 static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
-    tok = copy_line(vm, rest, tok);
+    tok         = copy_line(vm, rest, tok);
 
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     while (tok->kind != TK_EOF) {
         // "defined(foo)" or "defined foo" becomes "1" if macro "foo"
         // is defined. Otherwise "0".
         if (equal(tok, "defined")) {
-            Token *start = tok;
-            bool has_paren = consume(vm, &tok, tok->next, "(");
+            Token *start     = tok;
+            bool   has_paren = consume(vm, &tok, tok->next, "(");
 
             if (tok->kind != TK_IDENT)
                 error_tok(vm, start, "macro name must be an identifier");
             Macro *m = find_macro(vm, tok);
-            if (m) m->use_count++;
+            if (m)
+                m->use_count++;
             tok = tok->next;
 
             if (has_paren)
@@ -1478,8 +1522,8 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok, "__has_include")) {
-            Token *start = tok;
-            int result = eval_has_include(vm, &tok, tok);
+            Token *start  = tok;
+            int    result = eval_has_include(vm, &tok, tok);
             cur = cur->next = new_num_token(vm, result, start);
             continue;
         }
@@ -1488,9 +1532,9 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
             equal(tok, "__has_attribute") || equal(tok, "__has_builtin") ||
             equal(tok, "__has_c_attribute") ||
             equal(tok, "__has_cpp_attribute")) {
-            Token *start = tok;
-            char *kind = arena_strndup(vm, tok->loc, tok->len);
-            int result = eval_has_name(vm, &tok, tok, kind);
+            Token *start  = tok;
+            char  *kind   = arena_strndup(vm, tok->loc, tok->len);
+            int    result = eval_has_name(vm, &tok, tok, kind);
             cur = cur->next = new_num_token(vm, result, start);
             continue;
         }
@@ -1499,15 +1543,15 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
         // (empty)
         if (equal(tok, "__has_embed")) {
             Token *start = tok;
-            tok = skip(vm, tok->next, "(");
+            tok          = skip(vm, tok->next, "(");
 
             // Parse filename
-            bool is_dquote;
-            int filename_len;
+            bool  is_dquote;
+            int   filename_len;
             char *filename =
                 read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
 
-            tok = skip(vm, tok, ")");
+            tok        = skip(vm, tok, ")");
 
             char *path = resolve_include_probe(vm, start, filename,
                                                filename_len, is_dquote);
@@ -1515,7 +1559,7 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
             // Determine result: 0 = not found, 1 = non-empty, 2 = empty
             int result = 0;
             if (path && file_exists(path)) {
-                size_t file_size;
+                size_t         file_size;
                 unsigned char *data = read_binary_file(vm, path, &file_size);
                 if (data) {
                     result = (file_size == 0) ? 2 : 1;
@@ -1527,7 +1571,7 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         cur = cur->next = tok;
-        tok = tok->next;
+        tok             = tok->next;
     }
 
     cur->next = tok;
@@ -1537,16 +1581,16 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
 // Read and evaluate a constant expression.
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    Token *expr = read_const_expr(vm, rest, tok->next);
+    Token *expr  = read_const_expr(vm, rest, tok->next);
     // #889: defined(...) / __has_include(...) inside expr are rewritten by
     // read_const_expr into synthetic tokens minted via new_num_token(), which
     // allocates a fresh File*. The recursive preprocess2() below must not let
     // comptime/emit block interception see those tokens as "the block's file
     // changed" and auto-close an open block -- bump the depth counter so
     // those interception sites stand down for the duration of this call.
-    int saved_depth = vm->compiler.pp_const_expr_depth;
+    int saved_depth                  = vm->compiler.pp_const_expr_depth;
     vm->compiler.pp_const_expr_depth = saved_depth + 1;
-    expr = preprocess2(vm, expr);
+    expr                             = preprocess2(vm, expr);
     vm->compiler.pp_const_expr_depth = saved_depth;
 
     if (expr->kind == TK_EOF)
@@ -1567,17 +1611,17 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(t, "true")) {
             // C23 §6.10.1: true → pp-number 1
             Token *next = t->next;
-            *t = *new_num_token(vm, 1, t);
-            t->next = next;
+            *t          = *new_num_token(vm, 1, t);
+            t->next     = next;
         } else if (equal(t, "false")) {
             // C23 §6.10.1: false → pp-number 0
             Token *next = t->next;
-            *t = *new_num_token(vm, 0, t);
-            t->next = next;
+            *t          = *new_num_token(vm, 0, t);
+            t->next     = next;
         } else if (t->kind == TK_IDENT) {
             Token *next = t->next;
-            *t = *new_num_token(vm, 0, t);
-            t->next = next;
+            *t          = *new_num_token(vm, 0, t);
+            t->next     = next;
         }
     }
 
@@ -1585,7 +1629,7 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     convert_pp_tokens(vm, expr);
 
     Token *rest2;
-    long val = const_expr(vm, &rest2, expr);
+    long   val = const_expr(vm, &rest2, expr);
     if (rest2->kind != TK_EOF)
         error_tok(vm, rest2, "extra tokens after #if expression");
     return val;
@@ -1594,10 +1638,10 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
 static CondIncl *push_cond_incl(VirtualMachine *vm, Token *tok, bool included) {
     CondIncl *ci = arena_alloc(&vm->compiler.parser_arena, sizeof(CondIncl));
     memset(ci, 0, sizeof(CondIncl));
-    ci->next = vm->compiler.cond_incl;
-    ci->ctx = IN_THEN;
-    ci->tok = tok;
-    ci->included = included;
+    ci->next               = vm->compiler.cond_incl;
+    ci->ctx                = IN_THEN;
+    ci->tok                = tok;
+    ci->included           = included;
     vm->compiler.cond_incl = ci;
     return ci;
 }
@@ -1624,22 +1668,22 @@ bool cc_is_source_define_name(VirtualMachine *vm, const char *name, int len) {
     return m && m->define_tok != NULL;
 }
 
-static Macro *add_macro(VirtualMachine *vm, char *name, int name_len, bool is_objlike,
-                        Token *body, Token *define_tok) {
+static Macro *add_macro(VirtualMachine *vm, char *name, int name_len,
+                        bool is_objlike, Token *body, Token *define_tok) {
     Macro *m = arena_alloc(&vm->compiler.parser_arena, sizeof(Macro));
     memset(m, 0, sizeof(Macro));
-    m->name = name;
+    m->name       = name;
     m->is_objlike = is_objlike;
-    m->body = body;
+    m->body       = body;
     m->define_tok = define_tok;
     hashmap_put2(&vm->compiler.macros, name, name_len, m);
     return m;
 }
 
-static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest, Token *tok,
-                                     char **va_args_name) {
-    MacroParam head = {};
-    MacroParam *cur = &head;
+static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest,
+                                     Token *tok, char **va_args_name) {
+    MacroParam  head = {};
+    MacroParam *cur  = &head;
 
     while (!equal(tok, ")")) {
         if (cur != &head)
@@ -1647,7 +1691,7 @@ static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest, Token *to
 
         if (equal(tok, "...")) {
             *va_args_name = "__VA_ARGS__";
-            *rest = skip(vm, tok->next, ")");
+            *rest         = skip(vm, tok->next, ")");
             return head.next;
         }
 
@@ -1656,7 +1700,7 @@ static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest, Token *to
 
         if (equal(tok->next, "...")) {
             *va_args_name = arena_strndup(vm, tok->loc, tok->len);
-            *rest = skip(vm, tok->next->next, ")");
+            *rest         = skip(vm, tok->next->next, ")");
             return head.next;
         }
 
@@ -1665,56 +1709,59 @@ static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest, Token *to
         memset(m, 0, sizeof(MacroParam));
         m->name = arena_strndup(vm, tok->loc, tok->len);
         cur = cur->next = m;
-        tok = tok->next;
+        tok             = tok->next;
     }
 
     *rest = tok->next;
     return head.next;
 }
 
-static void read_macro_definition(VirtualMachine *vm, Token **rest, Token *tok) {
+static void read_macro_definition(VirtualMachine *vm, Token **rest,
+                                  Token *tok) {
     // #888: #define @shared NAME ... opts this one macro into visibility
     // during the isolated comptime preprocessing pass (isolate_comptime_macros
     // keeps entries with is_shared set even though define_tok != NULL). Any
     // other route attribute on #define is rejected by the caller before this
     // function is reached, so the only route possible here is SHARED or NORMAL.
-    bool is_shared = false;
-    Token *route_rest = tok;
-    IncludeRoute route = read_include_route(&route_rest);
+    bool         is_shared  = false;
+    Token       *route_rest = tok;
+    IncludeRoute route      = read_include_route(&route_rest);
     if (route == INCLUDE_ROUTE_SHARED) {
         is_shared = true;
-        tok = route_rest;
+        tok       = route_rest;
     }
 
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "macro name must be an identifier");
-    char *name = arena_strndup(vm, tok->loc, tok->len);
-    int name_len = tok->len; // Save name length before moving tok
-    Token *name_tok = tok;   // Save for define_tok
-    tok = tok->next;
+    char  *name     = arena_strndup(vm, tok->loc, tok->len);
+    int    name_len = tok->len; // Save name length before moving tok
+    Token *name_tok = tok;      // Save for define_tok
+    tok             = tok->next;
 
     Macro *m;
     if (!tok->has_space && equal(tok, "(")) {
         // Function-like macro
-        char *va_args_name = NULL;
+        char       *va_args_name = NULL;
         MacroParam *params =
             read_macro_params(vm, &tok, tok->next, &va_args_name);
 
-        m = add_macro(vm, name, name_len, false, copy_line(vm, rest, tok), name_tok);
-        m->params = params;
+        m = add_macro(vm, name, name_len, false, copy_line(vm, rest, tok),
+                      name_tok);
+        m->params       = params;
         m->va_args_name = va_args_name;
     } else {
         // Object-like macro
-        m = add_macro(vm, name, name_len, true, copy_line(vm, rest, tok), name_tok);
+        m = add_macro(vm, name, name_len, true, copy_line(vm, rest, tok),
+                      name_tok);
     }
     m->is_shared = is_shared;
 }
 
-static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest, Token *tok,
-                                    bool read_rest) {
-    Token head = {};
-    Token *cur = &head;
-    int level = 0;
+static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest,
+                                    Token *tok, bool read_rest) {
+    Token  head  = {};
+    Token *cur   = &head;
+    int    level = 0;
 
     for (;;) {
         if (level == 0 && equal(tok, ")"))
@@ -1731,32 +1778,32 @@ static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest, Token *tok
             level--;
 
         cur = cur->next = copy_token(vm, tok);
-        tok = tok->next;
+        tok             = tok->next;
     }
 
-    cur->next = new_eof(vm, tok);
+    cur->next     = new_eof(vm, tok);
 
     MacroArg *arg = arena_alloc(&vm->compiler.parser_arena, sizeof(MacroArg));
     memset(arg, 0, sizeof(MacroArg));
     arg->tok = head.next;
-    *rest = tok;
+    *rest    = tok;
     return arg;
 }
 
 static MacroArg *read_macro_args(VirtualMachine *vm, Token **rest, Token *tok,
                                  MacroParam *params, char *va_args_name) {
-    Token *start = tok;
-    tok = tok->next->next;
+    Token *start     = tok;
+    tok              = tok->next->next;
 
-    MacroArg head = {};
-    MacroArg *cur = &head;
+    MacroArg    head = {};
+    MacroArg   *cur  = &head;
 
-    MacroParam *pp = params;
+    MacroParam *pp   = params;
     for (; pp; pp = pp->next) {
         if (cur != &head)
             tok = skip(vm, tok, ",");
         cur = cur->next = read_macro_arg_one(vm, &tok, tok, false);
-        cur->name = pp->name;
+        cur->name       = pp->name;
     }
 
     if (va_args_name) {
@@ -1775,8 +1822,8 @@ static MacroArg *read_macro_args(VirtualMachine *vm, Token **rest, Token *tok,
         arg->is_va_args = true;
         cur = cur->next = arg;
     } else if (pp) {
-        error_tok(vm, start, "too many arguments to macro '%.*s'",
-                  start->len, start->loc);
+        error_tok(vm, start, "too many arguments to macro '%.*s'", start->len,
+                  start->loc);
     }
 
     skip(vm, tok, ")");
@@ -1793,7 +1840,8 @@ static MacroArg *find_arg(MacroArg *args, Token *tok) {
 }
 
 // Concatenates all tokens in `tok` and returns a new string.
-static char *join_tokens(VirtualMachine *vm, Token *tok, Token *end, int *out_len) {
+static char *join_tokens(VirtualMachine *vm, Token *tok, Token *end,
+                         int *out_len) {
     // Compute the length of the resulting token.
     int len = 1;
     for (Token *t = tok; t != end && t->kind != TK_EOF; t = t->next) {
@@ -1852,8 +1900,8 @@ static bool has_varargs(MacroArg *args) {
 
 // Replace func-like macro parameters with given arguments.
 static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     while (tok->kind != TK_EOF) {
         // "#" followed by a parameter is replaced with stringized actuals.
@@ -1863,7 +1911,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                 error_tok(vm, tok->next,
                           "'#' is not followed by a macro parameter");
             cur = cur->next = stringize(vm, tok, arg->tok);
-            tok = tok->next->next;
+            tok             = tok->next->next;
             continue;
         }
 
@@ -1877,7 +1925,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                     tok = tok->next->next->next;
                 } else {
                     cur = cur->next = copy_token(vm, tok);
-                    tok = tok->next->next;
+                    tok             = tok->next->next;
                 }
                 continue;
             }
@@ -1897,7 +1945,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                 if (arg->tok->kind != TK_EOF) {
                     *cur = *paste(vm, cur, arg->tok);
                     for (Token *t = arg->tok->next; t->kind != TK_EOF;
-                         t = t->next)
+                         t        = t->next)
                         cur = cur->next = copy_token(vm, t);
                 }
                 tok = tok->next->next;
@@ -1905,7 +1953,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
             }
 
             *cur = *paste(vm, cur, tok->next);
-            tok = tok->next->next;
+            tok  = tok->next->next;
             continue;
         }
 
@@ -1944,7 +1992,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                         // Expand and copy the parameter's tokens
                         Token *expanded = preprocess2(vm, a->tok);
                         for (Token *e = expanded; e->kind != TK_EOF;
-                             e = e->next)
+                             e        = e->next)
                             cur = cur->next = copy_token(vm, e);
                     } else {
                         // Not a parameter, just copy the token
@@ -1959,11 +2007,11 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
         // Handle a macro token. Macro arguments are completely macro-expanded
         // before they are substituted into a macro body.
         if (arg) {
-            Token *t = preprocess2(vm, arg->tok);
-            t->at_bol = tok->at_bol;
+            Token *t     = preprocess2(vm, arg->tok);
+            t->at_bol    = tok->at_bol;
             t->has_space = tok->has_space;
             for (; t->kind != TK_EOF; t = t->next) {
-                Token *c = copy_token(vm, t);
+                Token *c   = copy_token(vm, t);
                 c->hideset = NULL;
                 cur = cur->next = c;
             }
@@ -1973,7 +2021,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
 
         // Handle a non-macro token.
         cur = cur->next = copy_token(vm, tok);
-        tok = tok->next;
+        tok             = tok->next;
         continue;
     }
 
@@ -1995,7 +2043,7 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // Built-in dynamic macro application such as __LINE__
     if (m->handler) {
-        *rest = m->handler(vm, tok);
+        *rest         = m->handler(vm, tok);
         (*rest)->next = tok->next;
         return true;
     }
@@ -2003,11 +2051,11 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     // Object-like macro application
     if (m->is_objlike) {
         Hideset *hs = hideset_union(vm, tok->hideset, new_hideset(vm, m->name));
-        Token *body = add_hideset(vm, m->body, hs);
+        Token   *body = add_hideset(vm, m->body, hs);
         for (Token *t = body; t->kind != TK_EOF; t = t->next)
             t->origin = tok;
-        *rest = append(vm, body, tok->next);
-        (*rest)->at_bol = tok->at_bol;
+        *rest              = append(vm, body, tok->next);
+        (*rest)->at_bol    = tok->at_bol;
         (*rest)->has_space = tok->has_space;
         return true;
     }
@@ -2018,9 +2066,9 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
         return false;
 
     // Function-like macro application
-    Token *macro_token = tok;
+    Token    *macro_token = tok;
     MacroArg *args = read_macro_args(vm, &tok, tok, m->params, m->va_args_name);
-    Token *rparen = tok;
+    Token    *rparen = tok;
 
     // Tokens that consist a func-like macro invocation may have different
     // hidesets, and if that's the case, it's not clear what the hideset
@@ -2029,14 +2077,14 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     // as explained in the Dave Prossor's algorithm.
     Hideset *hs =
         hideset_intersection(vm, macro_token->hideset, rparen->hideset);
-    hs = hideset_union(vm, hs, new_hideset(vm, m->name));
+    hs          = hideset_union(vm, hs, new_hideset(vm, m->name));
 
     Token *body = subst(vm, m->body, args);
-    body = add_hideset(vm, body, hs);
+    body        = add_hideset(vm, body, hs);
     for (Token *t = body; t->kind != TK_EOF; t = t->next)
         t->origin = macro_token;
-    *rest = append(vm, body, tok->next);
-    (*rest)->at_bol = macro_token->at_bol;
+    *rest              = append(vm, body, tok->next);
+    (*rest)->at_bol    = macro_token->at_bol;
     (*rest)->has_space = macro_token->has_space;
     return true;
 }
@@ -2046,7 +2094,8 @@ static bool file_exists(char *path) {
     return !stat(path, &st);
 }
 
-static char *format_relative_path(VirtualMachine *vm, char *base_file, char *filename) {
+static char *format_relative_path(VirtualMachine *vm, char *base_file,
+                                  char *filename) {
     char *slash = strrchr(base_file, '/');
     if (!slash)
         return arena_format(vm, "./%s", filename);
@@ -2072,10 +2121,8 @@ static char *format_relative_path(VirtualMachine *vm, char *base_file, char *fil
 // These are never overridden even when --use-system-headers is active.
 static bool is_compiler_owned_header(const char *name) {
     static const char *owned[] = {
-        "stdarg.h", "setjmp.h",
-        "stdbool.h", "stddef.h", "stdint.h", "inttypes.h",
-        "complex.h", "stdatomic.h", "stdckdint.h",
-        NULL,
+        "stdarg.h",   "setjmp.h",  "stdbool.h",   "stddef.h",    "stdint.h",
+        "inttypes.h", "complex.h", "stdatomic.h", "stdckdint.h", NULL,
     };
     for (int i = 0; owned[i]; i++)
         if (!strcmp(name, owned[i]))
@@ -2108,9 +2155,8 @@ static bool is_compiler_owned_header(const char *name) {
 // needs this).
 static bool is_cccc_supplied_only_header(const char *name) {
     static const char *cccc_only[] = {
-        "stdbit.h", "stdckdint.h", "threads.h", "uchar.h", "Availability.h",
-        "decimal_math.h",
-        NULL,
+        "stdbit.h",       "stdckdint.h",    "threads.h", "uchar.h",
+        "Availability.h", "decimal_math.h", NULL,
     };
     for (int i = 0; cccc_only[i]; i++)
         if (!strcmp(name, cccc_only[i]))
@@ -2161,8 +2207,8 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     // stay force-resolved to CCCC's own copies regardless of what the table
     // currently knows about — otherwise a reduced table silently
     // de-protects them under --use-system-headers.
-    bool owned  = is_compiler_owned_header(filename);
-    bool force_cccc = owned || (!vm->compiler.use_system_headers && is_std);
+    bool owned       = is_compiler_owned_header(filename);
+    bool force_cccc  = owned || (!vm->compiler.use_system_headers && is_std);
     bool try_builtin = wants_builtin_header(vm, is_std, owned);
 
     if (vm->compiler.use_system_headers && is_std && !owned && is_system) {
@@ -2170,8 +2216,8 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         // CCCC's own builtin include dir is never registered in
         // system_include_paths (see cc_init), so no skip is needed here.
         for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
-            const char *dir = vm->compiler.system_include_paths.data[i];
-            char *path = format("%s/%s", dir, filename);
+            const char *dir  = vm->compiler.system_include_paths.data[i];
+            char       *path = format("%s/%s", dir, filename);
             if (file_exists(path)) {
                 hashmap_put2(&vm->compiler.include_cache, filename,
                              filename_len, path);
@@ -2190,9 +2236,11 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     // For "..." includes, the caller handles current-file-relative lookup and
     // this helper searches -I paths.
     for (int i = 0; i < vm->compiler.include_paths.len; i++) {
-        char *path = format("%s/%s", vm->compiler.include_paths.data[i], filename);
+        char *path =
+            format("%s/%s", vm->compiler.include_paths.data[i], filename);
         if (file_exists(path)) {
-            hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
+            hashmap_put2(&vm->compiler.include_cache, filename, filename_len,
+                         path);
             vm->compiler.include_next_idx = i + 1;
             return path;
         }
@@ -2208,9 +2256,11 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     // via tokenize_private_header) on a stage0 build; and as a safety net if
     // a build's embedded table is stale or partial.
     if (try_builtin && vm->compiler.builtin_include_dir) {
-        char *path = format("%s/%s", vm->compiler.builtin_include_dir, filename);
+        char *path =
+            format("%s/%s", vm->compiler.builtin_include_dir, filename);
         if (file_exists(path)) {
-            hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
+            hashmap_put2(&vm->compiler.include_cache, filename, filename_len,
+                         path);
             return path;
         }
         free(path);
@@ -2223,8 +2273,10 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         char *path = format("%s/%s", vm->compiler.system_include_paths.data[i],
                             filename);
         if (file_exists(path)) {
-            hashmap_put2(&vm->compiler.include_cache, filename, filename_len, path);
-            vm->compiler.include_next_idx = vm->compiler.include_paths.len + i + 1;
+            hashmap_put2(&vm->compiler.include_cache, filename, filename_len,
+                         path);
+            vm->compiler.include_next_idx =
+                vm->compiler.include_paths.len + i + 1;
             return path;
         }
         free(path);
@@ -2244,11 +2296,12 @@ Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag) {
     if (src)
         return tokenize_string(vm, tag, src);
 
-    char *rel = format("cccc/%s", name);
+    char *rel  = format("cccc/%s", name);
     char *path = search_include_paths(vm, rel, (int)strlen(rel), false);
     if (!path)
         error("cannot find cccc/%s -- run `make bootstrap` (or pass "
-              "-I<repo>/include) to make it resolvable", name);
+              "-I<repo>/include) to make it resolvable",
+              name);
 
     Token *toks = tokenize_file(vm, path, false);
     if (!toks)
@@ -2261,8 +2314,7 @@ static char *search_include_next(VirtualMachine *vm, char *filename) {
     for (; vm->compiler.include_next_idx < vm->compiler.include_paths.len;
          vm->compiler.include_next_idx++) {
         char *path = arena_format(
-            vm,
-            "%s/%s",
+            vm, "%s/%s",
             vm->compiler.include_paths.data[vm->compiler.include_next_idx],
             filename);
         if (file_exists(path))
@@ -2293,7 +2345,7 @@ static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
         // just two non-control characters, backslash and f.
         // So we don't want to use token->str.
         *is_dquote = true;
-        *rest = tok->next;
+        *rest      = tok->next;
         if (out_len)
             *out_len = tok->len - 2;
         return arena_strndup(vm, tok->loc + 1, tok->len - 2);
@@ -2311,7 +2363,7 @@ static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                 error_tok(vm, tok, "expected '>' after include filename");
 
         *is_dquote = false;
-        *rest = tok->next;
+        *rest      = tok->next;
         return join_tokens(vm, start->next, tok, out_len);
     }
 
@@ -2343,7 +2395,7 @@ static char *detect_include_guard(VirtualMachine *vm, Token *tok) {
         return NULL;
 
     char *macro = arena_strndup(vm, tok->loc, tok->len);
-    tok = tok->next;
+    tok         = tok->next;
 
     if (!is_hash(tok) || !equal(tok->next, "define") ||
         !equal(tok->next->next, macro))
@@ -2369,7 +2421,8 @@ static char *detect_include_guard(VirtualMachine *vm, Token *tok) {
 
 // Register stdlib functions for a specific header
 // Called automatically when a standard header is #include'd
-static void register_stdlib_for_header(VirtualMachine *vm, const char *header_name) {
+static void register_stdlib_for_header(VirtualMachine *vm,
+                                       const char     *header_name) {
     if (hashmap_get(&vm->compiler.included_headers, header_name))
         return;
     hashmap_put(&vm->compiler.included_headers, header_name, (void *)1);
@@ -2378,7 +2431,10 @@ static void register_stdlib_for_header(VirtualMachine *vm, const char *header_na
     if (!fn_name)
         return;
 
-    static const struct { const char *name; void (*fn)(VirtualMachine *); } fns[] = {
+    static const struct {
+        const char *name;
+        void (*fn)(VirtualMachine *);
+    } fns[] = {
         {"register_ctype_functions", register_ctype_functions},
         {"register_decimal_math_functions", register_decimal_math_functions},
         {"register_fenv_functions", register_fenv_functions},
@@ -2461,16 +2517,16 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
 // must keep failing (see test_builtin_reflection_header_unavailable.c).
 static bool is_private_embedded_header(const char *name) {
     return !strcmp(name, "reflection.h") || !strcmp(name, "testing.h") ||
-          !strcmp(name, "building.h");
+           !strcmp(name, "building.h");
 }
 
 // #891: the embedded src/std.c table's fallback for a standard header not
 // found on disk (foreign CWD with no ./include alongside the cccc binary,
-// or a copied binary with no repo at all). Only tried once search_include_paths()
-// has already come up empty (both the -I search and the on-disk
-// builtin_include_dir fallback), so an on-disk copy always wins when one is
-// reachable. Returns NULL for anything not a known *public* standard header,
-// or when wants_builtin_header() says CCCC's own copy shouldn't be
+// or a copied binary with no repo at all). Only tried once
+// search_include_paths() has already come up empty (both the -I search and the
+// on-disk builtin_include_dir fallback), so an on-disk copy always wins when
+// one is reachable. Returns NULL for anything not a known *public* standard
+// header, or when wants_builtin_header() says CCCC's own copy shouldn't be
 // considered here (--no-builtin-includes on a non-owned header).
 static char *try_embedded_std_header(VirtualMachine *vm, char *filename) {
     if (is_private_embedded_header(filename))
@@ -2532,13 +2588,13 @@ static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
 // Read #line arguments
 static void read_line_marker(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    tok = preprocess(vm, copy_line(vm, rest, tok));
+    tok          = preprocess(vm, copy_line(vm, rest, tok));
 
     if (tok->kind != TK_NUM || tok->ty->kind != TY_INT)
         error_tok(vm, tok, "invalid line marker");
     start->file->line_delta = tok->val - start->line_no;
 
-    tok = tok->next;
+    tok                     = tok->next;
     if (tok->kind == TK_EOF)
         return;
 
@@ -2549,17 +2605,19 @@ static void read_line_marker(VirtualMachine *vm, Token **rest, Token *tok) {
 
 // Read a token sequence for #embed parameters (prefix, suffix, if_empty)
 // Similar to read_macro_arg_one but simplified for #embed use case
-static Token *read_embed_parameter(VirtualMachine *vm, Token **rest, Token *tok) {
-    Token head = {};
-    Token *cur = &head;
-    int level = 0;
+static Token *read_embed_parameter(VirtualMachine *vm, Token **rest,
+                                   Token *tok) {
+    Token  head  = {};
+    Token *cur   = &head;
+    int    level = 0;
 
     for (;;) {
         if (level == 0 && equal(tok, ")"))
             break;
 
         if (tok->kind == TK_EOF)
-            error_tok(vm, tok, "premature end of input in #embed parameter list");
+            error_tok(vm, tok,
+                      "premature end of input in #embed parameter list");
 
         if (equal(tok, "("))
             level++;
@@ -2567,7 +2625,7 @@ static Token *read_embed_parameter(VirtualMachine *vm, Token **rest, Token *tok)
             level--;
 
         cur = cur->next = copy_token(vm, tok);
-        tok = tok->next;
+        tok             = tok->next;
     }
 
     *rest = tok;
@@ -2579,21 +2637,21 @@ static long eval_embed_limit_expr(VirtualMachine *vm, Token *start, Token *expr,
     if (!expr)
         error_tok(vm, start, "no expression");
 
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     for (Token *t = expr; t; t = t->next)
         cur = cur->next = copy_token(vm, t);
     cur->next = new_eof(vm, end);
 
-    expr = preprocess2(vm, head.next);
+    expr      = preprocess2(vm, head.next);
     if (expr->kind == TK_EOF)
         error_tok(vm, start, "no expression");
 
     convert_pp_tokens(vm, expr);
 
     Token *rest;
-    long val = const_expr(vm, &rest, expr);
+    long   val = const_expr(vm, &rest, expr);
     if (rest->kind != TK_EOF)
         error_tok(vm, rest, "extra tokens after #if expression");
     return val;
@@ -2603,16 +2661,16 @@ static long eval_embed_limit_expr(VirtualMachine *vm, Token *start, Token *expr,
 static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
                                      Token *directive_start, bool is_inline) {
     // Parse filename (quoted string or <angle brackets>)
-    bool is_dquote;
-    int filename_len;
+    bool  is_dquote;
+    int   filename_len;
     char *filename;
 
     if (tok->kind == TK_STR) {
         // Pattern: #embed "foo.bin"
-        is_dquote = true;
+        is_dquote    = true;
         filename_len = tok->len - 2;
-        filename = arena_strndup(vm, tok->loc + 1, tok->len - 2);
-        tok = tok->next;
+        filename     = arena_strndup(vm, tok->loc + 1, tok->len - 2);
+        tok          = tok->next;
     } else if (equal(tok, "<")) {
         // Pattern: #embed <foo.bin>
         tok = tok->next;
@@ -2626,18 +2684,18 @@ static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
         }
 
         is_dquote = false;
-        filename = join_tokens(vm, tok, end, &filename_len);
-        tok = end->next;
+        filename  = join_tokens(vm, tok, end, &filename_len);
+        tok       = end->next;
     } else {
         error_tok(vm, tok, "expected a filename for #embed");
         return tok;
     }
 
     // Parse optional parameters
-    long limit = -1; // -1 means no limit
-    bool has_limit = false;
-    Token *prefix_tokens = NULL;
-    Token *suffix_tokens = NULL;
+    long   limit           = -1; // -1 means no limit
+    bool   has_limit       = false;
+    Token *prefix_tokens   = NULL;
+    Token *suffix_tokens   = NULL;
     Token *if_empty_tokens = NULL;
 
     // Parse parameters in any order
@@ -2647,27 +2705,27 @@ static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
            equal(tok, "if_empty") || equal(tok, "__if_empty__")) {
 
         if (equal(tok, "limit") || equal(tok, "__limit__")) {
-            has_limit = true;
+            has_limit    = true;
             Token *start = tok;
-            tok = skip(vm, tok->next, "(");
-            Token *expr = read_embed_parameter(vm, &tok, tok);
-            limit = eval_embed_limit_expr(vm, start, expr, tok);
-            tok = skip(vm, tok, ")");
+            tok          = skip(vm, tok->next, "(");
+            Token *expr  = read_embed_parameter(vm, &tok, tok);
+            limit        = eval_embed_limit_expr(vm, start, expr, tok);
+            tok          = skip(vm, tok, ")");
 
             if (limit < 0)
                 error_tok(vm, start, "limit must be non-negative");
         } else if (equal(tok, "prefix") || equal(tok, "__prefix__")) {
-            tok = skip(vm, tok->next, "(");
+            tok           = skip(vm, tok->next, "(");
             prefix_tokens = read_embed_parameter(vm, &tok, tok);
-            tok = skip(vm, tok, ")");
+            tok           = skip(vm, tok, ")");
         } else if (equal(tok, "suffix") || equal(tok, "__suffix__")) {
-            tok = skip(vm, tok->next, "(");
+            tok           = skip(vm, tok->next, "(");
             suffix_tokens = read_embed_parameter(vm, &tok, tok);
-            tok = skip(vm, tok, ")");
+            tok           = skip(vm, tok, ")");
         } else if (equal(tok, "if_empty") || equal(tok, "__if_empty__")) {
-            tok = skip(vm, tok->next, "(");
+            tok             = skip(vm, tok->next, "(");
             if_empty_tokens = read_embed_parameter(vm, &tok, tok);
-            tok = skip(vm, tok, ")");
+            tok             = skip(vm, tok, ")");
         }
     }
 
@@ -2700,7 +2758,7 @@ static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
     }
 
     // Read binary file
-    size_t file_size;
+    size_t         file_size;
     unsigned char *data = read_binary_file(vm, path, &file_size);
 
     if (!data) {
@@ -2757,85 +2815,136 @@ static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
 
 typedef enum {
     PP_NONE = 0,
-    PP_IF, PP_IFDEF, PP_IFNDEF,
-    PP_ELIF, PP_ELIFDEF, PP_ELIFNDEF,
-    PP_ELSE, PP_ENDIF,
-    PP_INCLUDE, PP_INCLUDE_NEXT,
-    PP_DEFINE, PP_UNDEF,
-    PP_LINE, PP_PRAGMA, PP_EMBED,
-    PP_ERROR, PP_WARNING,
+    PP_IF,
+    PP_IFDEF,
+    PP_IFNDEF,
+    PP_ELIF,
+    PP_ELIFDEF,
+    PP_ELIFNDEF,
+    PP_ELSE,
+    PP_ENDIF,
+    PP_INCLUDE,
+    PP_INCLUDE_NEXT,
+    PP_DEFINE,
+    PP_UNDEF,
+    PP_LINE,
+    PP_PRAGMA,
+    PP_EMBED,
+    PP_ERROR,
+    PP_WARNING,
 } PPDir;
 
 static PPDir pp_directive(Token *tok) {
     const char *s = tok->loc;
     switch (tok->len) {
-    case 2:
-        if (s[0]=='i' && s[1]=='f') return PP_IF;
-        break;
-    case 4:
-        switch (s[0]) {
-        case 'e':
-            if (s[1]=='l') {
-                if (s[2]=='i' && s[3]=='f') return PP_ELIF;
-                if (s[2]=='s' && s[3]=='e') return PP_ELSE;
+        case 2:
+            if (s[0] == 'i' && s[1] == 'f')
+                return PP_IF;
+            break;
+        case 4:
+            switch (s[0]) {
+                case 'e':
+                    if (s[1] == 'l') {
+                        if (s[2] == 'i' && s[3] == 'f')
+                            return PP_ELIF;
+                        if (s[2] == 's' && s[3] == 'e')
+                            return PP_ELSE;
+                    }
+                    break;
+                case 'l':
+                    if (s[1] == 'i' && s[2] == 'n' && s[3] == 'e')
+                        return PP_LINE;
+                    break;
             }
             break;
-        case 'l': if (s[1]=='i' && s[2]=='n' && s[3]=='e') return PP_LINE; break;
-        }
-        break;
-    case 5:
-        switch (s[0]) {
-        case 'e':
-            switch (s[1]) {
-            case 'm': if (memcmp(s+2,"bed",3)==0) return PP_EMBED;  break;
-            case 'n': if (memcmp(s+2,"dif",3)==0) return PP_ENDIF;  break;
-            case 'r': if (memcmp(s+2,"ror",3)==0) return PP_ERROR;  break;
+        case 5:
+            switch (s[0]) {
+                case 'e':
+                    switch (s[1]) {
+                        case 'm':
+                            if (memcmp(s + 2, "bed", 3) == 0)
+                                return PP_EMBED;
+                            break;
+                        case 'n':
+                            if (memcmp(s + 2, "dif", 3) == 0)
+                                return PP_ENDIF;
+                            break;
+                        case 'r':
+                            if (memcmp(s + 2, "ror", 3) == 0)
+                                return PP_ERROR;
+                            break;
+                    }
+                    break;
+                case 'i':
+                    if (memcmp(s + 1, "fdef", 4) == 0)
+                        return PP_IFDEF;
+                    break;
+                case 'u':
+                    if (memcmp(s + 1, "ndef", 4) == 0)
+                        return PP_UNDEF;
+                    break;
             }
             break;
-        case 'i': if (memcmp(s+1,"fdef",4)==0) return PP_IFDEF;  break;
-        case 'u': if (memcmp(s+1,"ndef",4)==0) return PP_UNDEF;  break;
-        }
-        break;
-    case 6:
-        switch (s[0]) {
-        case 'd': if (memcmp(s+1,"efine",5)==0) return PP_DEFINE;  break;
-        case 'i': if (memcmp(s+1,"fndef",5)==0) return PP_IFNDEF;  break;
-        case 'p': if (memcmp(s+1,"ragma",5)==0) return PP_PRAGMA;  break;
-        }
-        break;
-    case 7:
-        switch (s[0]) {
-        case 'e': if (memcmp(s+1,"lifdef",6)==0) return PP_ELIFDEF;  break;
-        case 'i': if (memcmp(s+1,"nclude",6)==0) return PP_INCLUDE;  break;
-        case 'w': if (memcmp(s+1,"arning",6)==0) return PP_WARNING;  break;
-        }
-        break;
-    case 8:
-        if (memcmp(s,"elifndef",8)==0) return PP_ELIFNDEF;
-        break;
-    case 12:
-        if (memcmp(s,"include_next",12)==0) return PP_INCLUDE_NEXT;
-        break;
+        case 6:
+            switch (s[0]) {
+                case 'd':
+                    if (memcmp(s + 1, "efine", 5) == 0)
+                        return PP_DEFINE;
+                    break;
+                case 'i':
+                    if (memcmp(s + 1, "fndef", 5) == 0)
+                        return PP_IFNDEF;
+                    break;
+                case 'p':
+                    if (memcmp(s + 1, "ragma", 5) == 0)
+                        return PP_PRAGMA;
+                    break;
+            }
+            break;
+        case 7:
+            switch (s[0]) {
+                case 'e':
+                    if (memcmp(s + 1, "lifdef", 6) == 0)
+                        return PP_ELIFDEF;
+                    break;
+                case 'i':
+                    if (memcmp(s + 1, "nclude", 6) == 0)
+                        return PP_INCLUDE;
+                    break;
+                case 'w':
+                    if (memcmp(s + 1, "arning", 6) == 0)
+                        return PP_WARNING;
+                    break;
+            }
+            break;
+        case 8:
+            if (memcmp(s, "elifndef", 8) == 0)
+                return PP_ELIFNDEF;
+            break;
+        case 12:
+            if (memcmp(s, "include_next", 12) == 0)
+                return PP_INCLUDE_NEXT;
+            break;
     }
     return PP_NONE;
 }
 
 static bool is_pp_directive_kw(Token *tok) {
     static const char *kws[] = {
-        "define", "undef", "if", "ifdef", "ifndef",
-        "elif",   "else",  "endif", "include",
-        "pragma", "error", "warning", "line", NULL,
+        "define", "undef",   "if",     "ifdef", "ifndef",  "elif", "else",
+        "endif",  "include", "pragma", "error", "warning", "line", NULL,
     };
     for (int i = 0; kws[i]; i++)
-        if (equal(tok, (char *)kws[i])) return true;
+        if (equal(tok, (char *)kws[i]))
+            return true;
     return false;
 }
 
-// Rewrite @<ppkeyword> rest-of-line to #<ppkeyword> @<opposite_route> rest-of-line.
-// Opposite route: CTX_COMPTIME -> "emit"; all other contexts -> "comptime".
-// Returns false (tok_ptr unchanged) if the current token is not @<ppkeyword>.
-// Must be called before try_rewrite_at_attr to prevent @define etc. from being
-// mangled into __attribute__((define)).
+// Rewrite @<ppkeyword> rest-of-line to #<ppkeyword> @<opposite_route>
+// rest-of-line. Opposite route: CTX_COMPTIME -> "emit"; all other contexts ->
+// "comptime". Returns false (tok_ptr unchanged) if the current token is not
+// @<ppkeyword>. Must be called before try_rewrite_at_attr to prevent @define
+// etc. from being mangled into __attribute__((define)).
 static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     if (!equal(tok, "@") || !tok->next || tok->next->kind != TK_IDENT)
@@ -2844,14 +2953,16 @@ static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
     if (!is_pp_directive_kw(kw))
         return false;
     ComptimeCtxEntry *top = ctx_top(vm);
-    const char *route = (top && top->type == CTX_COMPTIME) ? "emit" : "comptime";
-    char *src = arena_format(vm, "#%.*s @%s ", (int)kw->len, kw->loc, route);
-    Token *new_toks = tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
+    const char       *route =
+        (top && top->type == CTX_COMPTIME) ? "emit" : "comptime";
+    char  *src = arena_format(vm, "#%.*s @%s ", (int)kw->len, kw->loc, route);
+    Token *new_toks =
+        tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF)
         last = last->next;
     last->next = kw->next;
-    *tok_ptr = new_toks;
+    *tok_ptr   = new_toks;
     return true;
 }
 
@@ -2866,21 +2977,21 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
         return false;
 
     Token *name_tok = tok->next;
-    char *name = arena_strndup(vm, name_tok->loc, name_tok->len);
-    Token *after = name_tok->next;
+    char  *name     = arena_strndup(vm, name_tok->loc, name_tok->len);
+    Token *after    = name_tok->next;
 
     // Build the args text "(arg1, arg2, ...)" by re-emitting raw source text
     // for each token inside the parens, separated by spaces.
     char *args_text = "";
     if (after && equal(after, "(")) {
-        int depth = 0;
-        char *buf = arena_format(vm, "(");
-        Token *p = after->next; // first token inside "("
+        int    depth = 0;
+        char  *buf   = arena_format(vm, "(");
+        Token *p     = after->next; // first token inside "("
         while (p && p->kind != TK_EOF) {
             if (equal(p, "(")) {
                 depth++;
                 buf = arena_format(vm, "%s(", buf);
-                p = p->next;
+                p   = p->next;
                 continue;
             }
             if (equal(p, ")")) {
@@ -2890,11 +3001,11 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
                 }
                 depth--;
                 buf = arena_format(vm, "%s)", buf);
-                p = p->next;
+                p   = p->next;
                 continue;
             }
             buf = arena_format(vm, "%s%.*s", buf, (int)p->len, p->loc);
-            p = p->next;
+            p   = p->next;
             if (p && !equal(p, ")") && !equal(p, "("))
                 buf = arena_format(vm, "%s ", buf);
         }
@@ -2904,23 +3015,30 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
     }
 
     const AttrInfo *info = find_attr_info(name);
-    AttrCategory cat = info ? info->cat : ATTR_GNU;
+    AttrCategory    cat  = info ? info->cat : ATTR_GNU;
 
-    char *src;
+    char           *src;
     switch (cat) {
-    case ATTR_CCCC: src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text); break;
-    case ATTR_STD:  src = arena_format(vm, "[[%s%s]]\n",       name, args_text); break;
-    default:        src = arena_format(vm, "__attribute__((%s%s))\n", name, args_text); break;
+        case ATTR_CCCC:
+            src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text);
+            break;
+        case ATTR_STD:
+            src = arena_format(vm, "[[%s%s]]\n", name, args_text);
+            break;
+        default:
+            src = arena_format(vm, "__attribute__((%s%s))\n", name, args_text);
+            break;
     }
 
-    Token *new_toks = tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
+    Token *new_toks =
+        tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
     // Strip trailing TK_EOF and splice new tokens before `after`.
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF)
         last = last->next;
     last->next = after;
 
-    *tok_ptr = new_toks;
+    *tok_ptr   = new_toks;
     return true;
 }
 
@@ -2937,22 +3055,22 @@ static const char *cccc_keyword_alias_name(Token *tok) {
 }
 
 static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
-    Token *tok = *tok_ptr;
+    Token      *tok  = *tok_ptr;
     const char *name = cccc_keyword_alias_name(tok);
     if (!name)
         return false;
 
-    Token *after = tok->next;
-    char *args_text = "";
+    Token *after     = tok->next;
+    char  *args_text = "";
     if (after && equal(after, "(")) {
-        int depth = 0;
-        char *buf = arena_format(vm, "(");
-        Token *p = after->next;
+        int    depth = 0;
+        char  *buf   = arena_format(vm, "(");
+        Token *p     = after->next;
         while (p && p->kind != TK_EOF) {
             if (equal(p, "(")) {
                 depth++;
                 buf = arena_format(vm, "%s(", buf);
-                p = p->next;
+                p   = p->next;
                 continue;
             }
             if (equal(p, ")")) {
@@ -2962,11 +3080,11 @@ static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
                 }
                 depth--;
                 buf = arena_format(vm, "%s)", buf);
-                p = p->next;
+                p   = p->next;
                 continue;
             }
             buf = arena_format(vm, "%s%.*s", buf, (int)p->len, p->loc);
-            p = p->next;
+            p   = p->next;
             if (p && !equal(p, ")") && !equal(p, "("))
                 buf = arena_format(vm, "%s ", buf);
         }
@@ -2975,15 +3093,15 @@ static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
         args_text = arena_format(vm, "%s)", buf);
     }
 
-    char *src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text);
-    Token *new_toks = tokenize(vm, new_file(vm, tok->file->name,
-                                            tok->file->file_no, src));
+    char  *src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text);
+    Token *new_toks =
+        tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF)
         last = last->next;
     last->next = after;
 
-    *tok_ptr = new_toks;
+    *tok_ptr   = new_toks;
     return true;
 }
 
@@ -2991,19 +3109,20 @@ static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
 typedef struct {
     const char *suite_name;
     const char *error_pat;
-    bool error_pat_negate;
+    bool        error_pat_negate;
     const char *test_name;
-    long timeout_ms;
-    int error_count;
-    CmpOp error_count_op;
-    RetKind ret_kind;
-    CmpOp ret_op;
-    int64_t ret_int_val;
-    double ret_float_val;
+    long        timeout_ms;
+    int         error_count;
+    CmpOp       error_count_op;
+    RetKind     ret_kind;
+    CmpOp       ret_op;
+    int64_t     ret_int_val;
+    double      ret_float_val;
     const char *ret_str_val;
-    double ret_epsilon_val;
-    int exit_code_val; // -1 = not set
-    bool expect_compile_error; // true = any compile error passes the test (#615)
+    double      ret_epsilon_val;
+    int         exit_code_val; // -1 = not set
+    bool
+        expect_compile_error; // true = any compile error passes the test (#615)
     const char *flags; // flags = "..." per-test CLI-flag string; NULL if unset
     // Per-test output assertions (#614)
     const char *expect_stderr;
@@ -3011,53 +3130,58 @@ typedef struct {
     const char *expect_stdout;
     const char *reject_stdout;
     // RET_STRUCT: compound-literal field list and raw source span text
-    TestRetField *ret_fields;     // heap-alloc'd; ownership transferred to TestFnRecord
-    char         *ret_struct_text; // heap-alloc'd strndup of the literal source span
+    TestRetField
+         *ret_fields; // heap-alloc'd; ownership transferred to TestFnRecord
+    char *ret_struct_text; // heap-alloc'd strndup of the literal source span
 } TestArgs;
 
-// Parsed arguments from [[cccc::test_setup(...)]] / __attribute__((test_setup(...)))
+// Parsed arguments from [[cccc::test_setup(...)]] /
+// __attribute__((test_setup(...)))
 typedef struct {
     const char *name_pat;
     const char *suite;
-    bool once;
-    bool inherit;
+    bool        once;
+    bool        inherit;
 } TestSetupArgs;
 
 // Classify one scalar token (or a leading "-" then NUM) from the token stream
 // into a RetKind and value.  Advances *p_ptr past the consumed tokens.
 // Returns true on success; leaves *p_ptr unchanged on failure.
 // For RET_STR the caller must strdup val->s (it points into token string data).
-static bool parse_scalar_operand(Token **p_ptr,
-                                  RetKind *out_kind,
-                                  int64_t *out_i,
-                                  double  *out_f,
-                                  const char **out_s) {
+static bool parse_scalar_operand(Token **p_ptr, RetKind *out_kind,
+                                 int64_t *out_i, double *out_f,
+                                 const char **out_s) {
     Token *p = *p_ptr;
-    if (!p) return false;
+    if (!p)
+        return false;
     if (p->kind == TK_STR) {
         *out_kind = RET_STR;
-        *out_s = p->str;
-        *p_ptr = p->next;
+        *out_s    = p->str;
+        *p_ptr    = p->next;
         return true;
     }
     if (p->kind == TK_NUM || p->kind == TK_PP_NUM) {
         bool is_float = false;
         for (int _i = 0; _i < (int)p->len; _i++) {
             char _c = p->loc[_i];
-            if (_c == '.' || _c == 'e' || _c == 'E') { is_float = true; break; }
+            if (_c == '.' || _c == 'e' || _c == 'E') {
+                is_float = true;
+                break;
+            }
         }
         if (!is_float && p->len > 0 &&
-            (p->loc[p->len-1] == 'f' || p->loc[p->len-1] == 'F'))
+            (p->loc[p->len - 1] == 'f' || p->loc[p->len - 1] == 'F'))
             is_float = true;
         char _buf[64];
-        int _n = p->len < 63 ? (int)p->len : 63;
-        memcpy(_buf, p->loc, _n); _buf[_n] = '\0';
+        int  _n = p->len < 63 ? (int)p->len : 63;
+        memcpy(_buf, p->loc, _n);
+        _buf[_n] = '\0';
         if (is_float) {
             *out_kind = RET_FLOAT;
-            *out_f = strtod(_buf, NULL);
+            *out_f    = strtod(_buf, NULL);
         } else {
             *out_kind = RET_INT;
-            *out_i = (int64_t)strtoll(_buf, NULL, 0);
+            *out_i    = (int64_t)strtoll(_buf, NULL, 0);
         }
         *p_ptr = p->next;
         return true;
@@ -3066,11 +3190,12 @@ static bool parse_scalar_operand(Token **p_ptr,
     if (equal(p, "-") && p->next &&
         (p->next->kind == TK_NUM || p->next->kind == TK_PP_NUM)) {
         char _buf[64];
-        int _n = p->next->len < 63 ? (int)p->next->len : 63;
-        memcpy(_buf, p->next->loc, _n); _buf[_n] = '\0';
+        int  _n = p->next->len < 63 ? (int)p->next->len : 63;
+        memcpy(_buf, p->next->loc, _n);
+        _buf[_n]  = '\0';
         *out_kind = RET_INT;
-        *out_i = -(int64_t)strtoll(_buf, NULL, 0);
-        *p_ptr = p->next->next;
+        *out_i    = -(int64_t)strtoll(_buf, NULL, 0);
+        *p_ptr    = p->next->next;
         return true;
     }
     return false;
@@ -3084,8 +3209,10 @@ void cc_free_ret_fields(TestRetField *f) {
     while (f) {
         TestRetField *next = f->next;
         free(f->name);
-        if (f->kind == RET_STR) free(f->val.s);
-        else if (f->kind == RET_STRUCT) cc_free_ret_fields(f->val.sub);
+        if (f->kind == RET_STR)
+            free(f->val.s);
+        else if (f->kind == RET_STRUCT)
+            cc_free_ret_fields(f->val.sub);
         free(f);
         f = next;
     }
@@ -3096,11 +3223,13 @@ void cc_free_ret_fields(TestRetField *f) {
 // already-opened '{' (i.e. at brace depth 1 relative to that '{'). Leaves
 // *p_ptr just past the matching top-level '}' (or at TK_EOF if unbalanced).
 static void skip_balanced_braces(Token **p_ptr) {
-    Token *p = *p_ptr;
-    int depth = 1;
+    Token *p     = *p_ptr;
+    int    depth = 1;
     while (p && p->kind != TK_EOF && depth > 0) {
-        if (equal(p, "{")) depth++;
-        else if (equal(p, "}")) depth--;
+        if (equal(p, "{"))
+            depth++;
+        else if (equal(p, "}"))
+            depth--;
         p = p->next;
     }
     *p_ptr = p;
@@ -3129,11 +3258,12 @@ static void skip_balanced_braces(Token **p_ptr) {
 // receives the matching '}' token on success (used by the top-level caller
 // to compute the source span for diagnostics); it is left NULL on failure.
 static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
-                                 TestRetField **out, Token **out_close,
-                                 int depth) {
+                                TestRetField **out, Token **out_close,
+                                int depth) {
     Token *p = *p_ptr;
-    *out = NULL;
-    if (out_close) *out_close = NULL;
+    *out     = NULL;
+    if (out_close)
+        *out_close = NULL;
 
     if (depth > CCCC_RET_FIELD_MAX_DEPTH) {
         warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
@@ -3146,7 +3276,7 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
     }
 
     TestRetField *fields = NULL, **ftail = &fields;
-    bool parse_ok = true;
+    bool          parse_ok = true;
     bool warned = false; // true once a specific diagnostic has been emitted,
                          // so the generic "malformed compound literal"
                          // fallback below doesn't double-warn
@@ -3156,9 +3286,12 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         char *fname = NULL;
         if (equal(p, ".")) {
             p = p->next;
-            if (!p || p->kind != TK_IDENT) { parse_ok = false; break; }
+            if (!p || p->kind != TK_IDENT) {
+                parse_ok = false;
+                break;
+            }
             fname = strndup(p->loc, p->len);
-            p = p->next;
+            p     = p->next;
             if (!p || !equal(p, "=")) {
                 free(fname);
                 parse_ok = false;
@@ -3168,64 +3301,72 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         }
         // else: no designator -- positional entry (array-element list)
 
-        bool is_nested_typed = p && equal(p, "(") &&
-            p->next && (equal(p->next, "struct") || equal(p->next, "union")) &&
+        bool is_nested_typed =
+            p && equal(p, "(") && p->next &&
+            (equal(p->next, "struct") || equal(p->next, "union")) &&
             p->next->next && p->next->next->kind == TK_IDENT &&
             p->next->next->next && equal(p->next->next->next, ")") &&
             p->next->next->next->next && equal(p->next->next->next->next, "{");
-        bool is_nested_bare = p && equal(p, "{");
+        bool          is_nested_bare = p && equal(p, "{");
 
-        RetKind fkind = RET_NONE;
-        int64_t ival = 0;
-        double  fval = 0.0;
-        const char *sval = NULL;
-        TestRetField *sub = NULL;
+        RetKind       fkind          = RET_NONE;
+        int64_t       ival           = 0;
+        double        fval           = 0.0;
+        const char   *sval           = NULL;
+        TestRetField *sub            = NULL;
 
         if (is_nested_typed || is_nested_bare) {
-            p = is_nested_typed ? p->next->next->next->next->next // past ( struct|union TAG ) {
-                                 : p->next;                        // past {
+            p = is_nested_typed ? p->next->next->next->next
+                                      ->next // past ( struct|union TAG ) {
+                                : p->next;   // past {
             TestRetField *children = NULL;
             if (!parse_ret_init_list(vm, &p, &children, NULL, depth + 1)) {
                 // Inner call already warned and skipped past its own '}'.
                 free(fname);
                 parse_ok = false;
-                warned = true;
+                warned   = true;
                 break;
             }
             fkind = RET_STRUCT;
-            sub = children;
+            sub   = children;
         } else if (!parse_scalar_operand(&p, &fkind, &ival, &fval, &sval)) {
             if (fname)
-                warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                         "unrecognized value for field '%s' in compound-literal "
-                         "return= assertion; skipping",
-                         fname);
+                warn_tok(
+                    vm, p, CCCC_WARN_ATTRIBUTES,
+                    "unrecognized value for field '%s' in compound-literal "
+                    "return= assertion; skipping",
+                    fname);
             else
                 warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
                          "unrecognized value in compound-literal return= "
                          "assertion; skipping");
             free(fname);
             parse_ok = false;
-            warned = true;
+            warned   = true;
             break;
         }
 
         TestRetField *f = calloc(1, sizeof(TestRetField));
-        f->name = fname;
-        f->kind = fkind;
-        if      (fkind == RET_INT)    f->val.i   = ival;
-        else if (fkind == RET_FLOAT)  f->val.f   = fval;
-        else if (fkind == RET_STR)    f->val.s   = sval ? strdup(sval) : NULL;
-        else if (fkind == RET_STRUCT) f->val.sub = sub;
+        f->name         = fname;
+        f->kind         = fkind;
+        if (fkind == RET_INT)
+            f->val.i = ival;
+        else if (fkind == RET_FLOAT)
+            f->val.f = fval;
+        else if (fkind == RET_STR)
+            f->val.s = sval ? strdup(sval) : NULL;
+        else if (fkind == RET_STRUCT)
+            f->val.sub = sub;
         *ftail = f;
-        ftail = &f->next;
+        ftail  = &f->next;
 
-        if (p && equal(p, ",")) p = p->next;
+        if (p && equal(p, ","))
+            p = p->next;
     }
 
     if (p && equal(p, "}")) {
         close_brace = p;
-        p = p->next;
+        p           = p->next;
     }
 
     if (!parse_ok || !close_brace) {
@@ -3241,7 +3382,8 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
     }
 
     *out = fields;
-    if (out_close) *out_close = close_brace;
+    if (out_close)
+        *out_close = close_brace;
     *p_ptr = p;
     return true;
 }
@@ -3251,122 +3393,144 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
 static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
     Token *p = *p_ptr;
     while (p && !equal(p, ")") && p->kind != TK_EOF) {
-        if (equal(p, "suite") &&
-            p->next && equal(p->next, "=") &&
+        if (equal(p, "suite") && p->next && equal(p->next, "=") &&
             p->next->next && p->next->next->kind == TK_STR) {
             out->suite_name = p->next->next->str;
-            p = p->next->next->next;
+            p               = p->next->next->next;
         } else if (equal(p, "error")) {
-            p = p->next;
+            p        = p->next;
             bool neg = p && equal(p, "!=");
-            if (neg || (p && equal(p, "="))) p = p->next;
-            if (p && p->kind == TK_STR) {
-                out->error_pat = p->str;
-                out->error_pat_negate = neg;
+            if (neg || (p && equal(p, "=")))
                 p = p->next;
+            if (p && p->kind == TK_STR) {
+                out->error_pat        = p->str;
+                out->error_pat_negate = neg;
+                p                     = p->next;
             }
         } else if (equal(p, "expect_compile_error")) {
             p = p->next;
-            if (p && equal(p, "=")) p = p->next;
-            if (p && equal(p, "true"))       { out->expect_compile_error = true;  p = p->next; }
-            else if (p && equal(p, "false")) { out->expect_compile_error = false; p = p->next; }
-            else                             { out->expect_compile_error = true; }
-        } else if (equal(p, "name") &&
-                   p->next && equal(p->next, "=") &&
+            if (p && equal(p, "="))
+                p = p->next;
+            if (p && equal(p, "true")) {
+                out->expect_compile_error = true;
+                p                         = p->next;
+            } else if (p && equal(p, "false")) {
+                out->expect_compile_error = false;
+                p                         = p->next;
+            } else {
+                out->expect_compile_error = true;
+            }
+        } else if (equal(p, "name") && p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
             out->test_name = p->next->next->str;
-            p = p->next->next->next;
-        } else if (equal(p, "timeout") &&
-                   p->next && equal(p->next, "=") &&
+            p              = p->next->next->next;
+        } else if (equal(p, "timeout") && p->next && equal(p->next, "=") &&
                    p->next->next &&
                    (p->next->next->kind == TK_NUM ||
                     p->next->next->kind == TK_PP_NUM)) {
             Token *vt = p->next->next;
-            char _buf[64];
-            int _n = vt->len < 63 ? (int)vt->len : 63;
-            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+            char   _buf[64];
+            int    _n = vt->len < 63 ? (int)vt->len : 63;
+            memcpy(_buf, vt->loc, _n);
+            _buf[_n]        = '\0';
             out->timeout_ms = strtoll(_buf, NULL, 0);
-            p = p->next->next->next;
+            p               = p->next->next->next;
         } else if (equal(p, "error_count")) {
-            p = p->next;
+            p        = p->next;
             CmpOp op = CMP_EQ;
-            if (p && (equal(p, "=") || equal(p, "==") ||
-                      equal(p, "!=") || equal(p, "<") ||
-                      equal(p, "<=") || equal(p, ">") ||
+            if (p && (equal(p, "=") || equal(p, "==") || equal(p, "!=") ||
+                      equal(p, "<") || equal(p, "<=") || equal(p, ">") ||
                       equal(p, ">="))) {
-                if      (equal(p, "!=")) op = CMP_NE;
-                else if (equal(p, "<=")) op = CMP_LE;
-                else if (equal(p, "<"))  op = CMP_LT;
-                else if (equal(p, ">=")) op = CMP_GE;
-                else if (equal(p, ">"))  op = CMP_GT;
+                if (equal(p, "!="))
+                    op = CMP_NE;
+                else if (equal(p, "<="))
+                    op = CMP_LE;
+                else if (equal(p, "<"))
+                    op = CMP_LT;
+                else if (equal(p, ">="))
+                    op = CMP_GE;
+                else if (equal(p, ">"))
+                    op = CMP_GT;
                 p = p->next;
             }
             if (p && p->kind == TK_NUM) {
                 out->error_count    = (int)p->val;
                 out->error_count_op = op;
-                p = p->next;
+                p                   = p->next;
             }
         } else if (equal(p, "return")) {
-            p = p->next;
+            p        = p->next;
             CmpOp op = CMP_EQ;
-            if (p && (equal(p, "=") || equal(p, "==") ||
-                      equal(p, "!=") || equal(p, "<") ||
-                      equal(p, "<=") || equal(p, ">") ||
+            if (p && (equal(p, "=") || equal(p, "==") || equal(p, "!=") ||
+                      equal(p, "<") || equal(p, "<=") || equal(p, ">") ||
                       equal(p, ">="))) {
-                if      (equal(p, "!=")) op = CMP_NE;
-                else if (equal(p, "<=")) op = CMP_LE;
-                else if (equal(p, "<"))  op = CMP_LT;
-                else if (equal(p, ">=")) op = CMP_GE;
-                else if (equal(p, ">"))  op = CMP_GT;
+                if (equal(p, "!="))
+                    op = CMP_NE;
+                else if (equal(p, "<="))
+                    op = CMP_LE;
+                else if (equal(p, "<"))
+                    op = CMP_LT;
+                else if (equal(p, ">="))
+                    op = CMP_GE;
+                else if (equal(p, ">"))
+                    op = CMP_GT;
                 p = p->next;
             }
             // Compound literal: (struct|union TAG){...}
-            if (p && equal(p, "(") &&
-                p->next && (equal(p->next, "struct") || equal(p->next, "union")) &&
+            if (p && equal(p, "(") && p->next &&
+                (equal(p->next, "struct") || equal(p->next, "union")) &&
                 p->next->next && p->next->next->kind == TK_IDENT &&
                 p->next->next->next && equal(p->next->next->next, ")") &&
-                p->next->next->next->next && equal(p->next->next->next->next, "{")) {
+                p->next->next->next->next &&
+                equal(p->next->next->next->next, "{")) {
 
                 if (op != CMP_EQ && op != CMP_NE) {
-                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                             "struct return= assertion only supports '=' or '!='; "
-                             "ordered comparisons are not meaningful for structs; "
-                             "assertion skipped");
+                    warn_tok(
+                        vm, p, CCCC_WARN_ATTRIBUTES,
+                        "struct return= assertion only supports '=' or '!='; "
+                        "ordered comparisons are not meaningful for structs; "
+                        "assertion skipped");
                     // Skip to closing brace (depth-aware: the literal may
                     // itself contain nested compound literals).
-                    p = p->next->next->next->next->next; // past ( struct|union TAG ) {
+                    p = p->next->next->next->next
+                            ->next; // past ( struct|union TAG ) {
                     skip_balanced_braces(&p);
                 } else {
-                    const char *span_start = p->loc;  // points to '('
+                    const char *span_start = p->loc; // points to '('
                     // Advance past: ( struct|union TAG ) {
-                    p = p->next->next->next->next->next;
+                    p                         = p->next->next->next->next->next;
 
-                    TestRetField *fields = NULL;
-                    Token *close_brace = NULL;
+                    TestRetField *fields      = NULL;
+                    Token        *close_brace = NULL;
                     if (parse_ret_init_list(vm, &p, &fields, &close_brace, 1)) {
-                        size_t span_len = (close_brace->loc + close_brace->len) - span_start;
+                        size_t span_len =
+                            (close_brace->loc + close_brace->len) - span_start;
                         out->ret_struct_text = strndup(span_start, span_len);
-                        out->ret_fields = fields;
-                        out->ret_kind   = RET_STRUCT;
-                        out->ret_op     = op;
+                        out->ret_fields      = fields;
+                        out->ret_kind        = RET_STRUCT;
+                        out->ret_op          = op;
                     }
                     // On failure, parse_ret_init_list already warned, freed
                     // the partial list, and left p past the matching '}'.
                 }
             } else {
-                // Scalar operands: use helper (handles STR / NUM / PP_NUM / negative int)
-                int64_t ival = 0;
-                double  fval = 0.0;
+                // Scalar operands: use helper (handles STR / NUM / PP_NUM /
+                // negative int)
+                int64_t     ival = 0;
+                double      fval = 0.0;
                 const char *sval = NULL;
-                RetKind sk = RET_NONE;
+                RetKind     sk   = RET_NONE;
                 if (parse_scalar_operand(&p, &sk, &ival, &fval, &sval)) {
                     out->ret_kind = sk;
                     out->ret_op   = op;
-                    if      (sk == RET_INT)   out->ret_int_val   = ival;
-                    else if (sk == RET_FLOAT) out->ret_float_val = fval;
-                    else if (sk == RET_STR)   out->ret_str_val   = sval;
-                } else if (p && p->kind != TK_EOF &&
-                           !equal(p, ")") && !equal(p, ",")) {
+                    if (sk == RET_INT)
+                        out->ret_int_val = ival;
+                    else if (sk == RET_FLOAT)
+                        out->ret_float_val = fval;
+                    else if (sk == RET_STR)
+                        out->ret_str_val = sval;
+                } else if (p && p->kind != TK_EOF && !equal(p, ")") &&
+                           !equal(p, ",")) {
                     warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
                              "unrecognized return= operand '%.*s';"
                              " assertion skipped (enum names not"
@@ -3375,57 +3539,57 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                     p = p->next;
                 }
             }
-        } else if (equal(p, "exit_code") &&
-                   p->next && equal(p->next, "=") &&
+        } else if (equal(p, "exit_code") && p->next && equal(p->next, "=") &&
                    p->next->next &&
                    (p->next->next->kind == TK_NUM ||
                     p->next->next->kind == TK_PP_NUM)) {
             Token *vt = p->next->next;
-            char _buf[64];
-            int _n = vt->len < 63 ? (int)vt->len : 63;
-            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+            char   _buf[64];
+            int    _n = vt->len < 63 ? (int)vt->len : 63;
+            memcpy(_buf, vt->loc, _n);
+            _buf[_n]           = '\0';
             out->exit_code_val = (int)strtoll(_buf, NULL, 0);
-            p = p->next->next->next;
-        } else if (equal(p, "return_epsilon") &&
-                   p->next && equal(p->next, "=") &&
-                   p->next->next &&
+            p                  = p->next->next->next;
+        } else if (equal(p, "return_epsilon") && p->next &&
+                   equal(p->next, "=") && p->next->next &&
                    (p->next->next->kind == TK_NUM ||
                     p->next->next->kind == TK_PP_NUM)) {
             Token *vt = p->next->next;
-            char _buf[64];
-            int _n = vt->len < 63 ? (int)vt->len : 63;
-            memcpy(_buf, vt->loc, _n); _buf[_n] = '\0';
+            char   _buf[64];
+            int    _n = vt->len < 63 ? (int)vt->len : 63;
+            memcpy(_buf, vt->loc, _n);
+            _buf[_n]             = '\0';
             out->ret_epsilon_val = strtod(_buf, NULL);
-            p = p->next->next->next;
-        } else if (equal(p, "flags") &&
-                   p->next && equal(p->next, "=") &&
+            p                    = p->next->next->next;
+        } else if (equal(p, "flags") && p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
             out->flags = p->next->next->str;
-            p = p->next->next->next;
-        } else if (equal(p, "expect_stderr") &&
-                   p->next && equal(p->next, "=") &&
-                   p->next->next && p->next->next->kind == TK_STR) {
+            p          = p->next->next->next;
+        } else if (equal(p, "expect_stderr") && p->next &&
+                   equal(p->next, "=") && p->next->next &&
+                   p->next->next->kind == TK_STR) {
             out->expect_stderr = p->next->next->str;
-            p = p->next->next->next;
-        } else if (equal(p, "reject_stderr") &&
-                   p->next && equal(p->next, "=") &&
-                   p->next->next && p->next->next->kind == TK_STR) {
+            p                  = p->next->next->next;
+        } else if (equal(p, "reject_stderr") && p->next &&
+                   equal(p->next, "=") && p->next->next &&
+                   p->next->next->kind == TK_STR) {
             out->reject_stderr = p->next->next->str;
-            p = p->next->next->next;
-        } else if (equal(p, "expect_stdout") &&
-                   p->next && equal(p->next, "=") &&
-                   p->next->next && p->next->next->kind == TK_STR) {
+            p                  = p->next->next->next;
+        } else if (equal(p, "expect_stdout") && p->next &&
+                   equal(p->next, "=") && p->next->next &&
+                   p->next->next->kind == TK_STR) {
             out->expect_stdout = p->next->next->str;
-            p = p->next->next->next;
-        } else if (equal(p, "reject_stdout") &&
-                   p->next && equal(p->next, "=") &&
-                   p->next->next && p->next->next->kind == TK_STR) {
+            p                  = p->next->next->next;
+        } else if (equal(p, "reject_stdout") && p->next &&
+                   equal(p->next, "=") && p->next->next &&
+                   p->next->next->kind == TK_STR) {
             out->reject_stdout = p->next->next->str;
-            p = p->next->next->next;
+            p                  = p->next->next->next;
         } else {
             p = p->next;
         }
-        if (p && equal(p, ",")) p = p->next;
+        if (p && equal(p, ","))
+            p = p->next;
     }
     *p_ptr = p;
 }
@@ -3435,26 +3599,25 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
 static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
     Token *p = *p_ptr;
     while (p && !equal(p, ")") && p->kind != TK_EOF) {
-        if (equal(p, "name") &&
-            p->next && equal(p->next, "=") &&
+        if (equal(p, "name") && p->next && equal(p->next, "=") &&
             p->next->next && p->next->next->kind == TK_STR) {
             out->name_pat = p->next->next->str;
-            p = p->next->next->next;
-        } else if (equal(p, "suite") &&
-                   p->next && equal(p->next, "=") &&
+            p             = p->next->next->next;
+        } else if (equal(p, "suite") && p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
             out->suite = p->next->next->str;
-            p = p->next->next->next;
+            p          = p->next->next->next;
         } else if (equal(p, "once")) {
             out->once = true;
-            p = p->next;
+            p         = p->next;
         } else if (equal(p, "inherit")) {
             out->inherit = true;
-            p = p->next;
+            p            = p->next;
         } else {
             p = p->next;
         }
-        if (p && equal(p, ",")) p = p->next;
+        if (p && equal(p, ","))
+            p = p->next;
     }
     *p_ptr = p;
 }
@@ -3507,23 +3670,24 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
             p = skip(vm, p->next, "(");
             if (p->kind != TK_STR)
                 error_tok(vm, p,
-                          "comptime(attribute(...)) expects a string literal attribute name");
+                          "comptime(attribute(...)) expects a string literal "
+                          "attribute name");
             *attribute_name = arena_strdup(vm, p->str);
-            p = skip(vm, p->next, ")");
+            p               = skip(vm, p->next, ")");
             continue;
         }
-        error_tok(vm, p, "unknown comptime attribute option '%.*s'",
-                  p->len, p->loc);
+        error_tok(vm, p, "unknown comptime attribute option '%.*s'", p->len,
+                  p->loc);
     }
 }
 
-bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan) {
-    Token *tok = *tok_ptr;
-    bool is_gnu_attr = false;
-    bool is_c23_attr = false;
+bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
+                            bool emit_scan) {
+    Token *tok         = *tok_ptr;
+    bool   is_gnu_attr = false;
+    bool   is_c23_attr = false;
 
-    if (equal(tok, "__attribute__") &&
-        tok->next && equal(tok->next, "(") &&
+    if (equal(tok, "__attribute__") && tok->next && equal(tok->next, "(") &&
         tok->next->next && equal(tok->next->next, "("))
         is_gnu_attr = true;
     else if (equal(tok, "[") && tok->next && equal(tok->next, "["))
@@ -3532,29 +3696,34 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
     if (!is_gnu_attr && !is_c23_attr)
         return false;
 
-    // Scan inside the attribute argument list for macro/comptime/test/inline markers.
-    bool is_comptime_kind     = false;
-    bool is_test_kind         = false;
-    bool is_setup_kind        = false;
-    bool is_teardown_kind     = false;
-    bool is_build_kind        = false;
-    bool is_build_target_kind = false;
-    char *build_target_kind   = NULL;  // "native" (default) when is_build_target_kind
-    char *attribute_name   = NULL;
-    Token *attr_end        = NULL;
-    TestArgs ta            = {0};
-    ta.error_count_op      = CMP_NONE;
-    ta.ret_op              = CMP_EQ;
-    ta.exit_code_val       = -1;
-    TestSetupArgs tsa      = {0};
+    // Scan inside the attribute argument list for macro/comptime/test/inline
+    // markers.
+    bool  is_comptime_kind     = false;
+    bool  is_test_kind         = false;
+    bool  is_setup_kind        = false;
+    bool  is_teardown_kind     = false;
+    bool  is_build_kind        = false;
+    bool  is_build_target_kind = false;
+    char *build_target_kind =
+        NULL; // "native" (default) when is_build_target_kind
+    char    *attribute_name = NULL;
+    Token   *attr_end       = NULL;
+    TestArgs ta             = {0};
+    ta.error_count_op       = CMP_NONE;
+    ta.ret_op               = CMP_EQ;
+    ta.exit_code_val        = -1;
+    TestSetupArgs tsa       = {0};
 
-    Token *scan = is_gnu_attr ? tok->next->next->next  // skip __attribute__ ( (
-                              : tok->next->next;        // skip [ [
-    int depth = 0;
+    Token *scan  = is_gnu_attr ? tok->next->next->next // skip __attribute__ ( (
+                               : tok->next->next;      // skip [ [
+    int    depth = 0;
 
     for (Token *t = scan; t && t->kind != TK_EOF; t = t->next) {
         if (is_gnu_attr) {
-            if (equal(t, "(")) { depth++; continue; }
+            if (equal(t, "(")) {
+                depth++;
+                continue;
+            }
             if (equal(t, ")")) {
                 if (depth == 0) {
                     if (t->next && equal(t->next, ")"))
@@ -3565,7 +3734,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                 continue;
             }
         } else {
-            if (equal(t, "[")) { depth++; continue; }
+            if (equal(t, "[")) {
+                depth++;
+                continue;
+            }
             if (equal(t, "]")) {
                 if (depth == 0) {
                     if (t->next && equal(t->next, "]"))
@@ -3577,8 +3749,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
             }
         }
 
-        if (depth != 0) continue;
-        if (equal(t, ",")) continue;
+        if (depth != 0)
+            continue;
+        if (equal(t, ","))
+            continue;
 
         if (equal(t, "macro")) {
             error_tok(vm, t,
@@ -3586,14 +3760,14 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
         } else if (equal(t, "comptime")) {
             is_comptime_kind = true;
             read_macro_attr_options(vm, t, &attribute_name);
-        } else if (equal(t, "cccc") &&
-                   t->next && equal(t->next, ":") &&
+        } else if (equal(t, "cccc") && t->next && equal(t->next, ":") &&
                    t->next->next && equal(t->next->next, ":") &&
                    t->next->next->next) {
             Token *after_scope = t->next->next->next;
             if (equal(after_scope, "macro")) {
-                error_tok(vm, after_scope,
-                          "[[cccc::macro]] is deprecated; use [[cccc::comptime]]");
+                error_tok(
+                    vm, after_scope,
+                    "[[cccc::macro]] is deprecated; use [[cccc::comptime]]");
             } else if (equal(after_scope, "comptime")) {
                 is_comptime_kind = true;
                 read_macro_attr_options(vm, after_scope, &attribute_name);
@@ -3617,35 +3791,45 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                 is_build_kind = true;
             } else if (equal(after_scope, "build_target")) {
                 is_build_target_kind = true;
-                // parse optional (kind=NAME); validate kind value now (with token)
+                // parse optional (kind=NAME); validate kind value now (with
+                // token)
                 if (after_scope->next && equal(after_scope->next, "(")) {
                     Token *p = after_scope->next->next;
                     while (p && !equal(p, ")") && p->kind != TK_EOF) {
-                        if (equal(p, "kind") && p->next && equal(p->next, "=") &&
-                            p->next->next && p->next->next->kind == TK_IDENT) {
+                        if (equal(p, "kind") && p->next &&
+                            equal(p->next, "=") && p->next->next &&
+                            p->next->next->kind == TK_IDENT) {
                             Token *kind_tok = p->next->next;
-                            if (!equal(kind_tok, "native") && !equal(kind_tok, "bytecode"))
+                            if (!equal(kind_tok, "native") &&
+                                !equal(kind_tok, "bytecode"))
                                 error_tok(vm, kind_tok,
-                                    "[[cccc::build_target(kind=%.*s)]] is not supported — "
-                                    "valid values are kind=native and kind=bytecode",
-                                    kind_tok->len, kind_tok->loc);
-                            build_target_kind = strndup(kind_tok->loc, kind_tok->len);
+                                          "[[cccc::build_target(kind=%.*s)]] "
+                                          "is not supported — "
+                                          "valid values are kind=native and "
+                                          "kind=bytecode",
+                                          kind_tok->len, kind_tok->loc);
+                            build_target_kind =
+                                strndup(kind_tok->loc, kind_tok->len);
                             p = kind_tok->next;
                         } else if (equal(p, ",")) {
                             p = p->next;
                         } else {
-                            error_tok(vm, p, "unknown [[cccc::build_target]] option '%.*s'",
-                                      p->len, p->loc);
+                            error_tok(
+                                vm, p,
+                                "unknown [[cccc::build_target]] option '%.*s'",
+                                p->len, p->loc);
                         }
                     }
                 }
             }
-            // Advance past the attribute name token so the bare-name branches below
-            // don't re-process it. The for loop's t = t->next will skip to
-            // after_scope->next (e.g. '(' for args, ']' for closing bracket).
+            // Advance past the attribute name token so the bare-name branches
+            // below don't re-process it. The for loop's t = t->next will skip
+            // to after_scope->next (e.g. '(' for args, ']' for closing
+            // bracket).
             t = after_scope;
         } else if (equal(t, "build_target")) {
-            // bare: __attribute__((build_target)) or __attribute__((build_target(...)))
+            // bare: __attribute__((build_target)) or
+            // __attribute__((build_target(...)))
             is_build_target_kind = true;
             if (t->next && equal(t->next, "(")) {
                 Token *p = t->next->next;
@@ -3653,18 +3837,24 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                     if (equal(p, "kind") && p->next && equal(p->next, "=") &&
                         p->next->next && p->next->next->kind == TK_IDENT) {
                         Token *kind_tok = p->next->next;
-                        if (!equal(kind_tok, "native") && !equal(kind_tok, "bytecode"))
-                            error_tok(vm, kind_tok,
+                        if (!equal(kind_tok, "native") &&
+                            !equal(kind_tok, "bytecode"))
+                            error_tok(
+                                vm, kind_tok,
                                 "build_target(kind=%.*s) is not supported — "
-                                "valid values are kind=native and kind=bytecode",
+                                "valid values are kind=native and "
+                                "kind=bytecode",
                                 kind_tok->len, kind_tok->loc);
-                        build_target_kind = strndup(kind_tok->loc, kind_tok->len);
+                        build_target_kind =
+                            strndup(kind_tok->loc, kind_tok->len);
                         p = kind_tok->next;
                     } else if (equal(p, ",")) {
                         p = p->next;
                     } else {
-                        error_tok(vm, p, "unknown build_target attribute option '%.*s'",
-                                  p->len, p->loc);
+                        error_tok(
+                            vm, p,
+                            "unknown build_target attribute option '%.*s'",
+                            p->len, p->loc);
                     }
                 }
             }
@@ -3679,7 +3869,8 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                 parse_test_args(vm, &p, &ta);
             }
         } else if (equal(t, "test_setup") || equal(t, "test_teardown")) {
-            // bare: __attribute__((test_setup)) or __attribute__((test_teardown))
+            // bare: __attribute__((test_setup)) or
+            // __attribute__((test_teardown))
             if (equal(t, "test_teardown"))
                 is_teardown_kind = true;
             else
@@ -3692,9 +3883,9 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
     }
 
     // Only act on a positive comptime/test/setup/teardown/build match.
-    if ((!is_comptime_kind && !is_test_kind &&
-         !is_setup_kind && !is_teardown_kind && !is_build_kind &&
-         !is_build_target_kind) || !attr_end)
+    if ((!is_comptime_kind && !is_test_kind && !is_setup_kind &&
+         !is_teardown_kind && !is_build_kind && !is_build_target_kind) ||
+        !attr_end)
         return false;
 
     // #1048: a `[[cccc::comptime]]`/`__attribute__((comptime))` declaration
@@ -3715,7 +3906,8 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
     // header verbatim is safe. tok->file, not attr_end->file: the
     // attribute's own opening token is where this declaration was
     // *written*, same granularity #896 already uses.
-    if (is_comptime_kind && tok->file && !is_private_header_tag(tok->file->name))
+    if (is_comptime_kind && tok->file &&
+        !is_private_header_tag(tok->file->name))
         mark_cccc_only_file(vm, tok->file->name);
 
     // #886: [[cccc::comptime]] typedef ...; -- a typedef is neither a
@@ -3733,19 +3925,22 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
 
     // Probe what follows attr_end: function or variable?
     // Heuristic: scan (respecting brace depth) for "ident (" before ";" or "=".
-    bool looks_like_function = false;
+    bool   looks_like_function    = false;
     Token *comptime_decl_name_tok = NULL;
     {
-        Token *probe = attr_end;
-        int brace_depth = 0;
+        Token *probe       = attr_end;
+        int    brace_depth = 0;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, "{"))       brace_depth++;
-            else if (equal(probe, "}")) brace_depth--;
+            if (equal(probe, "{"))
+                brace_depth++;
+            else if (equal(probe, "}"))
+                brace_depth--;
             else if (brace_depth == 0) {
-                if (equal(probe, ";") || equal(probe, "=")) break;
+                if (equal(probe, ";") || equal(probe, "="))
+                    break;
                 if (probe->kind == TK_IDENT && probe->next &&
                     equal(probe->next, "(")) {
-                    looks_like_function = true;
+                    looks_like_function    = true;
                     comptime_decl_name_tok = probe;
                     break;
                 }
@@ -3764,25 +3959,32 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                                      !probe_function_definition(attr_end);
 
     // [[cccc::test]] / __attribute__((test)): record the function name, strip
-    // the attribute, keep the function definition in the normal compilation stream.
+    // the attribute, keep the function definition in the normal compilation
+    // stream.
     if (is_test_kind) {
         Token *probe = attr_end;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, ";") || equal(probe, "=")) break;
-            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+            if (equal(probe, ";") || equal(probe, "="))
+                break;
+            if (probe->kind == TK_IDENT && probe->next &&
+                equal(probe->next, "(")) {
                 TestFnRecord *rec = calloc(1, sizeof(TestFnRecord));
                 rec->name         = strndup(probe->loc, probe->len);
                 rec->display_name = ta.test_name ? strdup(ta.test_name) : NULL;
-                // Suite: explicit attribute arg takes priority, then active pragma suite
-                const char *s = ta.suite_name ? ta.suite_name : vm->compiler.current_suite;
-                rec->suite            = s ? strdup(s) : NULL;
-                rec->error_pat        = ta.error_pat ? strdup(ta.error_pat) : NULL;
+                // Suite: explicit attribute arg takes priority, then active
+                // pragma suite
+                const char *s =
+                    ta.suite_name ? ta.suite_name : vm->compiler.current_suite;
+                rec->suite     = s ? strdup(s) : NULL;
+                rec->error_pat = ta.error_pat ? strdup(ta.error_pat) : NULL;
                 rec->error_pat_negate = ta.error_pat_negate;
-                rec->expect_compile_error = ta.expect_compile_error && !ta.error_pat;
+                rec->expect_compile_error =
+                    ta.expect_compile_error && !ta.error_pat;
                 if (ta.expect_compile_error && ta.error_pat)
                     warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
-                             "expect_compile_error= is redundant when error= is also set; ignored");
-                rec->timeout_ms       = ta.timeout_ms;
+                             "expect_compile_error= is redundant when error= "
+                             "is also set; ignored");
+                rec->timeout_ms = ta.timeout_ms;
                 if (ta.error_pat && ta.error_count_op != CMP_NONE) {
                     rec->expect_errors  = ta.error_count;
                     rec->error_count_op = ta.error_count_op;
@@ -3790,59 +3992,68 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
                     rec->expect_errors  = ta.error_count;
                     rec->error_count_op = CMP_EQ;
                 }
-                rec->ret_kind    = ta.ret_kind;
-                rec->ret_op      = (ta.ret_kind != RET_NONE) ? ta.ret_op : CMP_EQ;
+                rec->ret_kind = ta.ret_kind;
+                rec->ret_op   = (ta.ret_kind != RET_NONE) ? ta.ret_op : CMP_EQ;
                 rec->ret_epsilon = ta.ret_epsilon_val;
                 if (ta.ret_kind == RET_INT)
-                    rec->ret_expect.ret_int   = ta.ret_int_val;
+                    rec->ret_expect.ret_int = ta.ret_int_val;
                 else if (ta.ret_kind == RET_FLOAT)
                     rec->ret_expect.ret_float = ta.ret_float_val;
                 else if (ta.ret_kind == RET_STR)
-                    rec->ret_expect.ret_str   = ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
+                    rec->ret_expect.ret_str =
+                        ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
                 else if (ta.ret_kind == RET_STRUCT) {
-                    // Ownership of the heap-allocated fields/text is transferred here.
+                    // Ownership of the heap-allocated fields/text is
+                    // transferred here.
                     rec->ret_expect.ret_fields = ta.ret_fields;
-                    rec->ret_struct_text        = ta.ret_struct_text;
+                    rec->ret_struct_text       = ta.ret_struct_text;
                 }
                 rec->expect_exit_code = ta.exit_code_val;
                 // Link into the list before cc_parse_test_flags so that
                 // the VM cleanup loop frees the record if error_tok longjmps.
-                rec->next = vm->compiler.test_fns;
+                rec->next             = vm->compiler.test_fns;
                 vm->compiler.test_fns = rec;
                 if (ta.flags) {
-                    rec->test_flags = strdup(ta.flags);
+                    rec->test_flags         = strdup(ta.flags);
                     CcTestFlagsDelta _delta = {0};
-                    cc_parse_test_flags(vm, probe, ta.flags, rec->name, &_delta);
-                    rec->test_flags_or          = _delta.or_bits;
-                    rec->test_flags_mask        = _delta.set_mask;
-                    rec->test_opt_level         = _delta.opt_level;
-                    rec->test_opt_set           = _delta.opt_set;
-                    rec->test_warn_or           = _delta.warn_or;
-                    rec->test_warn_mask         = _delta.warn_mask;
-                    rec->test_warn_errors_or    = _delta.warn_errors_or;
-                    rec->test_warn_errors_mask  = _delta.warn_errors_mask;
-                    rec->test_warn_as_errors    = _delta.warn_as_errors;
+                    cc_parse_test_flags(vm, probe, ta.flags, rec->name,
+                                        &_delta);
+                    rec->test_flags_or           = _delta.or_bits;
+                    rec->test_flags_mask         = _delta.set_mask;
+                    rec->test_opt_level          = _delta.opt_level;
+                    rec->test_opt_set            = _delta.opt_set;
+                    rec->test_warn_or            = _delta.warn_or;
+                    rec->test_warn_mask          = _delta.warn_mask;
+                    rec->test_warn_errors_or     = _delta.warn_errors_or;
+                    rec->test_warn_errors_mask   = _delta.warn_errors_mask;
+                    rec->test_warn_as_errors     = _delta.warn_as_errors;
                     rec->test_warn_as_errors_set = _delta.warn_as_errors_set;
-                    rec->test_f_enable          = _delta.f_enable;
-                    rec->test_f_disable         = _delta.f_disable;
-                    rec->test_f_set             = (_delta.f_enable || _delta.f_disable);
-                    rec->test_ffi_allow         = _delta.ffi_allow;
-                    rec->test_ffi_allow_count   = _delta.ffi_allow_count;
-                    _delta.ffi_allow            = NULL;
-                    _delta.ffi_allow_count      = 0;
+                    rec->test_f_enable           = _delta.f_enable;
+                    rec->test_f_disable          = _delta.f_disable;
+                    rec->test_f_set     = (_delta.f_enable || _delta.f_disable);
+                    rec->test_ffi_allow = _delta.ffi_allow;
+                    rec->test_ffi_allow_count = _delta.ffi_allow_count;
+                    _delta.ffi_allow          = NULL;
+                    _delta.ffi_allow_count    = 0;
                 }
-                rec->expect_stderr = ta.expect_stderr ? strdup(ta.expect_stderr) : NULL;
-                rec->reject_stderr = ta.reject_stderr ? strdup(ta.reject_stderr) : NULL;
-                rec->expect_stdout = ta.expect_stdout ? strdup(ta.expect_stdout) : NULL;
-                rec->reject_stdout = ta.reject_stdout ? strdup(ta.reject_stdout) : NULL;
+                rec->expect_stderr =
+                    ta.expect_stderr ? strdup(ta.expect_stderr) : NULL;
+                rec->reject_stderr =
+                    ta.reject_stderr ? strdup(ta.reject_stderr) : NULL;
+                rec->expect_stdout =
+                    ta.expect_stdout ? strdup(ta.expect_stdout) : NULL;
+                rec->reject_stdout =
+                    ta.reject_stdout ? strdup(ta.reject_stdout) : NULL;
                 if (ta.exit_code_val >= 0 && ta.error_pat) {
                     warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
-                             "exit_code= and error= are mutually exclusive; error= ignored");
+                             "exit_code= and error= are mutually exclusive; "
+                             "error= ignored");
                     rec->error_pat = NULL;
                 }
                 if (ta.exit_code_val >= 0 && ta.ret_kind != RET_NONE) {
                     warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
-                             "exit_code= and return= are mutually exclusive; return= ignored");
+                             "exit_code= and return= are mutually exclusive; "
+                             "return= ignored");
                     rec->ret_kind = RET_NONE;
                 }
                 break;
@@ -3853,21 +4064,24 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
         return true;
     }
 
-    // [[cccc::test_setup]] / [[cccc::test_teardown]] / __attribute__ bare forms:
-    // record the hook, keep the function in the normal compilation token stream.
+    // [[cccc::test_setup]] / [[cccc::test_teardown]] / __attribute__ bare
+    // forms: record the hook, keep the function in the normal compilation token
+    // stream.
     if (is_setup_kind || is_teardown_kind) {
         Token *probe = attr_end;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, ";") || equal(probe, "=")) break;
-            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
+            if (equal(probe, ";") || equal(probe, "="))
+                break;
+            if (probe->kind == TK_IDENT && probe->next &&
+                equal(probe->next, "(")) {
                 TestSetupRecord *rec = calloc(1, sizeof(TestSetupRecord));
-                rec->fn_name     = strndup(probe->loc, probe->len);
+                rec->fn_name         = strndup(probe->loc, probe->len);
                 rec->name_pat    = tsa.name_pat ? strdup(tsa.name_pat) : NULL;
-                rec->suite       = tsa.suite    ? strdup(tsa.suite)    : NULL;
+                rec->suite       = tsa.suite ? strdup(tsa.suite) : NULL;
                 rec->once        = tsa.once;
                 rec->is_teardown = is_teardown_kind;
                 rec->inherit     = tsa.inherit;
-                rec->next = vm->compiler.test_setups;
+                rec->next        = vm->compiler.test_setups;
                 vm->compiler.test_setups = rec;
                 break;
             }
@@ -3883,11 +4097,13 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
     if (is_build_kind) {
         Token *probe = attr_end;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, ";") || equal(probe, "=")) break;
-            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
-                BuildFnRecord *rec = calloc(1, sizeof(BuildFnRecord));
-                rec->name = strndup(probe->loc, probe->len);
-                rec->next = vm->compiler.build_fns;
+            if (equal(probe, ";") || equal(probe, "="))
+                break;
+            if (probe->kind == TK_IDENT && probe->next &&
+                equal(probe->next, "(")) {
+                BuildFnRecord *rec     = calloc(1, sizeof(BuildFnRecord));
+                rec->name              = strndup(probe->loc, probe->len);
+                rec->next              = vm->compiler.build_fns;
                 vm->compiler.build_fns = rec;
                 break;
             }
@@ -3897,20 +4113,24 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
         return true;
     }
 
-    // [[cccc::build_target]] / [[cccc::build_target(kind=native|bytecode)]]: record
-    // the factory function name and kind.  Supported kinds: "native" (default),
-    // "bytecode" (#545).  The attribute is stripped; the function stays in the normal
-    // compilation stream so the runner can find and invoke it by address.
+    // [[cccc::build_target]] / [[cccc::build_target(kind=native|bytecode)]]:
+    // record the factory function name and kind.  Supported kinds: "native"
+    // (default), "bytecode" (#545).  The attribute is stripped; the function
+    // stays in the normal compilation stream so the runner can find and invoke
+    // it by address.
     if (is_build_target_kind) {
-        const char *kind = build_target_kind ? build_target_kind : "native";
-        Token *probe = attr_end;
+        const char *kind  = build_target_kind ? build_target_kind : "native";
+        Token      *probe = attr_end;
         while (probe && probe->kind != TK_EOF) {
-            if (equal(probe, ";") || equal(probe, "=")) break;
-            if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
-                BuildTargetFnRecord *rec = calloc(1, sizeof(BuildTargetFnRecord));
-                rec->name = strndup(probe->loc, probe->len);
-                rec->kind = strdup(kind);
-                rec->next = vm->compiler.build_target_fns;
+            if (equal(probe, ";") || equal(probe, "="))
+                break;
+            if (probe->kind == TK_IDENT && probe->next &&
+                equal(probe->next, "(")) {
+                BuildTargetFnRecord *rec =
+                    calloc(1, sizeof(BuildTargetFnRecord));
+                rec->name                     = strndup(probe->loc, probe->len);
+                rec->kind                     = strdup(kind);
+                rec->next                     = vm->compiler.build_target_fns;
                 vm->compiler.build_target_fns = rec;
                 break;
             }
@@ -3922,7 +4142,8 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
     }
 
     // Route to function or variable extraction.
-    if (emit_scan) return false;  // comptime/macro extraction invalid inside emit blocks
+    if (emit_scan)
+        return false; // comptime/macro extraction invalid inside emit blocks
 
     if (is_bodyless_comptime_decl) {
         // Record the name (for the never-defined check in compile_all_macros)
@@ -3935,22 +4156,23 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
         // arguments, so `int is_odd(int n);` would be misread as a
         // zero-context call to the comptime function `is_odd` and executed.
         if (comptime_decl_name_tok) {
-            ComptimeDeclRecord *rec = calloc(1, sizeof(ComptimeDeclRecord));
-            rec->name = strndup(comptime_decl_name_tok->loc, comptime_decl_name_tok->len);
-            rec->tok  = comptime_decl_name_tok;
-            rec->next = vm->compiler.comptime_decls;
+            ComptimeDeclRecord *rec     = calloc(1, sizeof(ComptimeDeclRecord));
+            rec->name                   = strndup(comptime_decl_name_tok->loc,
+                                                  comptime_decl_name_tok->len);
+            rec->tok                    = comptime_decl_name_tok;
+            rec->next                   = vm->compiler.comptime_decls;
             vm->compiler.comptime_decls = rec;
         }
         Token *decl_end = attr_end;
         while (decl_end && decl_end->kind != TK_EOF && !equal(decl_end, ";"))
             decl_end = decl_end->next;
-        *tok_ptr = decl_end && decl_end->kind != TK_EOF ? decl_end->next : decl_end;
+        *tok_ptr =
+            decl_end && decl_end->kind != TK_EOF ? decl_end->next : decl_end;
         return true;
     }
 
     if (looks_like_function) {
-        *tok_ptr = extract_macro_function(vm, attr_end, true,
-                                          attribute_name);
+        *tok_ptr = extract_macro_function(vm, attr_end, true, attribute_name);
     } else {
         *tok_ptr = extract_comptime_var(vm, attr_end);
     }
@@ -3964,14 +4186,22 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr, bool emit_scan)
 static bool probe_function_definition(Token *tok) {
     Token *probe = tok;
     while (probe && probe->kind != TK_EOF) {
-        if (equal(probe, ";")) return false;
+        if (equal(probe, ";"))
+            return false;
         if (probe->kind == TK_IDENT && probe->next && equal(probe->next, "(")) {
             // Scan past the parameter list
-            Token *p = probe->next;
-            int depth = 0;
+            Token *p     = probe->next;
+            int    depth = 0;
             while (p && p->kind != TK_EOF) {
-                if (equal(p, "("))       depth++;
-                else if (equal(p, ")")) { depth--; if (depth == 0) { p = p->next; break; } }
+                if (equal(p, "("))
+                    depth++;
+                else if (equal(p, ")")) {
+                    depth--;
+                    if (depth == 0) {
+                        p = p->next;
+                        break;
+                    }
+                }
                 p = p->next;
             }
             // Skip optional attribute/qualifier tokens then look for {
@@ -3991,15 +4221,19 @@ static bool probe_var_declaration(Token *tok) {
     // '('. That is an expression statement, not a declaration — reject it.
     if (tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, "("))
         return false;
-    Token *probe = tok;
-    bool found_ident = false;
-    int depth = 0;
+    Token *probe       = tok;
+    bool   found_ident = false;
+    int    depth       = 0;
     while (probe && probe->kind != TK_EOF) {
-        if (equal(probe, "{"))       depth++;
-        else if (equal(probe, "}")) depth--;
+        if (equal(probe, "{"))
+            depth++;
+        else if (equal(probe, "}"))
+            depth--;
         else if (depth == 0) {
-            if (equal(probe, "=") || equal(probe, ";")) return found_ident;
-            if (probe->kind == TK_IDENT)                found_ident = true;
+            if (equal(probe, "=") || equal(probe, ";"))
+                return found_ident;
+            if (probe->kind == TK_IDENT)
+                found_ident = true;
         }
         probe = probe->next;
     }
@@ -4014,16 +4248,25 @@ static Token *probe_struct_type_def_end(Token *tok) {
     if (!equal(tok, "struct") && !equal(tok, "union") && !equal(tok, "enum"))
         return NULL;
     Token *p = tok->next;
-    if (p && p->kind == TK_IDENT) p = p->next;   // optional tag name
-    if (!p || !equal(p, "{")) return NULL;
+    if (p && p->kind == TK_IDENT)
+        p = p->next; // optional tag name
+    if (!p || !equal(p, "{"))
+        return NULL;
     int d = 0;
     while (p && p->kind != TK_EOF) {
-        if (equal(p, "{"))        d++;
-        else if (equal(p, "}")) { if (--d == 0) { p = p->next; break; } }
+        if (equal(p, "{"))
+            d++;
+        else if (equal(p, "}")) {
+            if (--d == 0) {
+                p = p->next;
+                break;
+            }
+        }
         p = p->next;
     }
-    if (!p || !equal(p, ";")) return NULL;        // must end with ';' (no var name)
-    return p->next;                               // token after ';'
+    if (!p || !equal(p, ";"))
+        return NULL; // must end with ';' (no var name)
+    return p->next;  // token after ';'
 }
 
 // #886: if tok starts a `typedef ...;` declaration, return the token AFTER
@@ -4037,16 +4280,23 @@ static Token *probe_struct_type_def_end(Token *tok) {
 // so a ';' inside e.g. an array-size expression or a nested declarator
 // doesn't end the scan early.
 static Token *probe_typedef_end(Token *tok) {
-    if (!starts_with_typedef(tok)) return NULL;
-    Token *p = tok->next;
-    int paren = 0, bracket = 0, brace = 0;
+    if (!starts_with_typedef(tok))
+        return NULL;
+    Token *p     = tok->next;
+    int    paren = 0, bracket = 0, brace = 0;
     while (p && p->kind != TK_EOF) {
-        if (equal(p, "("))      paren++;
-        else if (equal(p, ")")) paren--;
-        else if (equal(p, "[")) bracket++;
-        else if (equal(p, "]")) bracket--;
-        else if (equal(p, "{")) brace++;
-        else if (equal(p, "}")) brace--;
+        if (equal(p, "("))
+            paren++;
+        else if (equal(p, ")"))
+            paren--;
+        else if (equal(p, "["))
+            bracket++;
+        else if (equal(p, "]"))
+            bracket--;
+        else if (equal(p, "{"))
+            brace++;
+        else if (equal(p, "}"))
+            brace--;
         else if (paren == 0 && bracket == 0 && brace == 0 && equal(p, ";"))
             return p->next;
         p = p->next;
@@ -4061,7 +4311,8 @@ static Token *probe_typedef_end(Token *tok) {
 // Returns true and advances *tok_ptr past the extracted definition on match.
 // NOTE: struct/union/enum type definitions are handled by the caller via
 // probe_struct_type_def_end; this function will never see them.
-static bool try_extract_comptime_block_decl(VirtualMachine *vm, Token **tok_ptr) {
+static bool try_extract_comptime_block_decl(VirtualMachine *vm,
+                                            Token         **tok_ptr) {
     Token *tok = *tok_ptr;
 
     // #886: typedefs are handled by the caller in preprocess2 via
@@ -4086,14 +4337,16 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "push")) {
         // Grow the stack if needed
         if (vm->compiler.diag_stack_depth >= vm->compiler.diag_stack_cap) {
-            int new_cap = vm->compiler.diag_stack_cap ? vm->compiler.diag_stack_cap * 2 : 4;
-            vm->compiler.diag_stack_warnings =
-                realloc(vm->compiler.diag_stack_warnings, sizeof(uint64_t) * new_cap);
-            vm->compiler.diag_stack_werror =
-                realloc(vm->compiler.diag_stack_werror, sizeof(uint64_t) * new_cap);
+            int new_cap = vm->compiler.diag_stack_cap
+                              ? vm->compiler.diag_stack_cap * 2
+                              : 4;
+            vm->compiler.diag_stack_warnings = realloc(
+                vm->compiler.diag_stack_warnings, sizeof(uint64_t) * new_cap);
+            vm->compiler.diag_stack_werror = realloc(
+                vm->compiler.diag_stack_werror, sizeof(uint64_t) * new_cap);
             vm->compiler.diag_stack_cap = new_cap;
         }
-        int d = vm->compiler.diag_stack_depth++;
+        int d                               = vm->compiler.diag_stack_depth++;
         vm->compiler.diag_stack_warnings[d] = vm->compiler.warnings;
         vm->compiler.diag_stack_werror[d]   = vm->compiler.warning_errors;
         return skip_line(vm, tok->next);
@@ -4104,7 +4357,7 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
             warn_tok(vm, tok, CCCC_WARN_CPP,
                      "#pragma GCC diagnostic pop with no matching push");
         } else {
-            int d = --vm->compiler.diag_stack_depth;
+            int d                       = --vm->compiler.diag_stack_depth;
             vm->compiler.warnings       = vm->compiler.diag_stack_warnings[d];
             vm->compiler.warning_errors = vm->compiler.diag_stack_werror[d];
         }
@@ -4118,7 +4371,7 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
 
     if (do_ignore || do_warning || do_error) {
         Token *action_tok = tok;
-        tok = tok->next;
+        tok               = tok->next;
         // Expect a string token like "-Wunused"
         if (!tok || tok->kind != TK_STR || tok->at_bol) {
             warn_tok(vm, action_tok, CCCC_WARN_CPP,
@@ -4137,10 +4390,11 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
 
         // Extract the warning name (strip leading "-W")
         char name[256];
-        int namelen = (int)strlen(s) - 2;
+        int  namelen = (int)strlen(s) - 2;
         if (namelen <= 0 || namelen >= (int)sizeof(name)) {
             warn_tok(vm, tok, CCCC_WARN_CPP,
-                     "#pragma GCC diagnostic: malformed warning option '%s'", s);
+                     "#pragma GCC diagnostic: malformed warning option '%s'",
+                     s);
             return skip_line(vm, tok->next);
         }
         memcpy(name, s + 2, namelen);
@@ -4155,9 +4409,10 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
             bool in_sys = (tok->file && tok->file->is_system_header) ||
                           vm->compiler.use_system_headers;
             if (!in_sys)
-                warn_tok(vm, tok, CCCC_WARN_CPP,
-                         "#pragma GCC diagnostic: unknown warning option '-W%s'",
-                         name);
+                warn_tok(
+                    vm, tok, CCCC_WARN_CPP,
+                    "#pragma GCC diagnostic: unknown warning option '-W%s'",
+                    name);
             return skip_line(vm, tok->next);
         }
 
@@ -4165,18 +4420,18 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
             vm->compiler.warnings       &= ~mask;
             vm->compiler.warning_errors &= ~mask;
         } else if (do_warning) {
-            vm->compiler.warnings       |=  mask;
+            vm->compiler.warnings       |= mask;
             vm->compiler.warning_errors &= ~mask;
         } else { // do_error
-            vm->compiler.warnings       |=  mask;
-            vm->compiler.warning_errors |=  mask;
+            vm->compiler.warnings       |= mask;
+            vm->compiler.warning_errors |= mask;
         }
         return skip_line(vm, tok->next);
     }
 
     warn_tok(vm, tok, CCCC_WARN_CPP,
-             "#pragma GCC diagnostic: unknown action '%.*s'",
-             tok->len, tok->loc);
+             "#pragma GCC diagnostic: unknown action '%.*s'", tok->len,
+             tok->loc);
     return skip_line(vm, tok->next);
 }
 
@@ -4185,20 +4440,20 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
 // individual pragmas these keys would otherwise correspond to.
 typedef struct {
     const char *name;
-    uint32_t bit;
+    uint32_t    bit;
 } PragmaConfigFlag;
 
 static const PragmaConfigFlag pragma_config_flags[] = {
-    {"bounds_checks",         CCCC_BOUNDS_CHECKS},
-    {"uaf_detection",         CCCC_UAF_DETECTION},
-    {"type_checks",           CCCC_TYPE_CHECKS},
-    {"overflow_checks",       CCCC_OVERFLOW_CHECKS},
-    {"stack_canaries",        CCCC_STACK_CANARIES},
-    {"heap_canaries",         CCCC_HEAP_CANARIES},
+    {"bounds_checks", CCCC_BOUNDS_CHECKS},
+    {"uaf_detection", CCCC_UAF_DETECTION},
+    {"type_checks", CCCC_TYPE_CHECKS},
+    {"overflow_checks", CCCC_OVERFLOW_CHECKS},
+    {"stack_canaries", CCCC_STACK_CANARIES},
+    {"heap_canaries", CCCC_HEAP_CANARIES},
     {"memory_leak_detection", CCCC_MEMORY_LEAK_DETECT},
-    {"pointer_sanitizer",     CCCC_POINTER_SANITIZER},
-    {"memory_tagging",        CCCC_MEMORY_TAGGING},
-    {"checked_pointers",      CCCC_CHECKED_BOUNDS}, // #770/#482-484
+    {"pointer_sanitizer", CCCC_POINTER_SANITIZER},
+    {"memory_tagging", CCCC_MEMORY_TAGGING},
+    {"checked_pointers", CCCC_CHECKED_BOUNDS}, // #770/#482-484
 };
 
 // Reads an integer literal token's text into *out. Returns false if tok is
@@ -4206,12 +4461,12 @@ static const PragmaConfigFlag pragma_config_flags[] = {
 static bool pragma_config_read_int(Token *tok, long *out) {
     if (!tok || (tok->kind != TK_PP_NUM && tok->kind != TK_NUM))
         return false;
-    char buf[32];
+    char   buf[32];
     size_t n = tok->len < sizeof(buf) - 1 ? tok->len : sizeof(buf) - 1;
     memcpy(buf, tok->loc, n);
     buf[n] = '\0';
     char *end;
-    long v = strtol(buf, &end, 10);
+    long  v = strtol(buf, &end, 10);
     if (end == buf || *end != '\0')
         return false;
     *out = v;
@@ -4223,8 +4478,14 @@ static bool pragma_config_read_bool(Token *tok, bool *out) {
     if (!tok)
         return false;
     if (tok->kind == TK_IDENT) {
-        if (equal(tok, "true"))  { *out = true;  return true; }
-        if (equal(tok, "false")) { *out = false; return true; }
+        if (equal(tok, "true")) {
+            *out = true;
+            return true;
+        }
+        if (equal(tok, "false")) {
+            *out = false;
+            return true;
+        }
         return false;
     }
     long v;
@@ -4238,7 +4499,8 @@ static bool pragma_config_read_bool(Token *tok, bool *out) {
 // Sets or clears a single CCCCFlags bit for `#pragma cccc config(...)`,
 // respecting CLI precedence (#357: CLI-set bits always win) and skipping
 // the change entirely in native mode (config() flags only affect VM codegen).
-static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit, bool enable) {
+static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit,
+                                   bool enable) {
     if (vm->compiler.native_mode)
         return;
     if (vm->compiler.cli_flags_mask & bit)
@@ -4254,12 +4516,12 @@ static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit, bool enable
 static void pragma_config_set_safety(VirtualMachine *vm, int level) {
     if (vm->compiler.native_mode)
         return;
-    uint32_t preset = level == 0 ? 0u
-                     : level == 1 ? (uint32_t)CCCC_SAFETY_BASIC
-                     : level == 2 ? (uint32_t)CCCC_SAFETY_STANDARD
-                     : (uint32_t)CCCC_SAFETY_MAX;
+    uint32_t preset    = level == 0   ? 0u
+                         : level == 1 ? (uint32_t)CCCC_SAFETY_BASIC
+                         : level == 2 ? (uint32_t)CCCC_SAFETY_STANDARD
+                                      : (uint32_t)CCCC_SAFETY_MAX;
     uint32_t touchable = CCCC_SAFETY_PRESET_BITS & ~vm->compiler.cli_flags_mask;
-    vm->flags = (vm->flags & ~touchable) | (preset & touchable);
+    vm->flags          = (vm->flags & ~touchable) | (preset & touchable);
 }
 
 // Applies `optimisation = N` (0..3), unless -O/--optimize was given on the CLI.
@@ -4272,30 +4534,34 @@ static void pragma_config_set_optimisation(VirtualMachine *vm, int level) {
 }
 
 // Table of optimisation-pass keys accepted by #pragma cccc config(...) (#612).
-typedef struct { const char *name; uint32_t bit; } PragmaConfigOptPass;
+typedef struct {
+    const char *name;
+    uint32_t    bit;
+} PragmaConfigOptPass;
 static const PragmaConfigOptPass pragma_config_opt_passes[] = {
-    {"fold",      CCCC_OPT_FOLD},
-    {"peephole",  CCCC_OPT_PEEPHOLE},
+    {"fold", CCCC_OPT_FOLD},
+    {"peephole", CCCC_OPT_PEEPHOLE},
     {"copy_prop", CCCC_OPT_COPY_PROP},
-    {"dce",       CCCC_OPT_DCE},
-    {"cse",       CCCC_OPT_CSE},
-    {"fuse",      CCCC_OPT_FUSE},
-    {"elim_ext",  CCCC_OPT_ELIM_EXT},
+    {"dce", CCCC_OPT_DCE},
+    {"cse", CCCC_OPT_CSE},
+    {"fuse", CCCC_OPT_FUSE},
+    {"elim_ext", CCCC_OPT_ELIM_EXT},
 };
 
 // Enables or disables a single optimisation pass, unless the CLI pinned it via
 // -f/-fno-. Note: enable and disable are mutually exclusive; setting one clears
 // the other so that opt_f_enable and opt_f_disable stay consistent.
-static void pragma_config_set_opt_pass(VirtualMachine *vm, uint32_t bit, bool enable) {
+static void pragma_config_set_opt_pass(VirtualMachine *vm, uint32_t bit,
+                                       bool enable) {
     if (vm->compiler.native_mode)
         return;
     if (vm->compiler.cli_f_mask & bit)
         return;
     if (enable) {
-        vm->compiler.opt_f_enable  |=  bit;
+        vm->compiler.opt_f_enable  |= bit;
         vm->compiler.opt_f_disable &= ~bit;
     } else {
-        vm->compiler.opt_f_disable |=  bit;
+        vm->compiler.opt_f_disable |= bit;
         vm->compiler.opt_f_enable  &= ~bit;
     }
 }
@@ -4309,52 +4575,68 @@ static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
     // behavior -- pragma_config_set_flag/_safety/_optimisation/_opt_pass
     // all early-return under native_mode already (see their own comments),
     // so the pragma is silently a no-op there. Surface that instead of
-    // staying quiet about it, matching -c=native/-m/-c=generated's CLI-flag warning
-    // for the same reason (main.c's warn_ignored_vm_flags). Fires before
-    // key validation below: even a malformed value is still a no-op here.
+    // staying quiet about it, matching -c=native/-m/-c=generated's CLI-flag
+    // warning for the same reason (main.c's warn_ignored_vm_flags). Fires
+    // before key validation below: even a malformed value is still a no-op
+    // here.
     if (vm->compiler.native_mode)
-        warn_tok(vm, key, CCCC_WARN_IGNORED_FEATURES,
-                 "#pragma cccc config(%.*s) has no effect in -c=native mode "
-                 "-- it configures VM bytecode generation/runtime behavior only",
-                 (int)key->len, key->loc);
+        warn_tok(
+            vm, key, CCCC_WARN_IGNORED_FEATURES,
+            "#pragma cccc config(%.*s) has no effect in -c=native mode "
+            "-- it configures VM bytecode generation/runtime behavior only",
+            (int)key->len, key->loc);
     if (equal(key, "safety")) {
         long level = 0;
-        if (!value || !pragma_config_read_int(value, &level) || level < 0 || level > 3)
-            error_tok(vm, value ? value : key,
-                      "#pragma cccc config: 'safety' requires an integer value 0..3");
+        if (!value || !pragma_config_read_int(value, &level) || level < 0 ||
+            level > 3)
+            error_tok(
+                vm, value ? value : key,
+                "#pragma cccc config: 'safety' requires an integer value 0..3");
         pragma_config_set_safety(vm, (int)level);
         return;
     }
     if (equal(key, "optimisation")) {
         long level = 0;
-        if (!value || !pragma_config_read_int(value, &level) || level < 0 || level > 3)
+        if (!value || !pragma_config_read_int(value, &level) || level < 0 ||
+            level > 3)
             error_tok(vm, value ? value : key,
-                      "#pragma cccc config: 'optimisation' requires an integer value 0..3");
+                      "#pragma cccc config: 'optimisation' requires an integer "
+                      "value 0..3");
         pragma_config_set_optimisation(vm, (int)level);
         return;
     }
-    for (size_t i = 0; i < sizeof(pragma_config_flags) / sizeof(pragma_config_flags[0]); i++) {
+    for (size_t i = 0;
+         i < sizeof(pragma_config_flags) / sizeof(pragma_config_flags[0]);
+         i++) {
         if (!equal(key, (char *)pragma_config_flags[i].name))
             continue;
         bool enable = true; // bare key == "= true"
         if (value && !pragma_config_read_bool(value, &enable))
-            error_tok(vm, value, "#pragma cccc config: '%.*s' requires a boolean value (true/false)",
+            error_tok(vm, value,
+                      "#pragma cccc config: '%.*s' requires a boolean value "
+                      "(true/false)",
                       (int)key->len, key->loc);
         pragma_config_set_flag(vm, pragma_config_flags[i].bit, enable);
         return;
     }
-    // Optimisation-pass keys (#612): fold, peephole, copy_prop, dce, cse, fuse, elim_ext
-    for (size_t i = 0; i < sizeof(pragma_config_opt_passes) / sizeof(pragma_config_opt_passes[0]); i++) {
+    // Optimisation-pass keys (#612): fold, peephole, copy_prop, dce, cse, fuse,
+    // elim_ext
+    for (size_t i = 0; i < sizeof(pragma_config_opt_passes) /
+                               sizeof(pragma_config_opt_passes[0]);
+         i++) {
         if (!equal(key, (char *)pragma_config_opt_passes[i].name))
             continue;
         bool enable = true;
         if (value && !pragma_config_read_bool(value, &enable))
-            error_tok(vm, value, "#pragma cccc config: '%.*s' requires a boolean value (true/false)",
+            error_tok(vm, value,
+                      "#pragma cccc config: '%.*s' requires a boolean value "
+                      "(true/false)",
                       (int)key->len, key->loc);
         pragma_config_set_opt_pass(vm, pragma_config_opt_passes[i].bit, enable);
         return;
     }
-    error_tok(vm, key, "#pragma cccc config: unknown option '%.*s'", (int)key->len, key->loc);
+    error_tok(vm, key, "#pragma cccc config: unknown option '%.*s'",
+              (int)key->len, key->loc);
 }
 
 // Parses `config ( key [= value] (, key [= value])* )` and applies each
@@ -4371,12 +4653,12 @@ static Token *handle_pragma_config(VirtualMachine *vm, Token *sub) {
         if (!p || p->kind != TK_IDENT)
             error_tok(vm, p && p->kind != TK_EOF ? p : sub,
                       "expected an option name in '#pragma cccc config'");
-        Token *key = p;
-        p = p->next;
+        Token *key   = p;
+        p            = p->next;
         Token *value = NULL;
         if (equal(p, "=")) {
             value = p->next;
-            p = value ? value->next : NULL;
+            p     = value ? value->next : NULL;
         }
         pragma_config_apply(vm, key, value);
         if (equal(p, ",")) {
@@ -4402,11 +4684,13 @@ static Token *handle_pragma_link(VirtualMachine *vm, Token *sub) {
                   "expected '(' after '#pragma cccc link'");
     p = p->next;
     if (equal(p, ")"))
-        error_tok(vm, p, "#pragma cccc link requires at least one library name");
+        error_tok(vm, p,
+                  "#pragma cccc link requires at least one library name");
     for (;;) {
         if (!p || p->kind != TK_STR)
             error_tok(vm, p && p->kind != TK_EOF ? p : sub,
-                      "expected a string literal library name in '#pragma cccc link'");
+                      "expected a string literal library name in '#pragma cccc "
+                      "link'");
         strarray_push(&vm->compiler.pragma_link_libs, strdup(p->str));
         p = p->next;
         if (equal(p, ",")) {
@@ -4423,9 +4707,9 @@ static Token *handle_pragma_link(VirtualMachine *vm, Token *sub) {
     return skip_line(vm, p);
 }
 
-
 // Dispatch the body of a #pragma directive or a _Pragma() operator.
-// tok is the first content token (after "#pragma" / after the destringized string).
+// tok is the first content token (after "#pragma" / after the destringized
+// string).
 static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "once")) {
         hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
@@ -4445,14 +4729,17 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             if (after && equal(after, "end")) {
                 ComptimeCtxEntry *top = ctx_top(vm);
                 if (!top || top->type != CTX_COMPTIME || !top->needs_end)
-                    error_tok(vm, tok, "stray #pragma cccc comptime end without matching begin");
+                    error_tok(vm, tok,
+                              "stray #pragma cccc comptime end without "
+                              "matching begin");
                 ctx_pop(vm);
                 return skip_line(vm, after->next);
             }
-            bool is_begin = after && equal(after, "begin");
-            ComptimeCtxEntry *top = ctx_top(vm);
+            bool              is_begin = after && equal(after, "begin");
+            ComptimeCtxEntry *top      = ctx_top(vm);
             if (top && top->type == CTX_COMPTIME)
-                error_tok(vm, tok, "#pragma cccc comptime: blocks cannot be nested");
+                error_tok(vm, tok,
+                          "#pragma cccc comptime: blocks cannot be nested");
             ctx_push(vm, CTX_COMPTIME, is_begin, tok->file, tok);
             return skip_line(vm, is_begin ? after->next : after);
         } else if (equal(sub, "emit")) {
@@ -4460,20 +4747,27 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             if (after && equal(after, "end")) {
                 ComptimeCtxEntry *top = ctx_top(vm);
                 if (!top || top->type != CTX_EMIT)
-                    error_tok(vm, tok, "stray #pragma cccc emit end without matching begin");
+                    error_tok(
+                        vm, tok,
+                        "stray #pragma cccc emit end without matching begin");
                 ctx_pop(vm);
                 return skip_line(vm, after->next);
             }
             if (!after || after->kind == TK_EOF || after->at_bol ||
                 !equal(after, "begin"))
-                error_tok(vm, after && !after->at_bol && after->kind != TK_EOF
-                              ? after : tok,
-                          "expected 'begin' or 'end' after '#pragma cccc emit'");
+                error_tok(
+                    vm,
+                    after && !after->at_bol && after->kind != TK_EOF ? after
+                                                                     : tok,
+                    "expected 'begin' or 'end' after '#pragma cccc emit'");
             ComptimeCtxEntry *top = ctx_top(vm);
             if (top && top->type == CTX_EMIT)
-                error_tok(vm, tok, "#pragma cccc emit: blocks cannot be nested");
+                error_tok(vm, tok,
+                          "#pragma cccc emit: blocks cannot be nested");
             if (!top || top->type != CTX_COMPTIME)
-                error_tok(vm, tok, "#pragma cccc emit requires an active comptime context");
+                error_tok(
+                    vm, tok,
+                    "#pragma cccc emit requires an active comptime context");
             ctx_push(vm, CTX_EMIT, true, tok->file, tok);
             return skip_line(vm, after->next);
         } else if (equal(sub, "end")) {
@@ -4483,7 +4777,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             } else if (vm->compiler.suite_stack_len > 0) {
                 suite_pop(vm);
             } else {
-                error_tok(vm, tok, "stray #pragma cccc end without matching begin");
+                error_tok(vm, tok,
+                          "stray #pragma cccc end without matching begin");
             }
             return skip_line(vm, sub->next);
         } else if (equal(sub, "suite")) {
@@ -4491,19 +4786,26 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             if (equal(after, "begin")) {
                 Token *name_tok = after->next;
                 if (!name_tok || name_tok->kind != TK_STR || name_tok->at_bol)
-                    error_tok(vm, after, "#pragma cccc suite begin requires a string name");
+                    error_tok(
+                        vm, after,
+                        "#pragma cccc suite begin requires a string name");
                 if (name_tok->str[0] == '\0')
-                    error_tok(vm, name_tok, "#pragma cccc suite begin requires a non-empty name");
+                    error_tok(
+                        vm, name_tok,
+                        "#pragma cccc suite begin requires a non-empty name");
                 suite_push(vm, name_tok->str, tok);
                 return skip_line(vm, name_tok->next);
             } else if (equal(after, "end")) {
                 if (vm->compiler.suite_stack_len == 0)
-                    error_tok(vm, tok, "stray #pragma cccc suite end without matching begin");
+                    error_tok(
+                        vm, tok,
+                        "stray #pragma cccc suite end without matching begin");
                 suite_pop(vm);
                 return skip_line(vm, after->next);
             } else {
-                error_tok(vm, after && after->kind != TK_EOF ? after : sub,
-                          "expected 'begin' or 'end' after '#pragma cccc suite'");
+                error_tok(
+                    vm, after && after->kind != TK_EOF ? after : sub,
+                    "expected 'begin' or 'end' after '#pragma cccc suite'");
             }
         } else if (equal(sub, "config")) {
             return handle_pragma_config(vm, sub);
@@ -4528,14 +4830,17 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                       vm->compiler.use_system_headers;
         if (!in_sys)
             warn_tok(vm, tok, CCCC_WARN_CPP, "unknown pragma ignored");
-        do { tok = tok->next; } while (!tok->at_bol && tok->kind != TK_EOF);
+        do {
+            tok = tok->next;
+        } while (!tok->at_bol && tok->kind != TK_EOF);
     }
     return tok;
 }
 
-static void queue_comptime_include(VirtualMachine *vm, const char *filename, bool is_dquote) {
-    char *line = arena_format(vm, is_dquote ? "#include \"%s\"" : "#include <%s>",
-                              filename);
+static void queue_comptime_include(VirtualMachine *vm, const char *filename,
+                                   bool is_dquote) {
+    char *line = arena_format(
+        vm, is_dquote ? "#include \"%s\"" : "#include <%s>", filename);
     strarray_push(&vm->compiler.comptime_pending_includes, line);
 }
 
@@ -4572,8 +4877,8 @@ static void queue_comptime_directive(VirtualMachine *vm, char *line) {
 // Visit all tokens in `tok` while evaluating preprocessing
 // macros and directives.
 static Token *preprocess2(VirtualMachine *vm, Token *tok) {
-    Token head = {};
-    Token *cur = &head;
+    Token  head = {};
+    Token *cur  = &head;
 
     while (tok->kind != TK_EOF) {
         if (tok->kind == TK_MACRO_SCOPE_PUSH) {
@@ -4599,10 +4904,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 {
                     Token *route_start = start->next->next;
                     Token *route_after = route_start;
-                    if (route_start &&
-                        read_include_route(&route_after) == INCLUDE_ROUTE_COMPTIME) {
-                        char *line = copy_routed_directive_line(vm, start, route_start,
-                                                                route_after);
+                    if (route_start && read_include_route(&route_after) ==
+                                           INCLUDE_ROUTE_COMPTIME) {
+                        char *line = copy_routed_directive_line(
+                            vm, start, route_start, route_after);
                         queue_comptime_directive(vm, line);
                         tok = skip_line(vm, route_after);
                         continue;
@@ -4615,8 +4920,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 continue;
             }
             // Scan for [[cccc::test]]/[[cccc::build]]/[[cccc::build_target]] in
-            // emitted tokens so comptime emit blocks can generate mode-attributed
-            // functions. Use a local pointer so the emit loop's tok is unaffected.
+            // emitted tokens so comptime emit blocks can generate
+            // mode-attributed functions. Use a local pointer so the emit loop's
+            // tok is unaffected.
             {
                 Token *scan = start;
                 try_extract_attr_macro(vm, &scan, /*emit_scan=*/true);
@@ -4624,13 +4930,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             cc_record_emit_source(vm, copy_raw_directive_line(vm, start));
             bool first_token = true;
             while (tok->kind != TK_EOF && (first_token || !tok->at_bol)) {
-                first_token = false;
-                tok->line_delta = tok->file->line_delta;
-                tok->filename = tok->file->display_name;
+                first_token        = false;
+                tok->line_delta    = tok->file->line_delta;
+                tok->filename      = tok->file->display_name;
                 tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
                 tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
                 cur = cur->next = tok;
-                tok = tok->next;
+                tok             = tok->next;
             }
             continue;
         }
@@ -4646,8 +4952,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // the definition is extracted into the MacroFn/ComptimeVar list
             // and tok is advanced past it; nothing is added to the output.
             // @<ppkeyword> is rewritten to #<keyword> @<opposite_route> before
-            // @name / @name(args) is rewritten to the canonical attribute form so
-            // that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
+            // @name / @name(args) is rewritten to the canonical attribute form
+            // so that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
             if (try_rewrite_at_directive(vm, &tok))
                 continue;
             if (try_rewrite_at_attr(vm, &tok))
@@ -4663,9 +4969,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok = skip(vm, tok, "(");
                 if (tok->kind != TK_STR)
                     error_tok(vm, tok, "_Pragma requires a string literal");
-                char *content = arena_format(vm, "%s\n", tok->str);
-                Token *pragma_toks = tokenize(
-                    vm, new_file(vm, tok->file->name, tok->file->file_no, content));
+                char  *content = arena_format(vm, "%s\n", tok->str);
+                Token *pragma_toks =
+                    tokenize(vm, new_file(vm, tok->file->name,
+                                          tok->file->file_no, content));
                 handle_pragma_body(vm, pragma_toks);
                 tok = tok->next;
                 tok = skip(vm, tok, ")");
@@ -4694,7 +5001,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 if (tok->file != comptime_top->file) {
                     if (comptime_top->needs_end)
                         warn_tok(vm, tok, CCCC_WARN_COMPTIME_BLOCK_LEAK,
-                                 "unclosed #pragma cccc comptime begin in included file; "
+                                 "unclosed #pragma cccc comptime begin in "
+                                 "included file; "
                                  "block closed automatically");
                     ctx_pop(vm);
                 } else {
@@ -4702,16 +5010,20 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     // pass through en-bloc so body tokens don't trigger
                     // false extractions.
                     Token *struct_end = probe_struct_type_def_end(tok);
-                    Token *typedef_end = struct_end ? NULL : probe_typedef_end(tok);
-                    Token *passthrough_end = struct_end ? struct_end : typedef_end;
+                    Token *typedef_end =
+                        struct_end ? NULL : probe_typedef_end(tok);
+                    Token *passthrough_end =
+                        struct_end ? struct_end : typedef_end;
                     if (passthrough_end) {
                         while (tok != passthrough_end) {
                             tok->line_delta = tok->file->line_delta;
-                            tok->filename = tok->file->display_name;
-                            tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
-                            tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
+                            tok->filename   = tok->file->display_name;
+                            tok->diag_warnings =
+                                (1ULL << 63) | vm->compiler.warnings;
+                            tok->diag_werror =
+                                (1ULL << 63) | vm->compiler.warning_errors;
                             cur = cur->next = tok;
-                            tok = tok->next;
+                            tok             = tok->next;
                         }
                         continue;
                     }
@@ -4721,25 +5033,25 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             }
 
             tok->line_delta = tok->file->line_delta;
-            tok->filename = tok->file->display_name;
+            tok->filename   = tok->file->display_name;
             // Stamp the effective diagnostic state so warn_tok can use it.
             tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
             tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
             cur = cur->next = tok;
-            tok = tok->next;
+            tok             = tok->next;
             continue;
         }
 
         Token *start = tok;
-        tok = tok->next;
+        tok          = tok->next;
 
         if (tok->kind == TK_PP_NUM) {
             read_line_marker(vm, &tok, tok);
             continue;
         }
 
-        Token *route_start = tok->next;
-        Token *route_after = route_start;
+        Token       *route_start     = tok->next;
+        Token       *route_after     = route_start;
         IncludeRoute directive_route = read_include_route(&route_after);
         // #896: a directive using any cccc-only routing taints its own file
         // -- that syntax is never valid to a downstream system compiler, so
@@ -4765,13 +5077,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // routed with @comptime (#define, #if, ...) don't reference a
             // filesystem path, so they keep the original text-copy path.
             if (pp_directive(tok) == PP_INCLUDE) {
-                bool is_dquote;
-                int filename_len;
-                Token *rest = route_after;
-                char *filename = read_include_filename(vm, &rest, route_after,
-                                                        &is_dquote, &filename_len);
-                char *resolved = resolve_comptime_include_path(vm, start, filename,
-                                                                filename_len, is_dquote);
+                bool   is_dquote;
+                int    filename_len;
+                Token *rest     = route_after;
+                char  *filename = read_include_filename(
+                    vm, &rest, route_after, &is_dquote, &filename_len);
+                char *resolved = resolve_comptime_include_path(
+                    vm, start, filename, filename_len, is_dquote);
                 queue_comptime_include(vm, resolved ? resolved : filename,
                                        resolved ? false : is_dquote);
                 tok = skip_line(vm, rest);
@@ -4787,45 +5099,55 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // When the mode is active the route token is stripped and the directive
         // falls through to the switch for normal processing.
         // When inactive:
-        //   - if/ifdef/ifndef/elif/elifdef/elifndef → rewrite as #if 0 / #elif 0
+        //   - if/ifdef/ifndef/elif/elifdef/elifndef → rewrite as #if 0 / #elif
+        //   0
         //     so the conditional is always false while keeping nesting balanced
-        //   - else/endif → strip route and process normally (must run to balance)
-        //   - all other directives (define, undef, include, ...) → silently drop
+        //   - else/endif → strip route and process normally (must run to
+        //   balance)
+        //   - all other directives (define, undef, include, ...) → silently
+        //   drop
         if (directive_route == INCLUDE_ROUTE_BUILD ||
             directive_route == INCLUDE_ROUTE_TEST) {
-            bool active = (directive_route == INCLUDE_ROUTE_BUILD)
-                              ? vm->compiler.build_mode
-                              : vm->compiler.testing_mode;
-            PPDir d = pp_directive(tok);
+            bool  active = (directive_route == INCLUDE_ROUTE_BUILD)
+                               ? vm->compiler.build_mode
+                               : vm->compiler.testing_mode;
+            PPDir d      = pp_directive(tok);
             if (active) {
                 // Strip the route token; directive falls through to the switch.
                 tok->next = route_after;
             } else {
                 switch (d) {
-                case PP_IF: case PP_IFDEF: case PP_IFNDEF:
-                case PP_ELIF: case PP_ELIFDEF: case PP_ELIFNDEF: {
-                    // Push a false conditional to maintain nesting balance.
-                    const char *kw = (d == PP_ELIF || d == PP_ELIFDEF ||
-                                      d == PP_ELIFNDEF) ? "elif" : "if";
-                    char *src = arena_format(vm, "#%s 0\n", kw);
-                    Token *nt = tokenize(
-                        vm, new_file(vm, start->file->name,
-                                     start->file->file_no, src));
-                    Token *last = nt;
-                    while (last->next && last->next->kind != TK_EOF)
-                        last = last->next;
-                    last->next = skip_line(vm, route_after);
-                    tok = nt;
-                    continue;
-                }
-                case PP_ELSE: case PP_ENDIF:
-                    // Must run so the conditional stack stays balanced.
-                    tok->next = route_after;
-                    break;
-                default:
-                    // Silently drop mode-inactive directives.
-                    tok = skip_line(vm, route_after);
-                    continue;
+                    case PP_IF:
+                    case PP_IFDEF:
+                    case PP_IFNDEF:
+                    case PP_ELIF:
+                    case PP_ELIFDEF:
+                    case PP_ELIFNDEF: {
+                        // Push a false conditional to maintain nesting balance.
+                        const char *kw  = (d == PP_ELIF || d == PP_ELIFDEF ||
+                                           d == PP_ELIFNDEF)
+                                              ? "elif"
+                                              : "if";
+                        char       *src = arena_format(vm, "#%s 0\n", kw);
+                        Token      *nt =
+                            tokenize(vm, new_file(vm, start->file->name,
+                                                  start->file->file_no, src));
+                        Token *last = nt;
+                        while (last->next && last->next->kind != TK_EOF)
+                            last = last->next;
+                        last->next = skip_line(vm, route_after);
+                        tok        = nt;
+                        continue;
+                    }
+                    case PP_ELSE:
+                    case PP_ENDIF:
+                        // Must run so the conditional stack stays balanced.
+                        tok->next = route_after;
+                        break;
+                    default:
+                        // Silently drop mode-inactive directives.
+                        tok = skip_line(vm, route_after);
+                        continue;
                 }
             }
         }
@@ -4868,10 +5190,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // host redefinition warning, not a semantic change. See
         // man/HEADERS.md.
         char *ac_include_line = NULL; // #896: set below when this directive
-                                       // is a captured #include that got
-                                       // auto-captured, so the PP_INCLUDE
-                                       // case can pair it with its resolved
-                                       // path once that's known
+                                      // is a captured #include that got
+                                      // auto-captured, so the PP_INCLUDE
+                                      // case can pair it with its resolved
+                                      // path once that's known
         {
             ComptimeCtxEntry *_ac = ctx_top(vm);
             // #1022 (found closing #1022's own pthread.h work): a
@@ -4893,19 +5215,19 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // file->name) is already true here for a directive nested
             // inside one -- widen the gate to also auto-capture from a
             // cccc-only includer, not just a command-line input file.
-            if (!vm->compiler.emit_strict &&
-                !vm->compiler.in_macro_mode &&
+            if (!vm->compiler.emit_strict && !vm->compiler.in_macro_mode &&
                 start->file &&
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
-                !(_ac && _ac->type == CTX_COMPTIME) &&
-                !is_pragma_cccc(start)) {
+                !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start)) {
                 char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED ||
-                                  directive_route == INCLUDE_ROUTE_BUILD  ||
+                                  directive_route == INCLUDE_ROUTE_BUILD ||
                                   directive_route == INCLUDE_ROUTE_TEST)
-                    ? copy_routed_directive_line(vm, start, route_start, route_after)
-                    : copy_raw_directive_line(vm, start);
-                push_emit_directive(vm, _ac_line, pp_directive(tok) == PP_INCLUDE);
+                                     ? copy_routed_directive_line(
+                                           vm, start, route_start, route_after)
+                                     : copy_raw_directive_line(vm, start);
+                push_emit_directive(vm, _ac_line,
+                                    pp_directive(tok) == PP_INCLUDE);
                 cc_record_emit_source(vm, _ac_line);
                 if (pp_directive(tok) == PP_INCLUDE)
                     ac_include_line = _ac_line;
@@ -4913,346 +5235,366 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         }
 
         switch (pp_directive(tok)) {
-        case PP_INCLUDE: {
-            bool is_dquote;
-            int filename_len;
-            Token *filename_start = tok->next;
-            IncludeRoute include_route = read_include_route(&filename_start);
-            char *filename = read_include_filename(vm, &tok, filename_start,
-                                                   &is_dquote, &filename_len);
-            // Comptime includes and ordinary includes inside a comptime block are
-            // queued for the comptime pass only; they never reach the runtime TU.
-            // Resolve the absolute path before queueing so that quoted relative
-            // includes like #include @comptime "local.h" can be found from the
-            // synthetic comptime preprocessing context (ticket #684).
-            if (include_route == INCLUDE_ROUTE_COMPTIME ||
-                (include_route == INCLUDE_ROUTE_NORMAL &&
-                 ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)) {
+            case PP_INCLUDE: {
+                bool         is_dquote;
+                int          filename_len;
+                Token       *filename_start = tok->next;
+                IncludeRoute include_route =
+                    read_include_route(&filename_start);
+                char *filename = read_include_filename(
+                    vm, &tok, filename_start, &is_dquote, &filename_len);
+                // Comptime includes and ordinary includes inside a comptime
+                // block are queued for the comptime pass only; they never reach
+                // the runtime TU. Resolve the absolute path before queueing so
+                // that quoted relative includes like #include @comptime
+                // "local.h" can be found from the synthetic comptime
+                // preprocessing context (ticket #684).
+                if (include_route == INCLUDE_ROUTE_COMPTIME ||
+                    (include_route == INCLUDE_ROUTE_NORMAL && ctx_top(vm) &&
+                     ctx_top(vm)->type == CTX_COMPTIME)) {
+                    tok            = skip_line(vm, tok);
+                    char *resolved = resolve_comptime_include_path(
+                        vm, start, filename, filename_len, is_dquote);
+                    // Unresolved (e.g. a URL, or a name genuinely not found
+                    // anywhere) falls back to the original filename/quoting
+                    // unchanged.
+                    queue_comptime_include(vm, resolved ? resolved : filename,
+                                           resolved ? false : is_dquote);
+                    break;
+                }
+                // Shared includes go to both contexts: queue for comptime, then
+                // fall through to the normal runtime splice below. Resolve the
+                // absolute path before queueing so that quoted relative
+                // includes like #include @shared "local.h" can be found from
+                // the synthetic comptime preprocessing context.
+                if (include_route == INCLUDE_ROUTE_SHARED) {
+                    char *shared_path = resolve_comptime_include_path(
+                        vm, start, filename, filename_len, is_dquote);
+                    // Queue as an angle-bracket include so the absolute path is
+                    // used directly (no relative-path ambiguity in comptime
+                    // context).
+                    queue_comptime_include(
+                        vm, shared_path ? shared_path : filename, false);
+                }
+                if (include_route == INCLUDE_ROUTE_EMIT) {
+                    char *line = arena_format(
+                        vm, is_dquote ? "#include \"%s\"" : "#include <%s>",
+                        filename);
+                    tok = skip_line(vm, tok);
+                    push_emit_directive(vm, line, true);
+                    break;
+                }
+                // Gate standard headers that require a minimum C version.
+                {
+                    static const struct {
+                        const char *name;
+                        CStdVersion min;
+                    } gates[] = {// C99 headers
+                                 {"complex.h", CCCC_STD_C99},
+                                 {"fenv.h", CCCC_STD_C99},
+                                 {"inttypes.h", CCCC_STD_C99},
+                                 {"iso646.h", CCCC_STD_C99},
+                                 {"stdbool.h", CCCC_STD_C99},
+                                 {"stdint.h", CCCC_STD_C99},
+                                 {"tgmath.h", CCCC_STD_C99},
+                                 {"wchar.h", CCCC_STD_C99},
+                                 {"wctype.h", CCCC_STD_C99},
+                                 // C11 headers
+                                 {"stdalign.h", CCCC_STD_C11},
+                                 {"stdatomic.h", CCCC_STD_C11},
+                                 {"stdnoreturn.h", CCCC_STD_C11},
+                                 {"uchar.h", CCCC_STD_C11},
+                                 {NULL, 0}};
+                    for (int gi = 0; gates[gi].name; gi++) {
+                        if (strcmp(filename, gates[gi].name) == 0 &&
+                            vm->compiler.c_std < gates[gi].min) {
+                            const char *req =
+                                gates[gi].min == CCCC_STD_C11 ? "C11" : "C99";
+                            error_tok(vm, start->next,
+                                      "<%s> is not available before %s",
+                                      filename, req);
+                            break;
+                        }
+                    }
+                }
                 tok = skip_line(vm, tok);
-                char *resolved = resolve_comptime_include_path(vm, start, filename,
-                                                               filename_len, is_dquote);
-                // Unresolved (e.g. a URL, or a name genuinely not found anywhere)
-                // falls back to the original filename/quoting unchanged.
-                queue_comptime_include(vm, resolved ? resolved : filename,
-                                       resolved ? false : is_dquote);
-                break;
-            }
-            // Shared includes go to both contexts: queue for comptime, then fall
-            // through to the normal runtime splice below.
-            // Resolve the absolute path before queueing so that quoted relative
-            // includes like #include @shared "local.h" can be found from the
-            // synthetic comptime preprocessing context.
-            if (include_route == INCLUDE_ROUTE_SHARED) {
-                char *shared_path = resolve_comptime_include_path(vm, start, filename,
-                                                                   filename_len, is_dquote);
-                // Queue as an angle-bracket include so the absolute path is
-                // used directly (no relative-path ambiguity in comptime context).
-                queue_comptime_include(vm, shared_path ? shared_path : filename,
-                                       false);
-            }
-            if (include_route == INCLUDE_ROUTE_EMIT) {
-                char *line = arena_format(vm, is_dquote ? "#include \"%s\""
-                                                        : "#include <%s>",
-                                          filename);
-                tok = skip_line(vm, tok);
-                push_emit_directive(vm, line, true);
-                break;
-            }
-            // Gate standard headers that require a minimum C version.
-            {
-                static const struct { const char *name; CStdVersion min; } gates[] = {
-                    // C99 headers
-                    {"complex.h",    CCCC_STD_C99},
-                    {"fenv.h",       CCCC_STD_C99},
-                    {"inttypes.h",   CCCC_STD_C99},
-                    {"iso646.h",     CCCC_STD_C99},
-                    {"stdbool.h",    CCCC_STD_C99},
-                    {"stdint.h",     CCCC_STD_C99},
-                    {"tgmath.h",     CCCC_STD_C99},
-                    {"wchar.h",      CCCC_STD_C99},
-                    {"wctype.h",     CCCC_STD_C99},
-                    // C11 headers
-                    {"stdalign.h",   CCCC_STD_C11},
-                    {"stdatomic.h",  CCCC_STD_C11},
-                    {"stdnoreturn.h",CCCC_STD_C11},
-                    {"uchar.h",      CCCC_STD_C11},
-                    {NULL, 0}
-                };
-                for (int gi = 0; gates[gi].name; gi++) {
-                    if (strcmp(filename, gates[gi].name) == 0 &&
-                        vm->compiler.c_std < gates[gi].min) {
-                        const char *req = gates[gi].min == CCCC_STD_C11 ? "C11" : "C99";
-                        error_tok(vm, start->next,
-                                  "<%s> is not available before %s", filename, req);
+
+                // Check for URL includes (supported with both <...> and "...")
+                if (is_url(filename)) {
+#ifdef CCCC_HAS_CURL
+                    char *cache_path = fetch_url_to_cache(vm, filename);
+                    if (!cache_path) {
+                        error_tok(vm, start->next, "failed to fetch URL: %s",
+                                  filename);
+                    }
+                    // Track URL -> cache path mapping for error reporting
+                    hashmap_put(&vm->compiler.url_to_path, cache_path,
+                                (void *)filename);
+                    tok = include_file(vm, tok, cache_path, start->next->next,
+                                       filename, false);
+                    continue;
+#else
+                    error_tok(vm, start->next,
+                              "URL includes require CCCC to be built with "
+                              "CCCC_HAS_CURL=1");
+#endif
+                }
+
+                if (filename[0] != '/' && is_dquote) {
+                    char *path =
+                        format_relative_path(vm, start->file->name, filename);
+                    if (file_exists(path)) {
+                        record_include_edge(
+                            vm, start->file ? start->file->name : NULL,
+                            path);           // #896
+                        if (ac_include_line) // #896
+                            hashmap_put(&vm->compiler.emit_include_paths,
+                                        ac_include_line, path);
+                        tok = include_file(vm, tok, path, start->next->next,
+                                           filename,
+                                           start->file->is_system_header);
                         break;
                     }
                 }
-            }
-            tok = skip_line(vm, tok);
 
-            // Check for URL includes (supported with both <...> and "...")
-            if (is_url(filename)) {
-#ifdef CCCC_HAS_CURL
-                char *cache_path = fetch_url_to_cache(vm, filename);
-                if (!cache_path) {
-                    error_tok(vm, start->next, "failed to fetch URL: %s",
-                              filename);
+                // Search include paths (for quoted includes) or system paths
+                // (for angle bracket)
+                char *path = search_include_paths(vm, filename, filename_len,
+                                                  !is_dquote);
+
+                // For quoted includes, if not found in include_paths, also try
+                // system_include_paths This is needed for system headers that
+                // use quoted includes for internal files
+                bool found_in_sys = false;
+                if (!path && is_dquote) {
+                    path =
+                        search_include_paths(vm, filename, filename_len, true);
+                    found_in_sys = (path != NULL);
                 }
-                // Track URL -> cache path mapping for error reporting
-                hashmap_put(&vm->compiler.url_to_path, cache_path,
-                            (void *)filename);
-                tok = include_file(vm, tok, cache_path, start->next->next, filename, false);
-                continue;
-#else
-                error_tok(
-                    vm, start->next,
-                    "URL includes require CCCC to be built with CCCC_HAS_CURL=1");
-#endif
-            }
 
-            if (filename[0] != '/' && is_dquote) {
-                char *path =
-                    format_relative_path(vm, start->file->name, filename);
-                if (file_exists(path)) {
-                    record_include_edge(vm, start->file ? start->file->name : NULL, path); // #896
-                    if (ac_include_line) // #896
-                        hashmap_put(&vm->compiler.emit_include_paths, ac_include_line, path);
-                    tok = include_file(vm, tok, path, start->next->next,
-                                       filename, start->file->is_system_header);
-                    break;
+                if (!path) {
+                    // Nothing on disk (no -I hit, no CCCC ./include fallback —
+                    // e.g. cccc running from a CWD that isn't its own repo, or
+                    // a copied binary with no include/ alongside it). Fall back
+                    // to the header text embedded in the binary itself
+                    // (src/std.c), the same table tokenize_private_header()
+                    // already uses for reflection.h et al. This is what makes
+                    // standard headers resolve with zero configuration
+                    // regardless of process CWD
+                    // (#891).
+                    char *embedded_src = try_embedded_std_header(vm, filename);
+                    if (embedded_src) {
+                        // #998: register this include's provenance BEFORE the
+                        // splice below -- the same header may already have been
+                        // seen once (e.g. routed @comptime earlier in this same
+                        // TU), in which case include_embedded_header() early-
+                        // returns on its #pragma once/include-guard check
+                        // without reaching any registration of its own. The
+                        // #include line is still replayed verbatim into
+                        // -c=generated output regardless (emit_directives,
+                        // above), so path_is_captured() (serialize.c) needs to
+                        // know this key is supplied by it -- otherwise
+                        // serialize_type_defs_for_owner() re-derives the type's
+                        // definition on top of the replayed #include, a
+                        // redefinition the host compiler rejects (#998).
+                        //
+                        // Deliberately NOT paired with a record_include_edge()
+                        // call the way the two on-disk branches above are:
+                        // under -c=native/-c=generated the downstream compiler
+                        // opens the real system header, not CCCC's embedded
+                        // copy, so a cc_file_is_cccc_only() closure computed
+                        // over the embedded copy would answer a question about
+                        // the wrong file -- it could only ever cause a false
+                        // suppression of a legitimate #include.
+                        if (ac_include_line)
+                            hashmap_put(&vm->compiler.emit_include_paths,
+                                        ac_include_line,
+                                        embedded_header_key(vm, filename));
+                        // #1003: a header whose CCCC copy is the only
+                        // implementation likely to exist on a typical host
+                        // (see is_cccc_supplied_only_header's comment above)
+                        // must never be replayed as a raw #include the host
+                        // compiler can't resolve -- reuse the #896/#999
+                        // cccc-only machinery wholesale by marking this exact
+                        // key (the same one just registered above) cccc-only,
+                        // so serialize.c's #include-replay loop suppresses it
+                        // and this header's own content is re-derived instead
+                        // of relied upon.
+                        if (is_cccc_supplied_only_header(filename))
+                            mark_cccc_only_file(
+                                vm, embedded_header_key(vm, filename));
+                        tok = include_embedded_header(
+                            vm, tok, filename, embedded_src, start->next->next);
+                        break;
+                    }
                 }
+
+                record_include_edge(vm, start->file ? start->file->name : NULL,
+                                    path ? path : filename); // #896
+                if (ac_include_line)                         // #896
+                    hashmap_put(&vm->compiler.emit_include_paths,
+                                ac_include_line, path ? path : filename);
+                // #1003: same reasoning as the embedded branch above -- this is
+                // the branch a polyfill header resolves through when found on
+                // disk (e.g. under tools/tests.py's -I./include), which #1003's
+                // own investigation found is not merely the embedded-table
+                // case the ticket described.
+                if (is_cccc_supplied_only_header(filename))
+                    mark_cccc_only_file(vm, path ? path : filename);
+                tok = include_file(vm, tok, path ? path : filename,
+                                   start->next->next, filename,
+                                   !is_dquote || found_in_sys);
+                break;
             }
-
-            // Search include paths (for quoted includes) or system paths (for
-            // angle bracket)
-            char *path =
-                search_include_paths(vm, filename, filename_len, !is_dquote);
-
-            // For quoted includes, if not found in include_paths, also try
-            // system_include_paths This is needed for system headers that use
-            // quoted includes for internal files
-            bool found_in_sys = false;
-            if (!path && is_dquote) {
-                path = search_include_paths(vm, filename, filename_len, true);
-                found_in_sys = (path != NULL);
+            case PP_INCLUDE_NEXT: {
+                bool  ignore;
+                int   filename_len;
+                char *filename = read_include_filename(vm, &tok, tok->next,
+                                                       &ignore, &filename_len);
+                tok            = skip_line(vm, tok);
+                char *path     = search_include_next(vm, filename);
+                record_include_edge(vm, start->file ? start->file->name : NULL,
+                                    path ? path : filename); // #896
+                tok = include_file(vm, tok, path ? path : filename,
+                                   start->next->next, filename, !ignore);
+                break;
             }
-
-            if (!path) {
-                // Nothing on disk (no -I hit, no CCCC ./include fallback —
-                // e.g. cccc running from a CWD that isn't its own repo, or a
-                // copied binary with no include/ alongside it). Fall back to
-                // the header text embedded in the binary itself (src/std.c),
-                // the same table tokenize_private_header() already uses for
-                // reflection.h et al. This is what makes standard headers
-                // resolve with zero configuration regardless of process CWD
-                // (#891).
-                char *embedded_src = try_embedded_std_header(vm, filename);
-                if (embedded_src) {
-                    // #998: register this include's provenance BEFORE the
-                    // splice below -- the same header may already have been
-                    // seen once (e.g. routed @comptime earlier in this same
-                    // TU), in which case include_embedded_header() early-
-                    // returns on its #pragma once/include-guard check
-                    // without reaching any registration of its own. The
-                    // #include line is still replayed verbatim into
-                    // -c=generated output regardless (emit_directives,
-                    // above), so path_is_captured() (serialize.c) needs to
-                    // know this key is supplied by it -- otherwise
-                    // serialize_type_defs_for_owner() re-derives the type's
-                    // definition on top of the replayed #include, a
-                    // redefinition the host compiler rejects (#998).
-                    //
-                    // Deliberately NOT paired with a record_include_edge()
-                    // call the way the two on-disk branches above are: under
-                    // -c=native/-c=generated the downstream compiler opens
-                    // the real system header, not CCCC's embedded copy, so
-                    // a cc_file_is_cccc_only() closure computed over the
-                    // embedded copy would answer a question about the wrong
-                    // file -- it could only ever cause a false suppression
-                    // of a legitimate #include.
-                    if (ac_include_line)
-                        hashmap_put(&vm->compiler.emit_include_paths,
-                                   ac_include_line,
-                                   embedded_header_key(vm, filename));
-                    // #1003: a header whose CCCC copy is the only
-                    // implementation likely to exist on a typical host
-                    // (see is_cccc_supplied_only_header's comment above)
-                    // must never be replayed as a raw #include the host
-                    // compiler can't resolve -- reuse the #896/#999
-                    // cccc-only machinery wholesale by marking this exact
-                    // key (the same one just registered above) cccc-only,
-                    // so serialize.c's #include-replay loop suppresses it
-                    // and this header's own content is re-derived instead
-                    // of relied upon.
-                    if (is_cccc_supplied_only_header(filename))
-                        mark_cccc_only_file(vm, embedded_header_key(vm, filename));
-                    tok = include_embedded_header(vm, tok, filename,
-                                                  embedded_src,
-                                                  start->next->next);
-                    break;
-                }
+            case PP_DEFINE:
+                read_macro_definition(vm, &tok, tok->next);
+                break;
+            case PP_UNDEF:
+                tok = tok->next;
+                if (tok->kind != TK_IDENT)
+                    error_tok(vm, tok, "macro name must be an identifier");
+                undef_macro(vm, arena_strndup(vm, tok->loc, tok->len));
+                tok = skip_line(vm, tok->next);
+                break;
+            case PP_IF: {
+                long val = eval_const_expr(vm, &tok, tok);
+                push_cond_incl(vm, start, val);
+                if (!val)
+                    tok = skip_cond_incl(vm, tok);
+                break;
             }
-
-            record_include_edge(vm, start->file ? start->file->name : NULL,
-                               path ? path : filename); // #896
-            if (ac_include_line) // #896
-                hashmap_put(&vm->compiler.emit_include_paths, ac_include_line,
-                           path ? path : filename);
-            // #1003: same reasoning as the embedded branch above -- this is
-            // the branch a polyfill header resolves through when found on
-            // disk (e.g. under tools/tests.py's -I./include), which #1003's
-            // own investigation found is not merely the embedded-table
-            // case the ticket described.
-            if (is_cccc_supplied_only_header(filename))
-                mark_cccc_only_file(vm, path ? path : filename);
-            tok = include_file(vm, tok, path ? path : filename,
-                               start->next->next, filename,
-                               !is_dquote || found_in_sys);
-            break;
-        }
-        case PP_INCLUDE_NEXT: {
-            bool ignore;
-            int filename_len;
-            char *filename = read_include_filename(vm, &tok, tok->next, &ignore,
-                                                   &filename_len);
-            tok = skip_line(vm, tok);
-            char *path = search_include_next(vm, filename);
-            record_include_edge(vm, start->file ? start->file->name : NULL,
-                               path ? path : filename); // #896
-            tok = include_file(vm, tok, path ? path : filename,
-                               start->next->next, filename, !ignore);
-            break;
-        }
-        case PP_DEFINE:
-            read_macro_definition(vm, &tok, tok->next);
-            break;
-        case PP_UNDEF:
-            tok = tok->next;
-            if (tok->kind != TK_IDENT)
-                error_tok(vm, tok, "macro name must be an identifier");
-            undef_macro(vm, arena_strndup(vm, tok->loc, tok->len));
-            tok = skip_line(vm, tok->next);
-            break;
-        case PP_IF: {
-            long val = eval_const_expr(vm, &tok, tok);
-            push_cond_incl(vm, start, val);
-            if (!val)
-                tok = skip_cond_incl(vm, tok);
-            break;
-        }
-        case PP_IFDEF: {
-            Macro *ifdef_m = find_macro(vm, tok->next);
-            if (ifdef_m) ifdef_m->use_count++;
-            push_cond_incl(vm, tok, ifdef_m != NULL);
-            tok = skip_line(vm, tok->next->next);
-            if (!ifdef_m)
-                tok = skip_cond_incl(vm, tok);
-            break;
-        }
-        case PP_IFNDEF: {
-            Macro *ifndef_m = find_macro(vm, tok->next);
-            if (ifndef_m) ifndef_m->use_count++;
-            push_cond_incl(vm, tok, ifndef_m == NULL);
-            tok = skip_line(vm, tok->next->next);
-            if (ifndef_m)
-                tok = skip_cond_incl(vm, tok);
-            break;
-        }
-        case PP_ELIF:
-            if (!vm->compiler.cond_incl)
-                error_tok(vm, start, "stray #elif without matching #if");
-            if (vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #elif after #else");
-            vm->compiler.cond_incl->ctx = IN_ELIF;
-            if (!vm->compiler.cond_incl->included &&
-                eval_const_expr(vm, &tok, tok))
-                vm->compiler.cond_incl->included = true;
-            else
-                tok = skip_cond_incl(vm, tok);
-            break;
-        case PP_ELIFDEF: {
-            if (!vm->compiler.cond_incl)
-                error_tok(vm, start, "stray #elifdef without matching #if");
-            if (vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #elifdef after #else");
-            vm->compiler.cond_incl->ctx = IN_ELIF;
-            Macro *elifdef_m = find_macro(vm, tok->next);
-            if (elifdef_m) elifdef_m->use_count++;
-            tok = skip_line(vm, tok->next->next);
-            if (!vm->compiler.cond_incl->included && elifdef_m)
-                vm->compiler.cond_incl->included = true;
-            else
-                tok = skip_cond_incl(vm, tok);
-            break;
-        }
-        case PP_ELIFNDEF: {
-            if (!vm->compiler.cond_incl)
-                error_tok(vm, start, "stray #elifndef without matching #if");
-            if (vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #elifndef after #else");
-            vm->compiler.cond_incl->ctx = IN_ELIF;
-            Macro *elifndef_m = find_macro(vm, tok->next);
-            if (elifndef_m) elifndef_m->use_count++;
-            tok = skip_line(vm, tok->next->next);
-            if (!vm->compiler.cond_incl->included && !elifndef_m)
-                vm->compiler.cond_incl->included = true;
-            else
-                tok = skip_cond_incl(vm, tok);
-            break;
-        }
-        case PP_ELSE:
-            if (!vm->compiler.cond_incl)
-                error_tok(vm, start, "stray #else without matching #if");
-            if (vm->compiler.cond_incl->ctx == IN_ELSE)
-                error_tok(vm, start, "stray #else after previous #else");
-            vm->compiler.cond_incl->ctx = IN_ELSE;
-            tok = skip_line(vm, tok->next);
-            if (vm->compiler.cond_incl->included)
-                tok = skip_cond_incl(vm, tok);
-            break;
-        case PP_ENDIF:
-            if (!vm->compiler.cond_incl)
-                error_tok(vm, start, "stray #endif without matching #if");
-            vm->compiler.cond_incl = vm->compiler.cond_incl->next;
-            tok = skip_line(vm, tok->next);
-            break;
-        case PP_LINE:
-            read_line_marker(vm, &tok, tok->next);
-            break;
-        case PP_PRAGMA:
-            tok = handle_pragma_body(vm, tok->next);
-            break;
-        case PP_EMBED:
-            if (vm->compiler.c_std < CCCC_STD_C23)
-                error_tok(vm, tok, "'#embed' is not available before C23");
-            tok = handle_embed_directive(vm, tok->next, start, false);
-            break;
-        case PP_ERROR: {
-            Token *msg_end;
-            Token *msg = copy_line(vm, &msg_end, tok->next);
-            char *text = join_tokens(vm, msg, NULL, NULL);
-            if (text && text[0])
-                error_tok(vm, tok, "%s", text);
-            else
-                error_tok(vm, tok, "#error directive");
-            break;
-        }
-        case PP_WARNING: {
-            Token *msg_end;
-            Token *msg = copy_line(vm, &msg_end, tok->next);
-            char *text = join_tokens(vm, msg, NULL, NULL);
-            if (text && text[0])
-                warn_tok(vm, tok, CCCC_WARN_CPP, "%s", text);
-            else
-                warn_tok(vm, tok, CCCC_WARN_CPP, "#warning directive");
-            tok = msg_end;
-            break;
-        }
-        default:
-            // `#`-only line is legal (null directive).
-            if (tok->at_bol) continue;
-            error_tok(vm, tok, "invalid preprocessor directive '%.*s'",
-                      tok->len, tok->loc);
+            case PP_IFDEF: {
+                Macro *ifdef_m = find_macro(vm, tok->next);
+                if (ifdef_m)
+                    ifdef_m->use_count++;
+                push_cond_incl(vm, tok, ifdef_m != NULL);
+                tok = skip_line(vm, tok->next->next);
+                if (!ifdef_m)
+                    tok = skip_cond_incl(vm, tok);
+                break;
+            }
+            case PP_IFNDEF: {
+                Macro *ifndef_m = find_macro(vm, tok->next);
+                if (ifndef_m)
+                    ifndef_m->use_count++;
+                push_cond_incl(vm, tok, ifndef_m == NULL);
+                tok = skip_line(vm, tok->next->next);
+                if (ifndef_m)
+                    tok = skip_cond_incl(vm, tok);
+                break;
+            }
+            case PP_ELIF:
+                if (!vm->compiler.cond_incl)
+                    error_tok(vm, start, "stray #elif without matching #if");
+                if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                    error_tok(vm, start, "stray #elif after #else");
+                vm->compiler.cond_incl->ctx = IN_ELIF;
+                if (!vm->compiler.cond_incl->included &&
+                    eval_const_expr(vm, &tok, tok))
+                    vm->compiler.cond_incl->included = true;
+                else
+                    tok = skip_cond_incl(vm, tok);
+                break;
+            case PP_ELIFDEF: {
+                if (!vm->compiler.cond_incl)
+                    error_tok(vm, start, "stray #elifdef without matching #if");
+                if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                    error_tok(vm, start, "stray #elifdef after #else");
+                vm->compiler.cond_incl->ctx = IN_ELIF;
+                Macro *elifdef_m            = find_macro(vm, tok->next);
+                if (elifdef_m)
+                    elifdef_m->use_count++;
+                tok = skip_line(vm, tok->next->next);
+                if (!vm->compiler.cond_incl->included && elifdef_m)
+                    vm->compiler.cond_incl->included = true;
+                else
+                    tok = skip_cond_incl(vm, tok);
+                break;
+            }
+            case PP_ELIFNDEF: {
+                if (!vm->compiler.cond_incl)
+                    error_tok(vm, start,
+                              "stray #elifndef without matching #if");
+                if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                    error_tok(vm, start, "stray #elifndef after #else");
+                vm->compiler.cond_incl->ctx = IN_ELIF;
+                Macro *elifndef_m           = find_macro(vm, tok->next);
+                if (elifndef_m)
+                    elifndef_m->use_count++;
+                tok = skip_line(vm, tok->next->next);
+                if (!vm->compiler.cond_incl->included && !elifndef_m)
+                    vm->compiler.cond_incl->included = true;
+                else
+                    tok = skip_cond_incl(vm, tok);
+                break;
+            }
+            case PP_ELSE:
+                if (!vm->compiler.cond_incl)
+                    error_tok(vm, start, "stray #else without matching #if");
+                if (vm->compiler.cond_incl->ctx == IN_ELSE)
+                    error_tok(vm, start, "stray #else after previous #else");
+                vm->compiler.cond_incl->ctx = IN_ELSE;
+                tok                         = skip_line(vm, tok->next);
+                if (vm->compiler.cond_incl->included)
+                    tok = skip_cond_incl(vm, tok);
+                break;
+            case PP_ENDIF:
+                if (!vm->compiler.cond_incl)
+                    error_tok(vm, start, "stray #endif without matching #if");
+                vm->compiler.cond_incl = vm->compiler.cond_incl->next;
+                tok                    = skip_line(vm, tok->next);
+                break;
+            case PP_LINE:
+                read_line_marker(vm, &tok, tok->next);
+                break;
+            case PP_PRAGMA:
+                tok = handle_pragma_body(vm, tok->next);
+                break;
+            case PP_EMBED:
+                if (vm->compiler.c_std < CCCC_STD_C23)
+                    error_tok(vm, tok, "'#embed' is not available before C23");
+                tok = handle_embed_directive(vm, tok->next, start, false);
+                break;
+            case PP_ERROR: {
+                Token *msg_end;
+                Token *msg  = copy_line(vm, &msg_end, tok->next);
+                char  *text = join_tokens(vm, msg, NULL, NULL);
+                if (text && text[0])
+                    error_tok(vm, tok, "%s", text);
+                else
+                    error_tok(vm, tok, "#error directive");
+                break;
+            }
+            case PP_WARNING: {
+                Token *msg_end;
+                Token *msg  = copy_line(vm, &msg_end, tok->next);
+                char  *text = join_tokens(vm, msg, NULL, NULL);
+                if (text && text[0])
+                    warn_tok(vm, tok, CCCC_WARN_CPP, "%s", text);
+                else
+                    warn_tok(vm, tok, CCCC_WARN_CPP, "#warning directive");
+                tok = msg_end;
+                break;
+            }
+            default:
+                // `#`-only line is legal (null directive).
+                if (tok->at_bol)
+                    continue;
+                error_tok(vm, tok, "invalid preprocessor directive '%.*s'",
+                          tok->len, tok->loc);
         }
     }
 
@@ -5263,17 +5605,27 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 // (Re)define standard-dependent predefined macros from vm->compiler.c_std.
 // This function is authoritative and idempotent — it can be called more than
 // once (e.g. first with the default inside cc_init, then again after the user's
-// -std= flag (long form: --std=) is parsed) and always produces the complete correct state.
+// -std= flag (long form: --std=) is parsed) and always produces the complete
+// correct state.
 void define_std_macros(VirtualMachine *vm) {
     const char *v;
     switch (vm->compiler.c_std) {
-    case CCCC_STD_C89:
-        undef_macro(vm, "__STDC_VERSION__");
-        return;
-    case CCCC_STD_C99: v = "199901L"; break;
-    case CCCC_STD_C11: v = "201112L"; break;
-    case CCCC_STD_C23: v = "202311L"; break;
-    case CCCC_STD_C17: default: v = "201710L"; break;
+        case CCCC_STD_C89:
+            undef_macro(vm, "__STDC_VERSION__");
+            return;
+        case CCCC_STD_C99:
+            v = "199901L";
+            break;
+        case CCCC_STD_C11:
+            v = "201112L";
+            break;
+        case CCCC_STD_C23:
+            v = "202311L";
+            break;
+        case CCCC_STD_C17:
+        default:
+            v = "201710L";
+            break;
     }
     define_macro(vm, "__STDC_VERSION__", (char *)v);
 }
@@ -5295,8 +5647,9 @@ void undef_macro(VirtualMachine *vm, char *name) {
     hashmap_delete(&vm->compiler.macros, name);
 }
 
-static Macro *add_builtin(VirtualMachine *vm, char *name, macro_handler_fn *fn) {
-    Macro *m = add_macro(vm, name, strlen(name), true, NULL, NULL);
+static Macro *add_builtin(VirtualMachine *vm, char *name,
+                          macro_handler_fn *fn) {
+    Macro *m   = add_macro(vm, name, strlen(name), true, NULL, NULL);
     m->handler = fn;
     return m;
 }
@@ -5360,18 +5713,25 @@ static char *format_time(VirtualMachine *vm, struct tm *tm) {
 // and expected to be correct on another platform (#771).
 static void init_fenv_macros(VirtualMachine *vm) {
     define_macro(vm, "__CCCC_FE_INVALID__", arena_format(vm, "%d", FE_INVALID));
-    define_macro(vm, "__CCCC_FE_DIVBYZERO__", arena_format(vm, "%d", FE_DIVBYZERO));
-    define_macro(vm, "__CCCC_FE_OVERFLOW__", arena_format(vm, "%d", FE_OVERFLOW));
-    define_macro(vm, "__CCCC_FE_UNDERFLOW__", arena_format(vm, "%d", FE_UNDERFLOW));
+    define_macro(vm, "__CCCC_FE_DIVBYZERO__",
+                 arena_format(vm, "%d", FE_DIVBYZERO));
+    define_macro(vm, "__CCCC_FE_OVERFLOW__",
+                 arena_format(vm, "%d", FE_OVERFLOW));
+    define_macro(vm, "__CCCC_FE_UNDERFLOW__",
+                 arena_format(vm, "%d", FE_UNDERFLOW));
     define_macro(vm, "__CCCC_FE_INEXACT__", arena_format(vm, "%d", FE_INEXACT));
     // Host FE_ALL_EXCEPT verbatim -- NOT the OR of the five named exceptions
     // above, since some platforms (x86) include additional bits (e.g.
     // FE_DENORMAL) that have no portable C name.
-    define_macro(vm, "__CCCC_FE_ALL_EXCEPT__", arena_format(vm, "%d", FE_ALL_EXCEPT));
-    define_macro(vm, "__CCCC_FE_TONEAREST__", arena_format(vm, "%d", FE_TONEAREST));
-    define_macro(vm, "__CCCC_FE_DOWNWARD__", arena_format(vm, "%d", FE_DOWNWARD));
+    define_macro(vm, "__CCCC_FE_ALL_EXCEPT__",
+                 arena_format(vm, "%d", FE_ALL_EXCEPT));
+    define_macro(vm, "__CCCC_FE_TONEAREST__",
+                 arena_format(vm, "%d", FE_TONEAREST));
+    define_macro(vm, "__CCCC_FE_DOWNWARD__",
+                 arena_format(vm, "%d", FE_DOWNWARD));
     define_macro(vm, "__CCCC_FE_UPWARD__", arena_format(vm, "%d", FE_UPWARD));
-    define_macro(vm, "__CCCC_FE_TOWARDZERO__", arena_format(vm, "%d", FE_TOWARDZERO));
+    define_macro(vm, "__CCCC_FE_TOWARDZERO__",
+                 arena_format(vm, "%d", FE_TOWARDZERO));
     // Sizes drive fexcept_t/fenv_t's guest typedefs -- fexcept_t is 2 bytes
     // on macOS/arm64 but the guest header previously hardcoded `unsigned
     // int` (4 bytes), leaving the top half of fegetexceptflag()'s output
@@ -5394,17 +5754,53 @@ static void init_fenv_macros(VirtualMachine *vm) {
 // platform builds cccc is the platform whose real errno numbers get baked
 // in, with nothing to transcribe or keep in sync by hand.
 static void init_errno_macros(VirtualMachine *vm) {
-#define E(name) define_macro(vm, "__CCCC_" #name "__", arena_format(vm, "%d", name))
-    E(EAGAIN); E(EDEADLK); E(EWOULDBLOCK);
-    E(EINPROGRESS); E(EALREADY); E(ENOTSOCK); E(EDESTADDRREQ); E(EMSGSIZE);
-    E(EPROTOTYPE); E(ENOPROTOOPT); E(ENOTSUP); E(EAFNOSUPPORT); E(EADDRINUSE);
-    E(EADDRNOTAVAIL); E(ENETDOWN); E(ENETUNREACH); E(ECONNABORTED);
-    E(ECONNRESET); E(ENOBUFS); E(EISCONN); E(ENOTCONN); E(ETIMEDOUT);
-    E(ECONNREFUSED); E(ELOOP); E(ENAMETOOLONG); E(EHOSTUNREACH);
-    E(ENOTEMPTY); E(ENOSYS); E(ECANCELED); E(EIDRM); E(ENOMSG); E(EOVERFLOW);
-    E(EBADMSG); E(EMULTIHOP); E(EILSEQ); E(ENOLINK); E(EPROTO); E(ENOLCK);
-    E(EOPNOTSUPP); E(ENOTRECOVERABLE); E(EOWNERDEAD); E(ESTALE); E(EDQUOT);
-    E(ETXTBSY); E(ENOTBLK);
+#define E(name)                                                                \
+    define_macro(vm, "__CCCC_" #name "__", arena_format(vm, "%d", name))
+    E(EAGAIN);
+    E(EDEADLK);
+    E(EWOULDBLOCK);
+    E(EINPROGRESS);
+    E(EALREADY);
+    E(ENOTSOCK);
+    E(EDESTADDRREQ);
+    E(EMSGSIZE);
+    E(EPROTOTYPE);
+    E(ENOPROTOOPT);
+    E(ENOTSUP);
+    E(EAFNOSUPPORT);
+    E(EADDRINUSE);
+    E(EADDRNOTAVAIL);
+    E(ENETDOWN);
+    E(ENETUNREACH);
+    E(ECONNABORTED);
+    E(ECONNRESET);
+    E(ENOBUFS);
+    E(EISCONN);
+    E(ENOTCONN);
+    E(ETIMEDOUT);
+    E(ECONNREFUSED);
+    E(ELOOP);
+    E(ENAMETOOLONG);
+    E(EHOSTUNREACH);
+    E(ENOTEMPTY);
+    E(ENOSYS);
+    E(ECANCELED);
+    E(EIDRM);
+    E(ENOMSG);
+    E(EOVERFLOW);
+    E(EBADMSG);
+    E(EMULTIHOP);
+    E(EILSEQ);
+    E(ENOLINK);
+    E(EPROTO);
+    E(ENOLCK);
+    E(EOPNOTSUPP);
+    E(ENOTRECOVERABLE);
+    E(EOWNERDEAD);
+    E(ESTALE);
+    E(EDQUOT);
+    E(ETXTBSY);
+    E(ENOTBLK);
 #undef E
 }
 
@@ -5621,8 +6017,8 @@ void init_macros(VirtualMachine *vm) {
     add_builtin(vm, "__COUNTER__", counter_macro);
     add_builtin(vm, "__TIMESTAMP__", timestamp_macro);
 
-    time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
+    time_t     now = time(NULL);
+    struct tm *tm  = localtime(&now);
     define_macro(vm, "__DATE__", format_date(vm, tm));
     define_macro(vm, "__TIME__", format_time(vm, tm));
 }
@@ -5652,14 +6048,14 @@ static StringKind getStringKind(Token *tok) {
         return STR_UTF8;
 
     switch (tok->loc[0]) {
-    case '"':
-        return STR_NONE;
-    case 'u':
-        return STR_UTF16;
-    case 'U':
-        return STR_UTF32;
-    case 'L':
-        return STR_WIDE;
+        case '"':
+            return STR_NONE;
+        case 'u':
+            return STR_UTF16;
+        case 'U':
+            return STR_UTF32;
+        case 'L':
+            return STR_WIDE;
     }
     unreachable();
     return -1;
@@ -5677,13 +6073,13 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
             continue;
         }
 
-        StringKind kind = getStringKind(tok1);
-        Type *basety = tok1->ty->base;
+        StringKind kind   = getStringKind(tok1);
+        Type      *basety = tok1->ty->base;
 
         for (Token *t = tok1->next; t->kind == TK_STR; t = t->next) {
             StringKind k = getStringKind(t);
             if (kind == STR_NONE) {
-                kind = k;
+                kind   = k;
                 basety = t->ty->base;
             } else if (k != STR_NONE && kind != k) {
                 error_tok(vm, t,
@@ -5726,20 +6122,21 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
             i = i + t->ty->size - t->ty->base->size;
         }
 
-        *tok1 = *copy_token(vm, tok1);
-        tok1->ty = array_of(vm, tok1->ty->base, len);
-        tok1->str = buf;
+        *tok1      = *copy_token(vm, tok1);
+        tok1->ty   = array_of(vm, tok1->ty->base, len);
+        tok1->str  = buf;
         tok1->next = tok2;
-        tok1 = tok2;
+        tok1       = tok2;
     }
 }
 
 // hashmap_foreach callback used by isolate_comptime_macros.
 static int isolate_comptime_macro_iter(char *key, int keylen, void *val,
                                        void *user_data) {
-    (void)key; (void)keylen;
+    (void)key;
+    (void)keylen;
     HashMap *macros = (HashMap *)user_data;
-    Macro *m = (Macro *)val;
+    Macro   *m      = (Macro *)val;
     // Keep only command-line and builtin macros (define_tok == NULL), plus
     // per-macro #define @shared opt-ins (#888).
     // All other source-file #defines — whether from the primary file or any
@@ -5789,10 +6186,12 @@ void isolate_comptime_macros(VirtualMachine *vm) {
 }
 
 // Entry point function of the preprocessor.
-static int warn_unused_macro_cb(char *key, int keylen, void *val, void *user_data) {
-    (void)key; (void)keylen;
+static int warn_unused_macro_cb(char *key, int keylen, void *val,
+                                void *user_data) {
+    (void)key;
+    (void)keylen;
     VirtualMachine *vm = (VirtualMachine *)user_data;
-    Macro *m = (Macro *)val;
+    Macro          *m  = (Macro *)val;
     if (!m->handler && m->use_count == 0 && m->define_tok &&
         m->define_tok->file && !m->define_tok->file->is_system_header &&
         !hashmap_get(&vm->compiler.guard_macros, m->name))
@@ -5810,18 +6209,20 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
     if (vm->compiler.ctx_stack_len > 0) {
         ComptimeCtxEntry *top = ctx_top(vm);
         error_tok(vm, top->open_tok,
-                  top->type == CTX_EMIT ? "unclosed #pragma cccc emit begin"
-                                        : "unclosed #pragma cccc comptime begin");
+                  top->type == CTX_EMIT
+                      ? "unclosed #pragma cccc emit begin"
+                      : "unclosed #pragma cccc comptime begin");
     }
     if (vm->compiler.suite_stack_len > 0)
         error_tok(vm, vm->compiler.suite_len_stack[0].open_tok,
                   "unclosed #pragma cccc suite begin");
     if (vm->compiler.cond_incl) {
-        Token *ci_tok = vm->compiler.cond_incl->tok;
-        const char *hint = "";
+        Token      *ci_tok = vm->compiler.cond_incl->tok;
+        const char *hint   = "";
         if (ci_tok->file && ci_tok->file->name &&
             strstr(ci_tok->file->name, "implicit-reflection.h"))
-            hint = "\n  hint: embedded reflection.h may be truncated — run `make bootstrap` to regenerate src/std.c";
+            hint = "\n  hint: embedded reflection.h may be truncated — run "
+                   "`make bootstrap` to regenerate src/std.c";
         error_tok(vm, ci_tok,
                   "unterminated conditional directive (started with #%.*s)%s",
                   ci_tok->len, ci_tok->loc, hint);
@@ -5852,8 +6253,7 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
 // ---------------------------------------------------------------------------
 void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                          const char *flags_str, const char *test_name,
-                         CcTestFlagsDelta *out)
-{
+                         CcTestFlagsDelta *out) {
     memset(out, 0, sizeof(*out));
 
     if (!flags_str || !*flags_str)
@@ -5866,50 +6266,55 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
         // Skip leading whitespace
         while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
             p++;
-        if (!*p) break;
+        if (!*p)
+            break;
 
         // Delimit this token
         char *tok = p;
         while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
             p++;
-        if (*p) *p++ = '\0';
+        if (*p)
+            *p++ = '\0';
 
         // --- safety presets ---
         if (strcmp(tok, "-0") == 0 ||
             (strncmp(tok, "--safety=", 9) == 0 &&
-             (strcmp(tok+9, "none") == 0 || strcmp(tok+9, "0") == 0))) {
-            out->or_bits  = out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS;
+             (strcmp(tok + 9, "none") == 0 || strcmp(tok + 9, "0") == 0))) {
+            out->or_bits   = out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS;
             out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
         } else if (strcmp(tok, "-1") == 0 ||
                    (strncmp(tok, "--safety=", 9) == 0 &&
-                    (strcmp(tok+9, "basic") == 0 || strcmp(tok+9, "1") == 0))) {
-            out->or_bits  = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
-                            (uint32_t)CCCC_SAFETY_BASIC;
+                    (strcmp(tok + 9, "basic") == 0 ||
+                     strcmp(tok + 9, "1") == 0))) {
+            out->or_bits = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                           (uint32_t)CCCC_SAFETY_BASIC;
             out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
         } else if (strcmp(tok, "-2") == 0 ||
                    (strncmp(tok, "--safety=", 9) == 0 &&
-                    (strcmp(tok+9, "standard") == 0 || strcmp(tok+9, "2") == 0))) {
-            out->or_bits  = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
-                            (uint32_t)CCCC_SAFETY_STANDARD;
+                    (strcmp(tok + 9, "standard") == 0 ||
+                     strcmp(tok + 9, "2") == 0))) {
+            out->or_bits = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                           (uint32_t)CCCC_SAFETY_STANDARD;
             out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
         } else if (strcmp(tok, "-3") == 0 ||
                    (strncmp(tok, "--safety=", 9) == 0 &&
-                    (strcmp(tok+9, "max") == 0 || strcmp(tok+9, "3") == 0))) {
-            out->or_bits  = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
-                            (uint32_t)CCCC_SAFETY_MAX;
+                    (strcmp(tok + 9, "max") == 0 ||
+                     strcmp(tok + 9, "3") == 0))) {
+            out->or_bits = (out->or_bits & ~(uint32_t)CCCC_SAFETY_PRESET_BITS) |
+                           (uint32_t)CCCC_SAFETY_MAX;
             out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
 
-        // --- optimisation level ---
+            // --- optimisation level ---
         } else if (strcmp(tok, "-O") == 0 || strcmp(tok, "--optimize") == 0) {
             out->opt_level = 1;
             out->opt_set   = true;
-        } else if (tok[0] == '-' && tok[1] == 'O' &&
-                   tok[2] >= '0' && tok[2] <= '4' && tok[3] == '\0') {
+        } else if (tok[0] == '-' && tok[1] == 'O' && tok[2] >= '0' &&
+                   tok[2] <= '4' && tok[3] == '\0') {
             out->opt_level = tok[2] - '0';
             out->opt_set   = true;
         } else if (strncmp(tok, "--optimize=", 11) == 0) {
             char *endp;
-            long v = strtol(tok + 11, &endp, 10);
+            long  v = strtol(tok + 11, &endp, 10);
             if (*endp != '\0' || v < 0 || v > 4)
                 error_tok(vm, src_tok,
                           "[[cccc::test]] flags=\"...\": invalid optimization"
@@ -5918,13 +6323,21 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             out->opt_level = (int)v;
             out->opt_set   = true;
 
-        // --- individual check flags (matching long_options names in main.c) ---
-#define SET_FLAG(bit) do { out->or_bits |= (uint32_t)(bit); out->set_mask |= (uint32_t)(bit); } while (0)
-        } else if (strcmp(tok, "-b") == 0 || strcmp(tok, "--bounds-checks") == 0) {
+            // --- individual check flags (matching long_options names in
+            // main.c) ---
+#define SET_FLAG(bit)                                                          \
+    do {                                                                       \
+        out->or_bits  |= (uint32_t)(bit);                                      \
+        out->set_mask |= (uint32_t)(bit);                                      \
+    } while (0)
+        } else if (strcmp(tok, "-b") == 0 ||
+                   strcmp(tok, "--bounds-checks") == 0) {
             SET_FLAG(CCCC_BOUNDS_CHECKS);
-        } else if (strcmp(tok, "-u") == 0 || strcmp(tok, "--uaf-detection") == 0) {
+        } else if (strcmp(tok, "-u") == 0 ||
+                   strcmp(tok, "--uaf-detection") == 0) {
             SET_FLAG(CCCC_UAF_DETECTION);
-        } else if (strcmp(tok, "-T") == 0 || strcmp(tok, "--type-checks") == 0) {
+        } else if (strcmp(tok, "-T") == 0 ||
+                   strcmp(tok, "--type-checks") == 0) {
             SET_FLAG(CCCC_TYPE_CHECKS);
         } else if (strcmp(tok, "--overflow-checks") == 0) {
             SET_FLAG(CCCC_OVERFLOW_CHECKS);
@@ -5932,11 +6345,14 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_UNINIT_DETECTION);
         } else if (strcmp(tok, "--stack-canaries") == 0) {
             SET_FLAG(CCCC_STACK_CANARIES);
-        } else if (strcmp(tok, "-H") == 0 || strcmp(tok, "--heap-canaries") == 0) {
+        } else if (strcmp(tok, "-H") == 0 ||
+                   strcmp(tok, "--heap-canaries") == 0) {
             SET_FLAG(CCCC_HEAP_CANARIES);
-        } else if (strcmp(tok, "-p") == 0 || strcmp(tok, "--pointer-sanitizer") == 0) {
+        } else if (strcmp(tok, "-p") == 0 ||
+                   strcmp(tok, "--pointer-sanitizer") == 0) {
             SET_FLAG(CCCC_POINTER_SANITIZER);
-        } else if (strcmp(tok, "-m") == 0 || strcmp(tok, "--memory-leak-detection") == 0) {
+        } else if (strcmp(tok, "-m") == 0 ||
+                   strcmp(tok, "--memory-leak-detection") == 0) {
             SET_FLAG(CCCC_MEMORY_LEAK_DETECT);
         } else if (strcmp(tok, "--stack-instrumentation") == 0) {
             SET_FLAG(CCCC_STACK_INSTR);
@@ -5952,7 +6368,8 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_INVALID_ARITH);
         } else if (strcmp(tok, "--format-string-checks") == 0) {
             SET_FLAG(CCCC_FORMAT_STR_CHECKS);
-        } else if (strcmp(tok, "-R") == 0 || strcmp(tok, "--random-canaries") == 0) {
+        } else if (strcmp(tok, "-R") == 0 ||
+                   strcmp(tok, "--random-canaries") == 0) {
             SET_FLAG(CCCC_RANDOM_CANARIES);
         } else if (strcmp(tok, "--memory-poisoning") == 0) {
             SET_FLAG(CCCC_MEMORY_POISONING);
@@ -5960,14 +6377,16 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_MEMORY_TAGGING);
         } else if (strcmp(tok, "--thread-safety") == 0) {
             SET_FLAG(CCCC_THREAD_SAFETY);
-        } else if (strcmp(tok, "-V") == 0 || strcmp(tok, "--require-vm-heap") == 0) {
+        } else if (strcmp(tok, "-V") == 0 ||
+                   strcmp(tok, "--require-vm-heap") == 0) {
             // Test-dialect only: -V/--require-vm-heap means "this test
             // requires the VM heap" (force it on). Deliberately NOT the CLI's
             // --no-vm-heap, which means the opposite (disable the heap) --
             // accepting it here would silently force the heap on for a test
             // that asked to disable it.
             SET_FLAG(CCCC_VM_HEAP);
-        } else if (strcmp(tok, "-C") == 0 || strcmp(tok, "--control-flow-integrity") == 0) {
+        } else if (strcmp(tok, "-C") == 0 ||
+                   strcmp(tok, "--control-flow-integrity") == 0) {
             SET_FLAG(CCCC_CFI);
         } else if (strcmp(tok, "-g") == 0 || strcmp(tok, "--debug") == 0) {
             SET_FLAG(CCCC_ENABLE_DEBUGGER);
@@ -5980,15 +6399,17 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
         } else if (strncmp(tok, "--ffi-allow=", 12) == 0) {
             const char *name = tok + 12;
             if (*name) {
-                out->ffi_allow = realloc(out->ffi_allow,
-                    sizeof(*out->ffi_allow) * (size_t)(out->ffi_allow_count + 1));
+                out->ffi_allow = realloc(
+                    out->ffi_allow, sizeof(*out->ffi_allow) *
+                                        (size_t)(out->ffi_allow_count + 1));
                 if (!out->ffi_allow)
                     error("cc_parse_test_flags: realloc failed");
                 out->ffi_allow[out->ffi_allow_count++] = strdup(name);
             }
 #undef SET_FLAG
 
-        // --- warning flags (#612): -W*, -Wno-*, -Werror, -Werror=*, -Wno-error=* ---
+            // --- warning flags (#612): -W*, -Wno-*, -Werror, -Werror=*,
+            // -Wno-error=* ---
         } else if (strncmp(tok, "-W", 2) == 0) {
             const char *arg = tok + 2; // everything after "-W"
             if (strcmp(arg, "error") == 0) {
@@ -5996,40 +6417,43 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                 out->warn_as_errors_set = true;
             } else if (strncmp(arg, "error=", 6) == 0) {
                 const char *name = arg + 6;
-                uint64_t mask = cccc_warning_mask_for_name(name);
+                uint64_t    mask = cccc_warning_mask_for_name(name);
                 if (!mask || cccc_warning_is_group_name(name)) {
-                    char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                    char bad[256];
+                    snprintf(bad, sizeof(bad), "%s", tok);
                     free(buf);
                     error_tok(vm, src_tok,
                               "[[cccc::test]] flags=\"...\": unknown warning"
                               " option '%s' in test '%s'",
                               bad, test_name ? test_name : "?");
                 }
-                out->warn_or           |= mask;
-                out->warn_mask         |= mask;
-                out->warn_errors_or    |= mask;
-                out->warn_errors_mask  |= mask;
-                out->warn_as_errors_set = true;
+                out->warn_or            |= mask;
+                out->warn_mask          |= mask;
+                out->warn_errors_or     |= mask;
+                out->warn_errors_mask   |= mask;
+                out->warn_as_errors_set  = true;
             } else if (strncmp(arg, "no-error=", 9) == 0) {
                 const char *name = arg + 9;
-                uint64_t mask = cccc_warning_mask_for_name(name);
+                uint64_t    mask = cccc_warning_mask_for_name(name);
                 if (!mask || cccc_warning_is_group_name(name)) {
-                    char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                    char bad[256];
+                    snprintf(bad, sizeof(bad), "%s", tok);
                     free(buf);
                     error_tok(vm, src_tok,
                               "[[cccc::test]] flags=\"...\": unknown warning"
                               " option '%s' in test '%s'",
                               bad, test_name ? test_name : "?");
                 }
-                out->warn_errors_or    &= ~mask;
-                out->warn_errors_mask  |= mask;
-                out->warn_as_errors_set = true;
+                out->warn_errors_or     &= ~mask;
+                out->warn_errors_mask   |= mask;
+                out->warn_as_errors_set  = true;
             } else {
-                bool disable = (strncmp(arg, "no-", 3) == 0);
-                const char *name = disable ? arg + 3 : arg;
-                uint64_t mask = cccc_warning_mask_for_name(name);
+                bool        disable = (strncmp(arg, "no-", 3) == 0);
+                const char *name    = disable ? arg + 3 : arg;
+                uint64_t    mask    = cccc_warning_mask_for_name(name);
                 if (!mask) {
-                    char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                    char bad[256];
+                    snprintf(bad, sizeof(bad), "%s", tok);
                     free(buf);
                     error_tok(vm, src_tok,
                               "[[cccc::test]] flags=\"...\": unknown warning"
@@ -6045,29 +6469,30 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                 }
             }
 
-        // --- optimisation-pass flags (#612): -f<pass> / -fno-<pass> ---
+            // --- optimisation-pass flags (#612): -f<pass> / -fno-<pass> ---
         } else if (tok[0] == '-' && tok[1] == 'f' && tok[2] != '\0') {
-            static const struct { const char *name; uint32_t bit; } ptab[] = {
-                {"fold",      CCCC_OPT_FOLD},
-                {"peephole",  CCCC_OPT_PEEPHOLE},
-                {"copy-prop", CCCC_OPT_COPY_PROP},
-                {"dce",       CCCC_OPT_DCE},
-                {"cse",       CCCC_OPT_CSE},
-                {"fuse",      CCCC_OPT_FUSE},
-                {"elim-ext",  CCCC_OPT_ELIM_EXT},
-                {NULL, 0}
-            };
-            const char *fname = tok + 2;
-            bool neg = (strncmp(fname, "no-", 3) == 0);
-            const char *pname = neg ? fname + 3 : fname;
-            bool matched = false;
+            static const struct {
+                const char *name;
+                uint32_t    bit;
+            } ptab[]            = {{"fold", CCCC_OPT_FOLD},
+                                   {"peephole", CCCC_OPT_PEEPHOLE},
+                                   {"copy-prop", CCCC_OPT_COPY_PROP},
+                                   {"dce", CCCC_OPT_DCE},
+                                   {"cse", CCCC_OPT_CSE},
+                                   {"fuse", CCCC_OPT_FUSE},
+                                   {"elim-ext", CCCC_OPT_ELIM_EXT},
+                                   {NULL, 0}};
+            const char *fname   = tok + 2;
+            bool        neg     = (strncmp(fname, "no-", 3) == 0);
+            const char *pname   = neg ? fname + 3 : fname;
+            bool        matched = false;
             for (int k = 0; ptab[k].name; k++) {
                 if (strcmp(pname, ptab[k].name) == 0) {
                     if (neg) {
-                        out->f_disable |=  ptab[k].bit;
+                        out->f_disable |= ptab[k].bit;
                         out->f_enable  &= ~ptab[k].bit;
                     } else {
-                        out->f_enable  |=  ptab[k].bit;
+                        out->f_enable  |= ptab[k].bit;
                         out->f_disable &= ~ptab[k].bit;
                     }
                     matched = true;
@@ -6075,7 +6500,8 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                 }
             }
             if (!matched) {
-                char bad[256]; snprintf(bad, sizeof(bad), "%s", tok);
+                char bad[256];
+                snprintf(bad, sizeof(bad), "%s", tok);
                 free(buf);
                 error_tok(vm, src_tok,
                           "[[cccc::test]] flags=\"...\": unknown optimisation"

@@ -12,7 +12,8 @@ int main(void) {
     LObj *xs;
 
     ccccl_rt_init();
-    xs = ccccl_cons(ccccl_intern("A"), ccccl_cons(ccccl_intern("B"), ccccl_nil));
+    xs =
+        ccccl_cons(ccccl_intern("A"), ccccl_cons(ccccl_intern("B"), ccccl_nil));
 
     ccccl_print(head(ccccl_cons(xs, ccccl_nil), ccccl_nil), stdout);
     fputc('\n', stdout);

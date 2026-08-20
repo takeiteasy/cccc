@@ -37,7 +37,7 @@
 #include <math.h>
 
 int main(void) {
-    float sf = 0.0f / 0.0f;      // a NaN; not asserted signaling either way
+    float  sf = 0.0f / 0.0f; // a NaN; not asserted signaling either way
     double sd = 0.0 / 0.0;
 
     // Just exercise both dispatch arms (float/double) of each macro --

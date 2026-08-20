@@ -1,6 +1,7 @@
-// CCCC_FLAGS: tests/fixtures/dup_tag_1014_private.c tests/fixtures/dup_tag_1014_impl.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*struct DyGC1014 \{[\s\S]*int v;)(?=[\s\S]*struct DyGC1014__cccc_dup[0-9]+ \{[\s\S]*double d;)
+// CCCC_FLAGS: tests/fixtures/dup_tag_1014_private.c
+// tests/fixtures/dup_tag_1014_impl.c -m CCCC_C4_SKIP: multi-source compile, not
+// a single-TU bytecode round-trip CCCC_EXPECT_STDOUT: (?=[\s\S]*struct DyGC1014
+// \{[\s\S]*int v;)(?=[\s\S]*struct DyGC1014__cccc_dup[0-9]+ \{[\s\S]*double d;)
 // CCCC_REJECT_STDOUT: struct DyGC1014 \{[\s\S]*\};\n\nstruct DyGC1014 \{
 //
 // #1014's input-order-independence proof: the reverse of

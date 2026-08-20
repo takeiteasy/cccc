@@ -12,14 +12,22 @@
 // use in src/stdlib/posix_sched.c.
 static int guest_to_host_lc(int guest_category) {
     switch (guest_category) {
-    case 0: return LC_ALL;
-    case 1: return LC_COLLATE;
-    case 2: return LC_CTYPE;
-    case 3: return LC_MONETARY;
-    case 4: return LC_NUMERIC;
-    case 5: return LC_TIME;
-    case 6: return LC_MESSAGES;
-    default: return guest_category;
+        case 0:
+            return LC_ALL;
+        case 1:
+            return LC_COLLATE;
+        case 2:
+            return LC_CTYPE;
+        case 3:
+            return LC_MONETARY;
+        case 4:
+            return LC_NUMERIC;
+        case 5:
+            return LC_TIME;
+        case 6:
+            return LC_MESSAGES;
+        default:
+            return guest_category;
     }
 }
 
@@ -40,19 +48,27 @@ static char *wrap_setlocale(int guest_category, const char *locale) {
 // newlocale(LC_ALL_MASK, ...) would build a locale with those extra
 // categories left unset.
 static int guest_to_host_lc_mask(int guest_mask) {
-    if (guest_mask == 0x3f) return LC_ALL_MASK;
+    if (guest_mask == 0x3f)
+        return LC_ALL_MASK;
 
     int host_mask = 0;
-    if (guest_mask & (1 << 0)) host_mask |= LC_COLLATE_MASK;
-    if (guest_mask & (1 << 1)) host_mask |= LC_CTYPE_MASK;
-    if (guest_mask & (1 << 2)) host_mask |= LC_MESSAGES_MASK;
-    if (guest_mask & (1 << 3)) host_mask |= LC_MONETARY_MASK;
-    if (guest_mask & (1 << 4)) host_mask |= LC_NUMERIC_MASK;
-    if (guest_mask & (1 << 5)) host_mask |= LC_TIME_MASK;
+    if (guest_mask & (1 << 0))
+        host_mask |= LC_COLLATE_MASK;
+    if (guest_mask & (1 << 1))
+        host_mask |= LC_CTYPE_MASK;
+    if (guest_mask & (1 << 2))
+        host_mask |= LC_MESSAGES_MASK;
+    if (guest_mask & (1 << 3))
+        host_mask |= LC_MONETARY_MASK;
+    if (guest_mask & (1 << 4))
+        host_mask |= LC_NUMERIC_MASK;
+    if (guest_mask & (1 << 5))
+        host_mask |= LC_TIME_MASK;
     return host_mask;
 }
 
-static locale_t wrap_newlocale(int guest_mask, const char *locale, locale_t base) {
+static locale_t wrap_newlocale(int guest_mask, const char *locale,
+                               locale_t base) {
     return newlocale(guest_to_host_lc_mask(guest_mask), locale, base);
 }
 
@@ -60,7 +76,8 @@ static locale_t wrap_newlocale(int guest_mask, const char *locale, locale_t base
 // a void guest-visible signature so the guest-side declaration doesn't have
 // to pick a host-specific return type.
 static void wrap_freelocale(locale_t locobj) {
-    if (!locobj || locobj == LC_GLOBAL_LOCALE) return;
+    if (!locobj || locobj == LC_GLOBAL_LOCALE)
+        return;
 #ifdef __APPLE__
     (void)freelocale(locobj);
 #else
@@ -69,10 +86,10 @@ static void wrap_freelocale(locale_t locobj) {
 }
 
 void register_locale_functions(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "setlocale", (void*)wrap_setlocale, 2, 0);
-    cc_register_cfunc(vm, "localeconv", (void*)localeconv, 0, 0);
-    cc_register_cfunc(vm, "newlocale", (void*)wrap_newlocale, 3, 0);
-    cc_register_cfunc(vm, "duplocale", (void*)duplocale, 1, 0);
-    cc_register_cfunc(vm, "freelocale", (void*)wrap_freelocale, 1, 0);
-    cc_register_cfunc(vm, "uselocale", (void*)uselocale, 1, 0);
+    cc_register_cfunc(vm, "setlocale", (void *)wrap_setlocale, 2, 0);
+    cc_register_cfunc(vm, "localeconv", (void *)localeconv, 0, 0);
+    cc_register_cfunc(vm, "newlocale", (void *)wrap_newlocale, 3, 0);
+    cc_register_cfunc(vm, "duplocale", (void *)duplocale, 1, 0);
+    cc_register_cfunc(vm, "freelocale", (void *)wrap_freelocale, 1, 0);
+    cc_register_cfunc(vm, "uselocale", (void *)uselocale, 1, 0);
 }

@@ -17,8 +17,8 @@ int main(void) {
 
     close(sv[1]); /* peer's read end is gone */
 
-    char byte = 'x';
-    ssize_t n = send(sv[0], &byte, 1, MSG_NOSIGNAL);
+    char    byte = 'x';
+    ssize_t n    = send(sv[0], &byte, 1, MSG_NOSIGNAL);
     if (n != -1)
         return 2; /* should fail (EPIPE), just not via a signal */
 

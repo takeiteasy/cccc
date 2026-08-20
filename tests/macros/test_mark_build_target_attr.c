@@ -4,18 +4,19 @@
 // [[cccc::build_target]] factory, selectable via --build-target.
 
 typedef struct BuildTarget BuildTarget;
-typedef struct Builder Builder;
+typedef struct Builder     Builder;
 BuildTarget *__builtin_build_executable(Builder *ctx, const char *name);
 
 [[cccc::comptime]]
 void gen_bt_fn(void) {
-    Type *bt_ty = GetType("BuildTarget");
+    Type *bt_ty      = GetType("BuildTarget");
     Type *builder_ty = GetType("Builder");
-    Obj *fn = MakeFunction("gen_target", MakePointer(bt_ty));
+    Obj  *fn         = MakeFunction("gen_target", MakePointer(bt_ty));
     FunctionAddParam(fn, "ctx", MakePointer(builder_ty));
     WithFn(fn) {
         Node *ctx_ref = MakeParamRef(fn, "ctx");
-        Node *call = Quote("__builtin_build_executable($1, \"gen_app\")", ctx_ref);
+        Node *call =
+            Quote("__builtin_build_executable($1, \"gen_app\")", ctx_ref);
         FunctionSetBody(fn, MakeReturn(call));
     }
     PublishNode(fn);

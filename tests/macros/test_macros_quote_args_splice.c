@@ -3,7 +3,8 @@
 
 #include "stdarg.h"
 
-// ---- Helper variadic functions -----------------------------------------------
+// ---- Helper variadic functions
+// -----------------------------------------------
 
 // Sum count integers passed as variadic args.
 int sum_ints(int count, ...) {
@@ -27,12 +28,12 @@ int base_plus_sum(int base, int count, ...) {
     return total;
 }
 
-// ---- Test 1: splice full arg list into a variadic callee ---------------------
-// call_sum3 builds a three-element node chain and splices it as the variadic
-// portion of sum_ints(3, ...).
+// ---- Test 1: splice full arg list into a variadic callee
+// --------------------- call_sum3 builds a three-element node chain and splices
+// it as the variadic portion of sum_ints(3, ...).
 [[cccc::comptime]]
 Node *call_sum3(Node *a, Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b, c }, 3);
+    Node *chain = __builtin_node_list((Node *[]){a, b, c}, 3);
     return __builtin_quote("sum_ints(3, $@1)", chain);
 }
 
@@ -40,11 +41,12 @@ int test_full_variadic_splice(void) {
     return call_sum3(10, 20, 12); // sum_ints(3, 10, 20, 12) == 42
 }
 
-// ---- Test 2: splice into variadic tail after a fixed prefix arg --------------
-// call_bps passes a fixed base, then splices two more ints into the variadic.
+// ---- Test 2: splice into variadic tail after a fixed prefix arg
+// -------------- call_bps passes a fixed base, then splices two more ints into
+// the variadic.
 [[cccc::comptime]]
 Node *call_bps(Node *base, Node *x, Node *y) {
-    Node *chain = __builtin_node_list((Node*[]){ x, y }, 2);
+    Node *chain = __builtin_node_list((Node *[]){x, y}, 2);
     return __builtin_quote("base_plus_sum($1, 2, $@2)", base, chain);
 }
 
@@ -52,13 +54,14 @@ int test_prefix_then_splice(void) {
     return call_bps(10, 16, 16); // base_plus_sum(10, 2, 16, 16) == 42
 }
 
-// ---- Test 3: empty splice (zero variadic args inserted) ----------------------
-// When __builtin_node_list returns NULL the $@k placeholder expands to nothing,
-// leaving sum_ints with only the fixed count argument.
+// ---- Test 3: empty splice (zero variadic args inserted)
+// ---------------------- When __builtin_node_list returns NULL the $@k
+// placeholder expands to nothing, leaving sum_ints with only the fixed count
+// argument.
 [[cccc::comptime]]
 Node *call_sum_empty(Node *fixed) {
     // count == 0 → __builtin_node_list returns NULL → empty splice
-    Node *empty = __builtin_node_list((Node*[]){}, 0);
+    Node *empty = __builtin_node_list((Node *[]){}, 0);
     return __builtin_quote("sum_ints($1, $@2)", fixed, empty);
 }
 
@@ -70,7 +73,7 @@ int test_empty_splice(void) {
 // Mixed scalar + splice in the same template.
 [[cccc::comptime]]
 Node *call_mixed(Node *base, Node *a, Node *b, Node *c) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b, c }, 3);
+    Node *chain = __builtin_node_list((Node *[]){a, b, c}, 3);
     // $1 binds to base (scalar), $@2 splices the chain.
     return __builtin_quote("base_plus_sum($1, 3, $@2)", base, chain);
 }
@@ -82,10 +85,14 @@ int test_mixed_scalar_splice(void) {
 // ---- main -------------------------------------------------------------------
 
 int main(void) {
-    if (test_full_variadic_splice() != 42) return 1;
-    if (test_prefix_then_splice()   != 42) return 2;
-    if (test_empty_splice()         !=  0) return 3;
-    if (test_mixed_scalar_splice()  != 42) return 4;
+    if (test_full_variadic_splice() != 42)
+        return 1;
+    if (test_prefix_then_splice() != 42)
+        return 2;
+    if (test_empty_splice() != 0)
+        return 3;
+    if (test_mixed_scalar_splice() != 42)
+        return 4;
 
     return 42;
 }

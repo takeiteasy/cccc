@@ -6,6 +6,7 @@
 void __chk_fail(void) __attribute__((error("buffer overflow detected")));
 
 int main(void) {
-    while (1) __chk_fail();   // live body → compile error
+    while (1)
+        __chk_fail(); // live body → compile error
     return 0;
 }

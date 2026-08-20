@@ -5,7 +5,9 @@
 // masks in an unsigned long long instead. This is the ticket's minimal
 // repro -- it produces the correct result on a plain build, and must not
 // print a UBSan diagnostic when built/run with `make ubsan`.
-void takes_ptr(int *p) { *p = 1; }
+void takes_ptr(int *p) {
+    *p = 1;
+}
 
 int main(void) {
     int local_scalar = 0;

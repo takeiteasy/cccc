@@ -3,4 +3,6 @@
 // safety/optimisation accept 0..3 only.
 #pragma cccc config(safety = 9)
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

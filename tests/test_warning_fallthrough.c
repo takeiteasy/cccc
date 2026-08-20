@@ -13,4 +13,7 @@ int test_fallthrough(int x) {
     }
     return result;
 }
-int main(void) { test_fallthrough(1); return 42; }
+int main(void) {
+    test_fallthrough(1);
+    return 42;
+}

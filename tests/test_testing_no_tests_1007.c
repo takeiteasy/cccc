@@ -11,4 +11,6 @@
 // plain/JSON header is printed. A --test=GLOB/--test-suite filter that
 // matches nothing is unaffected -- this checks the pre-filter list, not
 // the post-filter count.
-int test_testing_no_tests_1007_unused(void) { return 0; }
+int test_testing_no_tests_1007_unused(void) {
+    return 0;
+}

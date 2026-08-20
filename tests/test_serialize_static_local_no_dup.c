@@ -17,7 +17,9 @@
 // forward-declaration pass already fully supplies. Verified this exact
 // program printed `static struct Foo1011 __cccc_a_0;` twice, consecutively,
 // before the fix.
-struct Foo1011 { int x; };
+struct Foo1011 {
+    int x;
+};
 typedef struct Foo1011 Foo1011;
 
 Foo1011 *make_1011(void) {
@@ -26,7 +28,9 @@ Foo1011 *make_1011(void) {
     return &a;
 }
 
-int get_x_1011(Foo1011 *t) { return t->x; }
+int get_x_1011(Foo1011 *t) {
+    return t->x;
+}
 
 int main(void) {
     Foo1011 *t = make_1011();

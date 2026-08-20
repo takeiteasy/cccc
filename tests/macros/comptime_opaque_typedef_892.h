@@ -12,8 +12,12 @@
 typedef struct Widget Widget;
 typedef struct Gadget Gadget;
 
-struct Widget { int tag; };
-struct Gadget { int tag; };
+struct Widget {
+    int tag;
+};
+struct Gadget {
+    int tag;
+};
 
 static inline Widget *make_widget(void) {
     static struct Widget w = {1};
@@ -25,7 +29,11 @@ static inline Gadget *make_gadget(void) {
     return &g;
 }
 
-static inline int widget_tag(Widget *w) { return w->tag; }
-static inline int gadget_tag(Gadget *g) { return g->tag; }
+static inline int widget_tag(Widget *w) {
+    return w->tag;
+}
+static inline int gadget_tag(Gadget *g) {
+    return g->tag;
+}
 
 #endif

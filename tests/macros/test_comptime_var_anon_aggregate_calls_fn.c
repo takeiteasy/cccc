@@ -2,16 +2,24 @@
 // initializers use a typeof(var) compound-literal assignment.
 
 [[cccc::comptime]]
-int compute_width(void) { return 1024; }
+int compute_width(void) {
+    return 1024;
+}
 
 [[cccc::comptime]]
-int compute_value(void) { return 0x1234; }
+int compute_value(void) {
+    return 0x1234;
+}
 
-[[cccc::comptime]]
-struct { int width; int height; } dims = { compute_width(), 768 };
+[[cccc::comptime]] struct {
+    int width;
+    int height;
+} dims = {compute_width(), 768};
 
-[[cccc::comptime]]
-union { int i; unsigned char bytes[4]; } data = { compute_value() };
+[[cccc::comptime]] union {
+    int           i;
+    unsigned char bytes[4];
+} data = {compute_value()};
 
 [[cccc::comptime]]
 Node *get_width(void) {

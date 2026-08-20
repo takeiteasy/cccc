@@ -1,10 +1,14 @@
 // Ticket #309: static function-pointer tables inside comptime functions.
 
 [[cccc::comptime]]
-int handler_a(void) { return 10; }
+int handler_a(void) {
+    return 10;
+}
 
 [[cccc::comptime]]
-int handler_b(void) { return 20; }
+int handler_b(void) {
+    return 20;
+}
 
 [[cccc::comptime]]
 int dispatch(int i) {

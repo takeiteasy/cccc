@@ -7,11 +7,11 @@
 void *malloc(unsigned long);
 
 int main(void) {
-    int n = 3;
-    volatile int c = 1;
-    void *buf = malloc(8);
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = buf;
+    int          n                            = 3;
+    volatile int c                            = 1;
+    void        *buf                          = malloc(8);
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = buf;
     if (c)
         q = s;
     q[3] = 'x'; // c is true this run -- q holds s, traps via CHKNT

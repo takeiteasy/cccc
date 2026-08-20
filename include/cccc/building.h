@@ -2,16 +2,17 @@
  * @file building.h
  * @brief CCCC Build System — builder API injected in --build mode.
  *
- * This header is automatically injected when CCCC is invoked with the @c --build
- * flag and should not be included directly.  It declares the opaque build types,
- * the underlying @c __builtin_build_* FFI-callable functions, and PascalCase macro
- * wrappers that forward an explicit build context parameter.
+ * This header is automatically injected when CCCC is invoked with the @c
+ * --build flag and should not be included directly.  It declares the opaque
+ * build types, the underlying @c __builtin_build_* FFI-callable functions, and
+ * PascalCase macro wrappers that forward an explicit build context parameter.
  *
- * A build script is an ordinary @c .c file containing a build entry — a function
- * tagged @c [[cccc::build]] (or named @c build_main).  The entry receives the
- * build context as its first parameter, uses it to create targets, wires their
- * dependencies, and calls one of the @c Build* functions.  The host-side runner
- * then compiles and links the declared targets with the system toolchain
+ * A build script is an ordinary @c .c file containing a build entry — a
+ * function tagged @c [[cccc::build]] (or named @c build_main).  The entry
+ * receives the build context as its first parameter, uses it to create targets,
+ * wires their dependencies, and calls one of the @c Build* functions.  The
+ * host-side runner then compiles and links the declared targets with the system
+ * toolchain
  * (@c cc / @c ar / @c ld).
  *
  * ## Usage
@@ -95,7 +96,8 @@ BuildTarget *__builtin_build_executable(Builder *ctx, const char *name);
 BuildTarget *__builtin_build_static_lib(Builder *ctx, const char *name);
 
 /*!
- * @brief Create a dynamic-library target (output @c lib/lib\<name\>.{so,dylib}).
+ * @brief Create a dynamic-library target (output @c
+ * lib/lib\<name\>.{so,dylib}).
  * @param ctx Build context.
  * @param name Target name.
  * @return The new target handle.
@@ -181,10 +183,12 @@ void __builtin_build_add_sources_glob(BuildTarget *t, const char *pattern);
  * @param t Target to add the matched sources to.
  * @param pattern Glob pattern, relative to the build root.
  */
-void __builtin_build_add_sources_glob_deferred(BuildTarget *t, const char *pattern);
+void __builtin_build_add_sources_glob_deferred(BuildTarget *t,
+                                               const char  *pattern);
 
 /*!
- * @brief Write @c content to @c \<out_dir\>/gen/\<name\> and add it as a source.
+ * @brief Write @c content to @c \<out_dir\>/gen/\<name\> and add it as a
+ * source.
  * @param t Target to add the generated source to.
  * @param name Generated file name; must end in @c .c (or another compilable
  *            extension).
@@ -215,7 +219,8 @@ void __builtin_build_add_include(BuildTarget *t, const char *path);
  * @param name Macro name.
  * @param value Macro value, or @c NULL for a bare define.
  */
-void __builtin_build_add_define(BuildTarget *t, const char *name, const char *value);
+void __builtin_build_add_define(BuildTarget *t, const char *name,
+                                const char *value);
 
 /*!
  * @brief Add a preprocessor undefine (-U).
@@ -247,7 +252,8 @@ void __builtin_build_add_ldflag(BuildTarget *t, const char *flag);
  * @param name Environment variable name.
  * @param value Environment variable value.
  */
-void __builtin_build_set_target_env(BuildTarget *t, const char *name, const char *value);
+void __builtin_build_set_target_env(BuildTarget *t, const char *name,
+                                    const char *value);
 
 /*!
  * @brief Declare that @c t links against (and is built after) @c dep.
@@ -367,7 +373,8 @@ void __builtin_build_set_profile(BuildTarget *t, const char *profile);
 const char *__builtin_build_profile(Builder *ctx);
 
 /*!
- * @brief Override the compiler binary for @c t (e.g. @c "aarch64-linux-gnu-gcc").
+ * @brief Override the compiler binary for @c t (e.g. @c
+ * "aarch64-linux-gnu-gcc").
  * @details Takes precedence over @c --build-cc and the system default. Use
  *            for GCC-style cross-compilers that are identified by a
  *            prefixed name.
@@ -377,7 +384,8 @@ const char *__builtin_build_profile(Builder *ctx);
 void __builtin_build_set_toolchain(BuildTarget *t, const char *cc);
 
 /*!
- * @brief Set a clang-style target triple for @c t (e.g. @c "aarch64-linux-gnu").
+ * @brief Set a clang-style target triple for @c t (e.g. @c
+ * "aarch64-linux-gnu").
  * @details Appends @c --target=\<triple\> to both compile and link
  *            invocations.
  * @param t Target to modify.
@@ -522,7 +530,8 @@ const char *__builtin_build_read_file(Builder *ctx, const char *path);
  * @param content Content to write.
  * @return 0 on success, -1 on error.
  */
-int __builtin_build_write_file(Builder *ctx, const char *path, const char *content);
+int __builtin_build_write_file(Builder *ctx, const char *path,
+                               const char *content);
 
 /*!
  * @brief Change the process working directory to @c path.
@@ -621,126 +630,130 @@ int __builtin_build_run_default(Builder *ctx);
 /*! @def BuildRoot
  * @brief Absolute path of the directory the build was launched from.
  * @param ctx Build context. */
-#define BuildRoot(ctx)          __builtin_build_root(ctx)
+#define BuildRoot(ctx) __builtin_build_root(ctx)
 
 /*! @def BuildOutDir
  * @brief Output directory for build artifacts (default @c build/).
  * @param ctx Build context. */
-#define BuildOutDir(ctx)        __builtin_build_out_dir(ctx)
+#define BuildOutDir(ctx) __builtin_build_out_dir(ctx)
 
 /*! @def BuildHost
  * @brief Host platform name (@c "darwin", @c "linux", ...).
  * @param ctx Build context. */
-#define BuildHost(ctx)          __builtin_build_host(ctx)
+#define BuildHost(ctx) __builtin_build_host(ctx)
 
 /*! @def BuildVerbose
  * @brief Non-zero when verbose output was requested.
  * @param ctx Build context. */
-#define BuildVerbose(ctx)       __builtin_build_verbose(ctx)
+#define BuildVerbose(ctx) __builtin_build_verbose(ctx)
 
 /*! @def Executable
  * @brief Create an executable target (output @c bin/\<name\>).
  * @param ctx Build context.
  * @param name Target name. */
-#define Executable(ctx, name)   __builtin_build_executable(ctx, name)
+#define Executable(ctx, name) __builtin_build_executable(ctx, name)
 
 /*! @def StaticLib
  * @brief Create a static-library target (output @c lib/lib\<name\>.a).
  * @param ctx Build context.
  * @param name Target name. */
-#define StaticLib(ctx, name)    __builtin_build_static_lib(ctx, name)
+#define StaticLib(ctx, name) __builtin_build_static_lib(ctx, name)
 
 /*! @def DynamicLib
- * @brief Create a dynamic-library target (output @c lib/lib\<name\>.{so,dylib}).
+ * @brief Create a dynamic-library target (output @c
+ * lib/lib\<name\>.{so,dylib}).
  * @param ctx Build context.
  * @param name Target name. */
-#define DynamicLib(ctx, name)   __builtin_build_dynamic_lib(ctx, name)
+#define DynamicLib(ctx, name) __builtin_build_dynamic_lib(ctx, name)
 
 /*! @def SetOutput
  * @brief Override the target's output path (relative to the out dir).
  * @param t Target to modify.
  * @param p Output path. */
-#define SetOutput(t, p)         __builtin_build_set_output(t, p)
+#define SetOutput(t, p) __builtin_build_set_output(t, p)
 
 /*! @def TargetOutput
  * @brief On-disk output path for @c t.
  * @param t Target to query. */
-#define TargetOutput(t)         __builtin_build_target_output(t)
+#define TargetOutput(t) __builtin_build_target_output(t)
 
 /*! @def DeclareOutput
  * @brief Record a file path a @c RunCustom target (only) produces.
  * @param t Target to record against.
  * @param p Output path, taken verbatim. */
-#define DeclareOutput(t, p)     __builtin_build_declare_output(t, p)
+#define DeclareOutput(t, p) __builtin_build_declare_output(t, p)
 
 /*! @def AddSource
  * @brief Add a C source file to the target.
  * @param t Target to add the source to.
  * @param p Source file path, relative to the build root. */
-#define AddSource(t, p)         __builtin_build_add_source(t, p)
+#define AddSource(t, p) __builtin_build_add_source(t, p)
 
 /*! @def AddSourcesGlob
- * @brief Expand a glob pattern and add each match as a source file, immediately.
+ * @brief Expand a glob pattern and add each match as a source file,
+ * immediately.
  * @param t Target to add the matched sources to.
  * @param pat Glob pattern, relative to the build root. */
-#define AddSourcesGlob(t, pat)  __builtin_build_add_sources_glob(t, pat)
+#define AddSourcesGlob(t, pat) __builtin_build_add_sources_glob(t, pat)
 
 /*! @def AddSourcesGlobDeferred
  * @brief Like @c AddSourcesGlob, but expansion happens at build time,
  *            after @c t's dependencies have already been built.
  * @param t Target to add the matched sources to.
  * @param pat Glob pattern, relative to the build root. */
-#define AddSourcesGlobDeferred(t, pat) __builtin_build_add_sources_glob_deferred(t, pat)
+#define AddSourcesGlobDeferred(t, pat)                                         \
+    __builtin_build_add_sources_glob_deferred(t, pat)
 
 /*! @def AddSourceStr
  * @brief Write @c c to @c \<out_dir\>/gen/\<n\> and add it as a source.
  * @param t Target to add the generated source to.
- * @param n Generated file name; must end in @c .c (or another compilable extension).
+ * @param n Generated file name; must end in @c .c (or another compilable
+ * extension).
  * @param c File contents to write. */
-#define AddSourceStr(t, n, c)   __builtin_build_add_source_str(t, n, c)
+#define AddSourceStr(t, n, c) __builtin_build_add_source_str(t, n, c)
 
 /*! @def AddInput
  * @brief Record a file path a @c RunCustom target (only) reads.
  * @param t Target to record against.
  * @param p Input path the command reads. */
-#define AddInput(t, p)          __builtin_build_add_input(t, p)
+#define AddInput(t, p) __builtin_build_add_input(t, p)
 
 /*! @def ExcludeSource
  * @brief Exclude sources matching @c pat from compilation.
  * @param t Target to exclude the source from.
  * @param pat Exact path or @c fnmatch glob to match against. */
-#define ExcludeSource(t, pat)   __builtin_build_exclude_source(t, pat)
+#define ExcludeSource(t, pat) __builtin_build_exclude_source(t, pat)
 
 /*! @def AddInclude
  * @brief Add an include search path (-I) to the target's compiles.
  * @param t Target to modify.
  * @param p Include search path. */
-#define AddInclude(t, p)        __builtin_build_add_include(t, p)
+#define AddInclude(t, p) __builtin_build_add_include(t, p)
 
 /*! @def AddDefine
  * @brief Add a preprocessor define (-D).
  * @param t Target to modify.
  * @param n Macro name.
  * @param v Macro value, or @c NULL for a bare define. */
-#define AddDefine(t, n, v)      __builtin_build_add_define(t, n, v)
+#define AddDefine(t, n, v) __builtin_build_add_define(t, n, v)
 
 /*! @def AddUndef
  * @brief Add a preprocessor undefine (-U).
  * @param t Target to modify.
  * @param n Macro name to undefine. */
-#define AddUndef(t, n)          __builtin_build_add_undef(t, n)
+#define AddUndef(t, n) __builtin_build_add_undef(t, n)
 
 /*! @def AddCFlag
  * @brief Add a raw compiler flag (e.g. "-O2").
  * @param t Target to modify.
  * @param f Flag to append. */
-#define AddCFlag(t, f)          __builtin_build_add_cflag(t, f)
+#define AddCFlag(t, f) __builtin_build_add_cflag(t, f)
 
 /*! @def AddLdFlag
  * @brief Add a raw linker flag.
  * @param t Target to modify.
  * @param f Flag to append. */
-#define AddLdFlag(t, f)         __builtin_build_add_ldflag(t, f)
+#define AddLdFlag(t, f) __builtin_build_add_ldflag(t, f)
 
 /*! @def SetTargetEnv
  * @brief Set an environment variable for @c t's compiler/linker child
@@ -748,138 +761,138 @@ int __builtin_build_run_default(Builder *ctx);
  * @param t Target to modify.
  * @param n Environment variable name.
  * @param v Environment variable value. */
-#define SetTargetEnv(t, n, v)   __builtin_build_set_target_env(t, n, v)
+#define SetTargetEnv(t, n, v) __builtin_build_set_target_env(t, n, v)
 
 /*! @def LinkWith
  * @brief Declare that @c t links against (and is built after) @c dep.
  * @param t Target that links against @c dep.
  * @param dep Target being linked against. */
-#define LinkWith(t, dep)        __builtin_build_link_with(t, dep)
+#define LinkWith(t, dep) __builtin_build_link_with(t, dep)
 
 /*! @def DependsOn
  * @brief Ordering-only dependency: @c t is built after @c dep but does
  *            @b not add a linker flag.
  * @param t Target that depends on @c dep.
  * @param dep Target that must build first. */
-#define DependsOn(t, dep)       __builtin_build_depends_on(t, dep)
+#define DependsOn(t, dep) __builtin_build_depends_on(t, dep)
 
 /*! @def AddLib
  * @brief Add a system library to link against (@c -l\<name\>).
  * @param t Target to modify.
  * @param n Library name, without the @c lib prefix or extension. */
-#define AddLib(t, n)            __builtin_build_add_lib(t, n)
+#define AddLib(t, n) __builtin_build_add_lib(t, n)
 
 /*! @def AddLibPath
  * @brief Add a library search path (-L<path>).
  * @param t Target to modify.
  * @param p Library search path. */
-#define AddLibPath(t, p)        __builtin_build_add_libpath(t, p)
+#define AddLibPath(t, p) __builtin_build_add_libpath(t, p)
 
 /*! @def GetEnv
  * @brief Return the value of environment variable @c name.
  * @param ctx Build context.
  * @param name Environment variable name. */
-#define GetEnv(ctx, name)           __builtin_build_get_env(ctx, name)
+#define GetEnv(ctx, name) __builtin_build_get_env(ctx, name)
 
 /*! @def CaptureCommand
  * @brief Run @c cmd via @c sh @c -c and return its stdout.
  * @param ctx Build context.
  * @param cmd Shell command to run. */
-#define CaptureCommand(ctx, cmd)    __builtin_build_capture_command(ctx, cmd)
+#define CaptureCommand(ctx, cmd) __builtin_build_capture_command(ctx, cmd)
 
 /*! @def FileExists
  * @brief Check whether a path exists.
  * @param ctx Build context.
  * @param path Path to check (file, directory, or any other filesystem node). */
-#define FileExists(ctx, path)       __builtin_build_file_exists(ctx, path)
+#define FileExists(ctx, path) __builtin_build_file_exists(ctx, path)
 
 /*! @def DirExists
  * @brief Check whether a path exists and is a directory.
  * @param ctx Build context.
  * @param path Path to check. */
-#define DirExists(ctx, path)        __builtin_build_dir_exists(ctx, path)
+#define DirExists(ctx, path) __builtin_build_dir_exists(ctx, path)
 
 /*! @def GlobFiles
  * @brief Expand @c pattern and return the matching paths.
  * @param ctx Build context.
  * @param pattern Glob pattern. */
-#define GlobFiles(ctx, pattern)     __builtin_build_glob_files(ctx, pattern)
+#define GlobFiles(ctx, pattern) __builtin_build_glob_files(ctx, pattern)
 
 /*! @def ReadFile
  * @brief Read the file at @c path into a string.
  * @param ctx Build context.
  * @param path File path to read. */
-#define ReadFile(ctx, path)         __builtin_build_read_file(ctx, path)
+#define ReadFile(ctx, path) __builtin_build_read_file(ctx, path)
 
 /*! @def WriteFile
  * @brief Write @c c to @c path, creating parent directories as needed.
  * @param ctx Build context.
  * @param path File path to write.
  * @param c Content to write. */
-#define WriteFile(ctx, path, c)     __builtin_build_write_file(ctx, path, c)
+#define WriteFile(ctx, path, c) __builtin_build_write_file(ctx, path, c)
 
 /*! @def SetCwd
  * @brief Change the process working directory to @c path.
  * @param ctx Build context.
  * @param path Directory to change into. */
-#define SetCwd(ctx, path)           __builtin_build_set_cwd(ctx, path)
+#define SetCwd(ctx, path) __builtin_build_set_cwd(ctx, path)
 
 /*! @def GetCwd
  * @brief Return the current process working directory.
  * @param ctx Build context. */
-#define GetCwd(ctx)                 __builtin_build_get_cwd(ctx)
+#define GetCwd(ctx) __builtin_build_get_cwd(ctx)
 
 /*! @def CopyFile
  * @brief Copy file @c src to @c dst.
  * @param ctx Build context.
  * @param src Source file path.
  * @param dst Destination file path. */
-#define CopyFile(ctx, src, dst)     __builtin_build_copy_file(ctx, src, dst)
+#define CopyFile(ctx, src, dst) __builtin_build_copy_file(ctx, src, dst)
 
 /*! @def MoveFile
  * @brief Move (rename) file @c src to @c dst.
  * @param ctx Build context.
  * @param src Source file path.
  * @param dst Destination file path. */
-#define MoveFile(ctx, src, dst)     __builtin_build_move_file(ctx, src, dst)
+#define MoveFile(ctx, src, dst) __builtin_build_move_file(ctx, src, dst)
 
 /*! @def DeleteFile
  * @brief Delete the file at @c path (@c unlink).
  * @param ctx Build context.
  * @param path File path to delete. */
-#define DeleteFile(ctx, path)       __builtin_build_delete_file(ctx, path)
+#define DeleteFile(ctx, path) __builtin_build_delete_file(ctx, path)
 
 /*! @def MkDir
  * @brief Create @c path and all intermediate directories (@c mkdir @c -p
  *            semantics).
  * @param ctx Build context.
  * @param path Directory path to create. */
-#define MkDir(ctx, path)            __builtin_build_mkdir(ctx, path)
+#define MkDir(ctx, path) __builtin_build_mkdir(ctx, path)
 
 /*! @def DeleteDir
  * @brief Recursively delete @c path and all contents (@c rm @c -rf semantics).
  * @param ctx Build context.
  * @param path Directory path to delete. */
-#define DeleteDir(ctx, path)        __builtin_build_delete_dir(ctx, path)
+#define DeleteDir(ctx, path) __builtin_build_delete_dir(ctx, path)
 
 /*! @def HaveTool
  * @brief Check whether a named tool is available.
  * @param ctx Build context.
  * @param name Tool name to look up in @c PATH. */
-#define HaveTool(ctx, name)     __builtin_build_have_tool(ctx, name)
+#define HaveTool(ctx, name) __builtin_build_have_tool(ctx, name)
 
 /*! @def FindTool
  * @brief Return the full path of a named tool.
  * @param ctx Build context.
  * @param name Tool name to look up in @c PATH. */
-#define FindTool(ctx, name)     __builtin_build_find_tool(ctx, name)
+#define FindTool(ctx, name) __builtin_build_find_tool(ctx, name)
 
 /*! @def PkgConfig
  * @brief Run @c pkg-config to obtain compile and link flags for @c pkg and
  *            add them to @c t.
  * @param t Target to add the flags to.
  * @param pkg Package name to query. */
-#define PkgConfig(t, pkg)       __builtin_build_pkg_config(t, pkg)
+#define PkgConfig(t, pkg) __builtin_build_pkg_config(t, pkg)
 
 /*! @def RunCustom
  * @brief Register a custom shell-command target that runs @c cmd when
@@ -894,48 +907,49 @@ int __builtin_build_run_default(Builder *ctx);
  *            on the command line.
  * @param ctx Build context.
  * @param name Option key. */
-#define GetBuildOption(ctx, name)    __builtin_build_get_build_option(ctx, name)
+#define GetBuildOption(ctx, name) __builtin_build_get_build_option(ctx, name)
 
 /*! @def HaveBuildOption
  * @brief Check whether a @c --build-option was passed on the command line.
  * @param ctx Build context.
  * @param name Option key. */
-#define HaveBuildOption(ctx, name)   __builtin_build_have_build_option(ctx, name)
+#define HaveBuildOption(ctx, name) __builtin_build_have_build_option(ctx, name)
 
 /*! @def AddFramework
  * @brief Add a macOS @c -framework @c Name linker flag.
  * @param t Target to modify.
  * @param name Framework name. */
-#define AddFramework(t, name)        __builtin_build_add_framework(t, name)
+#define AddFramework(t, name) __builtin_build_add_framework(t, name)
 
 /*! @def BuildArgc
  * @brief Number of positional arguments forwarded via @c -- on the CLI.
  * @param ctx Build context. */
-#define BuildArgc(ctx)               __builtin_build_argc(ctx)
+#define BuildArgc(ctx) __builtin_build_argc(ctx)
 
 /*! @def BuildArgv
  * @brief Return the @c i -th positional argument forwarded via @c -- on
  *            the CLI.
  * @param ctx Build context.
  * @param i Zero-based argument index. */
-#define BuildArgv(ctx, i)            __builtin_build_argv(ctx, i)
+#define BuildArgv(ctx, i) __builtin_build_argv(ctx, i)
 
 /*! @def SetInstallPrefix
  * @brief Override the install prefix for @c InstallArtifact.
  * @param ctx Build context.
  * @param path Install prefix path. */
-#define SetInstallPrefix(ctx, path)  __builtin_build_set_install_prefix(ctx, path)
+#define SetInstallPrefix(ctx, path)                                            \
+    __builtin_build_set_install_prefix(ctx, path)
 
 /*! @def InstallArtifact
  * @brief Register @c t for installation when @c --build-install is active.
  * @param ctx Build context.
  * @param t Target to install. */
-#define InstallArtifact(ctx, t)      __builtin_build_install_artifact(ctx, t)
+#define InstallArtifact(ctx, t) __builtin_build_install_artifact(ctx, t)
 
 /*! @def BuildWantsInstall
  * @brief Check whether install was requested.
  * @param ctx Build context. */
-#define BuildWantsInstall(ctx)       __builtin_build_wants_install(ctx)
+#define BuildWantsInstall(ctx) __builtin_build_wants_install(ctx)
 
 /*! @def SetProfile
  * @brief Set the build profile for target @c t, overriding any global
@@ -943,54 +957,56 @@ int __builtin_build_run_default(Builder *ctx);
  * @param t Target to modify.
  * @param p Profile name: @c "debug", @c "release", @c "relwithdebinfo",
  *            or @c "minsizerel". */
-#define SetProfile(t, p)              __builtin_build_set_profile(t, p)
+#define SetProfile(t, p) __builtin_build_set_profile(t, p)
 
 /*! @def BuildProfile
  * @brief Return the global build profile name.
  * @param ctx Build context. */
-#define BuildProfile(ctx)             __builtin_build_profile(ctx)
+#define BuildProfile(ctx) __builtin_build_profile(ctx)
 
 /*! @def SetToolchain
- * @brief Override the compiler binary for @c t (e.g. @c "aarch64-linux-gnu-gcc").
+ * @brief Override the compiler binary for @c t (e.g. @c
+ * "aarch64-linux-gnu-gcc").
  * @param t Target to modify.
  * @param cc Compiler binary name or path. */
-#define SetToolchain(t, cc)           __builtin_build_set_toolchain(t, cc)
+#define SetToolchain(t, cc) __builtin_build_set_toolchain(t, cc)
 
 /*! @def SetTargetTriple
- * @brief Set a clang-style target triple for @c t (e.g. @c "aarch64-linux-gnu").
+ * @brief Set a clang-style target triple for @c t (e.g. @c
+ * "aarch64-linux-gnu").
  * @param t Target to modify.
  * @param triple Target triple. */
-#define SetTargetTriple(t, triple)    __builtin_build_set_target_triple(t, triple)
+#define SetTargetTriple(t, triple) __builtin_build_set_target_triple(t, triple)
 
 /*! @def BuildTargetTriple
  * @brief Return the global cross-compilation triple.
  * @param ctx Build context. */
-#define BuildTargetTriple(ctx)        __builtin_build_target_triple(ctx)
+#define BuildTargetTriple(ctx) __builtin_build_target_triple(ctx)
 
 /*! @def BuildTargetCount
  * @brief Return the number of @c [[cccc::build_target]] factory functions
  *            declared in the current build script.
  * @param ctx Build context. */
-#define BuildTargetCount(ctx)    __builtin_build_target_count(ctx)
+#define BuildTargetCount(ctx) __builtin_build_target_count(ctx)
 
 /*! @def BuildTargetName
  * @brief Return the name of the @c i -th @c [[cccc::build_target]] factory.
  * @param ctx Build context.
  * @param i Zero-based factory index. */
-#define BuildTargetName(ctx, i)  __builtin_build_target_name(ctx, i)
+#define BuildTargetName(ctx, i) __builtin_build_target_name(ctx, i)
 
 /*! @def Build
  * @brief Build @c t and its transitive dependencies.
  * @param ctx Build context.
  * @param t Target to build. */
-#define Build(ctx, t)           __builtin_build_run(ctx, t)
+#define Build(ctx, t) __builtin_build_run(ctx, t)
 
 /*! @def BuildAll
  * @brief Build every declared target in topological order.
  * @param ctx Build context. */
-#define BuildAll(ctx)           __builtin_build_run_all(ctx)
+#define BuildAll(ctx) __builtin_build_run_all(ctx)
 
 /*! @def BuildDefault
  * @brief Build every declared target and print a summary.
  * @param ctx Build context. */
-#define BuildDefault(ctx)       __builtin_build_run_default(ctx)
+#define BuildDefault(ctx) __builtin_build_run_default(ctx)

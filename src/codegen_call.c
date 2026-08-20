@@ -34,18 +34,32 @@ static bool is_wide_bitint_helper_op(Node *node) {
     if (!node)
         return false;
     switch (node->kind) {
-    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: case ND_MOD:
-    case ND_BITAND: case ND_BITOR: case ND_BITXOR: case ND_SHL: case ND_SHR:
-    case ND_EQ: case ND_NE: case ND_LT: case ND_LE: case ND_CAST:
-    case ND_NEG: case ND_BITNOT:
-        return node->lhs && (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty) ||
-                              is_decimal(node->lhs->ty) || is_decimal(node->ty));
-    case ND_ASSIGN:
-        return is_wide_bitint(node->ty) || is_decimal(node->ty);
-    case ND_DECIMAL_TO_CHARS:
-        return true;
-    default:
-        return false;
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_CAST:
+        case ND_NEG:
+        case ND_BITNOT:
+            return node->lhs &&
+                   (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->ty) ||
+                    is_decimal(node->lhs->ty) || is_decimal(node->ty));
+        case ND_ASSIGN:
+            return is_wide_bitint(node->ty) || is_decimal(node->ty);
+        case ND_DECIMAL_TO_CHARS:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -131,32 +145,34 @@ bool contains_self_call(Node *node, Obj *fn) {
 static bool addr_roots_at_frame_local(Obj *fn, Node *n) {
     while (n) {
         switch (n->kind) {
-        case ND_VAR:
-            if (!n->var || !n->var->is_local)
+            case ND_VAR:
+                if (!n->var || !n->var->is_local)
+                    return false;
+                for (Obj *v = fn->locals; v; v = v->next)
+                    if (v == n->var)
+                        return true;
                 return false;
-            for (Obj *v = fn->locals; v; v = v->next)
-                if (v == n->var)
-                    return true;
-            return false;
-        case ND_MEMBER:
-        case ND_CAST:
-        case ND_DEREF:
-            n = n->lhs;
-            continue;
-        case ND_ADD:
-        case ND_SUB:
-            if (n->lhs && n->lhs->ty &&
-                (n->lhs->ty->kind == TY_PTR || n->lhs->ty->kind == TY_ARRAY)) {
+            case ND_MEMBER:
+            case ND_CAST:
+            case ND_DEREF:
                 n = n->lhs;
-            } else if (n->rhs && n->rhs->ty &&
-                       (n->rhs->ty->kind == TY_PTR || n->rhs->ty->kind == TY_ARRAY)) {
-                n = n->rhs;
-            } else {
+                continue;
+            case ND_ADD:
+            case ND_SUB:
+                if (n->lhs && n->lhs->ty &&
+                    (n->lhs->ty->kind == TY_PTR ||
+                     n->lhs->ty->kind == TY_ARRAY)) {
+                    n = n->lhs;
+                } else if (n->rhs && n->rhs->ty &&
+                           (n->rhs->ty->kind == TY_PTR ||
+                            n->rhs->ty->kind == TY_ARRAY)) {
+                    n = n->rhs;
+                } else {
+                    return false;
+                }
+                continue;
+            default:
                 return false;
-            }
-            continue;
-        default:
-            return false;
         }
     }
     return false;
@@ -169,31 +185,32 @@ static bool addr_roots_at_frame_local(Obj *fn, Node *n) {
 static bool tail_arg_carries_frame_addr(Obj *fn, Node *n) {
     while (n) {
         switch (n->kind) {
-        case ND_CAST:
-            n = n->lhs;
-            continue;
-        case ND_COMMA:
-        case ND_ASSIGN:
-            n = n->rhs;
-            continue;
-        case ND_COND:
-            return tail_arg_carries_frame_addr(fn, n->then) ||
-                   tail_arg_carries_frame_addr(fn, n->els);
-        case ND_ADDR:
-            return addr_roots_at_frame_local(fn, n->lhs);
-        case ND_ADD:
-        case ND_SUB:
-            // Pointer arithmetic off a frame-local base, e.g. `buf + i`.
-            if (n->ty && n->ty->kind == TY_PTR)
-                return addr_roots_at_frame_local(fn, n);
-            return false;
-        default:
-            // Arrays/structs/unions decay to their own base address with no
-            // explicit `&` in the source at all.
-            if (n->ty && (n->ty->kind == TY_ARRAY || n->ty->kind == TY_STRUCT ||
-                          n->ty->kind == TY_UNION))
-                return addr_roots_at_frame_local(fn, n);
-            return false;
+            case ND_CAST:
+                n = n->lhs;
+                continue;
+            case ND_COMMA:
+            case ND_ASSIGN:
+                n = n->rhs;
+                continue;
+            case ND_COND:
+                return tail_arg_carries_frame_addr(fn, n->then) ||
+                       tail_arg_carries_frame_addr(fn, n->els);
+            case ND_ADDR:
+                return addr_roots_at_frame_local(fn, n->lhs);
+            case ND_ADD:
+            case ND_SUB:
+                // Pointer arithmetic off a frame-local base, e.g. `buf + i`.
+                if (n->ty && n->ty->kind == TY_PTR)
+                    return addr_roots_at_frame_local(fn, n);
+                return false;
+            default:
+                // Arrays/structs/unions decay to their own base address with no
+                // explicit `&` in the source at all.
+                if (n->ty &&
+                    (n->ty->kind == TY_ARRAY || n->ty->kind == TY_STRUCT ||
+                     n->ty->kind == TY_UNION))
+                    return addr_roots_at_frame_local(fn, n);
+                return false;
         }
     }
     return false;
@@ -212,31 +229,40 @@ static long long return_repr_key(Type *ty) {
     if (is_complex(ty) || is_vector(ty) || is_wide_bitint(ty) || is_decimal(ty))
         return -1;
     switch (ty->kind) {
-    case TY_STRUCT: case TY_UNION: case TY_ARRAY: case TY_VLA:
-    case TY_FUNC: case TY_ERROR: case TY_AUTO: case TY_BLOCK:
-        return -1;
-    case TY_FLOAT:
-        return 1; // f32 -- emit_fround_f32 is idempotent, but f32->f64 is not
-    case TY_DOUBLE: case TY_LDOUBLE:
-        return 2; // f64/f80 share a representation; f32<->f64 is not a no-op
-    case TY_BOOL:
-        return 3; // SNE3 is idempotent on an already-0/1 value
-    case TY_CHAR:
-        return 10 + (ty->is_unsigned ? 1 : 0);
-    case TY_SHORT:
-        return 20 + (ty->is_unsigned ? 1 : 0);
-    case TY_INT:
-        return 30 + (ty->is_unsigned ? 1 : 0);
-    case TY_BITINT:
-        // Narrow (<=64-bit) _BitInt only -- is_wide_bitint already handled
-        // above. Key on width/signedness: emit_bitint_trunc's mask depends
-        // on both.
-        return 1000 + ty->bit_width * 2 + (ty->is_unsigned ? 1 : 0);
-    default:
-        // TY_LONG, TY_PTR, TY_ENUM, TY_VOID, TY_NULLPTR_T: gen_expr's
-        // ND_CAST case emits nothing for these -- one shared 64-bit,
-        // no-conversion key.
-        return 0;
+        case TY_STRUCT:
+        case TY_UNION:
+        case TY_ARRAY:
+        case TY_VLA:
+        case TY_FUNC:
+        case TY_ERROR:
+        case TY_AUTO:
+        case TY_BLOCK:
+            return -1;
+        case TY_FLOAT:
+            return 1; // f32 -- emit_fround_f32 is idempotent, but f32->f64 is
+                      // not
+        case TY_DOUBLE:
+        case TY_LDOUBLE:
+            return 2; // f64/f80 share a representation; f32<->f64 is not a
+                      // no-op
+        case TY_BOOL:
+            return 3; // SNE3 is idempotent on an already-0/1 value
+        case TY_CHAR:
+            return 10 + (ty->is_unsigned ? 1 : 0);
+        case TY_SHORT:
+            return 20 + (ty->is_unsigned ? 1 : 0);
+        case TY_INT:
+            return 30 + (ty->is_unsigned ? 1 : 0);
+        case TY_BITINT:
+            // Narrow (<=64-bit) _BitInt only -- is_wide_bitint already handled
+            // above. Key on width/signedness: emit_bitint_trunc's mask depends
+            // on both.
+            return 1000 + ty->bit_width * 2 + (ty->is_unsigned ? 1 : 0);
+        default:
+            // TY_LONG, TY_PTR, TY_ENUM, TY_VOID, TY_NULLPTR_T: gen_expr's
+            // ND_CAST case emits nothing for these -- one shared 64-bit,
+            // no-conversion key.
+            return 0;
     }
 }
 
@@ -249,8 +275,9 @@ bool cast_is_repr_noop(Type *to, Type *from) {
 }
 
 // Return true when `expr` is a tail-call candidate: a direct, in-VM,
-// non-variadic, non-nested, non-noreturn, non-struct-returning call with ≤8 args.
-// The caller is responsible for the opt_level >= 1 and inline_exit_name guards.
+// non-variadic, non-nested, non-noreturn, non-struct-returning call with ≤8
+// args. The caller is responsible for the opt_level >= 1 and inline_exit_name
+// guards.
 bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     if (!expr || expr->kind != ND_FUNCALL)
         return false;
@@ -266,8 +293,8 @@ bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
         return false; // va_area is part of the frame
     if (callee->is_noreturn)
         return false; // BTRAP emitted after CALL; can't compose with CALLT
-    if (expr->ty && (expr->ty->kind == TY_STRUCT || expr->ty->kind == TY_UNION ||
-                     expr->ty->kind == TY_VECTOR))
+    if (expr->ty && (expr->ty->kind == TY_STRUCT ||
+                     expr->ty->kind == TY_UNION || expr->ty->kind == TY_VECTOR))
         return false; // RETBUF machinery — incompatible with frame reuse
     // #763: a wide _BitInt(N>64) return is materialised as an address into a
     // frame-local scratch buffer (alloc_wide_bitint_temp, gen_expr's ND_CAST
@@ -337,21 +364,21 @@ bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
 int count_ast_nodes(Node *node) {
     if (!node)
         return 0;
-    int count = 1; // this node
-    count += count_ast_nodes(node->next);
-    count += count_ast_nodes(node->lhs);
-    count += count_ast_nodes(node->rhs);
-    count += count_ast_nodes(node->cond);
-    count += count_ast_nodes(node->then);
-    count += count_ast_nodes(node->els);
-    count += count_ast_nodes(node->init);
-    count += count_ast_nodes(node->inc);
-    count += count_ast_nodes(node->body);
-    count += count_ast_nodes(node->args);
-    count += count_ast_nodes(node->cas_addr);
-    count += count_ast_nodes(node->cas_old);
-    count += count_ast_nodes(node->cas_new);
-    count += count_ast_nodes(node->atomic_expr);
+    int count  = 1; // this node
+    count     += count_ast_nodes(node->next);
+    count     += count_ast_nodes(node->lhs);
+    count     += count_ast_nodes(node->rhs);
+    count     += count_ast_nodes(node->cond);
+    count     += count_ast_nodes(node->then);
+    count     += count_ast_nodes(node->els);
+    count     += count_ast_nodes(node->init);
+    count     += count_ast_nodes(node->inc);
+    count     += count_ast_nodes(node->body);
+    count     += count_ast_nodes(node->args);
+    count     += count_ast_nodes(node->cas_addr);
+    count     += count_ast_nodes(node->cas_old);
+    count     += count_ast_nodes(node->cas_new);
+    count     += count_ast_nodes(node->atomic_expr);
     // Don't follow goto_next/case_next/default_case/init_tail — they are
     // chain pointers within switch/label structures, not tree children.
     return count;
@@ -424,7 +451,8 @@ int var_stack_slots(Obj *var) {
     if (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
         var->ty->kind == TY_COMPLEX || var->ty->kind == TY_VECTOR)
         return (var->ty->size + 7) / 8;
-    if (is_decimal(var->ty) && var->ty->size > 8) // #402: _Decimal128 is 2 words
+    if (is_decimal(var->ty) &&
+        var->ty->size > 8) // #402: _Decimal128 is 2 words
         return (var->ty->size + 7) / 8;
     return 1;
 }
@@ -432,21 +460,21 @@ int var_stack_slots(Obj *var) {
 static Node *clone_expr(VirtualMachine *vm, Node *src) {
     if (!src)
         return NULL;
-    Node *n = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *n = *src;
-    n->next = clone_expr(vm, src->next);
-    n->lhs = clone_expr(vm, src->lhs);
-    n->rhs = clone_expr(vm, src->rhs);
-    n->cond = clone_expr(vm, src->cond);
-    n->then = clone_expr(vm, src->then);
-    n->els = clone_expr(vm, src->els);
-    n->init = clone_expr(vm, src->init);
-    n->inc = clone_expr(vm, src->inc);
-    n->body = clone_expr(vm, src->body);
-    n->args = clone_expr(vm, src->args);
-    n->cas_addr = clone_expr(vm, src->cas_addr);
-    n->cas_old = clone_expr(vm, src->cas_old);
-    n->cas_new = clone_expr(vm, src->cas_new);
+    Node *n        = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *n             = *src;
+    n->next        = clone_expr(vm, src->next);
+    n->lhs         = clone_expr(vm, src->lhs);
+    n->rhs         = clone_expr(vm, src->rhs);
+    n->cond        = clone_expr(vm, src->cond);
+    n->then        = clone_expr(vm, src->then);
+    n->els         = clone_expr(vm, src->els);
+    n->init        = clone_expr(vm, src->init);
+    n->inc         = clone_expr(vm, src->inc);
+    n->body        = clone_expr(vm, src->body);
+    n->args        = clone_expr(vm, src->args);
+    n->cas_addr    = clone_expr(vm, src->cas_addr);
+    n->cas_old     = clone_expr(vm, src->cas_old);
+    n->cas_new     = clone_expr(vm, src->cas_new);
     n->atomic_expr = clone_expr(vm, src->atomic_expr);
     // #1018: va_ap/va_last/va_src are pure serializer annotation (see
     // Node.va_form's comment, src/cccc.h) but are themselves Node*, so a
@@ -457,13 +485,13 @@ static Node *clone_expr(VirtualMachine *vm, Node *src) {
     // Clone them in step with everything else so a comptime/macro clone
     // never silently degrades an annotated node back to unannotated
     // (today's broken) native output.
-    n->va_ap = clone_expr(vm, src->va_ap);
-    n->va_last = clone_expr(vm, src->va_last);
-    n->va_src = clone_expr(vm, src->va_src);
-    n->goto_next = NULL;
-    n->case_next = NULL;
+    n->va_ap        = clone_expr(vm, src->va_ap);
+    n->va_last      = clone_expr(vm, src->va_last);
+    n->va_src       = clone_expr(vm, src->va_src);
+    n->goto_next    = NULL;
+    n->case_next    = NULL;
     n->default_case = NULL;
-    n->init_tail = NULL;
+    n->init_tail    = NULL;
     return n;
 }
 
@@ -471,7 +499,7 @@ Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args) {
     if (!src)
         return NULL;
     if (src->kind == ND_VAR && src->var) {
-        Obj *p = params;
+        Obj  *p = params;
         Node *a = args;
         while (p && a) {
             if (src->var == p)
@@ -480,56 +508,56 @@ Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args) {
             a = a->next;
         }
     }
-    Node *n = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *n = *src;
-    n->next = clone_subst(vm, src->next, params, args);
-    n->lhs = clone_subst(vm, src->lhs, params, args);
-    n->rhs = clone_subst(vm, src->rhs, params, args);
-    n->cond = clone_subst(vm, src->cond, params, args);
-    n->then = clone_subst(vm, src->then, params, args);
-    n->els = clone_subst(vm, src->els, params, args);
-    n->init = clone_subst(vm, src->init, params, args);
-    n->inc = clone_subst(vm, src->inc, params, args);
-    n->body = clone_subst(vm, src->body, params, args);
-    n->args = clone_subst(vm, src->args, params, args);
-    n->cas_addr = clone_subst(vm, src->cas_addr, params, args);
-    n->cas_old = clone_subst(vm, src->cas_old, params, args);
-    n->cas_new = clone_subst(vm, src->cas_new, params, args);
+    Node *n        = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *n             = *src;
+    n->next        = clone_subst(vm, src->next, params, args);
+    n->lhs         = clone_subst(vm, src->lhs, params, args);
+    n->rhs         = clone_subst(vm, src->rhs, params, args);
+    n->cond        = clone_subst(vm, src->cond, params, args);
+    n->then        = clone_subst(vm, src->then, params, args);
+    n->els         = clone_subst(vm, src->els, params, args);
+    n->init        = clone_subst(vm, src->init, params, args);
+    n->inc         = clone_subst(vm, src->inc, params, args);
+    n->body        = clone_subst(vm, src->body, params, args);
+    n->args        = clone_subst(vm, src->args, params, args);
+    n->cas_addr    = clone_subst(vm, src->cas_addr, params, args);
+    n->cas_old     = clone_subst(vm, src->cas_old, params, args);
+    n->cas_new     = clone_subst(vm, src->cas_new, params, args);
     n->atomic_expr = clone_subst(vm, src->atomic_expr, params, args);
     // #1018: see clone_expr's own comment above -- va_ap/va_last/va_src
     // need the same param-substitution pass as any other child field.
-    n->va_ap = clone_subst(vm, src->va_ap, params, args);
-    n->va_last = clone_subst(vm, src->va_last, params, args);
-    n->va_src = clone_subst(vm, src->va_src, params, args);
-    n->goto_next = NULL;
-    n->case_next = NULL;
+    n->va_ap        = clone_subst(vm, src->va_ap, params, args);
+    n->va_last      = clone_subst(vm, src->va_last, params, args);
+    n->va_src       = clone_subst(vm, src->va_src, params, args);
+    n->goto_next    = NULL;
+    n->case_next    = NULL;
     n->default_case = NULL;
-    n->init_tail = NULL;
+    n->init_tail    = NULL;
     return n;
 }
 
-#define MAX_LABELS 256
+#define MAX_LABELS        256
 #define MAX_LABEL_PATCHES 1024
 
 typedef struct {
     char *name;
-    Pc offset;
+    Pc    offset;
 } LabelDef;
 
 typedef struct {
     char *name;
-    Pc patch_location;
-    bool text_relative;
+    Pc    patch_location;
+    bool  text_relative;
 } LabelPatch;
 
-static LabelDef label_defs[MAX_LABELS];
-static int num_label_defs = 0;
+static LabelDef   label_defs[MAX_LABELS];
+static int        num_label_defs = 0;
 
 static LabelPatch label_patches[MAX_LABEL_PATCHES];
-static int num_label_patches = 0;
+static int        num_label_patches = 0;
 
 void reset_labels(void) {
-    num_label_defs = 0;
+    num_label_defs    = 0;
     num_label_patches = 0;
 }
 
@@ -540,40 +568,42 @@ void define_label(VirtualMachine *vm, char *name) {
     if (num_label_defs >= MAX_LABELS) {
         error("codegen: too many labels");
     }
-    Pc label_pc = vm->text_ptr + 1;
-    label_defs[num_label_defs].name = name;
+    Pc label_pc                       = vm->text_ptr + 1;
+    label_defs[num_label_defs].name   = name;
     label_defs[num_label_defs].offset = label_pc;
     num_label_defs++;
 
-    // Also record in the persistent global map so apply_global_relocations() can
-    // resolve &&label references stored in static/global initialisers (#573).
+    // Also record in the persistent global map so apply_global_relocations()
+    // can resolve &&label references stored in static/global initialisers
+    // (#573).
     if (num_global_labels >= global_labels_cap) {
-        int new_cap = global_labels_cap ? global_labels_cap * 2 : 64;
-        GlobalLabelEntry *buf = realloc(global_label_map, (size_t)new_cap * sizeof(GlobalLabelEntry));
+        int new_cap           = global_labels_cap ? global_labels_cap * 2 : 64;
+        GlobalLabelEntry *buf = realloc(
+            global_label_map, (size_t)new_cap * sizeof(GlobalLabelEntry));
         if (!buf)
             error("codegen: out of memory for global label map");
-        global_label_map = buf;
+        global_label_map  = buf;
         global_labels_cap = new_cap;
     }
     global_label_map[num_global_labels].name   = name;
     global_label_map[num_global_labels].offset = label_pc;
     num_global_labels++;
 
-    // A label is a control-flow join point; the restrict cache is no longer valid.
+    // A label is a control-flow join point; the restrict cache is no longer
+    // valid.
     restrict_cache_invalidate_all(vm);
 }
 
 // Record a jump that needs to be patched later
-void add_label_patch(char *name, Pc patch_location,
-                            bool text_relative) {
+void add_label_patch(char *name, Pc patch_location, bool text_relative) {
     if (!name)
         return;
     if (num_label_patches >= MAX_LABEL_PATCHES) {
         error("codegen: too many label patches");
     }
-    label_patches[num_label_patches].name = name;
+    label_patches[num_label_patches].name           = name;
     label_patches[num_label_patches].patch_location = patch_location;
-    label_patches[num_label_patches].text_relative = text_relative;
+    label_patches[num_label_patches].text_relative  = text_relative;
     num_label_patches++;
 }
 
@@ -585,9 +615,9 @@ void patch_labels(VirtualMachine *vm) {
                     (void *)(uintptr_t)label_defs[i].offset);
 
     for (int i = 0; i < num_label_patches; i++) {
-        char *name = label_patches[i].name;
-        Pc patch = label_patches[i].patch_location;
-        Pc offset = (Pc)(uintptr_t)hashmap_get(&label_map, name);
+        char *name   = label_patches[i].name;
+        Pc    patch  = label_patches[i].patch_location;
+        Pc    offset = (Pc)(uintptr_t)hashmap_get(&label_map, name);
         if (!offset)
             continue;
 
@@ -600,4 +630,3 @@ void patch_labels(VirtualMachine *vm) {
 
     hashmap_deinit(&label_map);
 }
-

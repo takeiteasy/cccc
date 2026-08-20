@@ -9,17 +9,17 @@
 // surrounding precise loop's fixpoint). Must compile and run cleanly
 // either way.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
-    int k = 0;
+    int  k = 0;
     for (int i = 0; i < 3; i++) {
         switch (k) {
-        case 0:
-            goto lbl;
-        lbl:
-            break;
+            case 0:
+                goto lbl;
+            lbl:
+                break;
         }
         p = &x;
     }

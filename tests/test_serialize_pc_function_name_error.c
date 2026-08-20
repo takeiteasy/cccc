@@ -12,7 +12,7 @@
 // internal, undeclared __cccc_pc_to_name symbol.
 
 int main(void) {
-    void *ra = __builtin_return_address(0);
+    void       *ra = __builtin_return_address(0);
     const char *fn = __builtin_pc_function_name(ra);
     return fn ? 1 : 0;
 }

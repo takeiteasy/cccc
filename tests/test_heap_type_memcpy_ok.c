@@ -8,14 +8,14 @@
 #include <string.h>
 
 struct S {
-    int a;
+    int   a;
     float b;
 };
 
 int main(void) {
     struct S *src = malloc(sizeof(struct S));
-    src->a = 20;
-    src->b = 22.0f;
+    src->a        = 20;
+    src->b        = 22.0f;
 
     struct S *dst = malloc(sizeof(struct S));
     memcpy(dst, src, sizeof(struct S));

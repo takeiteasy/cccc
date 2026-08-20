@@ -13,6 +13,7 @@
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    BuildTarget *step = RunCustom(ctx, "andtest", "false && echo SHOULD_NOT_PRINT");
+    BuildTarget *step =
+        RunCustom(ctx, "andtest", "false && echo SHOULD_NOT_PRINT");
     return BuildDefault(ctx);
 }

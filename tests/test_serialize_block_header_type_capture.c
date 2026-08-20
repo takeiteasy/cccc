@@ -20,8 +20,10 @@
 
 int main(void) {
     struct tm t;
-    t.tm_year = 42;
-    int (^b)(void) = ^{ return t.tm_year; };
+    t.tm_year      = 42;
+    int (^b)(void) = ^{
+      return t.tm_year;
+    };
     (void)b;
     return 42;
 }

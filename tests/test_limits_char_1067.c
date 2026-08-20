@@ -39,8 +39,10 @@
 #error "MB_LEN_MAX missing from limits.h"
 #endif
 
-_Static_assert(CHAR_MIN == SCHAR_MIN, "plain char must be signed on every CCCC platform");
-_Static_assert(CHAR_MAX == SCHAR_MAX, "plain char must be signed on every CCCC platform");
+_Static_assert(CHAR_MIN == SCHAR_MIN,
+               "plain char must be signed on every CCCC platform");
+_Static_assert(CHAR_MAX == SCHAR_MAX,
+               "plain char must be signed on every CCCC platform");
 _Static_assert(MB_LEN_MAX >= 1, "C17 5.2.4.2.1p1 requires MB_LEN_MAX >= 1");
 
 int main(void) {

@@ -26,9 +26,9 @@
 
 // Recursively collect variables from outer scopes that are referenced in an
 // expression
-static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_locals,
-                                     Obj ***captures, int *num_captures,
-                                     int *cap_capacity) {
+static void collect_captures_in_node(VirtualMachine *vm, Node *node,
+                                     Obj *outer_locals, Obj ***captures,
+                                     int *num_captures, int *cap_capacity) {
     if (!node)
         return;
 
@@ -52,7 +52,7 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_
 
             // Add to captures list
             if (*num_captures >= *cap_capacity) {
-                *cap_capacity = (*cap_capacity == 0) ? 8 : *cap_capacity * 2;
+                *cap_capacity  = (*cap_capacity == 0) ? 8 : *cap_capacity * 2;
                 Obj **new_caps = arena_alloc(&vm->compiler.parser_arena,
                                              sizeof(Obj *) * (*cap_capacity));
                 for (int i = 0; i < *num_captures; i++)
@@ -60,7 +60,7 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_
                 *captures = new_caps;
             }
             (*captures)[(*num_captures)++] = node->var;
-            node->var->is_captured = true;
+            node->var->is_captured         = true;
         }
     }
 
@@ -90,8 +90,8 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node, Obj *outer_
     // Recurse into nested block literals so intermediate blocks pick up
     // transitive captures (e.g. outer block sees x used inside inner block).
     if (node->kind == ND_BLOCK_LITERAL && node->block_fn)
-        collect_captures_in_node(vm, node->block_fn->body, outer_locals, captures,
-                                 num_captures, cap_capacity);
+        collect_captures_in_node(vm, node->block_fn->body, outer_locals,
+                                 captures, num_captures, cap_capacity);
 }
 
 // #965: collect every `return` statement in a block literal's own body, used
@@ -108,7 +108,7 @@ static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
 
     if (node->kind == ND_RETURN) {
         if (*count >= *cap) {
-            *cap = (*cap == 0) ? 8 : *cap * 2;
+            *cap           = (*cap == 0) ? 8 : *cap * 2;
             Node **new_arr = arena_alloc(&vm->compiler.parser_arena,
                                          sizeof(Node *) * (*cap));
             for (int i = 0; i < *count; i++)
@@ -149,13 +149,15 @@ static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
 long cc_block_capture_offset(Obj *block_fn, int idx) {
     long off = 16;
     for (int i = 0; i < idx; i++) {
-        Obj *cap = block_fn->captures[i];
-        int slot_size = (cap->is_block_var || cap->ty->kind == TY_VLA)
-                             ? 8 : align_to((int)cap->ty->size, 8);
-        int slot_align = (cap->is_block_var || cap->ty->kind == TY_VLA)
-                              ? 8 : MAX(8, cap->ty->align);
-        off = align_to((int)off, slot_align);
-        off += slot_size;
+        Obj *cap         = block_fn->captures[i];
+        int  slot_size   = (cap->is_block_var || cap->ty->kind == TY_VLA)
+                               ? 8
+                               : align_to((int)cap->ty->size, 8);
+        int  slot_align  = (cap->is_block_var || cap->ty->kind == TY_VLA)
+                               ? 8
+                               : MAX(8, cap->ty->align);
+        off              = align_to((int)off, slot_align);
+        off             += slot_size;
     }
     return off;
 }
@@ -172,17 +174,17 @@ long cc_block_desc_size(Obj *block_fn) {
 // ... }
 Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    tok = tok->next; // Skip ^
+    tok          = tok->next; // Skip ^
 
     // Determine return type and parameters
-    Type *return_ty = ty_void;
-    Type *params = NULL;
-    bool return_ty_explicit = false;
+    Type *return_ty          = ty_void;
+    Type *params             = NULL;
+    bool  return_ty_explicit = false;
     // bool has_params = false;
 
     // Check for explicit return type (anything before '(' that's a type)
     if (!equal(tok, "{") && !equal(tok, "(") && is_typename(vm, tok)) {
-        return_ty = typename(vm, &tok, tok);
+        return_ty          = typename(vm, &tok, tok);
         return_ty_explicit = true;
     }
 
@@ -193,28 +195,29 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (!equal(tok, ")")) {
             // Parse parameters using declspec + declarator (like func_params)
-            Type head = {};
-            Type *cur = &head;
+            Type  head = {};
+            Type *cur  = &head;
             while (!equal(tok, ")")) {
                 if (cur != &head)
                     tok = skip(vm, tok, ",");
 
-                VarAttr attr = {};
-                Type *param_ty = declspec(vm, &tok, tok, &attr);
-                param_ty = declarator(vm, &tok, tok, param_ty);
-                param_ty = apply_var_attrs_to_type(vm, param_ty, &attr);
+                VarAttr attr     = {};
+                Type   *param_ty = declspec(vm, &tok, tok, &attr);
+                param_ty         = declarator(vm, &tok, tok, param_ty);
+                param_ty         = apply_var_attrs_to_type(vm, param_ty, &attr);
                 if (has_custom_attrs(param_ty, &attr))
                     error_tok(vm, param_ty->name ? param_ty->name : tok,
-                              "custom attributes are only supported on file-scope declarations");
+                              "custom attributes are only supported on "
+                              "file-scope declarations");
 
                 // Convert array and function parameters to pointers
                 if (param_ty->kind == TY_ARRAY) {
-                    Token *name = param_ty->name;
-                    param_ty = pointer_to(vm, param_ty->base);
+                    Token *name    = param_ty->name;
+                    param_ty       = pointer_to(vm, param_ty->base);
                     param_ty->name = name;
                 } else if (param_ty->kind == TY_FUNC) {
-                    Token *name = param_ty->name;
-                    param_ty = pointer_to(vm, param_ty);
+                    Token *name    = param_ty->name;
+                    param_ty       = pointer_to(vm, param_ty);
                     param_ty->name = name;
                 }
 
@@ -230,20 +233,20 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
         error_tok(vm, tok, "expected '{' in block literal");
 
     // Save current function context
-    Obj *outer_fn = vm->compiler.current_fn;
+    Obj *outer_fn     = vm->compiler.current_fn;
     Obj *saved_locals = vm->compiler.locals;
 
     // Create a synthetic function for this block
-    char *block_name = new_unique_name(vm);
-    Type *block_func_ty = func_type(vm, return_ty);
+    char *block_name      = new_unique_name(vm);
+    Type *block_func_ty   = func_type(vm, return_ty);
     block_func_ty->params = params;
 
     Obj *block_fn = new_gvar(vm, block_name, strlen(block_name), block_func_ty);
-    block_fn->is_function = true;
+    block_fn->is_function   = true;
     block_fn->is_definition = true;
-    block_fn->is_static = true;
-    block_fn->is_block = true;
-    block_fn->parent_fn = outer_fn;
+    block_fn->is_static     = true;
+    block_fn->is_block      = true;
+    block_fn->parent_fn     = outer_fn;
     block_fn->is_nested =
         true; // Treat blocks like nested functions for codegen
     block_fn->nesting_depth = outer_fn ? outer_fn->nesting_depth + 1 : 1;
@@ -256,14 +259,14 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // Set up block function context
     vm->compiler.current_fn = block_fn;
-    vm->compiler.locals = NULL;
+    vm->compiler.locals     = NULL;
     // #642: blocks get their own pending __builtin_object_size query list,
     // resolved against block_fn->body below — otherwise a query on a
     // block-local malloc-tracked pointer would be poison-scanned against the
     // *enclosing* function's body, which never mentions the block-local var,
     // and could wrongly resolve to the allocation size.
     struct ObjSizeQuery *saved_objsize_queries = vm->compiler.objsize_queries;
-    vm->compiler.objsize_queries = NULL;
+    vm->compiler.objsize_queries               = NULL;
 
     enter_scope(vm);
 
@@ -282,7 +285,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     if (param_count > 0) {
         param_array = arena_alloc(&vm->compiler.parser_arena,
                                   sizeof(Type *) * param_count);
-        int idx = 0;
+        int idx     = 0;
         for (Type *p = params; p; p = p->next) {
             param_array[idx++] = p;
         }
@@ -292,8 +295,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     for (int i = param_count - 1; i >= 0; i--) {
         Type *p = param_array[i];
         if (p->name) {
-            Obj *param =
-                new_lvar(vm, get_ident(vm, p->name), p->name->len, p);
+            Obj *param = new_lvar(vm, get_ident(vm, p->name), p->name->len, p);
             param->is_param = true;
         }
     }
@@ -306,8 +308,8 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
 
     // Now parse the block body - params are visible in scope
-    tok = skip(vm, tok, "{");
-    block_fn->body = compound_stmt(vm, &tok, tok, NULL);
+    tok              = skip(vm, tok, "{");
+    block_fn->body   = compound_stmt(vm, &tok, tok, NULL);
     block_fn->locals = vm->compiler.locals;
 
     leave_scope(vm);
@@ -326,8 +328,8 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // insertion while this was still pending; both are done here instead,
     // now that the real type is known.
     if (block_fn->block_return_ty_pending) {
-        Node **rets = NULL;
-        int num_rets = 0, rets_cap = 0;
+        Node **rets     = NULL;
+        int    num_rets = 0, rets_cap = 0;
         collect_block_returns(vm, block_fn->body, &rets, &num_rets, &rets_cap);
 
         Type *inferred = ty_void;
@@ -338,7 +340,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
             }
         }
 
-        return_ty = inferred;
+        return_ty                = inferred;
         block_func_ty->return_ty = inferred;
 
         if (inferred->kind != TY_STRUCT && inferred->kind != TY_UNION) {
@@ -352,8 +354,8 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Collect captured variables from the parsed body.
     // Walk all ancestor scopes so that variables from grandparent+ scopes are
     // captured transitively (inner block gets x from outer block's descriptor).
-    Obj **captures = NULL;
-    int num_captures = 0, cap_capacity = 0;
+    Obj **captures     = NULL;
+    int   num_captures = 0, cap_capacity = 0;
 
     // Level 0: immediate parent's locals
     if (saved_locals)
@@ -370,45 +372,46 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // #1074's fix, which deliberately excluded is_block from every "is this
     // genuinely nested" check it added.
     for (Obj *anc = outer_fn; anc && anc->is_nested && anc->block_outer_locals;
-         anc = anc->parent_fn)
+         anc      = anc->parent_fn)
         collect_captures_in_node(vm, block_fn->body, anc->block_outer_locals,
                                  &captures, &num_captures, &cap_capacity);
 
-    block_fn->captures = captures;
+    block_fn->captures     = captures;
     block_fn->num_captures = num_captures;
     // Descriptor offsets are computed per-block at codegen time via
     // find_capture_index so no per-Obj offset field is needed.
 
     // Restore outer function context
-    vm->compiler.current_fn = outer_fn;
-    vm->compiler.locals = saved_locals;
+    vm->compiler.current_fn      = outer_fn;
+    vm->compiler.locals          = saved_locals;
     vm->compiler.objsize_queries = saved_objsize_queries;
 
     // Allocate descriptor storage on the enclosing function's stack frame.
-    // Layout: [invoke_ptr(0) | desc_size(8) | cap0(16) | cap1(cc_block_capture_offset(block_fn,1)) | ...]
+    // Layout: [invoke_ptr(0) | desc_size(8) | cap0(16) |
+    // cap1(cc_block_capture_offset(block_fn,1)) | ...]
     // -- capture slots are no longer a flat one-word-each array; a
     // by-value aggregate capture wider than 8 bytes gets a wider slot
     // (#994, see cc_block_capture_offset above). Per-frame stack
     // allocation ensures each invocation gets its own descriptor, so
     // multiple calls to a function returning the same block literal are
     // independent.
-    long desc_bytes = cc_block_desc_size(block_fn);
+    long  desc_bytes  = cc_block_desc_size(block_fn);
     Type *desc_arr_ty = array_of(vm, ty_long, (int)(desc_bytes / 8));
-    Obj *desc_var = new_lvar(vm, "", 0, desc_arr_ty);
+    Obj  *desc_var    = new_lvar(vm, "", 0, desc_arr_ty);
     // #965: pure serializer bookkeeping -- see Obj.block_desc_of.
     desc_var->block_desc_of = block_fn;
 
     // Create the block literal node
-    Node *node = new_node(vm, ND_BLOCK_LITERAL, start);
-    node->block_fn = block_fn;
-    node->block_captures = captures;
+    Node *node               = new_node(vm, ND_BLOCK_LITERAL, start);
+    node->block_fn           = block_fn;
+    node->block_captures     = captures;
     node->num_block_captures = num_captures;
-    node->block_desc_var = desc_var;
+    node->block_desc_var     = desc_var;
 
     // Block type: pointer to function type (blocks are first-class callable
     // values)
     node->ty = block_type(vm, return_ty, params);
 
-    *rest = tok;
+    *rest    = tok;
     return node;
 }

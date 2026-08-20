@@ -8,12 +8,12 @@
 #include <stdlib.h>
 
 int main(void) {
-    int n = 7;
-    int **box = malloc(sizeof(int *));
-    *box = &n;
+    int   n    = 7;
+    int **box  = malloc(sizeof(int *));
+    *box       = &n;
 
-    int *p = *box;
-    *p = 42;
+    int *p     = *box;
+    *p         = 42;
 
     int result = n;
     free(box);

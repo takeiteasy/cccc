@@ -6,9 +6,9 @@
 // branch's null state join in -- without the dead-env marking, this would
 // incorrectly report "may be null" (or worse).
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 void helper(void) {
-    int y = 0;
+    int  y = 0;
     int *p = &y;
     for (int i = 0; i < 3; i++) {
         if (i == 0) {

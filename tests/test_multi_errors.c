@@ -14,11 +14,10 @@ int main() {
 
     // Error 4: Invalid assignment to constant
     const int c = 100;
-    c = 200;
+    c           = 200;
 
     // Error 5: Missing semicolon (syntax error)
-    int a = 1
-    int b = 2;
+    int a = 1 int b = 2;
 
     return 0;
 }

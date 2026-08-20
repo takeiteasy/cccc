@@ -5,11 +5,11 @@
 // unconditionally assigns a non-null value, the pre-loop null state still
 // flows to the exit -- the result must be MAYBE, never definite NULL.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
-    int n = 0;
+    int  n = 0;
     for (int i = 0; i < n; i++) {
         p = &x;
     }

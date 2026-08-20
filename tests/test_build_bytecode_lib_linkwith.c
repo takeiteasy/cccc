@@ -8,7 +8,7 @@
 // The discriminating regex verifies that --link and mathlib.c4a appear on the
 // same invocation line (the exe's compile).
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_app(Builder *ctx) {
     // Static library: defines lib_add/lib_mul, no main().
     BuildTarget *lib = StaticLib(ctx, "mathlib");

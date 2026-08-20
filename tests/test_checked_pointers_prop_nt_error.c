@@ -8,9 +8,9 @@
 // propagated since #919. This is the ticket's own motivating example.
 
 int main(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = s;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = s;
     q[3] = 'x'; // now traps via CHKNT through `q`, same as through `s` directly
     return 0;
 }

@@ -3,8 +3,9 @@
 // computed goto via &&label; int typedef [[]]\$ uses \$ as an identifier.
 #include <stdio.h>
 
-int typedef[[]]$;
+int typedef[[]] $;
 
-int main($[[]]$) {
-  [[]]$:&&$&&$&&puts("hello world");
+int main($[[]] $) {
+[[]] $:
+    &&$ && $ && puts("hello world");
 }

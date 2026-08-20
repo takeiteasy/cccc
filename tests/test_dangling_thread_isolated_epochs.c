@@ -18,7 +18,7 @@
 static void *worker(void *arg) {
     // An escaping local in the WORKER's own frame: forces ENT3 to push a
     // frame_epochs entry using the worker's own (private-stack) bp.
-    int local = 7;
+    int local             = 7;
     int *volatile escaped = &local;
     return (void *)(long)*escaped;
 }

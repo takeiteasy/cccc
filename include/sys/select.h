@@ -26,20 +26,23 @@ typedef struct {
     unsigned char __fds_bits[FD_SETSIZE / 8];
 } fd_set;
 
-#define FD_ZERO(set) \
-    do { \
-        for (unsigned __i = 0; __i < sizeof((set)->__fds_bits); __i++) \
-            (set)->__fds_bits[__i] = 0; \
+#define FD_ZERO(set)                                                           \
+    do {                                                                       \
+        for (unsigned __i = 0; __i < sizeof((set)->__fds_bits); __i++)         \
+            (set)->__fds_bits[__i] = 0;                                        \
     } while (0)
 
-#define FD_SET(fd, set)   ((set)->__fds_bits[(fd) / 8] |=  (unsigned char)(1u << ((fd) % 8)))
-#define FD_CLR(fd, set)   ((set)->__fds_bits[(fd) / 8] &= (unsigned char)~(1u << ((fd) % 8)))
-#define FD_ISSET(fd, set) (((set)->__fds_bits[(fd) / 8] & (unsigned char)(1u << ((fd) % 8))) != 0)
+#define FD_SET(fd, set)                                                        \
+    ((set)->__fds_bits[(fd) / 8] |= (unsigned char)(1u << ((fd) % 8)))
+#define FD_CLR(fd, set)                                                        \
+    ((set)->__fds_bits[(fd) / 8] &= (unsigned char)~(1u << ((fd) % 8)))
+#define FD_ISSET(fd, set)                                                      \
+    (((set)->__fds_bits[(fd) / 8] & (unsigned char)(1u << ((fd) % 8))) != 0)
 
 extern int select(int nfds, fd_set *readfds, fd_set *writefds,
-                   fd_set *exceptfds, struct timeval *timeout);
+                  fd_set *exceptfds, struct timeval *timeout);
 extern int pselect(int nfds, fd_set *readfds, fd_set *writefds,
-                    fd_set *exceptfds, const struct timespec *timeout,
-                    const sigset_t *sigmask);
+                   fd_set *exceptfds, const struct timespec *timeout,
+                   const sigset_t *sigmask);
 
 #endif /* __SYS_SELECT_H */

@@ -35,12 +35,12 @@ static void churn_vlas(void) {
 }
 
 int main(void) {
-    int k = 4;
+    int  k = 4;
     int *m;
     {
         int u[k]; // triggers this block's HMRK/HREL
         u[0] = 1;
-        m = malloc(sizeof(int) * 4);
+        m    = malloc(sizeof(int) * 4);
         if (!m)
             return 1;
         m[0] = 10;

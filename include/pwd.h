@@ -16,7 +16,7 @@ struct passwd {
     uid_t pw_uid;
     gid_t pw_gid;
 #ifdef __APPLE__
-    long pw_change;
+    long  pw_change;
     char *pw_class;
 #endif
     char *pw_gecos;
@@ -29,8 +29,8 @@ struct passwd {
 
 extern struct passwd *getpwuid(uid_t uid);
 extern struct passwd *getpwnam(const char *name);
-extern int getpwuid_r(uid_t uid, struct passwd *pwd, char *buf,
-                      size_t buflen, struct passwd **result);
+extern int getpwuid_r(uid_t uid, struct passwd *pwd, char *buf, size_t buflen,
+                      struct passwd **result);
 extern int getpwnam_r(const char *name, struct passwd *pwd, char *buf,
                       size_t buflen, struct passwd **result);
 

@@ -36,14 +36,14 @@
 
 static int failed = 0;
 
-#define CHECK(cond, ...)                                                     \
-    do {                                                                     \
-        if (!(cond)) {                                                      \
-            fprintf(stderr, "FAIL (%s:%d): ", __FILE__, __LINE__);          \
-            fprintf(stderr, __VA_ARGS__);                                   \
-            fprintf(stderr, "\n");                                         \
-            failed = 1;                                                    \
-        }                                                                    \
+#define CHECK(cond, ...)                                                       \
+    do {                                                                       \
+        if (!(cond)) {                                                         \
+            fprintf(stderr, "FAIL (%s:%d): ", __FILE__, __LINE__);             \
+            fprintf(stderr, __VA_ARGS__);                                      \
+            fprintf(stderr, "\n");                                             \
+            failed = 1;                                                        \
+        }                                                                      \
     } while (0)
 
 static void write_file(const char *path, const char *contents) {
@@ -79,14 +79,16 @@ int main(void) {
     CHECK(vm2.compiler.file_no == 1,
           "vm2.compiler.file_no = %d, expected 1 (counter leaked across VMs)",
           vm2.compiler.file_no);
-    CHECK(vm2.compiler.input_files != NULL && vm2.compiler.input_files[0] != NULL,
+    CHECK(vm2.compiler.input_files != NULL &&
+              vm2.compiler.input_files[0] != NULL,
           "vm2.compiler.input_files[0] missing");
     if (vm2.compiler.input_files && vm2.compiler.input_files[0]) {
         CHECK(strcmp(vm2.compiler.input_files[0]->name, file_a) == 0,
               "vm2.compiler.input_files[0]->name = %s, expected %s",
               vm2.compiler.input_files[0]->name, file_a);
     }
-    CHECK(vm2.compiler.input_files != NULL && vm2.compiler.input_files[1] == NULL,
+    CHECK(vm2.compiler.input_files != NULL &&
+              vm2.compiler.input_files[1] == NULL,
           "vm2.compiler.input_files[1] should be the NULL sentinel");
     cc_destroy(&vm2);
 
@@ -95,11 +97,13 @@ int main(void) {
     cc_init(&vm3, 0);
     tokenize_string(&vm3, "<embed1>", "int x;\n");
     CHECK(vm3.compiler.embedded_file_no == 1,
-          "vm3.compiler.embedded_file_no = %d, expected 1", vm3.compiler.embedded_file_no);
+          "vm3.compiler.embedded_file_no = %d, expected 1",
+          vm3.compiler.embedded_file_no);
     cc_destroy(&vm3);
 
     if (!failed)
-        printf("PASS: file_no/embedded_file_no reset per-VM; input_files well-formed across instances\n");
+        printf("PASS: file_no/embedded_file_no reset per-VM; input_files "
+               "well-formed across instances\n");
 
     return failed;
 }

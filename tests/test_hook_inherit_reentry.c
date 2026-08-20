@@ -6,7 +6,9 @@
 static int once_count = 0;
 
 [[cccc::test_setup(suite = "a", once, inherit)]]
-void setup_once(void) { once_count++; }
+void setup_once(void) {
+    once_count++;
+}
 
 #pragma cccc suite begin "a"
 
@@ -22,11 +24,11 @@ void test_a_b(void) {
     AssertEq(once_count, 1); // not re-fired on descent into "a/b"
 }
 
-#pragma cccc suite end  // end b
+#pragma cccc suite end       // end b
 
 [[cccc::test]]
 void test_a_reentry(void) {
     AssertEq(once_count, 1); // not re-fired on re-entry to "a" from "a/b"
 }
 
-#pragma cccc suite end  // end a
+#pragma cccc suite end       // end a

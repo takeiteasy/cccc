@@ -5,4 +5,6 @@
 // tests/test_serialize_enum_header_obj_collision_1017.c.
 #include "enum_hdr_collision_1017.h"
 
-int use_e_1017(E1017 e) { return (int)e + AA1017; }
+int use_e_1017(E1017 e) {
+    return (int)e + AA1017;
+}

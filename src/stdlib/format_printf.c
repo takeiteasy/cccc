@@ -25,7 +25,7 @@ int cccc_vsprintf(char *buf, const char *fmt, va_list ap) {
 // Streams formatted output to a FILE* in STB_SPRINTF_MIN-sized chunks.
 typedef struct {
     FILE *stream;
-    char buf[STB_SPRINTF_MIN];
+    char  buf[STB_SPRINTF_MIN];
 } cccc_vfprintf_ctx;
 
 static char *cccc_vfprintf_cb(const char *buf, void *user, int len) {
@@ -80,40 +80,45 @@ int cccc_snprintf(char *buf, size_t count, const char *fmt, ...) {
 
 long long wrap_cccc_vprintf(const char *fmt, long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)cccc_printf, 1, fixed, n, types, vals);
+    int64_t fixed[] = {(int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)cccc_printf, 1, fixed, n, types,
+                                  vals);
 }
 
 long long wrap_cccc_vsprintf(char *str, const char *fmt, long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)str, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)cccc_sprintf, 2, fixed, n, types, vals);
+    int64_t fixed[] = {(int64_t)str, (int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)cccc_sprintf, 2, fixed, n, types,
+                                  vals);
 }
 
-long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt, long long va_ptr) {
+long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt,
+                              long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)str, (int64_t)size, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)cccc_snprintf, 3, fixed, n, types, vals);
+    int64_t fixed[] = {(int64_t)str, (int64_t)size, (int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)cccc_snprintf, 3, fixed, n, types,
+                                  vals);
 }
 
 long long wrap_cccc_vfprintf(FILE *stream, const char *fmt, long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)stream, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)cccc_fprintf, 2, fixed, n, types, vals);
+    int64_t fixed[] = {(int64_t)stream, (int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)cccc_fprintf, 2, fixed, n, types,
+                                  vals);
 }

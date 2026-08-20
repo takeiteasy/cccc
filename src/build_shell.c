@@ -38,12 +38,13 @@ static void builtin_exit(int argc, char **argv);
 static void builtin_cd(int argc, char **argv);
 static void builtin_pwd(int argc, char **argv);
 
-shell_ctx* shell_ctx_create(void) {
-    shell_ctx *ctx = (shell_ctx*)malloc(sizeof(shell_ctx));
-    if (!ctx) return NULL;
+shell_ctx *shell_ctx_create(void) {
+    shell_ctx *ctx = (shell_ctx *)malloc(sizeof(shell_ctx));
+    if (!ctx)
+        return NULL;
     memset(ctx, 0, sizeof(shell_ctx));
 
-    ctx->input_fd = -1;
+    ctx->input_fd  = -1;
     ctx->output_fd = -1;
 
     /* Add default builtins */
@@ -55,7 +56,8 @@ shell_ctx* shell_ctx_create(void) {
 }
 
 void shell_ctx_destroy(shell_ctx *ctx) {
-    if (!ctx) return;
+    if (!ctx)
+        return;
 
     /* Free builtins */
     shell_builtin_entry_t *b = ctx->builtins;
@@ -90,29 +92,34 @@ void shell_ctx_destroy(shell_ctx *ctx) {
     free(ctx);
 }
 
-void shell_ctx_add_builtin(shell_ctx *ctx, const char *name, shell_builtin_func_t func) {
-    shell_builtin_entry_t *entry = (shell_builtin_entry_t*)malloc(sizeof(shell_builtin_entry_t));
-    if (!entry) return; // OOM
+void shell_ctx_add_builtin(shell_ctx *ctx, const char *name,
+                           shell_builtin_func_t func) {
+    shell_builtin_entry_t *entry =
+        (shell_builtin_entry_t *)malloc(sizeof(shell_builtin_entry_t));
+    if (!entry)
+        return; // OOM
     entry->name = strdup(name);
     entry->func = func;
 
     /* Prepend to list to ensure overriding behavior (LIFO check) */
-    entry->next = ctx->builtins;
+    entry->next   = ctx->builtins;
     ctx->builtins = entry;
 }
 
 static void _append_str_array(char ***arr, const char *str) {
     int count = 0;
     if (*arr) {
-        while ((*arr)[count]) count++;
+        while ((*arr)[count])
+            count++;
     }
 
-    char **new_arr = (char**)realloc(*arr, sizeof(char*) * (count + 2));
-    if (!new_arr) return; // OOM
+    char **new_arr = (char **)realloc(*arr, sizeof(char *) * (count + 2));
+    if (!new_arr)
+        return; // OOM
 
-    new_arr[count] = strdup(str);
-    new_arr[count+1] = NULL;
-    *arr = new_arr;
+    new_arr[count]     = strdup(str);
+    new_arr[count + 1] = NULL;
+    *arr               = new_arr;
 }
 
 void shell_ctx_blacklist_cmd(shell_ctx *ctx, const char *cmd) {
@@ -137,21 +144,21 @@ typedef enum shell_token_type {
     SHELL_TOKEN_ERROR,
     SHELL_TOKEN_EOL,
     SHELL_TOKEN_ATOM,
-    SHELL_TOKEN_PIPE = '|',
+    SHELL_TOKEN_PIPE      = '|',
     SHELL_TOKEN_AMPERSAND = '&',
-    SHELL_TOKEN_GREATER = '>',
-    SHELL_TOKEN_LESSER = '<',
+    SHELL_TOKEN_GREATER   = '>',
+    SHELL_TOKEN_LESSER    = '<',
     SHELL_TOKEN_SEMICOLON = ';',
     /* Two-character operators; values outside the ASCII range used by the
      * single-character tokens above so they can never collide. */
-    SHELL_TOKEN_AND = 256,  /* && */
-    SHELL_TOKEN_OR = 257,   /* || */
+    SHELL_TOKEN_AND = 256, /* && */
+    SHELL_TOKEN_OR  = 257, /* || */
 } shell_token_type;
 
 typedef struct shell_token {
     shell_token_type type;
-    unsigned char *begin;
-    int length;
+    unsigned char   *begin;
+    int              length;
     /* True when `begin` points at a heap buffer owned by this token (quote
      * removal / backslash / $VAR decoding can shrink or grow a word relative
      * to its source slice, so decoded ATOM tokens can no longer point into
@@ -165,12 +172,12 @@ typedef struct shell_lexer {
     unsigned char *begin;
     struct {
         unsigned char *ptr;
-        wchar_t ch;
-        int ch_length;
+        wchar_t        ch;
+        int            ch_length;
     } cursor;
-    char *error;
+    char          *error;
     unsigned char *input_begin;
-    size_t error_pos;
+    size_t         error_pos;
 } shell_lexer_t;
 
 typedef enum shell_ast_type {
@@ -185,21 +192,21 @@ typedef enum shell_ast_type {
 } shell_ast_type_t;
 
 typedef struct shell_ast {
-    shell_ast_type_t type;
-    shell_token_t *token;
+    shell_ast_type_t  type;
+    shell_token_t    *token;
     struct shell_ast *left, *right;
 } shell_ast_t;
 
 typedef struct shell_token_array {
     shell_token_t *data;
-    size_t count;
-    size_t capacity;
+    size_t         count;
+    size_t         capacity;
 } shell_token_array_t;
 
 typedef struct shell_parser {
     shell_token_array_t tokens;
-    shell_token_t *current;
-    size_t cursor;
+    shell_token_t      *current;
+    size_t              cursor;
 } shell_parser;
 
 static void eprintf(const char *fmt, ...) {
@@ -243,10 +250,12 @@ static int xopen(const char *path, int flags, mode_t mode) {
     return fd;
 }
 
-static int utf8read(const unsigned char* c, wchar_t* out) {
+static int utf8read(const unsigned char *c, wchar_t *out) {
     wchar_t u = *c, l = 1;
     if ((u & 0xC0) == 0xC0) {
-        int a = (u & 0x20) ? ((u & 0x10) ? ((u & 0x08) ? ((u & 0x04) ? 6 : 5) : 4) : 3) : 2;
+        int a = (u & 0x20)
+                    ? ((u & 0x10) ? ((u & 0x08) ? ((u & 0x04) ? 6 : 5) : 4) : 3)
+                    : 2;
         if (a < 6 || !(u & 0x02)) {
             u = ((u << (a + 1)) & 0xFF) >> (a + 1);
             for (int b = 1; b < a; ++b)
@@ -258,13 +267,13 @@ static int utf8read(const unsigned char* c, wchar_t* out) {
     return l;
 }
 
-static void shell_lexer(shell_lexer_t *l, unsigned char* line) {
-    l->begin = line;
-    l->cursor.ptr = line;
+static void shell_lexer(shell_lexer_t *l, unsigned char *line) {
+    l->begin            = line;
+    l->cursor.ptr       = line;
     l->cursor.ch_length = utf8read(line, &l->cursor.ch);
-    l->error = NULL;
-    l->input_begin = line;
-    l->error_pos = (size_t)-1;
+    l->error            = NULL;
+    l->input_begin      = line;
+    l->error_pos        = (size_t)-1;
 }
 
 static inline wchar_t peek(shell_lexer_t *l) {
@@ -276,14 +285,14 @@ static inline bool is_eof(shell_lexer_t *l) {
 }
 
 static inline void update(shell_lexer_t *l) {
-    l->begin = l->cursor.ptr;
+    l->begin            = l->cursor.ptr;
     l->cursor.ch_length = utf8read(l->cursor.ptr, &l->cursor.ch);
-    l->error = NULL;
+    l->error            = NULL;
 }
 
 static inline wchar_t advance(shell_lexer_t *l) {
-    l->cursor.ptr += utf8read(l->cursor.ptr, NULL);
-    l->cursor.ch_length = utf8read(l->cursor.ptr, &l->cursor.ch);
+    l->cursor.ptr       += utf8read(l->cursor.ptr, NULL);
+    l->cursor.ch_length  = utf8read(l->cursor.ptr, &l->cursor.ch);
     return l->cursor.ch;
 }
 
@@ -307,19 +316,17 @@ static void skip_whitespace(shell_lexer_t *l) {
 }
 
 static shell_token_t new_token(shell_lexer_t *l, shell_token_type type) {
-    return (shell_token_t) {
-        .type = type,
-        .begin = l->begin,
-        .length = (int)(l->cursor.ptr - l->begin)
-    };
+    return (shell_token_t){.type   = type,
+                           .begin  = l->begin,
+                           .length = (int)(l->cursor.ptr - l->begin)};
 }
 
 /* --- Word buffer: growable byte buffer used to build a decoded ATOM's
  * content while the lexer walks quotes/escapes/expansions. --- */
 typedef struct word_buf {
     unsigned char *buf;
-    size_t len;
-    size_t cap;
+    size_t         len;
+    size_t         cap;
 } word_buf_t;
 
 static void word_buf_init(word_buf_t *b) {
@@ -331,7 +338,7 @@ static void word_buf_init(word_buf_t *b) {
 static void word_buf_push(word_buf_t *b, unsigned char c) {
     if (b->len + 1 > b->cap) {
         b->cap *= 2;
-        b->buf = xrealloc(b->buf, b->cap);
+        b->buf  = xrealloc(b->buf, b->cap);
     }
     b->buf[b->len++] = c;
 }
@@ -365,8 +372,8 @@ static inline bool is_name_char(wchar_t c) {
  * chunk: the result is never re-split or globbed. */
 static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
     advance(l); /* consume '$' */
-    wchar_t c = peek(l);
-    bool braced = (c == '{');
+    wchar_t c      = peek(l);
+    bool    braced = (c == '{');
     if (braced)
         advance(l);
     if (!braced && !is_name_start_char(c)) {
@@ -380,7 +387,7 @@ static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
     size_t namelen = (size_t)(l->cursor.ptr - name_start);
     if (braced) {
         if (peek(l) != '}') {
-            l->error = "unterminated ${";
+            l->error     = "unterminated ${";
             l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
             return false;
         }
@@ -391,7 +398,7 @@ static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
         namelen = sizeof(namebuf) - 1;
     memcpy(namebuf, name_start, namelen);
     namebuf[namelen] = '\0';
-    const char *val = getenv(namebuf);
+    const char *val  = getenv(namebuf);
     if (val)
         word_buf_push_str(out, val);
     return true;
@@ -427,7 +434,7 @@ static shell_token_t read_word(shell_lexer_t *l) {
                 advance(l); /* consume opening quote */
                 for (;;) {
                     if (is_eof(l)) {
-                        l->error = "unterminated quote";
+                        l->error     = "unterminated quote";
                         l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
                         free(out.buf);
                         return new_token(l, SHELL_TOKEN_ERROR);
@@ -444,7 +451,7 @@ static shell_token_t read_word(shell_lexer_t *l) {
                 advance(l); /* consume opening quote */
                 for (;;) {
                     if (is_eof(l)) {
-                        l->error = "unterminated quote";
+                        l->error     = "unterminated quote";
                         l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
                         free(out.buf);
                         return new_token(l, SHELL_TOKEN_ERROR);
@@ -458,7 +465,8 @@ static shell_token_t read_word(shell_lexer_t *l) {
                         advance(l);
                         if (is_eof(l)) {
                             l->error = "unterminated quote";
-                            l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+                            l->error_pos =
+                                (size_t)(l->cursor.ptr - l->input_begin);
                             free(out.buf);
                             return new_token(l, SHELL_TOKEN_ERROR);
                         }
@@ -466,7 +474,8 @@ static shell_token_t read_word(shell_lexer_t *l) {
                         /* Inside double quotes, backslash is only special
                          * before " \ $ or a newline (POSIX); otherwise the
                          * backslash itself is kept literal. */
-                        if (nc == '"' || nc == '\\' || nc == '$' || nc == '\n') {
+                        if (nc == '"' || nc == '\\' || nc == '$' ||
+                            nc == '\n') {
                             if (nc == '\n')
                                 advance(l); /* line continuation: drop both */
                             else
@@ -515,12 +524,10 @@ static shell_token_t read_word(shell_lexer_t *l) {
 DONE: {
     int length = (int)out.len;
     word_buf_push(&out, '\0');
-    return (shell_token_t) {
-        .type = SHELL_TOKEN_ATOM,
-        .begin = out.buf,
-        .length = length,
-        .owned = true
-    };
+    return (shell_token_t){.type   = SHELL_TOKEN_ATOM,
+                           .begin  = out.buf,
+                           .length = length,
+                           .owned  = true};
 }
 }
 
@@ -565,18 +572,20 @@ static shell_token_t read_token(shell_lexer_t *l) {
 }
 
 static void shell_token_array_init(shell_token_array_t *arr) {
-    arr->data = NULL;
-    arr->count = 0;
+    arr->data     = NULL;
+    arr->count    = 0;
     arr->capacity = 0;
 }
 
-static bool shell_token_array_append(shell_token_array_t *arr, shell_token_t token) {
+static bool shell_token_array_append(shell_token_array_t *arr,
+                                     shell_token_t        token) {
     if (arr->count + 1 > arr->capacity) {
         size_t new_capacity = arr->capacity == 0 ? 8 : arr->capacity * 2;
-        shell_token_t *new_data = xrealloc(arr->data, sizeof(shell_token_t) * new_capacity);
+        shell_token_t *new_data =
+            xrealloc(arr->data, sizeof(shell_token_t) * new_capacity);
         if (!new_data)
             return false;
-        arr->data = new_data;
+        arr->data     = new_data;
         arr->capacity = new_capacity;
     }
     arr->data[arr->count++] = token;
@@ -593,8 +602,8 @@ static void shell_token_array_free(shell_token_array_t *arr) {
         if (arr->data[i].owned)
             free(arr->data[i].begin);
     free(arr->data);
-    arr->data = NULL;
-    arr->count = 0;
+    arr->data     = NULL;
+    arr->count    = 0;
     arr->capacity = 0;
 }
 
@@ -626,7 +635,7 @@ BAIL:
     return tokens;
 }
 
-static inline shell_ast_t* new_ast(void) {
+static inline shell_ast_t *new_ast(void) {
     shell_ast_t *result = malloc(sizeof(shell_ast_t));
     memset(result, 0, sizeof(shell_ast_t));
     return result;
@@ -640,11 +649,11 @@ static void free_ast(shell_ast_t *node) {
     free(node);
 }
 
-static shell_token_t* parser_peek(shell_parser *p) {
+static shell_token_t *parser_peek(shell_parser *p) {
     return p->cursor < p->tokens.count ? &p->tokens.data[p->cursor] : NULL;
 }
 
-static shell_token_t* parser_next(shell_parser *p) {
+static shell_token_t *parser_next(shell_parser *p) {
     if (p->cursor + 1 >= p->tokens.count)
         return NULL;
     ++p->cursor;
@@ -652,8 +661,8 @@ static shell_token_t* parser_next(shell_parser *p) {
 }
 
 static int match_token(shell_parser *p, shell_token_type type) {
-        shell_token_t *t = parser_peek(p);
-        return t != NULL && t->type == type;
+    shell_token_t *t = parser_peek(p);
+    return t != NULL && t->type == type;
 }
 
 static int expect_token(shell_parser *p, shell_token_type type) {
@@ -666,20 +675,22 @@ static shell_ast_t *simple_command(shell_parser *p) {
     if (t->type != SHELL_TOKEN_ATOM)
         return NULL;
     shell_ast_t *ast = new_ast();
-    ast->type = SHELL_AST_CMD;
-    ast->token = t;
+    ast->type        = SHELL_AST_CMD;
+    ast->token       = t;
     if (parser_next(p) != NULL)
         ast->right = simple_command(p);
     return ast;
 }
 
-static inline shell_ast_t *handle_redirection(shell_parser *p, shell_ast_type_t type, shell_ast_t *simple) {
+static inline shell_ast_t *handle_redirection(shell_parser    *p,
+                                              shell_ast_type_t type,
+                                              shell_ast_t     *simple) {
     if (!expect_token(p, SHELL_TOKEN_ATOM))
         return NULL;
     shell_ast_t *ast = new_ast();
-    ast->type = type;
-    ast->right = simple;
-    ast->token = parser_peek(p);
+    ast->type        = type;
+    ast->right       = simple;
+    ast->token       = parser_peek(p);
     parser_next(p);
     return ast;
 }
@@ -716,9 +727,9 @@ static shell_ast_t *_pipe(shell_parser *p) {
             return NULL;
         }
         shell_ast_t *ast = new_ast();
-        ast->type = SHELL_AST_PIPE;
-        ast->left = left;
-        ast->right = _pipe(p);
+        ast->type        = SHELL_AST_PIPE;
+        ast->left        = left;
+        ast->right       = _pipe(p);
         return ast;
     }
     return left;
@@ -737,16 +748,16 @@ static shell_ast_t *full_command(shell_parser *p) {
      * unconditionally rejected. */
     if (match_token(p, SHELL_TOKEN_AMPERSAND)) {
         shell_ast_t *ast = new_ast();
-        ast->type = SHELL_AST_BACKGROUND;
-        ast->left = left;
-        ast->right = parser_next(p) != NULL ? full_command(p) : NULL;
+        ast->type        = SHELL_AST_BACKGROUND;
+        ast->left        = left;
+        ast->right       = parser_next(p) != NULL ? full_command(p) : NULL;
         return ast;
     }
     if (match_token(p, SHELL_TOKEN_SEMICOLON)) {
         shell_ast_t *ast = new_ast();
-        ast->type = SHELL_AST_SEQ;
-        ast->left = left;
-        ast->right = parser_next(p) != NULL ? full_command(p) : NULL;
+        ast->type        = SHELL_AST_SEQ;
+        ast->left        = left;
+        ast->right       = parser_next(p) != NULL ? full_command(p) : NULL;
         return ast;
     }
     /* `&&` and `||` require a right-hand command — a trailing `&&`/`||` is
@@ -758,9 +769,9 @@ static shell_ast_t *full_command(shell_parser *p) {
             return NULL;
         }
         shell_ast_t *ast = new_ast();
-        ast->type = SHELL_AST_AND;
-        ast->left = left;
-        ast->right = full_command(p);
+        ast->type        = SHELL_AST_AND;
+        ast->left        = left;
+        ast->right       = full_command(p);
         return ast;
     }
     if (match_token(p, SHELL_TOKEN_OR)) {
@@ -770,31 +781,30 @@ static shell_ast_t *full_command(shell_parser *p) {
             return NULL;
         }
         shell_ast_t *ast = new_ast();
-        ast->type = SHELL_AST_OR;
-        ast->left = left;
-        ast->right = full_command(p);
+        ast->type        = SHELL_AST_OR;
+        ast->left        = left;
+        ast->right       = full_command(p);
         return ast;
     }
     return left;
 }
 
-static shell_ast_t* shell_eval_parser(shell_token_array_t tokens) {
-    shell_parser parser = {
-        .tokens = tokens,
-        .cursor = 0
-    };
+static shell_ast_t *shell_eval_parser(shell_token_array_t tokens) {
+    shell_parser parser = {.tokens = tokens, .cursor = 0};
     shell_ast_t *result = full_command(&parser);
-    return tokens.count == 0 ? NULL : parser.cursor == tokens.count - 1 ? result : NULL;
+    return tokens.count == 0                   ? NULL
+           : parser.cursor == tokens.count - 1 ? result
+                                               : NULL;
 }
 
 /* --- Execution --- */
 
 typedef struct shell_command {
-    int argc;
+    int    argc;
     char **argv;
-    int input_fd;
-    int output_fd;
-    int bg;
+    int    input_fd;
+    int    output_fd;
+    int    bg;
 } shell_command_t;
 
 /* Forward declare internal AST executor */
@@ -808,7 +818,7 @@ static void command_argv_from_ast(shell_command_t *cmd, shell_ast_t *ast) {
         cmd->argc++;
 
     if (cmd->argc == 0) {
-        cmd->argv = xmalloc(sizeof(char *));
+        cmd->argv    = xmalloc(sizeof(char *));
         cmd->argv[0] = NULL;
         return;
     }
@@ -816,10 +826,10 @@ static void command_argv_from_ast(shell_command_t *cmd, shell_ast_t *ast) {
     cmd->argv = xmalloc(sizeof(char *) * (cmd->argc + 1));
     for (int i = 0; i < cmd->argc; i++) {
         if (ast == NULL || ast->token == NULL) {
-            cmd->argv[i] = xmalloc(1);
+            cmd->argv[i]    = xmalloc(1);
             cmd->argv[i][0] = '\0';
         } else {
-            size_t len = (size_t)ast->token->length;
+            size_t len   = (size_t)ast->token->length;
             cmd->argv[i] = xmalloc(len + 1);
             memcpy(cmd->argv[i], ast->token->begin, len);
             cmd->argv[i][len] = '\0';
@@ -864,7 +874,8 @@ static shell_builtin_entry_t *builtin_find(shell_ctx *ctx, const char *name) {
 }
 
 static bool is_blacklisted_cmd(shell_ctx *ctx, const char *cmd) {
-    if (!ctx->cmd_blacklist) return false;
+    if (!ctx->cmd_blacklist)
+        return false;
     for (int i = 0; ctx->cmd_blacklist[i]; i++) {
         if (strcmp(ctx->cmd_blacklist[i], cmd) == 0)
             return true;
@@ -885,7 +896,8 @@ static bool is_allowlisted_cmd(shell_ctx *ctx, const char *cmd) {
 }
 
 static bool is_blacklisted_path(shell_ctx *ctx, const char *path) {
-    if (!ctx->path_blacklist) return false;
+    if (!ctx->path_blacklist)
+        return false;
     for (int i = 0; ctx->path_blacklist[i]; i++) {
         if (strstr(path, ctx->path_blacklist[i]) != NULL)
             return true;
@@ -898,7 +910,8 @@ static bool is_blacklisted_path(shell_ctx *ctx, const char *path) {
  * return type is void so a real code is unavailable).
  * Background processes return 0 immediately (no wait). */
 static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
-    if (cmd->argc == 0) return 0;
+    if (cmd->argc == 0)
+        return 0;
     char *exec_name = cmd->argv[0];
 
     /* 1. Check Blacklist */
@@ -910,12 +923,14 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
     /* Check all arguments for path restrictions */
     for (int i = 0; i < cmd->argc; i++) {
         if (is_blacklisted_path(ctx, cmd->argv[i])) {
-            eprintf("shell: argument '%s' contains blacklisted path\n", cmd->argv[i]);
+            eprintf("shell: argument '%s' contains blacklisted path\n",
+                    cmd->argv[i]);
             return SHELL_ERR_PERM;
         }
     }
 
-    /* 2. Check Builtins (User defined builtins override everything; always allowed) */
+    /* 2. Check Builtins (User defined builtins override everything; always
+     * allowed) */
     shell_builtin_entry_t *builtin = builtin_find(ctx, exec_name);
     if (builtin) {
         builtin->func(cmd->argc, cmd->argv);
@@ -930,7 +945,8 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
 
     /* 4. Check Builtin-Only Mode */
     if (ctx->builtin_only) {
-        eprintf("shell: command '%s' not found (builtin-only mode)\n", exec_name);
+        eprintf("shell: command '%s' not found (builtin-only mode)\n",
+                exec_name);
         return SHELL_ERR_PERM;
     }
 
@@ -998,10 +1014,10 @@ static void command_destroy(shell_command_t *cmd) {
 static int eval_commandtail(shell_ctx *ctx, shell_ast_t *ast) {
     shell_command_t cmd;
     command_argv_from_ast(&cmd, ast);
-    cmd.input_fd = ctx->input_fd;
+    cmd.input_fd  = ctx->input_fd;
     cmd.output_fd = ctx->output_fd;
-    cmd.bg = ctx->bg;
-    int rc = command_execute(ctx, &cmd);
+    cmd.bg        = ctx->bg;
+    int rc        = command_execute(ctx, &cmd);
     command_destroy(&cmd);
     return rc;
 }
@@ -1010,7 +1026,7 @@ static int eval_commandtail(shell_ctx *ctx, shell_ast_t *ast) {
 static int eval_sequence(shell_ctx *ctx, shell_ast_t *ast) {
     if (ast->type == SHELL_AST_BACKGROUND)
         ctx->bg = 1;
-    ast_exec(ctx, ast->left);   /* left runs; `;` ignores its exit code */
+    ast_exec(ctx, ast->left); /* left runs; `;` ignores its exit code */
     int rc = ast_exec(ctx, ast->right);
     if (ast->type == SHELL_AST_BACKGROUND)
         ctx->bg = 0;
@@ -1035,10 +1051,10 @@ static int eval_or(shell_ctx *ctx, shell_ast_t *ast) {
 
 /* CCCC patch: returns exit code of the redirected command. */
 static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
-    int fd;
+    int           fd;
     unsigned char c = ast->token->begin[ast->token->length];
     ast->token->begin[ast->token->length] = '\0';
-    const char *filename = (const char*)ast->token->begin;
+    const char *filename                  = (const char *)ast->token->begin;
 
     /* Security Check for File Access */
     if (is_blacklisted_path(ctx, filename)) {
@@ -1067,9 +1083,9 @@ static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
     }
     ast->token->begin[ast->token->length] = c;
 
-    int rc = ast_exec(ctx, ast->right);
+    int rc                                = ast_exec(ctx, ast->right);
     close(fd);
-    ctx->input_fd = -1;
+    ctx->input_fd  = -1;
     ctx->output_fd = -1;
     return rc;
 }
@@ -1082,12 +1098,12 @@ static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
         return SHELL_ERR_PIPE;
     }
 
-    ctx->input_fd = -1;
+    ctx->input_fd  = -1;
     ctx->output_fd = pipefd[1];
     ast_exec(ctx, ast->left);
     close(pipefd[1]);
 
-    ast = ast->right;
+    ast           = ast->right;
 
     ctx->input_fd = pipefd[0];
 
@@ -1102,10 +1118,10 @@ static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
         close(pipefd[1]);
         close(ctx->input_fd);
         ctx->input_fd = pipefd[0];
-        ast = ast->right;
+        ast           = ast->right;
     }
     ctx->output_fd = -1;
-    ctx->input_fd = pipefd[0];
+    ctx->input_fd  = pipefd[0];
     int rc = ast_exec(ctx, ast); /* exit code of last command in pipeline */
     close(pipefd[0]);
     return rc;
@@ -1113,7 +1129,8 @@ static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
 
 /* CCCC patch: propagates real exit codes from all eval_* functions. */
 static int ast_exec(shell_ctx *ctx, shell_ast_t *ast) {
-    if (!ast) return 0;
+    if (!ast)
+        return 0;
     switch (ast->type) {
         case SHELL_AST_PIPE:
             return eval_pipeline(ctx, ast);
@@ -1141,28 +1158,31 @@ static int ast_exec(shell_ctx *ctx, shell_ast_t *ast) {
 /* ... (Win32 reader threads and helpers same as before) ... */
 
 typedef struct {
-    HANDLE handle;
+    HANDLE            handle;
     shell_stream_cb_t callback;
-    void *userdata;
-    char **buffer;
-    size_t *length;
-    size_t *capacity;
-    int use_callback;
+    void             *userdata;
+    char            **buffer;
+    size_t           *length;
+    size_t           *capacity;
+    int               use_callback;
 } win_reader_args_t;
 
 static DWORD WINAPI win_reader_thread(LPVOID arg) {
     /* Same implementation as before */
-    win_reader_args_t *args = (win_reader_args_t*)arg;
-    char buffer[4096];
-    DWORD bytes_read = 0;
-    while (ReadFile(args->handle, buffer, sizeof(buffer), &bytes_read, NULL) && bytes_read > 0)
+    win_reader_args_t *args = (win_reader_args_t *)arg;
+    char               buffer[4096];
+    DWORD              bytes_read = 0;
+    while (ReadFile(args->handle, buffer, sizeof(buffer), &bytes_read, NULL) &&
+           bytes_read > 0)
         if (args->use_callback) {
             args->callback(buffer, bytes_read, args->userdata);
         } else {
             if (*args->capacity - *args->length < bytes_read) {
-                size_t new_capacity = (*args->capacity == 0) ? 4096 : *args->capacity * 2;
-                while (new_capacity - *args->length < bytes_read) new_capacity *= 2;
-                *args->buffer = xrealloc(*args->buffer, new_capacity + 1);
+                size_t new_capacity =
+                    (*args->capacity == 0) ? 4096 : *args->capacity * 2;
+                while (new_capacity - *args->length < bytes_read)
+                    new_capacity *= 2;
+                *args->buffer   = xrealloc(*args->buffer, new_capacity + 1);
                 *args->capacity = new_capacity;
             }
             memcpy(*args->buffer + *args->length, buffer, bytes_read);
@@ -1171,9 +1191,13 @@ static DWORD WINAPI win_reader_thread(LPVOID arg) {
     return 0;
 }
 
-static int create_pipe_pair(HANDLE *read_handle, HANDLE *write_handle, int inherit_read) {
-    SECURITY_ATTRIBUTES sa = { .nLength = sizeof(SECURITY_ATTRIBUTES), .bInheritHandle = TRUE, .lpSecurityDescriptor = NULL };
-    if (!CreatePipe(read_handle, write_handle, &sa, 0)) return SHELL_ERR_PIPE;
+static int create_pipe_pair(HANDLE *read_handle, HANDLE *write_handle,
+                            int inherit_read) {
+    SECURITY_ATTRIBUTES sa = {.nLength        = sizeof(SECURITY_ATTRIBUTES),
+                              .bInheritHandle = TRUE,
+                              .lpSecurityDescriptor = NULL};
+    if (!CreatePipe(read_handle, write_handle, &sa, 0))
+        return SHELL_ERR_PIPE;
     HANDLE non_inherit = inherit_read ? *write_handle : *read_handle;
     SetHandleInformation(non_inherit, HANDLE_FLAG_INHERIT, 0);
     return SHELL_OK;
@@ -1188,11 +1212,13 @@ static void cleanup_handles(HANDLE *handles, size_t count) {
 }
 
 static int win_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
-    (void)ctx; /* Warning: Context logic not fully applied to Win32 path in this simplified port */
+    (void)ctx; /* Warning: Context logic not fully applied to Win32 path in this
+                  simplified port */
 
-    if (!cmd) return SHELL_ERR_GENERIC;
+    if (!cmd)
+        return SHELL_ERR_GENERIC;
 
-    HANDLE pipes[6] = {0};
+    HANDLE  pipes[6] = {0};
     HANDLE *stdin_r = &pipes[0], *stdin_w = &pipes[1];
     HANDLE *stdout_r = &pipes[2], *stdout_w = &pipes[3];
     HANDLE *stderr_r = &pipes[4], *stderr_w = &pipes[5];
@@ -1205,19 +1231,18 @@ static int win_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
     }
 
     size_t cmd_len = strlen(cmd);
-    char *cmdline = xmalloc(cmd_len + 1);
+    char  *cmdline = xmalloc(cmd_len + 1);
     strcpy(cmdline, cmd);
 
-    STARTUPINFOA si = {
-        .cb = sizeof(STARTUPINFOA),
-        .dwFlags = STARTF_USESTDHANDLES,
-        .hStdInput = *stdin_r,
-        .hStdOutput = *stdout_w,
-        .hStdError = *stderr_w
-    };
+    STARTUPINFOA        si = {.cb         = sizeof(STARTUPINFOA),
+                              .dwFlags    = STARTF_USESTDHANDLES,
+                              .hStdInput  = *stdin_r,
+                              .hStdOutput = *stdout_w,
+                              .hStdError  = *stderr_w};
 
     PROCESS_INFORMATION pi = {0};
-    BOOL success = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    BOOL success = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0, NULL,
+                                  NULL, &si, &pi);
     free(cmdline);
 
     if (!success) {
@@ -1225,17 +1250,32 @@ static int win_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
         return SHELL_ERR_FORK;
     }
 
-    CloseHandle(*stdout_w); *stdout_w = NULL;
-    CloseHandle(*stderr_w); *stderr_w = NULL;
-    CloseHandle(*stdin_r); *stdin_r = NULL;
+    CloseHandle(*stdout_w);
+    *stdout_w = NULL;
+    CloseHandle(*stderr_w);
+    *stderr_w = NULL;
+    CloseHandle(*stdin_r);
+    *stdin_r                 = NULL;
 
-    char *outbuf = NULL, *errbuf = NULL;
-    size_t out_len = 0, out_cap = 0, err_len = 0, err_cap = 0;
+    char             *outbuf = NULL, *errbuf = NULL;
+    size_t            out_len = 0, out_cap = 0, err_len = 0, err_cap = 0;
 
-    win_reader_args_t out_args = { .handle = *stdout_r, .callback = io ? io->out_cb : NULL, .userdata = io ? io->userdata : NULL, .buffer = &outbuf, .length = &out_len, .capacity = &out_cap, .use_callback = (io && io->out_cb) };
-    win_reader_args_t err_args = { .handle = *stderr_r, .callback = io ? io->err_cb : NULL, .userdata = io ? io->userdata : NULL, .buffer = &errbuf, .length = &err_len, .capacity = &err_cap, .use_callback = (io && io->err_cb) };
+    win_reader_args_t out_args = {.handle       = *stdout_r,
+                                  .callback     = io ? io->out_cb : NULL,
+                                  .userdata     = io ? io->userdata : NULL,
+                                  .buffer       = &outbuf,
+                                  .length       = &out_len,
+                                  .capacity     = &out_cap,
+                                  .use_callback = (io && io->out_cb)};
+    win_reader_args_t err_args = {.handle       = *stderr_r,
+                                  .callback     = io ? io->err_cb : NULL,
+                                  .userdata     = io ? io->userdata : NULL,
+                                  .buffer       = &errbuf,
+                                  .length       = &err_len,
+                                  .capacity     = &err_cap,
+                                  .use_callback = (io && io->err_cb)};
 
-    HANDLE threads[2];
+    HANDLE            threads[2];
     threads[0] = CreateThread(NULL, 0, win_reader_thread, &out_args, 0, NULL);
     threads[1] = CreateThread(NULL, 0, win_reader_thread, &err_args, 0, NULL);
 
@@ -1243,7 +1283,8 @@ static int win_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
         DWORD written;
         WriteFile(*stdin_w, io->in, (DWORD)io->in_len, &written, NULL);
     }
-    CloseHandle(*stdin_w); *stdin_w = NULL;
+    CloseHandle(*stdin_w);
+    *stdin_w = NULL;
 
     WaitForSingleObject(pi.hProcess, INFINITE);
     WaitForMultipleObjects(2, threads, TRUE, INFINITE);
@@ -1252,14 +1293,29 @@ static int win_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
     GetExitCodeProcess(pi.hProcess, &exit_code);
 
     if (io) {
-        if (!out_args.use_callback) { io->out = outbuf ? (outbuf[out_len] = '\0', outbuf) : (outbuf = xmalloc(1), outbuf[0] = '\0', outbuf); io->out_len = out_len; }
-        else { io->out = NULL; io->out_len = 0; }
-        if (!err_args.use_callback) { io->err = errbuf ? (errbuf[err_len] = '\0', errbuf) : (errbuf = xmalloc(1), errbuf[0] = '\0', errbuf); io->err_len = err_len; }
-        else { io->err = NULL; io->err_len = 0; }
+        if (!out_args.use_callback) {
+            io->out = outbuf ? (outbuf[out_len] = '\0', outbuf)
+                             : (outbuf = xmalloc(1), outbuf[0] = '\0', outbuf);
+            io->out_len = out_len;
+        } else {
+            io->out     = NULL;
+            io->out_len = 0;
+        }
+        if (!err_args.use_callback) {
+            io->err = errbuf ? (errbuf[err_len] = '\0', errbuf)
+                             : (errbuf = xmalloc(1), errbuf[0] = '\0', errbuf);
+            io->err_len = err_len;
+        } else {
+            io->err     = NULL;
+            io->err_len = 0;
+        }
     }
 
-    CloseHandle(pi.hProcess); CloseHandle(pi.hThread); cleanup_handles(pipes, 6);
-    CloseHandle(threads[0]); CloseHandle(threads[1]);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    cleanup_handles(pipes, 6);
+    CloseHandle(threads[0]);
+    CloseHandle(threads[1]);
 
     return (int)exit_code;
 }
@@ -1273,16 +1329,24 @@ static int set_nonblocking(int fd) {
 }
 
 static void close_pipe_pair(int pipe_fds[2]) {
-    if (pipe_fds[0] != -1) { close(pipe_fds[0]); pipe_fds[0] = -1; }
-    if (pipe_fds[1] != -1) { close(pipe_fds[1]); pipe_fds[1] = -1; }
+    if (pipe_fds[0] != -1) {
+        close(pipe_fds[0]);
+        pipe_fds[0] = -1;
+    }
+    if (pipe_fds[1] != -1) {
+        close(pipe_fds[1]);
+        pipe_fds[1] = -1;
+    }
 }
 
-static int write_input_to_child(int write_fd, const char *input, size_t input_len) {
+static int write_input_to_child(int write_fd, const char *input,
+                                size_t input_len) {
     size_t written = 0;
     while (written < input_len) {
         ssize_t result = write(write_fd, input + written, input_len - written);
         if (result == -1) {
-            if (errno == EAGAIN || errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EINTR)
+                continue;
             return -1;
         }
         written += result;
@@ -1290,47 +1354,57 @@ static int write_input_to_child(int write_fd, const char *input, size_t input_le
     return 0;
 }
 
-static int ensure_buffer_capacity(char **buffer, size_t *capacity, size_t current_len, size_t needed) {
-    if (*capacity - current_len >= needed) return 0;
+static int ensure_buffer_capacity(char **buffer, size_t *capacity,
+                                  size_t current_len, size_t needed) {
+    if (*capacity - current_len >= needed)
+        return 0;
     size_t new_capacity = (*capacity == 0) ? 4096 : *capacity * 2;
-    while (new_capacity - current_len < needed) new_capacity *= 2;
-    *buffer = xrealloc(*buffer, new_capacity + 1);
+    while (new_capacity - current_len < needed)
+        new_capacity *= 2;
+    *buffer   = xrealloc(*buffer, new_capacity + 1);
     *capacity = new_capacity;
     return 0;
 }
 
 static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
-    int pipes[6] = {-1, -1, -1, -1, -1, -1}; /* in[2], out[2], err[2] */
+    int  pipes[6] = {-1, -1, -1, -1, -1, -1}; /* in[2], out[2], err[2] */
     int *inpipe = &pipes[0], *outpipe = &pipes[2], *errpipe = &pipes[4];
 
     if (pipe(inpipe) == -1 || pipe(outpipe) == -1 || pipe(errpipe) == -1) {
-        for (int i = 0; i < 6; i += 2) close_pipe_pair(&pipes[i]);
+        for (int i = 0; i < 6; i += 2)
+            close_pipe_pair(&pipes[i]);
         return SHELL_ERR_PIPE;
     }
 
     pid_t pid = fork();
     if (pid == -1) {
-        for (int i = 0; i < 6; i += 2) close_pipe_pair(&pipes[i]);
+        for (int i = 0; i < 6; i += 2)
+            close_pipe_pair(&pipes[i]);
         return SHELL_ERR_FORK;
     }
 
     if (pid == 0) {
         /* Child process */
-        close(inpipe[1]); close(outpipe[0]); close(errpipe[0]);
+        close(inpipe[1]);
+        close(outpipe[0]);
+        close(errpipe[0]);
 
         if (dup2(inpipe[0], STDIN_FILENO) == -1 ||
             dup2(outpipe[1], STDOUT_FILENO) == -1 ||
             dup2(errpipe[1], STDERR_FILENO) == -1) {
             die("dup2");
         }
-        close(inpipe[0]); close(outpipe[1]); close(errpipe[1]);
+        close(inpipe[0]);
+        close(outpipe[1]);
+        close(errpipe[1]);
 
         /* Tokenize and Parse */
         char *cmd_copy = strdup(cmd);
-        if (!cmd_copy) die("strdup");
+        if (!cmd_copy)
+            die("strdup");
 
         shell_lexer_t lexer;
-        shell_lexer(&lexer, (unsigned char*)cmd_copy);
+        shell_lexer(&lexer, (unsigned char *)cmd_copy);
         shell_token_array_t tokens = shell_parse(&lexer);
 
         if (!tokens.data || lexer.error) {
@@ -1356,7 +1430,9 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
     }
 
     /* Parent process */
-    close(inpipe[0]); close(outpipe[1]); close(errpipe[1]);
+    close(inpipe[0]);
+    close(outpipe[1]);
+    close(errpipe[1]);
 
     set_nonblocking(inpipe[1]);
     set_nonblocking(outpipe[0]);
@@ -1366,46 +1442,78 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
         write_input_to_child(inpipe[1], io->in, io->in_len);
     close(inpipe[1]);
 
-    char *outbuf = NULL, *errbuf = NULL;
-    size_t out_len = 0, out_cap = 0, err_len = 0, err_cap = 0;
-    int use_out_cb = io && io->out_cb != NULL;
-    int use_err_cb = io && io->err_cb != NULL;
+    char         *outbuf = NULL, *errbuf = NULL;
+    size_t        out_len = 0, out_cap = 0, err_len = 0, err_cap = 0;
+    int           use_out_cb = io && io->out_cb != NULL;
+    int           use_err_cb = io && io->err_cb != NULL;
 
-    struct pollfd fds[2] = { {.fd = outpipe[0], .events = POLLIN | POLLHUP}, {.fd = errpipe[0], .events = POLLIN | POLLHUP} };
-    int active_fds = 2;
+    struct pollfd fds[2]     = {{.fd = outpipe[0], .events = POLLIN | POLLHUP},
+                                {.fd = errpipe[0], .events = POLLIN | POLLHUP}};
+    int           active_fds = 2;
 
     while (active_fds > 0) {
         int poll_result = poll(fds, 2, -1);
         if (poll_result == -1) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             break;
         }
 
         for (int i = 0; i < 2; i++) {
-            if (!(fds[i].revents & (POLLIN | POLLHUP)) || fds[i].fd == -1) continue;
-            char buffer[4096];
+            if (!(fds[i].revents & (POLLIN | POLLHUP)) || fds[i].fd == -1)
+                continue;
+            char    buffer[4096];
             ssize_t bytes_read;
             while ((bytes_read = read(fds[i].fd, buffer, sizeof(buffer))) > 0) {
                 if (i == 0) {
-                    if (use_out_cb) io->out_cb(buffer, bytes_read, io->userdata);
-                    else { ensure_buffer_capacity(&outbuf, &out_cap, out_len, bytes_read); memcpy(outbuf + out_len, buffer, bytes_read); out_len += bytes_read; }
+                    if (use_out_cb)
+                        io->out_cb(buffer, bytes_read, io->userdata);
+                    else {
+                        ensure_buffer_capacity(&outbuf, &out_cap, out_len,
+                                               bytes_read);
+                        memcpy(outbuf + out_len, buffer, bytes_read);
+                        out_len += bytes_read;
+                    }
                 } else {
-                    if (use_err_cb) io->err_cb(buffer, bytes_read, io->userdata);
-                    else { ensure_buffer_capacity(&errbuf, &err_cap, err_len, bytes_read); memcpy(errbuf + err_len, buffer, bytes_read); err_len += bytes_read; }
+                    if (use_err_cb)
+                        io->err_cb(buffer, bytes_read, io->userdata);
+                    else {
+                        ensure_buffer_capacity(&errbuf, &err_cap, err_len,
+                                               bytes_read);
+                        memcpy(errbuf + err_len, buffer, bytes_read);
+                        err_len += bytes_read;
+                    }
                 }
             }
-            if (bytes_read == 0 || (bytes_read == -1 && errno != EAGAIN && errno != EINTR)) { fds[i].fd = -1; active_fds--; }
+            if (bytes_read == 0 ||
+                (bytes_read == -1 && errno != EAGAIN && errno != EINTR)) {
+                fds[i].fd = -1;
+                active_fds--;
+            }
         }
     }
 
     if (io) {
-        if (!use_out_cb) { io->out = outbuf ? (outbuf[out_len] = '\0', outbuf) : (outbuf = xmalloc(1), outbuf[0] = '\0', outbuf); io->out_len = out_len; }
-        else { io->out = NULL; io->out_len = 0; }
-        if (!use_err_cb) { io->err = errbuf ? (errbuf[err_len] = '\0', errbuf) : (errbuf = xmalloc(1), errbuf[0] = '\0', errbuf); io->err_len = err_len; }
-        else { io->err = NULL; io->err_len = 0; }
+        if (!use_out_cb) {
+            io->out = outbuf ? (outbuf[out_len] = '\0', outbuf)
+                             : (outbuf = xmalloc(1), outbuf[0] = '\0', outbuf);
+            io->out_len = out_len;
+        } else {
+            io->out     = NULL;
+            io->out_len = 0;
+        }
+        if (!use_err_cb) {
+            io->err = errbuf ? (errbuf[err_len] = '\0', errbuf)
+                             : (errbuf = xmalloc(1), errbuf[0] = '\0', errbuf);
+            io->err_len = err_len;
+        } else {
+            io->err     = NULL;
+            io->err_len = 0;
+        }
     }
 
-    close(outpipe[0]); close(errpipe[0]);
+    close(outpipe[0]);
+    close(errpipe[0]);
     int status;
     waitpid(pid, &status, 0);
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -1419,7 +1527,7 @@ static int posix_shell_inline(const char *cmd, shell_ctx *ctx) {
     }
 
     shell_lexer_t lexer;
-    shell_lexer(&lexer, (unsigned char*)cmd_copy);
+    shell_lexer(&lexer, (unsigned char *)cmd_copy);
 
     shell_token_array_t tokens = shell_parse(&lexer);
     if (!tokens.data || lexer.error) {
@@ -1449,12 +1557,14 @@ static int posix_shell_inline(const char *cmd, shell_ctx *ctx) {
 #endif /* _WIN32 */
 
 int shell_with_ctx(const char *cmd, shell_io *io, shell_ctx *ctx) {
-    if (!cmd) return SHELL_ERR_GENERIC;
+    if (!cmd)
+        return SHELL_ERR_GENERIC;
 
 #if defined(_WIN32) || defined(_WIN64)
     return win_shell_with_io(cmd, io, ctx);
 #else
-    return io ? posix_shell_with_io(cmd, io, ctx) : posix_shell_inline(cmd, ctx);
+    return io ? posix_shell_with_io(cmd, io, ctx)
+              : posix_shell_inline(cmd, ctx);
 #endif
 }
 
@@ -1464,14 +1574,15 @@ int shell(const char *cmd, shell_io *io) {
     } else {
         /* Temporary context */
         shell_ctx *tmp = shell_ctx_create();
-        int res = shell_with_ctx(cmd, io, tmp);
+        int        res = shell_with_ctx(cmd, io, tmp);
         shell_ctx_destroy(tmp);
         return res;
     }
 }
 
 int shell_fmt(shell_io *io, const char *fmt, ...) {
-    if (!fmt) return SHELL_ERR_GENERIC;
+    if (!fmt)
+        return SHELL_ERR_GENERIC;
     va_list args;
     va_start(args, fmt);
     char *cmd = NULL;

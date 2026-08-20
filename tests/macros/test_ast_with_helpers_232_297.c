@@ -3,7 +3,7 @@
 [[cccc::comptime]]
 Node *make_scoped_switch(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("scoped_switch", int_ty);
+    Obj  *fn     = MakeFunction("scoped_switch", int_ty);
     FunctionAddParam(fn, "x", int_ty);
 
     WithFn(fn) {
@@ -23,7 +23,7 @@ make_scoped_switch();
 [[cccc::comptime]]
 Node *make_explicit_switch(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("explicit_switch", int_ty);
+    Obj  *fn     = MakeFunction("explicit_switch", int_ty);
     FunctionAddParam(fn, "x", int_ty);
 
     WithFn(fn) {
@@ -40,7 +40,7 @@ make_explicit_switch();
 [[cccc::comptime]]
 Node *make_scoped_struct(void) {
     Type *int_ty = GetType("int");
-    Type *point = MakeStruct("ScopedPoint");
+    Type *point  = MakeStruct("ScopedPoint");
     WithStruct(point) {
         StructAddField("x", int_ty);
         StructAddField("y", int_ty);
@@ -71,8 +71,8 @@ make_scoped_enum();
 [[cccc::comptime]]
 Node *make_scoped_block(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("scoped_block_value", int_ty);
-    Node *block = MakeBlock((Node*[]){0}, 0);
+    Obj  *fn     = MakeFunction("scoped_block_value", int_ty);
+    Node *block  = MakeBlock((Node *[]){0}, 0);
 
     WithBlock(block) {
         BlockAddStmt(MakeReturn(MakeIntLiteral(6)));
@@ -84,20 +84,29 @@ Node *make_scoped_block(void) {
 make_scoped_block();
 
 int main(void) {
-    if (scoped_switch(0) != 10) return 1;
-    if (scoped_switch(1) != 20) return 2;
-    if (scoped_switch(7) != -1) return 3;
+    if (scoped_switch(0) != 10)
+        return 1;
+    if (scoped_switch(1) != 20)
+        return 2;
+    if (scoped_switch(7) != -1)
+        return 3;
 
-    if (explicit_switch(0) != 30) return 4;
-    if (explicit_switch(7) != -3) return 5;
+    if (explicit_switch(0) != 30)
+        return 4;
+    if (explicit_switch(7) != -3)
+        return 5;
 
     int point[2] = {3, 5};
-    if (scoped_point_sum((void *)point) != 8) return 6;
+    if (scoped_point_sum((void *)point) != 8)
+        return 6;
 
-    if (SCOPED_A != 4) return 7;
-    if (SCOPED_B != 8) return 8;
+    if (SCOPED_A != 4)
+        return 7;
+    if (SCOPED_B != 8)
+        return 8;
 
-    if (scoped_block_value() != 6) return 9;
+    if (scoped_block_value() != 6)
+        return 9;
 
     return 42;
 }

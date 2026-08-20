@@ -1,5 +1,6 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: int gen_locals_996\(void\) \{\s*\n\s*int (x|y);\s*\n\s*int (x|y);
+// CCCC_EXPECT_STDOUT: int gen_locals_996\(void\) \{\s*\n\s*int
+// (x|y);\s*\n\s*int (x|y);
 //
 // Ticket #996: a MakeFunction()+FunctionSetBody(fn, Quote(...)) body built
 // without WithFn(fn) never attached its Quote()-declared locals to fn, so

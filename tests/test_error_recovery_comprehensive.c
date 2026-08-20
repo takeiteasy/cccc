@@ -5,7 +5,7 @@
 
 int main() {
     // Error 1: Invalid expression (missing operand)
-    int x = 1 +;
+    int x = 1 + ;
 
     // This should still be parsed after error recovery
     int y = 2;

@@ -7,4 +7,6 @@
 [[cccc::comptime]]
 int f(int n);
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

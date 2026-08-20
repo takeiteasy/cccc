@@ -3,12 +3,12 @@
 #include <threads.h>
 #include <stdatomic.h>
 
-_Thread_local int g_tls = 0;
+_Thread_local int  g_tls      = 0;
 static _Atomic int g_failures = 0;
 
 static int worker(void *arg) {
     int id = *(int *)arg;
-    g_tls = id * 10;
+    g_tls  = id * 10;
     // Let another thread potentially run
     thrd_yield();
     if (g_tls != id * 10)
@@ -18,7 +18,7 @@ static int worker(void *arg) {
 
 int main(void) {
     thrd_t threads[4];
-    int ids[4];
+    int    ids[4];
     for (int i = 0; i < 4; i++) {
         ids[i] = i + 1;
         if (thrd_create(&threads[i], worker, &ids[i]) != thrd_success)

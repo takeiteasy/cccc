@@ -3,7 +3,7 @@
 
 int main(void) {
     const char *cstr = "hello";
-    char *mstr = (char *)cstr;
+    char       *mstr = (char *)cstr;
     (void)mstr;
     return 42;
 }

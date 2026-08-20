@@ -2,12 +2,12 @@
 #include "stdarg.h"
 
 int outer(int count, ...) {
-    va_list args;            // 3 slots (24 bytes struct)
+    va_list args;                     // 3 slots (24 bytes struct)
     va_start(args, count);
-    int total = 0;           // 1 slot
-    for (int i = 0; i < count; i++) {  // i = 1 slot
-        int val = va_arg(args, int);   // val = 1 slot
-        total += val;
+    int total = 0;                    // 1 slot
+    for (int i = 0; i < count; i++) { // i = 1 slot
+        int val  = va_arg(args, int); // val = 1 slot
+        total   += val;
     }
     va_end(args);
     return total;
@@ -17,6 +17,7 @@ int outer(int count, ...) {
 
 int main() {
     int result = outer(3, 10, 20, 30);
-    if (result == 60) return 42;
+    if (result == 60)
+        return 42;
     return result;
 }

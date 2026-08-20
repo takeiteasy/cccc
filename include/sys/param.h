@@ -15,7 +15,7 @@
 #endif
 
 #ifndef NBBY
-#define NBBY 8   /* number of bits in a byte */
+#define NBBY 8 /* number of bits in a byte */
 #endif
 
 #ifndef MIN

@@ -12,10 +12,10 @@
 #include "sys/socket.h"
 
 struct hostent {
-    char *h_name;
+    char  *h_name;
     char **h_aliases;
-    int h_addrtype;
-    int h_length;
+    int    h_addrtype;
+    int    h_length;
     char **h_addr_list;
 };
 
@@ -28,10 +28,10 @@ struct hostent {
    sizeof(struct netent) == 24 on both, n_net is a 32-bit network number
    in host byte order). */
 struct netent {
-    char     *n_name;
-    char    **n_aliases;
-    int       n_addrtype;
-    uint32_t  n_net;
+    char    *n_name;
+    char   **n_aliases;
+    int      n_addrtype;
+    uint32_t n_net;
 };
 
 /* struct servent / struct protoent (#746). Same design class as struct
@@ -54,17 +54,17 @@ struct protoent {
 };
 
 struct addrinfo {
-    int ai_flags;
-    int ai_family;
-    int ai_socktype;
-    int ai_protocol;
+    int       ai_flags;
+    int       ai_family;
+    int       ai_socktype;
+    int       ai_protocol;
     socklen_t ai_addrlen;
 #ifdef __APPLE__
-    char *ai_canonname;
+    char            *ai_canonname;
     struct sockaddr *ai_addr;
 #else
     struct sockaddr *ai_addr;
-    char *ai_canonname;
+    char            *ai_canonname;
 #endif
     struct addrinfo *ai_next;
 };
@@ -89,16 +89,16 @@ struct addrinfo {
 #define EAI_SYSTEM   11
 #define EAI_OVERFLOW 14
 #else
-#define EAI_BADFLAGS  -1
-#define EAI_NONAME    -2
-#define EAI_AGAIN     -3
-#define EAI_FAIL      -4
-#define EAI_FAMILY    -6
-#define EAI_SOCKTYPE  -7
-#define EAI_SERVICE   -8
-#define EAI_MEMORY    -10
-#define EAI_SYSTEM    -11
-#define EAI_OVERFLOW  -12
+#define EAI_BADFLAGS -1
+#define EAI_NONAME   -2
+#define EAI_AGAIN    -3
+#define EAI_FAIL     -4
+#define EAI_FAMILY   -6
+#define EAI_SOCKTYPE -7
+#define EAI_SERVICE  -8
+#define EAI_MEMORY   -10
+#define EAI_SYSTEM   -11
+#define EAI_OVERFLOW -12
 #endif
 
 /* getnameinfo() flags -- verified against real macOS and Linux
@@ -145,23 +145,21 @@ extern struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);
    standard getnetbyaddr_r on any platform. Returns 0 on success (with
    *result set, or NULL if not found and *h_errnop set), or a positive
    errno value (ERANGE if buf is too small for the result). */
-extern int gethostbyname_r(const char *name, struct hostent *ret,
-                           char *buf, size_t buflen,
-                           struct hostent **result, int *h_errnop);
+extern int gethostbyname_r(const char *name, struct hostent *ret, char *buf,
+                           size_t buflen, struct hostent **result,
+                           int *h_errnop);
 extern int gethostbyaddr_r(const void *addr, socklen_t len, int type,
                            struct hostent *ret, char *buf, size_t buflen,
                            struct hostent **result, int *h_errnop);
-extern int getnetbyname_r(const char *name, struct netent *ret,
-                          char *buf, size_t buflen,
-                          struct netent **result, int *h_errnop);
+extern int getnetbyname_r(const char *name, struct netent *ret, char *buf,
+                          size_t buflen, struct netent **result, int *h_errnop);
 
 extern int getaddrinfo(const char *node, const char *service,
-                       const struct addrinfo *hints,
-                       struct addrinfo **res);
+                       const struct addrinfo *hints, struct addrinfo **res);
 extern void freeaddrinfo(struct addrinfo *res);
 extern int getnameinfo(const struct sockaddr *addr, socklen_t addrlen,
-                       char *host, socklen_t hostlen,
-                       char *serv, socklen_t servlen, int flags);
+                       char *host, socklen_t hostlen, char *serv,
+                       socklen_t servlen, int flags);
 extern struct netent *getnetbyname(const char *name);
 extern struct netent *getnetbyaddr(uint32_t net, int type);
 extern void setnetent(int stayopen);

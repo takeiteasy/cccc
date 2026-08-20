@@ -4,21 +4,21 @@
 // assigns a non-null value -- the switch can no longer be skipped with a
 // null result, so the exit stays NONNULL and nothing warns.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0, y = 0, z = 0;
+    int  x = 0, y = 0, z = 0;
     int *p = 0;
-    int k = 0;
+    int  k = 0;
     switch (k) {
-    case 0:
-        p = &x;
-        break;
-    case 1:
-        p = &y;
-        break;
-    default:
-        p = &z;
-        break;
+        case 0:
+            p = &x;
+            break;
+        case 1:
+            p = &y;
+            break;
+        default:
+            p = &z;
+            break;
     }
     foo(p);
     return 42;

@@ -18,4 +18,6 @@ gen();
 #pragma cccc comptime end
 
 int get_answer(void);
-int main(void) { return get_answer(); }
+int main(void) {
+    return get_answer();
+}

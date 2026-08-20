@@ -9,10 +9,14 @@ typedef enum { A = 1, B } Color;
 
 int describe(Color c) {
     switch (c) {
-        case A: return 1;
-        case B: return 2;
-        case 3: return 3;
-        default: return 0;
+        case A:
+            return 1;
+        case B:
+            return 2;
+        case 3:
+            return 3;
+        default:
+            return 0;
     }
 }
 

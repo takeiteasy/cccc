@@ -2,13 +2,15 @@
 // variable (cross-var reference, evaluated in declaration order).
 
 [[cccc::comptime]]
-int compute_base(void) { return 7; }
+int compute_base(void) {
+    return 7;
+}
 
 [[cccc::comptime]]
-int a = compute_base() * 3;   // a == 21
+int a = compute_base() * 3; // a == 21
 
 [[cccc::comptime]]
-int b = a * 2;                 // b == 42  (references a)
+int b = a * 2;              // b == 42  (references a)
 
 [[cccc::comptime]]
 Node *get_a(void) {

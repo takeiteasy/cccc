@@ -33,16 +33,9 @@ typedef struct entry {
     void *data;
 } ENTRY;
 
-typedef enum {
-    FIND, ENTER
-} ACTION;
+typedef enum { FIND, ENTER } ACTION;
 
-typedef enum {
-    preorder,
-    postorder,
-    endorder,
-    leaf
-} VISIT;
+typedef enum { preorder, postorder, endorder, leaf } VISIT;
 
 extern int hcreate(size_t nel);
 extern void hdestroy(void);
@@ -52,16 +45,16 @@ extern void insque(void *element, void *pred);
 extern void remque(void *element);
 
 extern void *lfind(const void *key, const void *base, size_t *nmemb,
-                    size_t size, int (*compar)(const void *, const void *));
-extern void *lsearch(const void *key, void *base, size_t *nmemb,
-                      size_t size, int (*compar)(const void *, const void *));
+                   size_t size, int (*compar)(const void *, const void *));
+extern void *lsearch(const void *key, void *base, size_t *nmemb, size_t size,
+                     int (*compar)(const void *, const void *));
 
 extern void *tdelete(const void *key, void **rootp,
-                      int (*compar)(const void *, const void *));
+                     int (*compar)(const void *, const void *));
 extern void *tfind(const void *key, void *const *rootp,
-                    int (*compar)(const void *, const void *));
+                   int (*compar)(const void *, const void *));
 extern void *tsearch(const void *key, void **rootp,
-                      int (*compar)(const void *, const void *));
+                     int (*compar)(const void *, const void *));
 extern void twalk(const void *root, void (*action)(const void *, VISIT, int));
 
 #endif /* __SEARCH_H */

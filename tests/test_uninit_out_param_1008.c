@@ -8,7 +8,7 @@
 // unless the read-side CHKI is exempted once a local's address has been
 // taken (Obj.addr_taken, set by mark_addr_escapes's new ND_ADDR case).
 static void fill(int *out, int *found) {
-    *out = 42;
+    *out   = 42;
     *found = 1;
 }
 

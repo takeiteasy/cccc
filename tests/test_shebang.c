@@ -1,4 +1,4 @@
-#!/usr/bin/env cccc
+#!/ usr / bin / env cccc
 #include <stdio.h>
 
 int main(void) {

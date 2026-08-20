@@ -11,9 +11,9 @@
 
 typedef struct HostSignalGuard HostSignalGuard;
 struct HostSignalGuard {
-    sigjmp_buf env;
-    VirtualMachine *vm;
-    HostSignalGuard *previous;
+    sigjmp_buf            env;
+    VirtualMachine       *vm;
+    HostSignalGuard      *previous;
     volatile sig_atomic_t signal;
     volatile sig_atomic_t guest_resume;
     void *volatile fault_addr;
@@ -24,18 +24,16 @@ static const int host_fault_signals[] = {
 #ifdef SIGBUS
     SIGBUS,
 #endif
-    SIGFPE,
-    SIGILL,
-    SIGABRT,
+    SIGFPE,  SIGILL, SIGABRT,
 };
 
-#define HOST_FAULT_SIGNAL_COUNT \
+#define HOST_FAULT_SIGNAL_COUNT                                                \
     ((int)(sizeof(host_fault_signals) / sizeof(host_fault_signals[0])))
 
-static struct sigaction saved_actions[HOST_FAULT_SIGNAL_COUNT];
-static int host_handler_depth;
+static struct sigaction               saved_actions[HOST_FAULT_SIGNAL_COUNT];
+static int                            host_handler_depth;
 static _Thread_local HostSignalGuard *active_guard;
-static _Thread_local sig_atomic_t handlers_suspended;
+static _Thread_local sig_atomic_t     handlers_suspended;
 
 static int host_signal_index(int sig) {
     for (int i = 0; i < HOST_FAULT_SIGNAL_COUNT; i++)
@@ -77,7 +75,7 @@ static void host_fault_handler(int sig, siginfo_t *info, void *context) {
     SigSlot *slot = &guard->vm->vm_sigslots[sig];
     if (slot->action != 0) {
         _cccc_pending[sig] = 1;
-        _cccc_any_pending = 1;
+        _cccc_any_pending  = 1;
 
         /* Asynchronous signals can return to the interrupted instruction and
          * will be delivered at the next dispatch. A synchronous hardware
@@ -88,7 +86,7 @@ static void host_fault_handler(int sig, siginfo_t *info, void *context) {
         guard->guest_resume = 1;
     }
 
-    guard->signal = sig;
+    guard->signal     = sig;
     guard->fault_addr = info ? info->si_addr : NULL;
 
     /* Print the host C backtrace while the faulting stack is still live —
@@ -115,9 +113,9 @@ static bool install_host_handlers(HostSignalGuard *guard) {
         memset(&action, 0, sizeof(action));
         sigemptyset(&action.sa_mask);
         action.sa_sigaction = host_fault_handler;
-        action.sa_flags = SA_SIGINFO;
+        action.sa_flags     = SA_SIGINFO;
 
-        int installed = 0;
+        int installed       = 0;
         for (int i = 0; i < HOST_FAULT_SIGNAL_COUNT; i++) {
             int sig = host_fault_signals[i];
             if (sigaction(sig, NULL, &saved_actions[i]) != 0 ||
@@ -159,20 +157,20 @@ static void uninstall_host_handlers(HostSignalGuard *guard) {
    in src/stdlib/signal.c). Not applied for action == 0 (SIG_DFL): the
    kernel's own default disposition already governs restart/notification
    behavior there. */
-static void make_guest_action(struct sigaction *sa, int action, bool use_siginfo,
-                              int passthrough_flags) {
+static void make_guest_action(struct sigaction *sa, int action,
+                              bool use_siginfo, int passthrough_flags) {
     memset(sa, 0, sizeof(*sa));
     sigemptyset(&sa->sa_mask);
     if (action == 1) {
         sa->sa_handler = SIG_IGN;
-        sa->sa_flags = passthrough_flags;
+        sa->sa_flags   = passthrough_flags;
     } else if (action == 2) {
         if (use_siginfo) {
             sa->sa_sigaction = _cccc_sig_shim_info;
-            sa->sa_flags = SA_SIGINFO | passthrough_flags;
+            sa->sa_flags     = SA_SIGINFO | passthrough_flags;
         } else {
             sa->sa_handler = _cccc_sig_shim;
-            sa->sa_flags = passthrough_flags;
+            sa->sa_flags   = passthrough_flags;
         }
     } else {
         sa->sa_handler = SIG_DFL;
@@ -180,9 +178,9 @@ static void make_guest_action(struct sigaction *sa, int action, bool use_siginfo
 }
 
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
-    int idx = host_signal_index(sig);
-    bool use_siginfo = vm && action == 2 &&
-                        (vm->vm_sigslots[sig].sa_flags & SA_SIGINFO) != 0;
+    int  idx = host_signal_index(sig);
+    bool use_siginfo =
+        vm && action == 2 && (vm->vm_sigslots[sig].sa_flags & SA_SIGINFO) != 0;
     int passthrough = 0;
     if (vm && sig > 0 && sig < CCCC_NSIG)
         passthrough = vm->vm_sigslots[sig].sa_flags &
@@ -204,7 +202,7 @@ int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
 
 int vm_eval(VirtualMachine *vm) {
     volatile Pc current_pc = vm ? vm->pc : CCCC_INVALID_PC;
-    vm->cycle = 0;
+    vm->cycle              = 0;
 
     if (!host_signal_debug_active(vm))
         return cccc_vm_eval_dispatch(vm, &current_pc);
@@ -212,7 +210,7 @@ int vm_eval(VirtualMachine *vm) {
     for (;;) {
         HostSignalGuard guard;
         memset(&guard, 0, sizeof(guard));
-        guard.vm = vm;
+        guard.vm       = vm;
         guard.previous = active_guard;
 
         if (sigsetjmp(guard.env, 1) != 0) {
@@ -222,9 +220,10 @@ int vm_eval(VirtualMachine *vm) {
                 continue;
 
             vm->dbg.host_fault_signal = guard.signal;
-            vm->pc = current_pc;
-            handlers_suspended = 1;
-            cc_debug_repl_host_fault(vm, guard.signal, (void *)guard.fault_addr);
+            vm->pc                    = current_pc;
+            handlers_suspended        = 1;
+            cc_debug_repl_host_fault(vm, guard.signal,
+                                     (void *)guard.fault_addr);
             handlers_suspended = 0;
             return CCCC_HOST_SIGNAL_RC;
         }
@@ -242,14 +241,15 @@ int vm_eval(VirtualMachine *vm) {
 
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
     (void)vm;
-    void (*handler)(int) =
-        action == 1 ? SIG_IGN : action == 2 ? _cccc_sig_shim : SIG_DFL;
+    void (*handler)(int) = action == 1   ? SIG_IGN
+                           : action == 2 ? _cccc_sig_shim
+                                         : SIG_DFL;
     return signal(sig, handler) == SIG_ERR ? -1 : 0;
 }
 
 int vm_eval(VirtualMachine *vm) {
     volatile Pc current_pc = vm ? vm->pc : CCCC_INVALID_PC;
-    vm->cycle = 0;
+    vm->cycle              = 0;
     return cccc_vm_eval_dispatch(vm, &current_pc);
 }
 

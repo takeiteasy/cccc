@@ -4,6 +4,6 @@
 // CCCC_EXPECT_STDERR: stray #pragma cccc suite end without matching begin
 
 [[cccc::test]]
-void test_dummy(void) { }
+void test_dummy(void) {}
 
 #pragma cccc suite end

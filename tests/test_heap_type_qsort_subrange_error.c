@@ -18,16 +18,18 @@ static int cmp_int(const void *a, const void *b) {
 }
 
 int main(void) {
-    int *arr = malloc(sizeof(int) * 8);
+    int *arr          = malloc(sizeof(int) * 8);
     ((float *)arr)[0] = 1.0f;
-    ((float *)arr)[1] = 2.0f; // arr[0..1]: stamped float, outside the sorted range
+    ((float *)arr)[1] =
+        2.0f;           // arr[0..1]: stamped float, outside the sorted range
     for (int i = 2; i < 8; i++)
-        arr[i] = 8 - i;        // arr[2..7]: stamped int, uniformly
+        arr[i] = 8 - i; // arr[2..7]: stamped int, uniformly
 
     qsort(arr + 2, 4, sizeof(int), cmp_int); // sorts only arr[2..5]
 
     float *fbuf = (float *)arr;
-    float v = fbuf[3]; // load arr[3] (inside the sorted range) as float: mismatches int
+    float  v    = fbuf[3]; // load arr[3] (inside the sorted range) as float:
+                           // mismatches int
     free(arr);
     return (int)v;
 }

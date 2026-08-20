@@ -17,24 +17,27 @@
 [[cccc::build]]
 int build_main(Builder *ctx) {
     const char *out_dir = BuildOutDir(ctx);
-    char lib_out[512], cmd[1024];
-    snprintf(lib_out, sizeof(lib_out), "%s/lib/mathlib_link_inmem_test.c4a", out_dir);
+    char        lib_out[512], cmd[1024];
+    snprintf(lib_out, sizeof(lib_out), "%s/lib/mathlib_link_inmem_test.c4a",
+             out_dir);
 
     snprintf(cmd, sizeof(cmd),
-        "mkdir -p %s/lib && ./cccc "
-        "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
-        "-I tests/fixtures/build_bytecode_libs_demo/include "
-        "--compile=bytecode -o %s 2>&1",
-        out_dir, lib_out);
-    if (!CaptureCommand(ctx, cmd)) return 1;
+             "mkdir -p %s/lib && ./cccc "
+             "tests/fixtures/build_bytecode_libs_demo/src/math_lib.c "
+             "-I tests/fixtures/build_bytecode_libs_demo/include "
+             "--compile=bytecode -o %s 2>&1",
+             out_dir, lib_out);
+    if (!CaptureCommand(ctx, cmd))
+        return 1;
 
     // No -o here: this is the exact repro from #898.
     snprintf(cmd, sizeof(cmd),
-        "sh -c './cccc tests/fixtures/build_bytecode_libs_demo/src/main.c "
-        "-I tests/fixtures/build_bytecode_libs_demo/include --link %s "
-        ">/dev/null 2>&1; echo \"exit=$?\"'",
-        lib_out);
+             "sh -c './cccc tests/fixtures/build_bytecode_libs_demo/src/main.c "
+             "-I tests/fixtures/build_bytecode_libs_demo/include --link %s "
+             ">/dev/null 2>&1; echo \"exit=$?\"'",
+             lib_out);
     const char *result = CaptureCommand(ctx, cmd);
-    if (result) puts(result);
+    if (result)
+        puts(result);
     return 0;
 }

@@ -11,4 +11,6 @@ void gen(void) {
 
 gen();
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

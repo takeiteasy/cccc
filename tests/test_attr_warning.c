@@ -19,11 +19,15 @@ void test_attr_warning_compiles(void) {
 [[cccc::test]]
 void test_attr_warning_suppressed_in_dead_branch(void) {
     // Call inside a statically-dead branch must not warn.
-    if (0) deprecated_api();
+    if (0)
+        deprecated_api();
 }
 
 [[cccc::test]]
 void test_attr_warning_suppressed_true_else(void) {
     // Call in the else of an always-true condition must not warn.
-    if (1) { /* live */ } else { deprecated_api(); }
+    if (1) { /* live */
+    } else {
+        deprecated_api();
+    }
 }

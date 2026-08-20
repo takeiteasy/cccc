@@ -3,7 +3,7 @@
 // Should report type errors and continue
 
 int main() {
-    int arr[5];
+    int  arr[5];
     int *ptr;
 
     // Error: cannot assign to array

@@ -5,9 +5,15 @@
 // are needed in comptime code into an @shared header.
 #define FROM_MAIN 77
 
-[[cccc::comptime]] int get_val(void) { return FROM_MAIN; }
+[[cccc::comptime]] int get_val(void) {
+    return FROM_MAIN;
+}
 
 [[cccc::comptime]]
-Node *call_get(void) { return MakeIntLiteral(get_val()); }
+Node *call_get(void) {
+    return MakeIntLiteral(get_val());
+}
 
-int main(void) { return call_get() == 77 ? 42 : 1; }
+int main(void) {
+    return call_get() == 77 ? 42 : 1;
+}

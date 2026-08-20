@@ -44,7 +44,7 @@ Pc emit_word_ptr(VirtualMachine *vm) {
 }
 
 Pc emit_i64(VirtualMachine *vm, long long val) {
-    Pc loc = emit_word_ptr(vm);
+    Pc loc            = emit_word_ptr(vm);
     vm->text_seg[loc] = cc_i64_lo(val);
     emit_word(vm, cc_i64_hi(val));
     return loc;
@@ -52,7 +52,8 @@ Pc emit_i64(VirtualMachine *vm, long long val) {
 
 void check_data_capacity(VirtualMachine *vm, long long needed) {
     if (vm_data_ensure(vm, needed) != 0)
-        error("codegen: data segment overflow (limit: %d bytes)", vm->poolsize_max);
+        error("codegen: data segment overflow (limit: %d bytes)",
+              vm->poolsize_max);
 }
 
 // Grow tls_template to hold at least `needed` bytes.
@@ -67,7 +68,7 @@ void check_tls_capacity(VirtualMachine *vm, size_t needed) {
         error("codegen: TLS template allocation failed");
     if (new_cap > vm->tls_template_cap)
         memset(p + vm->tls_template_cap, 0, new_cap - vm->tls_template_cap);
-    vm->tls_template = p;
+    vm->tls_template     = p;
     vm->tls_template_cap = new_cap;
 }
 
@@ -96,7 +97,8 @@ void emit_rr(VirtualMachine *vm, int op, int rd, int rs1) {
 // Used by the wide-vector opcodes (#722) to carry a runtime lane count/byte
 // width alongside up to 3 register operands -- see the SIMD opcode block in
 // cccc.h for which family uses which field.
-void emit_rrrs(VirtualMachine *vm, int op, int rd, int rs1, int rs2, int scale) {
+void emit_rrrs(VirtualMachine *vm, int op, int rd, int rs1, int rs2,
+               int scale) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RRRS(rd, rs1, rs2, scale));
 }
@@ -125,7 +127,7 @@ Pc emit_rri(VirtualMachine *vm, int op, int rd, int rs, long long imm) {
 }
 
 Pc emit_rrrs_i(VirtualMachine *vm, int op, int rd, int base, int index,
-                          int scale, long long offset) {
+               int scale, long long offset) {
     emit_word(vm, op);
     emit_word(vm, ENCODE_RRRS(rd, base, index, scale));
     return emit_i64(vm, offset);
@@ -166,7 +168,8 @@ Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
 // op_LEA3_fn to skip its vm->stack_ptr_epochs write for this address -- pass
 // true only when the result is proven never to escape its creating frame
 // (see man/SAFETY.md and the mark_addr_escapes pass in parse.c).
-static Pc emit_lea3_ex(VirtualMachine *vm, int rd, long long offset, bool skip_record) {
+static Pc emit_lea3_ex(VirtualMachine *vm, int rd, long long offset,
+                       bool skip_record) {
     emit_word(vm, LEA3);
     emit_word(vm, ENCODE_R(rd) | (skip_record ? LEA3_NO_RECORD : 0));
     return emit_i64(vm, offset);
@@ -204,9 +207,9 @@ Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
 // path) rather than a fn->locals-only pre-scan, which would miss an
 // escaping aggregate *parameter*.
 Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
-    bool escaping_agg = var->addr_escapes &&
-        (var->ty->kind == TY_ARRAY || var->ty->kind == TY_STRUCT ||
-         var->ty->kind == TY_UNION);
+    bool escaping_agg = var->addr_escapes && (var->ty->kind == TY_ARRAY ||
+                                              var->ty->kind == TY_STRUCT ||
+                                              var->ty->kind == TY_UNION);
     // A TY_VECTOR local is always STKTAG'd, regardless of what escape
     // analysis (mark_addr_escapes, #676) proved (#727). Structs/arrays only
     // need STKTAG when addr_escapes is set because a *non*-escaping
@@ -239,7 +242,7 @@ Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
     // -- which layer 3 resolves soundly via prefer-live -- is enough to
     // cover every offset of this vector, including offset 0.
     bool vector_agg = var->ty->kind == TY_VECTOR;
-    Pc pc = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
+    Pc   pc         = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
     if (escaping_agg || vector_agg) {
         emit_stktag(vm, var->offset, var->ty->size);
         vm->compiler.frame_has_esc_agg = true;
@@ -279,24 +282,42 @@ int fop_for_type(Type *ty, int f64_op) {
     if (!ty || ty->kind != TY_FLOAT)
         return f64_op;
     switch (f64_op) {
-    case FADD3: return FADD3_F32;
-    case FSUB3: return FSUB3_F32;
-    case FMUL3: return FMUL3_F32;
-    case FDIV3: return FDIV3_F32;
-    case FNEG3: return FNEG3_F32;
-    case FEQ3: return FEQ3_F32;
-    case FNE3: return FNE3_F32;
-    case FLT3: return FLT3_F32;
-    case FLE3: return FLE3_F32;
-    case FGT3: return FGT3_F32;
-    case FGE3: return FGE3_F32;
-    case I2F3: return I2F3_F32;
-    case F2I3: return F2I3_F32;
-    case U2F3: return U2F3_F32;
-    case F2U3: return F2U3_F32;
-    case FR2R: return FR2R_F32;
-    case R2FR: return R2FR_F32;
-    default: return f64_op;
+        case FADD3:
+            return FADD3_F32;
+        case FSUB3:
+            return FSUB3_F32;
+        case FMUL3:
+            return FMUL3_F32;
+        case FDIV3:
+            return FDIV3_F32;
+        case FNEG3:
+            return FNEG3_F32;
+        case FEQ3:
+            return FEQ3_F32;
+        case FNE3:
+            return FNE3_F32;
+        case FLT3:
+            return FLT3_F32;
+        case FLE3:
+            return FLE3_F32;
+        case FGT3:
+            return FGT3_F32;
+        case FGE3:
+            return FGE3_F32;
+        case I2F3:
+            return I2F3_F32;
+        case F2I3:
+            return F2I3_F32;
+        case U2F3:
+            return U2F3_F32;
+        case F2U3:
+            return F2U3_F32;
+        case FR2R:
+            return FR2R_F32;
+        case R2FR:
+            return R2FR_F32;
+        default:
+            return f64_op;
     }
 }
 
@@ -353,14 +374,14 @@ bool block_capture_needs_mcpy(Type *ty) {
     if (ty->size > 8)
         return true;
     switch (ty->kind) {
-    case TY_STRUCT:
-    case TY_UNION:
-    case TY_ARRAY:
-    case TY_COMPLEX:
-    case TY_VECTOR:
-        return true;
-    default:
-        return is_wide_bitint(ty) || is_decimal(ty);
+        case TY_STRUCT:
+        case TY_UNION:
+        case TY_ARRAY:
+        case TY_COMPLEX:
+        case TY_VECTOR:
+            return true;
+        default:
+            return is_wide_bitint(ty) || is_decimal(ty);
     }
 }
 
@@ -400,7 +421,8 @@ void emit_wide_op(VirtualMachine *vm, int op) {
 // (mirroring TY_STRUCT/UNION), keeping both sides symmetric. Fixed in #457.
 long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
     vm->compiler.ent3_extra_stack += words;
-    return -(long long)(vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack);
+    return -(long long)(vm->compiler.ent3_base_stack +
+                        vm->compiler.ent3_extra_stack);
 }
 
 // Allocate a fresh stack slot for a _Decimal32/64/128 intermediate result
@@ -428,8 +450,8 @@ void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     int v = alloc_temp_reg();
     gen_expr(vm, arg, v); // vector value -> vregs[v]
     mark_temp_reg_used(v);
-    int bytes = arg->ty->size;
-    long long off = alloc_wide_bitint_temp(vm, bytes / 8);
+    int       bytes = arg->ty->size;
+    long long off   = alloc_wide_bitint_temp(vm, bytes / 8);
     emit_lea3(vm, addr_reg, off); // address escapes to the callee -- record it
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, addr_reg, 0);
@@ -453,9 +475,10 @@ void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
 // but-in-bounds bytes from a fully-sized scratch object, never past it.
 void gen_decimal_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     int r_src = alloc_temp_reg();
-    gen_expr(vm, arg, r_src); // decimal value -> address of source
+    gen_expr(vm, arg, r_src);       // decimal value -> address of source
     mark_temp_reg_used(r_src);
-    long long off = alloc_decimal_temp(vm, 16); // always full width, not arg->ty->size
+    long long off =
+        alloc_decimal_temp(vm, 16); // always full width, not arg->ty->size
     emit_lea3(vm, addr_reg, off); // address escapes to the callee -- record it
     if (vm->flags & CCCC_POINTER_CHECKS) {
         emit_rr(vm, CHKP3, addr_reg, 0);
@@ -466,8 +489,8 @@ void gen_decimal_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     // interleaved with the call's own argument-register evaluation loop and
     // would clobber earlier-placed argument registers.
     int r_tmp = alloc_temp_reg();
-    int r_s = alloc_temp_reg();
-    int r_d = alloc_temp_reg();
+    int r_s   = alloc_temp_reg();
+    int r_d   = alloc_temp_reg();
     emit_mov3(vm, r_s, r_src);
     emit_mov3(vm, r_d, addr_reg);
     if (arg->ty->size == 4) {
@@ -500,10 +523,10 @@ void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg) {
 // the binary wide ops), so gen_expr yields the source address; the result is
 // written into a fresh stack temp whose address is returned in dest_reg.
 void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
-                                  const char *helper) {
-    Type *ty = node->ty;
-    int words = ty->size / 8;
-    int r_src = alloc_temp_reg();
+                           const char *helper) {
+    Type *ty    = node->ty;
+    int   words = ty->size / 8;
+    int   r_src = alloc_temp_reg();
     gen_expr(vm, node->lhs, r_src); // wide operand → address
     long long dst_offset = node->ret_buffer
                                ? (long long)node->ret_buffer->offset
@@ -536,11 +559,12 @@ void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         emit_wide_helper(vm, "__cccc_bitint_nonzero", 2);
         emit_mov3(vm, dest_reg, REG_A0);
     } else if (is_decimal(node->ty)) {
-        int w = dec_width_code(node->ty);
+        int           w             = dec_width_code(node->ty);
         unsigned char zero_bits[16] = {0};
-        long long offset = vm->data_ptr - vm->data_seg;
-        offset = (offset + (node->ty->align - 1)) & ~(long long)(node->ty->align - 1);
-        vm->data_ptr = vm->data_seg + offset;
+        long long     offset        = vm->data_ptr - vm->data_seg;
+        offset                      = (offset + (node->ty->align - 1)) &
+                                      ~(long long)(node->ty->align - 1);
+        vm->data_ptr                = vm->data_seg + offset;
         check_data_capacity(vm, offset + node->ty->size);
         if (!cccc_dec_encode_literal("0", w, zero_bits))
             error_tok(vm, node->tok,
@@ -548,7 +572,7 @@ void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         memcpy(vm->data_ptr, zero_bits, (size_t)node->ty->size);
         vm->data_ptr += node->ty->size;
 
-        int r_zero = alloc_temp_reg();
+        int r_zero    = alloc_temp_reg();
         emit_lda3(vm, r_zero, offset);
         emit_mov3(vm, REG_A0, dest_reg);
         emit_mov3(vm, REG_A1, r_zero);
@@ -583,7 +607,7 @@ void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 // re-derives rs_addr purely to run these checks -- forward-declared near
 // CCCC_FUSION_UNSAFE_FLAGS since that caller sits earlier in the file.
 void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
-                              bool dangling_check) {
+                             bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     if (dangling_check && (vm->flags & CCCC_BOUNDS_CHECKS))
@@ -593,7 +617,8 @@ void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
                  ((long long)ty->size << 8) | (long long)ty->kind);
 }
 
-void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangling_check) {
+void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
+                  bool dangling_check) {
     emit_load_safety_checks(vm, ty, rs_addr, dangling_check);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_rr(vm, LDR_B, rd, rs_addr);
@@ -610,18 +635,22 @@ void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangli
     } else if (ty->kind == TY_ENUM) {
         if (ty->size == 1) {
             emit_rr(vm, LDR_B, rd, rs_addr);
-            if (ty->is_unsigned) emit_rr(vm, ZX1, rd, rd);
+            if (ty->is_unsigned)
+                emit_rr(vm, ZX1, rd, rd);
         } else if (ty->size == 2) {
             emit_rr(vm, LDR_H, rd, rs_addr);
-            if (ty->is_unsigned) emit_rr(vm, ZX2, rd, rd);
+            if (ty->is_unsigned)
+                emit_rr(vm, ZX2, rd, rd);
         } else {
             emit_rr(vm, LDR_D, rd, rs_addr);
         }
     } else if (ty->kind == TY_BITINT) {
         if (is_wide_bitint(ty)) {
-            // Wide _BitInt: address-based. rd already holds the address (rs_addr).
-            // Just move address if they differ; no value load needed.
-            if (rd != rs_addr) emit_mov3(vm, rd, rs_addr);
+            // Wide _BitInt: address-based. rd already holds the address
+            // (rs_addr). Just move address if they differ; no value load
+            // needed.
+            if (rd != rs_addr)
+                emit_mov3(vm, rd, rs_addr);
         } else if (ty->size == 1) {
             emit_rr(vm, LDR_B, rd, rs_addr);
             emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
@@ -639,7 +668,8 @@ void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr, bool dangli
     } else if (is_decimal(ty)) {
         // _Decimal32/64/128 (#402): address-based, same as wide _BitInt.
         // rd already holds the address (rs_addr); no value load needed.
-        if (rd != rs_addr) emit_mov3(vm, rd, rs_addr);
+        if (rd != rs_addr)
+            emit_mov3(vm, rd, rs_addr);
     } else if (is_flonum(ty)) {
         emit_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr);
     } else {
@@ -662,8 +692,10 @@ static Node *strip_index_casts(Node *node) {
 // (caller-saved), so a base address held in r_base across a call in
 // the index expression will be corrupted at runtime.
 bool expr_has_call(Node *node) {
-    if (!node) return false;
-    if (node->kind == ND_FUNCALL) return true;
+    if (!node)
+        return false;
+    if (node->kind == ND_FUNCALL)
+        return true;
     return expr_has_call(node->lhs) || expr_has_call(node->rhs) ||
            expr_has_call(node->cond) || expr_has_call(node->then) ||
            expr_has_call(node->els) || expr_has_call(node->body);
@@ -704,18 +736,18 @@ bool match_indexed_addr(VirtualMachine *vm, Node *addr, IndexedAddr *out) {
     if (!lhs || !rhs)
         return false;
     Node *index = NULL;
-    int scale = 0;
+    int   scale = 0;
     if (is_index_scale(rhs, &index, &scale)) {
-        out->base = lhs;
-        out->index = index;
-        out->scale = scale;
+        out->base   = lhs;
+        out->index  = index;
+        out->scale  = scale;
         out->offset = 0;
         return true;
     }
     if (is_index_scale(lhs, &index, &scale)) {
-        out->base = rhs;
-        out->index = index;
-        out->scale = scale;
+        out->base   = rhs;
+        out->index  = index;
+        out->scale  = scale;
         out->offset = 0;
         return true;
     }
@@ -730,14 +762,19 @@ static int indexed_load_op(Type *ty) {
     if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4))
         return LDR_INDEX_W;
     if (ty->kind == TY_ENUM) {
-        if (ty->size == 1) return LDR_INDEX_B;
-        if (ty->size == 2) return LDR_INDEX_H;
+        if (ty->size == 1)
+            return LDR_INDEX_B;
+        if (ty->size == 2)
+            return LDR_INDEX_H;
         return LDR_INDEX_D;
     }
     if (ty->kind == TY_BITINT && !is_wide_bitint(ty)) {
-        if (ty->size == 1) return LDR_INDEX_B;
-        if (ty->size == 2) return LDR_INDEX_H;
-        if (ty->size == 4) return LDR_INDEX_W;
+        if (ty->size == 1)
+            return LDR_INDEX_B;
+        if (ty->size == 2)
+            return LDR_INDEX_H;
+        if (ty->size == 4)
+            return LDR_INDEX_W;
         return LDR_INDEX_D;
     }
     if (ty->kind == TY_FLOAT)
@@ -755,14 +792,19 @@ static int indexed_store_op(Type *ty) {
     if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4))
         return STR_INDEX_W;
     if (ty->kind == TY_ENUM) {
-        if (ty->size == 1) return STR_INDEX_B;
-        if (ty->size == 2) return STR_INDEX_H;
+        if (ty->size == 1)
+            return STR_INDEX_B;
+        if (ty->size == 2)
+            return STR_INDEX_H;
         return STR_INDEX_D;
     }
     if (ty->kind == TY_BITINT && !is_wide_bitint(ty)) {
-        if (ty->size == 1) return STR_INDEX_B;
-        if (ty->size == 2) return STR_INDEX_H;
-        if (ty->size == 4) return STR_INDEX_W;
+        if (ty->size == 1)
+            return STR_INDEX_B;
+        if (ty->size == 2)
+            return STR_INDEX_H;
+        if (ty->size == 4)
+            return STR_INDEX_W;
         return STR_INDEX_D;
     }
     if (ty->kind == TY_FLOAT)
@@ -779,17 +821,22 @@ static int indexed_store_op(Type *ty) {
 // in a 64-bit register), and match_indexed_addr strips the widening cast that
 // would otherwise zero-extend — i.e. truncate — the value before it is used as
 // a byte offset. Re-apply that zero-extension here. Signed indices are
-// sign-correct straight from their loads/arithmetic, so they need no fixup. (#581)
+// sign-correct straight from their loads/arithmetic, so they need no fixup.
+// (#581)
 static void emit_index_normalize(VirtualMachine *vm, int reg, Type *ty) {
     if (!ty || !ty->is_unsigned || !is_integer(ty) || ty->kind == TY_BITINT)
         return;
-    if (ty->size == 1)      emit_rr(vm, ZX1, reg, reg);
-    else if (ty->size == 2) emit_rr(vm, ZX2, reg, reg);
-    else if (ty->size == 4) emit_rr(vm, ZX4, reg, reg);
+    if (ty->size == 1)
+        emit_rr(vm, ZX1, reg, reg);
+    else if (ty->size == 2)
+        emit_rr(vm, ZX2, reg, reg);
+    else if (ty->size == 4)
+        emit_rr(vm, ZX4, reg, reg);
     // size 8 (unsigned long / size_t): already full width.
 }
 
-bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int dest_reg) {
+bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node,
+                                   int dest_reg) {
     if (!node || node->kind != ND_DEREF || !node->lhs ||
         node->ty->kind == TY_ARRAY || node->ty->kind == TY_STRUCT ||
         node->ty->kind == TY_UNION || node->ty->kind == TY_COMPLEX ||
@@ -822,13 +869,19 @@ bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int dest_reg)
                 emit_rr(vm, ZX4, dest_reg, dest_reg);
         } else if (node->ty->kind == TY_BITINT) {
             if (node->ty->is_unsigned) {
-                if (node->ty->size == 1) emit_rr(vm, ZX1, dest_reg, dest_reg);
-                else if (node->ty->size == 2) emit_rr(vm, ZX2, dest_reg, dest_reg);
-                else if (node->ty->size == 4) emit_rr(vm, ZX4, dest_reg, dest_reg);
+                if (node->ty->size == 1)
+                    emit_rr(vm, ZX1, dest_reg, dest_reg);
+                else if (node->ty->size == 2)
+                    emit_rr(vm, ZX2, dest_reg, dest_reg);
+                else if (node->ty->size == 4)
+                    emit_rr(vm, ZX4, dest_reg, dest_reg);
             } else {
-                if (node->ty->size == 1) emit_rr(vm, SX1, dest_reg, dest_reg);
-                else if (node->ty->size == 2) emit_rr(vm, SX2, dest_reg, dest_reg);
-                else if (node->ty->size == 4) emit_rr(vm, SX4, dest_reg, dest_reg);
+                if (node->ty->size == 1)
+                    emit_rr(vm, SX1, dest_reg, dest_reg);
+                else if (node->ty->size == 2)
+                    emit_rr(vm, SX2, dest_reg, dest_reg);
+                else if (node->ty->size == 4)
+                    emit_rr(vm, SX4, dest_reg, dest_reg);
             }
             emit_bitint_trunc(vm, node->ty, dest_reg);
         }
@@ -839,10 +892,10 @@ bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node, int dest_reg)
 }
 
 bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *ty,
-                                           int value_reg) {
-    if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs ||
-        ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_COMPLEX ||
-        is_wide_bitint(ty) || is_decimal(ty)) // #402: address-based
+                                    int value_reg) {
+    if (!lhs || lhs->kind != ND_DEREF || !lhs->lhs || ty->kind == TY_STRUCT ||
+        ty->kind == TY_UNION || ty->kind == TY_COMPLEX || is_wide_bitint(ty) ||
+        is_decimal(ty)) // #402: address-based
         return false;
     IndexedAddr idx = {};
     if (!match_indexed_addr(vm, lhs->lhs, &idx))
@@ -855,8 +908,8 @@ bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *ty,
     int r_index = alloc_temp_reg();
     gen_expr(vm, idx.index, r_index);
     emit_index_normalize(vm, r_index, idx.index->ty);
-    emit_rrrs_i(vm, indexed_store_op(ty), value_reg, r_base, r_index,
-                idx.scale, idx.offset);
+    emit_rrrs_i(vm, indexed_store_op(ty), value_reg, r_base, r_index, idx.scale,
+                idx.offset);
     free_temp_reg(r_index);
     free_temp_reg(r_base);
     return true;
@@ -879,10 +932,12 @@ void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
     } else if (ty->kind == TY_ENUM) {
         if (ty->size == 1) {
             emit_ri(vm, LDR_LOCAL_B, rd, offset);
-            if (ty->is_unsigned) emit_rr(vm, ZX1, rd, rd);
+            if (ty->is_unsigned)
+                emit_rr(vm, ZX1, rd, rd);
         } else if (ty->size == 2) {
             emit_ri(vm, LDR_LOCAL_H, rd, offset);
-            if (ty->is_unsigned) emit_rr(vm, ZX2, rd, rd);
+            if (ty->is_unsigned)
+                emit_rr(vm, ZX2, rd, rd);
         } else {
             emit_ri(vm, LDR_LOCAL_D, rd, offset);
         }
@@ -910,7 +965,8 @@ void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
 }
 
 // Fused store to bp-relative local slot — replaces LEA3+STR
-void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val, long long offset) {
+void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
+                      long long offset) {
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
         emit_ri(vm, STR_LOCAL_B, rd_val, offset);
     } else if (ty->kind == TY_SHORT) {
@@ -918,14 +974,21 @@ void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val, long long offset
     } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_ri(vm, STR_LOCAL_W, rd_val, offset);
     } else if (ty->kind == TY_ENUM) {
-        if (ty->size == 1)       emit_ri(vm, STR_LOCAL_B, rd_val, offset);
-        else if (ty->size == 2)  emit_ri(vm, STR_LOCAL_H, rd_val, offset);
-        else                     emit_ri(vm, STR_LOCAL_D, rd_val, offset);
+        if (ty->size == 1)
+            emit_ri(vm, STR_LOCAL_B, rd_val, offset);
+        else if (ty->size == 2)
+            emit_ri(vm, STR_LOCAL_H, rd_val, offset);
+        else
+            emit_ri(vm, STR_LOCAL_D, rd_val, offset);
     } else if (ty->kind == TY_BITINT) {
-        if (ty->size == 1)       emit_ri(vm, STR_LOCAL_B, rd_val, offset);
-        else if (ty->size == 2)  emit_ri(vm, STR_LOCAL_H, rd_val, offset);
-        else if (ty->size == 4)  emit_ri(vm, STR_LOCAL_W, rd_val, offset);
-        else                     emit_ri(vm, STR_LOCAL_D, rd_val, offset);
+        if (ty->size == 1)
+            emit_ri(vm, STR_LOCAL_B, rd_val, offset);
+        else if (ty->size == 2)
+            emit_ri(vm, STR_LOCAL_H, rd_val, offset);
+        else if (ty->size == 4)
+            emit_ri(vm, STR_LOCAL_W, rd_val, offset);
+        else
+            emit_ri(vm, STR_LOCAL_D, rd_val, offset);
     } else if (ty->kind == TY_FLOAT) {
         emit_ri(vm, FSTR_LOCAL_F32, rd_val, offset);
     } else if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE) {
@@ -939,11 +1002,11 @@ void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg) {
     if (!ty)
         return;
     if (ty->kind == TY_BOOL || ty->kind == TY_CHAR) {
-        emit_rr(vm, ty->is_unsigned || ty->kind == TY_BOOL ? ZX1 : SX1, reg, reg);
+        emit_rr(vm, ty->is_unsigned || ty->kind == TY_BOOL ? ZX1 : SX1, reg,
+                reg);
     } else if (ty->kind == TY_SHORT) {
         emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, reg, reg);
-    } else if (ty->kind == TY_INT ||
-               (ty->kind == TY_ENUM && ty->size == 4)) {
+    } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
     } else if (ty->kind == TY_BITINT) {
         if (ty->size == 1)
@@ -1046,7 +1109,8 @@ void emit_flush_fp_promoted_locals(VirtualMachine *vm) {
         if (!vm->compiler.fp_promoted_dirty[i])
             continue;
         Obj *var = vm->compiler.fp_promoted_locals[i];
-        emit_local_store(vm, var->ty, vm->compiler.fp_promoted_regs[i], var->offset);
+        emit_local_store(vm, var->ty, vm->compiler.fp_promoted_regs[i],
+                         var->offset);
         vm->compiler.fp_promoted_dirty[i] = false;
     }
 }
@@ -1080,7 +1144,8 @@ void emit_init_fp_promoted_params(VirtualMachine *vm) {
 // through a *different* member of the same union is legal punning, not a
 // bug -- so this emits CHKT3 in "clear" mode instead of "stamp" mode,
 // erasing rather than establishing effective-type info for the range.
-void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr, bool dangling_check) {
+void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
+                   bool dangling_check) {
     if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     // #983: see emit_load_safety_checks' comment on dangling_check gating
@@ -1088,7 +1153,8 @@ void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr, bool d
     if (dangling_check && (vm->flags & CCCC_BOUNDS_CHECKS))
         emit_rri(vm, CHKD, rs_addr, 0, (long long)ty->size);
     if (vm->flags & CCCC_TYPE_CHECKS) {
-        int mode = vm->compiler.in_union_member_access ? CHKT3_MODE_CLEAR : CHKT3_MODE_STAMP;
+        int mode = vm->compiler.in_union_member_access ? CHKT3_MODE_CLEAR
+                                                       : CHKT3_MODE_STAMP;
         emit_rri(vm, CHKT3, rs_addr, mode,
                  ((long long)ty->size << 8) | (long long)ty->kind);
     }
@@ -1099,9 +1165,12 @@ void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr, bool d
     } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
         emit_rr(vm, STR_W, rd_val, rs_addr);
     } else if (ty->kind == TY_ENUM) {
-        if (ty->size == 1)       emit_rr(vm, STR_B, rd_val, rs_addr);
-        else if (ty->size == 2)  emit_rr(vm, STR_H, rd_val, rs_addr);
-        else                     emit_rr(vm, STR_D, rd_val, rs_addr);
+        if (ty->size == 1)
+            emit_rr(vm, STR_B, rd_val, rs_addr);
+        else if (ty->size == 2)
+            emit_rr(vm, STR_H, rd_val, rs_addr);
+        else
+            emit_rr(vm, STR_D, rd_val, rs_addr);
     } else if (ty->kind == TY_BITINT) {
         if (is_wide_bitint(ty)) {
             // rd_val holds the source address; rs_addr is the destination.
@@ -1143,7 +1212,7 @@ void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg) {
     if (ty->bit_width >= 64)
         return;
     int shift = 64 - ty->bit_width;
-    int tmp = alloc_temp_reg();
+    int tmp   = alloc_temp_reg();
     emit_li3(vm, tmp, shift);
     emit_rrr(vm, SHL3, reg, reg, tmp);
     emit_rrr(vm, ty->is_unsigned ? USHR3 : SHR3, reg, reg, tmp);
@@ -1154,9 +1223,10 @@ void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg) {
 Pc emit_jz3(VirtualMachine *vm, int rs) {
     emit(vm, JZ3);
     emit_word(vm, ENCODE_R(rs));
-    Pc patch = emit_word_ptr(vm);
+    Pc patch            = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
-    // Branch creates a control-flow split; invalidate restrict cache for the fall-through path.
+    // Branch creates a control-flow split; invalidate restrict cache for the
+    // fall-through path.
     restrict_cache_invalidate_all(vm);
     return patch;
 }
@@ -1165,9 +1235,10 @@ Pc emit_jz3(VirtualMachine *vm, int rs) {
 Pc emit_jnz3(VirtualMachine *vm, int rs) {
     emit(vm, JNZ3);
     emit_word(vm, ENCODE_R(rs));
-    Pc patch = emit_word_ptr(vm);
+    Pc patch            = emit_word_ptr(vm);
     vm->text_seg[patch] = 0;
-    // Branch creates a control-flow split; invalidate restrict cache for the fall-through path.
+    // Branch creates a control-flow split; invalidate restrict cache for the
+    // fall-through path.
     restrict_cache_invalidate_all(vm);
     return patch;
 }
@@ -1175,11 +1246,11 @@ Pc emit_jnz3(VirtualMachine *vm, int rs) {
 static void add_patch_to_list(PatchList *list, Pc patch) {
     if (list->len == list->cap) {
         int new_cap = list->cap ? list->cap * 2 : 16;
-        Pc *items = realloc(list->items, sizeof(Pc) * new_cap);
+        Pc *items   = realloc(list->items, sizeof(Pc) * new_cap);
         if (!items)
             error("out of memory");
         list->items = items;
-        list->cap = new_cap;
+        list->cap   = new_cap;
     }
     list->items[list->len++] = patch;
 }
@@ -1190,14 +1261,14 @@ static void add_case_patch(SwitchCasePatch *entry, Pc patch) {
         Pc *patches = realloc(entry->patches, sizeof(Pc) * new_cap);
         if (!patches)
             error("out of memory");
-        entry->patches = patches;
+        entry->patches     = patches;
         entry->cap_patches = new_cap;
     }
     entry->patches[entry->num_patches++] = patch;
 }
 
 SwitchCasePatch *find_switch_case(SwitchCasePatch *cases, int num_cases,
-                                         Node *node) {
+                                  Node *node) {
     for (int i = 0; i < num_cases; i++)
         if (cases[i].node == node)
             return &cases[i];
@@ -1215,14 +1286,14 @@ static int compare_switch_cases(const void *a, const void *b) {
 }
 
 SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
-                                             long *min_case, long *max_case,
-                                             long *covered_values) {
-    int cap = 16;
+                                      long *min_case, long *max_case,
+                                      long *covered_values) {
+    int              cap   = 16;
     SwitchCasePatch *cases = calloc(cap, sizeof(SwitchCasePatch));
     if (!cases)
         error("out of memory");
 
-    *num_cases = 0;
+    *num_cases      = 0;
     *covered_values = 0;
     for (Node *n = node->case_next; n; n = n->case_next) {
         if (*num_cases == cap) {
@@ -1236,11 +1307,11 @@ SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
             cases = new_cases;
         }
 
-        long begin = n->begin;
-        long end = n->end;
-        cases[*num_cases].node = n;
-        cases[*num_cases].begin = begin;
-        cases[*num_cases].end = end;
+        long begin                    = n->begin;
+        long end                      = n->end;
+        cases[*num_cases].node        = n;
+        cases[*num_cases].begin       = begin;
+        cases[*num_cases].end         = end;
         cases[*num_cases].table_entry = CCCC_INVALID_PC;
 
         if (*num_cases == 0 || begin < *min_case)
@@ -1264,8 +1335,8 @@ void free_switch_cases(SwitchCasePatch *cases, int num_cases) {
 }
 
 void emit_sparse_switch_tree(VirtualMachine *vm, SwitchCasePatch *cases, int lo,
-                                    int hi, int r_val, int r_cmp,
-                                    PatchList *fail_patches) {
+                             int hi, int r_val, int r_cmp,
+                             PatchList *fail_patches) {
     if (lo > hi) {
         emit(vm, JMP);
         add_patch_to_list(fail_patches, emit_word_ptr(vm));
@@ -1297,4 +1368,3 @@ void emit_pop3(VirtualMachine *vm, int rd) {
     emit(vm, POP3);
     emit_word(vm, ENCODE_R(rd));
 }
-

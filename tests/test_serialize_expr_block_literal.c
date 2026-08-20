@@ -11,7 +11,9 @@
 // stack-descriptor construction (ND_BLOCK_LITERAL, codegen.c) exactly.
 
 int main(void) {
-    int a = 21;
-    int (^add)(int) = ^(int x) { return x + a; };
+    int a           = 21;
+    int (^add)(int) = ^(int x) {
+      return x + a;
+    };
     return add(21);
 }

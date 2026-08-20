@@ -8,8 +8,7 @@ void set_value(int *p) {
     return (*p = 42);
 }
 
-int fallthrough(void) {
-}
+int fallthrough(void) {}
 
 int main(void) {
     int value = 0;

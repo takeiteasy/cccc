@@ -3,9 +3,8 @@
 // and accessible in build mode.
 // Note: 'BuildTarget' is a reserved name in building.h - use a distinct name.
 
-[[cccc::build]]
-enum MyBuildKind {
-    KIND_NATIVE = 0,
+[[cccc::build]] enum MyBuildKind {
+    KIND_NATIVE   = 0,
     KIND_BYTECODE = 1,
 };
 

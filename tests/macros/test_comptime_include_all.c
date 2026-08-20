@@ -14,7 +14,8 @@ int glob_struct_nonempty(void) {
 [[cccc::comptime]]
 void generate_result(void) {
     Obj *fn = MakeFunction("result", GetType("int"));
-    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(glob_struct_nonempty() ? 42 : 1)));
+    FunctionSetBody(
+        fn, MakeReturn(MakeIntLiteral(glob_struct_nonempty() ? 42 : 1)));
 }
 
 generate_result();

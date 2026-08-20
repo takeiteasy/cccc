@@ -6,13 +6,15 @@
 // (legal to form, same as the scalar case) must still trap when a struct
 // assignment dereferences it.
 #include <stdlib.h>
-typedef struct { int x, y; } Pair;
+typedef struct {
+    int x, y;
+} Pair;
 int main(void) {
-    Pair *p = malloc(2 * sizeof(Pair));   // valid indices 0..1
+    Pair *p = malloc(2 * sizeof(Pair)); // valid indices 0..1
     if (!p)
         return 255;
     Pair src = {1, 2};
-    p[2] = src;   // exactly one past the end -- struct MCPY deref must trap
+    p[2]     = src; // exactly one past the end -- struct MCPY deref must trap
     free(p);
     return 42;
 }

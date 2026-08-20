@@ -3,5 +3,9 @@
 // CCCC_EXPECT_STDOUT: __attribute__\(\(packed\)\) struct S
 // CCCC_REJECT_STDOUT: \[\[nodiscard\]\]
 @nodiscard int f(void);
-@packed struct S { int x; };
-int main(void) { return 42; }
+@packed struct S {
+    int x;
+};
+int main(void) {
+    return 42;
+}

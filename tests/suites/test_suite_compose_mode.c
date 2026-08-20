@@ -3,7 +3,8 @@
 // Source tests: test_mode_compose, test_comptime_compose_mode.
 
 // [from test_mode_compose.c]
-// Both __CCCC_TEST_MODE__ and __CCCC_BUILD_MODE__ must be defined in compose mode.
+// Both __CCCC_TEST_MODE__ and __CCCC_BUILD_MODE__ must be defined in compose
+// mode.
 #pragma cccc suite begin "compose_mode"
 
 [[cccc::test]]

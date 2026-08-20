@@ -4,8 +4,8 @@
 // out-of-bounds access does in test_checked_pointers_opt_out_default.c.
 
 int main(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
     s[n] = 'x'; // terminator slot, non-null -- no check without the flag
     return 42;
 }

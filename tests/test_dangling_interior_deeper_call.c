@@ -18,9 +18,9 @@ int *get_local(int i) {
 }
 
 void use(int *p) {
-    int pad[8]; // match get_local's frame depth to defeat the range check
+    int pad[8];  // match get_local's frame depth to defeat the range check
     pad[0] = 0;
-    int y = *p; // NOT caught by #670/#673 alone; caught by #675.
+    int y  = *p; // NOT caught by #670/#673 alone; caught by #675.
     (void)y;
     (void)pad;
 }

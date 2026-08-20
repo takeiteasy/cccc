@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --testing -O1
-// CCCC_MATRIX_SKIP: CALLT tail-call codegen requires -O1; the per-pass matrix forces -O0
-// Tests for __builtin_return_address interaction with tail calls (CALLT).
+// CCCC_MATRIX_SKIP: CALLT tail-call codegen requires -O1; the per-pass matrix
+// forces -O0 Tests for __builtin_return_address interaction with tail calls
+// (CALLT).
 //
 // CALLT unwinds the intermediate frame before jumping to the callee.
 // The callee therefore sees only ONE frame on the stack above it — the
@@ -27,15 +28,27 @@
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-static void *ra_capture(void)        { return __builtin_return_address(0); }
-static void *ra_capture_level1(void) { return __builtin_return_address(1); }
-static void *ra_capture_level2(void) { return __builtin_return_address(2); }
+static void *ra_capture(void) {
+    return __builtin_return_address(0);
+}
+static void *ra_capture_level1(void) {
+    return __builtin_return_address(1);
+}
+static void *ra_capture_level2(void) {
+    return __builtin_return_address(2);
+}
 
 // These are the tail wrappers.  With -O1 each return statement is compiled
 // as a CALLT — the wrapper frame is unbound before the callee runs.
-static void *tail_wrap_ra0(void)  { return ra_capture(); }
-static void *tail_wrap_ra1(void)  { return ra_capture_level1(); }
-static void *tail_wrap_ra2(void)  { return ra_capture_level2(); }
+static void *tail_wrap_ra0(void) {
+    return ra_capture();
+}
+static void *tail_wrap_ra1(void) {
+    return ra_capture_level1();
+}
+static void *tail_wrap_ra2(void) {
+    return ra_capture_level2();
+}
 
 // ─── Level-0 tests ────────────────────────────────────────────────────────
 
@@ -56,8 +69,8 @@ void test_callt_ra_level0_equals_direct_to_same_site(void) {
     // We use two separate call sites and verify that:
     //   - both are nonzero
     //   - they differ (different call sites produce different return addresses)
-    void *ra1 = tail_wrap_ra0();   // call site A
-    void *ra2 = tail_wrap_ra0();   // call site B
+    void *ra1 = tail_wrap_ra0(); // call site A
+    void *ra2 = tail_wrap_ra0(); // call site B
     AssertNotNull(ra1);
     AssertNotNull(ra2);
     AssertNeq((long long)ra1, (long long)ra2);

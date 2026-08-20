@@ -6,7 +6,9 @@
 
 static int ran = 0;
 
-static __attribute__((constructor)) void init(void) { ran = 1; }
+static __attribute__((constructor)) void init(void) {
+    ran = 1;
+}
 
 int main(void) {
     return ran ? 42 : 1;

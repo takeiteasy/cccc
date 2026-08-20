@@ -29,9 +29,10 @@ struct cccc_guest_statfs {
     unsigned int  f_flags;
 };
 
-static void copy_statfs_fields(const struct statfs *host_buf, long long guest_ptr) {
+static void copy_statfs_fields(const struct statfs *host_buf,
+                               long long            guest_ptr) {
     struct cccc_guest_statfs *g = (struct cccc_guest_statfs *)(void *)guest_ptr;
-    g->f_bsize  = (unsigned int)host_buf->f_bsize;
+    g->f_bsize                  = (unsigned int)host_buf->f_bsize;
 #ifdef __linux__
     // glibc's struct statfs has f_frsize, not f_iosize; closest analog.
     g->f_iosize = (unsigned int)host_buf->f_frsize;
@@ -48,15 +49,17 @@ static void copy_statfs_fields(const struct statfs *host_buf, long long guest_pt
 
 static long long wrap_statfs(long long path, long long buf) {
     struct statfs host_buf;
-    int rc = statfs((const char *)path, &host_buf);
-    if (rc == 0 && buf) copy_statfs_fields(&host_buf, buf);
+    int           rc = statfs((const char *)path, &host_buf);
+    if (rc == 0 && buf)
+        copy_statfs_fields(&host_buf, buf);
     return rc;
 }
 
 static long long wrap_fstatfs(long long fd, long long buf) {
     struct statfs host_buf;
-    int rc = fstatfs((int)fd, &host_buf);
-    if (rc == 0 && buf) copy_statfs_fields(&host_buf, buf);
+    int           rc = fstatfs((int)fd, &host_buf);
+    if (rc == 0 && buf)
+        copy_statfs_fields(&host_buf, buf);
     return rc;
 }
 
@@ -79,8 +82,10 @@ struct cccc_guest_statvfs {
     unsigned long f_namemax;
 };
 
-static void copy_statvfs_fields(const struct statvfs *host_buf, long long guest_ptr) {
-    struct cccc_guest_statvfs *g = (struct cccc_guest_statvfs *)(void *)guest_ptr;
+static void copy_statvfs_fields(const struct statvfs *host_buf,
+                                long long             guest_ptr) {
+    struct cccc_guest_statvfs *g =
+        (struct cccc_guest_statvfs *)(void *)guest_ptr;
     g->f_bsize   = (unsigned long)host_buf->f_bsize;
     g->f_frsize  = (unsigned long)host_buf->f_frsize;
     g->f_blocks  = (unsigned long)host_buf->f_blocks;
@@ -96,25 +101,29 @@ static void copy_statvfs_fields(const struct statvfs *host_buf, long long guest_
 
 static long long wrap_statvfs(long long path, long long buf) {
     struct statvfs host_buf;
-    int rc = statvfs((const char *)path, &host_buf);
-    if (rc == 0 && buf) copy_statvfs_fields(&host_buf, buf);
+    int            rc = statvfs((const char *)path, &host_buf);
+    if (rc == 0 && buf)
+        copy_statvfs_fields(&host_buf, buf);
     return rc;
 }
 
 static long long wrap_fstatvfs(long long fd, long long buf) {
     struct statvfs host_buf;
-    int rc = fstatvfs((int)fd, &host_buf);
-    if (rc == 0 && buf) copy_statvfs_fields(&host_buf, buf);
+    int            rc = fstatvfs((int)fd, &host_buf);
+    if (rc == 0 && buf)
+        copy_statvfs_fields(&host_buf, buf);
     return rc;
 }
 
 void register_posix_statfs_functions(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "statfs",  (void*)wrap_statfs,  2, 0);
-    cc_register_cfunc(vm, "fstatfs", (void*)wrap_fstatfs, 2, 0);
-    cc_register_cfunc(vm, "statvfs",  (void*)wrap_statvfs,  2, 0);
-    cc_register_cfunc(vm, "fstatvfs", (void*)wrap_fstatvfs, 2, 0);
+    cc_register_cfunc(vm, "statfs", (void *)wrap_statfs, 2, 0);
+    cc_register_cfunc(vm, "fstatfs", (void *)wrap_fstatfs, 2, 0);
+    cc_register_cfunc(vm, "statvfs", (void *)wrap_statvfs, 2, 0);
+    cc_register_cfunc(vm, "fstatvfs", (void *)wrap_fstatvfs, 2, 0);
 }
 
 #else
-void register_posix_statfs_functions(VirtualMachine *vm) { (void)vm; }
+void register_posix_statfs_functions(VirtualMachine *vm) {
+    (void)vm;
+}
 #endif

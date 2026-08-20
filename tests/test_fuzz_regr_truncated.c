@@ -5,5 +5,6 @@
 // when equal() received a NULL Token pointer.
 
 int main() {
-    if (1) ret
+    if (1)
+        ret
 }

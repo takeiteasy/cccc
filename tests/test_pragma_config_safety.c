@@ -8,7 +8,7 @@
 #include "limits.h"
 
 int main() {
-    long long x = LLONG_MAX;
+    long long x      = LLONG_MAX;
     long long result = x + 1; // overflow, caught by the STANDARD preset
     return 42;
 }

@@ -9,10 +9,12 @@ int old_function(void) {
 int [[deprecated]] old_variable = 2;
 typedef int OldInt [[deprecated("use int")]];
 enum Values { OLD_VALUE [[deprecated]] = 3 };
-struct [[deprecated("use another struct")]] OldStruct { int value; };
+struct [[deprecated("use another struct")]] OldStruct {
+    int value;
+};
 
 int main(void) {
-    OldInt value = old_variable + OLD_VALUE;
-    struct OldStruct old = {36};
+    OldInt           value = old_variable + OLD_VALUE;
+    struct OldStruct old   = {36};
     return old_function() + value + old.value;
 }

@@ -36,8 +36,7 @@ int mutual_odd(int n) {
 
 [[cccc::comptime]]
 Node *mutual_add_four(Node *x) {
-    return MakeBinary(NK_ADD, x,
-                          MakeIntLiteral(mutual_even(4)));
+    return MakeBinary(NK_ADD, x, MakeIntLiteral(mutual_even(4)));
 }
 
 int main(void) {

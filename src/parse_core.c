@@ -31,9 +31,11 @@ int align_to(int n, int align) {
 // Return the TestFnRecord for this name if it is a negative test, else NULL.
 // A negative test has either error_pat or expect_compile_error set.
 TestFnRecord *find_neg_test_record(VirtualMachine *vm, const char *name) {
-    if (!name) return NULL;
+    if (!name)
+        return NULL;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
-        if ((r->error_pat || r->expect_compile_error) && strcmp(r->name, name) == 0)
+        if ((r->error_pat || r->expect_compile_error) &&
+            strcmp(r->name, name) == 0)
             return r;
     return NULL;
 }
@@ -45,7 +47,7 @@ int align_down(int n, int align) {
 void enter_scope(VirtualMachine *vm) {
     Scope *sc = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
     memset(sc, 0, sizeof(Scope));
-    sc->next = vm->compiler.scope;
+    sc->next           = vm->compiler.scope;
     vm->compiler.scope = sc;
 }
 
@@ -62,7 +64,7 @@ char *obj_display_name(Obj *var) {
 }
 
 void warn_deprecated_use(VirtualMachine *vm, Token *tok, char *name,
-                                char *message) {
+                         char *message) {
     if (message)
         warn_tok(vm, tok, CCCC_WARN_DEPRECATED, "'%s' is deprecated: %s", name,
                  message);
@@ -71,8 +73,8 @@ void warn_deprecated_use(VirtualMachine *vm, Token *tok, char *name,
 }
 
 Type *type_after_deprecated_use(VirtualMachine *vm, Type *ty) {
-    Type *copy = copy_type(vm, ty);
-    copy->is_deprecated = false;
+    Type *copy           = copy_type(vm, ty);
+    copy->is_deprecated  = false;
     copy->deprecated_msg = NULL;
     return copy;
 }
@@ -119,9 +121,9 @@ void warn_if_shadowing(VirtualMachine *vm, Token *tok) {
         return;
 
     for (Scope *sc = vm->compiler.scope->next; sc; sc = sc->next) {
-        VarScopeNode *node = sc->var_map.buckets
-                                 ? hashmap_get2(&sc->var_map, tok->loc, tok->len)
-                                 : NULL;
+        VarScopeNode *node =
+            sc->var_map.buckets ? hashmap_get2(&sc->var_map, tok->loc, tok->len)
+                                : NULL;
         if (!node) {
             for (node = sc->vars; node; node = node->next)
                 if (node->name_len == tok->len &&
@@ -167,16 +169,16 @@ MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok) {
     return NULL;
 }
 
-void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list, Token *name_tok,
-                               Node *args, int arg_count) {
+void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list,
+                        Token *name_tok, Node *args, int arg_count) {
     if (!list || !name_tok)
         return;
     CustomAttrUse *use =
         arena_alloc(&vm->compiler.parser_arena, sizeof(CustomAttrUse));
     memset(use, 0, sizeof(CustomAttrUse));
-    use->name = arena_strndup(vm, name_tok->loc, name_tok->len);
-    use->tok = name_tok;
-    use->args = args;
+    use->name      = arena_strndup(vm, name_tok->loc, name_tok->len);
+    use->tok       = name_tok;
+    use->args      = args;
     use->arg_count = arg_count;
 
     if (!*list) {
@@ -190,7 +192,7 @@ void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list, Token *name_to
 }
 
 static Token *skip_paren_group(VirtualMachine *vm, Token *tok) {
-    tok = skip(vm, tok, "(");
+    tok       = skip(vm, tok, "(");
     int depth = 1;
     while (tok && tok->kind != TK_EOF && depth > 0) {
         if (equal(tok, "("))
@@ -237,8 +239,8 @@ bool is_decl_start(VirtualMachine *vm, Token *tok) {
 }
 
 Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
-                                     int *arg_count) {
-    *args = NULL;
+                              int *arg_count) {
+    *args      = NULL;
     *arg_count = 0;
     if (!equal(tok, "("))
         return tok;
@@ -246,9 +248,9 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
     if (vm->compiler.in_type_lookahead)
         return skip_paren_group(vm, tok);
 
-    tok = tok->next;
-    Node head = {};
-    Node *cur = &head;
+    tok        = tok->next;
+    Node  head = {};
+    Node *cur  = &head;
     while (!equal(tok, ")")) {
         if (cur != &head)
             tok = skip(vm, tok, ",");
@@ -285,9 +287,9 @@ static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
         memset(target, 0, sizeof(AttrTarget));
         target->kind = kind;
         target->name = name;
-        target->ty = ty;
-        target->obj = obj;
-        target->tok = tok ? tok : use->tok;
+        target->ty   = ty;
+        target->obj  = obj;
+        target->tok  = tok ? tok : use->tok;
         cc_execute_attribute_macro(vm, pm, use->tok, target, use->args,
                                    use->arg_count);
     }
@@ -298,30 +300,34 @@ bool has_custom_attrs(Type *ty, VarAttr *attr) {
 }
 
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
-                                  AttrTargetKind kind, char *name,
-                                  Type *target_ty, Obj *obj, Token *tok) {
+                           AttrTargetKind kind, char *name, Type *target_ty,
+                           Obj *obj, Token *tok) {
     if (attr && attr->custom_attrs)
         run_custom_attrs(vm, attr->custom_attrs, kind, name, target_ty, obj,
                          tok);
     if (ty && ty->custom_attrs)
-        run_custom_attrs(vm, ty->custom_attrs, kind, name, target_ty, obj,
-                         tok);
+        run_custom_attrs(vm, ty->custom_attrs, kind, name, target_ty, obj, tok);
 }
 
-// Ticket #619: generic programmatic attribute application for AST-generated Objs.
-// Parses attr_text as though it appeared in [[attr_text]] in source and applies it to fn.
-// Handles mode attrs (test/build/build_target/…), standard C23/GNU attrs, and custom @attrs.
-void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Token *site_tok) {
-    if (!vm || !fn || !fn->name || !attr_text) return;
+// Ticket #619: generic programmatic attribute application for AST-generated
+// Objs. Parses attr_text as though it appeared in [[attr_text]] in source and
+// applies it to fn. Handles mode attrs (test/build/build_target/…), standard
+// C23/GNU attrs, and custom @attrs.
+void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
+                         Token *site_tok) {
+    if (!vm || !fn || !fn->name || !attr_text)
+        return;
 
-    // cccc::comptime cannot be applied retroactively — the fn is already compiled.
+    // cccc::comptime cannot be applied retroactively — the fn is already
+    // compiled.
     if (strstr(attr_text, "comptime"))
-        error_tok(vm, site_tok, "cccc::comptime cannot be applied via AddAttribute");
+        error_tok(vm, site_tok,
+                  "cccc::comptime cannot be applied via AddAttribute");
 
-    // Synthesize "[[attr_text]]\nvoid fn_name(void);\n" so the mode-attr scanner
-    // can find the function name by looking ahead past "]]\n".
+    // Synthesize "[[attr_text]]\nvoid fn_name(void);\n" so the mode-attr
+    // scanner can find the function name by looking ahead past "]]\n".
     size_t buf_len = strlen(attr_text) + strlen(fn->name) + 32;
-    char *buf = malloc(buf_len);
+    char  *buf     = malloc(buf_len);
     snprintf(buf, buf_len, "[[%s]]\nvoid %s(void);\n", attr_text, fn->name);
     Token *toks = tokenize_string(vm, "<add-attribute>", buf);
     free(buf);
@@ -329,30 +335,32 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Tok
     // Fix up error locations to point at the macro call site.
     if (site_tok) {
         for (Token *t = toks; t && t->kind != TK_EOF; t = t->next) {
-            t->file = site_tok->file;
+            t->file    = site_tok->file;
             t->line_no = site_tok->line_no;
         }
     }
 
     // Try mode attributes (test/build/build_target/test_setup/test_teardown).
-    // emit_scan=true: register records but do NOT re-extract as a comptime function.
+    // emit_scan=true: register records but do NOT re-extract as a comptime
+    // function.
     Token *tok_ptr = toks;
     if (try_extract_attr_macro(vm, &tok_ptr, /*emit_scan=*/true))
         return;
 
     // Try standard C23 / GNU attributes.  Both parsers fill a VarAttr and
-    // advance past the attribute syntax; custom @attrs land in VarAttr.custom_attrs.
-    VarAttr attr = {0};
-    Token *after = toks;
+    // advance past the attribute syntax; custom @attrs land in
+    // VarAttr.custom_attrs.
+    VarAttr attr  = {0};
+    Token  *after = toks;
     if (equal(after, "[") && after->next && equal(after->next, "["))
         after = c23_attribute_list(vm, after, NULL, &attr);
     else if (equal(after, "__attribute__"))
         after = attribute_list(vm, after, NULL, &attr);
 
-    bool has_std = attr.is_maybe_unused || attr.is_deprecated || attr.is_noreturn ||
-                   attr.is_nodiscard || attr.is_pure || attr.is_func_const ||
-                   attr.format_style || attr.cleanup_fn || attr.align > 0 ||
-                   attr.fn_optimize_set;
+    bool has_std = attr.is_maybe_unused || attr.is_deprecated ||
+                   attr.is_noreturn || attr.is_nodiscard || attr.is_pure ||
+                   attr.is_func_const || attr.format_style || attr.cleanup_fn ||
+                   attr.align > 0 || attr.fn_optimize_set;
     bool has_custom = attr.custom_attrs != NULL;
 
     if (!has_std && !has_custom)
@@ -365,8 +373,8 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text, Tok
             fn->align = attr.align;
     }
     if (has_custom)
-        run_decl_custom_attrs(vm, NULL, &attr, ATTR_TARGET_FUNCTION,
-                              fn->name, fn->ty, fn, site_tok);
+        run_decl_custom_attrs(vm, NULL, &attr, ATTR_TARGET_FUNCTION, fn->name,
+                              fn->ty, fn, site_tok);
 }
 
 void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src) {
@@ -432,7 +440,8 @@ Type *find_tag_in_current_scope(VirtualMachine *vm, Token *tok) {
     return NULL;
 }
 
-VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name, int name_len) {
+VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name,
+                                    int name_len) {
     Scope *sc = vm->compiler.scope;
     if (!sc)
         return NULL;
@@ -451,63 +460,63 @@ Node *new_node(VirtualMachine *vm, NodeKind kind, Token *tok) {
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = kind;
-    node->tok = tok;
+    node->tok  = tok;
     return node;
 }
 
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
-                        Token *tok) {
+                 Token *tok) {
     Node *node = new_node(vm, kind, tok);
-    node->lhs = lhs;
-    node->rhs = rhs;
+    node->lhs  = lhs;
+    node->rhs  = rhs;
     return node;
 }
 
 Node *new_unary(VirtualMachine *vm, NodeKind kind, Node *expr, Token *tok) {
     Node *node = new_node(vm, kind, tok);
-    node->lhs = expr;
+    node->lhs  = expr;
     return node;
 }
 
 Node *new_num(VirtualMachine *vm, int64_t val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
-    node->val = val;
-    node->ty = ty_int;
+    node->val  = val;
+    node->ty   = ty_int;
     return node;
 }
 
 Node *new_long(VirtualMachine *vm, int64_t val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
-    node->val = val;
-    node->ty = ty_long;
+    node->val  = val;
+    node->ty   = ty_long;
     return node;
 }
 
 Node *new_ulong(VirtualMachine *vm, long val, Token *tok) {
     Node *node = new_node(vm, ND_NUM, tok);
-    node->val = val;
-    node->ty = ty_ulong;
+    node->val  = val;
+    node->ty   = ty_ulong;
     return node;
 }
 
 Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
-                              Token *tok) {
+                       Token *tok) {
     Node *node = new_node(vm, ND_COMPLEX, tok);
-    node->lhs = real;
-    node->rhs = imag;
-    node->ty = ty;
+    node->lhs  = real;
+    node->rhs  = imag;
+    node->ty   = ty;
     return node;
 }
 
 Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VAR, tok);
-    node->var = var;
+    node->var  = var;
     return node;
 }
 
 Node *new_vla_ptr(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VLA_PTR, tok);
-    node->var = var;
+    node->var  = var;
     return node;
 }
 
@@ -516,9 +525,9 @@ Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = ND_CAST;
-    node->tok = expr->tok;
-    node->lhs = expr;
-    node->ty = copy_type(vm, ty);
+    node->tok  = expr->tok;
+    node->lhs  = expr;
+    node->ty   = copy_type(vm, ty);
     return node;
 }
 
@@ -526,9 +535,9 @@ VarScope *push_scope(VirtualMachine *vm, char *name, int name_len) {
     VarScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));
     memset(node, 0, sizeof(VarScopeNode));
-    node->name = name;
-    node->name_len = name_len;
-    node->next = vm->compiler.scope->vars;
+    node->name               = name;
+    node->name_len           = name_len;
+    node->next               = vm->compiler.scope->vars;
     vm->compiler.scope->vars = node;
     hashmap_put2_borrowed(&vm->compiler.scope->var_map, name, name_len, node);
     return (VarScope *)node;
@@ -539,18 +548,18 @@ VarScope *push_scope(VirtualMachine *vm, char *name, int name_len) {
 // cccc.h). NULL is treated as "not from an include" (the synthetic-token
 // callers, if any are added later, should prefer always_emit instead).
 void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
-                             bool is_tag, Token *decl_tok) {
+                      bool is_tag, Token *decl_tok) {
     if (!ty || !name || name_len <= 0)
         return;
 
     TypeNameRecord *rec =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TypeNameRecord));
     memset(rec, 0, sizeof(TypeNameRecord));
-    rec->ty = ty;
-    rec->name = name;
+    rec->ty       = ty;
+    rec->name     = name;
     rec->name_len = name_len;
     rec->owner_fn = vm->compiler.current_fn;
-    rec->is_tag = is_tag;
+    rec->is_tag   = is_tag;
     // #896: a type declared in a file whose contents (directly or
     // transitively) use cccc-only routing syntax is never treated as
     // from_include -- serialize.c's native-backend re-emission filter
@@ -583,11 +592,12 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
     bool is_quote_pseudo_file = decl_tok && decl_tok->file &&
                                 decl_tok->file->name &&
                                 strcmp(decl_tok->file->name, "<quote>") == 0;
-    rec->from_include = decl_tok && decl_tok->file && !is_quote_pseudo_file &&
-                        !cc_file_is_command_line_input(vm, decl_tok->file->name) &&
-                        !cc_file_is_cccc_only(vm, decl_tok->file->name);
+    rec->from_include =
+        decl_tok && decl_tok->file && !is_quote_pseudo_file &&
+        !cc_file_is_command_line_input(vm, decl_tok->file->name) &&
+        !cc_file_is_cccc_only(vm, decl_tok->file->name);
     rec->file_path = decl_tok && decl_tok->file ? decl_tok->file->name : NULL;
-    rec->next = vm->compiler.type_names;
+    rec->next      = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
 
@@ -654,8 +664,8 @@ Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
                 Initializer *child = arena_alloc(&vm->compiler.parser_arena,
                                                  sizeof(Initializer));
                 memset(child, 0, sizeof(Initializer));
-                child->ty = mem->ty;
-                child->is_flexible = true;
+                child->ty                = mem->ty;
+                child->is_flexible       = true;
                 init->children[mem->idx] = child;
             } else {
                 init->children[mem->idx] = new_initializer(vm, mem->ty, false);
@@ -670,27 +680,28 @@ Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
 Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
-    var->name = name;
-    var->ty = ty;
+    var->name      = name;
+    var->ty        = ty;
     var->asm_label = ty->asm_label;
-    var->align = ty->align;
-    var->tok = ty->name;
+    var->align     = ty->align;
+    var->tok       = ty->name;
     var->display_name =
         ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : name;
-    var->is_maybe_unused = ty->is_maybe_unused;
-    var->is_deprecated = ty->is_deprecated;
-    var->is_noreturn = ty->is_noreturn;
-    var->is_pure = ty->is_pure;
-    var->is_func_const = ty->is_func_const;
+    var->is_maybe_unused   = ty->is_maybe_unused;
+    var->is_deprecated     = ty->is_deprecated;
+    var->is_noreturn       = ty->is_noreturn;
+    var->is_pure           = ty->is_pure;
+    var->is_func_const     = ty->is_func_const;
     var->fn_optimize_level = ty->fn_optimize_level;
-    var->fn_optimize_set = ty->fn_optimize_set;
-    var->deprecated_msg = ty->deprecated_msg;
-    var->is_constructor = ty->is_constructor;
-    var->is_destructor = ty->is_destructor;
-    var->init_priority = ty->init_priority;
+    var->fn_optimize_set   = ty->fn_optimize_set;
+    var->deprecated_msg    = ty->deprecated_msg;
+    var->is_constructor    = ty->is_constructor;
+    var->is_destructor     = ty->is_destructor;
+    var->init_priority     = ty->init_priority;
     if (var->is_constructor || var->is_destructor) {
-        // Reachable only via the attribute (gen() walks prog for is_constructor/
-        // is_destructor, not through any call site) — keep it live under DCE.
+        // Reachable only via the attribute (gen() walks prog for
+        // is_constructor/ is_destructor, not through any call site) — keep it
+        // live under DCE.
         var->is_live = true;
         var->is_root = true;
     }
@@ -705,27 +716,27 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     // resolved later by resolve_checked_bounds() -- it reads the still-
     // unresolved token spans straight off var->ty->checked_bounds_arg1/arg2
     // rather than needing its own copy here.
-    var->checked_kind = ty->checked_kind;
-    var->checked_bounds_form = ty->checked_bounds_form;
+    var->checked_kind                   = ty->checked_kind;
+    var->checked_bounds_form            = ty->checked_bounds_form;
     push_scope(vm, name, name_len)->var = var;
     return var;
 }
 
 Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     warn_if_shadowing(vm, ty->name);
-    Obj *var = new_var(vm, name, name_len, ty);
-    var->is_local = true;
+    Obj *var             = new_var(vm, name, name_len, ty);
+    var->is_local        = true;
     var->is_local_symbol = ty->name && name_len > 0;
-    var->next = vm->compiler.locals;
-    vm->compiler.locals = var;
+    var->next            = vm->compiler.locals;
+    vm->compiler.locals  = var;
     return var;
 }
 
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
-    Obj *var = new_var(vm, name, name_len, ty);
-    var->next = vm->compiler.globals;
-    var->is_static = true;
-    var->is_definition = true;
+    Obj *var             = new_var(vm, name, name_len, ty);
+    var->next            = vm->compiler.globals;
+    var->is_static       = true;
+    var->is_definition   = true;
     vm->compiler.globals = var;
     return var;
 }
@@ -752,16 +763,16 @@ bool node_has_side_effects(Node *n) {
     if (!n)
         return false;
     switch (n->kind) {
-    case ND_ASSIGN:
-    case ND_FUNCALL:
-    case ND_CAS:
-    case ND_EXCH:
-    case ND_ALOAD:
-    case ND_ASTORE:
-    case ND_STMT_EXPR: // GNU statement expression; may contain anything
-        return true;
-    default:
-        break;
+        case ND_ASSIGN:
+        case ND_FUNCALL:
+        case ND_CAS:
+        case ND_EXCH:
+        case ND_ALOAD:
+        case ND_ASTORE:
+        case ND_STMT_EXPR: // GNU statement expression; may contain anything
+            return true;
+        default:
+            break;
     }
     if (node_has_side_effects(n->lhs) || node_has_side_effects(n->rhs) ||
         node_has_side_effects(n->cond) || node_has_side_effects(n->then) ||
@@ -811,15 +822,16 @@ bool node_has_side_effects(Node *n) {
 // untouched) for CB_NONE/CB_UNKNOWN -- callers are expected to have already
 // skipped those forms via their own cheaper check, this is just a second
 // line of defense.
-static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty,
-                                  Node **out_lo, Node **out_hi) {
-    if (ty->checked_bounds_form == CB_NONE || ty->checked_bounds_form == CB_UNKNOWN)
+static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
+                                  Node **out_hi) {
+    if (ty->checked_bounds_form == CB_NONE ||
+        ty->checked_bounds_form == CB_UNKNOWN)
         return;
 
     Token *tok;
 
     if (ty->checked_bounds_form == CB_RANGE) {
-        tok = ty->checked_bounds_arg1;
+        tok      = ty->checked_bounds_arg1;
         Node *lo = assign(vm, &tok, tok);
         add_type(vm, lo);
         if (node_has_side_effects(lo))
@@ -827,7 +839,7 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty,
                       "checked-pointer bounds expression must not have side "
                       "effects -- it is re-evaluated at every access");
 
-        tok = ty->checked_bounds_arg2;
+        tok      = ty->checked_bounds_arg2;
         Node *hi = assign(vm, &tok, tok);
         add_type(vm, hi);
         if (node_has_side_effects(hi))
@@ -841,7 +853,7 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty,
     }
 
     // CB_COUNT / CB_BYTE_COUNT
-    tok = ty->checked_bounds_arg1;
+    tok     = ty->checked_bounds_arg1;
     Node *n = assign(vm, &tok, tok);
     add_type(vm, n);
     if (node_has_side_effects(n))
@@ -852,7 +864,8 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty,
 }
 
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
-    resolve_bounds_tokens(vm, var->ty, &var->checked_bounds_lo, &var->checked_bounds_hi);
+    resolve_bounds_tokens(vm, var->ty, &var->checked_bounds_lo,
+                          &var->checked_bounds_hi);
 }
 
 // Walks a resolved member-bounds template (see Member.checked_bounds_lo/hi's
@@ -870,16 +883,18 @@ void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
 // (compute_checked_bounds's ND_MEMBER substitution) extracts a bit-field's
 // value, and doing so would need to duplicate the bit-extraction codegen
 // path for no real benefit -- v1 chooses to reject, not to add that.
-static void check_member_bounds_template(VirtualMachine *vm, Node *n, Token *tok) {
+static void check_member_bounds_template(VirtualMachine *vm, Node *n,
+                                         Token *tok) {
     if (!n)
         return;
     if (n->kind == ND_VAR) {
         Obj *v = n->var;
         if (v->checked_self_member) {
             if (v->checked_self_member->is_bitfield)
-                error_tok(vm, tok,
-                          "a checked-pointer bounds expression cannot reference "
-                          "a bit-field member");
+                error_tok(
+                    vm, tok,
+                    "a checked-pointer bounds expression cannot reference "
+                    "a bit-field member");
         } else if (v->is_local) {
             error_tok(vm, tok,
                       "checked-pointer bounds on a struct member may only "
@@ -922,16 +937,17 @@ void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
         Obj *placeholder = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
         memset(placeholder, 0, sizeof(Obj));
         placeholder->name = arena_strndup(vm, mem->name->loc, mem->name->len);
-        placeholder->display_name = placeholder->name;
-        placeholder->ty = mem->ty;
-        placeholder->checked_self_member = mem;
+        placeholder->display_name                           = placeholder->name;
+        placeholder->ty                                     = mem->ty;
+        placeholder->checked_self_member                    = mem;
         push_scope(vm, mem->name->loc, mem->name->len)->var = placeholder;
     }
     for (Member *mem = members; mem; mem = mem->next) {
         if (!mem->name || mem->ty->checked_bounds_form == CB_NONE ||
             mem->ty->checked_bounds_form == CB_UNKNOWN)
             continue;
-        resolve_bounds_tokens(vm, mem->ty, &mem->checked_bounds_lo, &mem->checked_bounds_hi);
+        resolve_bounds_tokens(vm, mem->ty, &mem->checked_bounds_lo,
+                              &mem->checked_bounds_hi);
         check_member_bounds_template(vm, mem->checked_bounds_lo, mem->name);
         check_member_bounds_template(vm, mem->checked_bounds_hi, mem->name);
     }
@@ -944,17 +960,17 @@ void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
 Obj *new_private_func_obj(VirtualMachine *vm, const char *name, Type *ty) {
     Obj *var = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
     memset(var, 0, sizeof(Obj));
-    var->name = (char *)name;
-    var->display_name = (char *)name;
-    var->ty = ty;
-    var->is_function = true;
+    var->name          = (char *)name;
+    var->display_name  = (char *)name;
+    var->ty            = ty;
+    var->is_function   = true;
     var->is_definition = false;
     return var;
 }
 
 Obj *new_implicit_function(VirtualMachine *vm, Token *tok) {
-    Type *ty = func_type(vm, ty_int);
-    ty->is_variadic = true;
+    Type *ty           = func_type(vm, ty_int);
+    ty->is_variadic    = true;
 
     Scope *saved_scope = vm->compiler.scope;
     while (vm->compiler.scope->next)
@@ -962,10 +978,10 @@ Obj *new_implicit_function(VirtualMachine *vm, Token *tok) {
     Obj *fn = new_gvar(vm, arena_strndup(vm, tok->loc, tok->len), tok->len, ty);
     vm->compiler.scope = saved_scope;
 
-    fn->is_function = true;
-    fn->is_definition = false;
-    fn->is_static = false;
-    fn->is_implicit = true;
+    fn->is_function    = true;
+    fn->is_definition  = false;
+    fn->is_static      = false;
+    fn->is_implicit    = true;
     return fn;
 }
 
@@ -979,8 +995,8 @@ Obj *new_anon_gvar(VirtualMachine *vm, Type *ty) {
 }
 
 Obj *new_string_literal(VirtualMachine *vm, char *p, Type *ty) {
-    Obj *var = new_anon_gvar(vm, ty);
-    var->init_data = p;
+    Obj *var               = new_anon_gvar(vm, ty);
+    var->init_data         = p;
     var->is_string_literal = true;
     return var;
 }
@@ -1039,7 +1055,7 @@ Token *skip_to_decl_boundary(VirtualMachine *vm, Token *tok) {
             if (equal(tok, ";"))
                 return tok->next; // End of declaration
             if (equal(tok, "{"))
-                return tok; // Function body start
+                return tok;       // Function body start
         }
 
         tok = tok->next;
@@ -1059,11 +1075,12 @@ Type *find_typedef(VirtualMachine *vm, Token *tok) {
 void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty) {
     TagScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
-    node->name = tok->loc;
-    node->name_len = tok->len;
-    node->ty = ty;
-    node->next = vm->compiler.scope->tags;
+    node->name               = tok->loc;
+    node->name_len           = tok->len;
+    node->ty                 = ty;
+    node->next               = vm->compiler.scope->tags;
     vm->compiler.scope->tags = node;
-    hashmap_put2_borrowed(&vm->compiler.scope->tag_map, tok->loc, tok->len, node);
+    hashmap_put2_borrowed(&vm->compiler.scope->tag_map, tok->loc, tok->len,
+                          node);
     record_type_name(vm, ty, tok->loc, tok->len, true, tok);
 }

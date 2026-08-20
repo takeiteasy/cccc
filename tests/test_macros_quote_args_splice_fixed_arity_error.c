@@ -13,7 +13,7 @@ int add2(int a, int b) {
 // Too few: splice 2 nodes into a 3-parameter callee.
 [[cccc::comptime]]
 Node *too_few_splice(Node *a, Node *b) {
-    Node *chain = __builtin_node_list((Node*[]){ a, b }, 2);
+    Node *chain = __builtin_node_list((Node *[]){a, b}, 2);
     return __builtin_quote("add3($@1)", chain);
 }
 

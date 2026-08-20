@@ -5,7 +5,7 @@
 // contain a .c4d path, confirming the bytecode dynamic module pipeline is
 // used instead of the native cc -shared toolchain.
 
-[[cccc::build_target(kind=bytecode)]]
+[[cccc::build_target(kind = bytecode)]]
 BuildTarget *bc_plugin(Builder *ctx) {
     BuildTarget *t = DynamicLib(ctx, "plugin");
     AddSource(t, "tests/fixtures/build_bytecode_libs_demo/src/plugin.c");

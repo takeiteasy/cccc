@@ -5,14 +5,15 @@
 // correctly propagate the innermost conditional assignment out to the
 // outermost exit.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 3; j++) {
             for (int k = 0; k < 3; k++) {
-                if (i == 1 && j == 1 && k == 1) p = &x;
+                if (i == 1 && j == 1 && k == 1)
+                    p = &x;
             }
         }
     }

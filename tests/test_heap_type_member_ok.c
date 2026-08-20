@@ -10,15 +10,15 @@
 #include <stdlib.h>
 
 struct S {
-    int a;
+    int   a;
     float b;
 };
 
 int main(void) {
     struct S *s = malloc(sizeof(struct S));
-    s->a = 20;    // stamps s->a's own byte range (offset 0) as int
-    s->b = 22.0f; // stamps s->b's own byte range (offset 4) as float
-    int result = s->a + (int)s->b;
+    s->a        = 20;    // stamps s->a's own byte range (offset 0) as int
+    s->b        = 22.0f; // stamps s->b's own byte range (offset 4) as float
+    int result  = s->a + (int)s->b;
     free(s);
     return result;
 }

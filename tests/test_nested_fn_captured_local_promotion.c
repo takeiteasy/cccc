@@ -27,10 +27,12 @@
 [[cccc::test]]
 void test_nested_fn_write_int_visible_to_parent(void) {
     int s = 1;
-    s = s + 1; // pad score: several parent-scope uses of s
-    s = s + 1;
-    s = s + 1;
-    void set_to_42(void) { s = 42; }
+    s     = s + 1; // pad score: several parent-scope uses of s
+    s     = s + 1;
+    s     = s + 1;
+    void set_to_42(void) {
+        s = 42;
+    }
     set_to_42();
     AssertEq(s, 42);
 }
@@ -43,9 +45,11 @@ void test_nested_fn_write_int_visible_to_parent(void) {
 
 [[cccc::test]]
 void test_nested_fn_read_int_sees_parent_write(void) {
-    int s = 0;
+    int s    = 0;
     int seen = 0;
-    void capture(void) { seen = s; }
+    void capture(void) {
+        seen = s;
+    }
     s = 1;
     s = s + 1;
     s = s + 1;
@@ -55,17 +59,19 @@ void test_nested_fn_read_int_sees_parent_write(void) {
 }
 
 // ---------------------------------------------------------------------------
-// FP local: exercises prepare_fp_local_promotion / is_fp_promotion_candidate_ok,
-// the float-register counterpart of the same bug.
+// FP local: exercises prepare_fp_local_promotion /
+// is_fp_promotion_candidate_ok, the float-register counterpart of the same bug.
 // ---------------------------------------------------------------------------
 
 [[cccc::test]]
 void test_nested_fn_write_double_visible_to_parent(void) {
     double d = 1.0;
-    d = d + 1.0;
-    d = d + 1.0;
-    d = d + 1.0;
-    void set_to_half(void) { d = 0.5; }
+    d        = d + 1.0;
+    d        = d + 1.0;
+    d        = d + 1.0;
+    void set_to_half(void) {
+        d = 0.5;
+    }
     set_to_half();
     AssertEq((int)(d * 2.0), 1);
 }
@@ -80,11 +86,15 @@ void test_nested_fn_write_double_visible_to_parent(void) {
 [[cccc::test]]
 void test_nested_fn_two_level_write_visible_to_outer(void) {
     int outer = 1;
-    outer = outer + 1;
-    outer = outer + 1;
-    outer = outer + 1;
-    void inner(void) { outer = 99; }
-    void mid(void) { inner(); }
+    outer     = outer + 1;
+    outer     = outer + 1;
+    outer     = outer + 1;
+    void inner(void) {
+        outer = 99;
+    }
+    void mid(void) {
+        inner();
+    }
     mid();
     AssertEq(outer, 99);
 }

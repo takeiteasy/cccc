@@ -13,13 +13,13 @@
 #ifdef __APPLE__
 struct sockaddr_un {
     unsigned char sun_len;
-    sa_family_t sun_family;
-    char sun_path[104];
+    sa_family_t   sun_family;
+    char          sun_path[104];
 };
 #else
 struct sockaddr_un {
     sa_family_t sun_family;
-    char sun_path[108];
+    char        sun_path[108];
 };
 #endif
 

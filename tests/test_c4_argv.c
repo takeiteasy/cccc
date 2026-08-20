@@ -1,11 +1,13 @@
 static int ends_with(const char *s, const char *suffix) {
-    const char *p = s;
-    const char *q = suffix;
-    int len = 0;
-    int suffix_len = 0;
+    const char *p          = s;
+    const char *q          = suffix;
+    int         len        = 0;
+    int         suffix_len = 0;
 
-    while (*p++) len++;
-    while (*q++) suffix_len++;
+    while (*p++)
+        len++;
+    while (*q++)
+        suffix_len++;
     if (len < suffix_len)
         return 0;
 

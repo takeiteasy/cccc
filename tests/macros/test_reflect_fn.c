@@ -1,6 +1,8 @@
 // Test $identifier reflect operator: $fn_name yields a non-NULL Obj*
 
-int helper(int x) { return x + 1; }
+int helper(int x) {
+    return x + 1;
+}
 
 [[cccc::comptime]]
 Node *reflect_fn(void) {

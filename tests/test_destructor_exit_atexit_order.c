@@ -9,8 +9,12 @@
 static int order[3];
 static int order_idx;
 
-static void a1(void) { order[order_idx++] = 1; }
-static void a2(void) { order[order_idx++] = 2; }
+static void a1(void) {
+    order[order_idx++] = 1;
+}
+static void a2(void) {
+    order[order_idx++] = 2;
+}
 
 // The only destructor -- must run after both atexit handlers.
 __attribute__((destructor)) void d(void) {

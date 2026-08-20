@@ -11,7 +11,7 @@
 // error error_tok_recover() had already queued. Verified this exact
 // program crashed (exit 139, no stderr) before the fix.
 int main(void) {
-    int notstruct = 0;
-    notstruct.y += 1;
+    int notstruct  = 0;
+    notstruct.y   += 1;
     return 42;
 }

@@ -14,13 +14,13 @@ typedef struct {
     size_t gl_pathc;
     size_t gl_matchc;
     size_t gl_offs;
-    int gl_flags;
+    int    gl_flags;
     char **gl_pathv;
     void **gl_statv;
     void **gl_errfunc;
     char **gl_matchv;
-    char *gl_lstat;
-    char *gl_stat;
+    char  *gl_lstat;
+    char  *gl_stat;
 } glob_t;
 #else
 struct dirent;
@@ -28,7 +28,7 @@ typedef struct {
     size_t gl_pathc;
     char **gl_pathv;
     size_t gl_offs;
-    int gl_flags;
+    int    gl_flags;
     void (*gl_closedir)(void *);
     struct dirent *(*gl_readdir)(void *);
     void *(*gl_opendir)(const char *);
@@ -65,9 +65,8 @@ typedef struct {
 #define GLOB_NOMATCH 3
 #endif
 
-extern int glob(const char *pattern, int flags,
-                int (*errfunc)(const char *epath, int eerrno),
-                glob_t *pglob);
+extern int glob(const char *pattern, int                               flags,
+                int (*errfunc)(const char *epath, int eerrno), glob_t *pglob);
 extern void globfree(glob_t *pglob);
 
 #endif /* __GLOB_H */

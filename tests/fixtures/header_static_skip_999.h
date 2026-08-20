@@ -6,4 +6,6 @@
 // separate (out-of-scope, tracked on its own ticket) bug where
 // pragma_once/include_guard state persists across TUs that share one
 // cccc invocation. A guarded header would confound the two.
-static int header_static_skip_999_helper(int x) { return x + 1; }
+static int header_static_skip_999_helper(int x) {
+    return x + 1;
+}

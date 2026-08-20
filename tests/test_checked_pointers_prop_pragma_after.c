@@ -14,11 +14,11 @@
 // pragma comes after every declaration involved.
 
 int main(void) {
-    int n = 4;
-    int * [[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
-    int *q = p + 0;
-    volatile int i = 4;
-    int x = q[i];
+    int n                                  = 4;
+    int *[[cccc::array, cccc::count(n)]] p = (int[4]){1, 2, 3, 4};
+    int         *q                         = p + 0;
+    volatile int i                         = 4;
+    int          x                         = q[i];
     return x;
 }
 

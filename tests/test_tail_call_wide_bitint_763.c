@@ -27,8 +27,9 @@
 
 // A value that needs more than 64 bits: 0x1_0000_0000_0000_0007 (low word 7,
 // high word 1). Fits in _BitInt(128).
-__attribute__((noinline))
-static _BitInt(128) g_wide(_BitInt(128) y) { return y + 1; }
+__attribute__((noinline)) static _BitInt(128) g_wide(_BitInt(128) y) {
+    return y + 1;
+}
 
 static _BitInt(128) f_wide_tail(_BitInt(128) x) {
     return g_wide(x); // tail position -- must NOT become CALLT
@@ -46,13 +47,17 @@ static _BitInt(128) f_wide_recur(_BitInt(128) n, _BitInt(128) acc) {
 
 [[cccc::test]]
 void test_763_wide_bitint_tail_call_correct(void) {
-    _BitInt(128) start = ((_BitInt(128)) 1 << 64) + 6; // 0x1_0000_0000_0000_0006
-    _BitInt(128) result = f_wide_tail(start);
-    _BitInt(128) expected = ((_BitInt(128)) 1 << 64) + 7;
-    unsigned long long lo = (unsigned long long) (result & 0xFFFFFFFFFFFFFFFFULL);
-    unsigned long long hi = (unsigned long long) ((result >> 64) & 0xFFFFFFFFFFFFFFFFULL);
-    unsigned long long elo = (unsigned long long) (expected & 0xFFFFFFFFFFFFFFFFULL);
-    unsigned long long ehi = (unsigned long long) ((expected >> 64) & 0xFFFFFFFFFFFFFFFFULL);
+    _BitInt(128) start = ((_BitInt(128))1 << 64) + 6; // 0x1_0000_0000_0000_0006
+    _BitInt(128) result   = f_wide_tail(start);
+    _BitInt(128) expected = ((_BitInt(128))1 << 64) + 7;
+    unsigned long long lo =
+        (unsigned long long)(result & 0xFFFFFFFFFFFFFFFFULL);
+    unsigned long long hi =
+        (unsigned long long)((result >> 64) & 0xFFFFFFFFFFFFFFFFULL);
+    unsigned long long elo =
+        (unsigned long long)(expected & 0xFFFFFFFFFFFFFFFFULL);
+    unsigned long long ehi =
+        (unsigned long long)((expected >> 64) & 0xFFFFFFFFFFFFFFFFULL);
     AssertEq(lo, elo);
     AssertEq(hi, ehi);
 }
@@ -61,6 +66,7 @@ void test_763_wide_bitint_tail_call_correct(void) {
 void test_763_wide_bitint_tail_recursion_correct(void) {
     _BitInt(128) result = f_wide_recur(1000, 0);
     // sum 1..1000 == 500500, well within 64 bits -- only the low word matters.
-    unsigned long long lo = (unsigned long long) (result & 0xFFFFFFFFFFFFFFFFULL);
+    unsigned long long lo =
+        (unsigned long long)(result & 0xFFFFFFFFFFFFFFFFULL);
     AssertEq(lo, 500500ULL);
 }

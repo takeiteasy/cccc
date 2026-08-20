@@ -10,8 +10,8 @@ static int worker(void *arg) {
 
 int main(void) {
     thrd_t t;
-    int arg = 42;
-    int res = -1;
+    int    arg = 42;
+    int    res = -1;
 
     if (thrd_create(&t, worker, &arg) != thrd_success)
         return 1;

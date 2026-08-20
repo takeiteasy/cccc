@@ -15,15 +15,15 @@
 #include <stdlib.h>
 
 static int touch(int *restrict p) {
-    int a = *p;             // cache miss: fills the (p, 0) entry as "int"
-    *(float *)p = 1.0f;     // write-through: real store re-stamps heap as
-                             // float, cache entry stays valid (not invalidated)
-    int b = *p;             // cache hit: must still catch the int/float mismatch
+    int a       = *p;   // cache miss: fills the (p, 0) entry as "int"
+    *(float *)p = 1.0f; // write-through: real store re-stamps heap as
+                        // float, cache entry stays valid (not invalidated)
+    int b = *p;         // cache hit: must still catch the int/float mismatch
     return a + b;
 }
 
 int main(void) {
     int *p = malloc(sizeof(int));
-    *p = 5;
+    *p     = 5;
     return touch(p);
 }

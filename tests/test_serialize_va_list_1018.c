@@ -64,8 +64,8 @@ static int outer_vararg(int count, ...) {
     va_start(args, count);
     int total = 0;
     for (int i = 0; i < count; i++) {
-        int val = va_arg(args, int);
-        total += sum_ints(2, val, val * 2);
+        int val  = va_arg(args, int);
+        total   += sum_ints(2, val, val * 2);
     }
     va_end(args);
     return total;

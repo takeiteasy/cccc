@@ -28,15 +28,21 @@
 // different types").
 
 // Combined form, pointer alias only used indirectly, P never used by value.
-typedef struct { int a[2]; } P, *Pp;
+typedef struct {
+    int a[2];
+} P, *Pp;
 
 // Split form of the same shape.
-typedef struct { long b; } S;
+typedef struct {
+    long b;
+} S;
 typedef S *Sp;
 
 // Tagged control: already worked before this fix (verified during triage),
 // kept here so a future regression in the tagged path shows up too.
-typedef struct Tag { int c; } T, *Tp;
+typedef struct Tag {
+    int c;
+} T, *Tp;
 
 // Anonymous enum, same defect class as struct/union (#1046's fix extends to
 // TY_ENUM in ensure_typedef_for_type_emitted()).
@@ -54,19 +60,23 @@ struct Holder {
 
 int main(void) {
     struct Holder h;
-    P p = {{1, 2}};
-    h.p = &p;
-    S s = {3};
-    h.s = &s;
-    T t = {4};
-    h.t = &t;
-    E e = E_TWO;
-    h.e = &e;
+    P             p = {{1, 2}};
+    h.p             = &p;
+    S s             = {3};
+    h.s             = &s;
+    T t             = {4};
+    h.t             = &t;
+    E e             = E_TWO;
+    h.e             = &e;
 
-    if (h.p->a[0] != 1 || h.p->a[1] != 2) return 1;
-    if (h.s->b != 3) return 2;
-    if (h.t->c != 4) return 3;
-    if (*h.e != E_TWO) return 4;
+    if (h.p->a[0] != 1 || h.p->a[1] != 2)
+        return 1;
+    if (h.s->b != 3)
+        return 2;
+    if (h.t->c != 4)
+        return 3;
+    if (*h.e != E_TWO)
+        return 4;
 
     return 42;
 }

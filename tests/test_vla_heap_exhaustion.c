@@ -12,7 +12,7 @@ int main(void) {
     long long k = 1024 * 1024; // 4 MiB of int
     for (int i = 0; i < 64; i++) {
         int u[k];
-        u[0] = i;
+        u[0]     = i;
         u[k - 1] = i;
         if (u[0] != u[k - 1])
             return 1;

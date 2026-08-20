@@ -7,9 +7,8 @@
 // [[cccc::test]] on an enum is attribute-stripped: enum compiled in all modes.
 #pragma cccc suite begin "test_mode/attr_strip"
 
-[[cccc::test]]
-enum ModeTestStatus {
-    MODE_STATUS_OK = 0,
+[[cccc::test]] enum ModeTestStatus {
+    MODE_STATUS_OK   = 0,
     MODE_STATUS_FAIL = 1,
     MODE_STATUS_SKIP = 2,
 };
@@ -24,9 +23,9 @@ void test_annotated_enum_accessible(void) {
 // [from test_mode_global_attr.c]
 // [[cccc::test]] on a global variable is attribute-stripped.
 [[cccc::test]]
-int mode_test_only_global = 42;
+int        mode_test_only_global = 42;
 
-static int mode_normal_global = 100;
+static int mode_normal_global    = 100;
 
 [[cccc::test]]
 void test_annotated_global_accessible(void) {
@@ -38,8 +37,7 @@ void test_annotated_global_accessible(void) {
 
 // [from test_mode_struct_attr.c]
 // [[cccc::test]] on a struct declaration is attribute-stripped.
-[[cccc::test]]
-struct ModeTestPoint {
+[[cccc::test]] struct ModeTestPoint {
     int x;
     int y;
 };

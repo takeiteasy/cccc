@@ -2,7 +2,9 @@
 // members, plus a cross-var reference to a prior scalar comptime var.
 
 [[cccc::comptime]]
-int base_width(void) { return 320; }
+int base_width(void) {
+    return 320;
+}
 
 // Scalar comptime var used as cross-var reference in the struct initializer.
 [[cccc::comptime]]
@@ -10,12 +12,11 @@ int scale = 2;
 
 // Struct initializer: first member is a function call, second is a constant,
 // third references the scalar comptime var 'scale' (cross-var ref).
-[[cccc::comptime]]
-struct Config {
+[[cccc::comptime]] struct Config {
     int width;
     int height;
     int scale;
-} cfg = { base_width(), 240, scale };
+} cfg = {base_width(), 240, scale};
 
 [[cccc::comptime]]
 Node *get_width(void) {

@@ -10,9 +10,9 @@ static void *worker(void *arg) {
 
 int main(void) {
     pthread_t thread;
-    int thread_value = 42;
-    int main_value = 7;
-    void *retval = 0;
+    int       thread_value = 42;
+    int       main_value   = 7;
+    void     *retval       = 0;
 
     if (pthread_key_create(&key, 0) != 0)
         return 1;

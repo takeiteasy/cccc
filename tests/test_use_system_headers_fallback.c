@@ -2,8 +2,8 @@
 // when no SDK dir is configured (e.g. no --sysroot / -isystem). The flag
 // must be accepted and the polyfill used as the fallback source.
 // CCCC_FLAGS: --use-system-headers
-#include <stdio.h>   // non-owned: falls back to CCCC polyfill
-#include <stdarg.h>  // owned: always from CCCC
+#include <stdio.h>  // non-owned: falls back to CCCC polyfill
+#include <stdarg.h> // owned: always from CCCC
 
 static int sum(int n, ...) {
     va_list ap;
@@ -20,5 +20,5 @@ int main(void) {
     // stdio.h resolved via polyfill fallback: FILE type available
     FILE *f = 0;
     (void)f;
-    return sum(3, 10, 12, 20);  // 10+12+20 = 42
+    return sum(3, 10, 12, 20); // 10+12+20 = 42
 }

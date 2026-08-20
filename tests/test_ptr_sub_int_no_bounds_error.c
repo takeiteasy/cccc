@@ -21,9 +21,9 @@ int main(void) {
     // deliberately deferred issue (#982's defect C, a new follow-up
     // ticket), not what this test is about.
     char *q = p + 12;
-    char *r = q - 8;   // steps back to p+4, well inside the allocation
-    *r = 42;
-    int v = (int)*r;
+    char *r = q - 8; // steps back to p+4, well inside the allocation
+    *r      = 42;
+    int v   = (int)*r;
     free(p);
     return v == 42 ? 42 : 1;
 }

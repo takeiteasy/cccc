@@ -21,7 +21,7 @@
 
 int main(void) {
     struct in_addr a;
-    a.s_addr = htonl(0x7f000001); // 127.0.0.1
+    a.s_addr      = htonl(0x7f000001); // 127.0.0.1
     const char *s = inet_ntoa(a);
     if (!s || strcmp(s, "127.0.0.1") != 0)
         return 1;
@@ -29,7 +29,7 @@ int main(void) {
     // A second call with a different address must not be corrupted by the
     // first's argument marshalling (no shared/aliased scratch storage).
     struct in_addr b;
-    b.s_addr = htonl(0xc0a80101); // 192.168.1.1
+    b.s_addr       = htonl(0xc0a80101); // 192.168.1.1
     const char *s2 = inet_ntoa(b);
     if (!s2 || strcmp(s2, "192.168.1.1") != 0)
         return 2;
@@ -37,11 +37,11 @@ int main(void) {
     // hsearch control: by-value ENTRY, already correct pre-#1090.
     if (hcreate(16) == 0)
         return 3;
-    ENTRY e = { .key = "k", .data = (void *)"v" };
+    ENTRY  e = {.key = "k", .data = (void *)"v"};
     ENTRY *r = hsearch(e, ENTER);
     if (!r || strcmp((const char *)r->data, "v") != 0)
         return 4;
-    ENTRY find = { .key = "k", .data = NULL };
+    ENTRY  find  = {.key = "k", .data = NULL};
     ENTRY *found = hsearch(find, FIND);
     if (!found || strcmp((const char *)found->data, "v") != 0)
         return 5;

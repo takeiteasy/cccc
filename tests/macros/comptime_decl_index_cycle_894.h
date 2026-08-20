@@ -3,7 +3,7 @@
 // when B (pointer-only, so incomplete-type-safe) refers back to A.
 struct A894 {
     struct B894 *b;
-    int val;
+    int          val;
 };
 
 struct B894 {

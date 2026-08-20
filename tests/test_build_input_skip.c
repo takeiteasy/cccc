@@ -13,12 +13,15 @@ int build_main(Builder *ctx) {
     WriteFile(ctx, "build/test_input_skip_src/in.txt", "hello\n");
 
     BuildTarget *gen = RunCustom(ctx, "gen-input-skip",
-        "cp build/test_input_skip_src/in.txt build/test_input_skip_src/out.txt");
+                                 "cp build/test_input_skip_src/in.txt "
+                                 "build/test_input_skip_src/out.txt");
     AddInput(gen, "build/test_input_skip_src/in.txt");
     DeclareOutput(gen, "build/test_input_skip_src/out.txt");
 
-    if (Build(ctx, gen) != 0) return 1;
-    if (Build(ctx, gen) != 0) return 1;
+    if (Build(ctx, gen) != 0)
+        return 1;
+    if (Build(ctx, gen) != 0)
+        return 1;
 
     return 0;
 }

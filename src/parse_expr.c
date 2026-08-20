@@ -47,8 +47,9 @@ double eval_double(VirtualMachine *vm, Node *node) {
     // float cast via eval_decimal, #832) -- so this is still a diagnostic,
     // not silent 0.
     if (is_decimal(node->ty))
-        error_tok(vm, node->tok,
-                  "_Decimal constant expressions are not supported in this context");
+        error_tok(
+            vm, node->tok,
+            "_Decimal constant expressions are not supported in this context");
 
     if (is_integer(node->ty)) {
         if (node->ty->is_unsigned)
@@ -57,60 +58,64 @@ double eval_double(VirtualMachine *vm, Node *node) {
     }
 
     switch (node->kind) {
-    case ND_ADD:
-        return eval_double(vm, node->lhs) + eval_double(vm, node->rhs);
-    case ND_SUB:
-        return eval_double(vm, node->lhs) - eval_double(vm, node->rhs);
-    case ND_MUL:
-        return eval_double(vm, node->lhs) * eval_double(vm, node->rhs);
-    case ND_DIV:
-        return eval_double(vm, node->lhs) / eval_double(vm, node->rhs);
-    case ND_NEG:
-        return -eval_double(vm, node->lhs);
-    case ND_COND:
-        return eval_double(vm, node->cond) ? eval_double(vm, node->then)
-                                           : eval_double(vm, node->els);
-    case ND_COMMA:
-        return eval_double(vm, node->rhs);
-    case ND_CAST:
-        // #832: a decimal-to-binary-float cast (e.g. `(double)(1.1dd +
-        // 2.2dd)`) folds via eval_decimal + cccc_dec_to_bin instead of
-        // recursing into eval_double, which would just hit this function's
-        // own is_decimal(node->ty) guard above on the recursive call.
-        if (is_decimal(node->lhs->ty)) {
-            int w = dec_width_code(node->lhs->ty);
-            unsigned char tmp[16];
-            eval_decimal(vm, node->lhs, w, tmp);
-            uint64_t bits = 0;
-            bool dst_is_f32 = (node->ty->kind == TY_FLOAT);
-            if (!cccc_dec_to_bin(w, tmp, dst_is_f32, &bits, CCCC_DEC_ENV_STATIC))
-                error_tok(vm, node->tok,
-                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
-            if (dst_is_f32) {
-                float fv; memcpy(&fv, &bits, 4);
-                return (double)fv;
+        case ND_ADD:
+            return eval_double(vm, node->lhs) + eval_double(vm, node->rhs);
+        case ND_SUB:
+            return eval_double(vm, node->lhs) - eval_double(vm, node->rhs);
+        case ND_MUL:
+            return eval_double(vm, node->lhs) * eval_double(vm, node->rhs);
+        case ND_DIV:
+            return eval_double(vm, node->lhs) / eval_double(vm, node->rhs);
+        case ND_NEG:
+            return -eval_double(vm, node->lhs);
+        case ND_COND:
+            return eval_double(vm, node->cond) ? eval_double(vm, node->then)
+                                               : eval_double(vm, node->els);
+        case ND_COMMA:
+            return eval_double(vm, node->rhs);
+        case ND_CAST:
+            // #832: a decimal-to-binary-float cast (e.g. `(double)(1.1dd +
+            // 2.2dd)`) folds via eval_decimal + cccc_dec_to_bin instead of
+            // recursing into eval_double, which would just hit this function's
+            // own is_decimal(node->ty) guard above on the recursive call.
+            if (is_decimal(node->lhs->ty)) {
+                int           w = dec_width_code(node->lhs->ty);
+                unsigned char tmp[16];
+                eval_decimal(vm, node->lhs, w, tmp);
+                uint64_t bits       = 0;
+                bool     dst_is_f32 = (node->ty->kind == TY_FLOAT);
+                if (!cccc_dec_to_bin(w, tmp, dst_is_f32, &bits,
+                                     CCCC_DEC_ENV_STATIC))
+                    error_tok(vm, node->tok,
+                              "_Decimal literals require a build with "
+                              "CCCC_HAS_DECIMAL=1");
+                if (dst_is_f32) {
+                    float fv;
+                    memcpy(&fv, &bits, 4);
+                    return (double)fv;
+                }
+                double dv;
+                memcpy(&dv, &bits, 8);
+                return dv;
             }
-            double dv; memcpy(&dv, &bits, 8);
-            return dv;
+            // #780: route through eval_double unconditionally, even for an
+            // integer operand -- its is_integer() head above applies the
+            // correct unsigned widening (unsigned long long, not a bare
+            // "eval()" whose int64_t return implicitly sign-converts to
+            // double and loses the operand's unsignedness for values >= 2^63).
+            return eval_double(vm, node->lhs);
+        case ND_VAR:
+        case ND_MEMBER: {
+            Node *expr = constexpr_expr_for_node(node);
+            if (!expr)
+                error_tok(vm, node->tok, "not a compile-time constant");
+            return eval_double(vm, expr);
         }
-        // #780: route through eval_double unconditionally, even for an
-        // integer operand -- its is_integer() head above applies the
-        // correct unsigned widening (unsigned long long, not a bare
-        // "eval()" whose int64_t return implicitly sign-converts to
-        // double and loses the operand's unsignedness for values >= 2^63).
-        return eval_double(vm, node->lhs);
-    case ND_VAR:
-    case ND_MEMBER: {
-        Node *expr = constexpr_expr_for_node(node);
-        if (!expr)
+        case ND_NUM:
+            return node->fval;
+        default:
             error_tok(vm, node->tok, "not a compile-time constant");
-        return eval_double(vm, expr);
-    }
-    case ND_NUM:
-        return node->fval;
-    default:
-        error_tok(vm, node->tok, "not a compile-time constant");
-        return 0;
+            return 0;
     }
 }
 
@@ -143,92 +148,106 @@ static void eval_decimal_rec(VirtualMachine *vm, Node *node, int w, void *out) {
                   "(missing usual-arithmetic-conversion cast?)");
 
     switch (node->kind) {
-    case ND_NUM:
-        if (!node->dec_digits)
-            error_tok(vm, node->tok, "not a compile-time constant");
-        if (!cccc_dec_encode_literal(node->dec_digits, w, out))
-            error_tok(vm, node->tok,
-                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
-        return;
-    case ND_CAST: {
-        Type *src_ty = node->lhs->ty;
-        if (is_decimal(src_ty)) {
-            int src_w = dec_width_code(src_ty);
-            unsigned char tmp[16];
-            eval_decimal_rec(vm, node->lhs, src_w, tmp);
-            if (!cccc_dec_convert(w, src_w, out, tmp, CCCC_DEC_ENV_STATIC))
+        case ND_NUM:
+            if (!node->dec_digits)
+                error_tok(vm, node->tok, "not a compile-time constant");
+            if (!cccc_dec_encode_literal(node->dec_digits, w, out))
                 error_tok(vm, node->tok,
-                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+                          "_Decimal literals require a build with "
+                          "CCCC_HAS_DECIMAL=1");
             return;
-        }
-        if (is_integer(src_ty)) {
-            int64_t v = eval(vm, node->lhs);
-            if (!cccc_dec_from_int(w, out, v, src_ty->is_unsigned, CCCC_DEC_ENV_STATIC))
-                error_tok(vm, node->tok,
-                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
-            return;
-        }
-        if (is_flonum(src_ty)) {
-            double d = eval_double(vm, node->lhs);
-            uint64_t bits;
-            bool src_is_f32 = (src_ty->kind == TY_FLOAT);
-            if (src_is_f32) {
-                float fv = (float)d;
-                uint32_t b32; memcpy(&b32, &fv, 4);
-                bits = b32;
-            } else {
-                memcpy(&bits, &d, 8);
+        case ND_CAST: {
+            Type *src_ty = node->lhs->ty;
+            if (is_decimal(src_ty)) {
+                int           src_w = dec_width_code(src_ty);
+                unsigned char tmp[16];
+                eval_decimal_rec(vm, node->lhs, src_w, tmp);
+                if (!cccc_dec_convert(w, src_w, out, tmp, CCCC_DEC_ENV_STATIC))
+                    error_tok(vm, node->tok,
+                              "_Decimal literals require a build with "
+                              "CCCC_HAS_DECIMAL=1");
+                return;
             }
-            if (!cccc_dec_from_bin(w, out, bits, src_is_f32, CCCC_DEC_ENV_STATIC))
-                error_tok(vm, node->tok,
-                          "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
+            if (is_integer(src_ty)) {
+                int64_t v = eval(vm, node->lhs);
+                if (!cccc_dec_from_int(w, out, v, src_ty->is_unsigned,
+                                       CCCC_DEC_ENV_STATIC))
+                    error_tok(vm, node->tok,
+                              "_Decimal literals require a build with "
+                              "CCCC_HAS_DECIMAL=1");
+                return;
+            }
+            if (is_flonum(src_ty)) {
+                double   d = eval_double(vm, node->lhs);
+                uint64_t bits;
+                bool     src_is_f32 = (src_ty->kind == TY_FLOAT);
+                if (src_is_f32) {
+                    float    fv = (float)d;
+                    uint32_t b32;
+                    memcpy(&b32, &fv, 4);
+                    bits = b32;
+                } else {
+                    memcpy(&bits, &d, 8);
+                }
+                if (!cccc_dec_from_bin(w, out, bits, src_is_f32,
+                                       CCCC_DEC_ENV_STATIC))
+                    error_tok(vm, node->tok,
+                              "_Decimal literals require a build with "
+                              "CCCC_HAS_DECIMAL=1");
+                return;
+            }
+            error_tok(vm, node->tok, "not a compile-time constant");
             return;
         }
-        error_tok(vm, node->tok, "not a compile-time constant");
-        return;
-    }
-    case ND_ADD: case ND_SUB: case ND_MUL: case ND_DIV: {
-        unsigned char a[16], b[16];
-        eval_decimal_rec(vm, node->lhs, w, a);
-        eval_decimal_rec(vm, node->rhs, w, b);
-        int op = node->kind == ND_ADD ? '+' : node->kind == ND_SUB ? '-' :
-                 node->kind == ND_MUL ? '*' : '/';
-        if (!cccc_dec_binop(op, w, out, a, b, CCCC_DEC_ENV_STATIC))
-            error_tok(vm, node->tok,
-                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
-        return;
-    }
-    case ND_NEG: {
-        unsigned char a[16];
-        eval_decimal_rec(vm, node->lhs, w, a);
-        if (!cccc_dec_neg(w, out, a))
-            error_tok(vm, node->tok,
-                      "_Decimal literals require a build with CCCC_HAS_DECIMAL=1");
-        return;
-    }
-    case ND_COND:
-        // Mirrors eval_double's ND_COND handling: the condition itself is
-        // never decimal-typed in practice (C's ?: condition is an ordinary
-        // scalar test), so eval_double's own int/flonum handling covers it.
-        if (eval_double(vm, node->cond))
-            eval_decimal_rec(vm, node->then, w, out);
-        else
-            eval_decimal_rec(vm, node->els, w, out);
-        return;
-    case ND_COMMA:
-        eval_decimal_rec(vm, node->rhs, w, out);
-        return;
-    case ND_VAR:
-    case ND_MEMBER: {
-        Node *expr = constexpr_expr_for_node(node);
-        if (!expr)
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV: {
+            unsigned char a[16], b[16];
+            eval_decimal_rec(vm, node->lhs, w, a);
+            eval_decimal_rec(vm, node->rhs, w, b);
+            int op = node->kind == ND_ADD   ? '+'
+                     : node->kind == ND_SUB ? '-'
+                     : node->kind == ND_MUL ? '*'
+                                            : '/';
+            if (!cccc_dec_binop(op, w, out, a, b, CCCC_DEC_ENV_STATIC))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with "
+                          "CCCC_HAS_DECIMAL=1");
+            return;
+        }
+        case ND_NEG: {
+            unsigned char a[16];
+            eval_decimal_rec(vm, node->lhs, w, a);
+            if (!cccc_dec_neg(w, out, a))
+                error_tok(vm, node->tok,
+                          "_Decimal literals require a build with "
+                          "CCCC_HAS_DECIMAL=1");
+            return;
+        }
+        case ND_COND:
+            // Mirrors eval_double's ND_COND handling: the condition itself is
+            // never decimal-typed in practice (C's ?: condition is an ordinary
+            // scalar test), so eval_double's own int/flonum handling covers it.
+            if (eval_double(vm, node->cond))
+                eval_decimal_rec(vm, node->then, w, out);
+            else
+                eval_decimal_rec(vm, node->els, w, out);
+            return;
+        case ND_COMMA:
+            eval_decimal_rec(vm, node->rhs, w, out);
+            return;
+        case ND_VAR:
+        case ND_MEMBER: {
+            Node *expr = constexpr_expr_for_node(node);
+            if (!expr)
+                error_tok(vm, node->tok, "not a compile-time constant");
+            eval_decimal_rec(vm, expr, w, out);
+            return;
+        }
+        default:
             error_tok(vm, node->tok, "not a compile-time constant");
-        eval_decimal_rec(vm, expr, w, out);
-        return;
-    }
-    default:
-        error_tok(vm, node->tok, "not a compile-time constant");
-        return;
+            return;
     }
 }
 
@@ -279,13 +298,13 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
     // error type instead of descending into the ND_MEMBER branch.
     if (is_error_type(binary->lhs->ty) || is_error_type(binary->rhs->ty)) {
         Node *err_node = new_node(vm, ND_MEMBER, tok);
-        err_node->ty = ty_error;
+        err_node->ty   = ty_error;
         return err_node;
     }
 
     // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
     if (binary->lhs->kind == ND_MEMBER) {
-        Obj *var = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->lhs->ty));
+        Obj  *var = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->lhs->ty));
 
         Node *expr1 =
             new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
@@ -296,12 +315,12 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
             new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
         expr2->member = binary->lhs->member;
 
-        Node *expr3 = new_unary(
+        Node *expr3   = new_unary(
             vm, ND_MEMBER,
             new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
         expr3->member = binary->lhs->member;
 
-        Node *expr4 = new_binary(
+        Node *expr4   = new_binary(
             vm, ND_ASSIGN, expr2,
             new_binary(vm, binary->kind, expr3, binary->rhs, tok), tok);
 
@@ -318,15 +337,15 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
     //   new;
     // })
     if (binary->lhs->ty->is_atomic) {
-        Node head = {};
-        Node *cur = &head;
+        Node  head = {};
+        Node *cur  = &head;
 
-        Obj *addr = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->ty));
-        Obj *val = new_lvar(vm, "", 0, binary->rhs->ty);
-        Obj *old = new_lvar(vm, "", 0, binary->lhs->ty);
-        Obj *new = new_lvar(vm, "", 0, binary->lhs->ty);
+        Obj  *addr = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->ty));
+        Obj  *val  = new_lvar(vm, "", 0, binary->rhs->ty);
+        Obj  *old  = new_lvar(vm, "", 0, binary->lhs->ty);
+        Obj  *new  = new_lvar(vm, "", 0, binary->lhs->ty);
 
-        cur = cur->next =
+        cur        = cur->next =
             new_unary(vm, ND_EXPR_STMT,
                       new_binary(vm, ND_ASSIGN, new_var_node(vm, addr, tok),
                                  new_unary(vm, ND_ADDR, binary->lhs, tok), tok),
@@ -345,8 +364,8 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
                 new_unary(vm, ND_DEREF, new_var_node(vm, addr, tok), tok), tok),
             tok);
 
-        Node *loop = new_node(vm, ND_DO, tok);
-        loop->brk_label = new_unique_name(vm);
+        Node *loop       = new_node(vm, ND_DO, tok);
+        loop->brk_label  = new_unique_name(vm);
         loop->cont_label = new_unique_name(vm);
 
         Node *body =
@@ -355,14 +374,14 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
                                   new_var_node(vm, val, tok), tok),
                        tok);
 
-        loop->then = new_node(vm, ND_BLOCK, tok);
+        loop->then       = new_node(vm, ND_BLOCK, tok);
         loop->then->body = new_unary(vm, ND_EXPR_STMT, body, tok);
 
-        Node *cas = new_node(vm, ND_CAS, tok);
-        cas->cas_addr = new_var_node(vm, addr, tok);
+        Node *cas        = new_node(vm, ND_CAS, tok);
+        cas->cas_addr    = new_var_node(vm, addr, tok);
         cas->cas_old = new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
         cas->cas_new = new_var_node(vm, new, tok);
-        loop->cond = new_unary(vm, ND_NOT, cas, tok);
+        loop->cond   = new_unary(vm, ND_NOT, cas, tok);
 
         // #937: an `_Atomic` ntarray element's `+=`/`++`/`--` takes this
         // CAS-loop desugar rather than the plain ND_ASSIGN one above -- the
@@ -382,8 +401,9 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
         // is still trying to write a non-null byte into the terminator slot.
         if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_hi &&
             binary->lhs->checked_nt_terminator) {
-            cas->checked_bounds_hi = clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
-            cas->checked_access_size = binary->lhs->checked_access_size;
+            cas->checked_bounds_hi =
+                clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
+            cas->checked_access_size   = binary->lhs->checked_access_size;
             cas->checked_nt_terminator = true;
             // #945: carry the object-expression hoist init across too (if
             // any) -- `hi` above may read `*t`, so codegen's CHKNT site for
@@ -406,7 +426,7 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
             binary->lhs->checked_rmw_mirror = cas;
 
         cur = cur->next = loop;
-        cur = cur->next =
+        cur             = cur->next =
             new_unary(vm, ND_EXPR_STMT, new_var_node(vm, new, tok), tok);
 
         Node *node = new_node(vm, ND_STMT_EXPR, tok);
@@ -422,11 +442,13 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
     // propagate_checked_bounds()'s poison scan -- it never leaves the comma
     // expression built below, so it can't actually alias `q` anywhere. See
     // Node.is_rmw_temp_addr's comment.
-    Node *addr_of_lhs = new_unary(vm, ND_ADDR, binary->lhs, tok);
+    Node *addr_of_lhs             = new_unary(vm, ND_ADDR, binary->lhs, tok);
     addr_of_lhs->is_rmw_temp_addr = true;
-    Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), addr_of_lhs, tok);
+    Node *expr1 =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), addr_of_lhs, tok);
 
-    Node *store_deref = new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
+    Node *store_deref =
+        new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
 
     // #937: `binary->lhs` (the original `*p`/`p[i]`/`p->x` deref, e.g. `s[n]`
     // in `s[n] += 1`) already carries checked-pointer bounds if
@@ -453,9 +475,11 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
     // magnitude, not worth deduping.
     if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_lo &&
         binary->lhs->checked_bounds_hi) {
-        store_deref->checked_bounds_lo = clone_bounds_node(vm, binary->lhs->checked_bounds_lo);
-        store_deref->checked_bounds_hi = clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
-        store_deref->checked_access_size = binary->lhs->checked_access_size;
+        store_deref->checked_bounds_lo =
+            clone_bounds_node(vm, binary->lhs->checked_bounds_lo);
+        store_deref->checked_bounds_hi =
+            clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
+        store_deref->checked_access_size   = binary->lhs->checked_access_size;
         store_deref->checked_nt_terminator = binary->lhs->checked_nt_terminator;
         // #945: see the ND_CAS branch above -- same reasoning, this is the
         // non-atomic RMW desugar's synthesized store.
@@ -553,8 +577,8 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         // DCE-aware suppression: 1 ?: chk() — `b` is dead when `a` is
         // statically truthy (a ?: b == a ? a : b, so b is only reached when
         // a is falsy).  Matches standard-ternary els_dead direction (#645).
-        bool elvis_els_dead = vm->compiler.saw_diag_attr &&
-                              static_branch_value(vm, cond) == 1;
+        bool elvis_els_dead =
+            vm->compiler.saw_diag_attr && static_branch_value(vm, cond) == 1;
 
         // [GNU] `a ?: b` normally compiles as `tmp = a, tmp ? tmp : b` so
         // `a` is evaluated exactly once even when it has side effects or is
@@ -569,29 +593,34 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         // scope, where a bounds expression may be resolved with no current
         // function to host the temp local (see resolve_bounds_tokens()).
         // Anything else keeps the temp desugar unchanged.
-        bool cheap_reread = (cond->kind == ND_VAR || cond->kind == ND_NUM) &&
-                            !(cond->ty && (cond->ty->is_volatile || cond->ty->is_atomic));
+        bool cheap_reread =
+            (cond->kind == ND_VAR || cond->kind == ND_NUM) &&
+            !(cond->ty && (cond->ty->is_volatile || cond->ty->is_atomic));
 
         if (cheap_reread) {
             Node *rhs = new_node(vm, ND_COND, tok);
             rhs->cond = cond;
             rhs->then = clone_bounds_node(vm, cond);
-            if (elvis_els_dead) vm->compiler.dead_code_depth++;
+            if (elvis_els_dead)
+                vm->compiler.dead_code_depth++;
             rhs->els = conditional(vm, rest, tok->next->next);
-            if (elvis_els_dead) vm->compiler.dead_code_depth--;
+            if (elvis_els_dead)
+                vm->compiler.dead_code_depth--;
             return rhs;
         }
 
         // Compile `a ?: b` as `tmp = a, tmp ? tmp : b`.
-        Obj *var = new_lvar(vm, "", 0, cond->ty);
+        Obj  *var = new_lvar(vm, "", 0, cond->ty);
         Node *lhs =
             new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), cond, tok);
         Node *rhs = new_node(vm, ND_COND, tok);
         rhs->cond = new_var_node(vm, var, tok);
         rhs->then = new_var_node(vm, var, tok);
-        if (elvis_els_dead) vm->compiler.dead_code_depth++;
+        if (elvis_els_dead)
+            vm->compiler.dead_code_depth++;
         rhs->els = conditional(vm, rest, tok->next->next);
-        if (elvis_els_dead) vm->compiler.dead_code_depth--;
+        if (elvis_els_dead)
+            vm->compiler.dead_code_depth--;
         return new_binary(vm, ND_COMMA, lhs, rhs, tok);
     }
 
@@ -600,14 +629,15 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // DCE-aware suppression: 0 ? dead() : live() — then branch is dead;
     // 1 ? live() : dead() — else branch is dead.
-    int ternary_bv = vm->compiler.saw_diag_attr
-                         ? static_branch_value(vm, cond)
-                         : -1;
+    int ternary_bv =
+        vm->compiler.saw_diag_attr ? static_branch_value(vm, cond) : -1;
     bool then_dead = (ternary_bv == 0), else_dead = (ternary_bv == 1);
 
-    if (then_dead) vm->compiler.dead_code_depth++;
+    if (then_dead)
+        vm->compiler.dead_code_depth++;
     node->then = expr(vm, &tok, tok->next);
-    if (then_dead) vm->compiler.dead_code_depth--;
+    if (then_dead)
+        vm->compiler.dead_code_depth--;
 
     // Try to recover if ':' is missing
     if (!equal(tok, ":")) {
@@ -615,7 +645,7 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
             error_tok_recover(vm, tok, "expected ':' in ternary operator")) {
             // Use 'then' expression as 'else' placeholder
             node->els = node->then;
-            *rest = tok;
+            *rest     = tok;
             return node;
         }
         tok = skip(vm, tok, ":");
@@ -623,9 +653,11 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         tok = tok->next;
     }
 
-    if (else_dead) vm->compiler.dead_code_depth++;
+    if (else_dead)
+        vm->compiler.dead_code_depth++;
     node->els = conditional(vm, rest, tok);
-    if (else_dead) vm->compiler.dead_code_depth--;
+    if (else_dead)
+        vm->compiler.dead_code_depth--;
     return node;
 }
 
@@ -639,11 +671,13 @@ static Node *logor(VirtualMachine *vm, Token **rest, Token *tok) {
         // DCE-aware suppression: true || chk() — RHS is statically dead.
         // static_branch_value handles both Tier-1 (const) and Tier-2
         // (unsigned tautology), matching the if-statement treatment.
-        bool rhs_dead = vm->compiler.saw_diag_attr &&
-                        static_branch_value(vm, node) == 1;
-        if (rhs_dead) vm->compiler.dead_code_depth++;
+        bool rhs_dead =
+            vm->compiler.saw_diag_attr && static_branch_value(vm, node) == 1;
+        if (rhs_dead)
+            vm->compiler.dead_code_depth++;
         Node *rhs = logand(vm, &tok, tok->next);
-        if (rhs_dead) vm->compiler.dead_code_depth--;
+        if (rhs_dead)
+            vm->compiler.dead_code_depth--;
         if (vm->compiler.warnings & CCCC_WARN_LOGICAL_OP) {
             if (is_const_expr(vm, node))
                 warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
@@ -666,11 +700,13 @@ static Node *logand(VirtualMachine *vm, Token **rest, Token *tok) {
     while (equal(tok, "&&")) {
         Token *start = tok;
         // DCE-aware suppression: false && chk() — RHS is statically dead.
-        bool rhs_dead = vm->compiler.saw_diag_attr &&
-                        static_branch_value(vm, node) == 0;
-        if (rhs_dead) vm->compiler.dead_code_depth++;
+        bool rhs_dead =
+            vm->compiler.saw_diag_attr && static_branch_value(vm, node) == 0;
+        if (rhs_dead)
+            vm->compiler.dead_code_depth++;
         Node *rhs = bitor(vm, &tok, tok->next);
-        if (rhs_dead) vm->compiler.dead_code_depth--;
+        if (rhs_dead)
+            vm->compiler.dead_code_depth--;
         if (vm->compiler.warnings & CCCC_WARN_LOGICAL_OP) {
             if (is_const_expr(vm, node))
                 warn_tok(vm, start, CCCC_WARN_LOGICAL_OP,
@@ -743,19 +779,22 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (is_flonum(node->ty) && is_flonum(rhs->ty))
                     warn_tok(vm, start, CCCC_WARN_FLOAT_EQUAL,
-                             "comparing floating-point values with == is unreliable");
+                             "comparing floating-point values with == is "
+                             "unreliable");
             }
             if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
                 nodes_structurally_equal(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                          "self-comparison always evaluates to true");
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
-                if (node->ty && rhs->ty &&
-                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
-                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
+                    rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
+                    node->ty->enum_tag && rhs->ty->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
-                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             "comparison between values of different enum "
+                             "types '%.*s' and '%.*s'",
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
@@ -770,19 +809,22 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (is_flonum(node->ty) && is_flonum(rhs->ty))
                     warn_tok(vm, start, CCCC_WARN_FLOAT_EQUAL,
-                             "comparing floating-point values with != is unreliable");
+                             "comparing floating-point values with != is "
+                             "unreliable");
             }
             if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
                 nodes_structurally_equal(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                          "self-comparison always evaluates to false");
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
-                if (node->ty && rhs->ty &&
-                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
-                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
+                    rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
+                    node->ty->enum_tag && rhs->ty->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
-                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             "comparison between values of different enum "
+                             "types '%.*s' and '%.*s'",
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
@@ -807,22 +849,26 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok, "<")) {
             Node *rhs = shift(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
+                add_type(vm, node);
+                add_type(vm, rhs);
                 if (nodes_structurally_equal(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to false");
                 else if (is_integer(node->ty) && node->ty->is_unsigned &&
                          is_const_expr(vm, rhs) && eval(vm, rhs) == 0)
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
-                             "comparison of unsigned expression < 0 is always false");
+                             "comparison of unsigned expression < 0 is always "
+                             "false");
             }
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
-                if (node->ty && rhs->ty &&
-                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
-                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
+                    rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
+                    node->ty->enum_tag && rhs->ty->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
-                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             "comparison between values of different enum "
+                             "types '%.*s' and '%.*s'",
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
@@ -833,18 +879,21 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok, "<=")) {
             Node *rhs = shift(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
+                add_type(vm, node);
+                add_type(vm, rhs);
                 if (nodes_structurally_equal(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to true");
             }
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
-                if (node->ty && rhs->ty &&
-                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
-                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
+                    rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
+                    node->ty->enum_tag && rhs->ty->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
-                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             "comparison between values of different enum "
+                             "types '%.*s' and '%.*s'",
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
@@ -855,22 +904,26 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok, ">")) {
             Node *rhs = shift(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
+                add_type(vm, node);
+                add_type(vm, rhs);
                 if (nodes_structurally_equal(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to false");
                 else if (is_integer(rhs->ty) && rhs->ty->is_unsigned &&
                          is_const_expr(vm, node) && eval(vm, node) == 0)
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
-                             "comparison of 0 > unsigned expression is always false");
+                             "comparison of 0 > unsigned expression is always "
+                             "false");
             }
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
-                if (node->ty && rhs->ty &&
-                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
-                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
+                    rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
+                    node->ty->enum_tag && rhs->ty->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
-                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             "comparison between values of different enum "
+                             "types '%.*s' and '%.*s'",
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
@@ -882,22 +935,26 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         if (equal(tok, ">=")) {
             Node *rhs = shift(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
+                add_type(vm, node);
+                add_type(vm, rhs);
                 if (nodes_structurally_equal(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to true");
                 else if (is_integer(node->ty) && node->ty->is_unsigned &&
                          is_const_expr(vm, rhs) && eval(vm, rhs) == 0)
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
-                             "comparison of unsigned expression >= 0 is always true");
+                             "comparison of unsigned expression >= 0 is always "
+                             "true");
             }
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
-                add_type(vm, node); add_type(vm, rhs);
-                if (node->ty && rhs->ty &&
-                    node->ty->kind == TY_ENUM && rhs->ty->kind == TY_ENUM &&
-                    node->ty != rhs->ty && node->ty->enum_tag && rhs->ty->enum_tag)
+                add_type(vm, node);
+                add_type(vm, rhs);
+                if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
+                    rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
+                    node->ty->enum_tag && rhs->ty->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
-                             "comparison between values of different enum types '%.*s' and '%.*s'",
+                             "comparison between values of different enum "
+                             "types '%.*s' and '%.*s'",
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
@@ -926,21 +983,28 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             add_type(vm, rhs);
             if (is_error_type(node->ty) || is_error_type(rhs->ty)) {
-                node = new_binary(vm, ND_SHL, node, rhs, start);
+                node     = new_binary(vm, ND_SHL, node, rhs, start);
                 node->ty = ty_error;
                 continue;
             }
             if (is_const_expr(vm, rhs)) {
                 int64_t rv = eval(vm, rhs);
-                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) && rv < 0)
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) &&
+                    rv < 0)
                     warn_tok(vm, start, CCCC_WARN_SHIFT_NEGATIVE_VALUE,
-                             "left shift by negative amount %lld is undefined behaviour", rv);
-                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_OVERFLOW) && rv >= 0) {
-                    // integer promotion: types smaller than int promote to int (4 bytes)
+                             "left shift by negative amount %lld is undefined "
+                             "behaviour",
+                             rv);
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_OVERFLOW) &&
+                    rv >= 0) {
+                    // integer promotion: types smaller than int promote to int
+                    // (4 bytes)
                     int bw = (node->ty->size < 4 ? 4 : node->ty->size) * 8;
                     if (rv >= bw)
-                        warn_tok(vm, start, CCCC_WARN_SHIFT_OVERFLOW,
-                                 "left shift amount %lld >= width of type (%d bits)", rv, bw);
+                        warn_tok(
+                            vm, start, CCCC_WARN_SHIFT_OVERFLOW,
+                            "left shift amount %lld >= width of type (%d bits)",
+                            rv, bw);
                 }
             }
             node = new_binary(vm, ND_SHL, node, rhs, start);
@@ -953,20 +1017,26 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             add_type(vm, rhs);
             if (is_error_type(node->ty) || is_error_type(rhs->ty)) {
-                node = new_binary(vm, ND_SHR, node, rhs, start);
+                node     = new_binary(vm, ND_SHR, node, rhs, start);
                 node->ty = ty_error;
                 continue;
             }
             if (is_const_expr(vm, rhs)) {
                 int64_t rv = eval(vm, rhs);
-                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) && rv < 0)
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) &&
+                    rv < 0)
                     warn_tok(vm, start, CCCC_WARN_SHIFT_NEGATIVE_VALUE,
-                             "right shift by negative amount %lld is undefined behaviour", rv);
-                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_OVERFLOW) && rv >= 0) {
+                             "right shift by negative amount %lld is undefined "
+                             "behaviour",
+                             rv);
+                if ((vm->compiler.warnings & CCCC_WARN_SHIFT_OVERFLOW) &&
+                    rv >= 0) {
                     int bw = (node->ty->size < 4 ? 4 : node->ty->size) * 8;
                     if (rv >= bw)
                         warn_tok(vm, start, CCCC_WARN_SHIFT_OVERFLOW,
-                                 "right shift amount %lld >= width of type (%d bits)", rv, bw);
+                                 "right shift amount %lld >= width of type (%d "
+                                 "bits)",
+                                 rv, bw);
                 }
             }
             node = new_binary(vm, ND_SHR, node, rhs, start);
@@ -990,7 +1060,7 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     // Early exit for error types to prevent cascading errors
     if (is_error_type(lhs->ty) || is_error_type(rhs->ty)) {
         Node *node = new_binary(vm, ND_ADD, lhs, rhs, tok);
-        node->ty = ty_error;
+        node->ty   = ty_error;
         return node;
     }
 
@@ -1024,12 +1094,13 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     // Canonicalize `num + ptr` to `ptr + num`.
     if (!lhs->ty->base && rhs->ty->base) {
         Node *tmp = lhs;
-        lhs = rhs;
-        rhs = tmp;
+        lhs       = rhs;
+        rhs       = tmp;
     }
 
     if (!lhs->ty->base)
-        error_tok(vm, tok, "invalid operands to + (expected pointer and integer)");
+        error_tok(vm, tok,
+                  "invalid operands to + (expected pointer and integer)");
 
     // void* arithmetic is a GNU extension; we allow it for compatibility
     if (lhs->ty->base->kind == TY_VOID) {
@@ -1066,7 +1137,7 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     // Early exit for error types to prevent cascading errors
     if (is_error_type(lhs->ty) || is_error_type(rhs->ty)) {
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
-        node->ty = ty_error;
+        node->ty   = ty_error;
         return node;
     }
 
@@ -1088,7 +1159,8 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         return new_binary(vm, ND_SUB, lhs, rhs, tok);
 
     if (!lhs->ty->base)
-        error_tok(vm, tok, "invalid operands to - (left operand is not a pointer)");
+        error_tok(vm, tok,
+                  "invalid operands to - (left operand is not a pointer)");
 
     // VLA - num. #976: must not fire for VLA - VLA-row-pointer (`&v[1] -
     // &v[0]`) -- rhs->ty->base guards that off, since a plain integer offset
@@ -1102,7 +1174,7 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
                          new_var_node(vm, lhs->ty->base->vla_size, tok), tok);
         add_type(vm, rhs);
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
-        node->ty = lhs->ty;
+        node->ty   = lhs->ty;
         return node;
     }
 
@@ -1118,7 +1190,7 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
                          new_long(vm, get_vm_size(lhs->ty->base), tok), tok);
         add_type(vm, rhs);
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
-        node->ty = lhs->ty;
+        node->ty   = lhs->ty;
         return node;
     }
 
@@ -1127,11 +1199,12 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         if (lhs->ty->base->kind == TY_VOID || rhs->ty->base->kind == TY_VOID)
             warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer of type 'void *' used in arithmetic");
-        else if (lhs->ty->base->kind == TY_FUNC || rhs->ty->base->kind == TY_FUNC)
+        else if (lhs->ty->base->kind == TY_FUNC ||
+                 rhs->ty->base->kind == TY_FUNC)
             warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer to a function used in arithmetic");
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
-        node->ty = ty_long;
+        node->ty   = ty_long;
         // #976: when lhs->ty->base is TY_VLA (e.g. `&v[1] - &v[0]` on a 2-D
         // VLA, both sides `int (*)[m]`), TY_VLA's `size` is always the
         // placeholder 8 a pointer-sized new_type() call gives it (vla_of(),
@@ -1201,7 +1274,7 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             add_type(vm, rhs);
             if (is_error_type(node->ty) || is_error_type(rhs->ty)) {
-                node = new_binary(vm, ND_MUL, node, rhs, start);
+                node     = new_binary(vm, ND_MUL, node, rhs, start);
                 node->ty = ty_error;
                 continue;
             }
@@ -1215,7 +1288,7 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             add_type(vm, rhs);
             if (is_error_type(node->ty) || is_error_type(rhs->ty)) {
-                node = new_binary(vm, ND_DIV, node, rhs, start);
+                node     = new_binary(vm, ND_DIV, node, rhs, start);
                 node->ty = ty_error;
                 continue;
             }
@@ -1229,7 +1302,7 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             add_type(vm, rhs);
             if (is_error_type(node->ty) || is_error_type(rhs->ty)) {
-                node = new_binary(vm, ND_MOD, node, rhs, start);
+                node     = new_binary(vm, ND_MOD, node, rhs, start);
                 node->ty = ty_error;
                 continue;
             }
@@ -1249,72 +1322,76 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "(") && is_typename(vm, tok->next)) {
         Token *start = tok;
-        Type *ty = typename(vm, &tok, tok->next);
-        tok = skip(vm, tok, ")");
+        Type  *ty    = typename(vm, &tok, tok->next);
+        tok          = skip(vm, tok, ")");
 
-        Node *expr = cast(vm, &tok, tok);
+        Node *expr   = cast(vm, &tok, tok);
 
         // Warn when a cast discards the _Atomic qualifier from a pointer type.
         if ((vm->flags & CCCC_THREAD_SAFETY) &&
             !vm->compiler.in_type_lookahead) {
             add_type(vm, expr);
-            if (expr->ty && ty &&
-                expr->ty->kind == TY_PTR && ty->kind == TY_PTR &&
-                expr->ty->base && ty->base &&
+            if (expr->ty && ty && expr->ty->kind == TY_PTR &&
+                ty->kind == TY_PTR && expr->ty->base && ty->base &&
                 expr->ty->base->is_atomic && !ty->base->is_atomic) {
-                warn_tok(vm, start, CCCC_WARN_DISCARDED_QUALIFIERS,
-                         "cast discards '_Atomic' qualifier from pointer type; "
-                         "non-atomic access to atomic object may cause data races");
+                warn_tok(
+                    vm, start, CCCC_WARN_DISCARDED_QUALIFIERS,
+                    "cast discards '_Atomic' qualifier from pointer type; "
+                    "non-atomic access to atomic object may cause data races");
             }
         }
 
         // -Wcast-qual and -Wcast-align: need expr->ty populated.
         if (!vm->compiler.in_type_lookahead &&
-            (vm->compiler.warnings & (CCCC_WARN_CAST_QUAL | CCCC_WARN_CAST_ALIGN))) {
+            (vm->compiler.warnings &
+             (CCCC_WARN_CAST_QUAL | CCCC_WARN_CAST_ALIGN))) {
             add_type(vm, expr);
         }
 
-        // -Wcast-qual: explicit cast drops const/volatile/restrict from pointee.
+        // -Wcast-qual: explicit cast drops const/volatile/restrict from
+        // pointee.
         if (!vm->compiler.in_type_lookahead &&
-            (vm->compiler.warnings & CCCC_WARN_CAST_QUAL) &&
-            expr->ty && ty &&
-            expr->ty->kind == TY_PTR && ty->kind == TY_PTR &&
-            expr->ty->base && ty->base) {
+            (vm->compiler.warnings & CCCC_WARN_CAST_QUAL) && expr->ty && ty &&
+            expr->ty->kind == TY_PTR && ty->kind == TY_PTR && expr->ty->base &&
+            ty->base) {
             Type *fb = expr->ty->base, *tb = ty->base;
-            char qbuf[128]; qbuf[0] = '\0';
-            if (fb->is_const    && !tb->is_const)    strcat(qbuf, "'const'");
+            char  qbuf[128];
+            qbuf[0] = '\0';
+            if (fb->is_const && !tb->is_const)
+                strcat(qbuf, "'const'");
             if (fb->is_volatile && !tb->is_volatile) {
-                if (qbuf[0]) strcat(qbuf, ", ");
+                if (qbuf[0])
+                    strcat(qbuf, ", ");
                 strcat(qbuf, "'volatile'");
             }
             if (fb->is_restrict && !tb->is_restrict) {
-                if (qbuf[0]) strcat(qbuf, ", ");
+                if (qbuf[0])
+                    strcat(qbuf, ", ");
                 strcat(qbuf, "'restrict'");
             }
             if (qbuf[0]) {
-                int qcount = (fb->is_const    && !tb->is_const) +
+                int qcount = (fb->is_const && !tb->is_const) +
                              (fb->is_volatile && !tb->is_volatile) +
                              (fb->is_restrict && !tb->is_restrict);
-                warn_tok(vm, start, CCCC_WARN_CAST_QUAL,
-                         "cast discards %s qualifier%s from pointer target type",
-                         qbuf, qcount > 1 ? "s" : "");
+                warn_tok(
+                    vm, start, CCCC_WARN_CAST_QUAL,
+                    "cast discards %s qualifier%s from pointer target type",
+                    qbuf, qcount > 1 ? "s" : "");
             }
         }
 
         // -Wcast-align: explicit cast raises pointer alignment requirement.
         if (!vm->compiler.in_type_lookahead &&
-            (vm->compiler.warnings & CCCC_WARN_CAST_ALIGN) &&
-            expr->ty && ty &&
-            expr->ty->kind == TY_PTR && ty->kind == TY_PTR &&
-            expr->ty->base && ty->base &&
-            ty->base->align > expr->ty->base->align)
+            (vm->compiler.warnings & CCCC_WARN_CAST_ALIGN) && expr->ty && ty &&
+            expr->ty->kind == TY_PTR && ty->kind == TY_PTR && expr->ty->base &&
+            ty->base && ty->base->align > expr->ty->base->align)
             warn_tok(vm, start, CCCC_WARN_CAST_ALIGN,
                      "cast increases required alignment of target type");
 
         // type cast
         Node *node = new_cast(vm, expr, ty);
-        node->tok = start;
-        *rest = tok;
+        node->tok  = start;
+        *rest      = tok;
         return node;
     }
 
@@ -1332,9 +1409,9 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
 // (verified: `a[i]` / `r[j] = ...` with a variable `i`/`j` compiles and runs
 // correctly through this same ND_ADDR/ND_DEREF path).
 Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
-                              Node *index, Token *tok) {
+                      Node *index, Token *tok) {
     Node *addr = new_unary(vm, ND_ADDR, vec_expr, tok);
-    addr = new_cast(vm, addr, pointer_to(vm, elem_ty));
+    addr       = new_cast(vm, addr, pointer_to(vm, elem_ty));
     return new_unary(vm, ND_DEREF, new_add(vm, addr, index, tok), tok);
 }
 
@@ -1347,18 +1424,18 @@ Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
 // the rest exist for __has_builtin/gcc-compatibility and are not otherwise
 // consumed by CCCC itself.
 enum {
-    CCCC_VOID_TYPE_CLASS = 0,
-    CCCC_INTEGER_TYPE_CLASS = 1,
-    CCCC_CHAR_TYPE_CLASS = 2,
+    CCCC_VOID_TYPE_CLASS     = 0,
+    CCCC_INTEGER_TYPE_CLASS  = 1,
+    CCCC_CHAR_TYPE_CLASS     = 2,
     CCCC_ENUMERAL_TYPE_CLASS = 3,
-    CCCC_BOOLEAN_TYPE_CLASS = 4,
-    CCCC_POINTER_TYPE_CLASS = 5,
-    CCCC_REAL_TYPE_CLASS = 8,
-    CCCC_COMPLEX_TYPE_CLASS = 9,
+    CCCC_BOOLEAN_TYPE_CLASS  = 4,
+    CCCC_POINTER_TYPE_CLASS  = 5,
+    CCCC_REAL_TYPE_CLASS     = 8,
+    CCCC_COMPLEX_TYPE_CLASS  = 9,
     CCCC_FUNCTION_TYPE_CLASS = 10,
-    CCCC_RECORD_TYPE_CLASS = 12,
-    CCCC_UNION_TYPE_CLASS = 13,
-    CCCC_ARRAY_TYPE_CLASS = 14,
+    CCCC_RECORD_TYPE_CLASS   = 12,
+    CCCC_UNION_TYPE_CLASS    = 13,
+    CCCC_ARRAY_TYPE_CLASS    = 14,
     // No gcc equivalent -- _Decimal32/64/128 (#829) isn't in gcc's
     // typeclass.h either (gcc classifies it as REAL_TYPE_CLASS, but CCCC's
     // va_arg needs a distinct discriminant since decimal, unlike binary
@@ -1376,33 +1453,33 @@ int64_t classify_type_code(Type *ty) {
     if (is_decimal(ty))
         return CCCC_DECIMAL_TYPE_CLASS;
     switch (ty->kind) {
-    case TY_VOID:
-        return CCCC_VOID_TYPE_CLASS;
-    case TY_BOOL:
-        return CCCC_BOOLEAN_TYPE_CLASS;
-    case TY_CHAR:
-        return CCCC_CHAR_TYPE_CLASS;
-    case TY_ENUM:
-        return CCCC_ENUMERAL_TYPE_CLASS;
-    case TY_PTR:
-        return CCCC_POINTER_TYPE_CLASS;
-    case TY_FLOAT:
-    case TY_DOUBLE:
-    case TY_LDOUBLE:
-        return CCCC_REAL_TYPE_CLASS;
-    case TY_COMPLEX:
-        return CCCC_COMPLEX_TYPE_CLASS;
-    case TY_FUNC:
-        return CCCC_FUNCTION_TYPE_CLASS;
-    case TY_STRUCT:
-        return CCCC_RECORD_TYPE_CLASS;
-    case TY_UNION:
-        return CCCC_UNION_TYPE_CLASS;
-    case TY_ARRAY:
-    case TY_VLA:
-        return CCCC_ARRAY_TYPE_CLASS;
-    default:
-        // SHORT, INT, LONG, BITINT, NULLPTR_T, etc.
-        return CCCC_INTEGER_TYPE_CLASS;
+        case TY_VOID:
+            return CCCC_VOID_TYPE_CLASS;
+        case TY_BOOL:
+            return CCCC_BOOLEAN_TYPE_CLASS;
+        case TY_CHAR:
+            return CCCC_CHAR_TYPE_CLASS;
+        case TY_ENUM:
+            return CCCC_ENUMERAL_TYPE_CLASS;
+        case TY_PTR:
+            return CCCC_POINTER_TYPE_CLASS;
+        case TY_FLOAT:
+        case TY_DOUBLE:
+        case TY_LDOUBLE:
+            return CCCC_REAL_TYPE_CLASS;
+        case TY_COMPLEX:
+            return CCCC_COMPLEX_TYPE_CLASS;
+        case TY_FUNC:
+            return CCCC_FUNCTION_TYPE_CLASS;
+        case TY_STRUCT:
+            return CCCC_RECORD_TYPE_CLASS;
+        case TY_UNION:
+            return CCCC_UNION_TYPE_CLASS;
+        case TY_ARRAY:
+        case TY_VLA:
+            return CCCC_ARRAY_TYPE_CLASS;
+        default:
+            // SHORT, INT, LONG, BITINT, NULLPTR_T, etc.
+            return CCCC_INTEGER_TYPE_CLASS;
     }
 }

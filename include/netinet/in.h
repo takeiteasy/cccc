@@ -13,24 +13,24 @@
 typedef uint16_t in_port_t;
 typedef uint32_t in_addr_t;
 
-#define AF_INET  2
+#define AF_INET 2
 #ifdef __APPLE__
 #define AF_INET6 30
 #else
 #define AF_INET6 10
 #endif
 
-#define PF_INET  AF_INET
-#define PF_INET6 AF_INET6
+#define PF_INET          AF_INET
+#define PF_INET6         AF_INET6
 
-#define IPPROTO_IP     0
-#define IPPROTO_ICMP   1
-#define IPPROTO_TCP    6
-#define IPPROTO_UDP    17
-#define IPPROTO_ICMPV6 58
-#define IPPROTO_RAW    255
+#define IPPROTO_IP       0
+#define IPPROTO_ICMP     1
+#define IPPROTO_TCP      6
+#define IPPROTO_UDP      17
+#define IPPROTO_ICMPV6   58
+#define IPPROTO_RAW      255
 
-#define IPPORT_RESERVED 1024
+#define IPPORT_RESERVED  1024
 
 #define INADDR_ANY       ((in_addr_t)0x00000000)
 #define INADDR_LOOPBACK  ((in_addr_t)0x7f000001)
@@ -43,18 +43,18 @@ struct in_addr {
 
 #ifdef __APPLE__
 struct sockaddr_in {
-    unsigned char sin_len;
-    sa_family_t sin_family;
-    in_port_t sin_port;
+    unsigned char  sin_len;
+    sa_family_t    sin_family;
+    in_port_t      sin_port;
     struct in_addr sin_addr;
-    char sin_zero[8];
+    char           sin_zero[8];
 };
 #else
 struct sockaddr_in {
-    sa_family_t sin_family;
-    in_port_t sin_port;
+    sa_family_t    sin_family;
+    in_port_t      sin_port;
     struct in_addr sin_addr;
-    char sin_zero[8];
+    char           sin_zero[8];
 };
 #endif
 
@@ -88,10 +88,10 @@ struct sockaddr_in6 {
 };
 #endif
 
-#define IN6ADDR_ANY_INIT      { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } }
-#define IN6ADDR_LOOPBACK_INIT { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } }
+#define IN6ADDR_ANY_INIT      {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
+#define IN6ADDR_LOOPBACK_INIT {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
 
-#define IPPROTO_IPV6 41
+#define IPPROTO_IPV6          41
 
 /* IPV6_* socket-option constants -- verified against real macOS and Linux
    x86_64/aarch64 headers (Linux values match across x86_64/aarch64). */
@@ -108,21 +108,21 @@ struct sockaddr_in6 {
    requires __APPLE_USE_RFC_3542 to be visible before <netinet/in.h> is
    included (see src/stdlib/posix.c), or the host doesn't define these
    either. */
-#define IPV6_CHECKSUM       26
-#define IPV6_RECVTCLASS     35
-#define IPV6_TCLASS         36
-#define IPV6_RECVHOPLIMIT   37
-#define IPV6_RECVRTHDR      38
-#define IPV6_RECVHOPOPTS    39
-#define IPV6_RECVDSTOPTS    40
-#define IPV6_PKTINFO        46
-#define IPV6_HOPLIMIT       47
-#define IPV6_HOPOPTS        49
-#define IPV6_DSTOPTS        50
-#define IPV6_RTHDR          51
-#define IPV6_RECVPKTINFO    61
-#define IPV6_RTHDR_TYPE_0    0
-#define IPV6_DONTFRAG       62
+#define IPV6_CHECKSUM     26
+#define IPV6_RECVTCLASS   35
+#define IPV6_TCLASS       36
+#define IPV6_RECVHOPLIMIT 37
+#define IPV6_RECVRTHDR    38
+#define IPV6_RECVHOPOPTS  39
+#define IPV6_RECVDSTOPTS  40
+#define IPV6_PKTINFO      46
+#define IPV6_HOPLIMIT     47
+#define IPV6_HOPOPTS      49
+#define IPV6_DSTOPTS      50
+#define IPV6_RTHDR        51
+#define IPV6_RECVPKTINFO  61
+#define IPV6_RTHDR_TYPE_0 0
+#define IPV6_DONTFRAG     62
 #else
 #define IPV6_UNICAST_HOPS   16
 #define IPV6_MULTICAST_IF   17
@@ -133,7 +133,7 @@ struct sockaddr_in6 {
 #define IPV6_V6ONLY         26
 /* Advanced IPV6_* options (#749) -- verified against real Linux
    x86_64/aarch64 headers (values match across x86_64/aarch64). */
-#define IPV6_CHECKSUM        7
+#define IPV6_CHECKSUM       7
 #define IPV6_RECVPKTINFO    49
 #define IPV6_PKTINFO        50
 #define IPV6_RECVHOPLIMIT   51
@@ -144,7 +144,7 @@ struct sockaddr_in6 {
 #define IPV6_RECVRTHDR      56
 #define IPV6_RECVDSTOPTS    58
 #define IPV6_DSTOPTS        59
-#define IPV6_RTHDR_TYPE_0    0
+#define IPV6_RTHDR_TYPE_0   0
 #define IPV6_RECVTCLASS     66
 #define IPV6_TCLASS         67
 #define IPV6_DONTFRAG       62

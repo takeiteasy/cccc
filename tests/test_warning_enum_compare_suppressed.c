@@ -7,7 +7,7 @@ typedef enum Color { RED, GREEN, BLUE } Color;
 typedef enum Direction { NORTH, SOUTH, EAST, WEST } Direction;
 
 int main(void) {
-    Color c = RED;
+    Color     c = RED;
     Direction d = NORTH;
     (void)(c == d);
     printf("done\n");

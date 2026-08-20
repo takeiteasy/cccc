@@ -18,29 +18,46 @@
 
 #include <string.h>
 
-struct Point { int x; int y; };
-int use_point(struct Point q) { return q.x + q.y; }
+struct Point {
+    int x;
+    int y;
+};
+int use_point(struct Point q) {
+    return q.x + q.y;
+}
 
-union U { int a; float b; };
-int use_union(union U q) { return q.a; }
+union U {
+    int   a;
+    float b;
+};
+int use_union(union U q) {
+    return q.a;
+}
 
 enum Color { RED, GREEN, BLUE };
-int use_color(enum Color c) { return (int)c; }
+int use_color(enum Color c) {
+    return (int)c;
+}
 
 [[cccc::comptime]]
 Node *check_900(void) {
-    if (strcmp(TypeName(GetType("Point")), "Point") != 0) return MakeIntLiteral(1);
-    if (strcmp(TypeCName(GetType("Point")), "Point") != 0) return MakeIntLiteral(1);
-    if (strcmp(TypeName(GetType("U")), "U") != 0) return MakeIntLiteral(1);
-    if (strcmp(EnumName(GetType("Color")), "Color") != 0) return MakeIntLiteral(1);
+    if (strcmp(TypeName(GetType("Point")), "Point") != 0)
+        return MakeIntLiteral(1);
+    if (strcmp(TypeCName(GetType("Point")), "Point") != 0)
+        return MakeIntLiteral(1);
+    if (strcmp(TypeName(GetType("U")), "U") != 0)
+        return MakeIntLiteral(1);
+    if (strcmp(EnumName(GetType("Color")), "Color") != 0)
+        return MakeIntLiteral(1);
     return MakeIntLiteral(0);
 }
 
 int main(void) {
     struct Point p = {1, 2};
-    union U u; u.a = 3;
-    enum Color c = RED;
-    int sum = use_point(p) + use_union(u) + use_color(c);
+    union U      u;
+    u.a            = 3;
+    enum Color c   = RED;
+    int        sum = use_point(p) + use_union(u) + use_color(c);
     (void)sum;
     return 42 + check_900();
 }

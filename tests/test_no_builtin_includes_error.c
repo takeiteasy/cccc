@@ -4,4 +4,6 @@
 // --no-builtin-includes: non-owned std headers must NOT fall back to
 // CCCC's ./include when no SDK dir is configured. The include must fail.
 #include <stdio.h>
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

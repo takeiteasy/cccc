@@ -11,7 +11,7 @@ int main(void) {
     size_t alignments[] = {8, 16, 32, 64, 256};
     for (int i = 0; i < 5; i++) {
         size_t alignment = alignments[i];
-        void *p = aligned_alloc(alignment, 128);
+        void  *p         = aligned_alloc(alignment, 128);
         if (!p)
             return 1;
         if ((uintptr_t)p % alignment != 0)

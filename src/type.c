@@ -16,58 +16,63 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
- This file was original part of chibicc by Rui Ueyama (MIT) https://github.com/rui314/chibicc
+ This file was original part of chibicc by Rui Ueyama (MIT)
+ https://github.com/rui314/chibicc
 */
 
 #include "./internal.h"
 
 // Type sizes now match standard C sizes with proper VM instruction support:
 // char=1, short=2, int=4, long=8
-Type *ty_void = &(Type){TY_VOID, 1, 1};
-Type *ty_bool = &(Type){TY_BOOL, 1, 1};
+Type *ty_void      = &(Type){TY_VOID, 1, 1};
+Type *ty_bool      = &(Type){TY_BOOL, 1, 1};
 Type *ty_nullptr_t = &(Type){TY_NULLPTR_T, 8, 8, true};
 
-Type *ty_char = &(Type){TY_CHAR, 1, 1};
-Type *ty_short = &(Type){TY_SHORT, 2, 2};
-Type *ty_int = &(Type){TY_INT, 4, 4};
-Type *ty_long = &(Type){TY_LONG, 8, 8};
+Type *ty_char      = &(Type){TY_CHAR, 1, 1};
+Type *ty_short     = &(Type){TY_SHORT, 2, 2};
+Type *ty_int       = &(Type){TY_INT, 4, 4};
+Type *ty_long      = &(Type){TY_LONG, 8, 8};
 
-Type *ty_uchar = &(Type){TY_CHAR, 1, 1, true};
-Type *ty_ushort = &(Type){TY_SHORT, 2, 2, true};
-Type *ty_uint = &(Type){TY_INT, 4, 4, true};
-Type *ty_ulong = &(Type){TY_LONG, 8, 8, true};
+Type *ty_uchar     = &(Type){TY_CHAR, 1, 1, true};
+Type *ty_ushort    = &(Type){TY_SHORT, 2, 2, true};
+Type *ty_uint      = &(Type){TY_INT, 4, 4, true};
+Type *ty_ulong     = &(Type){TY_LONG, 8, 8, true};
 
-Type *ty_float = &(Type){TY_FLOAT, 4, 4};
-Type *ty_double = &(Type){TY_DOUBLE, 8, 8};
-Type *ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
+Type *ty_float     = &(Type){TY_FLOAT, 4, 4};
+Type *ty_double    = &(Type){TY_DOUBLE, 8, 8};
+Type *ty_ldouble   = &(Type){TY_LDOUBLE, 16, 16};
 
-Type *ty_fcomplex = &(Type){.kind = TY_COMPLEX, .size = 8, .align = 4,
-                             .base = &(Type){TY_FLOAT, 4, 4}};
-Type *ty_dcomplex = &(Type){.kind = TY_COMPLEX, .size = 16, .align = 8,
-                             .base = &(Type){TY_DOUBLE, 8, 8}};
-Type *ty_ldcomplex = &(Type){.kind = TY_COMPLEX, .size = 32, .align = 16,
-                              .base = &(Type){TY_LDOUBLE, 16, 16}};
+Type *ty_fcomplex  = &(Type){
+    .kind = TY_COMPLEX, .size = 8, .align = 4, .base = &(Type){TY_FLOAT, 4, 4}};
+Type *ty_dcomplex  = &(Type){.kind  = TY_COMPLEX,
+                             .size  = 16,
+                             .align = 8,
+                             .base  = &(Type){TY_DOUBLE, 8, 8}};
+Type *ty_ldcomplex = &(Type){.kind  = TY_COMPLEX,
+                             .size  = 32,
+                             .align = 16,
+                             .base  = &(Type){TY_LDOUBLE, 16, 16}};
 
 // C23 decimal floating-point: real IEEE-754-2008 decimal encoding (Intel BID)
 // when built with CCCC_HAS_DECIMAL=1. Declarations, sizeof, struct layout,
 // etc. work unconditionally; decimal literals/arithmetic are a compile
 // error without the library (see cccc_dec_encode_literal / gen_decimal_expr).
-Type *ty_decimal32  = &(Type){.kind = TY_DECIMAL32,  .size = 4,  .align = 4};
-Type *ty_decimal64  = &(Type){.kind = TY_DECIMAL64,  .size = 8,  .align = 8};
+Type *ty_decimal32  = &(Type){.kind = TY_DECIMAL32, .size = 4, .align = 4};
+Type *ty_decimal64  = &(Type){.kind = TY_DECIMAL64, .size = 8, .align = 8};
 Type *ty_decimal128 = &(Type){.kind = TY_DECIMAL128, .size = 16, .align = 16};
 
 static Type ty_error_obj = {TY_ERROR, 0, 1};
-Type *ty_error = &ty_error_obj;
+Type       *ty_error     = &ty_error_obj;
 
 // C23 auto type-inference sentinel; never reaches codegen
 static Type ty_auto_obj = {TY_AUTO, 0, 0};
-Type *ty_auto = &ty_auto_obj;
+Type       *ty_auto     = &ty_auto_obj;
 
 static Type *new_type(VirtualMachine *vm, TypeKind kind, int size, int align) {
     Type *ty = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     memset(ty, 0, sizeof(Type));
-    ty->kind = kind;
-    ty->size = size;
+    ty->kind  = kind;
+    ty->size  = size;
     ty->align = align;
     return ty;
 }
@@ -80,34 +85,46 @@ Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned) {
     if (width < 1)
         error_tok(vm, tok, "_BitInt width must be at least 1, got %d", width);
     if (!is_unsigned && width < 2)
-        error_tok(vm, tok, "signed _BitInt requires at least 2 bits (sign + value), got %d", width);
+        error_tok(
+            vm, tok,
+            "signed _BitInt requires at least 2 bits (sign + value), got %d",
+            width);
     if (width > 65535)
-        error_tok(vm, tok, "_BitInt width %d exceeds maximum 65535 (BITINT_MAXWIDTH)", width);
+        error_tok(vm, tok,
+                  "_BitInt width %d exceeds maximum 65535 (BITINT_MAXWIDTH)",
+                  width);
 
     int sz;
-    if (width <= 8)       sz = 1;
-    else if (width <= 16) sz = 2;
-    else if (width <= 32) sz = 4;
-    else if (width <= 64) sz = 8;
-    else                  sz = (width + 63) / 64 * 8; // ceil to 8-byte word boundary
-    int al = sz > 8 ? 8 : sz;
-    Type *ty = new_type(vm, TY_BITINT, sz, al);
+    if (width <= 8)
+        sz = 1;
+    else if (width <= 16)
+        sz = 2;
+    else if (width <= 32)
+        sz = 4;
+    else if (width <= 64)
+        sz = 8;
+    else
+        sz = (width + 63) / 64 * 8; // ceil to 8-byte word boundary
+    int   al        = sz > 8 ? 8 : sz;
+    Type *ty        = new_type(vm, TY_BITINT, sz, al);
     ty->is_unsigned = is_unsigned;
-    ty->bit_width = width;
+    ty->bit_width   = width;
     return ty;
 }
 
 bool is_integer(Type *ty) {
-    if (!ty) return false;
+    if (!ty)
+        return false;
     TypeKind k = ty->kind;
-    return k == TY_BOOL || k == TY_CHAR || k == TY_SHORT ||
-    k == TY_INT  || k == TY_LONG || k == TY_ENUM || k == TY_BITINT;
+    return k == TY_BOOL || k == TY_CHAR || k == TY_SHORT || k == TY_INT ||
+           k == TY_LONG || k == TY_ENUM || k == TY_BITINT;
 }
 
 bool is_flonum(Type *ty) {
-    if (!ty) return false;
+    if (!ty)
+        return false;
     return ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE ||
-    ty->kind == TY_LDOUBLE;
+           ty->kind == TY_LDOUBLE;
 }
 
 // _Decimal32/64/128. Deliberately NOT is_flonum: a decimal value is
@@ -116,34 +133,43 @@ bool is_flonum(Type *ty) {
 // decimal as flonum, or they'd force a 4/8/16-byte decimal value through a
 // flat 64-bit double register -- lossy for d32/d64, impossible for d128.
 bool is_decimal(Type *ty) {
-    if (!ty) return false;
+    if (!ty)
+        return false;
     return ty->kind == TY_DECIMAL32 || ty->kind == TY_DECIMAL64 ||
-    ty->kind == TY_DECIMAL128;
+           ty->kind == TY_DECIMAL128;
 }
 
 // 0/1/2 for _Decimal32/64/128, or -1 for a non-decimal type.
 int dec_width_code(Type *ty) {
-    if (!ty) return -1;
+    if (!ty)
+        return -1;
     switch (ty->kind) {
-    case TY_DECIMAL32:  return 0;
-    case TY_DECIMAL64:  return 1;
-    case TY_DECIMAL128: return 2;
-    default: return -1;
+        case TY_DECIMAL32:
+            return 0;
+        case TY_DECIMAL64:
+            return 1;
+        case TY_DECIMAL128:
+            return 2;
+        default:
+            return -1;
     }
 }
 
 bool is_complex(Type *ty) {
-    if (!ty) return false;
+    if (!ty)
+        return false;
     return ty->kind == TY_COMPLEX;
 }
 
 bool is_numeric(Type *ty) {
-    if (!ty) return false;
+    if (!ty)
+        return false;
     return is_integer(ty) || is_flonum(ty) || is_complex(ty) || is_decimal(ty);
 }
 
 bool is_vector(Type *ty) {
-    if (!ty) return false;
+    if (!ty)
+        return false;
     return ty->kind == TY_VECTOR;
 }
 
@@ -198,30 +224,31 @@ bool is_compatible(Type *t1, Type *t2) {
             if (!is_compatible(t1->base, t2->base))
                 return false;
             return t1->array_len < 0 && t2->array_len < 0 &&
-            t1->array_len == t2->array_len;
+                   t1->array_len == t2->array_len;
         case TY_BITINT:
             return t1->is_unsigned == t2->is_unsigned &&
                    t1->bit_width == t2->bit_width;
         case TY_NULLPTR_T:
             return true;
         case TY_VECTOR:
-            return t1->vec_len == t2->vec_len && is_compatible(t1->base, t2->base);
+            return t1->vec_len == t2->vec_len &&
+                   is_compatible(t1->base, t2->base);
         default:
             return false;
     }
 }
 
 Type *copy_type(VirtualMachine *vm, Type *ty) {
-    Type *ret = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
-    *ret = *ty;
+    Type *ret   = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
+    *ret        = *ty;
     ret->origin = ty;
     // Note: is_const is preserved through memcpy (*ret = *ty)
     return ret;
 }
 
 Type *pointer_to(VirtualMachine *vm, Type *base) {
-    Type *ty = new_type(vm, TY_PTR, 8, 8);
-    ty->base = base;
+    Type *ty        = new_type(vm, TY_PTR, 8, 8);
+    ty->base        = base;
     ty->is_unsigned = true;
     return ty;
 }
@@ -229,7 +256,7 @@ Type *pointer_to(VirtualMachine *vm, Type *base) {
 Type *func_type(VirtualMachine *vm, Type *return_ty) {
     // The C spec disallows sizeof(<function type>), but
     // GCC allows that and the expression is evaluated to 1.
-    Type *ty = new_type(vm, TY_FUNC, 1, 1);
+    Type *ty      = new_type(vm, TY_FUNC, 1, 1);
     ty->return_ty = return_ty;
     return ty;
 }
@@ -237,11 +264,13 @@ Type *func_type(VirtualMachine *vm, Type *return_ty) {
 Type *array_of(VirtualMachine *vm, Type *base, int len) {
     int sz;
     if (len > 0 && __builtin_mul_overflow(base->size, len, &sz))
-        error("array size overflow: element size %d times length %d exceeds INT_MAX", base->size, len);
+        error("array size overflow: element size %d times length %d exceeds "
+              "INT_MAX",
+              base->size, len);
     else
         sz = base->size * len;
-    Type *ty = new_type(vm, TY_ARRAY, sz, base->align);
-    ty->base = base;
+    Type *ty      = new_type(vm, TY_ARRAY, sz, base->align);
+    ty->base      = base;
     ty->array_len = len;
     return ty;
 }
@@ -253,8 +282,8 @@ Type *array_of(VirtualMachine *vm, Type *base, int len) {
 // The caller is expected to have already validated divisibility/size/width
 // via the vector_size attribute check in parse.c.
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
-    Type *ty = new_type(vm, TY_VECTOR, bytes, bytes);
-    ty->base = base;
+    Type *ty    = new_type(vm, TY_VECTOR, bytes, bytes);
+    ty->base    = base;
     ty->vec_len = bytes / base->size;
     return ty;
 }
@@ -267,17 +296,25 @@ Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty) {
     Type *base;
     switch (vecty->base->size) {
-    case 1:  base = ty_char;  break;
-    case 2:  base = ty_short; break;
-    case 4:  base = ty_int;   break;
-    default: base = ty_long;  break;
+        case 1:
+            base = ty_char;
+            break;
+        case 2:
+            base = ty_short;
+            break;
+        case 4:
+            base = ty_int;
+            break;
+        default:
+            base = ty_long;
+            break;
     }
     return vector_of(vm, base, vecty->size);
 }
 
 Type *vla_of(VirtualMachine *vm, Type *base, Node *len) {
-    Type *ty = new_type(vm, TY_VLA, 8, 8);
-    ty->base = base;
+    Type *ty    = new_type(vm, TY_VLA, 8, 8);
+    ty->base    = base;
     ty->vla_len = len;
     return ty;
 }
@@ -298,7 +335,7 @@ bool type_contains_vla(Type *ty) {
 }
 
 Type *enum_type(VirtualMachine *vm) {
-    return new_type(vm, TY_ENUM, 4, 4);  // enums are int-sized (4 bytes)
+    return new_type(vm, TY_ENUM, 4, 4); // enums are int-sized (4 bytes)
 }
 
 Type *struct_type(VirtualMachine *vm) {
@@ -310,9 +347,9 @@ Type *union_type(VirtualMachine *vm) {
 }
 
 Type *block_type(VirtualMachine *vm, Type *return_ty, Type *params) {
-    Type *ty = new_type(vm, TY_BLOCK, 8, 8);  // Block pointers are 8 bytes
+    Type *ty      = new_type(vm, TY_BLOCK, 8, 8); // Block pointers are 8 bytes
     ty->return_ty = return_ty;
-    ty->params = params;
+    ty->params    = params;
     return ty;
 }
 
@@ -328,7 +365,8 @@ Type *complex_type_for(VirtualMachine *vm, Type *base) {
 }
 
 // Integer promotion: Convert types smaller than int to int (C99 6.3.1.1)
-// char, short, and bit-fields promote to int if all values fit, else unsigned int
+// char, short, and bit-fields promote to int if all values fit, else unsigned
+// int
 static Type *integer_promotion(Type *ty) {
     // Don't promote error types or NULL
     if (!ty || ty->kind == TY_ERROR)
@@ -343,10 +381,11 @@ static Type *integer_promotion(Type *ty) {
 
     // Types smaller than int promote to int
     if (ty->size < 4) {
-        // If it's unsigned and all values don't fit in int, promote to unsigned int
-        // But for char and short, int can hold all values of unsigned char/short
-        // Only need unsigned int if original type was already unsigned AND larger than what int can hold
-        // In our case, unsigned short max (65535) fits in int, so always promote to int
+        // If it's unsigned and all values don't fit in int, promote to unsigned
+        // int But for char and short, int can hold all values of unsigned
+        // char/short Only need unsigned int if original type was already
+        // unsigned AND larger than what int can hold In our case, unsigned
+        // short max (65535) fits in int, so always promote to int
         return ty_int;
     }
 
@@ -357,17 +396,24 @@ static Type *integer_promotion(Type *ty) {
 // Approximation for C23 _BitInt: rank = bit_width, sufficient for N<=64.
 static int get_integer_rank(Type *ty) {
     switch (ty->kind) {
-        case TY_LONG:  return 64;
-        case TY_INT:   return 32;
-        case TY_SHORT: return 16;
-        case TY_CHAR:  return 8;
-        case TY_BOOL:  return 1;
+        case TY_LONG:
+            return 64;
+        case TY_INT:
+            return 32;
+        case TY_SHORT:
+            return 16;
+        case TY_CHAR:
+            return 8;
+        case TY_BOOL:
+            return 1;
         case TY_ENUM:
             if (ty->enum_base_type)
                 return get_integer_rank(ty->enum_base_type);
-            return 32;  // default: int rank
-        case TY_BITINT: return ty->bit_width;
-        default: return -1;
+            return 32; // default: int rank
+        case TY_BITINT:
+            return ty->bit_width;
+        default:
+            return -1;
     }
 }
 
@@ -429,15 +475,18 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
         return is_decimal(ty1) ? ty1 : ty2;
     }
 
-    // Step 1: If either operand has type long double, the other is converted to long double
+    // Step 1: If either operand has type long double, the other is converted to
+    // long double
     if (ty1->kind == TY_LDOUBLE || ty2->kind == TY_LDOUBLE)
         return ty_ldouble;
 
-    // Step 2: Otherwise, if either operand has type double, the other is converted to double
+    // Step 2: Otherwise, if either operand has type double, the other is
+    // converted to double
     if (ty1->kind == TY_DOUBLE || ty2->kind == TY_DOUBLE)
         return ty_double;
 
-    // Step 3: Otherwise, if either operand has type float, the other is converted to float
+    // Step 3: Otherwise, if either operand has type float, the other is
+    // converted to float
     if (ty1->kind == TY_FLOAT || ty2->kind == TY_FLOAT)
         return ty_float;
 
@@ -445,36 +494,40 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     ty1 = integer_promotion(ty1);
     ty2 = integer_promotion(ty2);
 
-    // Step 5: If both operands have the same type, no further conversion is needed.
-    // For _BitInt, also require matching bit_width (different widths go to step 6).
+    // Step 5: If both operands have the same type, no further conversion is
+    // needed. For _BitInt, also require matching bit_width (different widths go
+    // to step 6).
     if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned &&
         (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width))
         return ty1;
 
-    // Step 6: If both operands have signed integer types or both have unsigned integer types,
-    // the operand with lesser integer conversion rank is converted to the type of the operand with greater rank
+    // Step 6: If both operands have signed integer types or both have unsigned
+    // integer types, the operand with lesser integer conversion rank is
+    // converted to the type of the operand with greater rank
     if (ty1->is_unsigned == ty2->is_unsigned) {
         return (get_integer_rank(ty1) >= get_integer_rank(ty2)) ? ty1 : ty2;
     }
 
-    // Step 7: Otherwise, if the type of the operand with unsigned integer type has rank greater than
-    // or equal to the rank of the type of the other operand, the operand with signed integer type
-    // is converted to the type of the operand with unsigned integer type
+    // Step 7: Otherwise, if the type of the operand with unsigned integer type
+    // has rank greater than or equal to the rank of the type of the other
+    // operand, the operand with signed integer type is converted to the type of
+    // the operand with unsigned integer type
     Type *unsigned_ty = ty1->is_unsigned ? ty1 : ty2;
-    Type *signed_ty = ty1->is_unsigned ? ty2 : ty1;
+    Type *signed_ty   = ty1->is_unsigned ? ty2 : ty1;
 
     if (get_integer_rank(unsigned_ty) >= get_integer_rank(signed_ty))
         return unsigned_ty;
 
-    // Step 8: Otherwise, if the type of the operand with signed integer type can represent all
-    // values of the type of the operand with unsigned integer type, the operand with unsigned
-    // integer type is converted to the type of the operand with signed integer type
+    // Step 8: Otherwise, if the type of the operand with signed integer type
+    // can represent all values of the type of the operand with unsigned integer
+    // type, the operand with unsigned integer type is converted to the type of
+    // the operand with signed integer type
     if (signed_ty->size > unsigned_ty->size)
         return signed_ty;
 
-    // Step 9: Otherwise, both operands are converted to the unsigned integer type corresponding
-    // to the type of the operand with signed integer type
-    Type *result = copy_type(vm, signed_ty);
+    // Step 9: Otherwise, both operands are converted to the unsigned integer
+    // type corresponding to the type of the operand with signed integer type
+    Type *result        = copy_type(vm, signed_ty);
     result->is_unsigned = true;
     return result;
 }
@@ -512,12 +565,14 @@ static void usual_arith_conv(VirtualMachine *vm, Node **lhs, Node **rhs) {
 //
 // Categories:
 //   -Wconversion      integer -> narrower integer (by size)
-//   -Wsign-conversion integer -> same-or-narrower integer with differing signedness
-//   -Wfloat-conversion float -> integer, integer -> float, or float -> narrower float
+//   -Wsign-conversion integer -> same-or-narrower integer with differing
+//   signedness -Wfloat-conversion float -> integer, integer -> float, or float
+//   -> narrower float
 //
 // Integer cases are suppressed when the source is a constant that fits in the
 // destination type (e.g. `char c = 0;` is silent).
-void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *tok) {
+void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to,
+                              Token *tok) {
     if (!vm || !expr || !to || !expr->ty)
         return;
     Type *from = expr->ty;
@@ -525,22 +580,25 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
     if (from->kind == TY_ERROR || to->kind == TY_ERROR)
         return;
 
-    // Check for discarded qualifiers in pointer assignments (e.g. const char* -> char*).
-    // This must come before the early return for same-kind types below.
+    // Check for discarded qualifiers in pointer assignments (e.g. const char*
+    // -> char*). This must come before the early return for same-kind types
+    // below.
     if (from->kind == TY_PTR && to->kind == TY_PTR) {
         Type *from_base = from->base;
-        Type *to_base = to->base;
+        Type *to_base   = to->base;
         if (from_base && to_base) {
             char buf[128];
             buf[0] = '\0';
             if (from_base->is_const && !to_base->is_const)
                 strcat(buf, "'const'");
             if (from_base->is_volatile && !to_base->is_volatile) {
-                if (buf[0]) strcat(buf, ", ");
+                if (buf[0])
+                    strcat(buf, ", ");
                 strcat(buf, "'volatile'");
             }
             if (from_base->is_restrict && !to_base->is_restrict) {
-                if (buf[0]) strcat(buf, ", ");
+                if (buf[0])
+                    strcat(buf, ", ");
                 strcat(buf, "'restrict'");
             }
             if (buf[0]) {
@@ -548,15 +606,15 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
                             (from_base->is_volatile && !to_base->is_volatile) +
                             (from_base->is_restrict && !to_base->is_restrict);
                 warn_tok(vm, tok, CCCC_WARN_DISCARDED_QUALIFIERS,
-                         "assignment discards %s qualifier%s from pointer target type",
+                         "assignment discards %s qualifier%s from pointer "
+                         "target type",
                          buf, count > 1 ? "s" : "");
             }
         }
         // -Wincompatible-pointer-types: non-void pointee type mismatch
         if ((vm->compiler.warnings & CCCC_WARN_INCOMPATIBLE_POINTER_TYPES) &&
-            from_base && to_base &&
-            from_base->kind != TY_VOID && to_base->kind != TY_VOID &&
-            !is_compatible(from_base, to_base))
+            from_base && to_base && from_base->kind != TY_VOID &&
+            to_base->kind != TY_VOID && !is_compatible(from_base, to_base))
             warn_tok(vm, tok, CCCC_WARN_INCOMPATIBLE_POINTER_TYPES,
                      "incompatible pointer types");
         return;
@@ -569,7 +627,8 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
     if ((vm->compiler.warnings & CCCC_WARN_INT_CONVERSION) &&
         ((to->kind == TY_PTR && is_integer(from)) ||
          (from->kind == TY_PTR && is_integer(to)))) {
-        bool is_null_const = to->kind == TY_PTR && expr->kind == ND_NUM && expr->val == 0;
+        bool is_null_const =
+            to->kind == TY_PTR && expr->kind == ND_NUM && expr->val == 0;
         if (!is_null_const)
             warn_tok(vm, tok, CCCC_WARN_INT_CONVERSION,
                      to->kind == TY_PTR
@@ -587,16 +646,19 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
             return;
         if (from->size > to->size) {
             // Narrowing: integer -> smaller integer.
-            warn_tok(vm, tok, CCCC_WARN_CONVERSION,
-                     "implicit conversion loses integer precision: %s%s to %s%s",
-                     from->is_unsigned ? "unsigned " : "",
-                     (from->kind == TY_LONG) ? "long" :
-                     (from->kind == TY_INT)  ? "int"  :
-                     (from->kind == TY_SHORT) ? "short" : "char",
-                     to->is_unsigned ? "unsigned " : "",
-                     (to->kind == TY_LONG)  ? "long"  :
-                     (to->kind == TY_INT)   ? "int"   :
-                     (to->kind == TY_SHORT) ? "short" : "char");
+            warn_tok(
+                vm, tok, CCCC_WARN_CONVERSION,
+                "implicit conversion loses integer precision: %s%s to %s%s",
+                from->is_unsigned ? "unsigned " : "",
+                (from->kind == TY_LONG)    ? "long"
+                : (from->kind == TY_INT)   ? "int"
+                : (from->kind == TY_SHORT) ? "short"
+                                           : "char",
+                to->is_unsigned ? "unsigned " : "",
+                (to->kind == TY_LONG)    ? "long"
+                : (to->kind == TY_INT)   ? "int"
+                : (to->kind == TY_SHORT) ? "short"
+                                         : "char");
         } else if (from->is_unsigned != to->is_unsigned) {
             // Same-size (or widening) but signedness change.
             warn_tok(vm, tok, CCCC_WARN_SIGN_CONVERSION,
@@ -625,7 +687,8 @@ void warn_implicit_conversion(VirtualMachine *vm, Node *expr, Type *to, Token *t
 // Check for a signed/unsigned comparison mismatch BEFORE usual_arith_conv
 // normalises signedness away.  Both operands must be integers after promotion.
 // Constant non-negative operands are exempted (e.g. `x < 5` is quiet).
-static void check_sign_compare(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
+static void check_sign_compare(VirtualMachine *vm, Node *lhs, Node *rhs,
+                               Token *tok) {
     if (!is_integer(lhs->ty) || !is_integer(rhs->ty))
         return;
     // Apply integer promotion to reflect what the comparison actually uses.
@@ -690,19 +753,21 @@ void add_type(VirtualMachine *vm, Node *node) {
 
     switch (node->kind) {
         case ND_NUM:
-            // Parser already sets the correct type from token (ty_double for 3.14, etc.)
-            // Don't override it here!
+            // Parser already sets the correct type from token (ty_double
+            // for 3.14, etc.) Don't override it here!
             return;
         case ND_COMPLEX:
             if (node->val == 0) {
-                node->ty = complex_type_for(vm, node->ty ? node->ty->base : ty_double);
+                node->ty =
+                    complex_type_for(vm, node->ty ? node->ty->base : ty_double);
                 if (node->lhs)
                     node->lhs = new_cast(vm, node->lhs, node->ty->base);
                 if (node->rhs)
                     node->rhs = new_cast(vm, node->rhs, node->ty->base);
             } else if (node->val == 1 || node->val == 2) {
                 if (!is_complex(node->lhs->ty))
-                    node->lhs = new_cast(vm, node->lhs, complex_type_for(vm, node->ty));
+                    node->lhs =
+                        new_cast(vm, node->lhs, complex_type_for(vm, node->ty));
             } else if (node->val == 3) {
                 if (!is_complex(node->lhs->ty))
                     node->lhs = new_cast(vm, node->lhs, node->ty);
@@ -728,23 +793,25 @@ void add_type(VirtualMachine *vm, Node *node) {
                     error_tok(vm, node->tok,
                               "vector types do not match in binary expression");
                 Type *elem = is_vector(node->lhs->ty) ? node->lhs->ty->base
-                                                       : node->rhs->ty->base;
+                                                      : node->rhs->ty->base;
                 if ((node->kind == ND_MOD || node->kind == ND_BITAND ||
                      node->kind == ND_BITOR || node->kind == ND_BITXOR) &&
                     !is_integer(elem))
-                    error_tok(vm, node->tok,
-                              "'%s' is not supported on floating-point vector types",
-                              node->kind == ND_MOD ? "%" :
-                              node->kind == ND_BITAND ? "&" :
-                              node->kind == ND_BITOR ? "|" : "^");
+                    error_tok(
+                        vm, node->tok,
+                        "'%s' is not supported on floating-point vector types",
+                        node->kind == ND_MOD      ? "%"
+                        : node->kind == ND_BITAND ? "&"
+                        : node->kind == ND_BITOR  ? "|"
+                                                  : "^");
             }
             usual_arith_conv(vm, &node->lhs, &node->rhs);
             node->ty = node->lhs->ty;
             return;
         case ND_NEG: {
-            Type *ty = get_common_type(vm, ty_int, node->lhs->ty);
+            Type *ty  = get_common_type(vm, ty_int, node->lhs->ty);
             node->lhs = new_cast(vm, node->lhs, ty);
-            node->ty = ty;
+            node->ty  = ty;
             return;
         }
         case ND_ASSIGN:
@@ -760,8 +827,8 @@ void add_type(VirtualMachine *vm, Node *node) {
             if (node->lhs->ty->kind == TY_ARRAY ||
                 (node->lhs->ty->kind == TY_VLA &&
                  node->lhs->kind != ND_VLA_PTR)) {
-                if (vm->collect_errors && error_tok_recover(vm, node->lhs->tok,
-                                                             "not an lvalue")) {
+                if (vm->collect_errors &&
+                    error_tok_recover(vm, node->lhs->tok, "not an lvalue")) {
                     node->ty = ty_error;
                     return;
                 }
@@ -769,16 +836,19 @@ void add_type(VirtualMachine *vm, Node *node) {
             }
             // Check for const-correctness
             // Allow initialization (when initializing_var is set and matches)
-            bool is_initialization =
-                lhs_targets_initializing_var(node->lhs, vm->compiler.initializing_var);
+            bool is_initialization = lhs_targets_initializing_var(
+                node->lhs, vm->compiler.initializing_var);
 
             if (node->lhs->ty->is_const && !is_initialization) {
-                if (vm->collect_errors && error_tok_recover(vm, node->lhs->tok,
-                                                             "cannot assign to const-qualified variable")) {
+                if (vm->collect_errors &&
+                    error_tok_recover(
+                        vm, node->lhs->tok,
+                        "cannot assign to const-qualified variable")) {
                     node->ty = ty_error;
                     return;
                 }
-                error_tok(vm, node->lhs->tok, "cannot assign to const-qualified variable");
+                error_tok(vm, node->lhs->tok,
+                          "cannot assign to const-qualified variable");
             }
             // GCC vector_size vectors (tracker #72): matching real GCC/clang,
             // a bare scalar cannot initialize or be assigned to a whole
@@ -793,8 +863,10 @@ void add_type(VirtualMachine *vm, Node *node) {
                           "cannot initialize/assign a vector type from a "
                           "bare scalar; broadcast via an arithmetic operator "
                           "instead (e.g. 'v + 5.0f')");
-            if (node->lhs->ty->kind != TY_STRUCT && node->lhs->ty->kind != TY_UNION) {
-                warn_implicit_conversion(vm, node->rhs, node->lhs->ty, node->lhs->tok);
+            if (node->lhs->ty->kind != TY_STRUCT &&
+                node->lhs->ty->kind != TY_UNION) {
+                warn_implicit_conversion(vm, node->rhs, node->lhs->ty,
+                                         node->lhs->tok);
                 node->rhs = new_cast(vm, node->rhs, node->lhs->ty);
             }
             node->ty = node->lhs->ty;
@@ -825,7 +897,9 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_LT:
         case ND_LE:
             if (is_complex(node->lhs->ty) || is_complex(node->rhs->ty))
-                error_tok(vm, node->tok, "ordered comparison of complex values is not supported");
+                error_tok(
+                    vm, node->tok,
+                    "ordered comparison of complex values is not supported");
             if (is_vector(node->lhs->ty) || is_vector(node->rhs->ty)) {
                 if (!is_vector(node->lhs->ty) || !is_vector(node->rhs->ty) ||
                     !is_compatible(node->lhs->ty, node->rhs->ty))
@@ -850,8 +924,9 @@ void add_type(VirtualMachine *vm, Node *node) {
             // GNU vector_size vectors (tracker #715): ~v is supported on
             // integer-lane vectors only (matches & | ^).
             if (is_vector(node->lhs->ty) && !is_integer(node->lhs->ty->base))
-                error_tok(vm, node->tok,
-                          "'~' is not supported on floating-point vector types");
+                error_tok(
+                    vm, node->tok,
+                    "'~' is not supported on floating-point vector types");
             node->ty = node->lhs->ty;
             return;
         case ND_SHL:
@@ -861,8 +936,8 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_VAR:
         case ND_VLA_PTR:
             node->ty = node->var->ty;
-            // Function-to-pointer decay: when a function name is used as a value,
-            // it decays to a pointer to that function
+            // Function-to-pointer decay: when a function name is used as a
+            // value, it decays to a pointer to that function
             if (node->var->ty->kind == TY_FUNC) {
                 node->ty = pointer_to(vm, node->var->ty);
             }
@@ -890,7 +965,8 @@ void add_type(VirtualMachine *vm, Node *node) {
                               "vector types do not match in '?:' select");
                 if (is_vector(node->cond->ty)) {
                     Type *c = node->cond->ty;
-                    if (c->vec_len != t->vec_len || c->base->size != t->base->size)
+                    if (c->vec_len != t->vec_len ||
+                        c->base->size != t->base->size)
                         error_tok(vm, node->tok,
                                   "vector '?:' condition must be a vector with "
                                   "the same lane count and lane width as the "
@@ -907,27 +983,27 @@ void add_type(VirtualMachine *vm, Node *node) {
             } else if (t_ptr || e_ptr) {
                 // C11 6.5.15p6/7: when one arm is a pointer and the other is a
                 // null pointer constant (or nullptr_t), or both arms are
-                // pointers, the conditional has a pointer type.  Resolve to that
-                // pointer type and cast both arms to it, so codegen never
+                // pointers, the conditional has a pointer type.  Resolve to
+                // that pointer type and cast both arms to it, so codegen never
                 // integer-truncates a 64-bit pointer down to int (#591).
-                Type *tp = !t_ptr ? NULL
+                Type *tp = !t_ptr                ? NULL
                            : t->kind == TY_ARRAY ? pointer_to(vm, t->base)
                            : t->kind == TY_FUNC  ? pointer_to(vm, t)
                                                  : t;
-                Type *ep = !e_ptr ? NULL
+                Type *ep = !e_ptr                ? NULL
                            : e->kind == TY_ARRAY ? pointer_to(vm, e->base)
                            : e->kind == TY_FUNC  ? pointer_to(vm, e)
                                                  : e;
                 Type *pty;
                 if (tp && ep)
-                    pty = (tp->base && tp->base->kind == TY_VOID) ? tp
-                        : (ep->base && ep->base->kind == TY_VOID) ? ep
-                                                                  : tp;
+                    pty = (tp->base && tp->base->kind == TY_VOID)   ? tp
+                          : (ep->base && ep->base->kind == TY_VOID) ? ep
+                                                                    : tp;
                 else
                     pty = tp ? tp : ep;
                 node->then = new_cast(vm, node->then, pty);
-                node->els = new_cast(vm, node->els, pty);
-                node->ty = pty;
+                node->els  = new_cast(vm, node->els, pty);
+                node->ty   = pty;
             } else {
                 usual_arith_conv(vm, &node->then, &node->els);
                 node->ty = node->then->ty;
@@ -941,7 +1017,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = node->member->ty;
             // If the struct/union is const, propagate const to member access
             if (node->lhs && node->lhs->ty && node->lhs->ty->is_const) {
-                node->ty = copy_type(vm, node->ty);
+                node->ty           = copy_type(vm, node->ty);
                 node->ty->is_const = true;
             }
             return;
@@ -967,16 +1043,18 @@ void add_type(VirtualMachine *vm, Node *node) {
         }
         case ND_DEREF:
             if (!node->lhs->ty->base) {
-                if (vm->collect_errors && error_tok_recover(vm, node->tok,
-                                                             "invalid pointer dereference")) {
+                if (vm->collect_errors &&
+                    error_tok_recover(vm, node->tok,
+                                      "invalid pointer dereference")) {
                     node->ty = ty_error;
                     return;
                 }
                 error_tok(vm, node->tok, "invalid pointer dereference");
             }
             if (node->lhs->ty->base->kind == TY_VOID) {
-                if (vm->collect_errors && error_tok_recover(vm, node->tok,
-                                                             "dereferencing a void pointer")) {
+                if (vm->collect_errors &&
+                    error_tok_recover(vm, node->tok,
+                                      "dereferencing a void pointer")) {
                     node->ty = ty_error;
                     return;
                 }
@@ -996,7 +1074,8 @@ void add_type(VirtualMachine *vm, Node *node) {
                     return;
                 }
             }
-            error_tok(vm, node->tok, "statement expression returning void is not supported");
+            error_tok(vm, node->tok,
+                      "statement expression returning void is not supported");
             return;
         case ND_LABEL_VAL:
             node->ty = pointer_to(vm, ty_void);
@@ -1020,14 +1099,16 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_ALOAD:
             add_type(vm, node->lhs);
             if (node->lhs->ty->kind != TY_PTR)
-                error_tok(vm, node->lhs->tok, "__builtin_atomic_load: pointer expected");
+                error_tok(vm, node->lhs->tok,
+                          "__builtin_atomic_load: pointer expected");
             node->ty = node->lhs->ty->base;
             return;
         case ND_ASTORE:
             add_type(vm, node->lhs);
             add_type(vm, node->rhs);
             if (node->lhs->ty->kind != TY_PTR)
-                error_tok(vm, node->lhs->tok, "__builtin_atomic_store: pointer expected");
+                error_tok(vm, node->lhs->tok,
+                          "__builtin_atomic_store: pointer expected");
             node->ty = node->lhs->ty->base;
             return;
         case ND_BLOCK_LITERAL:
@@ -1042,9 +1123,10 @@ void add_type(VirtualMachine *vm, Node *node) {
             // Block call returns the block's return type
             add_type(vm, node->lhs);
             if (node->lhs->ty && node->lhs->ty->kind == TY_BLOCK) {
-                node->ty = node->lhs->ty->return_ty ? node->lhs->ty->return_ty : ty_void;
+                node->ty = node->lhs->ty->return_ty ? node->lhs->ty->return_ty
+                                                    : ty_void;
             } else {
-                node->ty = ty_int;  // Fallback
+                node->ty = ty_int; // Fallback
             }
             return;
         default:

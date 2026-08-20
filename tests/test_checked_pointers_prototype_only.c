@@ -5,7 +5,7 @@
 // The token span is left permanently unresolved, which is correct, not an
 // error -- caller-side checking of the bound is future work (#488).
 
-void f(int * [[cccc::array, cccc::count(n)]] p, int n);
+void f(int *[[cccc::array, cccc::count(n)]] p, int n);
 
 int main(void) {
     return 42;

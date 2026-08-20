@@ -32,15 +32,18 @@ extern int open(const char *path, int flags, ...);
 extern int close(int fd);
 
 int main(void) {
-    unsigned long guest_size = sizeof(struct statfs);
-    unsigned long tail = 64;
-    unsigned char *buf = (unsigned char *)malloc(guest_size + tail);
-    if (!buf) return 1;
+    unsigned long  guest_size = sizeof(struct statfs);
+    unsigned long  tail       = 64;
+    unsigned char *buf        = (unsigned char *)malloc(guest_size + tail);
+    if (!buf)
+        return 1;
     memset(buf, 0xAA, guest_size + tail);
 
     struct statfs *sb = (struct statfs *)buf;
-    if (statfs("/", sb) != 0) return 2;
-    if (sb->f_bsize == 0) return 3;
+    if (statfs("/", sb) != 0)
+        return 2;
+    if (sb->f_bsize == 0)
+        return 3;
 
     for (unsigned long i = guest_size; i < guest_size + tail; i++) {
         if (buf[i] != 0xAA) {
@@ -51,14 +54,26 @@ int main(void) {
 
     // fstatfs, same canary shape.
     unsigned char *buf2 = (unsigned char *)malloc(guest_size + tail);
-    if (!buf2) { free(buf); return 5; }
+    if (!buf2) {
+        free(buf);
+        return 5;
+    }
     memset(buf2, 0xAA, guest_size + tail);
 
     int fd = open(".", O_RDONLY);
-    if (fd < 0) { free(buf); free(buf2); return 8; }
+    if (fd < 0) {
+        free(buf);
+        free(buf2);
+        return 8;
+    }
 
     struct statfs *sb2 = (struct statfs *)buf2;
-    if (fstatfs(fd, sb2) != 0) { close(fd); free(buf); free(buf2); return 6; }
+    if (fstatfs(fd, sb2) != 0) {
+        close(fd);
+        free(buf);
+        free(buf2);
+        return 6;
+    }
     close(fd);
     for (unsigned long i = guest_size; i < guest_size + tail; i++) {
         if (buf2[i] != 0xAA) {

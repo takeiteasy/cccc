@@ -1,7 +1,7 @@
 // Test alternate include qualifier spellings for emit routing.
 
-#include @emit <stddef.h>
-#include __attribute__((emit)) <stdint.h>
+#include @emit < stddef.h>
+#include __attribute__((emit)) < stdint.h>
 
 [[cccc::comptime]]
 void gen_answer(void) {

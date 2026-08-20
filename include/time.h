@@ -34,22 +34,22 @@ typedef long time_t;
 #define _STRUCT_TIMESPEC struct timespec
 struct timespec {
     time_t tv_sec;
-    long tv_nsec;
+    long   tv_nsec;
 };
 
 #define TIME_UTC 1
 
 struct tm {
-    int tm_sec;
-    int tm_min;
-    int tm_hour;
-    int tm_mday;
-    int tm_mon;
-    int tm_year;
-    int tm_wday;
-    int tm_yday;
-    int tm_isdst;
-    long tm_gmtoff;
+    int   tm_sec;
+    int   tm_min;
+    int   tm_hour;
+    int   tm_mday;
+    int   tm_mon;
+    int   tm_year;
+    int   tm_wday;
+    int   tm_yday;
+    int   tm_isdst;
+    long  tm_gmtoff;
     char *tm_zone;
 };
 
@@ -62,11 +62,12 @@ extern int timespec_get(struct timespec *ts, int base);
 extern int nanosleep(const struct timespec *req, struct timespec *rem);
 // extern int timespec_getres(struct timespec *ts, int base);
 extern char *asctime(const struct tm *tm); // deprecated
-extern char *ctime(const time_t *timer); // deprecated
+extern char *ctime(const time_t *timer);   // deprecated
 extern struct tm *gmtime(const time_t *timer);
 extern struct tm *gmtime_r(const time_t *timer, struct tm *result);
 extern struct tm *localtime(const time_t *timer);
 extern struct tm *localtime_r(const time_t *timer, struct tm *result);
-extern size_t strftime(char *s, size_t maxsize, const char *format, const struct tm *timeptr);
+extern size_t strftime(char *s, size_t maxsize, const char *format,
+                       const struct tm *timeptr);
 
 #endif /* __TIME_H */

@@ -28,13 +28,13 @@ static int g(int v, int *q) {
 
 static int touch(int *restrict p) {
     int a = g(*p, p); // arg-fill: *p is read while preparing this call
-    int b = *p;        // must be caught as a UAF, not served from the cache
+    int b = *p;       // must be caught as a UAF, not served from the cache
     return a + b;
 }
 
 int main(void) {
     int *p = malloc(sizeof(int));
-    *p = 5;
-    int r = touch(p);
+    *p     = 5;
+    int r  = touch(p);
     return r;
 }

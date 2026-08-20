@@ -1,9 +1,9 @@
 /*
  * stdarg.h - Variable Argument Lists
  * CCCC C Compiler - Standard C Library Header
- * 
+ *
  * Implements C99/C11 variable argument list support for the CCCC VM.
- * 
+ *
  * Stack Layout for Variadic Functions (after ENT3):
  *   Stack Args      (call args 8+, caller's frame)
  *   [arg9]          ← bp[+3]
@@ -16,12 +16,12 @@
  *   ...
  *   [param7]        ← bp[-8]   (spilled from REG_A7, last register arg)
  *   [locals...]     ← bp[-9] and below
- * 
+ *
  * Register-based calling: first 8 args in REG_A0-A7, spilled by ENT3.
  * Args 9+ are pushed to stack before CALL. ENT3 copies fixed stack-passed
  * parameters into callee local slots; va_arg reads the remaining variadic tail
  * from the caller's stack area.
- * 
+ *
  * va_list is a struct that tracks position in both regions and knows
  * when to switch from the register-spill area to the stack args area.
  */
@@ -122,32 +122,33 @@
  * mirroring #1054's jmp_buf widening rather than diagnosing the fold.
  */
 typedef struct {
-    char *reg_ptr;      /* Current position in register spill area */
-    char *stack_ptr;    /* Current position in stack overflow area */
-    int reg_count;      /* Remaining slots in register spill area */
-    char __reserved[40]; /* #1059: headroom for the real host va_list size */
+    char *reg_ptr;        /* Current position in register spill area */
+    char *stack_ptr;      /* Current position in stack overflow area */
+    int   reg_count;      /* Remaining slots in register spill area */
+    char  __reserved[40]; /* #1059: headroom for the real host va_list size */
 } va_list;
 
 /*
  * va_start(ap, last) - Initialize va_list
  * @ap:   va_list to initialize
  * @last: name of the last fixed parameter before '...'
- * 
+ *
  * Computes:
  * - reg_ptr: address of first variadic arg = &last - 8 (one slot before last)
  * - stack_ptr: address of first stack variadic arg
  * - reg_count: how many varargs fit in remaining register spill slots
- * 
+ *
  * Stack geometry: last is at bp[-(param_idx+1)], bp[-8] is last reg slot.
  * reg_count = 8 - (param_idx + 1) = 7 - param_idx
- * 
+ *
  * We compute this by measuring distance from last to bp[-8]:
  * bp[-8] = bp - 64, and &last = bp - (param_idx+1)*8
- * Distance in slots = (bp - (param_idx+1)*8) - (bp - 64) / 8 = (64 - (param_idx+1)*8) / 8
- *                   = 8 - param_idx - 1 = 7 - param_idx
+ * Distance in slots = (bp - (param_idx+1)*8) - (bp - 64) / 8 = (64 -
+ * (param_idx+1)*8) / 8 = 8 - param_idx - 1 = 7 - param_idx
  *
- * Simpler: reg_count = (reg_end - &last) / 8 - 1 where reg_end is at a known offset.
- * 
+ * Simpler: reg_count = (reg_end - &last) / 8 - 1 where reg_end is at a known
+ * offset.
+ *
  * The trick: bp can be recovered as ((long long *)&last) + (param_offset / 8)
  * where param_offset = &last's position below bp. But param_offset is encoded
  * in the stack layout.
@@ -178,24 +179,32 @@ typedef struct {
  * print the real host `va_start(ap, last)` form instead of walking this
  * subtree.
  */
-#define va_start(ap, last) \
-    __cccc_va_start(ap, last, ({ \
-    long long *__bp = (long long *)__builtin_frame_address(0); \
-    (ap).reg_ptr = (char *)((long long *)&(last) - 1); \
-    /* Count remaining reg slots: last is at __bp[-(N+1)], reg area ends at __bp[-8] */ \
-    /* Remaining = 8 - (N+1) = number of slots from (last-1) down to __bp[-8] */ \
-    int __param_slot = (int)(__bp - (long long *)&(last)); \
-    /* Under --stack-canaries, ENT3 reserves bp[-1] for the canary and shifts \
-     * params one slot lower, inflating this bp-to-&last distance by one. The \
-     * relative reg_ptr above is unaffected; only the slot count needs the fix \
-     * (#445). __CCCC_STACK_CANARIES__ is 1 when canaries are on, else 0. */ \
-    __param_slot -= __CCCC_STACK_CANARIES__; \
-    (ap).reg_count = 8 - __param_slot; \
-    if ((ap).reg_count < 0) (ap).reg_count = 0; \
-    int __stack_fixed = __param_slot > 8 ? __param_slot - 8 : 0; \
-    (ap).stack_ptr = (char *)(__bp + 2 + __stack_fixed); \
-    (void)0; \
-    }))
+#define va_start(ap, last)                                                     \
+    __cccc_va_start(ap, last, ({                                               \
+                        long long *__bp =                                      \
+                            (long long *)__builtin_frame_address(0);           \
+                        (ap).reg_ptr = (char *)((long long *)&(last) - 1);     \
+                        /* Count remaining reg slots: last is at __bp[-(N+1)], \
+                         * reg area ends at __bp[-8] */                        \
+                        /* Remaining = 8 - (N+1) = number of slots from        \
+                         * (last-1) down to __bp[-8] */                        \
+                        int __param_slot = (int)(__bp - (long long *)&(last)); \
+                        /* Under --stack-canaries, ENT3 reserves bp[-1] for    \
+                         * the canary and shifts params one slot lower,        \
+                         * inflating this bp-to-&last distance by one. The     \
+                         * relative reg_ptr above is unaffected; only the slot \
+                         * count needs the fix                                 \
+                         * (#445). __CCCC_STACK_CANARIES__ is 1 when canaries  \
+                         * are on, else 0. */                                  \
+                        __param_slot   -= __CCCC_STACK_CANARIES__;             \
+                        (ap).reg_count  = 8 - __param_slot;                    \
+                        if ((ap).reg_count < 0)                                \
+                            (ap).reg_count = 0;                                \
+                        int __stack_fixed =                                    \
+                            __param_slot > 8 ? __param_slot - 8 : 0;           \
+                        (ap).stack_ptr = (char *)(__bp + 2 + __stack_fixed);   \
+                        (void)0;                                               \
+                    }))
 
 /*
  * va_arg(ap, type) - Retrieve next argument
@@ -245,22 +254,31 @@ typedef struct {
  * unaffected; only the serializer prints the real host `va_arg(ap, type)`
  * form using the annotation instead of walking this subtree.
  */
-#define va_arg(ap, type) \
-    __cccc_va_arg(ap, type, \
-    __builtin_choose_expr( \
-        __builtin_types_compatible_p(type, double) || __builtin_types_compatible_p(type, float), \
-        (((ap).reg_count > 0) \
-            ? (--((ap).reg_count), (*(double *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
-            : (*(double *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))), \
-        __builtin_choose_expr( \
-            __builtin_classify_type(*(type *)0) == 99 || \
-            __builtin_classify_type(*(type *)0) == 98, \
-            (((ap).reg_count > 0) \
-                ? (--((ap).reg_count), (*(type *)(*(void **)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)))) \
-                : (*(type *)(*(void **)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8)))), \
-            (((ap).reg_count > 0) \
-                ? (--((ap).reg_count), (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8))) \
-                : (*(type *)(((ap).stack_ptr) += 8, ((ap).stack_ptr) - 8))))))
+#define va_arg(ap, type)                                                       \
+    __cccc_va_arg(                                                             \
+        ap, type,                                                              \
+        __builtin_choose_expr(                                                 \
+            __builtin_types_compatible_p(type, double) ||                      \
+                __builtin_types_compatible_p(type, float),                     \
+            (((ap).reg_count > 0)                                              \
+                 ? (--((ap).reg_count),                                        \
+                    (*(double *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)))    \
+                 : (*(double *)(((ap).stack_ptr) += 8,                         \
+                                ((ap).stack_ptr) - 8))),                       \
+            __builtin_choose_expr(                                             \
+                __builtin_classify_type(*(type *)0) == 99 ||                   \
+                    __builtin_classify_type(*(type *)0) == 98,                 \
+                (((ap).reg_count > 0)                                          \
+                     ? (--((ap).reg_count),                                    \
+                        (*(type *)(*(void **)(((ap).reg_ptr) -= 8,             \
+                                              ((ap).reg_ptr) + 8))))           \
+                     : (*(type *)(*(void **)(((ap).stack_ptr) += 8,            \
+                                             ((ap).stack_ptr) - 8)))),         \
+                (((ap).reg_count > 0)                                          \
+                     ? (--((ap).reg_count),                                    \
+                        (*(type *)(((ap).reg_ptr) -= 8, ((ap).reg_ptr) + 8)))  \
+                     : (*(type *)(((ap).stack_ptr) += 8,                       \
+                                  ((ap).stack_ptr) - 8))))))
 
 /*
  * va_end(ap) - Cleanup va_list

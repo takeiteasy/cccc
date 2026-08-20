@@ -14,7 +14,7 @@
 
 typedef void *nl_catd;
 
-#define NL_SETD 1
+#define NL_SETD       1
 #define NL_CAT_LOCALE 1
 
 extern nl_catd catopen(const char *name, int oflag);

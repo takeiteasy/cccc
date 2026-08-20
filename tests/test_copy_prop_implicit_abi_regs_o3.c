@@ -34,20 +34,21 @@ static int overflow_pair(int sum, int t) {
     int r1, r2;
     int of1 = __builtin_add_overflow(sum, t, &r1);
     int of2 = __builtin_add_overflow(sum, t, &r2);
-    (void)of1; (void)of2;
+    (void)of1;
+    (void)of2;
     return r1 + r2;
 }
 
 int main(void) {
     int total = 0;
-    int junk = 0;
+    int junk  = 0;
     for (int i = 0; i < 5; i++) {
         int t = i * 3;
         int r1, r2;
         int of1 = __builtin_add_overflow(total, t, &r1);
         int of2 = __builtin_add_overflow(total, t, &r2);
-        junk = junk + of1 + of2;
-        total = r1 + r2;
+        junk    = junk + of1 + of2;
+        total   = r1 + r2;
     }
     int v = total + junk;
     if (v != 156) {

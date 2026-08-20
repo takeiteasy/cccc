@@ -5,8 +5,10 @@
 
 int f(bool b) {
     switch (b) {
-        case true:  return 1;
-        case false: return 0;
+        case true:
+            return 1;
+        case false:
+            return 0;
     }
     return -1;
 }

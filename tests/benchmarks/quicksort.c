@@ -9,13 +9,13 @@ static int *arr;
 
 static void swap(int *x, int *y) {
     int t = *x;
-    *x = *y;
-    *y = t;
+    *x    = *y;
+    *y    = t;
 }
 
 static int partition(int lo, int hi) {
     int pivot = arr[hi];
-    int i = lo - 1;
+    int i     = lo - 1;
     for (int j = lo; j < hi; j++) {
         if (arr[j] < pivot) {
             i++;
@@ -41,8 +41,8 @@ static unsigned long mrand(unsigned long *s) {
 
 int main(void) {
     unsigned long s = 0x9E3779B97F4A7C15ULL;
-    long n = BENCH_N;
-    arr = malloc(n * sizeof(int));
+    long          n = BENCH_N;
+    arr             = malloc(n * sizeof(int));
     for (long i = 0; i < n; i++) {
         arr[i] = (int)(mrand(&s) & 0x7FFFFFFFL);
     }

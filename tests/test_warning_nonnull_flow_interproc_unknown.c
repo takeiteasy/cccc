@@ -8,7 +8,7 @@
 // NN_UNKNOWN, not NN_MAYBE, even though malloc can genuinely return NULL.
 #include <stdlib.h>
 void handle(void *p) __attribute__((nonnull));
-void handle(void *p) { }
+void handle(void *p) {}
 int main(void) {
     void *p = malloc(16);
     handle(p);

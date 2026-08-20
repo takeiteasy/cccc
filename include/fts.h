@@ -38,32 +38,33 @@ typedef struct _ftsent {
     struct _ftsent *fts_cycle;
     struct _ftsent *fts_parent;
     struct _ftsent *fts_link;
-    long   fts_number;
-    void  *fts_pointer;
-    char  *fts_accpath;
-    char  *fts_path;
-    int    fts_errno;
-    int    fts_symfd;
-    unsigned short fts_pathlen;
-    unsigned short fts_namelen;
+    long            fts_number;
+    void           *fts_pointer;
+    char           *fts_accpath;
+    char           *fts_path;
+    int             fts_errno;
+    int             fts_symfd;
+    unsigned short  fts_pathlen;
+    unsigned short  fts_namelen;
 
-    ino_t  fts_ino;
-    dev_t  fts_dev;
-    nlink_t fts_nlink;
+    ino_t           fts_ino;
+    dev_t           fts_dev;
+    nlink_t         fts_nlink;
 
-    short  fts_level;
+    short           fts_level;
 
-    unsigned short fts_info;
-    unsigned short fts_flags;
-    unsigned short fts_instr;
+    unsigned short  fts_info;
+    unsigned short  fts_flags;
+    unsigned short  fts_instr;
 
-    struct stat *fts_statp;
-    char   fts_name[1];
+    struct stat    *fts_statp;
+    char            fts_name[1];
 } FTSENT;
 
 #ifdef __APPLE__
 _Static_assert(sizeof(FTSENT) == 112, "macOS FTSENT layout mismatch");
-_Static_assert(offsetof(FTSENT, fts_level) == 86, "macOS FTSENT fts_level offset mismatch");
+_Static_assert(offsetof(FTSENT, fts_level) == 86,
+               "macOS FTSENT fts_level offset mismatch");
 #else
 _Static_assert(sizeof(FTSENT) == 120, "glibc FTSENT layout mismatch");
 /* fts_level's offset is the one place the two glibc targets disagree --
@@ -71,9 +72,11 @@ _Static_assert(sizeof(FTSENT) == 120, "glibc FTSENT layout mismatch");
    aarch64, per sys/types.h), so the struct definition above stays a
    single shared branch and only this assert is arch-split. */
 #if defined(__x86_64__)
-_Static_assert(offsetof(FTSENT, fts_level) == 96, "glibc x86_64 FTSENT fts_level offset mismatch");
+_Static_assert(offsetof(FTSENT, fts_level) == 96,
+               "glibc x86_64 FTSENT fts_level offset mismatch");
 #else
-_Static_assert(offsetof(FTSENT, fts_level) == 92, "glibc aarch64 FTSENT fts_level offset mismatch");
+_Static_assert(offsetof(FTSENT, fts_level) == 92,
+               "glibc aarch64 FTSENT fts_level offset mismatch");
 #endif
 #endif
 

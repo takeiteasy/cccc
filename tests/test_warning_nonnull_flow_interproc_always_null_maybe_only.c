@@ -11,7 +11,7 @@ int *always_null(void) {
     return 0;
 }
 void handle(int *p) __attribute__((nonnull));
-void handle(int *p) { }
+void handle(int *p) {}
 int main(void) {
     int *p = always_null();
     handle(p);

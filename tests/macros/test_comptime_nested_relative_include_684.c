@@ -12,7 +12,8 @@
 [[cccc::comptime]]
 void generate_result(void) {
     Obj *fn = MakeFunction("result", GetType("int"));
-    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(comptime_nested_quadruple(10) + 2)));
+    FunctionSetBody(
+        fn, MakeReturn(MakeIntLiteral(comptime_nested_quadruple(10) + 2)));
 }
 
 generate_result();

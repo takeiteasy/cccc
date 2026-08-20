@@ -4,9 +4,12 @@
 // CCCC_EXPECT_STDERR: multiple default labels in one switch
 int main(void) {
     switch (1) {
-    case 1: break;
-    default: break;
-    default: break;
+        case 1:
+            break;
+        default:
+            break;
+        default:
+            break;
     }
     return 42;
 }

@@ -8,5 +8,5 @@ int main(void) {
     int *q = malloc(4 * sizeof(int));
     int *p = q + 2; // interior pointer into the allocation
     free(q);
-    return *p; // use-after-free via an interior pointer
+    return *p;      // use-after-free via an interior pointer
 }

@@ -56,7 +56,8 @@ extern int sched_get_priority_max(int policy);
 #if defined(__linux__) || defined(__CCCC_POSIX_EMULATION__)
 extern int sched_setparam(pid_t pid, const struct sched_param *param);
 extern int sched_getparam(pid_t pid, struct sched_param *param);
-extern int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param);
+extern int sched_setscheduler(pid_t pid, int policy,
+                              const struct sched_param *param);
 extern int sched_getscheduler(pid_t pid);
 extern int sched_rr_get_interval(pid_t pid, struct timespec *interval);
 #endif

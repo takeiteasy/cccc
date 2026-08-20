@@ -7,7 +7,7 @@
 [[cccc::comptime]]
 void gen_pick_or_default(void) {
     Type *int_ty = GetType("int");
-    Obj *fn = MakeFunction("pick_or_default", int_ty);
+    Obj  *fn     = MakeFunction("pick_or_default", int_ty);
     FunctionAddParam(fn, "a", int_ty);
     FunctionAddParam(fn, "b", int_ty);
     Node *a = MakeParamRef(fn, "a");

@@ -56,47 +56,47 @@
 // Scope for local variables, global variables, typedefs
 // or enum constants
 typedef struct {
-    Obj *var;
-    Type *type_def;
-    Type *enum_ty;
+    Obj    *var;
+    Type   *type_def;
+    Type   *enum_ty;
     int64_t enum_val;
-    bool is_deprecated;
-    char *deprecated_msg;
+    bool    is_deprecated;
+    char   *deprecated_msg;
 } VarScope;
 
 // Variable attributes such as typedef or extern.
 typedef struct {
-    bool is_typedef;
-    bool is_static;
-    bool is_extern;
-    bool is_inline;
-    bool is_tls;
-    bool is_constexpr;
-    bool is_block_var; // __block storage qualifier (Apple blocks)
-    bool is_auto;      // C23 type inference (auto without explicit type)
-    bool is_maybe_unused;
-    bool is_deprecated;
-    bool is_noreturn;
-    bool is_nodiscard;
-    bool is_fallthrough;
-    bool is_pure;
-    bool is_func_const;
-    char *deprecated_msg;
-    char *nodiscard_msg;
-    char *attr_error_msg;   // __attribute__((error("msg")))
-    char *attr_warning_msg; // __attribute__((warning("msg")))
-    Token *attribute_tok;
+    bool           is_typedef;
+    bool           is_static;
+    bool           is_extern;
+    bool           is_inline;
+    bool           is_tls;
+    bool           is_constexpr;
+    bool           is_block_var; // __block storage qualifier (Apple blocks)
+    bool           is_auto; // C23 type inference (auto without explicit type)
+    bool           is_maybe_unused;
+    bool           is_deprecated;
+    bool           is_noreturn;
+    bool           is_nodiscard;
+    bool           is_fallthrough;
+    bool           is_pure;
+    bool           is_func_const;
+    char          *deprecated_msg;
+    char          *nodiscard_msg;
+    char          *attr_error_msg;   // __attribute__((error("msg")))
+    char          *attr_warning_msg; // __attribute__((warning("msg")))
+    Token         *attribute_tok;
     CustomAttrUse *custom_attrs;
-    int align;
+    int            align;
 
     // Per-function optimization level
     int  fn_optimize_level;
     bool fn_optimize_set;
 
     // Format string validation
-    int format_style;          // 0=none/unvalidated, 1=printf, 2=scanf
-    int format_string_index;   // 1-based index of format string arg
-    int format_fmt_first_arg;  // 1-based index of first variadic arg to check
+    int format_style;         // 0=none/unvalidated, 1=printf, 2=scanf
+    int format_string_index;  // 1-based index of format string arg
+    int format_fmt_first_arg; // 1-based index of first variadic arg to check
 
     // Nonnull argument / return checking
     bool     nonnull_all;
@@ -113,7 +113,7 @@ typedef struct {
     bool is_malloc;
 
     // __attribute__((cleanup(fn)))
-    Obj *cleanup_fn;
+    Obj   *cleanup_fn;
     Token *cleanup_tok;
 
     // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
@@ -122,16 +122,16 @@ typedef struct {
     int  init_priority; // CCCC_NO_INIT_PRIORITY if not explicitly given
 
     // __attribute__((vector_size(N))) / [[gnu::vector_size(N)]] (tracker #72)
-    bool has_vector_size;
-    int  vector_size_bytes;
+    bool   has_vector_size;
+    int    vector_size_bytes;
     Token *vector_size_tok; // for diagnostics
 } VarAttr;
 
 struct CustomAttrUse {
-    char *name;
-    Token *tok;
-    Node *args;
-    int arg_count;
+    char          *name;
+    Token         *tok;
+    Node          *args;
+    int            arg_count;
     CustomAttrUse *next;
 };
 
@@ -141,9 +141,9 @@ struct CustomAttrUse {
 typedef struct Initializer Initializer;
 struct Initializer {
     Initializer *next;
-    Type *ty;
-    Token *tok;
-    bool is_flexible;
+    Type        *ty;
+    Token       *tok;
+    bool         is_flexible;
     bool is_set; // true once this slot has received an initializer value
 
     // If it's not an aggregate type and has an initializer,
@@ -163,9 +163,9 @@ struct Initializer {
 typedef struct InitDesg InitDesg;
 struct InitDesg {
     InitDesg *next;
-    int idx;
-    Member *member;
-    Obj *var;
+    int       idx;
+    Member   *member;
+    Obj      *var;
 };
 
 // __builtin_object_size helpers. Used from parse_analysis.c (the resolver
@@ -200,31 +200,57 @@ struct ObjSizeQuery {
 // init_typename_map() (parse_init.c) via pthread_once -- see is_typename()'s
 // own comment for why this is looked up through a hashmap rather than a
 // switch. Defined in parse_init.c, used from parse_stmt.c.
-extern HashMap typename_map;
+extern HashMap        typename_map;
 extern pthread_once_t typename_map_once;
 
 // Types used in a cross-file function prototype below, so they must be
 // visible here rather than staying local to their one natural home file.
 
-
-
 typedef enum {
     DK_NONE = 0,
     // Storage class
-    DK_TYPEDEF, DK_STATIC, DK_EXTERN, DK_INLINE, DK_TLS, DK_CONSTEXPR, DK_BLOCK_VAR,
+    DK_TYPEDEF,
+    DK_STATIC,
+    DK_EXTERN,
+    DK_INLINE,
+    DK_TLS,
+    DK_CONSTEXPR,
+    DK_BLOCK_VAR,
     // Qualifiers
-    DK_CONST, DK_VOLATILE,
+    DK_CONST,
+    DK_VOLATILE,
     // Ignored
-    DK_AUTO, DK_REGISTER, DK_RESTRICT, DK_NORETURN,
+    DK_AUTO,
+    DK_REGISTER,
+    DK_RESTRICT,
+    DK_NORETURN,
     // Special
-    DK_ATOMIC, DK_ALIGNAS,
+    DK_ATOMIC,
+    DK_ALIGNAS,
     // Composite
-    DK_STRUCT, DK_UNION, DK_ENUM, DK_TYPEOF, DK_TYPEOF_UNQUAL,
+    DK_STRUCT,
+    DK_UNION,
+    DK_ENUM,
+    DK_TYPEOF,
+    DK_TYPEOF_UNQUAL,
     // Built-in types
-    DK_VOID, DK_BOOL, DK_CHAR, DK_SHORT, DK_INT, DK_LONG,
-    DK_FLOAT, DK_DOUBLE, DK_COMPLEX, DK_IMAGINARY, DK_SIGNED, DK_UNSIGNED,
+    DK_VOID,
+    DK_BOOL,
+    DK_CHAR,
+    DK_SHORT,
+    DK_INT,
+    DK_LONG,
+    DK_FLOAT,
+    DK_DOUBLE,
+    DK_COMPLEX,
+    DK_IMAGINARY,
+    DK_SIGNED,
+    DK_UNSIGNED,
     // C23 types
-    DK_BITINT, DK_DECIMAL32, DK_DECIMAL64, DK_DECIMAL128,
+    DK_BITINT,
+    DK_DECIMAL32,
+    DK_DECIMAL64,
+    DK_DECIMAL128,
     // GNU 128-bit integers (mapped onto _BitInt(128))
     DK_INT128,
 } DeclKw;
@@ -235,14 +261,15 @@ typedef enum {
 // than the one that defines it, so each lost its `static` and gained a
 // prototype here.
 
-Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty);
+Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
+                          Type *ty);
 int align_down(int n, int align);
 int align_to(int n, int align);
-void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list, Token *name_tok,
-                               Node *args, int arg_count);
+void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list,
+                        Token *name_tok, Node *args, int arg_count);
 void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);
-Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok,
-                                     Token *tok, Type *ty, const char *name);
+Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
+                              Type *ty, const char *name);
 Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr);
 Token *asm_label(VirtualMachine *vm, Token *tok, char **label);
 Node *assign(VirtualMachine *vm, Token **rest, Token *tok);
@@ -250,13 +277,14 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr);
 Type *auto_deduced_type(VirtualMachine *vm, Type *ty);
 Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok);
 Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
-                                 VarAttr *attr);
+                          VarAttr *attr);
 Node *cast(VirtualMachine *vm, Token **rest, Token *tok);
 void check_may_return_null_summaries(VirtualMachine *vm);
 void check_nonnull_flow(VirtualMachine *vm, Obj *fn);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);
-Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok, Token **close_tok);
+Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
+                    Token **close_tok);
 Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok);
 Node *conditional(VirtualMachine *vm, Token **rest, Token *tok);
 Node *constexpr_expr_for_node(Node *node);
@@ -264,7 +292,7 @@ bool consume_end(Token **rest, Token *tok);
 int count_auto_ptr_depth(Type *ty);
 int count_ptr_depth(Type *ty);
 Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
-                         VarAttr *attr);
+                  VarAttr *attr);
 Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty);
 Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr);
 DeclKw declspec_kw(Token *tok);
@@ -281,15 +309,16 @@ Type *find_tag(VirtualMachine *vm, Token *tok);
 Type *find_tag_in_current_scope(VirtualMachine *vm, Token *tok);
 Type *find_typedef(VirtualMachine *vm, Token *tok);
 VarScope *find_var(VirtualMachine *vm, Token *tok);
-VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name, int name_len);
+VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name,
+                                    int name_len);
 Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
-Token *function_declaration_list(VirtualMachine *vm, Token *tok,
-                                        Type *basety, VarAttr *attr);
+Token *function_declaration_list(VirtualMachine *vm, Token *tok, Type *basety,
+                                 VarAttr *attr);
 char *get_ident(VirtualMachine *vm, Token *tok);
 Member *get_struct_member(Type *ty, Token *tok);
 int get_vm_size(Type *ty);
 Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
-                              VarAttr *attr);
+                       VarAttr *attr);
 void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
 bool has_custom_attrs(Type *ty, VarAttr *attr);
 void init_typename_map(void);
@@ -308,9 +337,9 @@ void mark_nested_captures(Obj *fn, Node *node);
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
-                        Token *tok);
+                 Token *tok);
 Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
-                              Token *tok);
+                       Token *tok);
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty);
 Obj *new_implicit_function(VirtualMachine *vm, Token *tok);
 Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible);
@@ -331,24 +360,27 @@ bool node_has_side_effects(Node *n);
 bool nodes_structurally_equal(Node *a, Node *b);
 char *obj_display_name(Obj *var);
 bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out);
-bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base, int *out_offset);
+bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base,
+                               int *out_offset);
 bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
-                                     int *arg_count);
-Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);
+                              int *arg_count);
+Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
+                     VarAttr *attr);
 void propagate_checked_bounds(VirtualMachine *vm, Obj *fn);
 VarScope *push_scope(VirtualMachine *vm, char *name, int name_len);
 void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty);
 void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
-                             bool is_tag, Token *decl_tok);
+                      bool is_tag, Token *decl_tok);
 void mark_last_type_name_as_definition(VirtualMachine *vm, Type *ty); // #1010
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var);
 void resolve_member_checked_bounds(VirtualMachine *vm, Member *members);
 void resolve_objsize_queries(VirtualMachine *vm, Node *body);
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
-                                  AttrTargetKind kind, char *name,
-                                  Type *target_ty, Obj *obj, Token *tok);
-void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr, Token *tok);
+                           AttrTargetKind kind, char *name, Type *target_ty,
+                           Obj *obj, Token *tok);
+void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
+                              Token *tok);
 Token *skip_to_decl_boundary(VirtualMachine *vm, Token *tok);
 Token *skip_to_stmt_end(VirtualMachine *vm, Token *tok);
 Token *static_assert_decl(VirtualMachine *vm, Token *tok);
@@ -361,12 +393,12 @@ Type *typename(VirtualMachine *vm, Token **rest, Token *tok);
 Node *unary(VirtualMachine *vm, Token **rest, Token *tok);
 void validate_nonnull_call(VirtualMachine *vm, Type *func_ty, Node *args);
 void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty,
-                                    Node *args);
+                            Node *args);
 Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
-                              Node *index, Token *tok);
+                      Node *index, Token *tok);
 void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn);
 void warn_deprecated_use(VirtualMachine *vm, Token *tok, char *name,
-                                char *message);
+                         char *message);
 void warn_if_shadowing(VirtualMachine *vm, Token *tok);
 
 #endif // CCCC_PARSE_INTERNAL_H

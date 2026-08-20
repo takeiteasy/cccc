@@ -2,7 +2,7 @@
 // are non-empty -- the standard idiom for a printf-style wrapper macro that
 // must omit the trailing comma when no extra arguments are given.
 
-#define LOG(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)
+#define LOG(fmt, ...) printf(fmt __VA_OPT__(, ) __VA_ARGS__)
 
 int printf(const char *fmt, ...);
 

@@ -6,6 +6,7 @@
 
 void main() void;
 
-void; {
-  puts("hello world");
+void;
+{
+    puts("hello world");
 }

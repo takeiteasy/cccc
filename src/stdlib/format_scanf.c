@@ -32,9 +32,9 @@
 typedef struct {
     int (*read)(void *ctx);
     void *ctx;
-    int pushback[CCCC_SCAN_PUSHBACK_MAX];
-    int pushback_n;
-    long consumed;
+    int   pushback[CCCC_SCAN_PUSHBACK_MAX];
+    int   pushback_n;
+    long  consumed;
 } ScanSource;
 
 static int sgetc(ScanSource *src) {
@@ -92,14 +92,30 @@ enum {
 
 static void store_int(void *ptr, int lenmod, unsigned long long val) {
     switch (lenmod) {
-    case LEN_hh: *(unsigned char *)ptr = (unsigned char)val; break;
-    case LEN_h:  *(unsigned short *)ptr = (unsigned short)val; break;
-    case LEN_l:  *(unsigned long *)ptr = (unsigned long)val; break;
-    case LEN_ll: *(unsigned long long *)ptr = (unsigned long long)val; break;
-    case LEN_j:  *(uintmax_t *)ptr = (uintmax_t)val; break;
-    case LEN_z:  *(size_t *)ptr = (size_t)val; break;
-    case LEN_t:  *(ptrdiff_t *)ptr = (ptrdiff_t)val; break;
-    default:     *(unsigned int *)ptr = (unsigned int)val; break;
+        case LEN_hh:
+            *(unsigned char *)ptr = (unsigned char)val;
+            break;
+        case LEN_h:
+            *(unsigned short *)ptr = (unsigned short)val;
+            break;
+        case LEN_l:
+            *(unsigned long *)ptr = (unsigned long)val;
+            break;
+        case LEN_ll:
+            *(unsigned long long *)ptr = (unsigned long long)val;
+            break;
+        case LEN_j:
+            *(uintmax_t *)ptr = (uintmax_t)val;
+            break;
+        case LEN_z:
+            *(size_t *)ptr = (size_t)val;
+            break;
+        case LEN_t:
+            *(ptrdiff_t *)ptr = (ptrdiff_t)val;
+            break;
+        default:
+            *(unsigned int *)ptr = (unsigned int)val;
+            break;
     }
 }
 
@@ -119,9 +135,12 @@ static void store_float(void *ptr, int lenmod, long double val) {
 enum { SCAN_OK = 0, SCAN_NOMATCH = 1, SCAN_EOF = 2 };
 
 static int digit_value(int c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
     return -1;
 }
 
@@ -134,14 +153,14 @@ static int is_digit_for_base(int c, int base) {
 // returns its value via *out (already negated if a '-' sign was present).
 // `base` is 0 (auto-detect, for %i), 2, 8, 10 or 16.
 static int scan_uint_value(ScanSource *src, int base, int width,
-                            unsigned long long *out) {
+                           unsigned long long *out) {
     skip_ws_input(src);
 
-    int max = width > 0 ? width : INT_MAX;
-    int n = 0;
+    int max       = width > 0 ? width : INT_MAX;
+    int n         = 0;
     int sign_char = 0;
 
-    int c = sgetc(src);
+    int c         = sgetc(src);
     if (c == EOF)
         return SCAN_EOF;
     n++;
@@ -163,42 +182,50 @@ static int scan_uint_value(ScanSource *src, int base, int width,
     // Optional 0x/0b prefix (consumed in addition to `width`, see header note).
     if (c == '0') {
         int c2 = sgetc(src);
-        if (c2 != EOF && (c2 == 'x' || c2 == 'X') && (base == 0 || base == 16)) {
+        if (c2 != EOF && (c2 == 'x' || c2 == 'X') &&
+            (base == 0 || base == 16)) {
             int c3 = sgetc(src);
             if (c3 != EOF && is_digit_for_base(c3, 16)) {
                 base = 16;
-                c = c3;
+                c    = c3;
             } else {
-                if (c3 != EOF) sungetc(src, c3);
+                if (c3 != EOF)
+                    sungetc(src, c3);
                 sungetc(src, c2);
-                if (base == 0) base = 8;
+                if (base == 0)
+                    base = 8;
                 // c stays '0', handled by the digit loop below
             }
-        } else if (c2 != EOF && (c2 == 'b' || c2 == 'B') && (base == 0 || base == 2)) {
+        } else if (c2 != EOF && (c2 == 'b' || c2 == 'B') &&
+                   (base == 0 || base == 2)) {
             int c3 = sgetc(src);
             if (c3 != EOF && (c3 == '0' || c3 == '1')) {
                 base = 2;
-                c = c3;
+                c    = c3;
             } else {
-                if (c3 != EOF) sungetc(src, c3);
+                if (c3 != EOF)
+                    sungetc(src, c3);
                 sungetc(src, c2);
-                if (base == 0) base = 8;
+                if (base == 0)
+                    base = 8;
             }
         } else {
-            if (c2 != EOF) sungetc(src, c2);
-            if (base == 0) base = 8;
+            if (c2 != EOF)
+                sungetc(src, c2);
+            if (base == 0)
+                base = 8;
         }
     } else if (base == 0) {
         base = 10;
     }
 
     char digits[256];
-    int dn = 0;
-    int remaining = max - (sign_char ? 1 : 0);
+    int  dn        = 0;
+    int  remaining = max - (sign_char ? 1 : 0);
     while (c != EOF && dn < remaining && dn < (int)sizeof(digits) - 1 &&
            is_digit_for_base(c, base)) {
         digits[dn++] = (char)c;
-        c = sgetc(src);
+        c            = sgetc(src);
     }
     if (c != EOF)
         sungetc(src, c);
@@ -209,7 +236,7 @@ static int scan_uint_value(ScanSource *src, int base, int width,
         return SCAN_NOMATCH;
     }
 
-    digits[dn] = 0;
+    digits[dn]             = 0;
     unsigned long long val = strtoull(digits, NULL, base);
     if (sign_char == '-')
         val = 0ULL - val;
@@ -232,17 +259,17 @@ static int scan_float_value_raw(ScanSource *src, int width, long double *out,
                                 char *raw_out, size_t raw_cap) {
     skip_ws_input(src);
 
-    int max = width > 0 ? width : INT_MAX;
+    int  max = width > 0 ? width : INT_MAX;
     char buf[256];
-    int n = 0;
+    int  n = 0;
 
-    int c = sgetc(src);
+    int  c = sgetc(src);
     if (c == EOF)
         return SCAN_EOF;
 
     if ((c == '+' || c == '-') && n < max) {
         buf[n++] = (char)c;
-        c = sgetc(src);
+        c        = sgetc(src);
     }
 
     // inf/infinity/nan(...) - `c` holds the first letter (not yet committed
@@ -251,7 +278,7 @@ static int scan_float_value_raw(ScanSource *src, int width, long double *out,
         static const char *const words[] = {"infinity", "inf", "nan"};
         for (int w = 0; w < 3; w++) {
             const char *word = words[w];
-            int len = (int)strlen(word);
+            int         len  = (int)strlen(word);
             if (tolower(c) != word[0] || n + len > max)
                 continue;
 
@@ -259,7 +286,7 @@ static int scan_float_value_raw(ScanSource *src, int width, long double *out,
             int pn = 0;
             int ok = 1;
             for (int i = 1; i < len; i++) {
-                int pc = sgetc(src);
+                int pc     = sgetc(src);
                 peek[pn++] = pc;
                 if (pc == EOF || tolower(pc) != word[i]) {
                     ok = 0;
@@ -273,58 +300,66 @@ static int scan_float_value_raw(ScanSource *src, int width, long double *out,
                 if (w == 2) { // nan(...)
                     int pc = sgetc(src);
                     if (pc == '(') {
-                        buf[n++] = (char)pc;
+                        buf[n++]  = (char)pc;
                         int depth = 1;
                         while (depth > 0) {
                             pc = sgetc(src);
-                            if (pc == EOF) break;
-                            if (pc == '(') depth++;
-                            else if (pc == ')') depth--;
-                            if (n < (int)sizeof(buf) - 1) buf[n++] = (char)pc;
+                            if (pc == EOF)
+                                break;
+                            if (pc == '(')
+                                depth++;
+                            else if (pc == ')')
+                                depth--;
+                            if (n < (int)sizeof(buf) - 1)
+                                buf[n++] = (char)pc;
                         }
                     } else if (pc != EOF) {
                         sungetc(src, pc);
                     }
                 }
                 buf[n] = 0;
-                *out = strtold(buf, NULL);
-                if (raw_out) snprintf(raw_out, raw_cap, "%s", buf);
+                *out   = strtold(buf, NULL);
+                if (raw_out)
+                    snprintf(raw_out, raw_cap, "%s", buf);
                 return SCAN_OK;
             }
             // not a match: push back everything peeked, in reverse order
             for (int i = pn - 1; i >= 0; i--)
-                if (peek[i] != EOF) sungetc(src, peek[i]);
+                if (peek[i] != EOF)
+                    sungetc(src, peek[i]);
         }
     }
 
     int is_hex = 0;
     if (c == '0' && n < max) {
         buf[n++] = '0';
-        int c2 = sgetc(src);
+        int c2   = sgetc(src);
         if (c2 != EOF && (c2 == 'x' || c2 == 'X') && n < max) {
             buf[n++] = (char)c2;
-            is_hex = 1;
-            c = sgetc(src);
+            is_hex   = 1;
+            c        = sgetc(src);
         } else {
             c = c2;
         }
     }
 
     int any_digit = 0;
-    while (c != EOF && n < max && n < (int)sizeof(buf) - 1 &&
-           (isdigit((unsigned char)c) || (is_hex && isxdigit((unsigned char)c)))) {
-        buf[n++] = (char)c;
+    while (
+        c != EOF && n < max && n < (int)sizeof(buf) - 1 &&
+        (isdigit((unsigned char)c) || (is_hex && isxdigit((unsigned char)c)))) {
+        buf[n++]  = (char)c;
         any_digit = 1;
-        c = sgetc(src);
+        c         = sgetc(src);
     }
     if (c == '.' && n < max && n < (int)sizeof(buf) - 1) {
         buf[n++] = '.';
-        c = sgetc(src);
+        c        = sgetc(src);
         while (c != EOF && n < max && n < (int)sizeof(buf) - 1 &&
-               (isdigit((unsigned char)c) || (is_hex && isxdigit((unsigned char)c)))) {
-            buf[n++] = (char)c;
+               (isdigit((unsigned char)c) ||
+                (is_hex && isxdigit((unsigned char)c)))) {
+            buf[n++]  = (char)c;
             any_digit = 1;
-            c = sgetc(src);
+            c         = sgetc(src);
         }
     }
 
@@ -332,25 +367,28 @@ static int scan_float_value_raw(ScanSource *src, int width, long double *out,
         int exp_lo = is_hex ? 'p' : 'e';
         int exp_hi = is_hex ? 'P' : 'E';
         if ((c == exp_lo || c == exp_hi) && n < (int)sizeof(buf) - 1) {
-            int echar = c;
-            int c2 = sgetc(src);
+            int echar  = c;
+            int c2     = sgetc(src);
             int sign_c = 0;
             if (c2 == '+' || c2 == '-') {
                 sign_c = c2;
-                c2 = sgetc(src);
+                c2     = sgetc(src);
             }
             if (c2 != EOF && isdigit((unsigned char)c2)) {
                 buf[n++] = (char)echar;
-                if (sign_c) buf[n++] = (char)sign_c;
+                if (sign_c)
+                    buf[n++] = (char)sign_c;
                 while (c2 != EOF && n < max && n < (int)sizeof(buf) - 1 &&
                        isdigit((unsigned char)c2)) {
                     buf[n++] = (char)c2;
-                    c2 = sgetc(src);
+                    c2       = sgetc(src);
                 }
                 c = c2;
             } else {
-                if (c2 != EOF) sungetc(src, c2);
-                if (sign_c) sungetc(src, sign_c);
+                if (c2 != EOF)
+                    sungetc(src, c2);
+                if (sign_c)
+                    sungetc(src, sign_c);
                 // leave c (the exponent char) to be pushed back below
             }
         }
@@ -368,8 +406,9 @@ static int scan_float_value_raw(ScanSource *src, int width, long double *out,
     }
 
     buf[n] = 0;
-    *out = strtold(buf, NULL);
-    if (raw_out) snprintf(raw_out, raw_cap, "%s", buf);
+    *out   = strtold(buf, NULL);
+    if (raw_out)
+        snprintf(raw_out, raw_cap, "%s", buf);
     return SCAN_OK;
 }
 
@@ -381,9 +420,10 @@ static int scan_float_value(ScanSource *src, int width, long double *out) {
 // %[ scanset]
 // ---------------------------------------------------------------------
 
-static int in_scanset(unsigned char c, const char *start, const char *end, int negate) {
-    int found = 0;
-    const char *p = start;
+static int in_scanset(unsigned char c, const char *start, const char *end,
+                      int negate) {
+    int         found = 0;
+    const char *p     = start;
     while (p < end) {
         if (p + 2 < end && p[1] == '-') {
             if (c >= (unsigned char)p[0] && c <= (unsigned char)p[2]) {
@@ -407,15 +447,17 @@ static int in_scanset(unsigned char c, const char *start, const char *end, int n
 // ---------------------------------------------------------------------
 
 static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
-    int result = 0;
-    const char *f = fmt;
+    int         result = 0;
+    const char *f      = fmt;
 
     while (*f) {
         if (isspace((unsigned char)*f)) {
-            while (*f && isspace((unsigned char)*f)) f++;
+            while (*f && isspace((unsigned char)*f))
+                f++;
             for (;;) {
                 int c = sgetc(src);
-                if (c == EOF) break;
+                if (c == EOF)
+                    break;
                 if (!isspace((unsigned char)c)) {
                     sungetc(src, c);
                     break;
@@ -426,7 +468,8 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
 
         if (*f != '%') {
             int c = sgetc(src);
-            if (c == EOF) goto eof_before;
+            if (c == EOF)
+                goto eof_before;
             if (c != (unsigned char)*f) {
                 sungetc(src, c);
                 goto nomatch;
@@ -439,7 +482,8 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
 
         if (*f == '%') {
             int c = sgetc(src);
-            if (c == EOF) goto eof_before;
+            if (c == EOF)
+                goto eof_before;
             if (c != '%') {
                 sungetc(src, c);
                 goto nomatch;
@@ -462,24 +506,52 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
 
         int lenmod = LEN_NONE;
         switch (*f) {
-        case 'h':
-            f++;
-            if (*f == 'h') { lenmod = LEN_hh; f++; } else lenmod = LEN_h;
-            break;
-        case 'l':
-            f++;
-            if (*f == 'l') { lenmod = LEN_ll; f++; } else lenmod = LEN_l;
-            break;
-        case 'j': lenmod = LEN_j; f++; break;
-        case 'z': lenmod = LEN_z; f++; break;
-        case 't': lenmod = LEN_t; f++; break;
-        case 'L': lenmod = LEN_L; f++; break;
-        case 'H': lenmod = LEN_H; f++; break;
-        case 'D':
-            f++;
-            if (*f == 'D') { lenmod = LEN_DD; f++; } else lenmod = LEN_D;
-            break;
-        default: break;
+            case 'h':
+                f++;
+                if (*f == 'h') {
+                    lenmod = LEN_hh;
+                    f++;
+                } else
+                    lenmod = LEN_h;
+                break;
+            case 'l':
+                f++;
+                if (*f == 'l') {
+                    lenmod = LEN_ll;
+                    f++;
+                } else
+                    lenmod = LEN_l;
+                break;
+            case 'j':
+                lenmod = LEN_j;
+                f++;
+                break;
+            case 'z':
+                lenmod = LEN_z;
+                f++;
+                break;
+            case 't':
+                lenmod = LEN_t;
+                f++;
+                break;
+            case 'L':
+                lenmod = LEN_L;
+                f++;
+                break;
+            case 'H':
+                lenmod = LEN_H;
+                f++;
+                break;
+            case 'D':
+                f++;
+                if (*f == 'D') {
+                    lenmod = LEN_DD;
+                    f++;
+                } else
+                    lenmod = LEN_D;
+                break;
+            default:
+                break;
         }
 
         char conv = *f;
@@ -488,141 +560,200 @@ static int cccc_vscan(ScanSource *src, const char *fmt, va_list ap) {
         f++;
 
         switch (conv) {
-        case 'd': case 'i': case 'u': case 'o': case 'x': case 'X':
-        case 'b': case 'B': {
-            int base;
-            switch (conv) {
-            case 'o': base = 8; break;
-            case 'x': case 'X': base = 16; break;
-            case 'b': case 'B': base = 2; break;
-            case 'u': case 'd': base = 10; break;
-            default: base = 0; break; // 'i'
-            }
-            unsigned long long val;
-            int r = scan_uint_value(src, base, width, &val);
-            if (r == SCAN_EOF) goto eof_before;
-            if (r == SCAN_NOMATCH) goto nomatch;
-            if (!suppress) {
-                store_int(va_arg(ap, void *), lenmod, val);
-                result++;
-            }
-            break;
-        }
-
-        case 'f': case 'e': case 'g': case 'a':
-        case 'F': case 'E': case 'G': case 'A': {
-            if (lenmod == LEN_H || lenmod == LEN_D || lenmod == LEN_DD) {
-                // #829: decimal destination -- scan the raw token text and
-                // hand it to BID directly (cccc_dec_from_string) rather than
-                // going through long double, so the result is correctly
-                // rounded per IEEE 754-2008 rather than double-rounded
-                // through a binary intermediate.
-                long double val;
-                char raw[256];
-                int r = scan_float_value_raw(src, width, &val, raw, sizeof raw);
-                if (r == SCAN_EOF) goto eof_before;
-                if (r == SCAN_NOMATCH) goto nomatch;
+            case 'd':
+            case 'i':
+            case 'u':
+            case 'o':
+            case 'x':
+            case 'X':
+            case 'b':
+            case 'B': {
+                int base;
+                switch (conv) {
+                    case 'o':
+                        base = 8;
+                        break;
+                    case 'x':
+                    case 'X':
+                        base = 16;
+                        break;
+                    case 'b':
+                    case 'B':
+                        base = 2;
+                        break;
+                    case 'u':
+                    case 'd':
+                        base = 10;
+                        break;
+                    default:
+                        base = 0;
+                        break; // 'i'
+                }
+                unsigned long long val;
+                int                r = scan_uint_value(src, base, width, &val);
+                if (r == SCAN_EOF)
+                    goto eof_before;
+                if (r == SCAN_NOMATCH)
+                    goto nomatch;
                 if (!suppress) {
-                    int w = (lenmod == LEN_H) ? 0 : (lenmod == LEN_D) ? 1 : 2;
-                    if (cccc_dec_from_string(w, va_arg(ap, void *), raw, CCCC_DEC_ENV_DYNAMIC))
-                        result++;
-                    else
-                        goto nomatch; // CCCC_HAS_DECIMAL not built in
+                    store_int(va_arg(ap, void *), lenmod, val);
+                    result++;
                 }
                 break;
             }
-            long double val;
-            int r = scan_float_value(src, width, &val);
-            if (r == SCAN_EOF) goto eof_before;
-            if (r == SCAN_NOMATCH) goto nomatch;
-            if (!suppress) {
-                store_float(va_arg(ap, void *), lenmod, val);
-                result++;
-            }
-            break;
-        }
 
-        case 'p': {
-            unsigned long long val;
-            int r = scan_uint_value(src, 16, width, &val);
-            if (r == SCAN_EOF) goto eof_before;
-            if (r == SCAN_NOMATCH) goto nomatch;
-            if (!suppress) {
-                *(void **)va_arg(ap, void *) = (void *)(uintptr_t)val;
-                result++;
+            case 'f':
+            case 'e':
+            case 'g':
+            case 'a':
+            case 'F':
+            case 'E':
+            case 'G':
+            case 'A': {
+                if (lenmod == LEN_H || lenmod == LEN_D || lenmod == LEN_DD) {
+                    // #829: decimal destination -- scan the raw token text and
+                    // hand it to BID directly (cccc_dec_from_string) rather
+                    // than going through long double, so the result is
+                    // correctly rounded per IEEE 754-2008 rather than
+                    // double-rounded through a binary intermediate.
+                    long double val;
+                    char        raw[256];
+                    int         r =
+                        scan_float_value_raw(src, width, &val, raw, sizeof raw);
+                    if (r == SCAN_EOF)
+                        goto eof_before;
+                    if (r == SCAN_NOMATCH)
+                        goto nomatch;
+                    if (!suppress) {
+                        int w = (lenmod == LEN_H)   ? 0
+                                : (lenmod == LEN_D) ? 1
+                                                    : 2;
+                        if (cccc_dec_from_string(w, va_arg(ap, void *), raw,
+                                                 CCCC_DEC_ENV_DYNAMIC))
+                            result++;
+                        else
+                            goto nomatch; // CCCC_HAS_DECIMAL not built in
+                    }
+                    break;
+                }
+                long double val;
+                int         r = scan_float_value(src, width, &val);
+                if (r == SCAN_EOF)
+                    goto eof_before;
+                if (r == SCAN_NOMATCH)
+                    goto nomatch;
+                if (!suppress) {
+                    store_float(va_arg(ap, void *), lenmod, val);
+                    result++;
+                }
+                break;
             }
-            break;
-        }
 
-        case 's': {
-            skip_ws_input(src);
-            int c = sgetc(src);
-            if (c == EOF) goto eof_before;
-            int max = width > 0 ? width : INT_MAX;
-            char *out = suppress ? NULL : (char *)va_arg(ap, void *);
-            int n = 0;
-            while (c != EOF && !isspace((unsigned char)c) && n < max) {
-                if (out) out[n] = (char)c;
-                n++;
-                c = sgetc(src);
+            case 'p': {
+                unsigned long long val;
+                int                r = scan_uint_value(src, 16, width, &val);
+                if (r == SCAN_EOF)
+                    goto eof_before;
+                if (r == SCAN_NOMATCH)
+                    goto nomatch;
+                if (!suppress) {
+                    *(void **)va_arg(ap, void *) = (void *)(uintptr_t)val;
+                    result++;
+                }
+                break;
             }
-            if (c != EOF) sungetc(src, c);
-            if (out) out[n] = 0;
-            if (!suppress) result++;
-            break;
-        }
 
-        case 'c': {
-            int max = width > 0 ? width : 1;
-            char *out = suppress ? NULL : (char *)va_arg(ap, void *);
-            int n = 0;
-            for (; n < max; n++) {
+            case 's': {
+                skip_ws_input(src);
                 int c = sgetc(src);
-                if (c == EOF) {
-                    if (n == 0) goto eof_before;
+                if (c == EOF)
+                    goto eof_before;
+                int   max = width > 0 ? width : INT_MAX;
+                char *out = suppress ? NULL : (char *)va_arg(ap, void *);
+                int   n   = 0;
+                while (c != EOF && !isspace((unsigned char)c) && n < max) {
+                    if (out)
+                        out[n] = (char)c;
+                    n++;
+                    c = sgetc(src);
+                }
+                if (c != EOF)
+                    sungetc(src, c);
+                if (out)
+                    out[n] = 0;
+                if (!suppress)
+                    result++;
+                break;
+            }
+
+            case 'c': {
+                int   max = width > 0 ? width : 1;
+                char *out = suppress ? NULL : (char *)va_arg(ap, void *);
+                int   n   = 0;
+                for (; n < max; n++) {
+                    int c = sgetc(src);
+                    if (c == EOF) {
+                        if (n == 0)
+                            goto eof_before;
+                        goto nomatch;
+                    }
+                    if (out)
+                        out[n] = (char)c;
+                }
+                if (!suppress)
+                    result++;
+                break;
+            }
+
+            case '[': {
+                int negate = 0;
+                if (*f == '^') {
+                    negate = 1;
+                    f++;
+                }
+                const char *set_start = f;
+                if (*f == ']')
+                    f++; // literal ']' as first member
+                while (*f && *f != ']')
+                    f++;
+                const char *set_end = f;
+                if (*f == ']')
+                    f++;
+
+                int   max = width > 0 ? width : INT_MAX;
+                char *out = suppress ? NULL : (char *)va_arg(ap, void *);
+                int   n   = 0;
+                int   c   = sgetc(src);
+                while (
+                    c != EOF && n < max &&
+                    in_scanset((unsigned char)c, set_start, set_end, negate)) {
+                    if (out)
+                        out[n] = (char)c;
+                    n++;
+                    c = sgetc(src);
+                }
+                if (c != EOF)
+                    sungetc(src, c);
+                if (n == 0) {
+                    if (c == EOF)
+                        goto eof_before;
                     goto nomatch;
                 }
-                if (out) out[n] = (char)c;
+                if (out)
+                    out[n] = 0;
+                if (!suppress)
+                    result++;
+                break;
             }
-            if (!suppress) result++;
-            break;
-        }
 
-        case '[': {
-            int negate = 0;
-            if (*f == '^') { negate = 1; f++; }
-            const char *set_start = f;
-            if (*f == ']') f++; // literal ']' as first member
-            while (*f && *f != ']') f++;
-            const char *set_end = f;
-            if (*f == ']') f++;
+            case 'n':
+                if (!suppress)
+                    store_int(va_arg(ap, void *), lenmod,
+                              (unsigned long long)src->consumed);
+                break;
 
-            int max = width > 0 ? width : INT_MAX;
-            char *out = suppress ? NULL : (char *)va_arg(ap, void *);
-            int n = 0;
-            int c = sgetc(src);
-            while (c != EOF && n < max && in_scanset((unsigned char)c, set_start, set_end, negate)) {
-                if (out) out[n] = (char)c;
-                n++;
-                c = sgetc(src);
-            }
-            if (c != EOF) sungetc(src, c);
-            if (n == 0) {
-                if (c == EOF) goto eof_before;
+            default:
                 goto nomatch;
-            }
-            if (out) out[n] = 0;
-            if (!suppress) result++;
-            break;
-        }
-
-        case 'n':
-            if (!suppress)
-                store_int(va_arg(ap, void *), lenmod, (unsigned long long)src->consumed);
-            break;
-
-        default:
-            goto nomatch;
         }
     }
 
@@ -645,12 +776,12 @@ static int read_from_file(void *ctx) {
 
 typedef struct {
     const char *s;
-    size_t pos;
+    size_t      pos;
 } StrReadCtx;
 
 static int read_from_str(void *ctx) {
-    StrReadCtx *sc = (StrReadCtx *)ctx;
-    unsigned char c = (unsigned char)sc->s[sc->pos];
+    StrReadCtx   *sc = (StrReadCtx *)ctx;
+    unsigned char c  = (unsigned char)sc->s[sc->pos];
     if (c == '\0')
         return EOF;
     sc->pos++;
@@ -659,9 +790,9 @@ static int read_from_str(void *ctx) {
 
 int cccc_vfscanf(FILE *stream, const char *fmt, va_list ap) {
     ScanSource src = {0};
-    src.read = read_from_file;
-    src.ctx = stream;
-    int r = cccc_vscan(&src, fmt, ap);
+    src.read       = read_from_file;
+    src.ctx        = stream;
+    int r          = cccc_vscan(&src, fmt, ap);
     // Restore any pushed-back characters to the real stream so subsequent
     // reads on it see them again.
     while (src.pushback_n > 0)
@@ -670,10 +801,10 @@ int cccc_vfscanf(FILE *stream, const char *fmt, va_list ap) {
 }
 
 int cccc_vsscanf(const char *str, const char *fmt, va_list ap) {
-    StrReadCtx ctx = { .s = str, .pos = 0 };
+    StrReadCtx ctx = {.s = str, .pos = 0};
     ScanSource src = {0};
-    src.read = read_from_str;
-    src.ctx = &ctx;
+    src.read       = read_from_str;
+    src.ctx        = &ctx;
     return cccc_vscan(&src, fmt, ap);
 }
 
@@ -712,30 +843,33 @@ int cccc_sscanf(const char *str, const char *fmt, ...) {
 
 long long wrap_cccc_vscanf(const char *fmt, long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)fmt };
+    int64_t fixed[] = {(int64_t)fmt};
     return cccc_ffi_call_variadic((void *)cccc_scanf, 1, fixed, n, types, vals);
 }
 
-long long wrap_cccc_vsscanf(const char *str, const char *fmt, long long va_ptr) {
+long long wrap_cccc_vsscanf(const char *str, const char *fmt,
+                            long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)str, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)cccc_sscanf, 2, fixed, n, types, vals);
+    int64_t fixed[] = {(int64_t)str, (int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)cccc_sscanf, 2, fixed, n, types,
+                                  vals);
 }
 
 long long wrap_cccc_vfscanf(FILE *stream, const char *fmt, long long va_ptr) {
     CCCC_VA_LOCAL(va, va_ptr);
-    int types[CCCC_VA_MAX_ARGS];
-    int n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_scanf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
     cccc_va_extract(va, types, n, vals);
-    int64_t fixed[] = { (int64_t)stream, (int64_t)fmt };
-    return cccc_ffi_call_variadic((void *)cccc_fscanf, 2, fixed, n, types, vals);
+    int64_t fixed[] = {(int64_t)stream, (int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)cccc_fscanf, 2, fixed, n, types,
+                                  vals);
 }

@@ -10,18 +10,18 @@
 
 int main(void) {
     int *buf = malloc(sizeof(int) * 4);
-    buf[0] = 1;
-    buf[1] = 2;
-    buf[2] = 3;
-    buf[3] = 4; // stamps buf's whole range as int
+    buf[0]   = 1;
+    buf[1]   = 2;
+    buf[2]   = 3;
+    buf[3]   = 4; // stamps buf's whole range as int
 
     // Read-only host calls: must not clear buf's shadow.
-    char *cbuf = (char *)buf;
-    size_t len = strlen(cbuf); // reads bytes, writes nothing
-    int cmp = memcmp(buf, buf, sizeof(int) * 4);
+    char  *cbuf = (char *)buf;
+    size_t len  = strlen(cbuf); // reads bytes, writes nothing
+    int    cmp  = memcmp(buf, buf, sizeof(int) * 4);
 
     float *fbuf = (float *)buf;
-    float v = fbuf[0]; // load as float: mismatches the still-stamped int type
+    float  v = fbuf[0]; // load as float: mismatches the still-stamped int type
     free(buf);
     return (int)v + (int)len + cmp;
 }

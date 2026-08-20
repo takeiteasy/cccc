@@ -15,7 +15,7 @@ enum BigVal : long long {
 
 [[cccc::comptime]]
 Node *check_enum_constant_value(void) {
-    Type *ty = GetType("BigVal");
+    Type         *ty  = GetType("BigVal");
 
     EnumConstant *big = EnumFind(ty, "BV_BIG");
     if (!big || EnumConstantValue(big) != 0x300000000LL)

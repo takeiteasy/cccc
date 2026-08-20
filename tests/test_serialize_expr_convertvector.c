@@ -8,7 +8,7 @@
 // attributed type name in that argument position, so no intermediate
 // typedef has to be emitted.
 
-typedef int v4i __attribute__((vector_size(16)));
+typedef int   v4i __attribute__((vector_size(16)));
 typedef float v4f __attribute__((vector_size(16)));
 
 int main(void) {

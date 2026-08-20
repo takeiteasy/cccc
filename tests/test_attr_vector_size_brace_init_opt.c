@@ -8,22 +8,28 @@
 // the ND_MEMZERO+ND_COMMA pre-zero path under -O4 specifically.
 
 typedef float v4sf __attribute__((vector_size(16)));
-typedef int v4si __attribute__((vector_size(16)));
+typedef int   v4si __attribute__((vector_size(16)));
 
 int main(void) {
     v4sf a = {1.0f, 2.0f, 3.0f, 4.0f};
-    if (a[0] != 1.0f) return 1;
-    if (a[3] != 4.0f) return 2;
+    if (a[0] != 1.0f)
+        return 1;
+    if (a[3] != 4.0f)
+        return 2;
 
     v4sf partial = {40.0f}; // remaining lanes zero-initialized
-    if (partial[0] != 40.0f) return 3;
-    if (partial[1] != 0.0f) return 4;
+    if (partial[0] != 40.0f)
+        return 3;
+    if (partial[1] != 0.0f)
+        return 4;
 
     v4si vi = {1, 2, 3, 4};
-    if (vi[0] + vi[1] + vi[2] + vi[3] != 10) return 5;
+    if (vi[0] + vi[1] + vi[2] + vi[3] != 10)
+        return 5;
 
     v4sf lit = (v4sf){5.0f, 5.0f, 5.0f, 5.0f}; // compound literal
-    if (lit[2] != 5.0f) return 6;
+    if (lit[2] != 5.0f)
+        return 6;
 
     return 42;
 }

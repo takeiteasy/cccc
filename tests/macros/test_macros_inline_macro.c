@@ -9,9 +9,9 @@
 void generate_const_func(void) {
 
     Type *int_type = __builtin_ast_get_type("int");
-    Obj *fn = __builtin_ast_function("generated_func", int_type);
+    Obj  *fn       = __builtin_ast_function("generated_func", int_type);
 
-    Node *ret_val = __builtin_ast_int_literal(42);
+    Node *ret_val  = __builtin_ast_int_literal(42);
     Node *ret_stmt = __builtin_ast_return(ret_val);
     __builtin_ast_function_set_body(fn, ret_stmt);
 }
@@ -20,5 +20,5 @@ generate_const_func();
 
 int main(void) {
     int result = generated_func();
-    return result;  // 0 on success
+    return result; // 0 on success
 }

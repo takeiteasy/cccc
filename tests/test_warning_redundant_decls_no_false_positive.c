@@ -3,10 +3,10 @@
 
 // A declaration followed by a definition must NOT warn.
 void baz(void);
-void baz(void) { }
+void baz(void) {}
 
 extern int qux;
-int qux = 99;
+int        qux = 99;
 
 int main(void) {
     baz();

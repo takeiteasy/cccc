@@ -2,11 +2,12 @@
    Vendored into CCCC from the original at ../paul/paul_shell.h.
 
    CCCC-local patches on top of the original:
-     - Added `cmd_allowlist` field to shell_ctx (allowlist of permitted commands).
+     - Added `cmd_allowlist` field to shell_ctx (allowlist of permitted
+ commands).
      - Added `shell_ctx_allowlist_cmd()` to populate the allowlist.
-     - Patched exit-code threading throughout: command_execute / eval_commandtail /
-       eval_sequence / eval_redirection / eval_pipeline / ast_exec all propagate
-       real child exit codes rather than always returning EXIT_SUCCESS.
+     - Patched exit-code threading throughout: command_execute /
+ eval_commandtail / eval_sequence / eval_redirection / eval_pipeline / ast_exec
+ all propagate real child exit codes rather than always returning EXIT_SUCCESS.
        (v1 limitation: die() still calls exit(EXIT_FAILURE) on OOM/open failure,
        which terminates the entire process rather than failing one build step.
        Filed: see BUILDMODE ticket for die()-abort-on-error improvement.)
@@ -32,7 +33,8 @@
  @updated 2025-09-29
  @brief Embeddable bourne-like shell (posix+windows)
  @discussion
-    Implementation is included when PAUL_SHELL_IMPLEMENTATION or PAUL_IMPLEMENTATION is defined.
+    Implementation is included when PAUL_SHELL_IMPLEMENTATION or
+ PAUL_IMPLEMENTATION is defined.
 */
 
 #include <stdlib.h>
@@ -76,57 +78,59 @@ extern "C" {
 /* Return codes for shell(): non-negative values are child exit codes.
  * Negative values are library error codes.
  */
-#define SHELL_OK 0
-#define SHELL_ERR_GENERIC -1
+#define SHELL_OK           0
+#define SHELL_ERR_GENERIC  -1
 #define SHELL_ERR_TOKENIZE -2
-#define SHELL_ERR_EVAL -3
-#define SHELL_ERR_PIPE -4
-#define SHELL_ERR_FORK -5
-#define SHELL_ERR_READ -6
-#define SHELL_ERR_PERM -7
+#define SHELL_ERR_EVAL     -3
+#define SHELL_ERR_PIPE     -4
+#define SHELL_ERR_FORK     -5
+#define SHELL_ERR_READ     -6
+#define SHELL_ERR_PERM     -7
 
 typedef void (*shell_stream_cb_t)(const char *data, size_t len, void *userdata);
 
 typedef struct shell_io {
     /* I/O capture and streaming control structure */
-    char *out;    /* captured stdout (NUL-terminated) */
+    char  *out; /* captured stdout (NUL-terminated) */
     size_t out_len;
-    char *err;    /* captured stderr (NUL-terminated) */
+    char  *err; /* captured stderr (NUL-terminated) */
     size_t err_len;
 
     /* Input to be written to child's STDIN before closing it. */
     const char *in;
-    size_t in_len;
+    size_t      in_len;
 
     /* Streaming callbacks. */
     shell_stream_cb_t out_cb;
     shell_stream_cb_t err_cb;
-    void *userdata;
+    void             *userdata;
 } shell_io;
 
 typedef void (*shell_builtin_func_t)(int argc, char **argv);
 
 typedef struct shell_builtin_entry {
-    char *name;
-    shell_builtin_func_t func;
+    char                       *name;
+    shell_builtin_func_t        func;
     struct shell_builtin_entry *next;
 } shell_builtin_entry_t;
 
 typedef struct shell_ctx {
     /* Configuration */
-    bool builtin_only;     /* If true, only builtins are executed */
+    bool builtin_only; /* If true, only builtins are executed */
 
     /* Lists */
     shell_builtin_entry_t *builtins; /* Linked list of builtins */
-    char **cmd_blacklist;            /* NULL-terminated array of forbidden commands */
-    char **cmd_allowlist;            /* NULL-terminated allowlist; if non-NULL & non-empty,
-                                        only listed commands may execute (builtins exempt) */
-    char **path_blacklist;           /* NULL-terminated array of forbidden paths (read/write/exec) */
+    char **cmd_blacklist; /* NULL-terminated array of forbidden commands */
+    char *
+        *cmd_allowlist;   /* NULL-terminated allowlist; if non-NULL & non-empty,
+                             only listed commands may execute (builtins exempt) */
+    char **path_blacklist; /* NULL-terminated array of forbidden paths
+                              (read/write/exec) */
 
     /* Internal Execution State */
-    int input_fd;
-    int output_fd;
-    int bg;
+    int   input_fd;
+    int   output_fd;
+    int   bg;
 
     void *userdata; /* For custom use in builtins */
 } shell_ctx;
@@ -135,7 +139,7 @@ typedef struct shell_ctx {
  @function shell_ctx_create
  @return A new shell context with default settings (standard builtins enabled).
  */
-shell_ctx* shell_ctx_create(void);
+shell_ctx *shell_ctx_create(void);
 
 /*!
  @function shell_ctx_destroy
@@ -145,9 +149,11 @@ void shell_ctx_destroy(shell_ctx *ctx);
 
 /*!
  @function shell_ctx_add_builtin
- @brief Register a builtin command. Overrides existing builtins with the same name.
+ @brief Register a builtin command. Overrides existing builtins with the same
+ name.
  */
-void shell_ctx_add_builtin(shell_ctx *ctx, const char *name, shell_builtin_func_t func);
+void shell_ctx_add_builtin(shell_ctx *ctx, const char *name,
+                           shell_builtin_func_t func);
 
 /*!
  @function shell_ctx_blacklist_cmd
@@ -157,8 +163,9 @@ void shell_ctx_blacklist_cmd(shell_ctx *ctx, const char *cmd);
 
 /*!
  @function shell_ctx_allowlist_cmd
- @brief Add a command name to the allowlist.  When the allowlist is non-empty only
-        listed external commands may be executed; shell builtins are always permitted.
+ @brief Add a command name to the allowlist.  When the allowlist is non-empty
+ only listed external commands may be executed; shell builtins are always
+ permitted.
  */
 void shell_ctx_allowlist_cmd(shell_ctx *ctx, const char *cmd);
 
@@ -171,7 +178,8 @@ void shell_ctx_blacklist_path(shell_ctx *ctx, const char *path);
 /*!
  @function shell_set_default_ctx
  @brief Sets the global default context used by `shell()`.
- @param ctx The context to use. If NULL, `shell()` creates a temporary context per call.
+ @param ctx The context to use. If NULL, `shell()` creates a temporary context
+ per call.
  */
 void shell_set_default_ctx(shell_ctx *ctx);
 

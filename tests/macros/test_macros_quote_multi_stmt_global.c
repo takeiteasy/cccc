@@ -8,10 +8,10 @@
 
 [[cccc::comptime]]
 Node *emit_widget2_helpers(void) {
-    return Quote(
-        "struct Widget2 { int x; int y; }; "
-        "void widget2_init(struct Widget2 *w) { w->x = 0; w->y = 0; } "
-        "void widget2_set(struct Widget2 *w, int x, int y) { w->x = x; w->y = y; }");
+    return Quote("struct Widget2 { int x; int y; }; "
+                 "void widget2_init(struct Widget2 *w) { w->x = 0; w->y = 0; } "
+                 "void widget2_set(struct Widget2 *w, int x, int y) { w->x = "
+                 "x; w->y = y; }");
 }
 
 emit_widget2_helpers();

@@ -11,8 +11,12 @@
 // this keeps the tag's original spelling.
 
 int main(void) {
-    struct P { int x; };
-    struct P p = {21};
-    int (^b)(void) = ^{ return p.x; };
+    struct P {
+        int x;
+    };
+    struct P p     = {21};
+    int (^b)(void) = ^{
+      return p.x;
+    };
     return b() + 21;
 }

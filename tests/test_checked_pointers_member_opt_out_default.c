@@ -5,12 +5,13 @@
 
 struct S {
     int n;
-    int * [[cccc::array, cccc::count(n)]] p;
+    int *[[cccc::array, cccc::count(n)]] p;
 };
 
 int main(void) {
-    struct S s = {4, (int[4]){1, 2, 3, 4}};
-    volatile int i = 4; // one past the declared count -- no check without the flag
+    struct S     s = {4, (int[4]){1, 2, 3, 4}};
+    volatile int i =
+        4; // one past the declared count -- no check without the flag
     int x = s.p[i];
     (void)x;
     return 42;

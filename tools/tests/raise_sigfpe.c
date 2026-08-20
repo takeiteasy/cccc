@@ -1,2 +1,5 @@
 #include <signal.h>
-int main(void) { raise(SIGFPE); return 42; }
+int main(void) {
+    raise(SIGFPE);
+    return 42;
+}

@@ -51,41 +51,42 @@ static void *cccc_memset_explicit(void *s, int c, size_t n) {
 // Register all string.h functions
 void register_string_functions(VirtualMachine *vm) {
     // Memory operations
-    cc_register_cfunc(vm, "memcpy", (void*)cccc_shim_memcpy, 3, 0);
-    cc_register_cfunc(vm, "memmove", (void*)cccc_shim_memmove, 3, 0);
-    cc_register_cfunc(vm, "memset", (void*)memset, 3, 0);
-    cc_register_cfunc(vm, "memcmp", (void*)wrap_memcmp, 3, 0);
-    cc_register_cfunc(vm, "memccpy", (void*)memccpy, 4, 0);
-    cc_register_cfunc(vm, "memchr", (void*)memchr, 3, 0);
-    cc_register_cfunc(vm, "memset_explicit", (void*)cccc_memset_explicit, 3, 0);
+    cc_register_cfunc(vm, "memcpy", (void *)cccc_shim_memcpy, 3, 0);
+    cc_register_cfunc(vm, "memmove", (void *)cccc_shim_memmove, 3, 0);
+    cc_register_cfunc(vm, "memset", (void *)memset, 3, 0);
+    cc_register_cfunc(vm, "memcmp", (void *)wrap_memcmp, 3, 0);
+    cc_register_cfunc(vm, "memccpy", (void *)memccpy, 4, 0);
+    cc_register_cfunc(vm, "memchr", (void *)memchr, 3, 0);
+    cc_register_cfunc(vm, "memset_explicit", (void *)cccc_memset_explicit, 3,
+                      0);
 
     // String length
-    cc_register_cfunc(vm, "strlen", (void*)strlen, 1, 0);
+    cc_register_cfunc(vm, "strlen", (void *)strlen, 1, 0);
 
     // String comparison
-    cc_register_cfunc(vm, "strcmp", (void*)wrap_strcmp, 2, 0);
-    cc_register_cfunc(vm, "strncmp", (void*)wrap_strncmp, 3, 0);
+    cc_register_cfunc(vm, "strcmp", (void *)wrap_strcmp, 2, 0);
+    cc_register_cfunc(vm, "strncmp", (void *)wrap_strncmp, 3, 0);
 
     // String copying
-    cc_register_cfunc(vm, "strcpy", (void*)strcpy, 2, 0);
-    cc_register_cfunc(vm, "strncpy", (void*)strncpy, 3, 0);
+    cc_register_cfunc(vm, "strcpy", (void *)strcpy, 2, 0);
+    cc_register_cfunc(vm, "strncpy", (void *)strncpy, 3, 0);
 
     // String concatenation
-    cc_register_cfunc(vm, "strcat", (void*)strcat, 2, 0);
-    cc_register_cfunc(vm, "strncat", (void*)strncat, 3, 0);
+    cc_register_cfunc(vm, "strcat", (void *)strcat, 2, 0);
+    cc_register_cfunc(vm, "strncat", (void *)strncat, 3, 0);
 
     // String search
-    cc_register_cfunc(vm, "strchr", (void*)strchr, 2, 0);
-    cc_register_cfunc(vm, "strrchr", (void*)strrchr, 2, 0);
-    cc_register_cfunc(vm, "strstr", (void*)strstr, 2, 0);
-    cc_register_cfunc(vm, "strpbrk", (void*)strpbrk, 2, 0);
-    cc_register_cfunc(vm, "strspn",  (void*)strspn,  2, 0);
-    cc_register_cfunc(vm, "strcspn", (void*)strcspn, 2, 0);
+    cc_register_cfunc(vm, "strchr", (void *)strchr, 2, 0);
+    cc_register_cfunc(vm, "strrchr", (void *)strrchr, 2, 0);
+    cc_register_cfunc(vm, "strstr", (void *)strstr, 2, 0);
+    cc_register_cfunc(vm, "strpbrk", (void *)strpbrk, 2, 0);
+    cc_register_cfunc(vm, "strspn", (void *)strspn, 2, 0);
+    cc_register_cfunc(vm, "strcspn", (void *)strcspn, 2, 0);
 
     // Other string functions
-    cc_register_cfunc(vm, "strxfrm", (void*)strxfrm, 3, 0);
-    cc_register_cfunc(vm, "strcoll", (void*)strcoll, 2, 0);
-    cc_register_cfunc(vm, "strerror", (void*)strerror, 1, 0);
-    cc_register_cfunc(vm, "strdup", (void*)strdup, 1, 0);
-    cc_register_cfunc(vm, "strndup", (void*)strndup, 2, 0);
+    cc_register_cfunc(vm, "strxfrm", (void *)strxfrm, 3, 0);
+    cc_register_cfunc(vm, "strcoll", (void *)strcoll, 2, 0);
+    cc_register_cfunc(vm, "strerror", (void *)strerror, 1, 0);
+    cc_register_cfunc(vm, "strdup", (void *)strdup, 1, 0);
+    cc_register_cfunc(vm, "strndup", (void *)strndup, 2, 0);
 }

@@ -53,9 +53,10 @@ extern ssize_t mq_send(mqd_t mqdes, const char *msg_ptr, size_t msg_len,
 extern ssize_t mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len,
                           unsigned int *msg_prio);
 extern int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len,
-                        unsigned int msg_prio, const struct timespec *abs_timeout);
+                        unsigned int           msg_prio,
+                        const struct timespec *abs_timeout);
 extern ssize_t mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len,
-                               unsigned int *msg_prio,
+                               unsigned int          *msg_prio,
                                const struct timespec *abs_timeout);
 /* mq_notify() only supports SIGEV_NONE/SIGEV_SIGNAL (see signal.h's
    struct sigevent comment) -- SIGEV_THREAD is rejected with EINVAL. */

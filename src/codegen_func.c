@@ -37,7 +37,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     vm->compiler.ent3_extra_stack = 0;
 
     // Reset lazy frame-epoch tracking for this function (#703).
-    vm->compiler.frame_has_esc_agg = false;
+    vm->compiler.frame_has_esc_agg    = false;
     vm->compiler.frame_has_esc_scalar = false;
 
     // Reset label tracking for this function
@@ -45,13 +45,14 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Count parameters first
     // Assign stack offsets early
-    int stack_size = assign_stack_offsets(vm, fn);
+    int stack_size      = assign_stack_offsets(vm, fn);
     int base_stack_size = stack_size;
     prepare_local_promotion(vm, fn, base_stack_size);
-    prepare_fp_local_promotion(vm, fn, base_stack_size); // must follow prepare_local_promotion
+    prepare_fp_local_promotion(
+        vm, fn, base_stack_size); // must follow prepare_local_promotion
     prepare_restrict_cache(vm, fn, base_stack_size);
-    stack_size += vm->compiler.promoted_count + vm->compiler.fp_promoted_count
-               + vm->compiler.restrict_cache_capacity;
+    stack_size += vm->compiler.promoted_count + vm->compiler.fp_promoted_count +
+                  vm->compiler.restrict_cache_capacity;
     if (stack_size % 2 != 0)
         stack_size++;
 
@@ -59,8 +60,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     int param_count = 0;
     for (Obj *param = fn->params; param; param = param->next)
         param_count++;
-    bool is_variadic = fn->ty && fn->ty->is_variadic;
-    int spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
+    bool is_variadic       = fn->ty && fn->ty->is_variadic;
+    int  spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
 
     // Record source location for function entry
     emit_source_location(vm, fn->body);
@@ -70,10 +71,10 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Compute float parameter masks for ENT3
     unsigned int float_param_mask = 0;
-    unsigned int f32_param_mask = 0;
-    int pindex = 0;
+    unsigned int f32_param_mask   = 0;
+    int          pindex           = 0;
     for (Obj *param = fn->params; param && pindex < 8;
-         param = param->next, pindex++) {
+         param      = param->next, pindex++) {
         if (is_flonum(param->ty)) {
             float_param_mask |= (1u << pindex);
             if (param->ty->kind == TY_FLOAT)
@@ -82,21 +83,26 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     }
 
     // Assign a function-level scope ID for stack instrumentation.
-    int fn_scope_id = vm->current_scope_id++;
+    int fn_scope_id               = vm->current_scope_id++;
     vm->current_function_scope_id = fn_scope_id;
 
     // Register all params and locals in the variable metadata map.
     for (Obj *param = fn->params; param; param = param->next) {
-        add_stack_var_meta(vm, param->name, param->offset, param->ty, fn_scope_id);
+        add_stack_var_meta(vm, param->name, param->offset, param->ty,
+                           fn_scope_id);
         add_debug_symbol(vm, param->name, param->offset, param->ty, 1, fn);
     }
     for (Obj *var = fn->locals; var; var = var->next) {
         bool is_param = false;
         for (Obj *p = fn->params; p; p = p->next)
-            if (p == var) { is_param = true; break; }
+            if (p == var) {
+                is_param = true;
+                break;
+            }
         bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
         if (!is_param && !is_builtin) {
-            add_stack_var_meta(vm, var->name, var->offset, var->ty, fn_scope_id);
+            add_stack_var_meta(vm, var->name, var->offset, var->ty,
+                               fn_scope_id);
             add_debug_symbol(vm, var->name, var->offset, var->ty, 1, fn);
         }
     }
@@ -107,9 +113,9 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     long long ent3_masks =
         (long long)float_param_mask | ((long long)f32_param_mask << 32);
     emit(vm, ENT3);
-    vm->compiler.ent3_stack_loc = emit_i64(vm, ent3_operand);
-    vm->compiler.ent3_masks_loc = emit_i64(vm, ent3_masks);
-    vm->compiler.ent3_base_stack = stack_size;
+    vm->compiler.ent3_stack_loc   = emit_i64(vm, ent3_operand);
+    vm->compiler.ent3_masks_loc   = emit_i64(vm, ent3_masks);
+    vm->compiler.ent3_base_stack  = stack_size;
     vm->compiler.ent3_extra_stack = 0;
 
     // Activate function-level scope (marks params/locals as alive).
@@ -146,7 +152,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
             // Store the heap pointer in the variable's stack slot
             int r_addr = alloc_temp_reg();
             // Slot address only feeds the immediate store below (#676).
-            emit_lea3_internal(vm, r_addr, var->offset); // Address of stack slot
+            emit_lea3_internal(vm, r_addr,
+                               var->offset);    // Address of stack slot
             emit_rr(vm, STR_D, REG_A0, r_addr); // Store heap pointer in slot
             free_temp_reg(r_addr);
         }
@@ -172,16 +179,16 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         if ((param->ty->kind != TY_STRUCT && param->ty->kind != TY_UNION) ||
             param->ty->size <= 0)
             continue;
-        long long copy_off = alloc_wide_bitint_temp(
-            vm, (param->ty->size + 7) / 8);
+        long long copy_off =
+            alloc_wide_bitint_temp(vm, (param->ty->size + 7) / 8);
         int r_src = alloc_temp_reg();
         // Slot address only feeds the immediate pointer load below (#676).
         emit_lea3_internal(vm, r_src, param->offset);
-        emit_rr(vm, LDR_D, r_src, r_src); // caller's object address
-        emit_lea3_internal(vm, REG_A0, copy_off);   // copy dest
-        emit_mov3(vm, REG_A1, r_src);               // copy src
-        emit_li3(vm, REG_A2, param->ty->size);       // copy count
-        emit(vm, MCPY); // clobbers A0-A2
+        emit_rr(vm, LDR_D, r_src, r_src);         // caller's object address
+        emit_lea3_internal(vm, REG_A0, copy_off); // copy dest
+        emit_mov3(vm, REG_A1, r_src);             // copy src
+        emit_li3(vm, REG_A2, param->ty->size);    // copy count
+        emit(vm, MCPY);                           // clobbers A0-A2
         free_temp_reg(r_src);
         // The copy is a genuine new object living at [copy_off,
         // copy_off+size) in this frame -- if the original param's address
@@ -214,13 +221,13 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Patch ENT3 stack size if inlining added local variables
     if (vm->compiler.ent3_extra_stack > 0) {
-        int new_stack = vm->compiler.ent3_base_stack +
-                        vm->compiler.ent3_extra_stack;
+        int new_stack =
+            vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack;
         if (new_stack % 2 != 0)
             new_stack++;
         long long new_operand =
             ((long long)new_stack) | (((long long)spill_param_count) << 32);
-        vm->text_seg[vm->compiler.ent3_stack_loc] = cc_i64_lo(new_operand);
+        vm->text_seg[vm->compiler.ent3_stack_loc]     = cc_i64_lo(new_operand);
         vm->text_seg[vm->compiler.ent3_stack_loc + 1] = cc_i64_hi(new_operand);
     }
 
@@ -240,15 +247,18 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
             new_masks |= (unsigned long long)ENT3_PUSH_EPOCH_AGG;
         if (vm->compiler.frame_has_esc_scalar)
             new_masks |= ((unsigned long long)ENT3_PUSH_EPOCH_SCALAR << 32);
-        vm->text_seg[vm->compiler.ent3_masks_loc] = cc_i64_lo((long long)new_masks);
-        vm->text_seg[vm->compiler.ent3_masks_loc + 1] = cc_i64_hi((long long)new_masks);
+        vm->text_seg[vm->compiler.ent3_masks_loc] =
+            cc_i64_lo((long long)new_masks);
+        vm->text_seg[vm->compiler.ent3_masks_loc + 1] =
+            cc_i64_hi((long long)new_masks);
     }
 
     // Patch all forward jumps (break/continue/goto)
     patch_labels(vm);
 
     // Implicit return 0 from entry function
-    const char *entry_fn = vm->compiler.entry_name ? vm->compiler.entry_name : "main";
+    const char *entry_fn =
+        vm->compiler.entry_name ? vm->compiler.entry_name : "main";
     if (strncmp(fn->name, entry_fn, strlen(entry_fn) + 1) == 0) {
         emit_li3(vm, REG_A0, 0);
     }
@@ -283,16 +293,16 @@ static void sort_init_entries(CCCCInitEntry *list, int count, bool ascending) {
     // Simple insertion sort: these lists are tiny (a handful of functions),
     // and seq guarantees a strict order so no comparator ties are possible.
     for (int i = 1; i < count; i++) {
-        CCCCInitEntry key = list[i];
-        int key_pri = init_entry_effective_priority(&key);
-        int j = i - 1;
+        CCCCInitEntry key     = list[i];
+        int           key_pri = init_entry_effective_priority(&key);
+        int           j       = i - 1;
         while (j >= 0) {
-            int cur_pri = init_entry_effective_priority(&list[j]);
-            bool key_before_cur = ascending
-                ? (key_pri < cur_pri ||
-                   (key_pri == cur_pri && key.seq < list[j].seq))
-                : (key_pri > cur_pri ||
-                   (key_pri == cur_pri && key.seq > list[j].seq));
+            int  cur_pri = init_entry_effective_priority(&list[j]);
+            bool key_before_cur =
+                ascending ? (key_pri < cur_pri ||
+                             (key_pri == cur_pri && key.seq < list[j].seq))
+                          : (key_pri > cur_pri ||
+                             (key_pri == cur_pri && key.seq > list[j].seq));
             if (!key_before_cur)
                 break;
             list[j + 1] = list[j];
@@ -318,10 +328,10 @@ static void alloc_return_buffer_pool(VirtualMachine *vm) {
     for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
         // Align to 8-byte boundary
         long long offset = vm->data_ptr - vm->data_seg;
-        offset = (offset + 7) & ~7;
+        offset           = (offset + 7) & ~7;
         check_data_capacity(vm, offset + vm->compiler.return_buffer_size);
-        vm->data_ptr = vm->data_seg + offset;
-        vm->compiler.return_buffer_pool[i] = vm->data_ptr;
+        vm->data_ptr                          = vm->data_seg + offset;
+        vm->compiler.return_buffer_pool[i]    = vm->data_ptr;
         vm->compiler.return_buffer_offsets[i] = offset;
         memset(vm->compiler.return_buffer_pool[i], 0,
                vm->compiler.return_buffer_size);
@@ -331,9 +341,9 @@ static void alloc_return_buffer_pool(VirtualMachine *vm) {
 
 void gen(VirtualMachine *vm, Obj *prog) {
     // Reset patch counters
-    vm->compiler.num_call_patches = 0;
+    vm->compiler.num_call_patches      = 0;
     vm->compiler.num_func_addr_patches = 0;
-    vm->compiler.num_data_relocs = 0;
+    vm->compiler.num_data_relocs       = 0;
 
     // Reset the persistent global label map (populated by define_label during
     // function codegen; consumed by apply_global_relocations for &&label
@@ -343,8 +353,9 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // Initialize text pointer - text_seg[0] is reserved for main entry point
     vm->text_ptr = 0;
 
-    // Initialize global variables in data segment (TLS vars go into tls_template)
-    // Zero the template so uninitialised TLS vars start at 0 across recompiles.
+    // Initialize global variables in data segment (TLS vars go into
+    // tls_template) Zero the template so uninitialised TLS vars start at 0
+    // across recompiles.
     if (vm->tls_template_cap > 0)
         memset(vm->tls_template, 0, vm->tls_template_cap);
     vm->tls_template_size = 0;
@@ -362,7 +373,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
             } else {
                 // Align data pointer to 8-byte boundary
                 long long offset = vm->data_ptr - vm->data_seg;
-                offset = (offset + 7) & ~7;
+                offset           = (offset + 7) & ~7;
                 check_data_capacity(vm, offset + var->ty->size);
                 vm->data_ptr = vm->data_seg + offset;
 
@@ -389,10 +400,10 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // as immediates, so any alias reference compiled before this point
     // would still get the wrong/zero offset).
     for (int i = 0; i < vm->compiler.global_aliases_count; i++) {
-        Obj *alias = vm->compiler.global_aliases[i].alias;
+        Obj *alias     = vm->compiler.global_aliases[i].alias;
         Obj *canonical = vm->compiler.global_aliases[i].canonical;
-        alias->offset = canonical->offset;
-        alias->is_tls = canonical->is_tls;
+        alias->offset  = canonical->offset;
+        alias->is_tls  = canonical->is_tls;
     }
 
     // Allocate return buffer pool for struct/union returns at end of data
@@ -437,11 +448,13 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // This is emitted into the .c4 so --link and cc_load_module() can resolve
     // cross-module CALLs.
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body || fn->is_static) continue;
+        if (!fn->is_function || !fn->body || fn->is_static)
+            continue;
         const char *sym_name = obj_external_name(fn);
-        if (!sym_name) continue;
+        if (!sym_name)
+            continue;
         PATCH_GROW(vm, sym_table, num_sym_table, sym_table_cap);
-        int idx = vm->compiler.num_sym_table;
+        int idx                               = vm->compiler.num_sym_table;
         vm->compiler.sym_table[idx].pc_offset = fn->code_addr;
         vm->compiler.sym_table[idx].name      = strdup(sym_name);
         vm->compiler.sym_table[idx].name_len  = strlen(sym_name);
@@ -450,9 +463,9 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     // Second pass: Patch function call addresses
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
-        Obj *target = vm->compiler.call_patches[i].function;
+        Obj        *target  = vm->compiler.call_patches[i].function;
         const char *fn_name = obj_external_name(target);
-        Pc loc = vm->compiler.call_patches[i].location;
+        Pc          loc     = vm->compiler.call_patches[i].location;
 
         Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
@@ -464,9 +477,11 @@ void gen(VirtualMachine *vm, Obj *prog) {
             // (skips patching entirely, since FFI calls use CALLF/CALLN, not
             // CALL), which would leave this CALL's operand at its unpatched
             // placeholder value of 0 instead of getting a relocation.
-            bool linked_elsewhere = symbol_defined_by_linked_module(vm, fn_name);
+            bool linked_elsewhere =
+                symbol_defined_by_linked_module(vm, fn_name);
             // Check for FFI function
-            int ffi_idx = linked_elsewhere ? -1 : find_ffi_function(vm, fn_name);
+            int ffi_idx =
+                linked_elsewhere ? -1 : find_ffi_function(vm, fn_name);
             if (ffi_idx >= 0) {
                 // FFI - not handled via CALL, skip
                 continue;
@@ -474,7 +489,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
             // When building a -c bytecode target or when --link libs are
             // provided, record a text relocation instead of erroring — the
             // symbol will be resolved at link time (#565).
-            if ((vm->compiler.compile_only || vm->compiler.deferred_link) && fn_name) {
+            if ((vm->compiler.compile_only || vm->compiler.deferred_link) &&
+                fn_name) {
                 PATCH_GROW(vm, text_relocs, num_text_relocs, text_relocs_cap);
                 int ridx = vm->compiler.num_text_relocs;
                 vm->compiler.text_relocs[ridx].location = loc;
@@ -493,17 +509,20 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // Third pass: Patch function address references (for function pointers)
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
         Obj *target = vm->compiler.func_addr_patches[i].function;
-        Pc loc = vm->compiler.func_addr_patches[i].location;
+        Pc   loc    = vm->compiler.func_addr_patches[i].location;
 
         Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
         if (fn_def) {
-            cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+            cc_write_i64_at(vm, loc,
+                            cc_pc_to_byte_offset((Pc)fn_def->code_addr));
         } else {
             const char *fn_name = obj_external_name(target);
             // #882: see the matching comment in the call-patch pass above.
-            bool linked_elsewhere = symbol_defined_by_linked_module(vm, fn_name);
-            int ffi_idx = linked_elsewhere ? -1 : find_ffi_function(vm, fn_name);
+            bool linked_elsewhere =
+                symbol_defined_by_linked_module(vm, fn_name);
+            int ffi_idx =
+                linked_elsewhere ? -1 : find_ffi_function(vm, fn_name);
             if (ffi_idx >= 0) {
                 // FFI function used as a value: store token so CALLN can
                 // call it. (JMPI, the other indirect-control-flow opcode,
@@ -511,8 +530,11 @@ void gen(VirtualMachine *vm, Obj *prog) {
                 // computed goto -- landing on this token there is a runtime
                 // error, not a call.)
                 cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
-            } else if ((vm->compiler.compile_only || vm->compiler.deferred_link) && fn_name) {
-                // Cross-module function-pointer: record addr reloc for link-time patching (#566).
+            } else if ((vm->compiler.compile_only ||
+                        vm->compiler.deferred_link) &&
+                       fn_name) {
+                // Cross-module function-pointer: record addr reloc for
+                // link-time patching (#566).
                 PATCH_GROW(vm, addr_relocs, num_addr_relocs, addr_relocs_cap);
                 int ridx = vm->compiler.num_addr_relocs;
                 vm->compiler.addr_relocs[ridx].location = loc;
@@ -521,7 +543,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
                 vm->compiler.addr_relocs[ridx].resolved = 0;
                 vm->compiler.num_addr_relocs++;
             }
-            // else: non-deferred mode; parser already rejects address-of-undeclared.
+            // else: non-deferred mode; parser already rejects
+            // address-of-undeclared.
         }
     }
 
@@ -535,8 +558,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // before checking. Must run after function codegen (gen_addr has by now
     // run for every reference) and before the check.
     for (int i = 0; i < vm->compiler.global_aliases_count; i++) {
-        Obj *alias = vm->compiler.global_aliases[i].alias;
-        Obj *canonical = vm->compiler.global_aliases[i].canonical;
+        Obj *alias                = vm->compiler.global_aliases[i].alias;
+        Obj *canonical            = vm->compiler.global_aliases[i].canonical;
         canonical->is_referenced |= alias->is_referenced;
     }
 
@@ -563,7 +586,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // applied.  Keeping this explicit rather than leaking it into the process
     // lifetime, as the repo is leak-paranoid.
     free(global_label_map);
-    global_label_map = NULL;
+    global_label_map  = NULL;
     global_labels_cap = 0;
     num_global_labels = 0;
 
@@ -579,17 +602,19 @@ void gen(VirtualMachine *vm, Obj *prog) {
                 continue;
             if (fn->is_constructor) {
                 PATCH_GROW(vm, ctor_list, ctor_count, ctor_capacity);
-                CCCCInitEntry *e = &vm->compiler.ctor_list[vm->compiler.ctor_count++];
+                CCCCInitEntry *e =
+                    &vm->compiler.ctor_list[vm->compiler.ctor_count++];
                 e->code_addr = fn->code_addr;
-                e->priority = fn->init_priority;
-                e->seq = seq;
+                e->priority  = fn->init_priority;
+                e->seq       = seq;
             }
             if (fn->is_destructor) {
                 PATCH_GROW(vm, dtor_list, dtor_count, dtor_capacity);
-                CCCCInitEntry *e = &vm->compiler.dtor_list[vm->compiler.dtor_count++];
+                CCCCInitEntry *e =
+                    &vm->compiler.dtor_list[vm->compiler.dtor_count++];
                 e->code_addr = fn->code_addr;
-                e->priority = fn->init_priority;
-                e->seq = seq;
+                e->priority  = fn->init_priority;
+                e->seq       = seq;
             }
             seq++;
         }
@@ -598,7 +623,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
     sort_init_entries(vm->compiler.dtor_list, vm->compiler.dtor_count, false);
 
     // Find entry function and store its address in text_seg[0]
-    const char *entry = vm->compiler.entry_name ? vm->compiler.entry_name : "main";
+    const char *entry =
+        vm->compiler.entry_name ? vm->compiler.entry_name : "main";
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function &&
             strncmp(fn->name, entry, strlen(entry) + 1) == 0) {
@@ -640,16 +666,17 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
         vm->text_ptr = 0; // reserve text_seg[0], as gen() does
         if (vm->flags & CCCC_ENABLE_DEBUGGER) {
             vm->dbg.source_map_capacity = 1024;
-            vm->dbg.source_map = malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
+            vm->dbg.source_map =
+                malloc(vm->dbg.source_map_capacity * sizeof(SourceMap));
             if (!vm->dbg.source_map)
                 error("could not malloc for source map");
-            vm->dbg.source_map_count = 0;
-            vm->dbg.last_debug_file = NULL;
-            vm->dbg.last_debug_line = -1;
-            vm->dbg.source_index = NULL;
+            vm->dbg.source_map_count   = 0;
+            vm->dbg.last_debug_file    = NULL;
+            vm->dbg.last_debug_line    = -1;
+            vm->dbg.source_index       = NULL;
             vm->dbg.source_index_count = 0;
-            vm->dbg.num_debug_symbols = 0;
-            vm->dbg.num_watchpoints = 0;
+            vm->dbg.num_debug_symbols  = 0;
+            vm->dbg.num_watchpoints    = 0;
         }
     }
 
@@ -668,7 +695,7 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
             num_new_vars++;
     if (num_new_vars > 0) {
         Obj **arr = alloca((size_t)num_new_vars * sizeof(Obj *));
-        int idx = num_new_vars - 1;
+        int   idx = num_new_vars - 1;
         for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
             if (!v->is_function)
                 arr[idx--] = v;
@@ -684,10 +711,10 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                 vm->tls_template_size = tls_offset + (size_t)var->ty->size;
             } else {
                 long long offset = vm->data_ptr - vm->data_seg;
-                offset = (offset + 7) & ~7;
+                offset           = (offset + 7) & ~7;
                 check_data_capacity(vm, offset + var->ty->size);
                 vm->data_ptr = vm->data_seg + offset;
-                var->offset = vm->data_ptr - vm->data_seg;
+                var->offset  = vm->data_ptr - vm->data_seg;
                 add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
                 if (var->init_data)
                     memcpy(vm->data_ptr, var->init_data, var->ty->size);
@@ -703,7 +730,7 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
             num_new_fns++;
     if (num_new_fns > 0) {
         Obj **farr = alloca((size_t)num_new_fns * sizeof(Obj *));
-        int idx = num_new_fns - 1;
+        int   idx  = num_new_fns - 1;
         for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
             if (v->is_function && v->body)
                 farr[idx--] = v;
@@ -726,9 +753,9 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                 hashmap_put(&fn_defs, fn->name, fn);
 
         for (int i = call_patch_start; i < vm->compiler.num_call_patches; i++) {
-            Obj *target = vm->compiler.call_patches[i].function;
+            Obj        *target  = vm->compiler.call_patches[i].function;
             const char *fn_name = obj_external_name(target);
-            Pc loc = vm->compiler.call_patches[i].location;
+            Pc          loc     = vm->compiler.call_patches[i].location;
 
             Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
             if (!fn_def) {
@@ -740,16 +767,18 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
             vm->text_seg[loc] = (Pc)fn_def->code_addr;
         }
 
-        for (int i = addr_patch_start; i < vm->compiler.num_func_addr_patches; i++) {
+        for (int i = addr_patch_start; i < vm->compiler.num_func_addr_patches;
+             i++) {
             Obj *target = vm->compiler.func_addr_patches[i].function;
-            Pc loc = vm->compiler.func_addr_patches[i].location;
+            Pc   loc    = vm->compiler.func_addr_patches[i].location;
 
             Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
             if (fn_def) {
-                cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+                cc_write_i64_at(vm, loc,
+                                cc_pc_to_byte_offset((Pc)fn_def->code_addr));
             } else {
                 const char *fn_name = obj_external_name(target);
-                int ffi_idx = find_ffi_function(vm, fn_name);
+                int         ffi_idx = find_ffi_function(vm, fn_name);
                 if (ffi_idx >= 0)
                     cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
                 // else: REPL disallows -c/deferred-link, so there is no

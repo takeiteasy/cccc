@@ -5,9 +5,15 @@
 
 #include <stdio.h>
 
-__attribute__((destructor(101))) void d101(void) { printf("d101\n"); }
-__attribute__((destructor(200))) void d200(void) { printf("d200\n"); }
-__attribute__((destructor)) void ddefault(void) { printf("ddefault\n"); }
+__attribute__((destructor(101))) void d101(void) {
+    printf("d101\n");
+}
+__attribute__((destructor(200))) void d200(void) {
+    printf("d200\n");
+}
+__attribute__((destructor)) void ddefault(void) {
+    printf("ddefault\n");
+}
 
 int main(void) {
     return 42;

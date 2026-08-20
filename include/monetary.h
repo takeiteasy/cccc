@@ -29,6 +29,7 @@
 #include "locale.h"
 
 extern ssize_t strfmon(char *s, size_t maxsize, const char *format, ...);
-extern ssize_t strfmon_l(char *s, size_t maxsize, locale_t loc, const char *format, ...);
+extern ssize_t strfmon_l(char *s, size_t maxsize, locale_t loc,
+                         const char *format, ...);
 
 #endif /* __MONETARY_H */

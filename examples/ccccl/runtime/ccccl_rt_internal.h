@@ -26,15 +26,22 @@ typedef enum LObjTag { CCCCL_ATOM, CCCCL_PAIR, CCCCL_FN } LObjTag;
  * rather than an inline anonymous struct, which is no longer required now
  * that LObj is fully opaque outside this file (nothing else parses this
  * struct at all), but there is no reason to revert something this cheap. */
-typedef struct { const char *name; } LObjAtom;
-typedef struct { LObj *car, *cdr; } LObjPair;
-typedef struct { CccclFn fn; LObj *env; } LObjClosure;
+typedef struct {
+    const char *name;
+} LObjAtom;
+typedef struct {
+    LObj *car, *cdr;
+} LObjPair;
+typedef struct {
+    CccclFn fn;
+    LObj   *env;
+} LObjClosure;
 
 struct LObj {
     LObjTag tag;
     union {
-        LObjAtom atom;
-        LObjPair pair;
+        LObjAtom    atom;
+        LObjPair    pair;
         LObjClosure closure;
     } as;
 };

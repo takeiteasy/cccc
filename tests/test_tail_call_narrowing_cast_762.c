@@ -29,39 +29,56 @@
 
 // noinline: this test targets the CALLT path specifically; an inlined callee
 // takes the separate expr_already_eval fall-through covered by case (6).
-__attribute__((noinline))
-static int g_uchar(unsigned char y) { return (int)y * 1000 + 37; }
-static int f_uchar(int x) { return (unsigned char) g_uchar((unsigned char)x); }
+__attribute__((noinline)) static int g_uchar(unsigned char y) {
+    return (int)y * 1000 + 37;
+}
+static int f_uchar(int x) {
+    return (unsigned char)g_uchar((unsigned char)x);
+}
 
 // ─── (2) short narrowing, value above 2^16 ─────────────────────────────────
 
-__attribute__((noinline))
-static int g_short(int x) { return x; }
-static short f_short(int x) { return (short) g_short(x); }
+__attribute__((noinline)) static int g_short(int x) {
+    return x;
+}
+static short f_short(int x) {
+    return (short)g_short(x);
+}
 
 // ─── (3) _Bool narrowing of a nonzero, non-one int ─────────────────────────
 
-__attribute__((noinline))
-static int g_bool(int x) { return x; }
-static _Bool f_bool(int x) { return (_Bool) g_bool(x); }
+__attribute__((noinline)) static int g_bool(int x) {
+    return x;
+}
+static _Bool f_bool(int x) {
+    return (_Bool)g_bool(x);
+}
 
 // ─── (4) int narrowing of a long-returning call, value above 2^32 ─────────
 
-__attribute__((noinline))
-static long g_long(long x) { return x; }
-static int f_int_of_long(long x) { return (int) g_long(x); }
+__attribute__((noinline)) static long g_long(long x) {
+    return x;
+}
+static int f_int_of_long(long x) {
+    return (int)g_long(x);
+}
 
 // ─── (5) float rounding of a double-returning call ─────────────────────────
 
-__attribute__((noinline))
-static double g_double(double x) { return x; }
-static float f_float_of_double(double x) { return (float) g_double(x); }
+__attribute__((noinline)) static double g_double(double x) {
+    return x;
+}
+static float f_float_of_double(double x) {
+    return (float)g_double(x);
+}
 
 // ─── (6) Inlined-callee variant of (1): expr_already_eval fall-through ────
 
-static int g_uchar_inl(unsigned char y) { return (int)y * 1000 + 37; }
+static int g_uchar_inl(unsigned char y) {
+    return (int)y * 1000 + 37;
+}
 static int f_uchar_inl(int x) {
-    return (unsigned char) g_uchar_inl((unsigned char)x);
+    return (unsigned char)g_uchar_inl((unsigned char)x);
 }
 
 // ─── (7) Positive control: ordinary identity-cast tail recursion must keep
@@ -82,7 +99,7 @@ void test_762_uchar_narrowing_return(void) {
 
 [[cccc::test]]
 void test_762_short_narrowing_return(void) {
-    AssertEq(f_short(70000), (short) 70000);
+    AssertEq(f_short(70000), (short)70000);
 }
 
 [[cccc::test]]
@@ -93,7 +110,7 @@ void test_762_bool_narrowing_return(void) {
 [[cccc::test]]
 void test_762_int_narrowing_of_long_return(void) {
     long v = (1LL << 33) + 7;
-    AssertEq(f_int_of_long(v), (int) v);
+    AssertEq(f_int_of_long(v), (int)v);
 }
 
 [[cccc::test]]
@@ -103,7 +120,7 @@ void test_762_float_rounding_of_double_return(void) {
     // default 1e-6 tolerance, so a dropped emit_fround_f32 is guaranteed to
     // be caught (a value near 1/3 would round within tolerance and miss it).
     double d = 16777217.0;
-    AssertFloatEq((float) d, f_float_of_double(d));
+    AssertFloatEq((float)d, f_float_of_double(d));
 }
 
 [[cccc::test]]

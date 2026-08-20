@@ -11,7 +11,8 @@
 #include <stdlib.h>
 
 int main(void) {
-    size_t n = 48 * 1024; // ~192 KiB of ints: spans multiple 64 KiB shadow pages
+    size_t n =
+        48 * 1024;       // ~192 KiB of ints: spans multiple 64 KiB shadow pages
     int *arr = malloc(n * sizeof(int));
     for (size_t i = 0; i < n; i++)
         arr[i] = (int)i; // stamps every byte in range as int

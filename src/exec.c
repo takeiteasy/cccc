@@ -26,15 +26,15 @@
 
 void argv_push(ArgVec *args, const char *arg) {
     if (args->len + 1 >= args->cap) {
-        int new_cap = args->cap ? args->cap * 2 : 16;
+        int          new_cap  = args->cap ? args->cap * 2 : 16;
         const char **new_data = realloc(args->data, sizeof(char *) * new_cap);
         if (!new_data)
             error("failed to allocate argument vector");
         args->data = new_data;
-        args->cap = new_cap;
+        args->cap  = new_cap;
     }
     args->data[args->len++] = arg;
-    args->data[args->len] = NULL;
+    args->data[args->len]   = NULL;
 }
 
 char *make_tmp_path(const char *suffix) {
@@ -43,13 +43,13 @@ char *make_tmp_path(const char *suffix) {
     return NULL;
 #else
     char template[] = "/tmp/cccc-native-XXXXXX";
-    int fd = mkstemp(template);
+    int  fd         = mkstemp(template);
     if (fd < 0)
         return NULL;
     close(fd);
 
-    size_t len = strlen(template) + strlen(suffix) + 1;
-    char *path = malloc(len);
+    size_t len  = strlen(template) + strlen(suffix) + 1;
+    char  *path = malloc(len);
     if (!path) {
         unlink(template);
         return NULL;
@@ -82,7 +82,8 @@ static char **merge_env(char *const extra_env[]) {
     int extra_count = 0;
     while (extra_env[extra_count])
         extra_count++;
-    char **merged = malloc(sizeof(char *) * (size_t)(base_count + extra_count + 1));
+    char **merged =
+        malloc(sizeof(char *) * (size_t)(base_count + extra_count + 1));
     if (!merged)
         return NULL;
     int n = 0;
@@ -90,8 +91,10 @@ static char **merge_env(char *const extra_env[]) {
         int shadowed = 0;
         for (int j = 0; j < extra_count; j++) {
             const char *eq = strchr(extra_env[j], '=');
-            size_t namelen = eq ? (size_t)(eq - extra_env[j]) : strlen(extra_env[j]);
-            if (strncmp(environ[i], extra_env[j], namelen) == 0 && environ[i][namelen] == '=') {
+            size_t      namelen =
+                eq ? (size_t)(eq - extra_env[j]) : strlen(extra_env[j]);
+            if (strncmp(environ[i], extra_env[j], namelen) == 0 &&
+                environ[i][namelen] == '=') {
                 shadowed = 1;
                 break;
             }

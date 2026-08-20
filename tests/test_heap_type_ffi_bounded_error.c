@@ -11,15 +11,15 @@
 
 int main(void) {
     int *arr = malloc(sizeof(int) * 4);
-    arr[2] = 3;
-    arr[3] = 4; // stamps only arr[2..3] (the tail) as int
+    arr[2]   = 3;
+    arr[3]   = 4; // stamps only arr[2..3] (the tail) as int
 
     // Bounded write into the head only: must clear just [arr, arr+8), not
     // the whole allocation.
     snprintf((char *)arr, sizeof(int) * 2, "ab");
 
     float *tail = (float *)&arr[2];
-    float v = *tail; // load as float: mismatches the still-stamped int tail
+    float  v    = *tail; // load as float: mismatches the still-stamped int tail
     free(arr);
     return (int)v;
 }

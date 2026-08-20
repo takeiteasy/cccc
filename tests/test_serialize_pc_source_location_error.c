@@ -12,9 +12,9 @@
 // internal, undeclared __cccc_pc_to_source symbol.
 
 int main(void) {
-    void *ra = __builtin_return_address(0);
+    void       *ra   = __builtin_return_address(0);
     const char *file = 0;
-    int line = 0;
-    int ok = __builtin_pc_source_location(ra, &file, &line);
+    int         line = 0;
+    int         ok   = __builtin_pc_source_location(ra, &file, &line);
     return ok;
 }

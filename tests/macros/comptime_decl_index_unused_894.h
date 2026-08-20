@@ -17,8 +17,8 @@ int unused_proto_894(int x, int y);
 // legal C (the symbol is declared below), but would need real evaluation
 // to forward correctly. Since nothing ever references "unused_dependent_894"
 // from comptime code, this must never be examined at all.
-static int unused_dependent_894 = 0;
-static int *unused_ptr_894 = &unused_dependent_894;
+static int  unused_dependent_894 = 0;
+static int *unused_ptr_894       = &unused_dependent_894;
 
 // The one declaration the test actually uses.
 typedef int UsedOnly894;

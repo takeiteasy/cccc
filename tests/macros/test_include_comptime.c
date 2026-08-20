@@ -1,7 +1,7 @@
-// Test #include [[cccc::comptime]]: glob.h is visible only during the comptime pass.
-// The runtime translation unit never sees glob_t or glob().
+// Test #include [[cccc::comptime]]: glob.h is visible only during the comptime
+// pass. The runtime translation unit never sees glob_t or glob().
 
-#include [[cccc::comptime]] <glob.h>
+#include[[cccc::comptime]] < glob.h>
 
 [[cccc::comptime]]
 int glob_type_size(void) {

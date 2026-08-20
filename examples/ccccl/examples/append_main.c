@@ -18,8 +18,8 @@ int main(void) {
 
     ccccl_rt_init();
 
-    xs = list2(ccccl_intern("A"), ccccl_intern("B"));
-    ys = list2(ccccl_intern("C"), ccccl_intern("D"));
+    xs     = list2(ccccl_intern("A"), ccccl_intern("B"));
+    ys     = list2(ccccl_intern("C"), ccccl_intern("D"));
 
     result = append(ccccl_cons(xs, ccccl_cons(ys, ccccl_nil)), ccccl_nil);
 

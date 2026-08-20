@@ -4,14 +4,23 @@
 //               test_std_c11_static_assert_ok, test_warning_ignored_tls,
 //               test_warning_ignored_tls_thread
 //
-// Deferred (uses -E flag, not [[cccc::test]]-compatible): test_attr_target_auto_c11
+// Deferred (uses -E flag, not [[cccc::test]]-compatible):
+// test_attr_target_auto_c11
 
-// File-scope thread-local variables (required by standard — TLS must be file/static scope)
-_Thread_local int c11_tls_var = 0;
-__thread int c11_thread_var = 0;
+// File-scope thread-local variables (required by standard — TLS must be
+// file/static scope)
+_Thread_local int c11_tls_var    = 0;
+__thread int      c11_thread_var = 0;
 
-// File-scope struct for anonymous struct test (CCCC promotes local structs to file scope)
-struct C11OuterAnon { int x; struct { int a; int b; }; };
+// File-scope struct for anonymous struct test (CCCC promotes local structs to
+// file scope)
+struct C11OuterAnon {
+    int x;
+    struct {
+        int a;
+        int b;
+    };
+};
 
 #pragma cccc suite begin "std_c11"
 
@@ -19,14 +28,17 @@ struct C11OuterAnon { int x; struct { int a; int b; }; };
 [[cccc::test(return = 42)]]
 int test_std_c11_anon_struct(void) {
     struct C11OuterAnon o;
-    o.x = 1; o.a = 2; o.b = 3;
+    o.x = 1;
+    o.a = 2;
+    o.b = 3;
     return o.a == 2 ? 42 : 1;
 }
 
 // test_std_c11_generic_ok: _Generic is available in C11
 [[cccc::test(return = 42)]]
 int test_std_c11_generic(void) {
-#define myabs(x) _Generic((x), int: (x) < 0 ? -(x) : (x), double: (x) < 0.0 ? -(x) : (x))
+#define myabs(x)                                                               \
+    _Generic((x), int: (x) < 0 ? -(x) : (x), double: (x) < 0.0 ? -(x) : (x))
     return myabs(-5) == 5 ? 42 : 1;
 #undef myabs
 }

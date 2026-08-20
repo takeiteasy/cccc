@@ -1,7 +1,11 @@
 // Test $identifier reflect operator: $SomeStruct as a direct call argument
 // to a comptime macro.
 
-typedef struct { float r; float g; float b; } Color;
+typedef struct {
+    float r;
+    float g;
+    float b;
+} Color;
 
 [[cccc::comptime]]
 Node *check_is_struct(Type *ty) {

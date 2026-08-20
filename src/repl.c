@@ -84,7 +84,8 @@ extern void __builtin_ast_function_set_body(Obj *fn, Node *body);
 // ---------------------------------------------------------------------
 
 typedef struct {
-    char *(*next)(void *ctx, const char *prompt); // malloc'd line, or NULL at EOF
+    char *(*next)(void       *ctx,
+                  const char *prompt); // malloc'd line, or NULL at EOF
     void *ctx;
 } LineSource;
 
@@ -116,7 +117,7 @@ static char *repl_read_stdin_line(void *ctx, const char *prompt) {
 static char *repl_read_file_line(void *ctx, const char *prompt) {
     (void)prompt;
     FILE *f = (FILE *)ctx;
-    char buf[65536];
+    char  buf[65536];
     if (!fgets(buf, sizeof(buf), f))
         return NULL;
     size_t len = strlen(buf);
@@ -131,7 +132,7 @@ static char *repl_read_file_line(void *ctx, const char *prompt) {
 // ---------------------------------------------------------------------
 
 typedef struct {
-    int depth;
+    int  depth;
     bool in_string, in_char, in_block_comment, escape;
 } BalanceState;
 
@@ -157,23 +158,53 @@ static void repl_scan_balance(BalanceState *st, const char *buf) {
             continue;
         }
         if (st->in_string) {
-            if (st->escape) { st->escape = false; continue; }
-            if (c == '\\') { st->escape = true; continue; }
-            if (c == '"') st->in_string = false;
+            if (st->escape) {
+                st->escape = false;
+                continue;
+            }
+            if (c == '\\') {
+                st->escape = true;
+                continue;
+            }
+            if (c == '"')
+                st->in_string = false;
             continue;
         }
         if (st->in_char) {
-            if (st->escape) { st->escape = false; continue; }
-            if (c == '\\') { st->escape = true; continue; }
-            if (c == '\'') st->in_char = false;
+            if (st->escape) {
+                st->escape = false;
+                continue;
+            }
+            if (c == '\\') {
+                st->escape = true;
+                continue;
+            }
+            if (c == '\'')
+                st->in_char = false;
             continue;
         }
-        if (c == '/' && p[1] == '/') { in_line_comment = true; p++; continue; }
-        if (c == '/' && p[1] == '*') { st->in_block_comment = true; p++; continue; }
-        if (c == '"') { st->in_string = true; continue; }
-        if (c == '\'') { st->in_char = true; continue; }
-        if (c == '{' || c == '(' || c == '[') st->depth++;
-        else if (c == '}' || c == ')' || c == ']') st->depth--;
+        if (c == '/' && p[1] == '/') {
+            in_line_comment = true;
+            p++;
+            continue;
+        }
+        if (c == '/' && p[1] == '*') {
+            st->in_block_comment = true;
+            p++;
+            continue;
+        }
+        if (c == '"') {
+            st->in_string = true;
+            continue;
+        }
+        if (c == '\'') {
+            st->in_char = true;
+            continue;
+        }
+        if (c == '{' || c == '(' || c == '[')
+            st->depth++;
+        else if (c == '}' || c == ')' || c == ']')
+            st->depth--;
     }
 }
 
@@ -187,13 +218,15 @@ static void repl_scan_balance(BalanceState *st, const char *buf) {
 // (verbatim, un-accumulated) so the caller can dispatch it as a session
 // command; :load'ed files pass allow_commands=false so a stray ':' in a file
 // is just parsed (and will error) rather than swallowed as a command.
-static char *repl_read_unit(LineSource *src, bool interactive, bool allow_commands) {
-    char *buf = NULL;
+static char *repl_read_unit(LineSource *src, bool interactive,
+                            bool allow_commands) {
+    char  *buf     = NULL;
     size_t buf_len = 0;
-    bool first = true;
+    bool   first   = true;
 
     for (;;) {
-        const char *prompt = interactive ? (first ? REPL_PROMPT : REPL_CONT_PROMPT) : "";
+        const char *prompt =
+            interactive ? (first ? REPL_PROMPT : REPL_CONT_PROMPT) : "";
         char *line = src->next(src->ctx, prompt);
         if (!line) {
             if (!buf)
@@ -206,17 +239,18 @@ static char *repl_read_unit(LineSource *src, bool interactive, bool allow_comman
             return line;
         }
 
-        bool explicit_cont = false;
-        size_t line_len = strlen(line);
+        bool   explicit_cont = false;
+        size_t line_len      = strlen(line);
         if (line_len > 0 && line[line_len - 1] == '\\') {
-            explicit_cont = true;
+            explicit_cont      = true;
             line[line_len - 1] = '\0';
             line_len--;
         }
 
         size_t sep = (buf_len > 0) ? 1 : 0; // room for the joining '\n'
-        buf = realloc(buf, buf_len + sep + line_len + 1);
-        if (sep) buf[buf_len] = '\n';
+        buf        = realloc(buf, buf_len + sep + line_len + 1);
+        if (sep)
+            buf[buf_len] = '\n';
         memcpy(buf + buf_len + sep, line, line_len + 1);
         buf_len += sep + line_len;
         free(line);
@@ -255,10 +289,12 @@ static HashMap repl_hashmap_snapshot_borrowed(const HashMap *map) {
     if (map->capacity > 0) {
         snap.buckets = malloc((size_t)map->capacity * sizeof(HashEntry));
         if (!snap.buckets) {
-            fprintf(stderr, "FATAL: out of memory in repl_hashmap_snapshot_borrowed\n");
+            fprintf(stderr,
+                    "FATAL: out of memory in repl_hashmap_snapshot_borrowed\n");
             exit(1);
         }
-        memcpy(snap.buckets, map->buckets, (size_t)map->capacity * sizeof(HashEntry));
+        memcpy(snap.buckets, map->buckets,
+               (size_t)map->capacity * sizeof(HashEntry));
     }
     return snap;
 }
@@ -273,14 +309,14 @@ static void repl_hashmap_restore_borrowed(HashMap *map, HashMap snapshot) {
 }
 
 CcExprSnapshot cc_expr_snapshot(VirtualMachine *vm) {
-    Scope *sc = vm->compiler.scope;
+    Scope         *sc = vm->compiler.scope;
     CcExprSnapshot snap;
     snap.var_map_snap = repl_hashmap_snapshot_borrowed(&sc->var_map);
     snap.tag_map_snap = repl_hashmap_snapshot_borrowed(&sc->tag_map);
-    snap.vars_head = sc->vars;
-    snap.tags_head = sc->tags;
+    snap.vars_head    = sc->vars;
+    snap.tags_head    = sc->tags;
     snap.globals_head = vm->compiler.globals;
-    snap.locals_head = vm->compiler.locals;
+    snap.locals_head  = vm->compiler.locals;
     return snap;
 }
 
@@ -299,10 +335,10 @@ void cc_expr_snapshot_restore(VirtualMachine *vm, CcExprSnapshot *snap) {
     Scope *sc = vm->compiler.scope;
     repl_hashmap_restore_borrowed(&sc->var_map, snap->var_map_snap);
     repl_hashmap_restore_borrowed(&sc->tag_map, snap->tag_map_snap);
-    sc->vars = snap->vars_head;
-    sc->tags = snap->tags_head;
+    sc->vars             = snap->vars_head;
+    sc->tags             = snap->tags_head;
     vm->compiler.globals = snap->globals_head;
-    vm->compiler.locals = snap->locals_head;
+    vm->compiler.locals  = snap->locals_head;
 }
 
 static void repl_print_pending_error(VirtualMachine *vm) {
@@ -322,21 +358,21 @@ static void repl_print_pending_error(VirtualMachine *vm) {
 
 void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
                           double *out_f) {
-    Pc saved_pc = vm->pc;
+    Pc         saved_pc = vm->pc;
     long long *saved_sp = vm->sp;
     long long *saved_bp = vm->bp;
-    long long saved_regs[NUM_REGS];
+    long long  saved_regs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     FReg saved_fregs[NUM_REGS];
     memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
     Obj *saved_current_fn = vm->compiler.current_fn;
 
-    vm->sp = vm->initial_sp;
-    vm->bp = vm->initial_bp;
-    *(--vm->sp) = 0; // sentinel return address
-    vm->pc = (Pc)fn->code_addr;
+    vm->sp                = vm->initial_sp;
+    vm->bp                = vm->initial_bp;
+    *(--vm->sp)           = 0; // sentinel return address
+    vm->pc                = (Pc)fn->code_addr;
 
-    cc_running_vm = vm;
+    cc_running_vm         = vm;
     cccc_gil_acquire(vm);
     int rc = vm_eval(vm);
     cccc_gil_release(vm);
@@ -346,8 +382,10 @@ void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
         fprintf(stderr, "note: evaluation raised a host signal (%d)\n",
                 vm->dbg.host_fault_signal);
 
-    if (out_i) *out_i = vm->regs[REG_A0];
-    if (out_f) *out_f = vm->fregs[FREG_A0].f64;
+    if (out_i)
+        *out_i = vm->regs[REG_A0];
+    if (out_f)
+        *out_f = vm->fregs[FREG_A0].f64;
 
     vm->pc = saved_pc;
     vm->sp = saved_sp;
@@ -366,7 +404,8 @@ void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
 // rather than a single register) and VLA results are not formatted.
 // ---------------------------------------------------------------------
 
-static void repl_print_result(VirtualMachine *vm, Type *ty, long long ival, double fval) {
+static void repl_print_result(VirtualMachine *vm, Type *ty, long long ival,
+                              double fval) {
     if (!ty || ty->kind == TY_VOID)
         return;
 
@@ -404,15 +443,15 @@ static void repl_cmd_type(VirtualMachine *vm, char *arg) {
     }
 
     CcExprSnapshot snap = cc_expr_snapshot(vm);
-    jmp_buf jb;
-    jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
-    vm->error_jmp_buf = &jb;
+    jmp_buf        jb;
+    jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
+    vm->error_jmp_buf            = &jb;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, "<repl:type>", arg);
         convert_pp_tokens(vm, tok);
         Token *rest;
-        Node *n = cc_parse_expr(vm, &rest, tok);
+        Node  *n = cc_parse_expr(vm, &rest, tok);
         add_type(vm, n);
         vm->error_jmp_buf = saved_jmp_buf;
         cc_expr_snapshot_discard(&snap);
@@ -437,13 +476,15 @@ static void repl_cmd_load(VirtualMachine *vm, char *arg) {
     }
     FILE *f = fopen(arg, "r");
     if (!f) {
-        fprintf(stderr, "error: could not open '%s': %s\n", arg, strerror(errno));
+        fprintf(stderr, "error: could not open '%s': %s\n", arg,
+                strerror(errno));
         return;
     }
 
-    LineSource src = { .next = repl_read_file_line, .ctx = f };
+    LineSource src = {.next = repl_read_file_line, .ctx = f};
     for (;;) {
-        char *unit = repl_read_unit(&src, /*interactive=*/false, /*allow_commands=*/false);
+        char *unit = repl_read_unit(&src, /*interactive=*/false,
+                                    /*allow_commands=*/false);
         if (!unit)
             break;
         repl_process_unit(vm, unit);
@@ -458,43 +499,43 @@ static void repl_cmd_load(VirtualMachine *vm, char *arg) {
 
 static void repl_process_unit(VirtualMachine *vm, const char *text) {
     CcExprSnapshot snap = cc_expr_snapshot(vm);
-    jmp_buf jb;
-    jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
-    vm->error_jmp_buf = &jb;
+    jmp_buf        jb;
+    jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
+    vm->error_jmp_buf            = &jb;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, "<repl>", (char *)text);
         convert_pp_tokens(vm, tok);
 
-        Node *expr_node = NULL;
-        ReplUnitKind kind = cc_parse_repl_unit(vm, tok, &expr_node);
+        Node        *expr_node = NULL;
+        ReplUnitKind kind      = cc_parse_repl_unit(vm, tok, &expr_node);
 
         switch (kind) {
-        case REPL_UNIT_EMPTY:
-            break;
+            case REPL_UNIT_EMPTY:
+                break;
 
-        case REPL_UNIT_DECL:
-            cc_repl_compile_new(vm, snap.globals_head);
-            break;
+            case REPL_UNIT_DECL:
+                cc_repl_compile_new(vm, snap.globals_head);
+                break;
 
-        case REPL_UNIT_EXPR: {
-            const char *name = __builtin_gensym("__repl_eval");
-            Obj *fn = __builtin_ast_function(name, expr_node->ty);
-            Node *ret = __builtin_ast_return(expr_node);
-            __builtin_ast_function_set_body(fn, ret);
-            cc_repl_compile_new(vm, snap.globals_head);
+            case REPL_UNIT_EXPR: {
+                const char *name = __builtin_gensym("__repl_eval");
+                Obj        *fn   = __builtin_ast_function(name, expr_node->ty);
+                Node       *ret  = __builtin_ast_return(expr_node);
+                __builtin_ast_function_set_body(fn, ret);
+                cc_repl_compile_new(vm, snap.globals_head);
 
-            long long ival = 0;
-            double fval = 0.0;
-            cc_expr_exec_wrapper(vm, fn, &ival, &fval);
-            repl_print_result(vm, expr_node->ty, ival, fval);
+                long long ival = 0;
+                double    fval = 0.0;
+                cc_expr_exec_wrapper(vm, fn, &ival, &fval);
+                repl_print_result(vm, expr_node->ty, ival, fval);
 
-            // One-shot wrapper: drop it from the persistent globals list so
-            // it is not recompiled by future units. Its bytecode/data stay
-            // in the segments -- known limitation, ticket #667.
-            vm->compiler.globals = snap.globals_head;
-            break;
-        }
+                // One-shot wrapper: drop it from the persistent globals list so
+                // it is not recompiled by future units. Its bytecode/data stay
+                // in the segments -- known limitation, ticket #667.
+                vm->compiler.globals = snap.globals_head;
+                break;
+            }
         }
 
         vm->error_jmp_buf = saved_jmp_buf;
@@ -517,7 +558,7 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
 // macro bodies.
 static void repl_init_stack(VirtualMachine *vm) {
     size_t reserved_stack = (size_t)vm->poolsize_max * sizeof(long long);
-    size_t initial_stack = (size_t)vm->poolsize * sizeof(long long);
+    size_t initial_stack  = (size_t)vm->poolsize * sizeof(long long);
     vm->sp = (long long *)((char *)vm->stack_seg + reserved_stack);
     vm->bp = vm->sp;
     vm->stack_base =
@@ -526,13 +567,15 @@ static void repl_init_stack(VirtualMachine *vm) {
     if (vm->flags & CCCC_CFI) {
         if (!vm->shadow_stack) {
             size_t stack_top_off = reserved_stack - initial_stack;
-            vm->shadow_stack = (long long *)cccc_vm_reserve(reserved_stack);
+            vm->shadow_stack     = (long long *)cccc_vm_reserve(reserved_stack);
             if (!vm->shadow_stack)
                 error("could not reserve shadow stack");
-            if (cccc_vm_commit(vm->shadow_stack, stack_top_off, initial_stack) != 0)
+            if (cccc_vm_commit(vm->shadow_stack, stack_top_off,
+                               initial_stack) != 0)
                 error("could not commit shadow stack");
         }
-        vm->shadow_sp = (long long *)((char *)vm->shadow_stack + reserved_stack);
+        vm->shadow_sp =
+            (long long *)((char *)vm->shadow_stack + reserved_stack);
     }
 
     vm->initial_sp = vm->sp;
@@ -560,22 +603,24 @@ void cc_run_repl(VirtualMachine *vm) {
     // same "once per program run" reasoning as cc_run()'s own call.
     cccc_reset_getopt_state();
 
-    printf("CCCC interactive REPL. Type :help for session commands, :quit to exit.\n");
+    printf("CCCC interactive REPL. Type :help for session commands, :quit to "
+           "exit.\n");
 
-    LineSource src = { .next = repl_read_stdin_line, .ctx = NULL };
-    bool interactive = CCCC_ISATTY(CCCC_FILENO(stdin));
+    LineSource src         = {.next = repl_read_stdin_line, .ctx = NULL};
+    bool       interactive = CCCC_ISATTY(CCCC_FILENO(stdin));
 
     for (;;) {
         char *unit = repl_read_unit(&src, interactive, /*allow_commands=*/true);
         if (!unit) {
-            if (interactive) printf("\n");
+            if (interactive)
+                printf("\n");
             break; // EOF
         }
 
         if (unit[0] == ':') {
-            char *cmd = unit + 1;
+            char  *cmd     = unit + 1;
             size_t cmd_len = strcspn(cmd, " \t");
-            char *arg = cmd + cmd_len;
+            char  *arg     = cmd + cmd_len;
 
             if ((cmd_len == 4 && strncmp(cmd, "quit", 4) == 0) ||
                 (cmd_len == 1 && cmd[0] == 'q')) {
@@ -597,8 +642,10 @@ void cc_run_repl(VirtualMachine *vm) {
 
         // Blank/whitespace-only submission: nothing to do.
         const char *p = unit;
-        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
-        if (*p) repl_process_unit(vm, unit);
+        while (*p == ' ' || *p == '\t' || *p == '\n')
+            p++;
+        if (*p)
+            repl_process_unit(vm, unit);
         free(unit);
     }
 }

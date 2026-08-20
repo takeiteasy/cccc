@@ -19,6 +19,6 @@ static int touch(int *restrict p) {
 
 int main(void) {
     int *p = malloc(sizeof(int));
-    *p = 5;
+    *p     = 5;
     return touch(p);
 }

@@ -11,7 +11,7 @@ int use_cycle(void) {
     b.a = 0;
     struct A894 a;
     a.val = 42;
-    a.b = 0;
+    a.b   = 0;
     return a.val;
 }
 

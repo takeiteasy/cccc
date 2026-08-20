@@ -10,7 +10,8 @@
 [[cccc::comptime]]
 void gen(void) {
     Obj *fn = MakeFunction("use_block", GetType("int"));
-    FunctionSetBody(fn, Quote("{ int (^b)(void) = ^{ return 42; }; return b(); }"));
+    FunctionSetBody(fn,
+                    Quote("{ int (^b)(void) = ^{ return 42; }; return b(); }"));
     PublishNode(fn);
 }
 gen();

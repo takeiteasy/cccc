@@ -9,13 +9,17 @@
 
 [[cccc::test(expect_compile_error = true)]]
 void test_bitfield_negative_width(void) {
-    struct S { int x : -1; };
+    struct S {
+        int x : -1;
+    };
     (void)(struct S){0};
 }
 
 [[cccc::test(expect_compile_error = true)]]
 void test_bitfield_too_wide(void) {
-    struct S { unsigned char x : 9; };
+    struct S {
+        unsigned char x : 9;
+    };
     (void)(struct S){0};
 }
 
@@ -52,21 +56,21 @@ void test_complex_comparison_order(void) {
 [[cccc::test(expect_compile_error = true)]]
 void test_const_assign(void) {
     const int x = 42;
-    x = 10;
+    x           = 10;
 }
 
 [[cccc::test(expect_compile_error = true)]]
 void test_const_pointer(void) {
-    int v = 10;
+    int        v = 10;
     const int *p = &v;
-    *p = 20;
+    *p           = 20;
 }
 
 [[cccc::test(expect_compile_error = true)]]
 void test_const_ptr(void) {
-    int x = 10, y = 20;
+    int        x = 10, y = 20;
     int *const p = &x;
-    p = &y;
+    p            = &y;
     (void)p;
 }
 
@@ -132,7 +136,9 @@ void test_parser_invalid_operands_error(void) {
 }
 
 // [from test_parser_no_such_member_error]
-struct PErr_Foo { int x; };
+struct PErr_Foo {
+    int x;
+};
 [[cccc::test(expect_compile_error = true, error = "no such member")]]
 void test_parser_no_such_member_error(void) {
     struct PErr_Foo f;
@@ -148,9 +154,10 @@ void test_parser_undefined_variable_error(void) {
 // --- C23 constexpr in function body ---
 
 // [from test_constexpr_nonconstant_init_error]
-[[cccc::test(expect_compile_error = true, error = "constexpr initializer is not a constant expression")]]
+[[cccc::test(expect_compile_error = true,
+             error = "constexpr initializer is not a constant expression")]]
 void test_constexpr_nonconstant_init_error(void) {
-    int x = 1;
+    int           x = 1;
     constexpr int n = x;
     (void)n;
 }
@@ -169,28 +176,28 @@ void test_c23_empty_params_error(void) {
 // [from test_c23_compound_literal_auto_error]
 [[cccc::test(expect_compile_error = true)]]
 void test_c23_compound_literal_auto_error(void) {
-    int *p = &(auto int){ 7 };
+    int *p = &(auto int){7};
     (void)p;
 }
 
 // [from test_c23_compound_literal_extern_error]
 [[cccc::test(expect_compile_error = true)]]
 void test_c23_compound_literal_extern_error(void) {
-    int *p = &(extern int){ 7 };
+    int *p = &(extern int){7};
     (void)p;
 }
 
 // [from test_c23_compound_literal_inline_error]
 [[cccc::test(expect_compile_error = true)]]
 void test_c23_compound_literal_inline_error(void) {
-    int *p = &(inline int){ 7 };
+    int *p = &(inline int){7};
     (void)p;
 }
 
 // [from test_c23_compound_literal_typedef_error]
 [[cccc::test(expect_compile_error = true)]]
 void test_c23_compound_literal_typedef_error(void) {
-    int *p = &(typedef int){ 7 };
+    int *p = &(typedef int){7};
     (void)p;
 }
 
@@ -215,30 +222,42 @@ void test_c23_incompatible_enum_redecl_error(void) {
 // [from test_c23_incompatible_struct_redecl_error]
 [[cccc::test(expect_compile_error = true)]]
 void test_c23_incompatible_struct_redecl_error(void) {
-    struct IncompBadStruct { int x; };
-    struct IncompBadStruct { long x; };
-    struct IncompBadStruct s; (void)s;
+    struct IncompBadStruct {
+        int x;
+    };
+    struct IncompBadStruct {
+        long x;
+    };
+    struct IncompBadStruct s;
+    (void)s;
 }
 
 // [from test_c23_incompatible_union_redecl_error]
 [[cccc::test(expect_compile_error = true)]]
 void test_c23_incompatible_union_redecl_error(void) {
-    union IncompBadUnion { int x; };
-    union IncompBadUnion { long x; };
-    union IncompBadUnion u; (void)u;
+    union IncompBadUnion {
+        int x;
+    };
+    union IncompBadUnion {
+        long x;
+    };
+    union IncompBadUnion u;
+    (void)u;
 }
 
 // --- constexpr error tests ---
 
 // [from test_constexpr_missing_init_error]
-[[cccc::test(expect_compile_error = true, error = "constexpr object requires an initializer")]]
+[[cccc::test(expect_compile_error = true,
+             error = "constexpr object requires an initializer")]]
 void test_constexpr_missing_init_error(void) {
     constexpr int ce_no_init;
     (void)ce_no_init;
 }
 
 // [from test_constexpr_restrict_error]
-[[cccc::test(expect_compile_error = true, error = "constexpr object has unsupported type or qualifiers")]]
+[[cccc::test(expect_compile_error = true,
+             error = "constexpr object has unsupported type or qualifiers")]]
 void test_constexpr_restrict_error(void) {
     int ce_target;
     constexpr int *restrict ce_p = &ce_target;
@@ -246,7 +265,8 @@ void test_constexpr_restrict_error(void) {
 }
 
 // [from test_constexpr_volatile_error]
-[[cccc::test(expect_compile_error = true, error = "constexpr object has unsupported type or qualifiers")]]
+[[cccc::test(expect_compile_error = true,
+             error = "constexpr object has unsupported type or qualifiers")]]
 void test_constexpr_volatile_error(void) {
     constexpr volatile int ce_vol_n = 1;
     (void)ce_vol_n;

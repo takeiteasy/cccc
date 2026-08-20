@@ -5,12 +5,13 @@
 // and it falls back to the original barrier scheme (reset to UNKNOWN),
 // which never warns. Losing precision here is fine; a false positive is not.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
     for (int i = 0; i < 3; i++) {
-        if (i == 1) goto skip;
+        if (i == 1)
+            goto skip;
         p = &x;
     skip:;
     }

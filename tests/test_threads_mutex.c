@@ -19,9 +19,11 @@ int main(void) {
         return 1;
 
     thrd_t t1, t2;
-    int n = 50;
-    if (thrd_create(&t1, increment, &n) != thrd_success) return 2;
-    if (thrd_create(&t2, increment, &n) != thrd_success) return 3;
+    int    n = 50;
+    if (thrd_create(&t1, increment, &n) != thrd_success)
+        return 2;
+    if (thrd_create(&t2, increment, &n) != thrd_success)
+        return 3;
 
     thrd_join(t1, 0);
     thrd_join(t2, 0);

@@ -16,10 +16,10 @@ typedef long ssize_t;
 #endif
 
 #ifndef NULL
-#define NULL ((void*)0)
+#define NULL ((void *)0)
 #endif
 
-#define STDIN_FILENO 0
+#define STDIN_FILENO  0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
@@ -163,54 +163,54 @@ extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
  */
 
 /* _SC_* -- sysconf() names */
-#define _SC_ARG_MAX             1
-#define _SC_CHILD_MAX           2
-#define _SC_CLK_TCK             3
-#define _SC_NGROUPS_MAX         4
-#define _SC_OPEN_MAX            5
-#define _SC_STREAM_MAX          6
-#define _SC_TZNAME_MAX          7
-#define _SC_JOB_CONTROL         8
-#define _SC_SAVED_IDS           9
-#define _SC_VERSION             10
-#define _SC_PAGESIZE            11
-#define _SC_PAGE_SIZE           _SC_PAGESIZE
-#define _SC_NPROCESSORS_CONF    12
-#define _SC_NPROCESSORS_ONLN    13
-#define _SC_PHYS_PAGES          14
-#define _SC_LINE_MAX            15
-#define _SC_RE_DUP_MAX          16
-#define _SC_2_VERSION           17
-#define _SC_XOPEN_VERSION       18
-#define _SC_HOST_NAME_MAX       19
-#define _SC_LOGIN_NAME_MAX      20
-#define _SC_TTY_NAME_MAX        21
-#define _SC_SYMLOOP_MAX         22
-#define _SC_ATEXIT_MAX          23
-#define _SC_IOV_MAX             24
-#define _SC_GETPW_R_SIZE_MAX    25
-#define _SC_GETGR_R_SIZE_MAX    26
-#define _SC_MONOTONIC_CLOCK     27
+#define _SC_ARG_MAX          1
+#define _SC_CHILD_MAX        2
+#define _SC_CLK_TCK          3
+#define _SC_NGROUPS_MAX      4
+#define _SC_OPEN_MAX         5
+#define _SC_STREAM_MAX       6
+#define _SC_TZNAME_MAX       7
+#define _SC_JOB_CONTROL      8
+#define _SC_SAVED_IDS        9
+#define _SC_VERSION          10
+#define _SC_PAGESIZE         11
+#define _SC_PAGE_SIZE        _SC_PAGESIZE
+#define _SC_NPROCESSORS_CONF 12
+#define _SC_NPROCESSORS_ONLN 13
+#define _SC_PHYS_PAGES       14
+#define _SC_LINE_MAX         15
+#define _SC_RE_DUP_MAX       16
+#define _SC_2_VERSION        17
+#define _SC_XOPEN_VERSION    18
+#define _SC_HOST_NAME_MAX    19
+#define _SC_LOGIN_NAME_MAX   20
+#define _SC_TTY_NAME_MAX     21
+#define _SC_SYMLOOP_MAX      22
+#define _SC_ATEXIT_MAX       23
+#define _SC_IOV_MAX          24
+#define _SC_GETPW_R_SIZE_MAX 25
+#define _SC_GETGR_R_SIZE_MAX 26
+#define _SC_MONOTONIC_CLOCK  27
 
 /* _PC_* -- pathconf()/fpathconf() names */
-#define _PC_LINK_MAX            1
-#define _PC_MAX_CANON           2
-#define _PC_MAX_INPUT           3
-#define _PC_NAME_MAX            4
-#define _PC_PATH_MAX            5
-#define _PC_PIPE_BUF            6
-#define _PC_CHOWN_RESTRICTED    7
-#define _PC_NO_TRUNC            8
-#define _PC_VDISABLE            9
+#define _PC_LINK_MAX         1
+#define _PC_MAX_CANON        2
+#define _PC_MAX_INPUT        3
+#define _PC_NAME_MAX         4
+#define _PC_PATH_MAX         5
+#define _PC_PIPE_BUF         6
+#define _PC_CHOWN_RESTRICTED 7
+#define _PC_NO_TRUNC         8
+#define _PC_VDISABLE         9
 
 /* _CS_* -- confstr() names */
-#define _CS_PATH                1
+#define _CS_PATH 1
 
 /* POSIX/X\/Open version this CCCC targets (VM-model constants, not derived
  * from the host). Kept in sync with the feature-test macros predefined by
  * the compiler (see init_macros in src/preprocess.c). */
-#define _POSIX_VERSION   200809L
-#define _POSIX2_VERSION  200809L
-#define _XOPEN_VERSION   700
+#define _POSIX_VERSION  200809L
+#define _POSIX2_VERSION 200809L
+#define _XOPEN_VERSION  700
 
 #endif /* __UNISTD_H */

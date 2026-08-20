@@ -5,8 +5,8 @@
 
 #include <stdint.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
 
-#define PRId8 "d"
-#define PRIi8 "i"
+#define PRId8  "d"
+#define PRIi8  "i"
 #define PRId16 "d"
 #define PRIi16 "i"
 #define PRId32 "d"

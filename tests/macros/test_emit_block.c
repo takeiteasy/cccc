@@ -1,4 +1,5 @@
-// Test #pragma cccc emit captures raw preprocessor directives for serialized output.
+// Test #pragma cccc emit captures raw preprocessor directives for serialized
+// output.
 
 #pragma cccc comptime begin
 #pragma cccc emit begin

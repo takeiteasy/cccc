@@ -11,7 +11,7 @@
 int main(void) {
     __block int x;
     void (^b)(void) = ^{
-        x = 42;
+      x = 42;
     };
     b();
 

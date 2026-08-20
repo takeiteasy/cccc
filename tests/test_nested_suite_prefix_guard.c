@@ -8,13 +8,17 @@
 #pragma cccc suite begin "outer"
 
 [[cccc::test]]
-void test_prefix_guard_outer(void) { AssertEq(1, 1); }
+void test_prefix_guard_outer(void) {
+    AssertEq(1, 1);
+}
 
 #pragma cccc suite end
 
 #pragma cccc suite begin "outerspace"
 
 [[cccc::test]]
-void test_prefix_guard_outerspace(void) { AssertEq(2, 2); }
+void test_prefix_guard_outerspace(void) {
+    AssertEq(2, 2);
+}
 
 #pragma cccc suite end

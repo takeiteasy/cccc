@@ -10,7 +10,7 @@ int main(void) {
     int *p = malloc(4 * sizeof(int));
     if (!p)
         return 255;
-    int *e = p + 4;   // legal to form -- must not trap under -3 either
+    int *e = p + 4; // legal to form -- must not trap under -3 either
     long d = e - p;
     free(p);
     return d == 4 ? 42 : 1;

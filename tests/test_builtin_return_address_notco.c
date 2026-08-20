@@ -30,13 +30,25 @@
 
 // Two-depth helpers (inner called from outer, outer called from test fn) ──
 
-static void *inner_ra0(void) { return __builtin_return_address(0); }
-static void *inner_ra1(void) { return __builtin_return_address(1); }
-static void *inner_ra2(void) { return __builtin_return_address(2); }
+static void *inner_ra0(void) {
+    return __builtin_return_address(0);
+}
+static void *inner_ra1(void) {
+    return __builtin_return_address(1);
+}
+static void *inner_ra2(void) {
+    return __builtin_return_address(2);
+}
 
-static void *outer_calls_inner_ra0(void) { return inner_ra0(); }
-static void *outer_calls_inner_ra1(void) { return inner_ra1(); }
-static void *outer_calls_inner_ra2(void) { return inner_ra2(); }
+static void *outer_calls_inner_ra0(void) {
+    return inner_ra0();
+}
+static void *outer_calls_inner_ra1(void) {
+    return inner_ra1();
+}
+static void *outer_calls_inner_ra2(void) {
+    return inner_ra2();
+}
 
 // Three-level chain for testing level-1 __builtin_pc_function_name lookup:
 //   test_fn → outer_calls_name_inner → name_inner_ra1
@@ -47,7 +59,9 @@ static const char *name_inner_ra1(void) {
     void *ra = __builtin_return_address(1);
     return __builtin_pc_function_name(ra);
 }
-static const char *outer_calls_name_inner(void) { return name_inner_ra1(); }
+static const char *outer_calls_name_inner(void) {
+    return name_inner_ra1();
+}
 
 // ─── Level 1 from two-deep chain is nonzero ──────────────────────────────
 // test_fn → outer_calls_inner_ra1 → inner_ra1

@@ -10,11 +10,11 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 int main(void) {
-    _Atomic int *p = malloc(4 * sizeof(int));   // valid indices 0..3
+    _Atomic int *p = malloc(4 * sizeof(int)); // valid indices 0..3
     if (!p)
         return 255;
-    _Atomic int *q = p + 4;   // exactly one past the end -- legal to form
-    atomic_store(q, 1);       // dereferencing it -- must trap
+    _Atomic int *q = p + 4; // exactly one past the end -- legal to form
+    atomic_store(q, 1);     // dereferencing it -- must trap
     free((void *)p);
     return 42;
 }

@@ -7,11 +7,11 @@
 #include <stdlib.h>
 
 int main(void) {
-    char *b = malloc(8);
-    *b = 'x';            // store char: stamps effective type = char
-    int *p = (int *)b;   // same base address, reinterpreted
-    *p = 42;             // store int: re-stamps effective type = int
-    int result = *p;     // load int: matches the current effective type
+    char *b    = malloc(8);
+    *b         = 'x';      // store char: stamps effective type = char
+    int *p     = (int *)b; // same base address, reinterpreted
+    *p         = 42;       // store int: re-stamps effective type = int
+    int result = *p;       // load int: matches the current effective type
     free(b);
     return result;
 }

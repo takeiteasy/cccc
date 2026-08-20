@@ -2,4 +2,6 @@
 // Folded into the bytecode executable by the build system (#563).
 #include "answer.h"
 
-int answer(void) { return 42; }
+int answer(void) {
+    return 42;
+}

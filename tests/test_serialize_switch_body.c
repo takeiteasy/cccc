@@ -1,6 +1,8 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: case 1:[\s\S]*?\+ 1;[\s\S]*?case 2:[\s\S]*?\+ 100;[\s\S]*?break;[\s\S]*?case 3 \.\.\. 5:[\s\S]*?\+ 1000;[\s\S]*?break;[\s\S]*?default:[\s\S]*?\+ 10000;
-// CCCC_REJECT_STDOUT: unsupported expr kind
+// CCCC_EXPECT_STDOUT: case 1:[\s\S]*?\+ 1;[\s\S]*?case 2:[\s\S]*?\+
+// 100;[\s\S]*?break;[\s\S]*?case 3 \.\.\. 5:[\s\S]*?\+
+// 1000;[\s\S]*?break;[\s\S]*?default:[\s\S]*?\+ 10000; CCCC_REJECT_STDOUT:
+// unsupported expr kind
 //
 // #1005: the ND_SWITCH serializer arm used to reconstruct a switch from the
 // case_next chain (newest-first, since parse.c prepends onto it) instead of

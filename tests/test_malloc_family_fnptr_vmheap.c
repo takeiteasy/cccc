@@ -24,44 +24,52 @@ static void *worker(void *arg) {
 }
 
 int main(void) {
-    void *(*mp)(size_t) = malloc;
-    void (*fp)(void *) = free;
+    void *(*mp)(size_t)         = malloc;
+    void (*fp)(void *)          = free;
     void *(*cp)(size_t, size_t) = calloc;
     void *(*rp)(void *, size_t) = realloc;
 
     // indirect alloc, direct free
     int *a = mp(sizeof(int));
-    if (!a) return 1;
+    if (!a)
+        return 1;
     *a = 1;
     free(a);
 
     // direct alloc, indirect free -- the crash reported in #865
     int *b = malloc(sizeof(int));
-    if (!b) return 2;
+    if (!b)
+        return 2;
     *b = 2;
     fp(b);
 
     // both indirect
     int *c = mp(sizeof(int));
-    if (!c) return 3;
+    if (!c)
+        return 3;
     *c = 3;
     fp(c);
 
     // indirect calloc must still zero-fill
     int *d = cp(4, sizeof(int));
-    if (!d) return 4;
+    if (!d)
+        return 4;
     for (int i = 0; i < 4; i++)
-        if (d[i] != 0) return 5;
+        if (d[i] != 0)
+            return 5;
     fp(d);
 
     // indirect realloc growing a directly-malloc'd block preserves data
     int *e = malloc(sizeof(int) * 2);
-    if (!e) return 6;
+    if (!e)
+        return 6;
     e[0] = 7;
     e[1] = 8;
-    e = rp(e, sizeof(int) * 4);
-    if (!e) return 7;
-    if (e[0] != 7 || e[1] != 8) return 8;
+    e    = rp(e, sizeof(int) * 4);
+    if (!e)
+        return 7;
+    if (e[0] != 7 || e[1] != 8)
+        return 8;
     fp(e);
 
     // The idiom that motivated #865: passing free itself (not a wrapper) as
@@ -73,7 +81,7 @@ int main(void) {
     if (pthread_key_create(&g_key, free) != 0)
         return 9;
     pthread_t t;
-    int val = 55;
+    int       val = 55;
     if (pthread_create(&t, NULL, worker, &val) != 0)
         return 10;
     if (pthread_join(t, NULL) != 0)

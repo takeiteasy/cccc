@@ -16,18 +16,20 @@ int main(void) {
     unlink(path);
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return 1;
+    if (fd < 0)
+        return 1;
 
     struct sockaddr_un addr;
     addr.sun_family = AF_UNIX;
-    int i = 0;
+    int i           = 0;
     while (path[i] && i < (int)sizeof(addr.sun_path) - 1) {
         addr.sun_path[i] = path[i];
         i++;
     }
     addr.sun_path[i] = 0;
 
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) return 2;
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
+        return 2;
 
     close(fd);
     unlink(path);

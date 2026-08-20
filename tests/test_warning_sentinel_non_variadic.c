@@ -5,7 +5,7 @@
 // warning fires and the per-call-site "not enough variable arguments" guard
 // must not also fire (#696).
 void foo(int a) __attribute__((sentinel));
-void foo(int a) { }
+void foo(int a) {}
 int main(void) {
     foo(1);
     return 42;

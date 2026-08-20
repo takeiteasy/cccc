@@ -20,15 +20,15 @@
 // pending-flag arrays it sizes.
 
 typedef struct {
-    int in_use;
+    int       in_use;
     long long guest_fn;    // guest sigev_notify_function, as a raw byte
-                            // offset (same encoding wrap_sigaction's
-                            // handler_fn uses; converted at delivery time
-                            // via cc_byte_offset_to_pc())
+                           // offset (same encoding wrap_sigaction's
+                           // handler_fn uses; converted at delivery time
+                           // via cc_byte_offset_to_pc())
     long long guest_sival; // original guest union sigval, passed through
 } SigevCookie;
 
-static SigevCookie g_sigev_cookies[CCCC_SIGEV_MAX];
+static SigevCookie     g_sigev_cookies[CCCC_SIGEV_MAX];
 static pthread_mutex_t g_sigev_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Mirrors _cccc_pending/_cccc_any_pending in src/stdlib/signal.c; polled by
@@ -41,10 +41,10 @@ static int sigev_cookie_alloc(long long guest_fn, long long guest_sival) {
     int idx = -1;
     for (int i = 0; i < CCCC_SIGEV_MAX; i++) {
         if (!g_sigev_cookies[i].in_use) {
-            g_sigev_cookies[i].in_use = 1;
-            g_sigev_cookies[i].guest_fn = guest_fn;
+            g_sigev_cookies[i].in_use      = 1;
+            g_sigev_cookies[i].guest_fn    = guest_fn;
             g_sigev_cookies[i].guest_sival = guest_sival;
-            idx = i;
+            idx                            = i;
             break;
         }
     }
@@ -57,7 +57,7 @@ void cccc_sigev_cookie_free(int idx) {
         return;
     pthread_mutex_lock(&g_sigev_mutex);
     g_sigev_cookies[idx].in_use = 0;
-    _cccc_sigev_pending[idx] = 0;
+    _cccc_sigev_pending[idx]    = 0;
     pthread_mutex_unlock(&g_sigev_mutex);
 }
 
@@ -75,10 +75,11 @@ void cccc_sigev_cookie_free(int idx) {
 // this address and the guest handler dereferencing it; only a fresh
 // registration reusing the same idx before that dereference would corrupt
 // it, a narrow race bounded by CCCC_SIGEV_MAX concurrent registrations.
-int cccc_sigev_cookie_guest_fn(int idx, long long *out_fn, long long *out_sival_addr) {
+int cccc_sigev_cookie_guest_fn(int idx, long long *out_fn,
+                               long long *out_sival_addr) {
     if (idx < 0 || idx >= CCCC_SIGEV_MAX || !g_sigev_cookies[idx].in_use)
         return 0;
-    *out_fn = g_sigev_cookies[idx].guest_fn;
+    *out_fn         = g_sigev_cookies[idx].guest_fn;
     *out_sival_addr = (long long)(intptr_t)&g_sigev_cookies[idx].guest_sival;
     return 1;
 }
@@ -88,7 +89,7 @@ static void cccc_sigev_thread_trampoline(union sigval sv) {
     if (idx < 0 || idx >= CCCC_SIGEV_MAX || !g_sigev_cookies[idx].in_use)
         return;
     _cccc_sigev_pending[idx] = 1;
-    _cccc_sigev_any_pending = 1;
+    _cccc_sigev_any_pending  = 1;
 }
 
 // aio.h (#804) -- struct aiocb is declared byte-exact per platform in
@@ -99,8 +100,8 @@ static void cccc_sigev_thread_trampoline(union sigval sv) {
 // aio_read()/aio_write()/aio_error()/aio_return()/aio_cancel()/aio_fsync()
 // only enqueue or poll state and return promptly, so they keep it,
 // matching opendir()'s category above. SIGEV_THREAD (see signal.h's
-// struct sigevent comment) is honored via cccc_posix_sigevent_prepare() above, which
-// swaps in cccc_sigev_thread_trampoline() as the real host notification
+// struct sigevent comment) is honored via cccc_posix_sigevent_prepare() above,
+// which swaps in cccc_sigev_thread_trampoline() as the real host notification
 // function; SIGEV_NONE/SIGEV_SIGNAL pass through unchanged.
 int cccc_posix_sigevent_prepare(struct sigevent *sev) {
     if (!sev)
@@ -119,9 +120,9 @@ int cccc_posix_sigevent_prepare(struct sigevent *sev) {
         errno = EAGAIN;
         return 0;
     }
-    sev->sigev_notify_function = cccc_sigev_thread_trampoline;
+    sev->sigev_notify_function   = cccc_sigev_thread_trampoline;
     sev->sigev_notify_attributes = NULL;
-    sev->sigev_value.sival_int = idx;
+    sev->sigev_value.sival_int   = idx;
     return 1;
 }
 
@@ -158,11 +159,12 @@ static long long wrap_aio_return(long long aiocbp) {
 static long long wrap_aio_cancel(long long fd, long long aiocbp) {
     struct aiocb *cb = (struct aiocb *)(intptr_t)aiocbp;
     // A single canceled request's SIGEV_THREAD cookie (its index is stashed
-    // in aio_sigevent.sigev_value by cccc_posix_sigevent_prepare()) is freed here since
-    // no notification will ever arrive for it. aiocbp == NULL cancels every
-    // outstanding request on fd at once; those cookies are not individually
-    // trackable from here and are freed lazily -- see cccc_sigev_cookie_free
-    // callers -- rather than leaked forever (bounded by CCCC_SIGEV_MAX).
+    // in aio_sigevent.sigev_value by cccc_posix_sigevent_prepare()) is freed
+    // here since no notification will ever arrive for it. aiocbp == NULL
+    // cancels every outstanding request on fd at once; those cookies are not
+    // individually trackable from here and are freed lazily -- see
+    // cccc_sigev_cookie_free callers -- rather than leaked forever (bounded by
+    // CCCC_SIGEV_MAX).
     if (cb && cb->aio_sigevent.sigev_notify == SIGEV_THREAD)
         cccc_sigev_cookie_free((int)cb->aio_sigevent.sigev_value.sival_int);
     return (long long)aio_cancel((int)fd, cb);
@@ -179,9 +181,11 @@ static long long wrap_aio_fsync(long long op, long long aiocbp) {
     return (long long)aio_fsync((int)op, cb);
 }
 
-static long long wrap_aio_suspend(long long aiocblist, long long nent, long long timeoutp) {
-    VirtualMachine *vm = cccc_posix_current_vm();
-    const struct aiocb *const *list = (const struct aiocb *const *)(intptr_t)aiocblist;
+static long long wrap_aio_suspend(long long aiocblist, long long nent,
+                                  long long timeoutp) {
+    VirtualMachine            *vm = cccc_posix_current_vm();
+    const struct aiocb *const *list =
+        (const struct aiocb *const *)(intptr_t)aiocblist;
     const struct timespec *tp = (const struct timespec *)(intptr_t)timeoutp;
     if (!vm || !vm->gil_initialized)
         return (long long)aio_suspend(list, (int)nent, tp);
@@ -192,7 +196,8 @@ static long long wrap_aio_suspend(long long aiocblist, long long nent, long long
     return (long long)r;
 }
 
-static long long wrap_lio_listio(long long mode, long long aiocblist, long long nent, long long sigp) {
+static long long wrap_lio_listio(long long mode, long long aiocblist,
+                                 long long nent, long long sigp) {
     struct sigevent *sev = (struct sigevent *)(intptr_t)sigp;
     if (!cccc_posix_sigevent_prepare(sev))
         return -1;
@@ -218,16 +223,18 @@ static long long wrap_lio_listio(long long mode, long long aiocblist, long long 
 
 void register_posix_aio_functions(VirtualMachine *vm) {
     // aio.h (#804)
-    cc_register_cfunc(vm, "aio_read",    (void*)wrap_aio_read,    1, 0);
-    cc_register_cfunc(vm, "aio_write",   (void*)wrap_aio_write,   1, 0);
-    cc_register_cfunc(vm, "aio_error",   (void*)wrap_aio_error,   1, 0);
-    cc_register_cfunc(vm, "aio_return",  (void*)wrap_aio_return,  1, 0);
-    cc_register_cfunc(vm, "aio_cancel",  (void*)wrap_aio_cancel,  2, 0);
-    cc_register_cfunc(vm, "aio_fsync",   (void*)wrap_aio_fsync,   2, 0);
-    cc_register_cfunc(vm, "aio_suspend", (void*)wrap_aio_suspend, 3, 0);
-    cc_register_cfunc(vm, "lio_listio",  (void*)wrap_lio_listio,  4, 0);
+    cc_register_cfunc(vm, "aio_read", (void *)wrap_aio_read, 1, 0);
+    cc_register_cfunc(vm, "aio_write", (void *)wrap_aio_write, 1, 0);
+    cc_register_cfunc(vm, "aio_error", (void *)wrap_aio_error, 1, 0);
+    cc_register_cfunc(vm, "aio_return", (void *)wrap_aio_return, 1, 0);
+    cc_register_cfunc(vm, "aio_cancel", (void *)wrap_aio_cancel, 2, 0);
+    cc_register_cfunc(vm, "aio_fsync", (void *)wrap_aio_fsync, 2, 0);
+    cc_register_cfunc(vm, "aio_suspend", (void *)wrap_aio_suspend, 3, 0);
+    cc_register_cfunc(vm, "lio_listio", (void *)wrap_lio_listio, 4, 0);
 }
 
 #else
-void register_posix_aio_functions(VirtualMachine *vm) { (void)vm; }
+void register_posix_aio_functions(VirtualMachine *vm) {
+    (void)vm;
+}
 #endif

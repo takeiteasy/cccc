@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --build
 // Tests that #include [[cccc::build]] includes the file in build mode.
-#include [[cccc::build]] "fixtures/build_only.h"
+#include[[cccc::build]] "fixtures/build_only.h"
 
 [[cccc::build]]
 int build_main(void) {

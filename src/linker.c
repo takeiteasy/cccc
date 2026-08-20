@@ -58,7 +58,7 @@ Token *cc_preprocess(VirtualMachine *vm, const char *path) {
     // }
 
     // Tokenize and parse.
-    Token *tok2 = must_tokenize_file(vm, (char*)path);
+    Token *tok2 = must_tokenize_file(vm, (char *)path);
     if (!vm->compiler.primary_file && tok2)
         vm->compiler.primary_file = tok2->file;
     tok = append_tokens(tok, tok2);
@@ -74,9 +74,9 @@ Obj *cc_parse(VirtualMachine *vm, Token *tok) {
 }
 
 void cc_print_tokens(Token *tok) {
-    FILE *out = stdout;
+    FILE *out  = stdout;
 
-    int line = 1;
+    int   line = 1;
     for (; tok->kind != TK_EOF; tok = tok->next) {
         if (line > 1 && tok->at_bol)
             fprintf(out, "\n");
@@ -96,7 +96,7 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
 
     // Store progs for later offset propagation
     vm->compiler.link_prog_count = count;
-    vm->compiler.link_progs = malloc(sizeof(Obj*) * count);
+    vm->compiler.link_progs      = malloc(sizeof(Obj *) * count);
     for (int i = 0; i < count; i++) {
         vm->compiler.link_progs[i] = progs[i];
     }
@@ -118,20 +118,21 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
             if (obj->is_static)
                 continue;
 
-            Obj *existing = hashmap_get(&symbol_map, obj->name);
+            Obj *existing   = hashmap_get(&symbol_map, obj->name);
 
             bool obj_is_def = obj->is_definition ||
-                             (obj->is_function && obj->body) ||
-                             (!obj->is_function && obj->init_data);
+                              (obj->is_function && obj->body) ||
+                              (!obj->is_function && obj->init_data);
 
             if (!existing) {
                 // New symbol, add it
                 hashmap_put(&symbol_map, obj->name, obj);
             } else {
                 // Symbol already exists - handle conflicts
-                bool existing_is_def = existing->is_definition ||
-                                      (existing->is_function && existing->body) ||
-                                      (!existing->is_function && existing->init_data);
+                bool existing_is_def =
+                    existing->is_definition ||
+                    (existing->is_function && existing->body) ||
+                    (!existing->is_function && existing->init_data);
 
                 if (obj_is_def && existing_is_def) {
                     // Both are definitions - error
@@ -139,17 +140,19 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 } else if (obj_is_def) {
                     // New one is definition, replace declaration
                     hashmap_put(&symbol_map, obj->name, obj);
-                    // Copy definition's properties to the declaration for AST node references
+                    // Copy definition's properties to the declaration for AST
+                    // node references
                     existing->is_definition = obj->is_definition;
-                    existing->init_data = obj->init_data;
-                    existing->rel = obj->rel;
-                    existing->ty = obj->ty;
+                    existing->init_data     = obj->init_data;
+                    existing->rel           = obj->rel;
+                    existing->ty            = obj->ty;
                 } else if (existing_is_def) {
-                    // Existing is definition, copy its properties to this declaration
+                    // Existing is definition, copy its properties to this
+                    // declaration
                     obj->is_definition = existing->is_definition;
-                    obj->init_data = existing->init_data;
-                    obj->rel = existing->rel;
-                    obj->ty = existing->ty;
+                    obj->init_data     = existing->init_data;
+                    obj->rel           = existing->rel;
+                    obj->ty            = existing->ty;
                 }
                 // Otherwise both are declarations, keep first one
             }
@@ -158,23 +161,26 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
 
     // Second pass: build the merged linked list and propagate definition info
     Obj *merged = NULL;
-    Obj *tail = NULL;
+    Obj *tail   = NULL;
     for (int i = 0; i < count; i++) {
         for (Obj *obj = progs[i]; obj;) {
             // Save next pointer before potentially modifying obj
             Obj *next_obj = obj->next;
 
-            Obj *canonical = obj->is_static ? obj : hashmap_get(&symbol_map, obj->name);
+            Obj *canonical =
+                obj->is_static ? obj : hashmap_get(&symbol_map, obj->name);
 
-            // If this is not the canonical version, update it to reference the canonical one
+            // If this is not the canonical version, update it to reference the
+            // canonical one
             if (canonical && canonical != obj) {
                 // This is a declaration - copy properties from the definition
-                // Note: offset will be set during codegen for the canonical object
-                // For now, we mark this object to point to the canonical one
+                // Note: offset will be set during codegen for the canonical
+                // object For now, we mark this object to point to the canonical
+                // one
                 obj->is_definition = canonical->is_definition;
-                obj->init_data = canonical->init_data;
-                obj->rel = canonical->rel;
-                obj->ty = canonical->ty;
+                obj->init_data     = canonical->init_data;
+                obj->rel           = canonical->rel;
+                obj->ty            = canonical->ty;
 
                 // #957: this non-canonical Obj is dropped from the merged
                 // list below and never reaches gen()'s data-segment
@@ -189,20 +195,28 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 // (CALL patched by call_patches), not by baked-in offset,
                 // so they need no such propagation.
                 if (!obj->is_function) {
-                    if (vm->compiler.global_aliases_count == vm->compiler.global_aliases_cap) {
+                    if (vm->compiler.global_aliases_count ==
+                        vm->compiler.global_aliases_cap) {
                         vm->compiler.global_aliases_cap =
-                            vm->compiler.global_aliases_cap ? vm->compiler.global_aliases_cap * 2 : 8;
-                        vm->compiler.global_aliases = realloc(
-                            vm->compiler.global_aliases,
-                            sizeof(*vm->compiler.global_aliases) * vm->compiler.global_aliases_cap);
+                            vm->compiler.global_aliases_cap
+                                ? vm->compiler.global_aliases_cap * 2
+                                : 8;
+                        vm->compiler.global_aliases =
+                            realloc(vm->compiler.global_aliases,
+                                    sizeof(*vm->compiler.global_aliases) *
+                                        vm->compiler.global_aliases_cap);
                     }
-                    vm->compiler.global_aliases[vm->compiler.global_aliases_count].alias = obj;
-                    vm->compiler.global_aliases[vm->compiler.global_aliases_count].canonical = canonical;
+                    vm->compiler
+                        .global_aliases[vm->compiler.global_aliases_count]
+                        .alias = obj;
+                    vm->compiler
+                        .global_aliases[vm->compiler.global_aliases_count]
+                        .canonical = canonical;
                     vm->compiler.global_aliases_count++;
 
-                    canonical->is_used |= obj->is_used;
+                    canonical->is_used         |= obj->is_used;
                     canonical->is_maybe_unused |= obj->is_maybe_unused;
-                    canonical->is_deprecated |= obj->is_deprecated;
+                    canonical->is_deprecated   |= obj->is_deprecated;
                 }
             }
 
@@ -213,14 +227,14 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
 
                 if (!merged) {
                     merged = obj;
-                    tail = obj;
+                    tail   = obj;
                 } else {
                     tail->next = obj;
-                    tail = obj;
+                    tail       = obj;
                 }
             }
 
-            obj = next_obj;  // Move to next using saved pointer
+            obj = next_obj; // Move to next using saved pointer
         }
     }
 

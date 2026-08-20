@@ -20,13 +20,14 @@
 // the pointer -- see #1087's audit) before making a normal,
 // compiler-generated call to the real hsearch().
 static _Thread_local long long g_search_compar_value;
-static _Thread_local int g_search_faulted;
+static _Thread_local int       g_search_faulted;
 
 static int search_compar_trampoline(const void *a, const void *b) {
-    VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[2] = { (long long)(intptr_t)a, (long long)(intptr_t)b };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_search_compar_value, args, 2, &result) != 0) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long       args[2] = {(long long)(intptr_t)a, (long long)(intptr_t)b};
+    long long       result  = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_search_compar_value, args, 2,
+                                        &result) != 0) {
         g_search_faulted = 1;
         return 0;
     }
@@ -39,124 +40,135 @@ static long long wrap_hsearch(long long entry_ptr, long long action) {
     // key/data scalar slots) -- confirmed empirically, since a 3-scalar-arg
     // registration silently shifted action into the data slot.
     ENTRY *guest_entry = (ENTRY *)(void *)entry_ptr;
-    ENTRY item;
-    item.key = guest_entry->key;
+    ENTRY  item;
+    item.key  = guest_entry->key;
     item.data = guest_entry->data;
-    ENTRY *r = hsearch(item, (ACTION)action);
+    ENTRY *r  = hsearch(item, (ACTION)action);
     return (long long)(intptr_t)r;
 }
 
 static long long wrap_lfind(long long key, long long base, long long nmemb,
                             long long size, long long compar) {
-    long long saved = g_search_compar_value;
-    int saved_faulted = g_search_faulted;
-    g_search_compar_value = compar;
-    g_search_faulted = 0;
+    long long saved         = g_search_compar_value;
+    int       saved_faulted = g_search_faulted;
+    g_search_compar_value   = compar;
+    g_search_faulted        = 0;
     void *r = lfind((const void *)key, (const void *)base, (size_t *)nmemb,
-                     (size_t)size, compar ? search_compar_trampoline : NULL);
-    int faulted = g_search_faulted;
+                    (size_t)size, compar ? search_compar_trampoline : NULL);
+    int   faulted         = g_search_faulted;
     g_search_compar_value = saved;
-    g_search_faulted = saved_faulted;
-    if (faulted) errno = EFAULT;
+    g_search_faulted      = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)r;
 }
 
 static long long wrap_lsearch(long long key, long long base, long long nmemb,
-                               long long size, long long compar) {
-    long long saved = g_search_compar_value;
-    int saved_faulted = g_search_faulted;
-    g_search_compar_value = compar;
-    g_search_faulted = 0;
+                              long long size, long long compar) {
+    long long saved         = g_search_compar_value;
+    int       saved_faulted = g_search_faulted;
+    g_search_compar_value   = compar;
+    g_search_faulted        = 0;
     void *r = lsearch((const void *)key, (void *)base, (size_t *)nmemb,
-                       (size_t)size, compar ? search_compar_trampoline : NULL);
-    int faulted = g_search_faulted;
+                      (size_t)size, compar ? search_compar_trampoline : NULL);
+    int   faulted         = g_search_faulted;
     g_search_compar_value = saved;
-    g_search_faulted = saved_faulted;
-    if (faulted) errno = EFAULT;
+    g_search_faulted      = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)r;
 }
 
-static long long wrap_tsearch(long long key, long long rootp, long long compar) {
-    long long saved = g_search_compar_value;
-    int saved_faulted = g_search_faulted;
-    g_search_compar_value = compar;
-    g_search_faulted = 0;
-    void *r = tsearch((const void *)key, (void **)rootp,
-                       compar ? search_compar_trampoline : NULL);
-    int faulted = g_search_faulted;
-    g_search_compar_value = saved;
-    g_search_faulted = saved_faulted;
-    if (faulted) errno = EFAULT;
+static long long wrap_tsearch(long long key, long long rootp,
+                              long long compar) {
+    long long saved         = g_search_compar_value;
+    int       saved_faulted = g_search_faulted;
+    g_search_compar_value   = compar;
+    g_search_faulted        = 0;
+    void *r                 = tsearch((const void *)key, (void **)rootp,
+                                      compar ? search_compar_trampoline : NULL);
+    int   faulted           = g_search_faulted;
+    g_search_compar_value   = saved;
+    g_search_faulted        = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)r;
 }
 
 static long long wrap_tfind(long long key, long long rootp, long long compar) {
-    long long saved = g_search_compar_value;
-    int saved_faulted = g_search_faulted;
-    g_search_compar_value = compar;
-    g_search_faulted = 0;
-    void *r = tfind((const void *)key, (void *const *)rootp,
-                     compar ? search_compar_trampoline : NULL);
-    int faulted = g_search_faulted;
-    g_search_compar_value = saved;
-    g_search_faulted = saved_faulted;
-    if (faulted) errno = EFAULT;
+    long long saved         = g_search_compar_value;
+    int       saved_faulted = g_search_faulted;
+    g_search_compar_value   = compar;
+    g_search_faulted        = 0;
+    void *r                 = tfind((const void *)key, (void *const *)rootp,
+                                    compar ? search_compar_trampoline : NULL);
+    int   faulted           = g_search_faulted;
+    g_search_compar_value   = saved;
+    g_search_faulted        = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)r;
 }
 
-static long long wrap_tdelete(long long key, long long rootp, long long compar) {
-    long long saved = g_search_compar_value;
-    int saved_faulted = g_search_faulted;
-    g_search_compar_value = compar;
-    g_search_faulted = 0;
-    void *r = tdelete((const void *)key, (void **)rootp,
-                       compar ? search_compar_trampoline : NULL);
-    int faulted = g_search_faulted;
-    g_search_compar_value = saved;
-    g_search_faulted = saved_faulted;
-    if (faulted) errno = EFAULT;
+static long long wrap_tdelete(long long key, long long rootp,
+                              long long compar) {
+    long long saved         = g_search_compar_value;
+    int       saved_faulted = g_search_faulted;
+    g_search_compar_value   = compar;
+    g_search_faulted        = 0;
+    void *r                 = tdelete((const void *)key, (void **)rootp,
+                                      compar ? search_compar_trampoline : NULL);
+    int   faulted           = g_search_faulted;
+    g_search_compar_value   = saved;
+    g_search_faulted        = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return (long long)(intptr_t)r;
 }
 
 static _Thread_local long long g_twalk_action_value;
-static _Thread_local int g_twalk_faulted;
+static _Thread_local int       g_twalk_faulted;
 
 static void twalk_action_trampoline(const void *nodep, VISIT which, int depth) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    long long args[3] = { (long long)(intptr_t)nodep, (long long)(int)which, (long long)depth };
-    long long result = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_twalk_action_value, args, 3, &result) != 0)
+    long long args[3]  = {(long long)(intptr_t)nodep, (long long)(int)which,
+                          (long long)depth};
+    long long result   = 0;
+    if (!vm || cccc_call_guest_callback(vm, g_twalk_action_value, args, 3,
+                                        &result) != 0)
         g_twalk_faulted = 1;
 }
 
 static long long wrap_twalk(long long root, long long action) {
-    long long saved = g_twalk_action_value;
-    int saved_faulted = g_twalk_faulted;
-    g_twalk_action_value = action;
-    g_twalk_faulted = 0;
+    long long saved         = g_twalk_action_value;
+    int       saved_faulted = g_twalk_faulted;
+    g_twalk_action_value    = action;
+    g_twalk_faulted         = 0;
     twalk((const void *)root, action ? twalk_action_trampoline : NULL);
-    int faulted = g_twalk_faulted;
+    int faulted          = g_twalk_faulted;
     g_twalk_action_value = saved;
-    g_twalk_faulted = saved_faulted;
-    if (faulted) errno = EFAULT;
+    g_twalk_faulted      = saved_faulted;
+    if (faulted)
+        errno = EFAULT;
     return 0;
 }
 
-
 void register_posix_search_functions(VirtualMachine *vm) {
-    cc_register_cfunc(vm, "hcreate",  (void*)hcreate,  1, 0);
-    cc_register_cfunc(vm, "hdestroy", (void*)hdestroy, 0, 0);
-    cc_register_cfunc(vm, "hsearch",  (void*)wrap_hsearch, 2, 0);
-    cc_register_cfunc(vm, "insque",   (void*)insque,   2, 0);
-    cc_register_cfunc(vm, "remque",   (void*)remque,   1, 0);
-    cc_register_cfunc(vm, "lfind",    (void*)wrap_lfind,   5, 0);
-    cc_register_cfunc(vm, "lsearch",  (void*)wrap_lsearch, 5, 0);
-    cc_register_cfunc(vm, "tsearch",  (void*)wrap_tsearch, 3, 0);
-    cc_register_cfunc(vm, "tfind",    (void*)wrap_tfind,   3, 0);
-    cc_register_cfunc(vm, "tdelete",  (void*)wrap_tdelete, 3, 0);
-    cc_register_cfunc(vm, "twalk",    (void*)wrap_twalk,   2, 0);
+    cc_register_cfunc(vm, "hcreate", (void *)hcreate, 1, 0);
+    cc_register_cfunc(vm, "hdestroy", (void *)hdestroy, 0, 0);
+    cc_register_cfunc(vm, "hsearch", (void *)wrap_hsearch, 2, 0);
+    cc_register_cfunc(vm, "insque", (void *)insque, 2, 0);
+    cc_register_cfunc(vm, "remque", (void *)remque, 1, 0);
+    cc_register_cfunc(vm, "lfind", (void *)wrap_lfind, 5, 0);
+    cc_register_cfunc(vm, "lsearch", (void *)wrap_lsearch, 5, 0);
+    cc_register_cfunc(vm, "tsearch", (void *)wrap_tsearch, 3, 0);
+    cc_register_cfunc(vm, "tfind", (void *)wrap_tfind, 3, 0);
+    cc_register_cfunc(vm, "tdelete", (void *)wrap_tdelete, 3, 0);
+    cc_register_cfunc(vm, "twalk", (void *)wrap_twalk, 2, 0);
 }
 
 #else
-void register_posix_search_functions(VirtualMachine *vm) { (void)vm; }
+void register_posix_search_functions(VirtualMachine *vm) {
+    (void)vm;
+}
 #endif

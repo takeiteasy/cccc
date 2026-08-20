@@ -2,10 +2,14 @@
 // Exercises the (union Tag){ ... } compound-literal cast branch.
 
 [[cccc::comptime]]
-int compute_value(void) { return 0x12345678; }
+int compute_value(void) {
+    return 0x12345678;
+}
 
-[[cccc::comptime]]
-union Data { int i; unsigned char bytes[4]; } data = { compute_value() };
+[[cccc::comptime]] union Data {
+    int           i;
+    unsigned char bytes[4];
+} data = {compute_value()};
 
 [[cccc::comptime]]
 Node *get_value(void) {

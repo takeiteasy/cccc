@@ -49,5 +49,7 @@ void register_posix_functions(VirtualMachine *vm) {
 }
 
 #else
-void register_posix_functions(VirtualMachine *vm) { (void)vm; }
+void register_posix_functions(VirtualMachine *vm) {
+    (void)vm;
+}
 #endif

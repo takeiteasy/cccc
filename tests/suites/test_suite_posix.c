@@ -1,6 +1,11 @@
 // CCCC_FLAGS: --testing --posix-emulation
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
-// Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi, test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll, test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb, test_posix_strings, test_posix_sys_mman, test_posix_sys_stat, test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl, test_posix_preadv_pwritev, test_posix_utime, test_posix_vfs_decls,
+// Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi,
+// test_posix_fnmatch, test_posix_glob, test_posix_libgen, test_posix_poll,
+// test_posix_pwd_grp, test_posix_regex, test_posix_socket_netdb,
+// test_posix_strings, test_posix_sys_mman, test_posix_sys_stat,
+// test_posix_sys_time, test_posix_termios, test_posix_unistd_fcntl,
+// test_posix_preadv_pwritev, test_posix_utime, test_posix_vfs_decls,
 //   test_glob_header, test_quick_exit, test_posix_sys_wait,
 //   test_posix_sysconf_pathconf_confstr, test_posix_host_global_bridge,
 //   test_posix_sendmsg_recvmsg_scm_rights, test_posix_ipv6_udp_roundtrip,
@@ -93,7 +98,8 @@
 
 // [from test_posix_extra_ffi]
 // Regression test for #590: additional POSIX FFI functions registered for the
-// SQLite unix VFS (fchmod, geteuid, pread, pwrite, getpagesize, nanosleep, ...).
+// SQLite unix VFS (fchmod, geteuid, pread, pwrite, getpagesize, nanosleep,
+// ...).
 //
 // Exercises the newly-registered functions in a portable way and returns 42.
 
@@ -104,22 +110,31 @@
 int test_posix_arpa_inet(void) {
     if (htonl(0x12345678) == 0x12345678) {
         /* little-endian host */
-        if (htonl(0x12345678) != 0x78563412) return 1;
-        if (htons(0x1234) != 0x3412) return 2;
-        if (ntohl(0x78563412) != 0x12345678) return 3;
-        if (ntohs(0x3412) != 0x1234) return 4;
+        if (htonl(0x12345678) != 0x78563412)
+            return 1;
+        if (htons(0x1234) != 0x3412)
+            return 2;
+        if (ntohl(0x78563412) != 0x12345678)
+            return 3;
+        if (ntohs(0x3412) != 0x1234)
+            return 4;
     }
 
-    if (inet_addr("127.0.0.1") == (uint32_t)(-1)) return 5;
+    if (inet_addr("127.0.0.1") == (uint32_t)(-1))
+        return 5;
 
     struct in_addr addr;
-    if (inet_pton(AF_INET, "127.0.0.1", &addr) != 1) return 6;
-    if (addr.s_addr != inet_addr("127.0.0.1")) return 7;
+    if (inet_pton(AF_INET, "127.0.0.1", &addr) != 1)
+        return 6;
+    if (addr.s_addr != inet_addr("127.0.0.1"))
+        return 7;
 
-    char buf[32];
+    char        buf[32];
     const char *s = inet_ntop(AF_INET, &addr, buf, sizeof(buf));
-    if (!s) return 8;
-    if (s[0] != '1' || s[1] != '2' || s[2] != '7') return 9;
+    if (!s)
+        return 8;
+    if (s[0] != '1' || s[1] != '2' || s[2] != '7')
+        return 9;
 
     return 42;
 }
@@ -128,20 +143,24 @@ int test_posix_arpa_inet(void) {
 [[cccc::test(return = 42)]]
 int test_posix_dirent(void) {
     DIR *d = opendir("tests/suites");
-    if (!d) return 1;
+    if (!d)
+        return 1;
 
-    int found = 0;
+    int            found = 0;
     struct dirent *ent;
     while ((ent = readdir(d)) != 0) {
         if (strcmp(ent->d_name, "test_suite_posix.c") == 0) {
             found = 1;
-            if (ent->d_reclen == 0) return 2;
+            if (ent->d_reclen == 0)
+                return 2;
             break;
         }
     }
 
-    if (closedir(d) != 0) return 3;
-    if (!found) return 4;
+    if (closedir(d) != 0)
+        return 3;
+    if (!found)
+        return 4;
     return 42;
 }
 
@@ -152,12 +171,13 @@ int test_posix_extra_ffi(void) {
     if (getpagesize() <= 0)
         return 1;
 
-    // geteuid: effective uid is non-negative (uid_t); just confirm it is callable
+    // geteuid: effective uid is non-negative (uid_t); just confirm it is
+    // callable
     (void)geteuid();
 
     // pread / pwrite round-trip through a temp file
     char tmpl[] = "/tmp/cccc_posix_XXXXXX";
-    int fd = mkstemp(tmpl);
+    int  fd     = mkstemp(tmpl);
     if (fd < 0)
         return 2;
 
@@ -179,7 +199,7 @@ int test_posix_extra_ffi(void) {
     unlink(tmpl);
 
     // nanosleep: a tiny, harmless sleep
-    struct timespec req = { 0, 1000000 }; // 1 ms
+    struct timespec req = {0, 1000000}; // 1 ms
     if (nanosleep(&req, 0) != 0)
         return 7;
 
@@ -189,10 +209,14 @@ int test_posix_extra_ffi(void) {
 // test_posix_fnmatch
 [[cccc::test(return = 42)]]
 int test_posix_fnmatch(void) {
-    if (fnmatch("*.c", "hello.c", 0) != 0) return 1;
-    if (fnmatch("*.c", "hello.h", 0) != FNM_NOMATCH) return 2;
-    if (fnmatch("a?c", "abc", 0) != 0) return 3;
-    if (fnmatch("*.txt", "a/b.txt", FNM_PATHNAME) != FNM_NOMATCH) return 4;
+    if (fnmatch("*.c", "hello.c", 0) != 0)
+        return 1;
+    if (fnmatch("*.c", "hello.h", 0) != FNM_NOMATCH)
+        return 2;
+    if (fnmatch("a?c", "abc", 0) != 0)
+        return 3;
+    if (fnmatch("*.txt", "a/b.txt", FNM_PATHNAME) != FNM_NOMATCH)
+        return 4;
     return 42;
 }
 
@@ -200,15 +224,20 @@ int test_posix_fnmatch(void) {
 [[cccc::test(return = 42)]]
 int test_posix_glob(void) {
     glob_t g;
-    int rc = glob("tests/suites/test_suite_posix.c", 0, 0, &g);
-    if (rc != 0) return 1;
-    if (g.gl_pathc != 1) return 2;
-    if (!g.gl_pathv) return 3;
-    if (strcmp(g.gl_pathv[0], "tests/suites/test_suite_posix.c") != 0) return 4;
+    int    rc = glob("tests/suites/test_suite_posix.c", 0, 0, &g);
+    if (rc != 0)
+        return 1;
+    if (g.gl_pathc != 1)
+        return 2;
+    if (!g.gl_pathv)
+        return 3;
+    if (strcmp(g.gl_pathv[0], "tests/suites/test_suite_posix.c") != 0)
+        return 4;
     globfree(&g);
 
     rc = glob("tests/no-such-posix-glob-file-*.c", 0, 0, &g);
-    if (rc != GLOB_NOMATCH) return 5;
+    if (rc != GLOB_NOMATCH)
+        return 5;
     return 42;
 }
 
@@ -219,13 +248,19 @@ int test_posix_libgen(void) {
     char p2[] = "/usr/";
     char p3[] = "usr";
 
-    if (strcmp(basename(p1), "lib") != 0) return 1;
-    if (strcmp(basename(p2), "usr") != 0) return 2;
-    if (strcmp(basename(p3), "usr") != 0) return 3;
+    if (strcmp(basename(p1), "lib") != 0)
+        return 1;
+    if (strcmp(basename(p2), "usr") != 0)
+        return 2;
+    if (strcmp(basename(p3), "usr") != 0)
+        return 3;
 
-    if (strcmp(dirname(p1), "/usr") != 0) return 4;
-    if (strcmp(dirname(p2), "/") != 0) return 5;
-    if (strcmp(dirname(p3), ".") != 0) return 6;
+    if (strcmp(dirname(p1), "/usr") != 0)
+        return 4;
+    if (strcmp(dirname(p2), "/") != 0)
+        return 5;
+    if (strcmp(dirname(p3), ".") != 0)
+        return 6;
 
     return 42;
 }
@@ -234,15 +269,18 @@ int test_posix_libgen(void) {
 [[cccc::test(return = 42)]]
 int test_posix_poll(void) {
     int fd[2];
-    if (pipe(fd) != 0) return 1;
+    if (pipe(fd) != 0)
+        return 1;
 
     char msg[] = "x";
     write(fd[1], msg, 1);
 
-    struct pollfd pfd = { fd[0], POLLIN, 0 };
-    int r = poll(&pfd, 1, 1000);
-    if (r != 1) return 2;
-    if (!(pfd.revents & POLLIN)) return 3;
+    struct pollfd pfd = {fd[0], POLLIN, 0};
+    int           r   = poll(&pfd, 1, 1000);
+    if (r != 1)
+        return 2;
+    if (!(pfd.revents & POLLIN))
+        return 3;
 
     close(fd[0]);
     close(fd[1]);
@@ -253,20 +291,28 @@ int test_posix_poll(void) {
 [[cccc::test(return = 42)]]
 int test_posix_pwd_grp(void) {
     struct passwd *pw = getpwuid(0);
-    if (!pw) return 1;
-    if (!pw->pw_name || !pw->pw_dir || !pw->pw_shell) return 2;
+    if (!pw)
+        return 1;
+    if (!pw->pw_name || !pw->pw_dir || !pw->pw_shell)
+        return 2;
 
     struct passwd *pw2 = getpwnam(pw->pw_name);
-    if (!pw2) return 3;
-    if (pw2->pw_uid != pw->pw_uid) return 4;
+    if (!pw2)
+        return 3;
+    if (pw2->pw_uid != pw->pw_uid)
+        return 4;
 
     struct group *gr = getgrgid(0);
-    if (!gr) return 5;
-    if (!gr->gr_name) return 6;
+    if (!gr)
+        return 5;
+    if (!gr->gr_name)
+        return 6;
 
     struct group *gr2 = getgrnam(gr->gr_name);
-    if (!gr2) return 7;
-    if (gr2->gr_gid != gr->gr_gid) return 8;
+    if (!gr2)
+        return 7;
+    if (gr2->gr_gid != gr->gr_gid)
+        return 8;
 
     return 42;
 }
@@ -274,20 +320,26 @@ int test_posix_pwd_grp(void) {
 // test_posix_regex
 [[cccc::test(return = 42)]]
 int test_posix_regex(void) {
-    regex_t re;
+    regex_t    re;
     regmatch_t match[2];
 
-    int rc = regcomp(&re, "j([0-9]+)", REG_EXTENDED);
-    if (rc != 0) return 1;
-    if (re.re_nsub != 1) return 2;
+    int        rc = regcomp(&re, "j([0-9]+)", REG_EXTENDED);
+    if (rc != 0)
+        return 1;
+    if (re.re_nsub != 1)
+        return 2;
 
     rc = regexec(&re, "j42", 2, match, 0);
-    if (rc != 0) return 3;
-    if (match[0].rm_so != 0 || match[0].rm_eo != 3) return 4;
-    if (match[1].rm_so != 1 || match[1].rm_eo != 3) return 5;
+    if (rc != 0)
+        return 3;
+    if (match[0].rm_so != 0 || match[0].rm_eo != 3)
+        return 4;
+    if (match[1].rm_so != 1 || match[1].rm_eo != 3)
+        return 5;
 
     rc = regexec(&re, "abc", 0, 0, 0);
-    if (rc != REG_NOMATCH) return 6;
+    if (rc != REG_NOMATCH)
+        return 6;
 
     regfree(&re);
     return 42;
@@ -297,26 +349,34 @@ int test_posix_regex(void) {
 [[cccc::test(return = 42)]]
 int test_posix_socket_netdb(void) {
     struct hostent *he = gethostbyname("localhost");
-    if (!he) return 1;
-    if (he->h_addrtype != AF_INET) return 2;
-    if (he->h_length != 4) return 3;
+    if (!he)
+        return 1;
+    if (he->h_addrtype != AF_INET)
+        return 2;
+    if (he->h_length != 4)
+        return 3;
 
-    struct addrinfo hints;
+    struct addrinfo  hints;
     struct addrinfo *res = 0;
     for (int i = 0; i < (int)(sizeof(hints)); i++)
         ((char *)&hints)[i] = 0;
-    hints.ai_family = AF_INET;
+    hints.ai_family   = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    int gai = getaddrinfo("127.0.0.1", "80", &hints, &res);
-    if (gai != 0) return 4;
-    if (!res) return 5;
-    if (res->ai_family != AF_INET) return 6;
-    if (res->ai_addrlen < (socklen_t)sizeof(struct sockaddr_in)) return 7;
+    int gai           = getaddrinfo("127.0.0.1", "80", &hints, &res);
+    if (gai != 0)
+        return 4;
+    if (!res)
+        return 5;
+    if (res->ai_family != AF_INET)
+        return 6;
+    if (res->ai_addrlen < (socklen_t)sizeof(struct sockaddr_in))
+        return 7;
     freeaddrinfo(res);
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return 8;
+    if (fd < 0)
+        return 8;
     close(fd);
 
     struct sockaddr_in addr;
@@ -325,16 +385,21 @@ int test_posix_socket_netdb(void) {
 #ifdef __APPLE__
     addr.sin_len = sizeof(addr);
 #endif
-    addr.sin_family = AF_INET;
-    addr.sin_port = 0;
+    addr.sin_family      = AF_INET;
+    addr.sin_port        = 0;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    socklen_t len = sizeof(addr);
-    if (bind(-1, (struct sockaddr *)&addr, sizeof(addr)) != -1) return 9;
-    if (listen(-1, 1) != -1) return 10;
-    if (accept(-1, (struct sockaddr *)&addr, &len) != -1) return 11;
-    if (connect(-1, (struct sockaddr *)&addr, sizeof(addr)) != -1) return 12;
-    if (getsockname(-1, (struct sockaddr *)&addr, &len) != -1) return 13;
+    socklen_t len        = sizeof(addr);
+    if (bind(-1, (struct sockaddr *)&addr, sizeof(addr)) != -1)
+        return 9;
+    if (listen(-1, 1) != -1)
+        return 10;
+    if (accept(-1, (struct sockaddr *)&addr, &len) != -1)
+        return 11;
+    if (connect(-1, (struct sockaddr *)&addr, sizeof(addr)) != -1)
+        return 12;
+    if (getsockname(-1, (struct sockaddr *)&addr, &len) != -1)
+        return 13;
 
     return 42;
 }
@@ -352,15 +417,20 @@ int test_posix_netent(void) {
 
     struct netent *ne = getnetbyname("loopback");
     if (ne) {
-        if (!ne->n_name) return 1;
+        if (!ne->n_name)
+            return 1;
         struct netent *by_addr = getnetbyaddr(ne->n_net, ne->n_addrtype);
-        if (!by_addr) return 2;
-        if (by_addr->n_net != ne->n_net) return 3;
-        if (by_addr->n_addrtype != ne->n_addrtype) return 4;
+        if (!by_addr)
+            return 2;
+        if (by_addr->n_net != ne->n_net)
+            return 3;
+        if (by_addr->n_addrtype != ne->n_addrtype)
+            return 4;
     }
 
     /* A name that should never resolve to a real network entry. */
-    if (getnetbyname("cccc-nonexistent-network-name")) return 5;
+    if (getnetbyname("cccc-nonexistent-network-name"))
+        return 5;
 
     endnetent();
     return 42;
@@ -380,24 +450,34 @@ int test_posix_servent_protoent(void) {
 
     struct servent *se = getservbyname("http", "tcp");
     if (se) {
-        if (!se->s_name) return 1;
-        if (ntohs((unsigned short)se->s_port) != 80) return 2;
+        if (!se->s_name)
+            return 1;
+        if (ntohs((unsigned short)se->s_port) != 80)
+            return 2;
         struct servent *by_port = getservbyport(se->s_port, "tcp");
-        if (!by_port) return 3;
-        if (by_port->s_port != se->s_port) return 4;
+        if (!by_port)
+            return 3;
+        if (by_port->s_port != se->s_port)
+            return 4;
     }
 
     struct protoent *pe = getprotobyname("tcp");
     if (pe) {
-        if (!pe->p_name) return 5;
-        if (pe->p_proto != 6) return 6;
+        if (!pe->p_name)
+            return 5;
+        if (pe->p_proto != 6)
+            return 6;
         struct protoent *by_num = getprotobynumber(pe->p_proto);
-        if (!by_num) return 7;
-        if (by_num->p_proto != pe->p_proto) return 8;
+        if (!by_num)
+            return 7;
+        if (by_num->p_proto != pe->p_proto)
+            return 8;
     }
 
-    if (getservbyname("cccc-nonexistent-service-name", "tcp")) return 9;
-    if (getprotobyname("cccc-nonexistent-protocol-name")) return 10;
+    if (getservbyname("cccc-nonexistent-service-name", "tcp"))
+        return 9;
+    if (getprotobyname("cccc-nonexistent-protocol-name"))
+        return 10;
 
     endservent();
     endprotoent();
@@ -417,13 +497,16 @@ static void *dns_gil_worker(void *arg) {
     int iterations = *(int *)arg;
     for (int i = 0; i < iterations; i++) {
         struct hostent *he = gethostbyname("localhost");
-        if (!he || he->h_addrtype != AF_INET) return (void *)1;
+        if (!he || he->h_addrtype != AF_INET)
+            return (void *)1;
 
         struct addrinfo hints, *res = 0;
-        for (int j = 0; j < (int)sizeof(hints); j++) ((char *)&hints)[j] = 0;
-        hints.ai_family = AF_INET;
+        for (int j = 0; j < (int)sizeof(hints); j++)
+            ((char *)&hints)[j] = 0;
+        hints.ai_family   = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
-        if (getaddrinfo("127.0.0.1", "80", &hints, &res) != 0 || !res) return (void *)2;
+        if (getaddrinfo("127.0.0.1", "80", &hints, &res) != 0 || !res)
+            return (void *)2;
         freeaddrinfo(res);
     }
     return (void *)0;
@@ -432,15 +515,21 @@ static void *dns_gil_worker(void *arg) {
 [[cccc::test(return = 42)]]
 int test_posix_dns_gil_concurrency(void) {
     pthread_t t1, t2;
-    int n = 20;
-    if (pthread_create(&t1, 0, dns_gil_worker, &n) != 0) return 1;
-    if (pthread_create(&t2, 0, dns_gil_worker, &n) != 0) return 2;
+    int       n = 20;
+    if (pthread_create(&t1, 0, dns_gil_worker, &n) != 0)
+        return 1;
+    if (pthread_create(&t2, 0, dns_gil_worker, &n) != 0)
+        return 2;
 
     void *r1 = 0, *r2 = 0;
-    if (pthread_join(t1, &r1) != 0) return 3;
-    if (pthread_join(t2, &r2) != 0) return 4;
-    if (r1 != 0) return 5;
-    if (r2 != 0) return 6;
+    if (pthread_join(t1, &r1) != 0)
+        return 3;
+    if (pthread_join(t2, &r2) != 0)
+        return 4;
+    if (r1 != 0)
+        return 5;
+    if (r2 != 0)
+        return 6;
     return 42;
 }
 
@@ -463,23 +552,31 @@ int test_posix_dns_gil_concurrency(void) {
 // reliably -- the Linux dispatcher simply never touches nss_static_mutex;
 // see that function's comment for the reasoning.
 static void *gethostbyname_r_worker(void *arg) {
-    int iterations = *(int *)arg;
+    int  iterations = *(int *)arg;
     char buf[2048];
     for (int i = 0; i < iterations; i++) {
-        struct hostent ret;
+        struct hostent  ret;
         struct hostent *result = 0;
-        int herr = 0;
-        int rc = gethostbyname_r("localhost", &ret, buf, sizeof(buf), &result, &herr);
-        if (rc != 0) return (void *)1;
-        if (!result || result != &ret) return (void *)2;
-        if (ret.h_addrtype != AF_INET || ret.h_length != 4) return (void *)3;
+        int             herr   = 0;
+        int rc = gethostbyname_r("localhost", &ret, buf, sizeof(buf), &result,
+                                 &herr);
+        if (rc != 0)
+            return (void *)1;
+        if (!result || result != &ret)
+            return (void *)2;
+        if (ret.h_addrtype != AF_INET || ret.h_length != 4)
+            return (void *)3;
         /* Proves the deep copy: h_name/h_addr_list point into this
            worker's own stack buffer, not shared static storage a
            concurrent call on the other thread could be overwriting. */
-        if ((char *)ret.h_name < buf || (char *)ret.h_name >= buf + sizeof(buf)) return (void *)4;
-        if ((char *)ret.h_addr_list[0] < buf || (char *)ret.h_addr_list[0] >= buf + sizeof(buf)) return (void *)5;
+        if ((char *)ret.h_name < buf || (char *)ret.h_name >= buf + sizeof(buf))
+            return (void *)4;
+        if ((char *)ret.h_addr_list[0] < buf ||
+            (char *)ret.h_addr_list[0] >= buf + sizeof(buf))
+            return (void *)5;
         unsigned char *addr = (unsigned char *)ret.h_addr_list[0];
-        if (addr[0] != 127 || addr[1] != 0 || addr[2] != 0 || addr[3] != 1) return (void *)6;
+        if (addr[0] != 127 || addr[1] != 0 || addr[2] != 0 || addr[3] != 1)
+            return (void *)6;
     }
     return (void *)0;
 }
@@ -487,45 +584,61 @@ static void *gethostbyname_r_worker(void *arg) {
 [[cccc::test(return = 42)]]
 int test_posix_gethostbyname_r(void) {
     pthread_t t1, t2;
-    int n = 20;
-    if (pthread_create(&t1, 0, gethostbyname_r_worker, &n) != 0) return 1;
-    if (pthread_create(&t2, 0, gethostbyname_r_worker, &n) != 0) return 2;
+    int       n = 20;
+    if (pthread_create(&t1, 0, gethostbyname_r_worker, &n) != 0)
+        return 1;
+    if (pthread_create(&t2, 0, gethostbyname_r_worker, &n) != 0)
+        return 2;
 
     void *r1 = 0, *r2 = 0;
-    if (pthread_join(t1, &r1) != 0) return 3;
-    if (pthread_join(t2, &r2) != 0) return 4;
-    if (r1 != 0) return 5;
-    if (r2 != 0) return 6;
+    if (pthread_join(t1, &r1) != 0)
+        return 3;
+    if (pthread_join(t2, &r2) != 0)
+        return 4;
+    if (r1 != 0)
+        return 5;
+    if (r2 != 0)
+        return 6;
 
     /* Short buffer -> ERANGE, *result cleared. */
-    char tiny[4];
-    struct hostent ret2;
+    char            tiny[4];
+    struct hostent  ret2;
     struct hostent *result2 = (struct hostent *)1;
-    int herr = 0;
-    int rc = gethostbyname_r("localhost", &ret2, tiny, sizeof(tiny), &result2, &herr);
-    if (rc != ERANGE) return 7;
-    if (result2 != 0) return 8;
+    int             herr    = 0;
+    int rc = gethostbyname_r("localhost", &ret2, tiny, sizeof(tiny), &result2,
+                             &herr);
+    if (rc != ERANGE)
+        return 7;
+    if (result2 != 0)
+        return 8;
 
     /* gethostbyaddr_r round trip on the same loopback address. */
     struct in_addr a;
     a.s_addr = htonl(0x7f000001); /* 127.0.0.1 */
-    struct hostent aret;
-    char abuf[2048];
+    struct hostent  aret;
+    char            abuf[2048];
     struct hostent *aresult = 0;
-    int aherr = 0;
-    if (gethostbyaddr_r(&a, sizeof(a), AF_INET, &aret, abuf, sizeof(abuf), &aresult, &aherr) != 0) return 9;
-    if (!aresult) return 10;
+    int             aherr   = 0;
+    if (gethostbyaddr_r(&a, sizeof(a), AF_INET, &aret, abuf, sizeof(abuf),
+                        &aresult, &aherr) != 0)
+        return 9;
+    if (!aresult)
+        return 10;
 
     /* getnetbyname_r: tolerate "not found" (the networks DB is often empty
        in containers), but the ERANGE/*result contract must still hold. */
-    struct netent nret;
-    char nbuf[512];
+    struct netent  nret;
+    char           nbuf[512];
     struct netent *nresult = (struct netent *)1;
-    int nherr = 0;
-    int nrc = getnetbyname_r("loopback", &nret, nbuf, sizeof(nbuf), &nresult, &nherr);
-    if (nrc != 0) return 11;
-    if (nresult && nresult != &nret) return 12;
-    if (!nresult && nherr != HOST_NOT_FOUND) return 13;
+    int            nherr   = 0;
+    int            nrc =
+        getnetbyname_r("loopback", &nret, nbuf, sizeof(nbuf), &nresult, &nherr);
+    if (nrc != 0)
+        return 11;
+    if (nresult && nresult != &nret)
+        return 12;
+    if (!nresult && nherr != HOST_NOT_FOUND)
+        return 13;
 
     return 42;
 }
@@ -533,10 +646,14 @@ int test_posix_gethostbyname_r(void) {
 // test_posix_strings
 [[cccc::test(return = 42)]]
 int test_posix_strings(void) {
-    if (strcasecmp("abc", "ABC") != 0) return 1;
-    if (strcasecmp("abc", "abd") >= 0) return 2;
-    if (strncasecmp("abc", "AB", 2) != 0) return 3;
-    if (strncasecmp("abc", "abd", 2) != 0) return 4;
+    if (strcasecmp("abc", "ABC") != 0)
+        return 1;
+    if (strcasecmp("abc", "abd") >= 0)
+        return 2;
+    if (strncasecmp("abc", "AB", 2) != 0)
+        return 3;
+    if (strncasecmp("abc", "abd", 2) != 0)
+        return 4;
     return 42;
 }
 
@@ -544,15 +661,20 @@ int test_posix_strings(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sys_mman(void) {
     size_t pagesize = 4096;
-    void *p = mmap(0, pagesize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p == (void *)-1) return 1;
+    void  *p        = mmap(0, pagesize, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == (void *)-1)
+        return 1;
 
     strcpy((char *)p, "hello");
-    if (strcmp((char *)p, "hello") != 0) return 2;
+    if (strcmp((char *)p, "hello") != 0)
+        return 2;
 
-    if (mprotect(p, pagesize, PROT_READ) != 0) return 3;
+    if (mprotect(p, pagesize, PROT_READ) != 0)
+        return 3;
 
-    if (munmap(p, pagesize) != 0) return 4;
+    if (munmap(p, pagesize) != 0)
+        return 4;
     return 42;
 }
 
@@ -560,27 +682,39 @@ int test_posix_sys_mman(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sys_stat(void) {
     char path[] = "/tmp/cccc-stat-test-XXXXXX";
-    int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd < 0) return 1;
+    int  fd     = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd < 0)
+        return 1;
 
-    if (write(fd, "abc", 3) != 3) return 2;
+    if (write(fd, "abc", 3) != 3)
+        return 2;
     close(fd);
 
     struct stat st;
-    if (stat(path, &st) != 0) return 3;
-    if (st.st_size != 3) return 4;
-    if (!S_ISREG(st.st_mode)) return 5;
+    if (stat(path, &st) != 0)
+        return 3;
+    if (st.st_size != 3)
+        return 4;
+    if (!S_ISREG(st.st_mode))
+        return 5;
 
-    if (chmod(path, S_IRUSR) != 0) return 6;
-    if (stat(path, &st) != 0) return 7;
-    if ((st.st_mode & S_IRWXU) != S_IRUSR) return 8;
-    if (st.st_mode & S_IWUSR) return 9;
+    if (chmod(path, S_IRUSR) != 0)
+        return 6;
+    if (stat(path, &st) != 0)
+        return 7;
+    if ((st.st_mode & S_IRWXU) != S_IRUSR)
+        return 8;
+    if (st.st_mode & S_IWUSR)
+        return 9;
 
     unlink(path);
 
-    if (mkdir("/tmp/cccc-stat-dir-test", S_IRWXU) != 0) return 10;
-    if (stat("/tmp/cccc-stat-dir-test", &st) != 0) return 11;
-    if (!S_ISDIR(st.st_mode)) return 12;
+    if (mkdir("/tmp/cccc-stat-dir-test", S_IRWXU) != 0)
+        return 10;
+    if (stat("/tmp/cccc-stat-dir-test", &st) != 0)
+        return 11;
+    if (!S_ISDIR(st.st_mode))
+        return 12;
     rmdir("/tmp/cccc-stat-dir-test");
 
     return 42;
@@ -590,25 +724,31 @@ int test_posix_sys_stat(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sys_time(void) {
     struct timeval tv1, tv2;
-    if (gettimeofday(&tv1, 0) != 0) return 1;
+    if (gettimeofday(&tv1, 0) != 0)
+        return 1;
 
     usleep(10000); /* 10ms */
 
-    if (gettimeofday(&tv2, 0) != 0) return 2;
+    if (gettimeofday(&tv2, 0) != 0)
+        return 2;
 
     /* tv2 should be >= tv1 */
-    if (tv2.tv_sec < tv1.tv_sec) return 3;
-    if (tv2.tv_sec == tv1.tv_sec && tv2.tv_usec < tv1.tv_usec) return 4;
+    if (tv2.tv_sec < tv1.tv_sec)
+        return 3;
+    if (tv2.tv_sec == tv1.tv_sec && tv2.tv_usec < tv1.tv_usec)
+        return 4;
 
     /* timeradd / timersub macros */
-    struct timeval a = { 1, 500000 };
-    struct timeval b = { 2, 600000 };
+    struct timeval a = {1, 500000};
+    struct timeval b = {2, 600000};
     struct timeval res;
     timeradd(&a, &b, &res);
-    if (res.tv_sec != 4 || res.tv_usec != 100000) return 5;
+    if (res.tv_sec != 4 || res.tv_usec != 100000)
+        return 5;
 
     timersub(&b, &a, &res);
-    if (res.tv_sec != 1 || res.tv_usec != 100000) return 6;
+    if (res.tv_sec != 1 || res.tv_usec != 100000)
+        return 6;
 
     return 42;
 }
@@ -617,12 +757,14 @@ int test_posix_sys_time(void) {
 [[cccc::test(return = 42)]]
 int test_posix_termios(void) {
     struct termios t;
-    if (NCCS < 10) return 1;
+    if (NCCS < 10)
+        return 1;
     t.c_cc[0] = 0;
 
-    int rc = tcgetattr(STDIN_FILENO, &t);
+    int rc    = tcgetattr(STDIN_FILENO, &t);
     if (rc == 0) {
-        if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0) return 2;
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0)
+            return 2;
     }
 
     return 42;
@@ -632,19 +774,26 @@ int test_posix_termios(void) {
 [[cccc::test(return = 42)]]
 int test_posix_unistd_fcntl(void) {
     char path[] = "/tmp/cccc-posix-test-XXXXXX";
-    int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd < 0) return 1;
+    int  fd     = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd < 0)
+        return 1;
 
     char msg[] = "abc";
-    if (write(fd, msg, 3) != 3) return 2;
-    if (lseek(fd, 0, SEEK_SET) != 0) return 3;
+    if (write(fd, msg, 3) != 3)
+        return 2;
+    if (lseek(fd, 0, SEEK_SET) != 0)
+        return 3;
 
     char buf[4] = {0};
-    if (read(fd, buf, 3) != 3) return 4;
-    if (buf[0] != 'a' || buf[1] != 'b' || buf[2] != 'c') return 5;
+    if (read(fd, buf, 3) != 3)
+        return 4;
+    if (buf[0] != 'a' || buf[1] != 'b' || buf[2] != 'c')
+        return 5;
 
-    if (close(fd) != 0) return 6;
-    if (unlink(path) != 0) return 7;
+    if (close(fd) != 0)
+        return 6;
+    if (unlink(path) != 0)
+        return 7;
 
     return 42;
 }
@@ -660,59 +809,71 @@ int test_posix_unistd_fcntl(void) {
 [[cccc::test(return = 42)]]
 int test_posix_preadv_pwritev(void) {
     char path[] = "/tmp/cccc-preadv-pwritev-test";
-    int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd < 0) return 1;
+    int  fd     = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd < 0)
+        return 1;
 
     /* Write "Hello" + "World!" starting at offset 10, via two iovecs. */
     struct iovec wiov[2];
     wiov[0].iov_base = "Hello";
-    wiov[0].iov_len = 5;
+    wiov[0].iov_len  = 5;
     wiov[1].iov_base = "World!";
-    wiov[1].iov_len = 6;
-    ssize_t wn = pwritev(fd, wiov, 2, 10);
-    if (wn != 11) return 2;
+    wiov[1].iov_len  = 6;
+    ssize_t wn       = pwritev(fd, wiov, 2, 10);
+    if (wn != 11)
+        return 2;
 
     /* Confirm pwritev did not move the fd's own file position: a plain
        write() right after should still land at offset 0, not 21. */
-    if (lseek(fd, 0, SEEK_CUR) != 0) return 3;
+    if (lseek(fd, 0, SEEK_CUR) != 0)
+        return 3;
 
     /* Read back into two differently-sized iovecs: 3 bytes then 8 bytes. */
-    char part1[3] = {0};
-    char part2[8] = {0};
+    char         part1[3] = {0};
+    char         part2[8] = {0};
     struct iovec riov[2];
     riov[0].iov_base = part1;
-    riov[0].iov_len = sizeof(part1);
+    riov[0].iov_len  = sizeof(part1);
     riov[1].iov_base = part2;
-    riov[1].iov_len = sizeof(part2);
-    ssize_t rn = preadv(fd, riov, 2, 10);
-    if (rn != 11) return 4;
-    if (memcmp(part1, "Hel", 3) != 0) return 5;
-    if (memcmp(part2, "loWorld!", 8) != 0) return 6;
+    riov[1].iov_len  = sizeof(part2);
+    ssize_t rn       = preadv(fd, riov, 2, 10);
+    if (rn != 11)
+        return 4;
+    if (memcmp(part1, "Hel", 3) != 0)
+        return 5;
+    if (memcmp(part2, "loWorld!", 8) != 0)
+        return 6;
 
     /* preadv at EOF -> 0, no error. */
     struct iovec eiov;
-    char ebuf[4];
+    char         ebuf[4];
     eiov.iov_base = ebuf;
-    eiov.iov_len = sizeof(ebuf);
-    if (preadv(fd, &eiov, 1, 21) != 0) return 7;
+    eiov.iov_len  = sizeof(ebuf);
+    if (preadv(fd, &eiov, 1, 21) != 0)
+        return 7;
 
 #ifdef __linux__
     /* preadv2/pwritev2 with flags == 0 must behave identically. */
     struct iovec wiov2;
     wiov2.iov_base = "!!";
-    wiov2.iov_len = 2;
-    if (pwritev2(fd, &wiov2, 1, 21, 0) != 2) return 8;
+    wiov2.iov_len  = 2;
+    if (pwritev2(fd, &wiov2, 1, 21, 0) != 2)
+        return 8;
 
-    char rbuf2[2] = {0};
+    char         rbuf2[2] = {0};
     struct iovec riov2;
     riov2.iov_base = rbuf2;
-    riov2.iov_len = sizeof(rbuf2);
-    if (preadv2(fd, &riov2, 1, 21, 0) != 2) return 9;
-    if (memcmp(rbuf2, "!!", 2) != 0) return 10;
+    riov2.iov_len  = sizeof(rbuf2);
+    if (preadv2(fd, &riov2, 1, 21, 0) != 2)
+        return 9;
+    if (memcmp(rbuf2, "!!", 2) != 0)
+        return 10;
 #endif
 
-    if (close(fd) != 0) return 11;
-    if (unlink(path) != 0) return 12;
+    if (close(fd) != 0)
+        return 11;
+    if (unlink(path) != 0)
+        return 12;
 
     return 42;
 }
@@ -721,23 +882,30 @@ int test_posix_preadv_pwritev(void) {
 [[cccc::test(return = 42)]]
 int test_posix_utime(void) {
     char path[] = "/tmp/cccc-utime-test-XXXXXX";
-    int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd < 0) return 1;
+    int  fd     = open(path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd < 0)
+        return 1;
     close(fd);
 
     struct utimbuf times;
-    times.actime = 1234567890;
+    times.actime  = 1234567890;
     times.modtime = 1234567890;
-    if (utime(path, &times) != 0) return 2;
+    if (utime(path, &times) != 0)
+        return 2;
 
     struct stat st;
-    if (stat(path, &st) != 0) return 3;
+    if (stat(path, &st) != 0)
+        return 3;
 #ifdef __APPLE__
-    if (st.st_atimespec.tv_sec != 1234567890) return 4;
-    if (st.st_mtimespec.tv_sec != 1234567890) return 5;
+    if (st.st_atimespec.tv_sec != 1234567890)
+        return 4;
+    if (st.st_mtimespec.tv_sec != 1234567890)
+        return 5;
 #else
-    if (st.st_atim.tv_sec != 1234567890) return 4;
-    if (st.st_mtim.tv_sec != 1234567890) return 5;
+    if (st.st_atim.tv_sec != 1234567890)
+        return 4;
+    if (st.st_mtim.tv_sec != 1234567890)
+        return 5;
 #endif
 
     unlink(path);
@@ -749,26 +917,43 @@ int test_posix_utime(void) {
 int test_posix_vfs_decls(void) {
     /* Reference the new declarations so the compiler must resolve them. */
     void *fns[] = {
-        (void*)fchmod, (void*)fchown, (void*)geteuid, (void*)getuid,
-        (void*)getgid, (void*)getegid, (void*)readlink, (void*)symlink,
-        (void*)pread, (void*)pwrite,
+        (void *)fchmod,
+        (void *)fchown,
+        (void *)geteuid,
+        (void *)getuid,
+        (void *)getgid,
+        (void *)getegid,
+        (void *)readlink,
+        (void *)symlink,
+        (void *)pread,
+        (void *)pwrite,
 #ifdef __linux__
         // fdatasync is absent from Darwin's libc entirely; its guest-side
         // declaration in include/unistd.h is __linux__-guarded to match (#783).
-        (void*)fdatasync,
+        (void *)fdatasync,
 #endif
-        (void*)getpagesize,
-        (void*)chown, (void*)ioctl, (void*)flock, (void*)statfs, (void*)fstatfs,
+        (void *)getpagesize,
+        (void *)chown,
+        (void *)ioctl,
+        (void *)flock,
+        (void *)statfs,
+        (void *)fstatfs,
     };
     struct flock fl;
-    fl.l_type = F_WRLCK; fl.l_whence = 0; fl.l_start = 0; fl.l_len = 0;
-    struct winsize ws; ws.ws_row = 0;
-    struct statfs sfs; sfs.f_bsize = 0; sfs.f_flags = 0;
-    int constants = F_GETLK + F_SETLK + F_SETLKW + F_RDLCK + F_UNLCK
-                  + LOCK_EX + LOCK_SH + LOCK_NB + LOCK_UN
-                  + ENOLCK + EOPNOTSUPP + _SC_PAGESIZE + MAXPATHLEN
-                  + (MAP_FAILED == (void*)-1) + (fl.l_type != 0) + (ws.ws_row == 0)
-                  + (sfs.f_bsize == 0) + (sizeof(fns) > 0) + MIN(1,2) + MAX(1,2);
+    fl.l_type   = F_WRLCK;
+    fl.l_whence = 0;
+    fl.l_start  = 0;
+    fl.l_len    = 0;
+    struct winsize ws;
+    ws.ws_row = 0;
+    struct statfs sfs;
+    sfs.f_bsize   = 0;
+    sfs.f_flags   = 0;
+    int constants = F_GETLK + F_SETLK + F_SETLKW + F_RDLCK + F_UNLCK + LOCK_EX +
+                    LOCK_SH + LOCK_NB + LOCK_UN + ENOLCK + EOPNOTSUPP +
+                    _SC_PAGESIZE + MAXPATHLEN + (MAP_FAILED == (void *)-1) +
+                    (fl.l_type != 0) + (ws.ws_row == 0) + (sfs.f_bsize == 0) +
+                    (sizeof(fns) > 0) + MIN(1, 2) + MAX(1, 2);
     (void)constants;
 
     /* #795: this suite runs with --posix-emulation (top of file), so a
@@ -781,7 +966,8 @@ int test_posix_vfs_decls(void) {
        to a bogus request code is host/kernel-version-dependent, the point
        is only that this must not crash and must not exit early via the
        allowlist's own EINVAL path. */
-    int fd = open("/tmp/cccc-ioctl-passthrough-test", O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    int fd = open("/tmp/cccc-ioctl-passthrough-test",
+                  O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
     if (fd >= 0) {
         int dummy = 0;
         ioctl(fd, 0x12345678, &dummy);
@@ -805,14 +991,22 @@ int test_glob_header(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sys_wait(void) {
     pid_t pid = fork();
-    if (pid < 0) return 1;
-    if (pid == 0) { _exit(42); }
-    int status;
+    if (pid < 0)
+        return 1;
+    if (pid == 0) {
+        _exit(42);
+    }
+    int   status;
     pid_t r;
-    do { r = waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
-    if (r != pid) return 2;
-    if (!WIFEXITED(status)) return 3;
-    if (WEXITSTATUS(status) != 42) return 4;
+    do {
+        r = waitpid(pid, &status, 0);
+    } while (r < 0 && errno == EINTR);
+    if (r != pid)
+        return 2;
+    if (!WIFEXITED(status))
+        return 3;
+    if (WEXITSTATUS(status) != 42)
+        return 4;
     return 42;
 }
 
@@ -824,15 +1018,23 @@ int test_posix_sys_wait(void) {
 [[cccc::test(return = 42)]]
 int test_posix_waitid(void) {
     pid_t pid = fork();
-    if (pid < 0) return 1;
-    if (pid == 0) { _exit(7); }
+    if (pid < 0)
+        return 1;
+    if (pid == 0) {
+        _exit(7);
+    }
 
     siginfo_t si;
-    for (int i = 0; i < (int)sizeof(si); i++) ((char *)&si)[i] = 0;
-    if (waitid(P_PID, (id_t)pid, &si, WEXITED) != 0) return 2;
-    if (si.si_pid != pid) return 3;
-    if (si.si_code != CLD_EXITED) return 4;
-    if (si.si_status != 7) return 5;
+    for (int i = 0; i < (int)sizeof(si); i++)
+        ((char *)&si)[i] = 0;
+    if (waitid(P_PID, (id_t)pid, &si, WEXITED) != 0)
+        return 2;
+    if (si.si_pid != pid)
+        return 3;
+    if (si.si_code != CLD_EXITED)
+        return 4;
+    if (si.si_status != 7)
+        return 5;
     return 42;
 }
 
@@ -845,10 +1047,14 @@ int test_posix_waitid(void) {
 [[cccc::test(return = 42)]]
 int test_posix_getrusage(void) {
     struct rusage ru;
-    for (int i = 0; i < (int)sizeof(ru); i++) ((char *)&ru)[i] = 0;
-    if (getrusage(RUSAGE_SELF, &ru) != 0) return 1;
-    if (ru.ru_maxrss <= 0) return 2;
-    if (ru.ru_utime.tv_sec < 0) return 3;
+    for (int i = 0; i < (int)sizeof(ru); i++)
+        ((char *)&ru)[i] = 0;
+    if (getrusage(RUSAGE_SELF, &ru) != 0)
+        return 1;
+    if (ru.ru_maxrss <= 0)
+        return 2;
+    if (ru.ru_utime.tv_sec < 0)
+        return 3;
     return 42;
 }
 
@@ -858,20 +1064,28 @@ int test_posix_getrusage(void) {
 [[cccc::test(return = 42)]]
 int test_posix_wait4(void) {
     pid_t pid = fork();
-    if (pid < 0) return 1;
-    if (pid == 0) { _exit(7); }
+    if (pid < 0)
+        return 1;
+    if (pid == 0) {
+        _exit(7);
+    }
 
-    int status = 0;
+    int           status = 0;
     struct rusage ru;
-    for (int i = 0; i < (int)sizeof(ru); i++) ((char *)&ru)[i] = 0;
+    for (int i = 0; i < (int)sizeof(ru); i++)
+        ((char *)&ru)[i] = 0;
     pid_t r = wait4(pid, &status, 0, &ru);
-    if (r != pid) return 2;
-    if (!WIFEXITED(status)) return 3;
-    if (WEXITSTATUS(status) != 7) return 4;
+    if (r != pid)
+        return 2;
+    if (!WIFEXITED(status))
+        return 3;
+    if (WEXITSTATUS(status) != 7)
+        return 4;
     /* The child did essentially no work, so most counters may legitimately
        be 0 -- just prove the struct was actually written to, not left as
        whatever garbage/zero it started as for every field. */
-    if (ru.ru_maxrss < 0) return 5;
+    if (ru.ru_maxrss < 0)
+        return 5;
     return 42;
 }
 
@@ -886,44 +1100,57 @@ int test_posix_wait4(void) {
 // niceness via setpriority, since raising priority is also privileged.
 [[cccc::test(return = 42)]]
 int test_posix_rlimit_priority(void) {
-    if (sizeof(struct rlimit) != 16) return 1;
-    if (RLIMIT_CORE == RLIMIT_NOFILE) return 2;
+    if (sizeof(struct rlimit) != 16)
+        return 1;
+    if (RLIMIT_CORE == RLIMIT_NOFILE)
+        return 2;
 
     struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) return 3;
-    if (rl.rlim_cur > rl.rlim_max && rl.rlim_max != RLIM_INFINITY) return 4;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0)
+        return 3;
+    if (rl.rlim_cur > rl.rlim_max && rl.rlim_max != RLIM_INFINITY)
+        return 4;
 
     rlim_t original_cur = rl.rlim_cur;
     if (original_cur > 16) {
         struct rlimit lowered = rl;
-        lowered.rlim_cur = 16;
-        if (setrlimit(RLIMIT_NOFILE, &lowered) != 0) return 5;
+        lowered.rlim_cur      = 16;
+        if (setrlimit(RLIMIT_NOFILE, &lowered) != 0)
+            return 5;
 
         struct rlimit check;
-        if (getrlimit(RLIMIT_NOFILE, &check) != 0) return 6;
-        if (check.rlim_cur != 16) return 7;
+        if (getrlimit(RLIMIT_NOFILE, &check) != 0)
+            return 6;
+        if (check.rlim_cur != 16)
+            return 7;
 
         /* Restore -- other tests in this same process must not inherit a
            lowered fd limit. */
         struct rlimit restore = rl;
-        restore.rlim_cur = original_cur;
-        if (setrlimit(RLIMIT_NOFILE, &restore) != 0) return 8;
+        restore.rlim_cur      = original_cur;
+        if (setrlimit(RLIMIT_NOFILE, &restore) != 0)
+            return 8;
     }
 
-    errno = 0;
+    errno        = 0;
     int nice_val = getpriority(PRIO_PROCESS, 0);
-    if (nice_val == -1 && errno != 0) return 9;
-    if (nice_val < -20 || nice_val > 19) return 10;
+    if (nice_val == -1 && errno != 0)
+        return 9;
+    if (nice_val < -20 || nice_val > 19)
+        return 10;
 
     /* Lower (never raise) niceness by 1 -- unprivileged processes can only
        increase niceness (lower priority), not decrease it. Skip if already
        at the max nice value. */
     if (nice_val < 19) {
-        if (setpriority(PRIO_PROCESS, 0, nice_val + 1) != 0) return 11;
-        errno = 0;
+        if (setpriority(PRIO_PROCESS, 0, nice_val + 1) != 0)
+            return 11;
+        errno          = 0;
         int check_nice = getpriority(PRIO_PROCESS, 0);
-        if (check_nice == -1 && errno != 0) return 12;
-        if (check_nice != nice_val + 1) return 13;
+        if (check_nice == -1 && errno != 0)
+            return 12;
+        if (check_nice != nice_val + 1)
+            return 13;
     }
 
     return 42;
@@ -945,29 +1172,39 @@ int test_quick_exit(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sysconf_pathconf_confstr(void) {
     long ps = sysconf(_SC_PAGESIZE);
-    if (ps <= 0 || ps != getpagesize()) return 1;
+    if (ps <= 0 || ps != getpagesize())
+        return 1;
 
-    if (sysconf(_SC_OPEN_MAX) <= 0) return 2;
-    if (sysconf(_SC_NPROCESSORS_ONLN) < 1) return 3;
+    if (sysconf(_SC_OPEN_MAX) <= 0)
+        return 2;
+    if (sysconf(_SC_NPROCESSORS_ONLN) < 1)
+        return 3;
 
     // Version queries answer with CCCC's VM-model constants directly.
-    if (sysconf(_SC_VERSION) != 200809L) return 4;
-    if (_POSIX_VERSION != 200809L) return 5;
-    if (_XOPEN_VERSION != 700) return 6;
+    if (sysconf(_SC_VERSION) != 200809L)
+        return 4;
+    if (_POSIX_VERSION != 200809L)
+        return 5;
+    if (_XOPEN_VERSION != 700)
+        return 6;
 
     // Unknown/unsupported name -> -1 (POSIX-correct failure signal).
-    if (sysconf(99999) != -1) return 7;
+    if (sysconf(99999) != -1)
+        return 7;
 
     int fd = open("/", O_RDONLY);
-    if (fd < 0) return 8;
-    long pm = pathconf("/", _PC_PATH_MAX);
+    if (fd < 0)
+        return 8;
+    long pm  = pathconf("/", _PC_PATH_MAX);
     long fpm = fpathconf(fd, _PC_PATH_MAX);
     close(fd);
-    if (pm <= 0 || fpm <= 0) return 9;
+    if (pm <= 0 || fpm <= 0)
+        return 9;
 
-    char buf[256];
+    char   buf[256];
     size_t cs = confstr(_CS_PATH, buf, sizeof(buf));
-    if (cs == 0 || cs > sizeof(buf)) return 10;
+    if (cs == 0 || cs > sizeof(buf))
+        return 10;
 
     // Feature-test macros are predefined so gated third-party code sees the
     // always-on POSIX surface CCCC exposes.
@@ -994,22 +1231,29 @@ int test_posix_sysconf_pathconf_confstr(void) {
 int test_posix_host_global_bridge(void) {
     errno = 0;
     int r = access("/nonexistent-path-xyz-736", F_OK);
-    if (r != -1) return 1;
-    if (errno != ENOENT) return 2;
+    if (r != -1)
+        return 1;
+    if (errno != ENOENT)
+        return 2;
 
     errno = 0;
     errno = EAGAIN;
-    if (errno != EAGAIN) return 3;
+    if (errno != EAGAIN)
+        return 3;
 
     char *argv[] = {"prog", "-x", "hello", NULL};
-    optind = 1;
-    int c = getopt(3, argv, "x:");
-    if (c != 'x') return 4;
-    if (!optarg || strcmp(optarg, "hello") != 0) return 5;
-    if (optind != 3) return 6;
+    optind       = 1;
+    int c        = getopt(3, argv, "x:");
+    if (c != 'x')
+        return 4;
+    if (!optarg || strcmp(optarg, "hello") != 0)
+        return 5;
+    if (optind != 3)
+        return 6;
 
     opterr = 0;
-    if (opterr != 0) return 7;
+    if (opterr != 0)
+        return 7;
 
     return 42;
 }
@@ -1020,31 +1264,44 @@ int test_posix_host_global_bridge(void) {
 [[cccc::test(return = 42)]]
 int test_posix_socket_transfer(void) {
     int sv[2];
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return 1;
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
+        return 1;
 
     const char *msg = "hello";
-    if (send(sv[0], msg, 5, 0) != 5) return 2;
+    if (send(sv[0], msg, 5, 0) != 5)
+        return 2;
 
     char buf[16];
-    for (int i = 0; i < 16; i++) buf[i] = 0;
-    if (recv(sv[1], buf, sizeof(buf), 0) != 5) return 3;
-    if (strcmp(buf, "hello") != 0) return 4;
+    for (int i = 0; i < 16; i++)
+        buf[i] = 0;
+    if (recv(sv[1], buf, sizeof(buf), 0) != 5)
+        return 3;
+    if (strcmp(buf, "hello") != 0)
+        return 4;
 
-    if (sendto(sv[0], msg, 5, 0, 0, 0) != 5) return 5;
-    for (int i = 0; i < 16; i++) buf[i] = 0;
-    if (recvfrom(sv[1], buf, sizeof(buf), 0, 0, 0) != 5) return 6;
-    if (strcmp(buf, "hello") != 0) return 7;
+    if (sendto(sv[0], msg, 5, 0, 0, 0) != 5)
+        return 5;
+    for (int i = 0; i < 16; i++)
+        buf[i] = 0;
+    if (recvfrom(sv[1], buf, sizeof(buf), 0, 0, 0) != 5)
+        return 6;
+    if (strcmp(buf, "hello") != 0)
+        return 7;
 
-    int type = 0;
+    int       type = 0;
     socklen_t tlen = sizeof(type);
-    if (getsockopt(sv[0], SOL_SOCKET, SO_TYPE, &type, &tlen) != 0) return 8;
-    if (type != SOCK_STREAM) return 9;
+    if (getsockopt(sv[0], SOL_SOCKET, SO_TYPE, &type, &tlen) != 0)
+        return 8;
+    if (type != SOCK_STREAM)
+        return 9;
 
     struct sockaddr_un addr;
-    socklen_t alen = sizeof(addr);
-    if (getpeername(sv[0], (struct sockaddr *)&addr, &alen) != 0) return 10;
+    socklen_t          alen = sizeof(addr);
+    if (getpeername(sv[0], (struct sockaddr *)&addr, &alen) != 0)
+        return 10;
 
-    if (sockatmark(sv[0]) != 0) return 11;
+    if (sockatmark(sv[0]) != 0)
+        return 11;
 
     close(sv[0]);
     close(sv[1]);
@@ -1057,43 +1314,77 @@ int test_posix_socket_transfer(void) {
 [[cccc::test(return = 42)]]
 int test_posix_socket_un_bind(void) {
     char path[64];
-    for (int i = 0; i < 64; i++) path[i] = 0;
+    for (int i = 0; i < 64; i++)
+        path[i] = 0;
     strcpy(path, "/tmp/cccc_test_un_XXXXXX");
     int tfd = mkstemp(path);
-    if (tfd < 0) return 1;
+    if (tfd < 0)
+        return 1;
     close(tfd);
     unlink(path);
 
     int lfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (lfd < 0) return 2;
+    if (lfd < 0)
+        return 2;
 
     struct sockaddr_un addr;
-    for (int i = 0; i < (int)sizeof(addr); i++) ((char *)&addr)[i] = 0;
+    for (int i = 0; i < (int)sizeof(addr); i++)
+        ((char *)&addr)[i] = 0;
     addr.sun_family = AF_UNIX;
     strcpy(addr.sun_path, path);
 #ifdef __APPLE__
     addr.sun_len = sizeof(addr);
 #endif
 
-    if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { close(lfd); return 3; }
-    if (listen(lfd, 1) != 0) { close(lfd); unlink(path); return 4; }
+    if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(lfd);
+        return 3;
+    }
+    if (listen(lfd, 1) != 0) {
+        close(lfd);
+        unlink(path);
+        return 4;
+    }
 
     int cfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (cfd < 0) { close(lfd); unlink(path); return 5; }
+    if (cfd < 0) {
+        close(lfd);
+        unlink(path);
+        return 5;
+    }
     if (connect(cfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(lfd); close(cfd); unlink(path); return 6;
+        close(lfd);
+        close(cfd);
+        unlink(path);
+        return 6;
     }
 
     struct sockaddr_un peer;
-    socklen_t plen = sizeof(peer);
-    int afd = accept(lfd, (struct sockaddr *)&peer, &plen);
-    if (afd < 0) { close(lfd); close(cfd); unlink(path); return 7; }
+    socklen_t          plen = sizeof(peer);
+    int                afd  = accept(lfd, (struct sockaddr *)&peer, &plen);
+    if (afd < 0) {
+        close(lfd);
+        close(cfd);
+        unlink(path);
+        return 7;
+    }
 
-    if (send(cfd, "hi", 2, 0) != 2) { close(lfd); close(cfd); close(afd); unlink(path); return 8; }
+    if (send(cfd, "hi", 2, 0) != 2) {
+        close(lfd);
+        close(cfd);
+        close(afd);
+        unlink(path);
+        return 8;
+    }
     char rbuf[4];
-    for (int i = 0; i < 4; i++) rbuf[i] = 0;
+    for (int i = 0; i < 4; i++)
+        rbuf[i] = 0;
     if (recv(afd, rbuf, sizeof(rbuf), 0) != 2 || strcmp(rbuf, "hi") != 0) {
-        close(lfd); close(cfd); close(afd); unlink(path); return 9;
+        close(lfd);
+        close(cfd);
+        close(afd);
+        unlink(path);
+        return 9;
     }
 
     close(lfd);
@@ -1113,70 +1404,131 @@ int test_posix_socket_un_bind(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sendmsg_recvmsg_scm_rights(void) {
     int sv[2];
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return 1;
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
+        return 1;
 
     char path[64];
-    for (int i = 0; i < 64; i++) path[i] = 0;
+    for (int i = 0; i < 64; i++)
+        path[i] = 0;
     strcpy(path, "/tmp/cccc_test_scm_XXXXXX");
     int passed_fd = mkstemp(path);
-    if (passed_fd < 0) { close(sv[0]); close(sv[1]); return 2; }
+    if (passed_fd < 0) {
+        close(sv[0]);
+        close(sv[1]);
+        return 2;
+    }
     unlink(path);
-    if (write(passed_fd, "hi", 2) != 2) { close(passed_fd); close(sv[0]); close(sv[1]); return 3; }
+    if (write(passed_fd, "hi", 2) != 2) {
+        close(passed_fd);
+        close(sv[0]);
+        close(sv[1]);
+        return 3;
+    }
 
-    char data = 'x';
+    char         data = 'x';
     struct iovec iov;
     iov.iov_base = &data;
-    iov.iov_len = 1;
+    iov.iov_len  = 1;
 
     char cbuf[CMSG_SPACE(sizeof(int))];
-    for (int i = 0; i < (int)sizeof(cbuf); i++) cbuf[i] = 0;
+    for (int i = 0; i < (int)sizeof(cbuf); i++)
+        cbuf[i] = 0;
 
     struct msghdr smsg;
-    for (int i = 0; i < (int)sizeof(smsg); i++) ((char *)&smsg)[i] = 0;
-    smsg.msg_iov = &iov;
-    smsg.msg_iovlen = 1;
-    smsg.msg_control = cbuf;
-    smsg.msg_controllen = sizeof(cbuf);
+    for (int i = 0; i < (int)sizeof(smsg); i++)
+        ((char *)&smsg)[i] = 0;
+    smsg.msg_iov         = &iov;
+    smsg.msg_iovlen      = 1;
+    smsg.msg_control     = cbuf;
+    smsg.msg_controllen  = sizeof(cbuf);
 
     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&smsg);
-    if (!cmsg) { close(passed_fd); close(sv[0]); close(sv[1]); return 4; }
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+    if (!cmsg) {
+        close(passed_fd);
+        close(sv[0]);
+        close(sv[1]);
+        return 4;
+    }
+    cmsg->cmsg_level        = SOL_SOCKET;
+    cmsg->cmsg_type         = SCM_RIGHTS;
+    cmsg->cmsg_len          = CMSG_LEN(sizeof(int));
     *(int *)CMSG_DATA(cmsg) = passed_fd;
 
-    if (sendmsg(sv[0], &smsg, 0) != 1) { close(passed_fd); close(sv[0]); close(sv[1]); return 5; }
+    if (sendmsg(sv[0], &smsg, 0) != 1) {
+        close(passed_fd);
+        close(sv[0]);
+        close(sv[1]);
+        return 5;
+    }
     close(passed_fd);
 
-    char rdata = 0;
+    char         rdata = 0;
     struct iovec riov;
     riov.iov_base = &rdata;
-    riov.iov_len = 1;
+    riov.iov_len  = 1;
 
     char rcbuf[CMSG_SPACE(sizeof(int))];
-    for (int i = 0; i < (int)sizeof(rcbuf); i++) rcbuf[i] = 0;
+    for (int i = 0; i < (int)sizeof(rcbuf); i++)
+        rcbuf[i] = 0;
 
     struct msghdr rmsg;
-    for (int i = 0; i < (int)sizeof(rmsg); i++) ((char *)&rmsg)[i] = 0;
-    rmsg.msg_iov = &riov;
-    rmsg.msg_iovlen = 1;
-    rmsg.msg_control = rcbuf;
+    for (int i = 0; i < (int)sizeof(rmsg); i++)
+        ((char *)&rmsg)[i] = 0;
+    rmsg.msg_iov        = &riov;
+    rmsg.msg_iovlen     = 1;
+    rmsg.msg_control    = rcbuf;
     rmsg.msg_controllen = sizeof(rcbuf);
 
-    if (recvmsg(sv[1], &rmsg, 0) != 1) { close(sv[0]); close(sv[1]); return 6; }
-    if (rdata != 'x') { close(sv[0]); close(sv[1]); return 7; }
+    if (recvmsg(sv[1], &rmsg, 0) != 1) {
+        close(sv[0]);
+        close(sv[1]);
+        return 6;
+    }
+    if (rdata != 'x') {
+        close(sv[0]);
+        close(sv[1]);
+        return 7;
+    }
 
     struct cmsghdr *rcmsg = CMSG_FIRSTHDR(&rmsg);
-    if (!rcmsg) { close(sv[0]); close(sv[1]); return 8; }
-    if (rcmsg->cmsg_level != SOL_SOCKET) { close(sv[0]); close(sv[1]); return 9; }
-    if (rcmsg->cmsg_type != SCM_RIGHTS) { close(sv[0]); close(sv[1]); return 10; }
+    if (!rcmsg) {
+        close(sv[0]);
+        close(sv[1]);
+        return 8;
+    }
+    if (rcmsg->cmsg_level != SOL_SOCKET) {
+        close(sv[0]);
+        close(sv[1]);
+        return 9;
+    }
+    if (rcmsg->cmsg_type != SCM_RIGHTS) {
+        close(sv[0]);
+        close(sv[1]);
+        return 10;
+    }
 
-    int received_fd = *(int *)CMSG_DATA(rcmsg);
+    int  received_fd = *(int *)CMSG_DATA(rcmsg);
     char verify[3];
-    for (int i = 0; i < 3; i++) verify[i] = 0;
-    if (lseek(received_fd, 0, SEEK_SET) != 0) { close(received_fd); close(sv[0]); close(sv[1]); return 11; }
-    if (read(received_fd, verify, 2) != 2) { close(received_fd); close(sv[0]); close(sv[1]); return 12; }
-    if (verify[0] != 'h' || verify[1] != 'i') { close(received_fd); close(sv[0]); close(sv[1]); return 13; }
+    for (int i = 0; i < 3; i++)
+        verify[i] = 0;
+    if (lseek(received_fd, 0, SEEK_SET) != 0) {
+        close(received_fd);
+        close(sv[0]);
+        close(sv[1]);
+        return 11;
+    }
+    if (read(received_fd, verify, 2) != 2) {
+        close(received_fd);
+        close(sv[0]);
+        close(sv[1]);
+        return 12;
+    }
+    if (verify[0] != 'h' || verify[1] != 'i') {
+        close(received_fd);
+        close(sv[0]);
+        close(sv[1]);
+        return 13;
+    }
 
     close(received_fd);
     close(sv[0]);
@@ -1193,39 +1545,67 @@ int test_posix_sendmsg_recvmsg_scm_rights(void) {
 [[cccc::test(return = 42)]]
 int test_posix_ipv6_udp_roundtrip(void) {
     int sfd = socket(AF_INET6, SOCK_DGRAM, 0);
-    if (sfd < 0) return 1;
+    if (sfd < 0)
+        return 1;
 
     struct sockaddr_in6 addr;
-    for (int i = 0; i < (int)sizeof(addr); i++) ((char *)&addr)[i] = 0;
+    for (int i = 0; i < (int)sizeof(addr); i++)
+        ((char *)&addr)[i] = 0;
 #ifdef __APPLE__
     addr.sin6_len = sizeof(addr);
 #endif
-    addr.sin6_family = AF_INET6;
-    addr.sin6_port = 0; /* ephemeral */
+    addr.sin6_family         = AF_INET6;
+    addr.sin6_port           = 0; /* ephemeral */
     struct in6_addr loopback = IN6ADDR_LOOPBACK_INIT;
-    addr.sin6_addr = loopback;
+    addr.sin6_addr           = loopback;
 
-    if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { close(sfd); return 2; }
+    if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(sfd);
+        return 2;
+    }
 
     struct sockaddr_in6 bound;
-    socklen_t blen = sizeof(bound);
-    if (getsockname(sfd, (struct sockaddr *)&bound, &blen) != 0) { close(sfd); return 3; }
-    if (bound.sin6_family != AF_INET6) { close(sfd); return 4; }
-    if (bound.sin6_port == 0) { close(sfd); return 5; }
+    socklen_t           blen = sizeof(bound);
+    if (getsockname(sfd, (struct sockaddr *)&bound, &blen) != 0) {
+        close(sfd);
+        return 3;
+    }
+    if (bound.sin6_family != AF_INET6) {
+        close(sfd);
+        return 4;
+    }
+    if (bound.sin6_port == 0) {
+        close(sfd);
+        return 5;
+    }
 
-    if (sendto(sfd, "hi", 2, 0, (struct sockaddr *)&bound, sizeof(bound)) != 2) { close(sfd); return 6; }
+    if (sendto(sfd, "hi", 2, 0, (struct sockaddr *)&bound, sizeof(bound)) !=
+        2) {
+        close(sfd);
+        return 6;
+    }
 
     char buf[4];
-    for (int i = 0; i < 4; i++) buf[i] = 0;
+    for (int i = 0; i < 4; i++)
+        buf[i] = 0;
     struct sockaddr_in6 from;
-    socklen_t flen = sizeof(from);
-    if (recvfrom(sfd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen) != 2) { close(sfd); return 7; }
-    if (strcmp(buf, "hi") != 0) { close(sfd); return 8; }
+    socklen_t           flen = sizeof(from);
+    if (recvfrom(sfd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen) !=
+        2) {
+        close(sfd);
+        return 7;
+    }
+    if (strcmp(buf, "hi") != 0) {
+        close(sfd);
+        return 8;
+    }
 
     close(sfd);
 
-    if (IPPROTO_IPV6 != 41) return 9;
-    if (IPV6_V6ONLY == IPV6_UNICAST_HOPS) return 10;
+    if (IPPROTO_IPV6 != 41)
+        return 9;
+    if (IPV6_V6ONLY == IPV6_UNICAST_HOPS)
+        return 10;
     return 42;
 }
 
@@ -1242,44 +1622,62 @@ int test_posix_ipv6_udp_roundtrip(void) {
 int test_posix_ipv6_advanced_options(void) {
     /* Constants distinct + match expectation (per-platform values verified
        against real macOS/Linux headers). */
-    if (IPV6_PKTINFO == IPV6_TCLASS) return 1;
-    if (IPV6_RECVPKTINFO == IPV6_RECVTCLASS) return 2;
-    if (IPV6_HOPOPTS == IPV6_DSTOPTS) return 3;
-    if (IPV6_RTHDR_TYPE_0 != 0) return 4;
+    if (IPV6_PKTINFO == IPV6_TCLASS)
+        return 1;
+    if (IPV6_RECVPKTINFO == IPV6_RECVTCLASS)
+        return 2;
+    if (IPV6_HOPOPTS == IPV6_DSTOPTS)
+        return 3;
+    if (IPV6_RTHDR_TYPE_0 != 0)
+        return 4;
 
-    if (sizeof(struct ipv6_mreq) != 20) return 5;
-    if (sizeof(struct in6_pktinfo) != 20) return 6;
+    if (sizeof(struct ipv6_mreq) != 20)
+        return 5;
+    if (sizeof(struct in6_pktinfo) != 20)
+        return 6;
 
     int sfd = socket(AF_INET6, SOCK_DGRAM, 0);
-    if (sfd < 0) return 7;
+    if (sfd < 0)
+        return 7;
 
     /* IPV6_TCLASS round trip -- genuine end-to-end check, no interface
        dependency. */
     int tclass = 42;
-    if (setsockopt(sfd, IPPROTO_IPV6, IPV6_TCLASS, &tclass, sizeof(tclass)) != 0) {
+    if (setsockopt(sfd, IPPROTO_IPV6, IPV6_TCLASS, &tclass, sizeof(tclass)) !=
+        0) {
         close(sfd);
         return 8;
     }
-    int got_tclass = -1;
+    int       got_tclass = -1;
     socklen_t tclass_len = sizeof(got_tclass);
-    if (getsockopt(sfd, IPPROTO_IPV6, IPV6_TCLASS, &got_tclass, &tclass_len) != 0) {
+    if (getsockopt(sfd, IPPROTO_IPV6, IPV6_TCLASS, &got_tclass, &tclass_len) !=
+        0) {
         close(sfd);
         return 9;
     }
-    if (got_tclass != tclass) { close(sfd); return 10; }
+    if (got_tclass != tclass) {
+        close(sfd);
+        return 10;
+    }
 
     /* struct ipv6_mreq + IPV6_JOIN_GROUP against a real multicast group on
        the default interface. Tolerate the host having no multicast-capable
        interface (common in containers/CI). */
     struct ipv6_mreq mreq;
-    for (int i = 0; i < (int)sizeof(mreq); i++) ((char *)&mreq)[i] = 0;
+    for (int i = 0; i < (int)sizeof(mreq); i++)
+        ((char *)&mreq)[i] = 0;
     mreq.ipv6mr_multiaddr.s6_addr[0] = 0xff;
     mreq.ipv6mr_multiaddr.s6_addr[1] = 0x02;
-    mreq.ipv6mr_multiaddr.s6_addr[15] = 0x01; /* ff02::1, all-nodes link-local */
+    mreq.ipv6mr_multiaddr.s6_addr[15] =
+        0x01;                  /* ff02::1, all-nodes link-local */
     mreq.ipv6mr_interface = 0; /* default interface */
 
-    if (setsockopt(sfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)) != 0) {
-        if (errno == EINVAL) { close(sfd); return 11; }
+    if (setsockopt(sfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)) !=
+        0) {
+        if (errno == EINVAL) {
+            close(sfd);
+            return 11;
+        }
         /* ENODEV/EADDRNOTAVAIL/ENOPROTOOPT/etc. -- no usable multicast
            interface on this host; the constant itself is proven correct
            by the fact the kernel understood the option well enough to
@@ -1302,36 +1700,52 @@ int test_posix_ipv6_advanced_options(void) {
 static int try_multicast_on(unsigned int ifindex, int *hard_fail) {
     *hard_fail = 0;
 
-    int rfd = socket(AF_INET6, SOCK_DGRAM, 0);
-    if (rfd < 0) { *hard_fail = 3; return 0; }
+    int rfd    = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (rfd < 0) {
+        *hard_fail = 3;
+        return 0;
+    }
 
     struct sockaddr_in6 raddr;
-    for (int i = 0; i < (int)sizeof(raddr); i++) ((char *)&raddr)[i] = 0;
+    for (int i = 0; i < (int)sizeof(raddr); i++)
+        ((char *)&raddr)[i] = 0;
 #ifdef __APPLE__
     raddr.sin6_len = sizeof(raddr);
 #endif
     raddr.sin6_family = AF_INET6;
-    raddr.sin6_port = 0; /* ephemeral */
-    if (bind(rfd, (struct sockaddr *)&raddr, sizeof(raddr)) != 0) { close(rfd); *hard_fail = 4; return 0; }
+    raddr.sin6_port   = 0; /* ephemeral */
+    if (bind(rfd, (struct sockaddr *)&raddr, sizeof(raddr)) != 0) {
+        close(rfd);
+        *hard_fail = 4;
+        return 0;
+    }
 
     struct sockaddr_in6 bound;
-    socklen_t blen = sizeof(bound);
-    if (getsockname(rfd, (struct sockaddr *)&bound, &blen) != 0) { close(rfd); *hard_fail = 5; return 0; }
+    socklen_t           blen = sizeof(bound);
+    if (getsockname(rfd, (struct sockaddr *)&bound, &blen) != 0) {
+        close(rfd);
+        *hard_fail = 5;
+        return 0;
+    }
 
     struct ipv6_mreq mreq;
-    for (int i = 0; i < (int)sizeof(mreq); i++) ((char *)&mreq)[i] = 0;
+    for (int i = 0; i < (int)sizeof(mreq); i++)
+        ((char *)&mreq)[i] = 0;
     mreq.ipv6mr_multiaddr.s6_addr[0] = 0xff;
     mreq.ipv6mr_multiaddr.s6_addr[1] = 0x02;
-    mreq.ipv6mr_multiaddr.s6_addr[15] = 0x01; /* ff02::1, all-nodes link-local */
+    mreq.ipv6mr_multiaddr.s6_addr[15] =
+        0x01; /* ff02::1, all-nodes link-local */
     mreq.ipv6mr_interface = ifindex;
 
-    if (setsockopt(rfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)) != 0) {
+    if (setsockopt(rfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq)) !=
+        0) {
         close(rfd);
         return 0; /* this interface can't join -- caller tries the next one */
     }
 
     int loop_enable = 1;
-    setsockopt(rfd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &loop_enable, sizeof(loop_enable));
+    setsockopt(rfd, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &loop_enable,
+               sizeof(loop_enable));
     setsockopt(rfd, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ifindex, sizeof(ifindex));
 
     /* Send from a second socket to ff02::1, scoped to the candidate
@@ -1346,32 +1760,36 @@ static int try_multicast_on(unsigned int ifindex, int *hard_fail) {
     setsockopt(sfd, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ifindex, sizeof(ifindex));
 
     struct sockaddr_in6 dest;
-    for (int i = 0; i < (int)sizeof(dest); i++) ((char *)&dest)[i] = 0;
+    for (int i = 0; i < (int)sizeof(dest); i++)
+        ((char *)&dest)[i] = 0;
 #ifdef __APPLE__
     dest.sin6_len = sizeof(dest);
 #endif
-    dest.sin6_family = AF_INET6;
-    dest.sin6_port = bound.sin6_port;
-    dest.sin6_addr = mreq.ipv6mr_multiaddr;
-    dest.sin6_scope_id = ifindex;
+    dest.sin6_family    = AF_INET6;
+    dest.sin6_port      = bound.sin6_port;
+    dest.sin6_addr      = mreq.ipv6mr_multiaddr;
+    dest.sin6_scope_id  = ifindex;
 
     const char *payload = "if788";
-    int sent_ok = (sendto(sfd, payload, 5, 0, (struct sockaddr *)&dest, sizeof(dest)) == 5);
+    int         sent_ok = (sendto(sfd, payload, 5, 0, (struct sockaddr *)&dest,
+                                  sizeof(dest)) == 5);
 
-    int ok = 0;
+    int         ok      = 0;
     if (sent_ok) {
         struct pollfd pfd;
-        pfd.fd = rfd;
-        pfd.events = POLLIN;
+        pfd.fd      = rfd;
+        pfd.events  = POLLIN;
         pfd.revents = 0;
-        int pr = poll(&pfd, 1, 3000);
+        int pr      = poll(&pfd, 1, 3000);
         if (pr > 0 && (pfd.revents & POLLIN)) {
             char buf[8];
-            for (int i = 0; i < 8; i++) buf[i] = 0;
+            for (int i = 0; i < 8; i++)
+                buf[i] = 0;
             struct sockaddr_in6 from;
-            socklen_t flen = sizeof(from);
-            ssize_t n = recvfrom(rfd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
-            ok = (n == 5 && strcmp(buf, payload) == 0);
+            socklen_t           flen = sizeof(from);
+            ssize_t             n = recvfrom(rfd, buf, sizeof(buf), 0,
+                                             (struct sockaddr *)&from, &flen);
+            ok                    = (n == 5 && strcmp(buf, payload) == 0);
         }
     }
     /* sendto/poll/recvfrom failing here is still environmental (e.g. no
@@ -1402,29 +1820,47 @@ static int try_multicast_on(unsigned int ifindex, int *hard_fail) {
 int test_posix_ipv6_multicast_roundtrip(void) {
     struct if_nameindex *list = if_nameindex();
     if (!list) {
-        printf("test_posix_ipv6_multicast_roundtrip: SKIP -- if_nameindex() returned nothing\n");
+        printf("test_posix_ipv6_multicast_roundtrip: SKIP -- if_nameindex() "
+               "returned nothing\n");
         return 42;
     }
 
     /* Round-trip if_indextoname() against the first interface's index. */
     char namebuf[IF_NAMESIZE];
-    for (int i = 0; i < IF_NAMESIZE; i++) namebuf[i] = 0;
-    if (if_indextoname(list[0].if_index, namebuf) != namebuf) { if_freenameindex(list); return 1; }
-    if (namebuf[0] == 0) { if_freenameindex(list); return 2; }
-    if (if_nametoindex(namebuf) != list[0].if_index) { if_freenameindex(list); return 10; }
+    for (int i = 0; i < IF_NAMESIZE; i++)
+        namebuf[i] = 0;
+    if (if_indextoname(list[0].if_index, namebuf) != namebuf) {
+        if_freenameindex(list);
+        return 1;
+    }
+    if (namebuf[0] == 0) {
+        if_freenameindex(list);
+        return 2;
+    }
+    if (if_nametoindex(namebuf) != list[0].if_index) {
+        if_freenameindex(list);
+        return 10;
+    }
 
-    int found = 0;
+    int found     = 0;
     int hard_fail = 0;
     for (struct if_nameindex *p = list; p->if_index != 0 || p->if_name; p++) {
-        if (try_multicast_on(p->if_index, &hard_fail)) { found = 1; break; }
-        if (hard_fail) break;
+        if (try_multicast_on(p->if_index, &hard_fail)) {
+            found = 1;
+            break;
+        }
+        if (hard_fail)
+            break;
     }
     if_freenameindex(list);
 
-    if (hard_fail) return hard_fail;
+    if (hard_fail)
+        return hard_fail;
     if (!found) {
-        printf("test_posix_ipv6_multicast_roundtrip: SKIP -- no interface in this environment "
-               "could complete an IPv6 multicast join+send+receive round trip\n");
+        printf(
+            "test_posix_ipv6_multicast_roundtrip: SKIP -- no interface in this "
+            "environment "
+            "could complete an IPv6 multicast join+send+receive round trip\n");
         return 42;
     }
     return 42;
@@ -1436,58 +1872,83 @@ int test_posix_ipv6_multicast_roundtrip(void) {
 // mlock, readdir_r/alphasort, getnameinfo, id functions, nice.
 [[cccc::test(return = 42)]]
 int test_posix_cheap_wrappers(void) {
-    if (mkdirat(AT_FDCWD, "/tmp/cccc_test_atdir", 0755) != 0) return 1;
+    if (mkdirat(AT_FDCWD, "/tmp/cccc_test_atdir", 0755) != 0)
+        return 1;
     struct stat st;
-    if (fstatat(AT_FDCWD, "/tmp/cccc_test_atdir", &st, 0) != 0) return 2;
-    if (!S_ISDIR(st.st_mode)) return 3;
-    if (fchmodat(AT_FDCWD, "/tmp/cccc_test_atdir", 0700, 0) != 0) return 4;
-    if ((st.st_mode & 0777) == 0 && fstatat(AT_FDCWD, "/tmp/cccc_test_atdir", &st, 0) != 0) return 5;
+    if (fstatat(AT_FDCWD, "/tmp/cccc_test_atdir", &st, 0) != 0)
+        return 2;
+    if (!S_ISDIR(st.st_mode))
+        return 3;
+    if (fchmodat(AT_FDCWD, "/tmp/cccc_test_atdir", 0700, 0) != 0)
+        return 4;
+    if ((st.st_mode & 0777) == 0 &&
+        fstatat(AT_FDCWD, "/tmp/cccc_test_atdir", &st, 0) != 0)
+        return 5;
     rmdir("/tmp/cccc_test_atdir");
 
     struct itimerval it, old;
-    it.it_value.tv_sec = 0; it.it_value.tv_usec = 0;
-    it.it_interval.tv_sec = 0; it.it_interval.tv_usec = 0;
-    if (setitimer(ITIMER_REAL, &it, &old) != 0) return 6;
-    if (getitimer(ITIMER_REAL, &old) != 0) return 7;
+    it.it_value.tv_sec     = 0;
+    it.it_value.tv_usec    = 0;
+    it.it_interval.tv_sec  = 0;
+    it.it_interval.tv_usec = 0;
+    if (setitimer(ITIMER_REAL, &it, &old) != 0)
+        return 6;
+    if (getitimer(ITIMER_REAL, &old) != 0)
+        return 7;
 
-    void *p = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p == (void *)-1) return 8;
-    if (mlock(p, 4096) == 0) munlock(p, 4096);
+    void *p = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                   -1, 0);
+    if (p == (void *)-1)
+        return 8;
+    if (mlock(p, 4096) == 0)
+        munlock(p, 4096);
     munmap(p, 4096);
 
     DIR *dp = opendir("/tmp");
-    if (!dp) return 9;
+    if (!dp)
+        return 9;
     struct dirent ent, *res;
-    if (readdir_r(dp, &ent, &res) != 0) return 10;
+    if (readdir_r(dp, &ent, &res) != 0)
+        return 10;
     closedir(dp);
 
     struct dirent da, db;
     strcpy(da.d_name, "apple");
     strcpy(db.d_name, "banana");
     const struct dirent *pa = &da, *pb = &db;
-    if (alphasort(&pa, &pb) >= 0) return 11;
+    if (alphasort(&pa, &pb) >= 0)
+        return 11;
 
     struct sockaddr_in sin;
-    for (int i = 0; i < (int)sizeof(sin); i++) ((char *)&sin)[i] = 0;
+    for (int i = 0; i < (int)sizeof(sin); i++)
+        ((char *)&sin)[i] = 0;
 #ifdef __APPLE__
     sin.sin_len = sizeof(sin);
 #endif
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(80);
+    sin.sin_family      = AF_INET;
+    sin.sin_port        = htons(80);
     sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     char host[NI_MAXHOST];
-    if (getnameinfo((struct sockaddr *)&sin, sizeof(sin), host, sizeof(host), 0, 0, NI_NUMERICHOST) != 0) return 12;
-    if (strcmp(host, "127.0.0.1") != 0) return 13;
+    if (getnameinfo((struct sockaddr *)&sin, sizeof(sin), host, sizeof(host), 0,
+                    0, NI_NUMERICHOST) != 0)
+        return 12;
+    if (strcmp(host, "127.0.0.1") != 0)
+        return 13;
 
-    if (getuid() < 0) return 14;
-    if (getgid() < 0) return 15;
+    if (getuid() < 0)
+        return 14;
+    if (getgid() < 0)
+        return 15;
 
     nice(0);
 
     /* Constant distinctness within each namespace (AT_*, wait-flag, mlock) */
-    if (AT_FDCWD == AT_SYMLINK_NOFOLLOW) return 16;
-    if (WEXITED == WSTOPPED || WSTOPPED == WNOWAIT || WEXITED == WNOWAIT) return 17;
-    if (MCL_CURRENT == MCL_FUTURE) return 18;
+    if (AT_FDCWD == AT_SYMLINK_NOFOLLOW)
+        return 16;
+    if (WEXITED == WSTOPPED || WSTOPPED == WNOWAIT || WEXITED == WNOWAIT)
+        return 17;
+    if (MCL_CURRENT == MCL_FUTURE)
+        return 18;
 
     return 42;
 }
@@ -1499,22 +1960,38 @@ int test_posix_cheap_wrappers(void) {
 // exercises the values functionally on whichever platform runs it.
 [[cccc::test(return = 42)]]
 int test_posix_fcntl_dirflags(void) {
-    if (O_DIRECTORY == O_NOFOLLOW) return 1;
+    if (O_DIRECTORY == O_NOFOLLOW)
+        return 1;
 
-    if (mkdir("/tmp/cccc_test_dirflag", 0755) != 0 && errno != EEXIST) return 2;
+    if (mkdir("/tmp/cccc_test_dirflag", 0755) != 0 && errno != EEXIST)
+        return 2;
 
     int dfd = open("/tmp/cccc_test_dirflag", O_RDONLY | O_DIRECTORY);
-    if (dfd < 0) return 3;
+    if (dfd < 0)
+        return 3;
     close(dfd);
 
-    int ffd = open("/tmp/cccc_test_dirflag/probe_file", O_CREAT | O_RDWR | O_TRUNC, 0600);
-    if (ffd < 0) { rmdir("/tmp/cccc_test_dirflag"); return 4; }
+    int ffd = open("/tmp/cccc_test_dirflag/probe_file",
+                   O_CREAT | O_RDWR | O_TRUNC, 0600);
+    if (ffd < 0) {
+        rmdir("/tmp/cccc_test_dirflag");
+        return 4;
+    }
     close(ffd);
 
-    errno = 0;
+    errno   = 0;
     int bad = open("/tmp/cccc_test_dirflag/probe_file", O_RDONLY | O_DIRECTORY);
-    if (bad >= 0) { close(bad); unlink("/tmp/cccc_test_dirflag/probe_file"); rmdir("/tmp/cccc_test_dirflag"); return 5; }
-    if (errno != ENOTDIR) { unlink("/tmp/cccc_test_dirflag/probe_file"); rmdir("/tmp/cccc_test_dirflag"); return 6; }
+    if (bad >= 0) {
+        close(bad);
+        unlink("/tmp/cccc_test_dirflag/probe_file");
+        rmdir("/tmp/cccc_test_dirflag");
+        return 5;
+    }
+    if (errno != ENOTDIR) {
+        unlink("/tmp/cccc_test_dirflag/probe_file");
+        rmdir("/tmp/cccc_test_dirflag");
+        return 6;
+    }
 
     unlink("/tmp/cccc_test_dirflag/probe_file");
     rmdir("/tmp/cccc_test_dirflag");
@@ -1530,36 +2007,47 @@ int test_posix_fcntl_dirflags(void) {
 // test_wait_stat_constants.c).
 [[cccc::test(return = 42)]]
 int test_posix_termios_constants(void) {
-    long iflag[] = {IGNBRK, BRKINT, IGNPAR, PARMRK, INPCK, ISTRIP, INLCR, IGNCR, ICRNL, IXON, IXOFF, IXANY};
-    int n = (int)(sizeof(iflag) / sizeof(iflag[0]));
+    long iflag[] = {IGNBRK, BRKINT, IGNPAR, PARMRK, INPCK, ISTRIP,
+                    INLCR,  IGNCR,  ICRNL,  IXON,   IXOFF, IXANY};
+    int  n       = (int)(sizeof(iflag) / sizeof(iflag[0]));
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (iflag[i] == iflag[j]) return 1;
+            if (iflag[i] == iflag[j])
+                return 1;
 
-    long cflag[] = {CS5, CS6, CS7, CS8, CSTOPB, CREAD, PARENB, PARODD, HUPCL, CLOCAL};
-    n = (int)(sizeof(cflag) / sizeof(cflag[0]));
+    long cflag[] = {CS5,   CS6,    CS7,    CS8,   CSTOPB,
+                    CREAD, PARENB, PARODD, HUPCL, CLOCAL};
+    n            = (int)(sizeof(cflag) / sizeof(cflag[0]));
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (i != 0 && j != 0 && cflag[i] == cflag[j]) return 2; /* CS5 == 0 legitimately */
+            if (i != 0 && j != 0 && cflag[i] == cflag[j])
+                return 2; /* CS5 == 0 legitimately */
 
-    long lflag[] = {ECHOE, ECHOK, ECHONL, NOFLSH, TOSTOP, IEXTEN, ECHO, ICANON, ISIG};
-    n = (int)(sizeof(lflag) / sizeof(lflag[0]));
+    long lflag[] = {ECHOE,  ECHOK, ECHONL, NOFLSH, TOSTOP,
+                    IEXTEN, ECHO,  ICANON, ISIG};
+    n            = (int)(sizeof(lflag) / sizeof(lflag[0]));
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (lflag[i] == lflag[j]) return 3;
+            if (lflag[i] == lflag[j])
+                return 3;
 
     long baud[] = {B9600, B19200, B38400, B57600, B115200, B230400};
-    n = (int)(sizeof(baud) / sizeof(baud[0]));
+    n           = (int)(sizeof(baud) / sizeof(baud[0]));
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (baud[i] == baud[j]) return 4;
-    if (B0 != 0) return 5;
+            if (baud[i] == baud[j])
+                return 4;
+    if (B0 != 0)
+        return 5;
 
-    long vchars[] = {VEOF, VEOL, VEOL2, VERASE, VWERASE, VKILL, VREPRINT, VINTR, VQUIT, VSUSP, VSTART, VSTOP, VLNEXT, VDISCARD, VMIN, VTIME};
-    n = (int)(sizeof(vchars) / sizeof(vchars[0]));
+    long vchars[] = {VEOF,     VEOL,     VEOL2, VERASE, VWERASE, VKILL,
+                     VREPRINT, VINTR,    VQUIT, VSUSP,  VSTART,  VSTOP,
+                     VLNEXT,   VDISCARD, VMIN,  VTIME};
+    n             = (int)(sizeof(vchars) / sizeof(vchars[0]));
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            if (vchars[i] == vchars[j]) return 6;
+            if (vchars[i] == vchars[j])
+                return 6;
 
     return 42;
 }
@@ -1590,29 +2078,38 @@ int test_posix_qsort_bsearch(void) {
     int arr[] = {5, 3, 1, 4, 2};
     qsort(arr, 5, sizeof(int), qb_cmp_int);
     for (int i = 0; i < 5; i++)
-        if (arr[i] != i + 1) return 1;
+        if (arr[i] != i + 1)
+            return 1;
 
-    int key = 3;
+    int  key   = 3;
     int *found = bsearch(&key, arr, 5, sizeof(int), qb_cmp_int);
-    if (!found || *found != 3) return 2;
+    if (!found || *found != 3)
+        return 2;
     key = 99;
-    if (bsearch(&key, arr, 5, sizeof(int), qb_cmp_int)) return 3;
+    if (bsearch(&key, arr, 5, sizeof(int), qb_cmp_int))
+        return 3;
 
     int arr2[] = {5, 3, 1, 4, 2};
     qsort(arr2, 5, sizeof(int), qb_cmp_nested);
     for (int i = 0; i < 5; i++)
-        if (arr2[i] != i + 1) return 4;
-    if (qb_nested_ok != 1) return 5;
+        if (arr2[i] != i + 1)
+            return 4;
+    if (qb_nested_ok != 1)
+        return 5;
 
     struct dirent a, b, c;
     strcpy(a.d_name, "banana");
     strcpy(b.d_name, "apple");
     strcpy(c.d_name, "cherry");
     const struct dirent *darr[3] = {&a, &b, &c};
-    qsort(darr, 3, sizeof(struct dirent *), (int (*)(const void *, const void *))alphasort);
-    if (strcmp(darr[0]->d_name, "apple") != 0) return 6;
-    if (strcmp(darr[1]->d_name, "banana") != 0) return 7;
-    if (strcmp(darr[2]->d_name, "cherry") != 0) return 8;
+    qsort(darr, 3, sizeof(struct dirent *),
+          (int (*)(const void *, const void *))alphasort);
+    if (strcmp(darr[0]->d_name, "apple") != 0)
+        return 6;
+    if (strcmp(darr[1]->d_name, "banana") != 0)
+        return 7;
+    if (strcmp(darr[2]->d_name, "cherry") != 0)
+        return 8;
 
     return 42;
 }
@@ -1627,7 +2124,8 @@ int test_posix_qsort_bsearch(void) {
 // this guards, and it's unconditional.
 static int glob_errfunc_calls;
 static int glob_errfunc(const char *epath, int eerrno) {
-    (void)epath; (void)eerrno;
+    (void)epath;
+    (void)eerrno;
     glob_errfunc_calls++;
     return 0;
 }
@@ -1638,7 +2136,8 @@ int test_posix_glob_errfunc(void) {
     glob_t g;
     glob("/tmp/cccc_test_glob_noperm/*", GLOB_ERR, glob_errfunc, &g);
     rmdir("/tmp/cccc_test_glob_noperm");
-    if (geteuid() != 0 && glob_errfunc_calls < 1) return 1;
+    if (geteuid() != 0 && glob_errfunc_calls < 1)
+        return 1;
     return 42;
 }
 
@@ -1654,12 +2153,17 @@ static int scandir_select_dotfiles_out(const struct dirent *e) {
 int test_posix_scandir(void) {
     struct dirent **list;
     int n = scandir("/tmp", &list, scandir_select_dotfiles_out, alphasort);
-    if (n < 0) return 1;
+    if (n < 0)
+        return 1;
     int rc = 42;
     for (int i = 0; i < n; i++) {
-        if (rc != 42) continue;
-        if (strcmp(list[i]->d_name, ".") == 0 || strcmp(list[i]->d_name, "..") == 0) rc = 2;
-        else if (i > 0 && strcmp(list[i - 1]->d_name, list[i]->d_name) > 0) rc = 3;
+        if (rc != 42)
+            continue;
+        if (strcmp(list[i]->d_name, ".") == 0 ||
+            strcmp(list[i]->d_name, "..") == 0)
+            rc = 2;
+        else if (i > 0 && strcmp(list[i - 1]->d_name, list[i]->d_name) > 0)
+            rc = 3;
     }
     for (int i = 0; i < n; i++)
         free(list[i]);
@@ -1682,42 +2186,56 @@ int test_posix_scandir(void) {
 // sigaction_flags below covers SA_RESETHAND/SA_NODEFER/sa_mask/SA_RESTART
 // enforcement itself).
 static volatile sig_atomic_t sigaction_got_it;
-static void sigaction_handler(int sig) { sigaction_got_it = sig; }
+static void sigaction_handler(int sig) {
+    sigaction_got_it = sig;
+}
 
 [[cccc::test(return = 42)]]
 int test_posix_sigaction(void) {
     struct sigaction sa, old;
-    for (int i = 0; i < (int)sizeof(sa); i++) ((char *)&sa)[i] = 0;
+    for (int i = 0; i < (int)sizeof(sa); i++)
+        ((char *)&sa)[i] = 0;
     sigemptyset(&sa.sa_mask);
     sigaddset(&sa.sa_mask, SIGTERM);
     sa.sa_handler = sigaction_handler;
-    sa.sa_flags = 0x1234;
+    sa.sa_flags   = 0x1234;
 
-    if (sigaction(SIGUSR1, &sa, &old) != 0) return 1;
-    if (old.sa_handler != SIG_DFL) return 2;
+    if (sigaction(SIGUSR1, &sa, &old) != 0)
+        return 1;
+    if (old.sa_handler != SIG_DFL)
+        return 2;
 
     /* oact fidelity round trip -- before any delivery, since 0x1234 may
        set SA_RESETHAND depending on platform. */
     struct sigaction q;
-    for (int i = 0; i < (int)sizeof(q); i++) ((char *)&q)[i] = 0;
-    if (sigaction(SIGUSR1, 0, &q) != 0) return 4;
-    if (q.sa_handler != sigaction_handler) return 5;
-    if (q.sa_flags != 0x1234) return 6;
-    if (sigismember(&q.sa_mask, SIGTERM) != 1) return 7;
+    for (int i = 0; i < (int)sizeof(q); i++)
+        ((char *)&q)[i] = 0;
+    if (sigaction(SIGUSR1, 0, &q) != 0)
+        return 4;
+    if (q.sa_handler != sigaction_handler)
+        return 5;
+    if (q.sa_flags != 0x1234)
+        return 6;
+    if (sigismember(&q.sa_mask, SIGTERM) != 1)
+        return 7;
 
     /* Re-register with real (non-RESETHAND/NODEFER) flags before actually
        delivering, so this test only exercises #738's basic dispatch, not
        #787's flag enforcement. */
     sa.sa_flags = 0;
-    if (sigaction(SIGUSR1, &sa, 0) != 0) return 9;
+    if (sigaction(SIGUSR1, &sa, 0) != 0)
+        return 9;
 
     raise(SIGUSR1);
-    if (sigaction_got_it != SIGUSR1) return 3;
+    if (sigaction_got_it != SIGUSR1)
+        return 3;
 
     struct sigaction dfl;
-    for (int i = 0; i < (int)sizeof(dfl); i++) ((char *)&dfl)[i] = 0;
+    for (int i = 0; i < (int)sizeof(dfl); i++)
+        ((char *)&dfl)[i] = 0;
     dfl.sa_handler = SIG_DFL;
-    if (sigaction(SIGUSR1, &dfl, 0) != 0) return 8;
+    if (sigaction(SIGUSR1, &dfl, 0) != 0)
+        return 8;
 
     return 42;
 }
@@ -1731,50 +2249,60 @@ int test_posix_sigaction(void) {
 // shim, which captures genuine kernel-provided data (si_code == CLD_EXITED,
 // si_status == the child's real exit code).
 static volatile sig_atomic_t siginfo_signo = -1;
-static volatile sig_atomic_t siginfo_code = -1;
-static volatile sig_atomic_t siginfo_pid = -1;
+static volatile sig_atomic_t siginfo_code  = -1;
+static volatile sig_atomic_t siginfo_pid   = -1;
 static void siginfo_handler(int sig, siginfo_t *info, void *uctx) {
     (void)uctx;
     siginfo_signo = sig;
-    siginfo_code = info->si_code;
-    siginfo_pid = info->si_pid;
+    siginfo_code  = info->si_code;
+    siginfo_pid   = info->si_pid;
 }
 
-static volatile sig_atomic_t sigchld_code = -1;
+static volatile sig_atomic_t sigchld_code   = -1;
 static volatile sig_atomic_t sigchld_status = -1;
-static volatile sig_atomic_t sigchld_pid = -1;
+static volatile sig_atomic_t sigchld_pid    = -1;
 static void sigchld_handler(int sig, siginfo_t *info, void *uctx) {
-    (void)sig; (void)uctx;
-    sigchld_code = info->si_code;
+    (void)sig;
+    (void)uctx;
+    sigchld_code   = info->si_code;
     sigchld_status = info->si_status;
-    sigchld_pid = info->si_pid;
+    sigchld_pid    = info->si_pid;
 }
 
 [[cccc::test(return = 42)]]
 int test_posix_sigaction_siginfo(void) {
     struct sigaction sa;
-    for (int i = 0; i < (int)sizeof(sa); i++) ((char *)&sa)[i] = 0;
+    for (int i = 0; i < (int)sizeof(sa); i++)
+        ((char *)&sa)[i] = 0;
     sa.sa_sigaction = siginfo_handler;
-    sa.sa_flags = SA_SIGINFO;
-    if (sigaction(SIGUSR1, &sa, 0) != 0) return 1;
+    sa.sa_flags     = SA_SIGINFO;
+    if (sigaction(SIGUSR1, &sa, 0) != 0)
+        return 1;
 
     raise(SIGUSR1);
-    if (siginfo_signo != SIGUSR1) return 2;
-    if (siginfo_code != SI_USER) return 3;
-    if (siginfo_pid != getpid()) return 4;
+    if (siginfo_signo != SIGUSR1)
+        return 2;
+    if (siginfo_code != SI_USER)
+        return 3;
+    if (siginfo_pid != getpid())
+        return 4;
 
     struct sigaction dfl1;
-    for (int i = 0; i < (int)sizeof(dfl1); i++) ((char *)&dfl1)[i] = 0;
+    for (int i = 0; i < (int)sizeof(dfl1); i++)
+        ((char *)&dfl1)[i] = 0;
     dfl1.sa_handler = SIG_DFL;
-    if (sigaction(SIGUSR1, &dfl1, 0) != 0) return 5;
+    if (sigaction(SIGUSR1, &dfl1, 0) != 0)
+        return 5;
 
     /* Real delivered SIGCHLD -- genuine kernel-captured siginfo, not
        synthesized by the VM. */
     struct sigaction sc;
-    for (int i = 0; i < (int)sizeof(sc); i++) ((char *)&sc)[i] = 0;
+    for (int i = 0; i < (int)sizeof(sc); i++)
+        ((char *)&sc)[i] = 0;
     sc.sa_sigaction = sigchld_handler;
-    sc.sa_flags = SA_SIGINFO;
-    if (sigaction(SIGCHLD, &sc, 0) != 0) return 6;
+    sc.sa_flags     = SA_SIGINFO;
+    if (sigaction(SIGCHLD, &sc, 0) != 0)
+        return 6;
 
     /* #853: every path below this point must fall through to the SIGCHLD
        disposition restore (dfl2) before returning -- an early `return`
@@ -1784,13 +2312,18 @@ int test_posix_sigaction_siginfo(void) {
        test's own waitpid()/blocking call (see test_posix_spawn). A single
        `rc` + fallthrough replaces the old direct returns so cleanup always
        runs. */
-    int rc = 0;
+    int   rc  = 0;
     pid_t pid = -1;
-    int status;
+    int   status;
 
     pid = fork();
-    if (pid < 0) { rc = 7; goto cleanup; }
-    if (pid == 0) { _exit(7); }
+    if (pid < 0) {
+        rc = 7;
+        goto cleanup;
+    }
+    if (pid == 0) {
+        _exit(7);
+    }
 
     /* waitpid() reaps the child; SIGCHLD delivery is polled for separately
        via the dispatch loop's pending-signal check, so give it a wall-
@@ -1802,7 +2335,8 @@ int test_posix_sigaction_siginfo(void) {
         struct timeval start, now;
         gettimeofday(&start, 0);
         do {
-            if (sigchld_pid == pid) break;
+            if (sigchld_pid == pid)
+                break;
             usleep(1000);
             gettimeofday(&now, 0);
         } while ((now.tv_sec - start.tv_sec) < 30);
@@ -1810,21 +2344,33 @@ int test_posix_sigaction_siginfo(void) {
 
     {
         pid_t r;
-        do { r = waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
+        do {
+            r = waitpid(pid, &status, 0);
+        } while (r < 0 && errno == EINTR);
     }
 
-    if (sigchld_pid != pid) { rc = 8; goto cleanup; }
-    if (sigchld_code != CLD_EXITED) { rc = 9; goto cleanup; }
-    if (sigchld_status != 7) { rc = 10; goto cleanup; }
+    if (sigchld_pid != pid) {
+        rc = 8;
+        goto cleanup;
+    }
+    if (sigchld_code != CLD_EXITED) {
+        rc = 9;
+        goto cleanup;
+    }
+    if (sigchld_status != 7) {
+        rc = 10;
+        goto cleanup;
+    }
     rc = 42;
 
-cleanup:
-    {
-        struct sigaction dfl2;
-        for (int i = 0; i < (int)sizeof(dfl2); i++) ((char *)&dfl2)[i] = 0;
-        dfl2.sa_handler = SIG_DFL;
-        if (sigaction(SIGCHLD, &dfl2, 0) != 0 && rc == 42) rc = 11;
-    }
+cleanup: {
+    struct sigaction dfl2;
+    for (int i = 0; i < (int)sizeof(dfl2); i++)
+        ((char *)&dfl2)[i] = 0;
+    dfl2.sa_handler = SIG_DFL;
+    if (sigaction(SIGCHLD, &dfl2, 0) != 0 && rc == 42)
+        rc = 11;
+}
     return rc;
 }
 
@@ -1837,27 +2383,38 @@ cleanup:
 // restart; not covered by an automated behavioral test here for that
 // reason, only round-tripped through oact like any other flag).
 static volatile sig_atomic_t resethand_ran;
-static void resethand_handler(int sig) { (void)sig; resethand_ran++; }
+static void resethand_handler(int sig) {
+    (void)sig;
+    resethand_ran++;
+}
 
 static volatile sig_atomic_t nodefer_depth;
 static volatile sig_atomic_t nodefer_max_depth;
 static volatile sig_atomic_t nodefer_entries;
 static void nodefer_handler(int sig) {
     nodefer_depth++;
-    if (nodefer_depth > nodefer_max_depth) nodefer_max_depth = nodefer_depth;
+    if (nodefer_depth > nodefer_max_depth)
+        nodefer_max_depth = nodefer_depth;
     nodefer_entries++;
-    if (nodefer_entries == 1) raise(sig); /* recurses iff SA_NODEFER */
+    if (nodefer_entries == 1)
+        raise(sig); /* recurses iff SA_NODEFER */
     nodefer_depth--;
 }
 
 static volatile sig_atomic_t mask_log[8];
 static volatile sig_atomic_t mask_log_len;
-static void mask_log_push(int v) { if (mask_log_len < 8) mask_log[mask_log_len++] = v; }
-static void mask_handler_b(int sig) { (void)sig; mask_log_push(2); }
+static void mask_log_push(int v) {
+    if (mask_log_len < 8)
+        mask_log[mask_log_len++] = v;
+}
+static void mask_handler_b(int sig) {
+    (void)sig;
+    mask_log_push(2);
+}
 static void mask_handler_a(int sig) {
     (void)sig;
     mask_log_push(1);
-    raise(SIGUSR2); /* blocked by A's sa_mask -- must not run B yet */
+    raise(SIGUSR2);   /* blocked by A's sa_mask -- must not run B yet */
     mask_log_push(3); /* proves B hasn't run between the two pushes above */
 }
 
@@ -1865,95 +2422,132 @@ static void mask_handler_a(int sig) {
 int test_posix_sigaction_flags(void) {
     /* SA_RESETHAND: disposition resets to SIG_DFL after one delivery. */
     struct sigaction rh;
-    for (int i = 0; i < (int)sizeof(rh); i++) ((char *)&rh)[i] = 0;
+    for (int i = 0; i < (int)sizeof(rh); i++)
+        ((char *)&rh)[i] = 0;
     rh.sa_handler = resethand_handler;
-    rh.sa_flags = SA_RESETHAND;
-    if (sigaction(SIGUSR2, &rh, 0) != 0) return 1;
+    rh.sa_flags   = SA_RESETHAND;
+    if (sigaction(SIGUSR2, &rh, 0) != 0)
+        return 1;
 
     raise(SIGUSR2);
-    if (resethand_ran != 1) return 2;
+    if (resethand_ran != 1)
+        return 2;
 
     struct sigaction q;
-    for (int i = 0; i < (int)sizeof(q); i++) ((char *)&q)[i] = 0;
-    if (sigaction(SIGUSR2, 0, &q) != 0) return 3;
-    if (q.sa_handler != SIG_DFL) return 4;
+    for (int i = 0; i < (int)sizeof(q); i++)
+        ((char *)&q)[i] = 0;
+    if (sigaction(SIGUSR2, 0, &q) != 0)
+        return 3;
+    if (q.sa_handler != SIG_DFL)
+        return 4;
 
     /* SA_NODEFER: without it, a handler's self-raise() is deferred (not
        reentered) until the handler returns; with it, the same self-raise()
        recurses immediately. */
     struct sigaction nd;
-    for (int i = 0; i < (int)sizeof(nd); i++) ((char *)&nd)[i] = 0;
+    for (int i = 0; i < (int)sizeof(nd); i++)
+        ((char *)&nd)[i] = 0;
     nd.sa_handler = nodefer_handler;
-    nd.sa_flags = 0;
-    if (sigaction(SIGUSR2, &nd, 0) != 0) return 5;
+    nd.sa_flags   = 0;
+    if (sigaction(SIGUSR2, &nd, 0) != 0)
+        return 5;
 
-    nodefer_depth = 0; nodefer_max_depth = 0; nodefer_entries = 0;
+    nodefer_depth     = 0;
+    nodefer_max_depth = 0;
+    nodefer_entries   = 0;
     raise(SIGUSR2);
     /* Give the dispatch loop a few cycles to redeliver the signal that was
        deferred during the handler's own execution (no OS wakeup needed --
        it's polled on every VM instruction, including these no-ops). */
-    for (volatile int i = 0; i < 100000 && nodefer_entries < 2; i++) { }
-    if (nodefer_max_depth != 1) return 6;   /* never reentered */
-    if (nodefer_entries != 2) return 7;     /* but still delivered twice */
+    for (volatile int i = 0; i < 100000 && nodefer_entries < 2; i++) {
+    }
+    if (nodefer_max_depth != 1)
+        return 6; /* never reentered */
+    if (nodefer_entries != 2)
+        return 7; /* but still delivered twice */
 
     nd.sa_flags = SA_NODEFER;
-    if (sigaction(SIGUSR2, &nd, 0) != 0) return 8;
-    nodefer_depth = 0; nodefer_max_depth = 0; nodefer_entries = 0;
+    if (sigaction(SIGUSR2, &nd, 0) != 0)
+        return 8;
+    nodefer_depth     = 0;
+    nodefer_max_depth = 0;
+    nodefer_entries   = 0;
     raise(SIGUSR2);
-    if (nodefer_max_depth != 2) return 9;   /* reentered synchronously */
-    if (nodefer_entries != 2) return 10;
+    if (nodefer_max_depth != 2)
+        return 9; /* reentered synchronously */
+    if (nodefer_entries != 2)
+        return 10;
 
     struct sigaction dfl3;
-    for (int i = 0; i < (int)sizeof(dfl3); i++) ((char *)&dfl3)[i] = 0;
+    for (int i = 0; i < (int)sizeof(dfl3); i++)
+        ((char *)&dfl3)[i] = 0;
     dfl3.sa_handler = SIG_DFL;
-    if (sigaction(SIGUSR2, &dfl3, 0) != 0) return 11;
+    if (sigaction(SIGUSR2, &dfl3, 0) != 0)
+        return 11;
 
     /* sa_mask: A's mask blocks SIGUSR2 for the duration of A's execution,
        so a self-raise(SIGUSR2) from inside A must not run B until A
        returns. */
     struct sigaction ma;
-    for (int i = 0; i < (int)sizeof(ma); i++) ((char *)&ma)[i] = 0;
+    for (int i = 0; i < (int)sizeof(ma); i++)
+        ((char *)&ma)[i] = 0;
     sigemptyset(&ma.sa_mask);
     sigaddset(&ma.sa_mask, SIGUSR2);
     ma.sa_handler = mask_handler_a;
-    ma.sa_flags = 0;
-    if (sigaction(SIGUSR1, &ma, 0) != 0) return 12;
+    ma.sa_flags   = 0;
+    if (sigaction(SIGUSR1, &ma, 0) != 0)
+        return 12;
 
     struct sigaction mb;
-    for (int i = 0; i < (int)sizeof(mb); i++) ((char *)&mb)[i] = 0;
+    for (int i = 0; i < (int)sizeof(mb); i++)
+        ((char *)&mb)[i] = 0;
     mb.sa_handler = mask_handler_b;
-    mb.sa_flags = 0;
-    if (sigaction(SIGUSR2, &mb, 0) != 0) return 13;
+    mb.sa_flags   = 0;
+    if (sigaction(SIGUSR2, &mb, 0) != 0)
+        return 13;
 
     mask_log_len = 0;
     raise(SIGUSR1);
-    for (volatile int i = 0; i < 100000 && mask_log_len < 3; i++) { }
-    if (mask_log_len != 3) return 14;
-    if (mask_log[0] != 1 || mask_log[1] != 3 || mask_log[2] != 2) return 15;
+    for (volatile int i = 0; i < 100000 && mask_log_len < 3; i++) {
+    }
+    if (mask_log_len != 3)
+        return 14;
+    if (mask_log[0] != 1 || mask_log[1] != 3 || mask_log[2] != 2)
+        return 15;
 
     struct sigaction dfl4, dfl5;
-    for (int i = 0; i < (int)sizeof(dfl4); i++) ((char *)&dfl4)[i] = 0;
+    for (int i = 0; i < (int)sizeof(dfl4); i++)
+        ((char *)&dfl4)[i] = 0;
     dfl4.sa_handler = SIG_DFL;
-    dfl5 = dfl4;
-    if (sigaction(SIGUSR1, &dfl4, 0) != 0) return 16;
-    if (sigaction(SIGUSR2, &dfl5, 0) != 0) return 17;
+    dfl5            = dfl4;
+    if (sigaction(SIGUSR1, &dfl4, 0) != 0)
+        return 16;
+    if (sigaction(SIGUSR2, &dfl5, 0) != 0)
+        return 17;
 
     /* SA_RESTART: round-trips through oact like any other flag (real
        host-level pass-through -- see comment above). */
     struct sigaction rs;
-    for (int i = 0; i < (int)sizeof(rs); i++) ((char *)&rs)[i] = 0;
+    for (int i = 0; i < (int)sizeof(rs); i++)
+        ((char *)&rs)[i] = 0;
     rs.sa_handler = resethand_handler;
-    rs.sa_flags = SA_RESTART;
-    if (sigaction(SIGUSR2, &rs, 0) != 0) return 18;
+    rs.sa_flags   = SA_RESTART;
+    if (sigaction(SIGUSR2, &rs, 0) != 0)
+        return 18;
     struct sigaction rq;
-    for (int i = 0; i < (int)sizeof(rq); i++) ((char *)&rq)[i] = 0;
-    if (sigaction(SIGUSR2, 0, &rq) != 0) return 19;
-    if (!(rq.sa_flags & SA_RESTART)) return 20;
+    for (int i = 0; i < (int)sizeof(rq); i++)
+        ((char *)&rq)[i] = 0;
+    if (sigaction(SIGUSR2, 0, &rq) != 0)
+        return 19;
+    if (!(rq.sa_flags & SA_RESTART))
+        return 20;
 
     struct sigaction dfl6;
-    for (int i = 0; i < (int)sizeof(dfl6); i++) ((char *)&dfl6)[i] = 0;
+    for (int i = 0; i < (int)sizeof(dfl6); i++)
+        ((char *)&dfl6)[i] = 0;
     dfl6.sa_handler = SIG_DFL;
-    if (sigaction(SIGUSR2, &dfl6, 0) != 0) return 21;
+    if (sigaction(SIGUSR2, &dfl6, 0) != 0)
+        return 21;
 
     return 42;
 }
@@ -1968,19 +2562,29 @@ int test_posix_sigaction_flags(void) {
 [[cccc::test(return = 42)]]
 int test_posix_sigset_ops(void) {
     sigset_t set;
-    if (sigemptyset(&set) != 0) return 1;
-    if (sigismember(&set, SIGUSR1) != 0) return 2;
+    if (sigemptyset(&set) != 0)
+        return 1;
+    if (sigismember(&set, SIGUSR1) != 0)
+        return 2;
 
-    if (sigaddset(&set, SIGUSR1) != 0) return 3;
-    if (sigismember(&set, SIGUSR1) != 1) return 4;
-    if (sigismember(&set, SIGUSR2) != 0) return 5;
+    if (sigaddset(&set, SIGUSR1) != 0)
+        return 3;
+    if (sigismember(&set, SIGUSR1) != 1)
+        return 4;
+    if (sigismember(&set, SIGUSR2) != 0)
+        return 5;
 
-    if (sigdelset(&set, SIGUSR1) != 0) return 6;
-    if (sigismember(&set, SIGUSR1) != 0) return 7;
+    if (sigdelset(&set, SIGUSR1) != 0)
+        return 6;
+    if (sigismember(&set, SIGUSR1) != 0)
+        return 7;
 
-    if (sigfillset(&set) != 0) return 8;
-    if (sigismember(&set, SIGUSR1) != 1) return 9;
-    if (sigismember(&set, SIGTERM) != 1) return 10;
+    if (sigfillset(&set) != 0)
+        return 8;
+    if (sigismember(&set, SIGUSR1) != 1)
+        return 9;
+    if (sigismember(&set, SIGTERM) != 1)
+        return 10;
 
     return 42;
 }
@@ -1997,11 +2601,14 @@ int test_posix_sigset_ops(void) {
 // function (a full LIFO-order/exit-code check needs the real process exit
 // the two standalone test files above provide).
 static int atexit_mid_call_ran;
-static void atexit_mid_call_handler(void) { atexit_mid_call_ran = 1; }
+static void atexit_mid_call_handler(void) {
+    atexit_mid_call_ran = 1;
+}
 
 [[cccc::test(return = 42)]]
 int test_posix_atexit_registration(void) {
-    if (atexit(atexit_mid_call_handler) != 0) return 1;
+    if (atexit(atexit_mid_call_handler) != 0)
+        return 1;
     /* Deliberately do not call exit() here -- this suite's own harness
        drives multiple [[cccc::test]] functions through one real main(),
        so calling exit() would terminate the whole suite early. Just prove
@@ -2019,17 +2626,24 @@ int test_posix_atexit_registration(void) {
 [[cccc::test(return = 42)]]
 int test_posix_uname(void) {
     struct utsname u;
-    for (int i = 0; i < (int)sizeof(u); i++) ((char *)&u)[i] = 0x7f;
-    if (uname(&u) != 0) return 1;
+    for (int i = 0; i < (int)sizeof(u); i++)
+        ((char *)&u)[i] = 0x7f;
+    if (uname(&u) != 0)
+        return 1;
 
     /* memchr for the terminating NUL rather than strlen, since the buffer
        was pre-filled with non-NUL 0x7f and strlen alone can't distinguish
        "field never touched" from "field legitimately empty". */
-    if (!memchr(u.sysname, 0, sizeof(u.sysname))) return 2;
-    if (u.sysname[0] == 0) return 3;
-    if (!memchr(u.machine, 0, sizeof(u.machine))) return 4;
-    if (u.machine[0] == 0) return 5;
-    if (!memchr(u.release, 0, sizeof(u.release))) return 6;
+    if (!memchr(u.sysname, 0, sizeof(u.sysname)))
+        return 2;
+    if (u.sysname[0] == 0)
+        return 3;
+    if (!memchr(u.machine, 0, sizeof(u.machine)))
+        return 4;
+    if (u.machine[0] == 0)
+        return 5;
+    if (!memchr(u.release, 0, sizeof(u.release)))
+        return 6;
     return 42;
 }
 
@@ -2040,12 +2654,17 @@ int test_posix_uname(void) {
 [[cccc::test(return = 42)]]
 int test_posix_times(void) {
     struct tms t;
-    for (int i = 0; i < (int)sizeof(t); i++) ((char *)&t)[i] = 0;
+    for (int i = 0; i < (int)sizeof(t); i++)
+        ((char *)&t)[i] = 0;
     clock_t r1 = times(&t);
-    if (r1 == (clock_t)-1) return 1;
-    if (r1 <= 0) return 2;
-    if (t.tms_utime < 0 || t.tms_stime < 0) return 3;
-    if (t.tms_cutime < 0 || t.tms_cstime < 0) return 4;
+    if (r1 == (clock_t)-1)
+        return 1;
+    if (r1 <= 0)
+        return 2;
+    if (t.tms_utime < 0 || t.tms_stime < 0)
+        return 3;
+    if (t.tms_cutime < 0 || t.tms_cstime < 0)
+        return 4;
 
     /* Burn some CPU so a second call is guaranteed to observe a strictly
        later tick count -- proves the FFI return isn't silently truncated
@@ -2053,12 +2672,15 @@ int test_posix_times(void) {
        host with enough uptime) and that struct tms is really being
        refreshed, not just zero-filled once. */
     volatile long busy = 0;
-    for (long i = 0; i < 20000000L; i++) busy += i;
+    for (long i = 0; i < 20000000L; i++)
+        busy += i;
     (void)busy;
 
     clock_t r2 = times(&t);
-    if (r2 == (clock_t)-1) return 5;
-    if (r2 < r1) return 6;
+    if (r2 == (clock_t)-1)
+        return 5;
+    if (r2 < r1)
+        return 6;
     return 42;
 }
 
@@ -2068,16 +2690,25 @@ int test_posix_times(void) {
 // verify. Just proves the constants are visible and have the right values.
 [[cccc::test(return = 42)]]
 int test_posix_tar_cpio(void) {
-    if (strcmp(TMAGIC, "ustar") != 0) return 1;
-    if (TMAGLEN != 6) return 2;
-    if (REGTYPE != '0') return 3;
-    if (DIRTYPE != '5') return 4;
-    if ((TUREAD | TUWRITE | TUEXEC) != 00700) return 5;
+    if (strcmp(TMAGIC, "ustar") != 0)
+        return 1;
+    if (TMAGLEN != 6)
+        return 2;
+    if (REGTYPE != '0')
+        return 3;
+    if (DIRTYPE != '5')
+        return 4;
+    if ((TUREAD | TUWRITE | TUEXEC) != 00700)
+        return 5;
 
-    if (strcmp(MAGIC, "070707") != 0) return 6;
-    if ((C_IRUSR | C_IWUSR | C_IXUSR) != 000700) return 7;
-    if (C_ISDIR != 040000) return 8;
-    if (C_ISREG != 0100000) return 9;
+    if (strcmp(MAGIC, "070707") != 0)
+        return 6;
+    if ((C_IRUSR | C_IWUSR | C_IXUSR) != 000700)
+        return 7;
+    if (C_ISDIR != 040000)
+        return 8;
+    if (C_ISREG != 0100000)
+        return 9;
     return 42;
 }
 
@@ -2098,9 +2729,10 @@ static void posix_syslog_va_helper(const char *fmt, ...) {
 int test_posix_syslog(void) {
     openlog("cccc-test", LOG_PID | LOG_NDELAY, LOG_USER);
 
-    int prev = setlogmask(LOG_UPTO(LOG_INFO));
+    int prev  = setlogmask(LOG_UPTO(LOG_INFO));
     int prev2 = setlogmask(prev);
-    if (prev2 != LOG_UPTO(LOG_INFO)) return 1;
+    if (prev2 != LOG_UPTO(LOG_INFO))
+        return 1;
 
     syslog(LOG_INFO, "cccc syslog test: %s %d %.2f", "ok", 7, 2.5);
 
@@ -2123,50 +2755,63 @@ int test_posix_syslog(void) {
 // 8-byte long, leaving the upper half stale after gettimeofday()).
 [[cccc::test(return = 42)]]
 int test_posix_select(void) {
-    if (sizeof(struct timeval) != 16) return 1;
-    if (sizeof(fd_set) != 128) return 2;
+    if (sizeof(struct timeval) != 16)
+        return 1;
+    if (sizeof(fd_set) != 128)
+        return 2;
 
     int fds[2];
-    if (pipe(fds) != 0) return 3;
+    if (pipe(fds) != 0)
+        return 3;
 
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(fds[0], &rfds);
     struct timeval tv = {0, 0};
-    int r = select(fds[0] + 1, &rfds, 0, 0, &tv);
-    if (r != 0) return 4;
-    if (FD_ISSET(fds[0], &rfds)) return 5;
+    int            r  = select(fds[0] + 1, &rfds, 0, 0, &tv);
+    if (r != 0)
+        return 4;
+    if (FD_ISSET(fds[0], &rfds))
+        return 5;
 
-    if (write(fds[1], "x", 1) != 1) return 6;
+    if (write(fds[1], "x", 1) != 1)
+        return 6;
 
     FD_ZERO(&rfds);
     FD_SET(fds[0], &rfds);
     struct timeval tv2 = {1, 0};
-    r = select(fds[0] + 1, &rfds, 0, 0, &tv2);
-    if (r != 1) return 7;
-    if (!FD_ISSET(fds[0], &rfds)) return 8;
+    r                  = select(fds[0] + 1, &rfds, 0, 0, &tv2);
+    if (r != 1)
+        return 7;
+    if (!FD_ISSET(fds[0], &rfds))
+        return 8;
 
     char c;
-    if (read(fds[0], &c, 1) != 1 || c != 'x') return 9;
+    if (read(fds[0], &c, 1) != 1 || c != 'x')
+        return 9;
 
     /* pselect with a real (empty) sigmask */
     FD_ZERO(&rfds);
     FD_SET(fds[0], &rfds);
     struct timespec ts = {0, 0};
-    sigset_t mask;
+    sigset_t        mask;
     sigemptyset(&mask);
     r = pselect(fds[0] + 1, &rfds, 0, 0, &ts, &mask);
-    if (r != 0) return 10;
+    if (r != 0)
+        return 10;
 
-    if (write(fds[1], "y", 1) != 1) return 11;
+    if (write(fds[1], "y", 1) != 1)
+        return 11;
 
     /* pselect with NULL sigmask */
     FD_ZERO(&rfds);
     FD_SET(fds[0], &rfds);
     struct timespec ts2 = {1, 0};
-    r = pselect(fds[0] + 1, &rfds, 0, 0, &ts2, 0);
-    if (r != 1) return 12;
-    if (!FD_ISSET(fds[0], &rfds)) return 13;
+    r                   = pselect(fds[0] + 1, &rfds, 0, 0, &ts2, 0);
+    if (r != 1)
+        return 12;
+    if (!FD_ISSET(fds[0], &rfds))
+        return 13;
 
     close(fds[0]);
     close(fds[1]);
@@ -2179,17 +2824,24 @@ int test_posix_select(void) {
 [[cccc::test(return = 42)]]
 int test_posix_statvfs(void) {
     struct statvfs sv;
-    if (statvfs("/", &sv) != 0) return 1;
-    if (sv.f_bsize == 0) return 2;
-    if (!(sv.f_blocks >= sv.f_bfree && sv.f_bfree >= sv.f_bavail)) return 3;
-    if (sv.f_namemax == 0) return 4;
+    if (statvfs("/", &sv) != 0)
+        return 1;
+    if (sv.f_bsize == 0)
+        return 2;
+    if (!(sv.f_blocks >= sv.f_bfree && sv.f_bfree >= sv.f_bavail))
+        return 3;
+    if (sv.f_namemax == 0)
+        return 4;
 
     int fd = open("/", O_RDONLY);
-    if (fd < 0) return 5;
+    if (fd < 0)
+        return 5;
     struct statvfs sv2;
-    if (fstatvfs(fd, &sv2) != 0) return 6;
+    if (fstatvfs(fd, &sv2) != 0)
+        return 6;
     close(fd);
-    if (sv2.f_bsize != sv.f_bsize) return 7;
+    if (sv2.f_bsize != sv.f_bsize)
+        return 7;
 
     return 42;
 }
@@ -2201,17 +2853,21 @@ int test_posix_statvfs(void) {
 // guarded by __linux__ since it's inherently platform-dependent).
 [[cccc::test(return = 42)]]
 int test_posix_sched(void) {
-    if (sched_yield() != 0) return 1;
+    if (sched_yield() != 0)
+        return 1;
 
     int max = sched_get_priority_max(SCHED_OTHER);
     int min = sched_get_priority_min(SCHED_OTHER);
-    if (max < min) return 2;
+    if (max < min)
+        return 2;
 
     int r = sched_getscheduler(0);
 #ifdef __linux__
-    if (r < 0) return 3;
+    if (r < 0)
+        return 3;
 #else
-    if (r != -1 || errno != ENOSYS) return 4;
+    if (r != -1 || errno != ENOSYS)
+        return 4;
 #endif
 
     return 42;
@@ -2226,9 +2882,12 @@ int test_posix_sched(void) {
 // non-NULL on both platforms.
 [[cccc::test(return = 42)]]
 int test_posix_locale(void) {
-    if (setlocale(LC_MONETARY, "C") == 0) return 1;
-    if (setlocale(LC_ALL, 0) == 0) return 2;
-    if (setlocale(LC_MESSAGES, "C") == 0) return 3;
+    if (setlocale(LC_MONETARY, "C") == 0)
+        return 1;
+    if (setlocale(LC_ALL, 0) == 0)
+        return 2;
+    if (setlocale(LC_MESSAGES, "C") == 0)
+        return 3;
     return 42;
 }
 
@@ -2245,31 +2904,42 @@ int test_posix_locale(void) {
 [[cccc::test(return = 42)]]
 int test_posix_spawn(void) {
     posix_spawnattr_t attr;
-    if (posix_spawnattr_init(&attr) != 0) return 1;
+    if (posix_spawnattr_init(&attr) != 0)
+        return 1;
 
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGUSR1);
-    if (posix_spawnattr_setsigmask(&attr, &mask) != 0) return 2;
-    if (posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK) != 0) return 3;
+    if (posix_spawnattr_setsigmask(&attr, &mask) != 0)
+        return 2;
+    if (posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF |
+                                            POSIX_SPAWN_SETSIGMASK) != 0)
+        return 3;
 
     sigset_t got_mask;
-    if (posix_spawnattr_getsigmask(&attr, &got_mask) != 0) return 4;
-    if (!sigismember(&got_mask, SIGUSR1)) return 5;
+    if (posix_spawnattr_getsigmask(&attr, &got_mask) != 0)
+        return 4;
+    if (!sigismember(&got_mask, SIGUSR1))
+        return 5;
 
     posix_spawn_file_actions_t fa;
-    if (posix_spawn_file_actions_init(&fa) != 0) return 6;
+    if (posix_spawn_file_actions_init(&fa) != 0)
+        return 6;
 
     char tmpl[] = "/tmp/cccc_test_spawn_XXXXXX";
-    int tfd = mkstemp(tmpl);
-    if (tfd < 0) return 7;
+    int  tfd    = mkstemp(tmpl);
+    if (tfd < 0)
+        return 7;
     close(tfd);
 
-    if (posix_spawn_file_actions_addopen(&fa, 1, tmpl, O_WRONLY | O_TRUNC, 0644) != 0) return 8;
+    if (posix_spawn_file_actions_addopen(&fa, 1, tmpl, O_WRONLY | O_TRUNC,
+                                         0644) != 0)
+        return 8;
 
     char *argv[] = {"echo", "posix-spawn-ok", 0};
     pid_t pid;
-    if (posix_spawnp(&pid, "echo", &fa, &attr, argv, environ) != 0) return 9;
+    if (posix_spawnp(&pid, "echo", &fa, &attr, argv, environ) != 0)
+        return 9;
 
     int status;
     /* #853: retry on EINTR -- a prior test's failure could leave a
@@ -2279,21 +2949,28 @@ int test_posix_spawn(void) {
        single blocking waitpid() and turn an unrelated failure into a
        spurious `return 10` here. */
     pid_t reaped;
-    do { reaped = waitpid(pid, &status, 0); } while (reaped < 0 && errno == EINTR);
-    if (reaped != pid) return 10;
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return 11;
+    do {
+        reaped = waitpid(pid, &status, 0);
+    } while (reaped < 0 && errno == EINTR);
+    if (reaped != pid)
+        return 10;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        return 11;
 
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&attr);
 
     FILE *f = fopen(tmpl, "r");
-    if (!f) return 12;
+    if (!f)
+        return 12;
     char buf[64] = {0};
-    if (!fgets(buf, sizeof(buf), f)) return 13;
+    if (!fgets(buf, sizeof(buf), f))
+        return 13;
     fclose(f);
     unlink(tmpl);
 
-    if (strncmp(buf, "posix-spawn-ok", 14) != 0) return 14;
+    if (strncmp(buf, "posix-spawn-ok", 14) != 0)
+        return 14;
 
     return 42;
 }
@@ -2305,24 +2982,29 @@ int test_posix_spawn(void) {
 [[cccc::test(return = 42)]]
 int test_posix_iconv(void) {
     iconv_t cd = iconv_open("UTF-8", "ISO-8859-1");
-    if (cd == (iconv_t)-1) return 1;
+    if (cd == (iconv_t)-1)
+        return 1;
 
-    char in[1] = { (char)0xE9 };
-    char out[8] = {0};
-    char *inp = in;
-    char *outp = out;
-    size_t inleft = 1;
+    char   in[1]   = {(char)0xE9};
+    char   out[8]  = {0};
+    char  *inp     = in;
+    char  *outp    = out;
+    size_t inleft  = 1;
     size_t outleft = sizeof(out);
 
-    size_t rc = iconv(cd, &inp, &inleft, &outp, &outleft);
-    if (rc == (size_t)-1) return 2;
-    if (inleft != 0) return 3;
+    size_t rc      = iconv(cd, &inp, &inleft, &outp, &outleft);
+    if (rc == (size_t)-1)
+        return 2;
+    if (inleft != 0)
+        return 3;
 
     unsigned char b0 = (unsigned char)out[0];
     unsigned char b1 = (unsigned char)out[1];
-    if (b0 != 0xC3 || b1 != 0xA9) return 4;
+    if (b0 != 0xC3 || b1 != 0xA9)
+        return 4;
 
-    if (iconv_close(cd) != 0) return 5;
+    if (iconv_close(cd) != 0)
+        return 5;
 
     return 42;
 }
@@ -2337,22 +3019,28 @@ int test_posix_langinfo(void) {
     setlocale(LC_ALL, "C");
 
     char *cs = nl_langinfo(CODESET);
-    if (!cs || !cs[0]) return 1;
+    if (!cs || !cs[0])
+        return 1;
 
     char *radix = nl_langinfo(RADIXCHAR);
-    if (!radix || radix[0] != '.') return 2;
+    if (!radix || radix[0] != '.')
+        return 2;
 
     char *day1 = nl_langinfo(DAY_1);
-    if (!day1 || !day1[0]) return 3;
+    if (!day1 || !day1[0])
+        return 3;
 
     char *abmon1 = nl_langinfo(ABMON_1);
-    if (!abmon1 || !abmon1[0]) return 4;
+    if (!abmon1 || !abmon1[0])
+        return 4;
 
     nl_catd cat = catopen("nonexistent_catalog_xyz", NL_CAT_LOCALE);
-    if (cat != (nl_catd)-1) return 5;
+    if (cat != (nl_catd)-1)
+        return 5;
 
     char *msg = catgets(cat, 1, 1, "default-message");
-    if (strcmp(msg, "default-message") != 0) return 6;
+    if (strcmp(msg, "default-message") != 0)
+        return 6;
 
     return 42;
 }
@@ -2371,57 +3059,70 @@ static int search_compar(const void *a, const void *b) {
 static int g_twalk_visits;
 
 static void search_action(const void *nodep, VISIT which, int depth) {
-    (void)nodep; (void)depth;
+    (void)nodep;
+    (void)depth;
     if (which == leaf || which == postorder)
         g_twalk_visits++;
 }
 
 [[cccc::test(return = 42)]]
 int test_posix_search(void) {
-    if (hcreate(16) == 0) return 1;
+    if (hcreate(16) == 0)
+        return 1;
 
-    ENTRY e1 = { strdup("key1"), (void *)100 };
-    if (!hsearch(e1, ENTER)) return 2;
+    ENTRY e1 = {strdup("key1"), (void *)100};
+    if (!hsearch(e1, ENTER))
+        return 2;
 
-    ENTRY search_key = { "key1", 0 };
-    ENTRY *found = hsearch(search_key, FIND);
-    if (!found || (long)found->data != 100) return 3;
+    ENTRY  search_key = {"key1", 0};
+    ENTRY *found      = hsearch(search_key, FIND);
+    if (!found || (long)found->data != 100)
+        return 3;
 
-    ENTRY missing_key = { "nope", 0 };
-    if (hsearch(missing_key, FIND) != 0) return 4;
+    ENTRY missing_key = {"nope", 0};
+    if (hsearch(missing_key, FIND) != 0)
+        return 4;
 
     hdestroy();
 
-    void *root = 0;
+    void      *root    = 0;
     static int vals[3] = {3, 1, 2};
     for (int i = 0; i < 3; i++) {
-        if (!tsearch(&vals[i], &root, search_compar)) return 5;
+        if (!tsearch(&vals[i], &root, search_compar))
+            return 5;
     }
 
-    int key1 = 2;
-    void *tf = tfind(&key1, &root, search_compar);
-    if (!tf || *(*(int **)tf) != 2) return 6;
+    int   key1 = 2;
+    void *tf   = tfind(&key1, &root, search_compar);
+    if (!tf || *(*(int **)tf) != 2)
+        return 6;
 
     int key_missing = 99;
-    if (tfind(&key_missing, &root, search_compar) != 0) return 7;
+    if (tfind(&key_missing, &root, search_compar) != 0)
+        return 7;
 
     g_twalk_visits = 0;
     twalk(root, search_action);
-    if (g_twalk_visits != 3) return 8;
+    if (g_twalk_visits != 3)
+        return 8;
 
     int key_del = 1;
-    if (!tdelete(&key_del, &root, search_compar)) return 9;
-    if (tfind(&key_del, &root, search_compar) != 0) return 10;
+    if (!tdelete(&key_del, &root, search_compar))
+        return 9;
+    if (tfind(&key_del, &root, search_compar) != 0)
+        return 10;
 
-    int arr[4] = {10, 20, 30, 0};
-    size_t n = 3;
-    int target = 20;
-    void *lf = lfind(&target, arr, &n, sizeof(int), search_compar);
-    if (!lf || *(int *)lf != 20) return 11;
+    int    arr[4] = {10, 20, 30, 0};
+    size_t n      = 3;
+    int    target = 20;
+    void  *lf     = lfind(&target, arr, &n, sizeof(int), search_compar);
+    if (!lf || *(int *)lf != 20)
+        return 11;
 
-    int newval = 40;
-    void *ls = lsearch(&newval, arr, &n, sizeof(int), search_compar);
-    if (!ls || n != 4 || arr[3] != 40) return 12;
+    int   newval = 40;
+    void *ls     = lsearch(&newval, arr, &n, sizeof(int), search_compar);
+    if (!ls || n != 4 || arr[3] != 40)
+        return 12;
 
     return 42;
 }
@@ -2439,18 +3140,24 @@ int test_posix_search(void) {
 // src/stdlib/posix.c.
 [[cccc::test(return = 42)]]
 int test_posix_strfmon(void) {
-    char buf[64] = {0};
-    ssize_t n = strfmon(buf, sizeof(buf), "%n", 1234.56);
-    if (n < 0) return 1;
-    if (!strstr(buf, "1234")) return 2;
+    char    buf[64] = {0};
+    ssize_t n       = strfmon(buf, sizeof(buf), "%n", 1234.56);
+    if (n < 0)
+        return 1;
+    if (!strstr(buf, "1234"))
+        return 2;
 
-    char buf2[64] = {0};
+    char    buf2[64] = {0};
     ssize_t n2 = strfmon(buf2, sizeof(buf2), "Price: %n and %n", 10.5, 20.5);
-    if (n2 < 0) return 3;
-    if (!strstr(buf2, "Price:") || !strstr(buf2, "10.5") || !strstr(buf2, "20.5")) return 4;
+    if (n2 < 0)
+        return 3;
+    if (!strstr(buf2, "Price:") || !strstr(buf2, "10.5") ||
+        !strstr(buf2, "20.5"))
+        return 4;
 
     char small[4];
-    if (strfmon(small, sizeof(small), "%n", 1234567.89) != -1) return 5;
+    if (strfmon(small, sizeof(small), "%n", 1234567.89) != -1)
+        return 5;
 
     return 42;
 }
@@ -2463,24 +3170,33 @@ int test_posix_strfmon(void) {
 int test_posix_timer_macros(void) {
     struct timeval tv;
     timerclear(&tv);
-    if (tv.tv_sec != 0 || tv.tv_usec != 0) return 1;
-    if (timerisset(&tv)) return 2;
+    if (tv.tv_sec != 0 || tv.tv_usec != 0)
+        return 1;
+    if (timerisset(&tv))
+        return 2;
 
     tv.tv_usec = 5;
-    if (!timerisset(&tv)) return 3;
+    if (!timerisset(&tv))
+        return 3;
     timerclear(&tv);
     tv.tv_sec = 1;
-    if (!timerisset(&tv)) return 4;
+    if (!timerisset(&tv))
+        return 4;
 
     struct timeval a = {1, 500000};
     struct timeval b = {1, 200000};
-    if (!timercmp(&a, &b, >)) return 5;
-    if (timercmp(&a, &b, <)) return 6;
-    if (!timercmp(&a, &a, ==)) return 7;
+    if (!timercmp(&a, &b, >))
+        return 5;
+    if (timercmp(&a, &b, <))
+        return 6;
+    if (!timercmp(&a, &a, ==))
+        return 7;
 
     struct timeval c = {2, 0};
-    if (!timercmp(&c, &a, >)) return 8;
-    if (timercmp(&a, &c, >)) return 9;
+    if (!timercmp(&c, &a, >))
+        return 8;
+    if (timercmp(&a, &c, >))
+        return 9;
 
     return 42;
 }
@@ -2496,35 +3212,43 @@ int test_posix_timer_macros(void) {
 [[cccc::test(return = 42)]]
 int test_posix_ppoll(void) {
     int fds[2];
-    if (pipe(fds) != 0) return 1;
+    if (pipe(fds) != 0)
+        return 1;
 
-    if (write(fds[1], "x", 1) != 1) return 2;
+    if (write(fds[1], "x", 1) != 1)
+        return 2;
 
-    struct pollfd pfd = {0};
-    pfd.fd = fds[0];
-    pfd.events = POLLIN;
+    struct pollfd pfd  = {0};
+    pfd.fd             = fds[0];
+    pfd.events         = POLLIN;
     struct timespec ts = {1, 0};
-    int r = ppoll(&pfd, 1, &ts, NULL);
-    if (r != 1) return 3;
-    if (!(pfd.revents & POLLIN)) return 4;
+    int             r  = ppoll(&pfd, 1, &ts, NULL);
+    if (r != 1)
+        return 3;
+    if (!(pfd.revents & POLLIN))
+        return 4;
 
     char c;
-    if (read(fds[0], &c, 1) != 1) return 5;
+    if (read(fds[0], &c, 1) != 1)
+        return 5;
 
-    struct pollfd pfd2 = {0};
-    pfd2.fd = fds[0];
-    pfd2.events = POLLIN;
+    struct pollfd pfd2  = {0};
+    pfd2.fd             = fds[0];
+    pfd2.events         = POLLIN;
     struct timespec ts2 = {0, 50000000}; // 50ms
-    r = ppoll(&pfd2, 1, &ts2, NULL);
-    if (r != 0) return 6;
+    r                   = ppoll(&pfd2, 1, &ts2, NULL);
+    if (r != 0)
+        return 6;
 
-    struct pollfd pfd3 = {0};
-    pfd3.fd = fds[1];
-    pfd3.events = POLLWRNORM;
+    struct pollfd pfd3  = {0};
+    pfd3.fd             = fds[1];
+    pfd3.events         = POLLWRNORM;
     struct timespec ts3 = {1, 0};
-    r = ppoll(&pfd3, 1, &ts3, NULL);
-    if (r != 1) return 7;
-    if (!(pfd3.revents & POLLWRNORM)) return 8;
+    r                   = ppoll(&pfd3, 1, &ts3, NULL);
+    if (r != 1)
+        return 7;
+    if (!(pfd3.revents & POLLWRNORM))
+        return 8;
 
     close(fds[0]);
     close(fds[1]);
@@ -2541,29 +3265,41 @@ int test_posix_ppoll(void) {
 [[cccc::test(return = 42)]]
 int test_posix_locale_t(void) {
     locale_t all = newlocale(LC_ALL_MASK, "C", (locale_t)0);
-    if (!all) return 1;
+    if (!all)
+        return 1;
 
     locale_t mon = newlocale(LC_MONETARY_MASK, "C", (locale_t)0);
-    if (!mon) return 2;
+    if (!mon)
+        return 2;
 
     locale_t dup = duplocale(all);
-    if (!dup) return 3;
+    if (!dup)
+        return 3;
 
     locale_t prev = uselocale(all);
-    if (!prev) return 4;
-    if (uselocale(LC_GLOBAL_LOCALE) != all) return 5;
+    if (!prev)
+        return 4;
+    if (uselocale(LC_GLOBAL_LOCALE) != all)
+        return 5;
 
-    if (strcmp(nl_langinfo_l(RADIXCHAR, all), ".") != 0) return 6;
-    if (nl_langinfo_l(DAY_1, all)[0] == '\0') return 7;
+    if (strcmp(nl_langinfo_l(RADIXCHAR, all), ".") != 0)
+        return 6;
+    if (nl_langinfo_l(DAY_1, all)[0] == '\0')
+        return 7;
 
-    char buf[64] = {0};
-    ssize_t n = strfmon_l(buf, sizeof(buf), all, "%n", 1234.56);
-    if (n < 0) return 8;
-    if (!strstr(buf, "1234")) return 9;
+    char    buf[64] = {0};
+    ssize_t n       = strfmon_l(buf, sizeof(buf), all, "%n", 1234.56);
+    if (n < 0)
+        return 8;
+    if (!strstr(buf, "1234"))
+        return 9;
 
-    if (!isalpha_l('a', all)) return 10;
-    if (isalpha_l('1', all)) return 11;
-    if (toupper_l('a', all) != 'A') return 12;
+    if (!isalpha_l('a', all))
+        return 10;
+    if (isalpha_l('1', all))
+        return 11;
+    if (toupper_l('a', all) != 'A')
+        return 12;
 
     freelocale(dup);
     freelocale(mon);
@@ -2581,25 +3317,43 @@ int test_posix_locale_t(void) {
 int test_sysv_shm(void) {
     int id = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
     if (id < 0) {
-        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC || errno == EACCES) {
-            printf("test_sysv_shm: shmget unavailable (errno=%d), skipping\n", errno);
+        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC ||
+            errno == EACCES) {
+            printf("test_sysv_shm: shmget unavailable (errno=%d), skipping\n",
+                   errno);
             return 42;
         }
         return 1;
     }
 
     int *p = (int *)shmat(id, 0, 0);
-    if (p == (void *)-1) { shmctl(id, IPC_RMID, 0); return 2; }
-    *p = 12345;
+    if (p == (void *)-1) {
+        shmctl(id, IPC_RMID, 0);
+        return 2;
+    }
+    *p      = 12345;
     int val = *p;
-    if (shmdt(p) != 0) { shmctl(id, IPC_RMID, 0); return 3; }
+    if (shmdt(p) != 0) {
+        shmctl(id, IPC_RMID, 0);
+        return 3;
+    }
 
     struct shmid_ds ds;
-    if (shmctl(id, IPC_STAT, &ds) != 0) { shmctl(id, IPC_RMID, 0); return 4; }
-    if (ds.shm_segsz != 4096) { shmctl(id, IPC_RMID, 0); return 5; }
-    if ((ds.shm_perm.mode & 0777) != 0600) { shmctl(id, IPC_RMID, 0); return 6; }
+    if (shmctl(id, IPC_STAT, &ds) != 0) {
+        shmctl(id, IPC_RMID, 0);
+        return 4;
+    }
+    if (ds.shm_segsz != 4096) {
+        shmctl(id, IPC_RMID, 0);
+        return 5;
+    }
+    if ((ds.shm_perm.mode & 0777) != 0600) {
+        shmctl(id, IPC_RMID, 0);
+        return 6;
+    }
 
-    if (shmctl(id, IPC_RMID, 0) != 0) return 7;
+    if (shmctl(id, IPC_RMID, 0) != 0)
+        return 7;
     return val == 12345 ? 42 : 8;
 }
 
@@ -2610,30 +3364,57 @@ int test_sysv_shm(void) {
 int test_sysv_sem(void) {
     int id = semget(IPC_PRIVATE, 1, IPC_CREAT | 0600);
     if (id < 0) {
-        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC || errno == EACCES) {
-            printf("test_sysv_sem: semget unavailable (errno=%d), skipping\n", errno);
+        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC ||
+            errno == EACCES) {
+            printf("test_sysv_sem: semget unavailable (errno=%d), skipping\n",
+                   errno);
             return 42;
         }
         return 1;
     }
 
-    if (semctl(id, 0, SETVAL, 1) < 0) { semctl(id, 0, IPC_RMID, 0); return 2; }
-    if (semctl(id, 0, GETVAL, 0) != 1) { semctl(id, 0, IPC_RMID, 0); return 3; }
+    if (semctl(id, 0, SETVAL, 1) < 0) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 2;
+    }
+    if (semctl(id, 0, GETVAL, 0) != 1) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 3;
+    }
 
     struct sembuf down = {0, -1, 0};
-    if (semop(id, &down, 1) != 0) { semctl(id, 0, IPC_RMID, 0); return 4; }
-    if (semctl(id, 0, GETVAL, 0) != 0) { semctl(id, 0, IPC_RMID, 0); return 5; }
+    if (semop(id, &down, 1) != 0) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 4;
+    }
+    if (semctl(id, 0, GETVAL, 0) != 0) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 5;
+    }
 
     struct sembuf up = {0, 1, 0};
-    if (semop(id, &up, 1) != 0) { semctl(id, 0, IPC_RMID, 0); return 6; }
+    if (semop(id, &up, 1) != 0) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 6;
+    }
     int val = semctl(id, 0, GETVAL, 0);
-    if (val != 1) { semctl(id, 0, IPC_RMID, 0); return 7; }
+    if (val != 1) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 7;
+    }
 
     struct semid_ds ds;
-    if (semctl(id, 0, IPC_STAT, &ds) != 0) { semctl(id, 0, IPC_RMID, 0); return 8; }
-    if (ds.sem_nsems != 1) { semctl(id, 0, IPC_RMID, 0); return 9; }
+    if (semctl(id, 0, IPC_STAT, &ds) != 0) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 8;
+    }
+    if (ds.sem_nsems != 1) {
+        semctl(id, 0, IPC_RMID, 0);
+        return 9;
+    }
 
-    if (semctl(id, 0, IPC_RMID, 0) < 0) return 10;
+    if (semctl(id, 0, IPC_RMID, 0) < 0)
+        return 10;
     return 42;
 }
 
@@ -2648,25 +3429,43 @@ struct cccc_test_msgbuf {
 int test_sysv_msg(void) {
     int id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
     if (id < 0) {
-        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC || errno == EACCES) {
-            printf("test_sysv_msg: msgget unavailable (errno=%d), skipping\n", errno);
+        if (errno == ENOSYS || errno == EPERM || errno == ENOSPC ||
+            errno == EACCES) {
+            printf("test_sysv_msg: msgget unavailable (errno=%d), skipping\n",
+                   errno);
             return 42;
         }
         return 1;
     }
 
     struct cccc_test_msgbuf mb = {1, "hello"};
-    if (msgsnd(id, &mb, sizeof("hello"), 0) < 0) { msgctl(id, IPC_RMID, 0); return 2; }
+    if (msgsnd(id, &mb, sizeof("hello"), 0) < 0) {
+        msgctl(id, IPC_RMID, 0);
+        return 2;
+    }
 
     struct msqid_ds ds;
-    if (msgctl(id, IPC_STAT, &ds) != 0) { msgctl(id, IPC_RMID, 0); return 3; }
-    if (ds.msg_qnum != 1) { msgctl(id, IPC_RMID, 0); return 4; }
+    if (msgctl(id, IPC_STAT, &ds) != 0) {
+        msgctl(id, IPC_RMID, 0);
+        return 3;
+    }
+    if (ds.msg_qnum != 1) {
+        msgctl(id, IPC_RMID, 0);
+        return 4;
+    }
 
     struct cccc_test_msgbuf rb = {0};
-    if (msgrcv(id, &rb, sizeof(rb.mtext), 0, 0) < 0) { msgctl(id, IPC_RMID, 0); return 5; }
-    if (strcmp(rb.mtext, "hello") != 0) { msgctl(id, IPC_RMID, 0); return 6; }
+    if (msgrcv(id, &rb, sizeof(rb.mtext), 0, 0) < 0) {
+        msgctl(id, IPC_RMID, 0);
+        return 5;
+    }
+    if (strcmp(rb.mtext, "hello") != 0) {
+        msgctl(id, IPC_RMID, 0);
+        return 6;
+    }
 
-    if (msgctl(id, IPC_RMID, 0) != 0) return 7;
+    if (msgctl(id, IPC_RMID, 0) != 0)
+        return 7;
     return 42;
 }
 
@@ -2676,8 +3475,10 @@ int test_sysv_msg(void) {
 int test_sysv_ftok(void) {
     key_t k1 = ftok("/tmp", 1);
     key_t k2 = ftok("/tmp", 1);
-    if (k1 == (key_t)-1) return 1;
-    if (k1 != k2) return 2;
+    if (k1 == (key_t)-1)
+        return 1;
+    if (k1 != k2)
+        return 2;
     return 42;
 }
 
@@ -2689,15 +3490,19 @@ int test_sysv_ftok(void) {
 int test_sysv_linux_info(void) {
 #ifdef __linux__
     int shmid = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
-    if (shmid < 0) return 1;
+    if (shmid < 0)
+        return 1;
     struct shm_info sinfo;
-    int rc = shmctl(shmid, SHM_INFO, (struct shmid_ds *)&sinfo);
+    int             rc = shmctl(shmid, SHM_INFO, (struct shmid_ds *)&sinfo);
     shmctl(shmid, IPC_RMID, 0);
-    if (rc < 0) return 2;
+    if (rc < 0)
+        return 2;
 
     struct shminfo info;
-    if (shmctl(0, IPC_INFO, (struct shmid_ds *)&info) < 0) return 3;
-    if (info.shmmax == 0) return 4;
+    if (shmctl(0, IPC_INFO, (struct shmid_ds *)&info) < 0)
+        return 3;
+    if (info.shmmax == 0)
+        return 4;
 #endif
     return 42;
 }
@@ -2708,7 +3513,7 @@ int test_sysv_linux_info(void) {
 [[cccc::test(return = 42)]]
 int test_wordexp_basic(void) {
     wordexp_t we;
-    int r = wordexp("a b c", &we, 0);
+    int       r = wordexp("a b c", &we, 0);
     if (r != 0) {
         if (r == WRDE_NOSYS) {
             printf("test_wordexp_basic: wordexp unavailable, skipping\n");
@@ -2716,15 +3521,28 @@ int test_wordexp_basic(void) {
         }
         return 1;
     }
-    if (we.we_wordc != 3) { wordfree(&we); return 2; }
-    if (strcmp(we.we_wordv[0], "a") != 0) { wordfree(&we); return 3; }
-    if (strcmp(we.we_wordv[1], "b") != 0) { wordfree(&we); return 4; }
-    if (strcmp(we.we_wordv[2], "c") != 0) { wordfree(&we); return 5; }
+    if (we.we_wordc != 3) {
+        wordfree(&we);
+        return 2;
+    }
+    if (strcmp(we.we_wordv[0], "a") != 0) {
+        wordfree(&we);
+        return 3;
+    }
+    if (strcmp(we.we_wordv[1], "b") != 0) {
+        wordfree(&we);
+        return 4;
+    }
+    if (strcmp(we.we_wordv[2], "c") != 0) {
+        wordfree(&we);
+        return 5;
+    }
     wordfree(&we);
 
     wordexp_t we2;
     r = wordexp("$(echo hi)", &we2, WRDE_NOCMD);
-    if (r != WRDE_CMDSUB) return 6;
+    if (r != WRDE_CMDSUB)
+        return 6;
 
     return 42;
 }
@@ -2732,9 +3550,12 @@ int test_wordexp_basic(void) {
 // test_wordexp_header (#802) -- struct layout / constant sanity.
 [[cccc::test(return = 42)]]
 int test_wordexp_header(void) {
-    if (sizeof(wordexp_t) == 0) return 1;
-    if (WRDE_APPEND == WRDE_DOOFFS) return 2;
-    if (WRDE_BADCHAR == WRDE_SYNTAX) return 3;
+    if (sizeof(wordexp_t) == 0)
+        return 1;
+    if (WRDE_APPEND == WRDE_DOOFFS)
+        return 2;
+    if (WRDE_BADCHAR == WRDE_SYNTAX)
+        return 3;
     return 42;
 }
 
@@ -2744,31 +3565,38 @@ int test_wordexp_header(void) {
 [[cccc::test(return = 42)]]
 int test_fts_walk(void) {
     char dir[] = "/tmp/cccc_fts_walk_XXXXXX";
-    if (!mkdtemp(dir)) return 1;
+    if (!mkdtemp(dir))
+        return 1;
 
     char sub[512];
     snprintf(sub, sizeof(sub), "%s/sub", dir);
-    if (mkdir(sub, 0755) != 0) return 2;
+    if (mkdir(sub, 0755) != 0)
+        return 2;
 
     char f1[512];
     snprintf(f1, sizeof(f1), "%s/a.txt", dir);
     FILE *fp = fopen(f1, "w");
-    if (!fp) return 3;
+    if (!fp)
+        return 3;
     fputs("hello", fp);
     fclose(fp);
 
-    char *paths[2] = { dir, NULL };
-    FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
-    if (!fts) return 4;
+    char *paths[2] = {dir, NULL};
+    FTS  *fts      = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+    if (!fts)
+        return 4;
 
-    int saw_file = 0, saw_dir = 0, saw_root = 0;
+    int     saw_file = 0, saw_dir = 0, saw_root = 0;
     FTSENT *e;
     while ((e = fts_read(fts)) != NULL) {
         if (e->fts_info == FTS_D && e->fts_level == FTS_ROOTLEVEL)
             saw_root = 1;
         if (e->fts_info == FTS_F && strcmp(e->fts_name, "a.txt") == 0) {
             saw_file = 1;
-            if (e->fts_statp->st_size != 5) { fts_close(fts); return 5; }
+            if (e->fts_statp->st_size != 5) {
+                fts_close(fts);
+                return 5;
+            }
         }
         if (e->fts_info == FTS_D && strcmp(e->fts_name, "sub") == 0)
             saw_dir = 1;
@@ -2779,7 +3607,8 @@ int test_fts_walk(void) {
     rmdir(sub);
     rmdir(dir);
 
-    if (!saw_root || !saw_file || !saw_dir) return 6;
+    if (!saw_root || !saw_file || !saw_dir)
+        return 6;
     return 42;
 }
 
@@ -2802,27 +3631,32 @@ static int fts_test_compar(const FTSENT **a, const FTSENT **b) {
 [[cccc::test(return = 42)]]
 int test_fts_set_skip(void) {
     fts_compar_calls = 0;
-    char dir[] = "/tmp/cccc_fts_skip_XXXXXX";
-    if (!mkdtemp(dir)) return 1;
+    char dir[]       = "/tmp/cccc_fts_skip_XXXXXX";
+    if (!mkdtemp(dir))
+        return 1;
 
     char skipme[512], keepme[512];
     snprintf(skipme, sizeof(skipme), "%s/skipme", dir);
     snprintf(keepme, sizeof(keepme), "%s/keepme", dir);
-    if (mkdir(skipme, 0755) != 0) return 2;
-    if (mkdir(keepme, 0755) != 0) return 3;
+    if (mkdir(skipme, 0755) != 0)
+        return 2;
+    if (mkdir(keepme, 0755) != 0)
+        return 3;
 
     char inside[512];
     snprintf(inside, sizeof(inside), "%s/should_not_visit.txt", skipme);
     FILE *fp = fopen(inside, "w");
-    if (!fp) return 4;
+    if (!fp)
+        return 4;
     fputs("x", fp);
     fclose(fp);
 
-    char *paths[2] = { dir, NULL };
-    FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_test_compar);
-    if (!fts) return 5;
+    char *paths[2] = {dir, NULL};
+    FTS  *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, fts_test_compar);
+    if (!fts)
+        return 5;
 
-    int saw_inside_skipped = 0, saw_keepme = 0;
+    int     saw_inside_skipped = 0, saw_keepme = 0;
     FTSENT *e;
     while ((e = fts_read(fts)) != NULL) {
         if (e->fts_info == FTS_D && strcmp(e->fts_name, "skipme") == 0)
@@ -2839,9 +3673,12 @@ int test_fts_set_skip(void) {
     rmdir(keepme);
     rmdir(dir);
 
-    if (saw_inside_skipped) return 6;
-    if (!saw_keepme) return 7;
-    if (fts_compar_calls <= 0) return 8; // comparator never invoked (#878)
+    if (saw_inside_skipped)
+        return 6;
+    if (!saw_keepme)
+        return 7;
+    if (fts_compar_calls <= 0)
+        return 8; // comparator never invoked (#878)
     return 42;
 }
 
@@ -2860,14 +3697,19 @@ int test_sigevent_layout(void) {
     struct sigevent sev;
     memset(&sev, 0, sizeof(sev));
 #ifdef __APPLE__
-    if (sizeof(struct sigevent) != 32) return 1;
+    if (sizeof(struct sigevent) != 32)
+        return 1;
 #else
-    if (sizeof(struct sigevent) != 64) return 1;
+    if (sizeof(struct sigevent) != 64)
+        return 1;
 #endif
-    if ((char *)&sev.sigev_notify_function - (char *)&sev != 16) return 2;
-    if ((char *)&sev.sigev_notify_attributes - (char *)&sev != 24) return 3;
+    if ((char *)&sev.sigev_notify_function - (char *)&sev != 16)
+        return 2;
+    if ((char *)&sev.sigev_notify_attributes - (char *)&sev != 24)
+        return 3;
     sev.sigev_notify_function = sigevent_layout_dummy;
-    if (sev.sigev_notify_function != sigevent_layout_dummy) return 4;
+    if (sev.sigev_notify_function != sigevent_layout_dummy)
+        return 4;
     return 42;
 }
 
@@ -2885,7 +3727,7 @@ int test_sigevent_layout(void) {
 // (register state survived every interruption intact), 0 if it didn't.
 static int busy_spin_wait_checked(volatile int *flag, long long max_spins) {
     long long checksum = 0;
-    long long spins = 0;
+    long long spins    = 0;
     while (!*flag && spins < max_spins) {
         checksum += (spins ^ (spins << 3)) - (checksum >> 1);
         spins++;
@@ -2970,12 +3812,12 @@ static int aio_fsync_retry(int op, struct aiocb *cb) {
     return -1;
 }
 
-static volatile int g_aio_sigev_notified = 0;
-static volatile long long g_aio_sigev_val = -1;
+static volatile int       g_aio_sigev_notified = 0;
+static volatile long long g_aio_sigev_val      = -1;
 
 static void aio_sigev_notify_fn(union sigval sv) {
     g_aio_sigev_notified = 1;
-    g_aio_sigev_val = sv.sival_int;
+    g_aio_sigev_val      = sv.sival_int;
 }
 
 // test_aio_sigev_thread (#870) -- aio_write() with SIGEV_THREAD: the guest
@@ -2993,23 +3835,24 @@ static void aio_sigev_notify_fn(union sigval sv) {
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_sigev_thread(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
     g_aio_sigev_notified = 0;
-    g_aio_sigev_val = -1;
+    g_aio_sigev_val      = -1;
 
     struct aiocb cb;
     memset(&cb, 0, sizeof(cb));
-    cb.aio_fildes = fd;
-    const char *msg = "sigev-thread";
-    cb.aio_buf = (void *)msg;
-    cb.aio_nbytes = strlen(msg);
-    cb.aio_offset = 0;
-    cb.aio_sigevent.sigev_notify = SIGEV_THREAD;
-    cb.aio_sigevent.sigev_notify_function = aio_sigev_notify_fn;
+    cb.aio_fildes                           = fd;
+    const char *msg                         = "sigev-thread";
+    cb.aio_buf                              = (void *)msg;
+    cb.aio_nbytes                           = strlen(msg);
+    cb.aio_offset                           = 0;
+    cb.aio_sigevent.sigev_notify            = SIGEV_THREAD;
+    cb.aio_sigevent.sigev_notify_function   = aio_sigev_notify_fn;
     cb.aio_sigevent.sigev_notify_attributes = NULL;
-    cb.aio_sigevent.sigev_value.sival_int = 4242;
+    cb.aio_sigevent.sigev_value.sival_int   = 4242;
 
     if (aio_write_retry(&cb) != 0) {
         int saved_errno = errno;
@@ -3025,7 +3868,7 @@ int test_aio_sigev_thread(void) {
     /* #929: reap so this request's aio slot is released rather than held
        for the rest of the process's life (SIGEV_THREAD's own notification
        already told us it completed; aio_suspend returns immediately). */
-    const struct aiocb *list[1] = { &cb };
+    const struct aiocb *list[1] = {&cb};
     aio_suspend(list, 1, NULL);
     (void)aio_error(&cb);
     (void)aio_return(&cb);
@@ -3033,9 +3876,12 @@ int test_aio_sigev_thread(void) {
     close(fd);
     unlink(tmpl);
 
-    if (!g_aio_sigev_notified) return 3;
-    if (g_aio_sigev_val != 4242) return 4;
-    if (!reg_intact) return 5; // async delivery corrupted a live register (#877)
+    if (!g_aio_sigev_notified)
+        return 3;
+    if (g_aio_sigev_val != 4242)
+        return 4;
+    if (!reg_intact)
+        return 5; // async delivery corrupted a live register (#877)
     return 42;
 }
 
@@ -3073,21 +3919,22 @@ static void aio_sigev_signal_handler(int sig) {
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_sigev_signal(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_signal_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
     g_aio_sigev_signal_seen = 0;
     signal(SIGUSR1, aio_sigev_signal_handler);
 
     struct aiocb cb;
     memset(&cb, 0, sizeof(cb));
-    cb.aio_fildes = fd;
-    const char *msg = "sigev-signal";
-    cb.aio_buf = (void *)msg;
-    cb.aio_nbytes = strlen(msg);
-    cb.aio_offset = 0;
+    cb.aio_fildes                = fd;
+    const char *msg              = "sigev-signal";
+    cb.aio_buf                   = (void *)msg;
+    cb.aio_nbytes                = strlen(msg);
+    cb.aio_offset                = 0;
     cb.aio_sigevent.sigev_notify = SIGEV_SIGNAL;
-    cb.aio_sigevent.sigev_signo = SIGUSR1;
+    cb.aio_sigevent.sigev_signo  = SIGUSR1;
 
     if (aio_write_retry(&cb) != 0) {
         int saved_errno = errno;
@@ -3097,18 +3944,20 @@ int test_aio_sigev_signal(void) {
         return 100 + saved_errno;
     }
 
-    const struct aiocb *list[1] = { &cb };
+    const struct aiocb *list[1] = {&cb};
     aio_suspend(list, 1, NULL);
-    for (int _i = 0; !g_aio_sigev_signal_seen && _i < 500; _i++) usleep(1000);
+    for (int _i = 0; !g_aio_sigev_signal_seen && _i < 500; _i++)
+        usleep(1000);
 
-    int err = aio_error(&cb);
+    int     err = aio_error(&cb);
     ssize_t ret = aio_return(&cb);
 
     signal(SIGUSR1, SIG_DFL);
     close(fd);
     unlink(tmpl);
 
-    if (err != 0 || ret != (ssize_t)strlen(msg)) return 3;
+    if (err != 0 || ret != (ssize_t)strlen(msg))
+        return 3;
     return 42;
 }
 
@@ -3121,40 +3970,77 @@ int test_aio_sigev_signal(void) {
 [[cccc::test(return = 42)]]
 int test_aio_write_read_roundtrip(void) {
     char tmpl[] = "/tmp/cccc_aio_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
-    const char *msg = "hello aio world";
+    const char  *msg = "hello aio world";
     struct aiocb wcb;
     memset(&wcb, 0, sizeof(wcb));
-    wcb.aio_fildes = fd;
-    wcb.aio_buf = (void *)msg;
-    wcb.aio_nbytes = strlen(msg);
-    wcb.aio_offset = 0;
+    wcb.aio_fildes                = fd;
+    wcb.aio_buf                   = (void *)msg;
+    wcb.aio_nbytes                = strlen(msg);
+    wcb.aio_offset                = 0;
     wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_write_retry(&wcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
-    const struct aiocb *wlist[1] = { &wcb };
-    if (aio_suspend(wlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 3; }
-    if (aio_error(&wcb) != 0) { close(fd); unlink(tmpl); return 4; }
-    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 5; }
+    if (aio_write_retry(&wcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + errno;
+    }
+    const struct aiocb *wlist[1] = {&wcb};
+    if (aio_suspend(wlist, 1, NULL) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 3;
+    }
+    if (aio_error(&wcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 4;
+    }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) {
+        close(fd);
+        unlink(tmpl);
+        return 5;
+    }
 
     char buf[64];
     memset(buf, 0, sizeof(buf));
     struct aiocb rcb;
     memset(&rcb, 0, sizeof(rcb));
-    rcb.aio_fildes = fd;
-    rcb.aio_buf = buf;
-    rcb.aio_nbytes = strlen(msg);
-    rcb.aio_offset = 0;
+    rcb.aio_fildes                = fd;
+    rcb.aio_buf                   = buf;
+    rcb.aio_nbytes                = strlen(msg);
+    rcb.aio_offset                = 0;
     rcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_read_retry(&rcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
-    const struct aiocb *rlist[1] = { &rcb };
-    if (aio_suspend(rlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 7; }
-    if (aio_error(&rcb) != 0) { close(fd); unlink(tmpl); return 8; }
-    if (aio_return(&rcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 9; }
-    if (strcmp(buf, msg) != 0) { close(fd); unlink(tmpl); return 10; }
+    if (aio_read_retry(&rcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + errno;
+    }
+    const struct aiocb *rlist[1] = {&rcb};
+    if (aio_suspend(rlist, 1, NULL) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 7;
+    }
+    if (aio_error(&rcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 8;
+    }
+    if (aio_return(&rcb) != (ssize_t)strlen(msg)) {
+        close(fd);
+        unlink(tmpl);
+        return 9;
+    }
+    if (strcmp(buf, msg) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 10;
+    }
 
     close(fd);
     unlink(tmpl);
@@ -3175,47 +4061,76 @@ int test_aio_write_read_roundtrip(void) {
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_fsync(void) {
     char tmpl[] = "/tmp/cccc_aio_fsync_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
     // wrap_aio_fsync()'s own NULL guard (src/stdlib/posix.c) -- this is CCCC
     // wrapper behaviour, not a POSIX guarantee (POSIX leaves a NULL aiocbp
     // undefined), but it's cheap and worth pinning.
     errno = 0;
-    if (aio_fsync(O_SYNC, NULL) != -1) { close(fd); unlink(tmpl); return 1000; }
+    if (aio_fsync(O_SYNC, NULL) != -1) {
+        close(fd);
+        unlink(tmpl);
+        return 1000;
+    }
 
     // A bogus op value must fail; the specific errno isn't asserted since
     // that would pin a detail POSIX doesn't guarantee across platforms.
     struct aiocb bad;
     memset(&bad, 0, sizeof(bad));
-    bad.aio_fildes = fd;
+    bad.aio_fildes                = fd;
     bad.aio_sigevent.sigev_notify = SIGEV_NONE;
-    if (aio_fsync(-1, &bad) != -1) { close(fd); unlink(tmpl); return 1001; }
+    if (aio_fsync(-1, &bad) != -1) {
+        close(fd);
+        unlink(tmpl);
+        return 1001;
+    }
 
-    const char *msg = "fsync me please";
+    const char  *msg = "fsync me please";
     struct aiocb wcb;
     memset(&wcb, 0, sizeof(wcb));
-    wcb.aio_fildes = fd;
-    wcb.aio_buf = (void *)msg;
-    wcb.aio_nbytes = strlen(msg);
-    wcb.aio_offset = 0;
+    wcb.aio_fildes                = fd;
+    wcb.aio_buf                   = (void *)msg;
+    wcb.aio_nbytes                = strlen(msg);
+    wcb.aio_offset                = 0;
     wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_write_retry(&wcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
-    const struct aiocb *wlist[1] = { &wcb };
-    if (aio_suspend(wlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 3; }
-    if (aio_error(&wcb) != 0) { close(fd); unlink(tmpl); return 4; }
-    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 5; }
+    if (aio_write_retry(&wcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + errno;
+    }
+    const struct aiocb *wlist[1] = {&wcb};
+    if (aio_suspend(wlist, 1, NULL) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 3;
+    }
+    if (aio_error(&wcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 4;
+    }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) {
+        close(fd);
+        unlink(tmpl);
+        return 5;
+    }
 
-    int ops[2] = { O_SYNC, O_DSYNC };
+    int ops[2] = {O_SYNC, O_DSYNC};
     for (int i = 0; i < 2; i++) {
         struct aiocb fcb;
         memset(&fcb, 0, sizeof(fcb));
-        fcb.aio_fildes = fd;
+        fcb.aio_fildes                = fd;
         fcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-        if (aio_fsync_retry(ops[i], &fcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
-        const struct aiocb *flist[1] = { &fcb };
+        if (aio_fsync_retry(ops[i], &fcb) != 0) {
+            close(fd);
+            unlink(tmpl);
+            return 100 + errno;
+        }
+        const struct aiocb *flist[1] = {&fcb};
         aio_suspend(flist, 1, NULL);
         /* aio_suspend() can return early on EINTR -- poll to a terminal
            state rather than trusting its return value alone (aio's history
@@ -3224,27 +4139,43 @@ int test_aio_fsync(void) {
         int err;
         while ((err = aio_error(&fcb)) == EINPROGRESS && n++ < 500)
             usleep(1000);
-        if (err != 0) { close(fd); unlink(tmpl); return 200 + i; }
-        if (aio_return(&fcb) != 0) { close(fd); unlink(tmpl); return 300 + i; }
+        if (err != 0) {
+            close(fd);
+            unlink(tmpl);
+            return 200 + i;
+        }
+        if (aio_return(&fcb) != 0) {
+            close(fd);
+            unlink(tmpl);
+            return 300 + i;
+        }
     }
 
     char buf[64];
     memset(buf, 0, sizeof(buf));
     lseek(fd, 0, SEEK_SET);
-    if (read(fd, buf, strlen(msg)) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 9; }
-    if (strcmp(buf, msg) != 0) { close(fd); unlink(tmpl); return 10; }
+    if (read(fd, buf, strlen(msg)) != (ssize_t)strlen(msg)) {
+        close(fd);
+        unlink(tmpl);
+        return 9;
+    }
+    if (strcmp(buf, msg) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 10;
+    }
 
     close(fd);
     unlink(tmpl);
     return 42;
 }
 
-static volatile int g_aio_fsync_sigev_notified = 0;
-static volatile long long g_aio_fsync_sigev_val = -1;
+static volatile int       g_aio_fsync_sigev_notified = 0;
+static volatile long long g_aio_fsync_sigev_val      = -1;
 
 static void aio_fsync_sigev_notify_fn(union sigval sv) {
     g_aio_fsync_sigev_notified = 1;
-    g_aio_fsync_sigev_val = sv.sival_int;
+    g_aio_fsync_sigev_val      = sv.sival_int;
 }
 
 // test_aio_fsync_sigev_thread (#931 follow-up) -- sigevent_prepare() (see
@@ -3261,34 +4192,51 @@ static void aio_fsync_sigev_notify_fn(union sigval sv) {
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_fsync_sigev_thread(void) {
     char tmpl[] = "/tmp/cccc_aio_fsync_sigev_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
-    const char *msg = "fsync-sigev-thread";
+    const char  *msg = "fsync-sigev-thread";
     struct aiocb wcb;
     memset(&wcb, 0, sizeof(wcb));
-    wcb.aio_fildes = fd;
-    wcb.aio_buf = (void *)msg;
-    wcb.aio_nbytes = strlen(msg);
-    wcb.aio_offset = 0;
+    wcb.aio_fildes                = fd;
+    wcb.aio_buf                   = (void *)msg;
+    wcb.aio_nbytes                = strlen(msg);
+    wcb.aio_offset                = 0;
     wcb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_write_retry(&wcb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
-    const struct aiocb *wlist[1] = { &wcb };
-    if (aio_suspend(wlist, 1, NULL) != 0) { close(fd); unlink(tmpl); return 3; }
-    if (aio_error(&wcb) != 0) { close(fd); unlink(tmpl); return 4; }
-    if (aio_return(&wcb) != (ssize_t)strlen(msg)) { close(fd); unlink(tmpl); return 5; }
+    if (aio_write_retry(&wcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + errno;
+    }
+    const struct aiocb *wlist[1] = {&wcb};
+    if (aio_suspend(wlist, 1, NULL) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 3;
+    }
+    if (aio_error(&wcb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 4;
+    }
+    if (aio_return(&wcb) != (ssize_t)strlen(msg)) {
+        close(fd);
+        unlink(tmpl);
+        return 5;
+    }
 
     g_aio_fsync_sigev_notified = 0;
-    g_aio_fsync_sigev_val = -1;
+    g_aio_fsync_sigev_val      = -1;
 
     struct aiocb fcb;
     memset(&fcb, 0, sizeof(fcb));
-    fcb.aio_fildes = fd;
-    fcb.aio_sigevent.sigev_notify = SIGEV_THREAD;
-    fcb.aio_sigevent.sigev_notify_function = aio_fsync_sigev_notify_fn;
+    fcb.aio_fildes                           = fd;
+    fcb.aio_sigevent.sigev_notify            = SIGEV_THREAD;
+    fcb.aio_sigevent.sigev_notify_function   = aio_fsync_sigev_notify_fn;
     fcb.aio_sigevent.sigev_notify_attributes = NULL;
-    fcb.aio_sigevent.sigev_value.sival_int = 5353;
+    fcb.aio_sigevent.sigev_value.sival_int   = 5353;
 
     if (aio_fsync_retry(O_SYNC, &fcb) != 0) {
         int saved_errno = errno;
@@ -3299,12 +4247,13 @@ int test_aio_fsync_sigev_thread(void) {
 
     /* #877 regression: tight bytecode busy-spin, not usleep() -- see
        busy_spin_wait_checked's comment near test_aio_sigev_thread. */
-    int reg_intact = busy_spin_wait_checked(&g_aio_fsync_sigev_notified, 2000000);
+    int reg_intact =
+        busy_spin_wait_checked(&g_aio_fsync_sigev_notified, 2000000);
 
     /* #929: reap so this request's aio slot is released rather than held
        for the rest of the process's life (SIGEV_THREAD's own notification
        already told us it completed; aio_suspend returns immediately). */
-    const struct aiocb *flist[1] = { &fcb };
+    const struct aiocb *flist[1] = {&fcb};
     aio_suspend(flist, 1, NULL);
     (void)aio_error(&fcb);
     (void)aio_return(&fcb);
@@ -3312,9 +4261,12 @@ int test_aio_fsync_sigev_thread(void) {
     close(fd);
     unlink(tmpl);
 
-    if (!g_aio_fsync_sigev_notified) return 7;
-    if (g_aio_fsync_sigev_val != 5353) return 8;
-    if (!reg_intact) return 9; // async delivery corrupted a live register (#877)
+    if (!g_aio_fsync_sigev_notified)
+        return 7;
+    if (g_aio_fsync_sigev_val != 5353)
+        return 8;
+    if (!reg_intact)
+        return 9; // async delivery corrupted a live register (#877)
     return 42;
 }
 
@@ -3325,20 +4277,25 @@ int test_aio_fsync_sigev_thread(void) {
 [[cccc::test(return = 42)]]
 int test_aio_cancel(void) {
     char tmpl[] = "/tmp/cccc_aio_cancel_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
     struct aiocb cb;
     memset(&cb, 0, sizeof(cb));
     cb.aio_fildes = fd;
     static char payload[4096];
     memset(payload, 'z', sizeof(payload));
-    cb.aio_buf = payload;
-    cb.aio_nbytes = sizeof(payload);
-    cb.aio_offset = 0;
+    cb.aio_buf                   = payload;
+    cb.aio_nbytes                = sizeof(payload);
+    cb.aio_offset                = 0;
     cb.aio_sigevent.sigev_notify = SIGEV_NONE;
 
-    if (aio_write_retry(&cb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
+    if (aio_write_retry(&cb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + errno;
+    }
     int r = aio_cancel(fd, &cb);
     if (r != AIO_ALLDONE && r != AIO_CANCELED && r != AIO_NOTCANCELED) {
         close(fd);
@@ -3346,7 +4303,7 @@ int test_aio_cancel(void) {
         return 3;
     }
     /* Whichever way it went, the request must reach a terminal state. */
-    const struct aiocb *list[1] = { &cb };
+    const struct aiocb *list[1] = {&cb};
     aio_suspend(list, 1, NULL);
     (void)aio_error(&cb);
     (void)aio_return(&cb);
@@ -3372,20 +4329,21 @@ int test_aio_cancel(void) {
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_slot_exhaustion(void) {
     char tmpl[] = "/tmp/cccc_aio_exhaustion_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
     static struct aiocb cbs[AIO_EXHAUSTION_MAX];
-    static char payload = 'z';
-    int submitted = 0;
-    int failed_with_eagain = 0;
+    static char         payload            = 'z';
+    int                 submitted          = 0;
+    int                 failed_with_eagain = 0;
 
     for (; submitted < AIO_EXHAUSTION_MAX; submitted++) {
         memset(&cbs[submitted], 0, sizeof(cbs[submitted]));
-        cbs[submitted].aio_fildes = fd;
-        cbs[submitted].aio_buf = &payload;
-        cbs[submitted].aio_nbytes = 1;
-        cbs[submitted].aio_offset = submitted;
+        cbs[submitted].aio_fildes                = fd;
+        cbs[submitted].aio_buf                   = &payload;
+        cbs[submitted].aio_nbytes                = 1;
+        cbs[submitted].aio_offset                = submitted;
         cbs[submitted].aio_sigevent.sigev_notify = SIGEV_NONE;
         if (aio_write(&cbs[submitted]) != 0) {
             failed_with_eagain = (errno == EAGAIN);
@@ -3398,7 +4356,7 @@ int test_aio_slot_exhaustion(void) {
            submitted and treat as a pass; the limit is host-configurable
            and a higher ceiling isn't a bug, just untestable at this size. */
         for (int i = 0; i < submitted; i++) {
-            const struct aiocb *list[1] = { &cbs[i] };
+            const struct aiocb *list[1] = {&cbs[i]};
             aio_suspend(list, 1, NULL);
             (void)aio_error(&cbs[i]);
             (void)aio_return(&cbs[i]);
@@ -3410,7 +4368,7 @@ int test_aio_slot_exhaustion(void) {
 
     /* Reap every request that did get submitted, freeing their slots. */
     for (int i = 0; i < submitted; i++) {
-        const struct aiocb *list[1] = { &cbs[i] };
+        const struct aiocb *list[1] = {&cbs[i]};
         aio_suspend(list, 1, NULL);
         (void)aio_error(&cbs[i]);
         (void)aio_return(&cbs[i]);
@@ -3419,21 +4377,26 @@ int test_aio_slot_exhaustion(void) {
     /* Slots should be free again now -- a fresh submission must succeed. */
     struct aiocb retry_cb;
     memset(&retry_cb, 0, sizeof(retry_cb));
-    retry_cb.aio_fildes = fd;
-    retry_cb.aio_buf = &payload;
-    retry_cb.aio_nbytes = 1;
-    retry_cb.aio_offset = 0;
+    retry_cb.aio_fildes                = fd;
+    retry_cb.aio_buf                   = &payload;
+    retry_cb.aio_nbytes                = 1;
+    retry_cb.aio_offset                = 0;
     retry_cb.aio_sigevent.sigev_notify = SIGEV_NONE;
-    if (aio_write_retry(&retry_cb) != 0) { close(fd); unlink(tmpl); return 100 + errno; }
-    const struct aiocb *retry_list[1] = { &retry_cb };
+    if (aio_write_retry(&retry_cb) != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + errno;
+    }
+    const struct aiocb *retry_list[1] = {&retry_cb};
     aio_suspend(retry_list, 1, NULL);
-    int err = aio_error(&retry_cb);
+    int     err = aio_error(&retry_cb);
     ssize_t ret = aio_return(&retry_cb);
 
     close(fd);
     unlink(tmpl);
 
-    if (err != 0 || ret != 1) return 3;
+    if (err != 0 || ret != 1)
+        return 3;
     return 42;
 }
 #undef AIO_EXHAUSTION_MAX
@@ -3448,24 +4411,32 @@ int test_aio_slot_exhaustion(void) {
 [[cccc::test(return = 42)]]
 int test_lio_listio_wait(void) {
     char tmpl[] = "/tmp/cccc_lio_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return 1;
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
 
-    const char *a = "AAAA";
-    const char *b = "BBBB";
+    const char  *a = "AAAA";
+    const char  *b = "BBBB";
     struct aiocb cb1, cb2;
     memset(&cb1, 0, sizeof(cb1));
     memset(&cb2, 0, sizeof(cb2));
-    cb1.aio_fildes = fd; cb1.aio_buf = (void *)a; cb1.aio_nbytes = 4; cb1.aio_offset = 0;
+    cb1.aio_fildes                = fd;
+    cb1.aio_buf                   = (void *)a;
+    cb1.aio_nbytes                = 4;
+    cb1.aio_offset                = 0;
     cb1.aio_sigevent.sigev_notify = SIGEV_NONE;
-    cb1.aio_lio_opcode = LIO_WRITE; /* lio_listio(), unlike aio_write(), needs this set */
-    cb2.aio_fildes = fd; cb2.aio_buf = (void *)b; cb2.aio_nbytes = 4; cb2.aio_offset = 4;
+    cb1.aio_lio_opcode =
+        LIO_WRITE; /* lio_listio(), unlike aio_write(), needs this set */
+    cb2.aio_fildes                = fd;
+    cb2.aio_buf                   = (void *)b;
+    cb2.aio_nbytes                = 4;
+    cb2.aio_offset                = 4;
     cb2.aio_sigevent.sigev_notify = SIGEV_NONE;
-    cb2.aio_lio_opcode = LIO_WRITE;
+    cb2.aio_lio_opcode            = LIO_WRITE;
 
-    struct aiocb *list[2] = { &cb1, &cb2 };
-    int rc = -1;
-    int saved_errno = 0;
+    struct aiocb *list[2]         = {&cb1, &cb2};
+    int           rc              = -1;
+    int           saved_errno     = 0;
     for (int attempt = 0; attempt < 10; attempt++) {
         rc = lio_listio(LIO_WAIT, list, 2, NULL);
         if (rc == 0)
@@ -3477,16 +4448,30 @@ int test_lio_listio_wait(void) {
             break;
         usleep(20000);
     }
-    if (rc != 0) { close(fd); unlink(tmpl); return 100 + saved_errno; }
+    if (rc != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 100 + saved_errno;
+    }
 
     char buf[9];
     memset(buf, 0, sizeof(buf));
     lseek(fd, 0, SEEK_SET);
-    if (read(fd, buf, 8) != 8) { close(fd); unlink(tmpl); return 3; }
-    if (strcmp(buf, "AAAABBBB") != 0) { close(fd); unlink(tmpl); return 4; }
+    if (read(fd, buf, 8) != 8) {
+        close(fd);
+        unlink(tmpl);
+        return 3;
+    }
+    if (strcmp(buf, "AAAABBBB") != 0) {
+        close(fd);
+        unlink(tmpl);
+        return 4;
+    }
 
-    (void)aio_error(&cb1); (void)aio_return(&cb1);
-    (void)aio_error(&cb2); (void)aio_return(&cb2);
+    (void)aio_error(&cb1);
+    (void)aio_return(&cb1);
+    (void)aio_error(&cb2);
+    (void)aio_return(&cb2);
 
     close(fd);
     unlink(tmpl);
@@ -3508,46 +4493,64 @@ int test_mqueue_roundtrip(void) {
 
     struct mq_attr attr;
     memset(&attr, 0, sizeof(attr));
-    attr.mq_maxmsg = 4;
+    attr.mq_maxmsg  = 4;
     attr.mq_msgsize = 32;
 
-    mqd_t q = mq_open(name, O_CREAT | O_RDWR, 0644, &attr);
-    if (q == (mqd_t)-1) return 2;
+    mqd_t q         = mq_open(name, O_CREAT | O_RDWR, 0644, &attr);
+    if (q == (mqd_t)-1)
+        return 2;
 
-    if (mq_send(q, "hi there", 8, 3) != 0) { mq_close(q); mq_unlink(name); return 3; }
+    if (mq_send(q, "hi there", 8, 3) != 0) {
+        mq_close(q);
+        mq_unlink(name);
+        return 3;
+    }
 
     char buf[64];
     memset(buf, 0, sizeof(buf));
     unsigned int prio = 0;
-    ssize_t n = mq_receive(q, buf, sizeof(buf), &prio);
+    ssize_t      n    = mq_receive(q, buf, sizeof(buf), &prio);
     if (n != 8 || strncmp(buf, "hi there", 8) != 0 || prio != 3) {
-        mq_close(q); mq_unlink(name);
+        mq_close(q);
+        mq_unlink(name);
         return 4;
     }
 
     struct mq_attr got;
-    int gattr_rc = mq_getattr(q, &got);
-    if (gattr_rc != 0) { mq_close(q); mq_unlink(name); return 6; }
-    if (got.mq_maxmsg != 4 || got.mq_msgsize != 32) { mq_close(q); mq_unlink(name); return 7; }
+    int            gattr_rc = mq_getattr(q, &got);
+    if (gattr_rc != 0) {
+        mq_close(q);
+        mq_unlink(name);
+        return 6;
+    }
+    if (got.mq_maxmsg != 4 || got.mq_msgsize != 32) {
+        mq_close(q);
+        mq_unlink(name);
+        return 7;
+    }
 
     struct timespec deadline;
-    deadline.tv_sec = time(NULL) + 1;
+    deadline.tv_sec  = time(NULL) + 1;
     deadline.tv_nsec = 0;
-    ssize_t tr = mq_timedreceive(q, buf, sizeof(buf), &prio, &deadline);
-    int tr_errno = errno;
-    if (tr != -1 || tr_errno != ETIMEDOUT) { mq_close(q); mq_unlink(name); return 9; }
+    ssize_t tr       = mq_timedreceive(q, buf, sizeof(buf), &prio, &deadline);
+    int     tr_errno = errno;
+    if (tr != -1 || tr_errno != ETIMEDOUT) {
+        mq_close(q);
+        mq_unlink(name);
+        return 9;
+    }
 
     mq_close(q);
     mq_unlink(name);
     return 42;
 }
 
-static volatile int g_mq_sigev_notified = 0;
-static volatile long long g_mq_sigev_val = -1;
+static volatile int       g_mq_sigev_notified = 0;
+static volatile long long g_mq_sigev_val      = -1;
 
 static void mq_sigev_notify_fn(union sigval sv) {
     g_mq_sigev_notified = 1;
-    g_mq_sigev_val = sv.sival_int;
+    g_mq_sigev_val      = sv.sival_int;
 }
 
 // test_mqueue_sigev_thread (#870) -- Linux-only. mq_notify() with
@@ -3561,26 +4564,36 @@ int test_mqueue_sigev_thread(void) {
     mq_unlink(name);
 
     struct mq_attr *attr = malloc(sizeof(struct mq_attr));
-    if (!attr) return 1;
+    if (!attr)
+        return 1;
     memset(attr, 0, sizeof(*attr));
-    attr->mq_maxmsg = 4;
+    attr->mq_maxmsg  = 4;
     attr->mq_msgsize = 32;
-    mqd_t q = mq_open(name, O_CREAT | O_RDWR, 0644, attr);
+    mqd_t q          = mq_open(name, O_CREAT | O_RDWR, 0644, attr);
     free(attr);
-    if (q == (mqd_t)-1) return 2;
+    if (q == (mqd_t)-1)
+        return 2;
 
     g_mq_sigev_notified = 0;
-    g_mq_sigev_val = -1;
+    g_mq_sigev_val      = -1;
 
     struct sigevent sev;
     memset(&sev, 0, sizeof(sev));
-    sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_notify_function = mq_sigev_notify_fn;
+    sev.sigev_notify            = SIGEV_THREAD;
+    sev.sigev_notify_function   = mq_sigev_notify_fn;
     sev.sigev_notify_attributes = NULL;
-    sev.sigev_value.sival_int = 4343;
+    sev.sigev_value.sival_int   = 4343;
 
-    if (mq_notify(q, &sev) != 0) { mq_close(q); mq_unlink(name); return 3; }
-    if (mq_send(q, "hi", 2, 0) != 0) { mq_close(q); mq_unlink(name); return 4; }
+    if (mq_notify(q, &sev) != 0) {
+        mq_close(q);
+        mq_unlink(name);
+        return 3;
+    }
+    if (mq_send(q, "hi", 2, 0) != 0) {
+        mq_close(q);
+        mq_unlink(name);
+        return 4;
+    }
 
     /* #877 regression: tight bytecode busy-spin, not usleep() -- see
        busy_spin_wait_checked's comment near test_aio_sigev_thread. */
@@ -3589,9 +4602,12 @@ int test_mqueue_sigev_thread(void) {
     mq_close(q);
     mq_unlink(name);
 
-    if (!g_mq_sigev_notified) return 5;
-    if (g_mq_sigev_val != 4343) return 6;
-    if (!reg_intact) return 7; // async delivery corrupted a live register (#877)
+    if (!g_mq_sigev_notified)
+        return 5;
+    if (g_mq_sigev_val != 4343)
+        return 6;
+    if (!reg_intact)
+        return 7; // async delivery corrupted a live register (#877)
     return 42;
 }
 #endif
@@ -3608,8 +4624,9 @@ int test_mqueue_sigev_thread(void) {
 [[cccc::test(return = 42)]]
 int test_ndbm_roundtrip(void) {
     char base[] = "/tmp/cccc_ndbm_test_XXXXXX";
-    int tfd = mkstemp(base);
-    if (tfd < 0) return 1;
+    int  tfd    = mkstemp(base);
+    if (tfd < 0)
+        return 1;
     close(tfd);
     unlink(base); /* dbm_open wants a bare path, not an existing plain file */
 
@@ -3618,30 +4635,45 @@ int test_ndbm_roundtrip(void) {
     unlink(dbfile);
 
     DBM *db = dbm_open(base, O_RDWR | O_CREAT, 0644);
-    if (!db) return 2;
+    if (!db)
+        return 2;
 
-    datum k1 = { "key1", 4 };
-    datum v1 = { "value1", 6 };
-    datum k2 = { "key2", 4 };
-    datum v2 = { "value2", 6 };
-    if (dbm_store(db, k1, v1, DBM_INSERT) != 0) { dbm_close(db); return 3; }
-    if (dbm_store(db, k2, v2, DBM_INSERT) != 0) { dbm_close(db); return 4; }
+    datum k1 = {"key1", 4};
+    datum v1 = {"value1", 6};
+    datum k2 = {"key2", 4};
+    datum v2 = {"value2", 6};
+    if (dbm_store(db, k1, v1, DBM_INSERT) != 0) {
+        dbm_close(db);
+        return 3;
+    }
+    if (dbm_store(db, k2, v2, DBM_INSERT) != 0) {
+        dbm_close(db);
+        return 4;
+    }
 
     /* DBM_INSERT must not clobber an existing key. */
-    datum v1_dup = { "should-not-land", 16 };
-    if (dbm_store(db, k1, v1_dup, DBM_INSERT) == 0) { dbm_close(db); return 9; }
+    datum v1_dup = {"should-not-land", 16};
+    if (dbm_store(db, k1, v1_dup, DBM_INSERT) == 0) {
+        dbm_close(db);
+        return 9;
+    }
 
     datum got = dbm_fetch(db, k1);
-    if (got.dptr == NULL || got.dsize != 6 || memcmp(got.dptr, "value1", 6) != 0) {
+    if (got.dptr == NULL || got.dsize != 6 ||
+        memcmp(got.dptr, "value1", 6) != 0) {
         dbm_close(db);
         return 5;
     }
 
     /* DBM_REPLACE must overwrite the existing value. */
-    datum v1_new = { "newval1", 7 };
-    if (dbm_store(db, k1, v1_new, DBM_REPLACE) != 0) { dbm_close(db); return 10; }
+    datum v1_new = {"newval1", 7};
+    if (dbm_store(db, k1, v1_new, DBM_REPLACE) != 0) {
+        dbm_close(db);
+        return 10;
+    }
     datum replaced = dbm_fetch(db, k1);
-    if (replaced.dptr == NULL || replaced.dsize != 7 || memcmp(replaced.dptr, "newval1", 7) != 0) {
+    if (replaced.dptr == NULL || replaced.dsize != 7 ||
+        memcmp(replaced.dptr, "newval1", 7) != 0) {
         dbm_close(db);
         return 11;
     }
@@ -3649,11 +4681,20 @@ int test_ndbm_roundtrip(void) {
     int count = 0;
     for (datum key = dbm_firstkey(db); key.dptr != NULL; key = dbm_nextkey(db))
         count++;
-    if (count != 2) { dbm_close(db); return 6; }
+    if (count != 2) {
+        dbm_close(db);
+        return 6;
+    }
 
-    if (dbm_delete(db, k1) != 0) { dbm_close(db); return 7; }
+    if (dbm_delete(db, k1) != 0) {
+        dbm_close(db);
+        return 7;
+    }
     datum gone = dbm_fetch(db, k1);
-    if (gone.dptr != NULL) { dbm_close(db); return 8; }
+    if (gone.dptr != NULL) {
+        dbm_close(db);
+        return 8;
+    }
 
     dbm_close(db);
     unlink(dbfile);

@@ -8,4 +8,6 @@
 // never truncates vm->errors. Must appear exactly once.
 #pragma made_up_unknown_pragma
 
-int main(void) { return 42; }
+int main(void) {
+    return 42;
+}

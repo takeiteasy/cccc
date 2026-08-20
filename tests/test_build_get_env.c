@@ -6,10 +6,13 @@
 [[cccc::build]]
 int build_main(Builder *ctx) {
     const char *path = GetEnv(ctx, "PATH");
-    if (!path || path[0] == '\0') return 1;
+    if (!path || path[0] == '\0')
+        return 1;
 
-    const char *missing = GetEnv(ctx, "CCCC_TEST_VAR_DEFINITELY_NOT_SET_XYZ123");
-    if (missing != (void*)0) return 1;
+    const char *missing =
+        GetEnv(ctx, "CCCC_TEST_VAR_DEFINITELY_NOT_SET_XYZ123");
+    if (missing != (void *)0)
+        return 1;
 
     return 42;
 }

@@ -9,6 +9,7 @@ __attribute__((constructor)) void init(void) {
 }
 
 int main(void) {
-    if (ready != 1) return 1;
+    if (ready != 1)
+        return 1;
     return 42;
 }

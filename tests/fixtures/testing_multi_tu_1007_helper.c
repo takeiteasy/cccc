@@ -4,4 +4,6 @@
 // macros and __builtin_assert_* prototypes) failed to reach a *later* input
 // file's parse stream once each command-line input file became its own
 // translation unit (#1001).
-int testing_multi_tu_1007_helper(void) { return 42; }
+int testing_multi_tu_1007_helper(void) {
+    return 42;
+}

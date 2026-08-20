@@ -5,11 +5,11 @@
 // (unlike a `for`/`while`, which can run zero times) -- see
 // test_warning_nonnull_flow_loop_zero_trip.c for the contrasting case.
 void foo(int *p) __attribute__((nonnull));
-void foo(int *p) { }
+void foo(int *p) {}
 int main(void) {
-    int x = 0;
+    int  x = 0;
     int *p = 0;
-    int c = 0;
+    int  c = 0;
     do {
         p = &x;
     } while (c);

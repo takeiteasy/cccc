@@ -21,28 +21,28 @@
 extern "C" {
 #endif
 
-#define CL_MAX_FNS 64
+#define CL_MAX_FNS    64
 #define CL_MAX_PARAMS 16
-#define CL_MAX_OPS 1024
-#define CL_MAX_SYMS 256
-#define CL_NAME_LEN 64
-#define CL_ERROR_LEN 256
+#define CL_MAX_OPS    1024
+#define CL_MAX_SYMS   256
+#define CL_NAME_LEN   64
+#define CL_ERROR_LEN  256
 
 typedef enum CccclOpKind {
-    CL_OP_NIL,          /* push ccccl_nil                                   */
-    CL_OP_T,            /* push ccccl_t                                     */
-    CL_OP_QUOTE,        /* a = const index -> push ccccl_const_<a>()        */
-    CL_OP_LOOKUP,       /* a = sym index   -> push ccccl_assoc(SYM_a, env)  */
-    CL_OP_CAR,          /* pop 1, push ccccl_car(top)                       */
-    CL_OP_CDR,          /* pop 1, push ccccl_cdr(top)                       */
-    CL_OP_ATOM,         /* pop 1, push ccccl_atom(top)                      */
-    CL_OP_EQ,           /* pop 2, push ccccl_eq(a, b)                       */
-    CL_OP_CONS,         /* pop 2, push ccccl_cons(a, d)                     */
-    CL_OP_COND,         /* a = clause count; see the lazy-evaluation note   */
-    CL_OP_CLOSURE,      /* a = fn index -> push ccccl_closure(fn_a, env)    */
-    CL_OP_ARGLIST,      /* a = n; pops n, pushes a cons list (last arg first)*/
-    CL_OP_CALL,         /* pops arglist then callee, pushes ccccl_apply(...) */
-    CL_OP_CALL_DIRECT   /* a = fn index; pops arglist; f(arglist, env)      */
+    CL_OP_NIL,        /* push ccccl_nil                                   */
+    CL_OP_T,          /* push ccccl_t                                     */
+    CL_OP_QUOTE,      /* a = const index -> push ccccl_const_<a>()        */
+    CL_OP_LOOKUP,     /* a = sym index   -> push ccccl_assoc(SYM_a, env)  */
+    CL_OP_CAR,        /* pop 1, push ccccl_car(top)                       */
+    CL_OP_CDR,        /* pop 1, push ccccl_cdr(top)                       */
+    CL_OP_ATOM,       /* pop 1, push ccccl_atom(top)                      */
+    CL_OP_EQ,         /* pop 2, push ccccl_eq(a, b)                       */
+    CL_OP_CONS,       /* pop 2, push ccccl_cons(a, d)                     */
+    CL_OP_COND,       /* a = clause count; see the lazy-evaluation note   */
+    CL_OP_CLOSURE,    /* a = fn index -> push ccccl_closure(fn_a, env)    */
+    CL_OP_ARGLIST,    /* a = n; pops n, pushes a cons list (last arg first)*/
+    CL_OP_CALL,       /* pops arglist then callee, pushes ccccl_apply(...) */
+    CL_OP_CALL_DIRECT /* a = fn index; pops arglist; f(arglist, env)      */
 } CccclOpKind;
 
 /* One op. For CL_OP_COND, `a` is the clause count and each clause occupies
@@ -52,7 +52,7 @@ typedef enum CccclOpKind {
  * interpreter) evaluate only the taken branch instead of every operand. */
 typedef struct {
     CccclOpKind kind;
-    int a, b;
+    int         a, b;
 } CccclOp;
 
 /* A COND clause: [pred_start, pred_end) and [val_start, val_end) are op
@@ -68,18 +68,18 @@ typedef struct {
 typedef struct {
     char lisp_name[CL_NAME_LEN];
     char c_name[CL_NAME_LEN + 32];
-    int is_lambda; /* anonymous, gensym'd C name */
+    int  is_lambda; /* anonymous, gensym'd C name */
 
-    int param_count;
+    int  param_count;
     char param_lisp[CL_MAX_PARAMS][CL_NAME_LEN];
-    int param_sym[CL_MAX_PARAMS]; /* index into plan->syms, one per param */
+    int  param_sym[CL_MAX_PARAMS]; /* index into plan->syms, one per param */
 
     /* This function's own env-binding: LABEL functions bind their own name
      * at entry (see docs/LOWERING.md). -1 if none. */
-    int self_label_sym; /* index into plan->syms, or -1 */
+    int     self_label_sym; /* index into plan->syms, or -1 */
 
     CccclOp ops[CL_MAX_OPS];
-    int op_count;
+    int     op_count;
 
     /* A COND clause's predicate/value expressions are lowered into this
      * *separate* pool, never into `ops[]` -- CccclCondClause's four indices
@@ -96,18 +96,18 @@ typedef struct {
      * the untaken branch never terminates. Confirmed by hitting exactly
      * this bug against `append` before splitting the pools. */
     CccclOp cond_ops[CL_MAX_OPS];
-    int cond_op_count;
+    int     cond_op_count;
 
     /* Where ccccl_emit currently appends: &ops/&op_count normally, swapped
      * to &cond_ops/&cond_op_count for the duration of lowering one clause's
      * predicate or value (see ccccl_lower_expr's COND case). A plain
      * save/restore around each nested lowering call, so nested CONDs (a
      * COND inside another COND's clause) work via ordinary C recursion. */
-    CccclOp *emit_ops;
-    int *emit_count;
+    CccclOp        *emit_ops;
+    int            *emit_count;
 
     CccclCondClause conds[CL_MAX_COND_CLAUSES];
-    int cond_count;
+    int             cond_count;
 } CccclPlanFn;
 
 typedef struct {
@@ -116,21 +116,21 @@ typedef struct {
 
 typedef struct {
     CccclPlanFn fns[CL_MAX_FNS];
-    int fn_count;
+    int         fn_count;
 
-    CccclSym syms[CL_MAX_SYMS];
-    int sym_count;
+    CccclSym    syms[CL_MAX_SYMS];
+    int         sym_count;
 
     /* Set on the first unsupported form; naming the form. Once set, lowering
      * stops adding ops (a partial plan is never silently compiled). */
     char error[CL_ERROR_LEN];
-    int has_error;
+    int  has_error;
 } CccclPlan;
 
 static void ccccl_plan_init(CccclPlan *p) {
-    p->fn_count = 0;
+    p->fn_count  = 0;
     p->sym_count = 0;
-    p->error[0] = '\0';
+    p->error[0]  = '\0';
     p->has_error = 0;
 }
 

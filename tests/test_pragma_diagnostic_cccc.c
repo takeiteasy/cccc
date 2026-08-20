@@ -1,6 +1,7 @@
 // #pragma cccc diagnostic is the canonical cccc-namespaced form of the
 // diagnostic push/pop/ignore/warning/error directives. It is consumed by the
-// VM and not passed through in -c=generated output (unlike #pragma GCC diagnostic).
+// VM and not passed through in -c=generated output (unlike #pragma GCC
+// diagnostic).
 
 // CCCC_FLAGS: -Wunused
 // CCCC_EXPECT_STDERR: unused variable 'y'

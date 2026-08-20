@@ -9,7 +9,7 @@
 
 int main(void) {
     double complex z = CMPLX(3.0, 4.0);
-    double r = creal(z);
-    double i = cimag(z);
+    double         r = creal(z);
+    double         i = cimag(z);
     return (int)(r + i) == 7 ? 42 : 1;
 }

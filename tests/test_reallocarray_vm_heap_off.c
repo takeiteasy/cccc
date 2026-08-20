@@ -14,9 +14,9 @@ int main(void) {
         printf("FAIL: malloc returned NULL\n");
         return 1;
     }
-    arr[0] = 1;
-    arr[1] = 2;
-    arr[2] = 3;
+    arr[0]    = 1;
+    arr[1]    = 2;
+    arr[2]    = 3;
 
     int *arr2 = reallocarray(arr, 6, sizeof(int));
     if (!arr2) {
@@ -28,9 +28,11 @@ int main(void) {
         return 1;
     }
 
-    void *overflow_result = reallocarray(arr2, (size_t)1 << 60, (size_t)1 << 60);
+    void *overflow_result =
+        reallocarray(arr2, (size_t)1 << 60, (size_t)1 << 60);
     if (overflow_result != NULL) {
-        printf("FAIL: reallocarray did not detect overflow on host-allocator path\n");
+        printf("FAIL: reallocarray did not detect overflow on host-allocator "
+               "path\n");
         return 1;
     }
     if (arr2[0] != 1 || arr2[1] != 2 || arr2[2] != 3) {

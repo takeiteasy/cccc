@@ -21,29 +21,41 @@
 // (a) The ticket's own failing case: a defined, parameterized file-scope
 // function, block-scope-redeclared (redundant prototype) from inside
 // another function's body, then called.
-int helper(int x) { return x + 1; }
+int helper(int x) {
+    return x + 1;
+}
 
 // (b) No-arg control: nothing to shift, worked before the fix too --
 // kept as a regression guard.
-int helper2(void) { return 42; }
+int helper2(void) {
+    return 42;
+}
 
 // (c) File-scope-only redeclare-then-define, no block scope involved --
 // worked before the fix too, kept as a regression guard.
 int helper3(int x);
-int helper3(int x) { return x + 1; }
+int helper3(int x) {
+    return x + 1;
+}
 
 // (d) A genuine nested-function *definition* -- must still resolve its
 // static link correctly (regression guard for #1039/the static-link path
 // codegen_expr.c's calling_nested arm implements).
 static int outer_with_nested(int base) {
-    int inner(int x) { return x * 2; }
+    int inner(int x) {
+        return x * 2;
+    }
     return inner(base);
 }
 
 // (e) The multi-declarator variant of (a) -- exercises
 // declare_function_prototype()/function_declaration_list(), not function().
-int fa(int a) { return a + 1; }
-int fb(int a) { return a + 10; }
+int fa(int a) {
+    return a + 1;
+}
+int fb(int a) {
+    return a + 10;
+}
 
 int main(void) {
     {
@@ -63,7 +75,7 @@ int main(void) {
         return 4;
 
     {
-        int fa(int), fb(int); // multi-declarator block-scope prototype
+        int fa(int), fb(int);        // multi-declarator block-scope prototype
         int r = fa(10) + fb(20) + 1; // 11 + 30 + 1 == 42
         if (r != 42)
             return 5;

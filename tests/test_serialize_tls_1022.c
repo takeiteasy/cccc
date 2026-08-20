@@ -12,12 +12,12 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
-_Thread_local int g_tls = 0;
+_Thread_local int  g_tls      = 0;
 static _Atomic int g_failures = 0;
 
 static void *worker(void *arg) {
     int id = *(int *)arg;
-    g_tls = id * 10;
+    g_tls  = id * 10;
     // Give another thread a chance to run and clobber a shared (non-TLS)
     // instance before this thread reads its own value back.
     for (volatile int i = 0; i < 1000000; i++)
@@ -29,7 +29,7 @@ static void *worker(void *arg) {
 
 int main(void) {
     pthread_t threads[4];
-    int ids[4];
+    int       ids[4];
     for (int i = 0; i < 4; i++) {
         ids[i] = i + 1;
         if (pthread_create(&threads[i], 0, worker, &ids[i]) != 0)

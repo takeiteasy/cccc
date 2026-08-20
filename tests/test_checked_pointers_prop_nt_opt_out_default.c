@@ -4,9 +4,9 @@
 // and return 42.
 
 int main(void) {
-    int n = 3;
-    char * [[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
-    char *q = s;
+    int n                                     = 3;
+    char *[[cccc::ntarray, cccc::count(n)]] s = (char[4]){'a', 'b', 'c', 0};
+    char *q                                   = s;
     q[3] = 'x'; // no flag -- no check at all
     return q[3] == 'x' ? 42 : 1;
 }

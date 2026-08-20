@@ -12,7 +12,9 @@
 // (3) --optimize=3 (CALLT eligibility).
 #include <stdlib.h>
 
-static int g(int v) { return v; }
+static int g(int v) {
+    return v;
+}
 
 static int touch(int *p) {
     int a = g(*p);
@@ -23,6 +25,6 @@ static int touch(int *p) {
 
 int main(void) {
     int *p = malloc(sizeof(int));
-    *p = 5;
+    *p     = 5;
     return touch(p); // tail call: main -> touch
 }

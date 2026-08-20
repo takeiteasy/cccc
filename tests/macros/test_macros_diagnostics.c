@@ -8,13 +8,15 @@
 [[cccc::comptime]]
 Node *warn_if_zero(Node *n) {
     // Always emit a warning — we're testing the mechanism, not the logic
-    __builtin_macro_warning_at(n, "warn_if_zero: inspecting argument (test warning)");
+    __builtin_macro_warning_at(
+        n, "warn_if_zero: inspecting argument (test warning)");
     return n;
 }
 
 int main(void) {
     // The warning is emitted during compilation; the program still runs.
     int x = warn_if_zero(99);
-    if (x != 99) return 1;
+    if (x != 99)
+        return 1;
     return 42;
 }

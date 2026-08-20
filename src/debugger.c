@@ -21,11 +21,14 @@ int cc_is_valid_vm_address(VirtualMachine *vm, void *addr) {
     long long ptr = (long long)addr;
     // Text segment
     if (ptr >= (long long)vm->text_seg &&
-        ptr < (long long)(vm->text_seg + vm->text_ptr + 1)) return 1;
+        ptr < (long long)(vm->text_seg + vm->text_ptr + 1))
+        return 1;
     // Data segment
-    if (ptr >= (long long)vm->data_seg && ptr < (long long)vm->data_ptr) return 1;
+    if (ptr >= (long long)vm->data_seg && ptr < (long long)vm->data_ptr)
+        return 1;
     // Heap segment
-    if (ptr >= (long long)vm->heap_seg && ptr < (long long)vm->heap_ptr) return 1;
+    if (ptr >= (long long)vm->heap_seg && ptr < (long long)vm->heap_ptr)
+        return 1;
     // Stack segment: grows downward from the top of the poolsize_max-sized
     // reservation. The committed (and only ever live) range is
     // [vm->stack_base, vm->initial_sp) -- stack_base tracks vm_stack_grow's
@@ -35,8 +38,9 @@ int cc_is_valid_vm_address(VirtualMachine *vm, void *addr) {
     // [stack_seg, stack_seg + poolsize), the low end of the much larger
     // poolsize_max reservation, which never actually holds live stack data
     // (#958).
-    if (vm->stack_base && vm->initial_sp &&
-        ptr >= (long long)vm->stack_base && ptr < (long long)vm->initial_sp) return 1;
+    if (vm->stack_base && vm->initial_sp && ptr >= (long long)vm->stack_base &&
+        ptr < (long long)vm->initial_sp)
+        return 1;
     return 0;
 }
 
@@ -62,16 +66,20 @@ const char *cc_pc_to_name(VirtualMachine *vm, Pc pc) {
 
 int cc_pc_to_source(VirtualMachine *vm, Pc pc, const char **out_file,
                     int *out_line) {
-    if (out_file) *out_file = NULL;
-    if (out_line) *out_line = 0;
+    if (out_file)
+        *out_file = NULL;
+    if (out_line)
+        *out_line = 0;
     if (!vm || pc == CCCC_INVALID_PC)
         return 0;
-    File *file = NULL;
-    int line_no = 0;
+    File *file    = NULL;
+    int   line_no = 0;
     if (!cc_get_source_location(vm, pc, &file, &line_no, NULL))
         return 0;
-    if (out_file) *out_file = file ? file->name : NULL;
-    if (out_line) *out_line = line_no;
+    if (out_file)
+        *out_file = file ? file->name : NULL;
+    if (out_line)
+        *out_line = line_no;
     return 1;
 }
 
@@ -85,7 +93,8 @@ static const char *__cccc_pc_to_name(void *pc) {
 }
 
 static int __cccc_pc_to_source(void *pc, const char **out_file, int *out_line) {
-    return cc_pc_to_source(cc_running_vm, (Pc)(uintptr_t)pc, out_file, out_line);
+    return cc_pc_to_source(cc_running_vm, (Pc)(uintptr_t)pc, out_file,
+                           out_line);
 }
 
 // Refactored helper — now delegates to the public API so there is no duplicated
@@ -115,8 +124,8 @@ static void *debugger_symbol_address(VirtualMachine *vm, DebugSymbol *sym) {
     return (void *)(vm->data_seg + sym->offset);
 }
 
-static int debugger_resolve_watch_expr(VirtualMachine *vm, const char *expr, void **addr,
-                                       int *size) {
+static int debugger_resolve_watch_expr(VirtualMachine *vm, const char *expr,
+                                       void **addr, int *size) {
     long long raw_addr;
     if (sscanf(expr, "%llx", &raw_addr) == 1) {
         *addr = (void *)raw_addr;
@@ -134,34 +143,34 @@ static int debugger_resolve_watch_expr(VirtualMachine *vm, const char *expr, voi
 }
 
 void debugger_init(VirtualMachine *vm) {
-    vm->flags |= CCCC_ENABLE_DEBUGGER;  // Make sure it's enabled
-    vm->dbg.num_breakpoints = 0;
-    vm->dbg.num_watchpoints = 0;  // Initialize watchpoint counter
-    vm->dbg.single_step = 0;
-    vm->dbg.step_over = 0;
-    vm->dbg.step_out = 0;
+    vm->flags               |= CCCC_ENABLE_DEBUGGER; // Make sure it's enabled
+    vm->dbg.num_breakpoints  = 0;
+    vm->dbg.num_watchpoints  = 0; // Initialize watchpoint counter
+    vm->dbg.single_step      = 0;
+    vm->dbg.step_over        = 0;
+    vm->dbg.step_out         = 0;
     vm->dbg.step_over_return_addr = CCCC_INVALID_PC;
-    vm->dbg.step_out_bp = NULL;
-    vm->dbg.debugger_attached = 0;
-    vm->dbg.dbg_frame_var = NULL;
+    vm->dbg.step_out_bp           = NULL;
+    vm->dbg.debugger_attached     = 0;
+    vm->dbg.dbg_frame_var         = NULL;
 
     // Initialize all breakpoints
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
-        vm->dbg.breakpoints[i].pc = CCCC_INVALID_PC;
-        vm->dbg.breakpoints[i].enabled = 0;
-        vm->dbg.breakpoints[i].hit_count = 0;
-        vm->dbg.breakpoints[i].condition = NULL;
-        vm->dbg.breakpoints[i].cond_fn = NULL;
+        vm->dbg.breakpoints[i].pc                  = CCCC_INVALID_PC;
+        vm->dbg.breakpoints[i].enabled             = 0;
+        vm->dbg.breakpoints[i].hit_count           = 0;
+        vm->dbg.breakpoints[i].condition           = NULL;
+        vm->dbg.breakpoints[i].cond_fn             = NULL;
         vm->dbg.breakpoints[i].cond_compile_failed = false;
     }
 
     // Initialize all watchpoints
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {
-        vm->dbg.watchpoints[i].address = NULL;
-        vm->dbg.watchpoints[i].enabled = 0;
-        vm->dbg.watchpoints[i].size = 0;
-        vm->dbg.watchpoints[i].type = 0;
-        vm->dbg.watchpoints[i].expr = NULL;
+        vm->dbg.watchpoints[i].address   = NULL;
+        vm->dbg.watchpoints[i].enabled   = 0;
+        vm->dbg.watchpoints[i].size      = 0;
+        vm->dbg.watchpoints[i].type      = 0;
+        vm->dbg.watchpoints[i].expr      = NULL;
         vm->dbg.watchpoints[i].hit_count = 0;
         vm->dbg.watchpoints[i].old_value = 0;
     }
@@ -169,7 +178,8 @@ void debugger_init(VirtualMachine *vm) {
 
 int cc_add_breakpoint(VirtualMachine *vm, Pc pc) {
     if (vm->dbg.num_breakpoints >= MAX_BREAKPOINTS) {
-        printf("Error: Maximum number of breakpoints (%d) reached\n", MAX_BREAKPOINTS);
+        printf("Error: Maximum number of breakpoints (%d) reached\n",
+               MAX_BREAKPOINTS);
         return -1;
     }
 
@@ -184,11 +194,11 @@ int cc_add_breakpoint(VirtualMachine *vm, Pc pc) {
     // Find first available slot
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
         if (!vm->dbg.breakpoints[i].enabled) {
-            vm->dbg.breakpoints[i].pc = pc;
-            vm->dbg.breakpoints[i].enabled = 1;
-            vm->dbg.breakpoints[i].hit_count = 0;
-            vm->dbg.breakpoints[i].condition = NULL;
-            vm->dbg.breakpoints[i].cond_fn = NULL;
+            vm->dbg.breakpoints[i].pc                  = pc;
+            vm->dbg.breakpoints[i].enabled             = 1;
+            vm->dbg.breakpoints[i].hit_count           = 0;
+            vm->dbg.breakpoints[i].condition           = NULL;
+            vm->dbg.breakpoints[i].cond_fn             = NULL;
             vm->dbg.breakpoints[i].cond_compile_failed = false;
             vm->dbg.num_breakpoints++;
 
@@ -212,14 +222,14 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index) {
         return;
     }
 
-    vm->dbg.breakpoints[index].enabled = 0;
-    vm->dbg.breakpoints[index].pc = CCCC_INVALID_PC;
+    vm->dbg.breakpoints[index].enabled   = 0;
+    vm->dbg.breakpoints[index].pc        = CCCC_INVALID_PC;
     vm->dbg.breakpoints[index].hit_count = 0;
     if (vm->dbg.breakpoints[index].condition) {
         free(vm->dbg.breakpoints[index].condition);
         vm->dbg.breakpoints[index].condition = NULL;
     }
-    vm->dbg.breakpoints[index].cond_fn = NULL;
+    vm->dbg.breakpoints[index].cond_fn             = NULL;
     vm->dbg.breakpoints[index].cond_compile_failed = false;
     vm->dbg.num_breakpoints--;
 
@@ -235,7 +245,8 @@ int debugger_check_breakpoint(VirtualMachine *vm) {
     }
 
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
-        if (vm->dbg.breakpoints[i].enabled && vm->dbg.breakpoints[i].pc == vm->pc) {
+        if (vm->dbg.breakpoints[i].enabled &&
+            vm->dbg.breakpoints[i].pc == vm->pc) {
             // Check condition if one exists
             if (vm->dbg.breakpoints[i].condition != NULL) {
                 if (!debugger_eval_condition(vm, &vm->dbg.breakpoints[i])) {
@@ -263,9 +274,7 @@ void debugger_list_breakpoints(VirtualMachine *vm) {
 
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
         if (vm->dbg.breakpoints[i].enabled) {
-            printf("%-5d %-12u %-10d",
-                   i,
-                   vm->dbg.breakpoints[i].pc,
+            printf("%-5d %-12u %-10d", i, vm->dbg.breakpoints[i].pc,
                    vm->dbg.breakpoints[i].hit_count);
 
             // Print condition if it exists
@@ -280,15 +289,16 @@ void debugger_list_breakpoints(VirtualMachine *vm) {
 
 void debugger_print_registers(VirtualMachine *vm) {
     printf("\n=== Registers ===\n");
-    printf("  A0 (return):  0x%016llx (%lld)\n", vm->regs[REG_A0], vm->regs[REG_A0]);
+    printf("  A0 (return):  0x%016llx (%lld)\n", vm->regs[REG_A0],
+           vm->regs[REG_A0]);
     printf("  FA0 (f64):    %f\n", cccc_freg_get_f64(vm, FREG_A0));
     printf("  pc:           %u\n", vm->pc);
-    printf("  bp:           %p\n", (void*)vm->bp);
-    printf("  sp:           %p\n", (void*)vm->sp);
+    printf("  bp:           %p\n", (void *)vm->bp);
+    printf("  sp:           %p\n", (void *)vm->sp);
     printf("  cycle:        %lld\n", vm->cycle);
     // Print first few general registers
-    printf("  T0-T3:        %lld, %lld, %lld, %lld\n",
-           vm->regs[REG_T0], vm->regs[REG_T1], vm->regs[REG_T2], vm->regs[REG_T3]);
+    printf("  T0-T3:        %lld, %lld, %lld, %lld\n", vm->regs[REG_T0],
+           vm->regs[REG_T1], vm->regs[REG_T2], vm->regs[REG_T3]);
     printf("\n");
 }
 
@@ -297,14 +307,15 @@ void debugger_print_stack(VirtualMachine *vm, int count) {
 
     long long *sp = vm->sp;
     for (int i = 0; i < count; i++) {
-        if (!cc_is_valid_vm_address(vm, sp)) break;
+        if (!cc_is_valid_vm_address(vm, sp))
+            break;
         printf("  sp[%2d] = 0x%016llx  (%lld)\n", i, *sp, *sp);
         sp++;
     }
     printf("\n");
 }
 
-static const char* opcode_name(int op) {
+static const char *opcode_name(int op) {
     static const char *names[] = {
 #define X(NAME, OPERANDS) #NAME,
         OPS_X
@@ -317,9 +328,10 @@ static const char* opcode_name(int op) {
 
 // Returns the number of words consumed by the instruction (including opcode)
 static int disassemble_instruction(VirtualMachine *vm, Pc pc) {
-    if (pc > vm->text_ptr) return 0;
+    if (pc > vm->text_ptr)
+        return 0;
 
-    int op = (int)vm->text_seg[pc];
+    int         op   = (int)vm->text_seg[pc];
     const char *name = opcode_name(op);
 
     printf("%u: %-6s", pc, name);
@@ -332,8 +344,8 @@ static int disassemble_instruction(VirtualMachine *vm, Pc pc) {
         printf(" %u", vm->text_seg[pc + (Pc)i]);
     }
     if (op == JMPT && pc + 3 <= vm->text_ptr) {
-        Pc table_pc = vm->text_seg[pc + 1];
-        InstrWord count = vm->text_seg[pc + 2];
+        Pc        table_pc = vm->text_seg[pc + 1];
+        InstrWord count    = vm->text_seg[pc + 2];
         if (table_pc == pc + 4 && table_pc + (Pc)count <= vm->text_ptr + 1)
             size += (int)count;
     }
@@ -342,7 +354,8 @@ static int disassemble_instruction(VirtualMachine *vm, Pc pc) {
 }
 
 void cc_disassemble(VirtualMachine *vm) {
-    if (!vm || !vm->text_seg) return;
+    if (!vm || !vm->text_seg)
+        return;
 
     printf("=== Disassembly ===\n");
     // text_seg[0] is the entry point offset, not an instruction
@@ -351,7 +364,8 @@ void cc_disassemble(VirtualMachine *vm) {
     Pc pc = 1;
     while (pc <= vm->text_ptr) {
         int size = disassemble_instruction(vm, pc);
-        if (size == 0) break;
+        if (size == 0)
+            break;
         pc += size;
     }
     printf("===================\n");
@@ -368,11 +382,13 @@ void debugger_disassemble_current(VirtualMachine *vm) {
 static void print_help(bool inspect_only) {
     printf("\n=== Debugger Commands ===\n");
     printf("\nBreakpoints:\n");
-    printf("  break/b <line>           - Set breakpoint at line number in current file\n");
+    printf("  break/b <line>           - Set breakpoint at line number in "
+           "current file\n");
     printf("  break/b <file:line>      - Set breakpoint at file:line\n");
     printf("  break/b <function>       - Set breakpoint at function entry\n");
     printf("  break/b <offset>         - Set breakpoint at bytecode offset\n");
-    printf("  break/b <location> if <expr> - Set conditional breakpoint (e.g., break 22 if x > 5)\n");
+    printf("  break/b <location> if <expr> - Set conditional breakpoint (e.g., "
+           "break 22 if x > 5)\n");
     printf("  delete/d <num>           - Delete breakpoint by number\n");
     printf("  list/l                   - List all breakpoints\n");
     printf("\nWatchpoints (Data Breakpoints):\n");
@@ -394,7 +410,8 @@ static void print_help(bool inspect_only) {
     printf("  stack/st [count]   - Print stack (default 10 entries)\n");
     printf("  disasm/dis         - Disassemble current instruction\n");
     printf("  memory/m <addr>    - Inspect memory at address (hex)\n");
-    printf("  print/p <variable> - Print a variable's value (recursively formats\n");
+    printf("  print/p <variable> - Print a variable's value (recursively "
+           "formats\n");
     printf("                       structs/unions/arrays/vectors, #958)\n");
     printf("\nOther:\n");
     printf("  help/h/?           - Show this help\n");
@@ -403,19 +420,20 @@ static void print_help(bool inspect_only) {
 }
 
 static void debugger_print_source_location(VirtualMachine *vm) {
-    File *file = NULL;
-    int line_no = 0;
-    int col_no = 0;
+    File *file    = NULL;
+    int   line_no = 0;
+    int   col_no  = 0;
 
     if (cc_get_source_location(vm, vm->pc, &file, &line_no, &col_no)) {
-        printf("At %s:%d:%d\n", file->name ? file->name : "<unknown>", line_no, col_no);
+        printf("At %s:%d:%d\n", file->name ? file->name : "<unknown>", line_no,
+               col_no);
 
         // Try to show source line if file contents available
         if (file->contents && line_no > 0) {
             // Find the line in file contents
-            const char *p = file->contents;
-            int current_line = 1;
-            const char *line_start = p;
+            const char *p            = file->contents;
+            int         current_line = 1;
+            const char *line_start   = p;
 
             while (*p && current_line <= line_no) {
                 if (*p == '\n') {
@@ -480,45 +498,45 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         }
 
         // Help command
-        if (STREQ_LIT(cmd, "help") || STREQ_LIT(cmd, "h") || STREQ_LIT(cmd, "?")) {
+        if (STREQ_LIT(cmd, "help") || STREQ_LIT(cmd, "h") ||
+            STREQ_LIT(cmd, "?")) {
             print_help(inspect_only);
-        }
-        else if (inspect_only &&
-                 (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c") ||
-                  STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s") ||
-                  STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n") ||
-                  STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f"))) {
-            printf("Cannot resume after a host fault; use inspection commands or quit.\n");
+        } else if (inspect_only &&
+                   (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c") ||
+                    STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s") ||
+                    STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n") ||
+                    STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f"))) {
+            printf("Cannot resume after a host fault; use inspection commands "
+                   "or quit.\n");
         }
         // Continue
         else if (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c")) {
             vm->dbg.single_step = 0;
-            vm->dbg.step_over = 0;
-            vm->dbg.step_out = 0;
+            vm->dbg.step_over   = 0;
+            vm->dbg.step_out    = 0;
             break;
         }
         // Single step
         else if (STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s")) {
             vm->dbg.single_step = 1;
-            vm->dbg.step_over = 0;
-            vm->dbg.step_out = 0;
+            vm->dbg.step_over   = 0;
+            vm->dbg.step_out    = 0;
             break;
         }
         // Step over
         else if (STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n")) {
             vm->dbg.single_step = 0;
-            vm->dbg.step_over = 1;
-            vm->dbg.step_out = 0;
-            int op = (int)vm->text_seg[vm->pc];
+            vm->dbg.step_over   = 1;
+            vm->dbg.step_out    = 0;
+            int op              = (int)vm->text_seg[vm->pc];
             if (op == CALL || op == CALLT || op == CALLI) {
                 // CALL/CALLI: return address is two words after the opcode.
                 // (op word + one operand word). Stop there after the call
                 // returns instead of stepping into the callee.
-                vm->dbg.step_over_return_addr =
-                    vm->pc + (Pc)cc_instr_words(op);
+                vm->dbg.step_over_return_addr = vm->pc + (Pc)cc_instr_words(op);
             } else {
                 // Not a call instruction: nothing to skip, just single-step.
-                vm->dbg.step_over = 0;
+                vm->dbg.step_over   = 0;
                 vm->dbg.single_step = 1;
             }
             break;
@@ -526,8 +544,8 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         // Step out
         else if (STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f")) {
             vm->dbg.single_step = 0;
-            vm->dbg.step_over = 0;
-            vm->dbg.step_out = 1;
+            vm->dbg.step_over   = 0;
+            vm->dbg.step_out    = 1;
             vm->dbg.step_out_bp = vm->bp;
             break;
         }
@@ -547,20 +565,21 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         }
         // Set breakpoint
         else if (STREQ_LIT(cmd, "break") || STREQ_LIT(cmd, "b")) {
-            char arg[128];
+            char  arg[128];
             char *condition = NULL;
-            Pc bp_pc = CCCC_INVALID_PC;
+            Pc    bp_pc     = CCCC_INVALID_PC;
 
             // Try to parse arguments and extract condition if present
             // Format: break <location> [if <condition>]
             char *if_pos = strstr(line, " if ");
             if (if_pos) {
                 // Extract condition (everything after " if ")
-                condition = if_pos + 4;  // Skip " if "
+                condition = if_pos + 4; // Skip " if "
                 // Trim leading whitespace
-                while (*condition && isspace(*condition)) condition++;
+                while (*condition && isspace(*condition))
+                    condition++;
                 if (*condition) {
-                    condition = strdup(condition);  // Make a copy
+                    condition = strdup(condition); // Make a copy
                 }
                 // Temporarily null-terminate before " if " for location parsing
                 *if_pos = '\0';
@@ -571,14 +590,17 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                 // Check if it's file:line format
                 char *colon = strchr(arg, ':');
                 if (colon) {
-                    *colon = '\0';  // Split at colon
+                    *colon         = '\0'; // Split at colon
                     char *filename = arg;
-                    int line_num = atoi(colon + 1);
+                    int   line_num = atoi(colon + 1);
 
                     // Find file (simple match on filename, not full path)
                     File *target_file = NULL;
-                    for (int i = 0; vm->compiler.input_files && vm->compiler.input_files[i]; i++) {
-                        if (strstr(vm->compiler.input_files[i]->name, filename)) {
+                    for (int i = 0; vm->compiler.input_files &&
+                                    vm->compiler.input_files[i];
+                         i++) {
+                        if (strstr(vm->compiler.input_files[i]->name,
+                                   filename)) {
                             target_file = vm->compiler.input_files[i];
                             break;
                         }
@@ -586,20 +608,24 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
 
                     bp_pc = cc_find_pc_for_source(vm, target_file, line_num);
                     if (bp_pc == CCCC_INVALID_PC) {
-                        printf("Error: Could not find code for %s:%d\n", filename, line_num);
+                        printf("Error: Could not find code for %s:%d\n",
+                               filename, line_num);
                     }
                 }
                 // Check if it's a pure number (offset or line number)
                 else if (isdigit(arg[0])) {
                     long long num = atoll(arg);
 
-                    // If it's a small number, treat as line number in current file
+                    // If it's a small number, treat as line number in current
+                    // file
                     if (num < 10000) {
                         File *current_file = NULL;
-                        cc_get_source_location(vm, vm->pc, &current_file, NULL, NULL);
+                        cc_get_source_location(vm, vm->pc, &current_file, NULL,
+                                               NULL);
                         bp_pc = cc_find_pc_for_source(vm, current_file, num);
                         if (bp_pc == CCCC_INVALID_PC) {
-                            printf("Error: Could not find code for line %lld\n", num);
+                            printf("Error: Could not find code for line %lld\n",
+                                   num);
                         }
                     } else {
                         // Large number, treat as bytecode instruction index.
@@ -625,11 +651,12 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                     if (bp_idx >= 0 && condition) {
                         vm->dbg.breakpoints[bp_idx].condition = condition;
                         printf("Condition: %s\n", condition);
-                        condition = NULL;  // Prevent double-free
+                        condition = NULL; // Prevent double-free
                     }
                 }
             } else {
-                printf("Usage: break <line> | <file:line> | <function> | <offset> [if <condition>]\n");
+                printf("Usage: break <line> | <file:line> | <function> | "
+                       "<offset> [if <condition>]\n");
             }
 
             // Clean up condition if not used
@@ -654,12 +681,13 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         else if (STREQ_LIT(cmd, "memory") || STREQ_LIT(cmd, "m")) {
             long long addr;
             if (sscanf(line, "%*s %llx", &addr) == 1) {
-                if (cc_is_valid_vm_address(vm, (void*)addr) &&
-                    cc_is_valid_vm_address(vm, (void*)(addr + sizeof(long long) - 1))) {
+                if (cc_is_valid_vm_address(vm, (void *)addr) &&
+                    cc_is_valid_vm_address(
+                        vm, (void *)(addr + sizeof(long long) - 1))) {
                     long long value;
                     memcpy(&value, (void *)addr, sizeof(value));
-                    printf("Memory at 0x%llx: 0x%016llx (%lld)\n",
-                           addr, value, value);
+                    printf("Memory at 0x%llx: 0x%016llx (%lld)\n", addr, value,
+                           value);
                 } else {
                     printf("Error: Invalid memory address 0x%llx\n", addr);
                 }
@@ -683,7 +711,8 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                         cc_dump_value(stdout, vm, sym->ty, addr);
                         printf("\n");
                     } else {
-                        printf("Error: '%s' is not currently accessible (address %p out of range)\n",
+                        printf("Error: '%s' is not currently accessible "
+                               "(address %p out of range)\n",
                                expr, addr);
                     }
                 } else {
@@ -692,7 +721,8 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                         cc_is_valid_vm_address(vm, (void *)raw_addr)) {
                         long long value;
                         memcpy(&value, (void *)raw_addr, sizeof(value));
-                        printf("0x%llx: 0x%016llx (%lld)\n", raw_addr, value, value);
+                        printf("0x%llx: 0x%016llx (%lld)\n", raw_addr, value,
+                               value);
                     } else {
                         printf("Error: Unable to resolve '%s'\n", expr);
                     }
@@ -706,11 +736,13 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
                 void *addr = NULL;
-                int size = 0;
+                int   size = 0;
                 if (debugger_resolve_watch_expr(vm, expr, &addr, &size)) {
-                    cc_add_watchpoint(vm, addr, size, WATCH_WRITE | WATCH_CHANGE, expr);
+                    cc_add_watchpoint(vm, addr, size,
+                                      WATCH_WRITE | WATCH_CHANGE, expr);
                 } else {
-                    printf("Error: Unable to resolve watch expression '%s'\n", expr);
+                    printf("Error: Unable to resolve watch expression '%s'\n",
+                           expr);
                 }
             } else {
                 printf("Usage: watch <variable> | watch 0x<address>\n");
@@ -721,11 +753,12 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
                 void *addr = NULL;
-                int size = 0;
+                int   size = 0;
                 if (debugger_resolve_watch_expr(vm, expr, &addr, &size)) {
                     cc_add_watchpoint(vm, addr, size, WATCH_READ, expr);
                 } else {
-                    printf("Error: Unable to resolve watch expression '%s'\n", expr);
+                    printf("Error: Unable to resolve watch expression '%s'\n",
+                           expr);
                 }
             } else {
                 printf("Usage: rwatch <variable> | rwatch 0x<address>\n");
@@ -736,11 +769,13 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
             char expr[128];
             if (sscanf(line, "%*s %127s", expr) == 1) {
                 void *addr = NULL;
-                int size = 0;
+                int   size = 0;
                 if (debugger_resolve_watch_expr(vm, expr, &addr, &size)) {
-                    cc_add_watchpoint(vm, addr, size, WATCH_READ | WATCH_WRITE, expr);
+                    cc_add_watchpoint(vm, addr, size, WATCH_READ | WATCH_WRITE,
+                                      expr);
                 } else {
-                    printf("Error: Unable to resolve watch expression '%s'\n", expr);
+                    printf("Error: Unable to resolve watch expression '%s'\n",
+                           expr);
                 }
             } else {
                 printf("Usage: awatch <variable> | awatch 0x<address>\n");
@@ -749,17 +784,20 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         // Info watch (list watchpoints)
         else if (STREQ_LIT(cmd, "info")) {
             char subcmd[64];
-            if (sscanf(line, "%*s %63s", subcmd) == 1 && STREQ_LIT(subcmd, "watch")) {
+            if (sscanf(line, "%*s %63s", subcmd) == 1 &&
+                STREQ_LIT(subcmd, "watch")) {
                 if (vm->dbg.num_watchpoints == 0) {
                     printf("No watchpoints set.\n");
                 } else {
                     printf("\nWatchpoints:\n");
-                    printf("%-4s %-10s %-18s %-8s %s\n", "Num", "Type", "Address", "Hits", "Expression");
-                    printf("------------------------------------------------------------\n");
+                    printf("%-4s %-10s %-18s %-8s %s\n", "Num", "Type",
+                           "Address", "Hits", "Expression");
+                    printf("---------------------------------------------------"
+                           "---------\n");
                     for (int i = 0; i < MAX_WATCHPOINTS; i++) {
                         if (vm->dbg.watchpoints[i].enabled) {
                             const char *type_str = "";
-                            int type = vm->dbg.watchpoints[i].type;
+                            int         type     = vm->dbg.watchpoints[i].type;
                             if ((type & WATCH_READ) && (type & WATCH_WRITE)) {
                                 type_str = "access";
                             } else if (type & WATCH_WRITE) {
@@ -767,10 +805,12 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                             } else if (type & WATCH_READ) {
                                 type_str = "read";
                             }
-                            printf("%-4d %-10s %p       %-8d %s\n",
-                                   i, type_str, vm->dbg.watchpoints[i].address,
+                            printf("%-4d %-10s %p       %-8d %s\n", i, type_str,
+                                   vm->dbg.watchpoints[i].address,
                                    vm->dbg.watchpoints[i].hit_count,
-                                   vm->dbg.watchpoints[i].expr ? vm->dbg.watchpoints[i].expr : "");
+                                   vm->dbg.watchpoints[i].expr
+                                       ? vm->dbg.watchpoints[i].expr
+                                       : "");
                         }
                     }
                     printf("\n");
@@ -785,8 +825,7 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
             if (inspect_only)
                 break;
             exit(0);
-        }
-        else {
+        } else {
             printf("Unknown command: %s\n", cmd);
             printf("Type 'help' or '?' for command list\n");
         }
@@ -801,21 +840,28 @@ void cc_debug_repl(VirtualMachine *vm) {
 
 static const char *host_signal_name(int sig) {
     switch (sig) {
-    case SIGSEGV: return "SIGSEGV";
+        case SIGSEGV:
+            return "SIGSEGV";
 #ifdef SIGBUS
-    case SIGBUS:  return "SIGBUS";
+        case SIGBUS:
+            return "SIGBUS";
 #endif
-    case SIGFPE:  return "SIGFPE";
-    case SIGILL:  return "SIGILL";
-    case SIGABRT: return "SIGABRT";
-    default:      return "unknown signal";
+        case SIGFPE:
+            return "SIGFPE";
+        case SIGILL:
+            return "SIGILL";
+        case SIGABRT:
+            return "SIGABRT";
+        default:
+            return "unknown signal";
     }
 }
 
 void cc_debug_repl_host_fault(VirtualMachine *vm, int sig, void *fault_addr) {
     fprintf(stderr, "\nHost fault: %s (%d)", host_signal_name(sig), sig);
     fprintf(stderr, " at %p", fault_addr);
-    fprintf(stderr, "\nThe native VM frame was unwound; execution cannot continue.\n");
+    fprintf(stderr,
+            "\nThe native VM frame was unwound; execution cannot continue.\n");
     fflush(stderr);
     debug_repl(vm, true);
 }
@@ -824,8 +870,7 @@ int debugger_run(VirtualMachine *vm, int argc, char **argv) {
     // Find main function
     Obj *main_fn = NULL;
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
-        if (obj->is_function && obj->name &&
-            STREQ_LIT(obj->name, "main")) {
+        if (obj->is_function && obj->name && STREQ_LIT(obj->name, "main")) {
             main_fn = obj;
             break;
         }
@@ -851,7 +896,8 @@ int debugger_run(VirtualMachine *vm, int argc, char **argv) {
     cc_debug_repl(vm);
 
     // Main execution loop with debugger support
-    // Call vm_eval which handles all the debugger hooks (breakpoints, stepping, etc.)
+    // Call vm_eval which handles all the debugger hooks (breakpoints, stepping,
+    // etc.)
     return vm_eval(vm);
 }
 
@@ -859,8 +905,10 @@ int debugger_run(VirtualMachine *vm, int argc, char **argv) {
 // Source Mapping Functions (for source-level debugging)
 // ============================================================================
 
-int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file, int *out_line, int *out_col) {
-    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_map || vm->dbg.source_map_count == 0) {
+int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file,
+                           int *out_line, int *out_col) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_map ||
+        vm->dbg.source_map_count == 0) {
         return 0;
     }
 
@@ -868,22 +916,22 @@ int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file, int *out_
 
     // Binary search for the source mapping
     // Find the largest offset <= pc_offset
-    int left = 0;
-    int right = vm->dbg.source_map_count - 1;
+    int left     = 0;
+    int right    = vm->dbg.source_map_count - 1;
     int best_idx = -1;
 
     while (left <= right) {
         int mid = left + (right - left) / 2;
         if (vm->dbg.source_map[mid].pc_offset <= pc_offset) {
             best_idx = mid;
-            left = mid + 1;
+            left     = mid + 1;
         } else {
             right = mid - 1;
         }
     }
 
     if (best_idx == -1) {
-        return 0;  // No mapping found
+        return 0; // No mapping found
     }
 
     // Return the found mapping
@@ -901,7 +949,8 @@ int cc_get_source_location(VirtualMachine *vm, Pc pc, File **out_file, int *out_
 }
 
 Pc cc_find_pc_for_source(VirtualMachine *vm, File *file, int line) {
-    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_index || vm->dbg.source_index_count == 0) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !vm->dbg.source_index ||
+        vm->dbg.source_index_count == 0) {
         return CCCC_INVALID_PC;
     }
 
@@ -917,11 +966,11 @@ Pc cc_find_pc_for_source(VirtualMachine *vm, File *file, int line) {
 
     // Binary search by (file, line_no) in the sorted source_index
     uintptr_t ufile = (uintptr_t)file;
-    int left = 0;
-    int right = vm->dbg.source_index_count - 1;
+    int       left  = 0;
+    int       right = vm->dbg.source_index_count - 1;
 
     while (left <= right) {
-        int mid = left + (right - left) / 2;
+        int          mid   = left + (right - left) / 2;
         SourceIndex *entry = &vm->dbg.source_index[mid];
 
         if (entry->file == file && entry->line_no == line)
@@ -1034,11 +1083,11 @@ static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
     VarScopeNode *node = calloc(1, sizeof(VarScopeNode));
     if (!node)
         error("out of memory");
-    node->var = var;
-    node->name = var->name;
+    node->var      = var;
+    node->name     = var->name;
     node->name_len = strlen(var->name);
-    node->next = *vars;
-    *vars = node;
+    node->next     = *vars;
+    *vars          = node;
 }
 
 static void debugger_free_condition_scope(VarScopeNode *vars) {
@@ -1078,28 +1127,30 @@ static bool debugger_var_is_paused_frame_local(Obj *current_fn, Obj *var) {
 // through ordinary codegen since a single data segment is shared by every
 // function. The rewrite is type-preserving (see the node->ty note below), so
 // ancestor nodes never need retyping and this can simply mutate in place.
-static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn, Node *node) {
+static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
+                                    Node *node) {
     if (!node)
         return;
 
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
-        Obj *var = node->var;
+        Obj  *var       = node->var;
         Node *frame_ref = __builtin_ast_var_ref("__cccc_dbg_frame");
         Node *char_ptr = __builtin_ast_cast(frame_ref, pointer_to(vm, ty_char));
-        Node *idx = __builtin_ast_int_literal((int64_t)var->offset *
-                                                        (int64_t)sizeof(long long));
-        Node *elem = __builtin_ast_subscript(char_ptr, idx);
-        Node *addr = __builtin_ast_unary(ND_ADDR, elem);
-        add_type(vm, addr); // types elem + addr; __builtin_ast_cast doesn't type
-                             // its operand for us (unlike parse.c's new_cast), and
-                             // once typed_ptr wraps addr in a CAST, add_type would
-                             // never reach it again (see the node->ty note below).
+        Node *idx      = __builtin_ast_int_literal((int64_t)var->offset *
+                                                   (int64_t)sizeof(long long));
+        Node *elem     = __builtin_ast_subscript(char_ptr, idx);
+        Node *addr     = __builtin_ast_unary(ND_ADDR, elem);
+        add_type(vm,
+                 addr); // types elem + addr; __builtin_ast_cast doesn't type
+                        // its operand for us (unlike parse.c's new_cast), and
+                        // once typed_ptr wraps addr in a CAST, add_type would
+                        // never reach it again (see the node->ty note below).
         Node *typed_ptr = __builtin_ast_cast(addr, pointer_to(vm, var->ty));
 
-        node->kind = ND_DEREF;
-        node->lhs = typed_ptr;
-        node->var = NULL;
+        node->kind      = ND_DEREF;
+        node->lhs       = typed_ptr;
+        node->var       = NULL;
         // Type-preserving rewrite: *(T*)&frame[off] has exactly the same type
         // T as the original variable, so set it directly instead of clearing
         // it for add_type to recompute. That matters beyond saving a call:
@@ -1131,9 +1182,9 @@ static Obj *debugger_frame_var(VirtualMachine *vm) {
         return vm->dbg.dbg_frame_var;
 
     CcExprSnapshot snap = cc_expr_snapshot(vm);
-    jmp_buf jb;
-    jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
-    vm->error_jmp_buf = &jb;
+    jmp_buf        jb;
+    jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
+    vm->error_jmp_buf            = &jb;
 
     if (setjmp(jb) == 0) {
         Obj *var = __builtin_ast_global_var("__cccc_dbg_frame",
@@ -1162,7 +1213,8 @@ static Obj *debugger_frame_var(VirtualMachine *vm) {
 // the same shape of issue as the REPL's per-expression wrapper accumulation
 // (ticket #667), just keyed per conditional breakpoint here. Low priority;
 // tracked as a follow-up: https://todo.sr.ht/~takeiteasy/cccc/702
-static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) {
+static bool debugger_compile_condition_once(VirtualMachine *vm,
+                                            Breakpoint     *bp) {
     if (!debugger_frame_var(vm)) {
         bp->cond_compile_failed = true;
         return false;
@@ -1170,14 +1222,12 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
 
     char buf[512];
     snprintf(buf, sizeof(buf), "%s\n", bp->condition);
-    File temp_file = {
-        .name = "<condition>",
-        .file_no = 0,
-        .contents = buf,
-        .display_name = NULL,
-        .line_delta = 0
-    };
-    Token *tok = tokenize(vm, &temp_file);
+    File   temp_file = {.name         = "<condition>",
+                        .file_no      = 0,
+                        .contents     = buf,
+                        .display_name = NULL,
+                        .line_delta   = 0};
+    Token *tok       = tokenize(vm, &temp_file);
     if (!tok) {
         printf("Error: Failed to tokenize condition\n");
         bp->cond_compile_failed = true;
@@ -1185,7 +1235,7 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
     }
     convert_pp_tokens(vm, tok);
 
-    Obj *current_fn = debugger_current_function(vm);
+    Obj  *current_fn      = debugger_current_function(vm);
     Scope condition_scope = {0};
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
         debugger_add_condition_scope_var(&condition_scope.vars, obj);
@@ -1194,12 +1244,12 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
             debugger_add_condition_scope_var(&condition_scope.vars, obj);
     }
 
-    Scope *saved_scope = vm->compiler.scope;
+    Scope *saved_scope   = vm->compiler.scope;
     condition_scope.next = saved_scope;
-    vm->compiler.scope = &condition_scope;
-    Token *rest = NULL;
-    Node *expr = cc_parse_expr(vm, &rest, tok);
-    vm->compiler.scope = saved_scope;
+    vm->compiler.scope   = &condition_scope;
+    Token *rest          = NULL;
+    Node  *expr          = cc_parse_expr(vm, &rest, tok);
+    vm->compiler.scope   = saved_scope;
     debugger_free_condition_scope(condition_scope.vars);
     if (!expr) {
         printf("Error: Failed to parse condition expression\n");
@@ -1213,18 +1263,18 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
         bp->cond_compile_failed = true;
         return false;
     }
-    Type *cond_ty = expr->ty;
+    Type          *cond_ty = expr->ty;
 
-    CcExprSnapshot snap = cc_expr_snapshot(vm);
-    jmp_buf jb;
-    jmp_buf *saved_jmp_buf = vm->error_jmp_buf;
-    vm->error_jmp_buf = &jb;
+    CcExprSnapshot snap    = cc_expr_snapshot(vm);
+    jmp_buf        jb;
+    jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
+    vm->error_jmp_buf            = &jb;
 
     if (setjmp(jb) == 0) {
         debugger_rewrite_locals(vm, current_fn, expr);
         const char *name = __builtin_gensym("__cccc_dbg_cond");
-        Obj *fn = __builtin_ast_function(name, cond_ty);
-        Node *ret = __builtin_ast_return(expr);
+        Obj        *fn   = __builtin_ast_function(name, cond_ty);
+        Node       *ret  = __builtin_ast_return(expr);
         __builtin_ast_function_set_body(fn, ret);
         cc_repl_compile_new(vm, snap.globals_head);
         vm->error_jmp_buf = saved_jmp_buf;
@@ -1234,7 +1284,8 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
     }
 
     vm->error_jmp_buf = saved_jmp_buf;
-    printf("Error: %s\n", vm->error_message ? vm->error_message : "failed to compile condition");
+    printf("Error: %s\n", vm->error_message ? vm->error_message
+                                            : "failed to compile condition");
     vm->error_message = NULL;
     cc_expr_snapshot_restore(vm, &snap);
     bp->cond_compile_failed = true;
@@ -1249,49 +1300,50 @@ static bool debugger_compile_condition_once(VirtualMachine *vm, Breakpoint *bp) 
 // that address range. Instead it keeps vm->bp (the wrapper establishes its
 // own frame on entry, same as any real call) and only pushes a fresh return
 // sentinel below the current vm->sp, exactly like a normal nested call.
-static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn, Type *cond_ty) {
+static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn,
+                                            Type *cond_ty) {
     long long saved_regs[NUM_REGS];
-    FReg saved_fregs[NUM_REGS];
+    FReg      saved_fregs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
-    Pc saved_pc = vm->pc;
-    long long *saved_bp = vm->bp;
-    long long *saved_sp = vm->sp;
-    long long *saved_shadow_sp = vm->shadow_sp;
-    uint32_t saved_flags = vm->flags;
-    int saved_single_step = vm->dbg.single_step;
-    int saved_step_over = vm->dbg.step_over;
-    int saved_step_out = vm->dbg.step_out;
-    Pc saved_step_over_return_addr = vm->dbg.step_over_return_addr;
-    long long *saved_step_out_bp = vm->dbg.step_out_bp;
-    int saved_debugger_attached = vm->dbg.debugger_attached;
+    Pc         saved_pc                     = vm->pc;
+    long long *saved_bp                     = vm->bp;
+    long long *saved_sp                     = vm->sp;
+    long long *saved_shadow_sp              = vm->shadow_sp;
+    uint32_t   saved_flags                  = vm->flags;
+    int        saved_single_step            = vm->dbg.single_step;
+    int        saved_step_over              = vm->dbg.step_over;
+    int        saved_step_out               = vm->dbg.step_out;
+    Pc         saved_step_over_return_addr  = vm->dbg.step_over_return_addr;
+    long long *saved_step_out_bp            = vm->dbg.step_out_bp;
+    int        saved_debugger_attached      = vm->dbg.debugger_attached;
 
-    vm->flags &= ~CCCC_ENABLE_DEBUGGER;
-    vm->dbg.single_step = 0;
-    vm->dbg.step_over = 0;
-    vm->dbg.step_out = 0;
-    vm->dbg.debugger_attached = 0;
+    vm->flags                              &= ~CCCC_ENABLE_DEBUGGER;
+    vm->dbg.single_step                     = 0;
+    vm->dbg.step_over                       = 0;
+    vm->dbg.step_out                        = 0;
+    vm->dbg.debugger_attached               = 0;
     if (vm->flags & CCCC_CFI)
         *--vm->shadow_sp = 0;
-    *--vm->sp = 0; // sentinel return address
-    vm->pc = (Pc)fn->code_addr;
-    int rc = vm_eval(vm);
+    *--vm->sp      = 0; // sentinel return address
+    vm->pc         = (Pc)fn->code_addr;
+    int       rc   = vm_eval(vm);
     long long ival = vm->regs[REG_A0];
-    double fval = vm->fregs[FREG_A0].f64;
+    double    fval = vm->fregs[FREG_A0].f64;
 
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
-    vm->pc = saved_pc;
-    vm->bp = saved_bp;
-    vm->sp = saved_sp;
-    vm->shadow_sp = saved_shadow_sp;
-    vm->flags = saved_flags;
-    vm->dbg.single_step = saved_single_step;
-    vm->dbg.step_over = saved_step_over;
-    vm->dbg.step_out = saved_step_out;
+    vm->pc                        = saved_pc;
+    vm->bp                        = saved_bp;
+    vm->sp                        = saved_sp;
+    vm->shadow_sp                 = saved_shadow_sp;
+    vm->flags                     = saved_flags;
+    vm->dbg.single_step           = saved_single_step;
+    vm->dbg.step_over             = saved_step_over;
+    vm->dbg.step_out              = saved_step_out;
     vm->dbg.step_over_return_addr = saved_step_over_return_addr;
-    vm->dbg.step_out_bp = saved_step_out_bp;
-    vm->dbg.debugger_attached = saved_debugger_attached;
+    vm->dbg.step_out_bp           = saved_step_out_bp;
+    vm->dbg.debugger_attached     = saved_debugger_attached;
 
     if (rc < 0) {
         printf("Error: Condition evaluation failed\n");
@@ -1314,10 +1366,10 @@ static int debugger_eval_condition(VirtualMachine *vm, Breakpoint *bp) {
     if (!bp->cond_fn && !debugger_compile_condition_once(vm, bp))
         return 0;
 
-    Obj *frame_var = vm->dbg.dbg_frame_var;
+    Obj *frame_var                               = vm->dbg.dbg_frame_var;
     *(void **)(vm->data_seg + frame_var->offset) = (void *)vm->bp;
 
-    Type *cond_ty = bp->cond_fn->ty->return_ty;
+    Type *cond_ty                                = bp->cond_fn->ty->return_ty;
     return debugger_exec_condition_wrapper(vm, bp->cond_fn, cond_ty);
 }
 
@@ -1325,9 +1377,11 @@ static int debugger_eval_condition(VirtualMachine *vm, Breakpoint *bp) {
 // Watchpoint Management Functions
 // ============================================================================
 
-int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type, const char *expr) {
+int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type,
+                      const char *expr) {
     if (vm->dbg.num_watchpoints >= MAX_WATCHPOINTS) {
-        printf("Error: Maximum number of watchpoints (%d) reached\n", MAX_WATCHPOINTS);
+        printf("Error: Maximum number of watchpoints (%d) reached\n",
+               MAX_WATCHPOINTS);
         return -1;
     }
 
@@ -1335,17 +1389,27 @@ int cc_add_watchpoint(VirtualMachine *vm, void *address, int size, int type, con
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {
         if (!vm->dbg.watchpoints[i].enabled) {
             vm->dbg.watchpoints[i].address = address;
-            vm->dbg.watchpoints[i].size = size;
-            vm->dbg.watchpoints[i].type = type;
+            vm->dbg.watchpoints[i].size    = size;
+            vm->dbg.watchpoints[i].type    = type;
             switch (size) {
-                case 1: vm->dbg.watchpoints[i].old_value = *(char *)address; break;
-                case 2: vm->dbg.watchpoints[i].old_value = *(short *)address; break;
-                case 4: vm->dbg.watchpoints[i].old_value = *(int *)address; break;
-                case 8: vm->dbg.watchpoints[i].old_value = *(long long *)address; break;
-                default: vm->dbg.watchpoints[i].old_value = 0; break;
+                case 1:
+                    vm->dbg.watchpoints[i].old_value = *(char *)address;
+                    break;
+                case 2:
+                    vm->dbg.watchpoints[i].old_value = *(short *)address;
+                    break;
+                case 4:
+                    vm->dbg.watchpoints[i].old_value = *(int *)address;
+                    break;
+                case 8:
+                    vm->dbg.watchpoints[i].old_value = *(long long *)address;
+                    break;
+                default:
+                    vm->dbg.watchpoints[i].old_value = 0;
+                    break;
             }
-            vm->dbg.watchpoints[i].expr = expr ? strdup(expr) : NULL;
-            vm->dbg.watchpoints[i].enabled = 1;
+            vm->dbg.watchpoints[i].expr      = expr ? strdup(expr) : NULL;
+            vm->dbg.watchpoints[i].enabled   = 1;
             vm->dbg.watchpoints[i].hit_count = 0;
             vm->dbg.num_watchpoints++;
 
@@ -1395,9 +1459,11 @@ void cc_remove_watchpoint(VirtualMachine *vm, int index) {
 
 // Check if a memory access triggers any watchpoints
 // Returns: watchpoint index if triggered, -1 otherwise
-int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int access_type) {
+int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size,
+                              int access_type) {
     // Safety checks
-    if (!vm || !(vm->flags & CCCC_ENABLE_DEBUGGER) || vm->dbg.num_watchpoints == 0 || !addr) {
+    if (!vm || !(vm->flags & CCCC_ENABLE_DEBUGGER) ||
+        vm->dbg.num_watchpoints == 0 || !addr) {
         return -1;
     }
 
@@ -1421,19 +1487,19 @@ int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int acce
         // Check if the access overlaps with this watchpoint
         // Watchpoint range: [wp->address, wp->address + wp->size)
         // Access range: [addr, addr + size)
-        long long wp_start = (long long)wp->address;
-        long long wp_end = wp_start + wp->size;
+        long long wp_start     = (long long)wp->address;
+        long long wp_end       = wp_start + wp->size;
         long long access_start = (long long)addr;
-        long long access_end = access_start + size;
+        long long access_end   = access_start + size;
 
         // Check for overlap
         if (access_start >= wp_end || access_end <= wp_start) {
-            continue;  // No overlap
+            continue; // No overlap
         }
 
         // Check if this watchpoint type matches the access type
         if ((wp->type & access_type) == 0) {
-            continue;  // Type doesn't match
+            continue; // Type doesn't match
         }
 
         // If this is a WATCH_CHANGE watchpoint, check if value changed
@@ -1441,16 +1507,26 @@ int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int acce
             // Read current value
             long long current_value = 0;
             switch (wp->size) {
-                case 1: current_value = *(char *)wp->address; break;
-                case 2: current_value = *(short *)wp->address; break;
-                case 4: current_value = *(int *)wp->address; break;
-                case 8: current_value = *(long long *)wp->address; break;
-                default: current_value = *(long long *)wp->address; break;
+                case 1:
+                    current_value = *(char *)wp->address;
+                    break;
+                case 2:
+                    current_value = *(short *)wp->address;
+                    break;
+                case 4:
+                    current_value = *(int *)wp->address;
+                    break;
+                case 8:
+                    current_value = *(long long *)wp->address;
+                    break;
+                default:
+                    current_value = *(long long *)wp->address;
+                    break;
             }
 
             // Check if value changed
             if (current_value == wp->old_value) {
-                continue;  // Value didn't change, don't trigger
+                continue; // Value didn't change, don't trigger
             }
 
             // Update old value for next check
@@ -1461,8 +1537,8 @@ int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size, int acce
         wp->hit_count++;
 
         // Get source location if available
-        File *file = NULL;
-        int line_no = 0;
+        File *file    = NULL;
+        int   line_no = 0;
         cc_get_source_location(vm, vm->pc, &file, &line_no, NULL);
 
         // Print watchpoint info
@@ -1520,7 +1596,8 @@ void cc_load_symbolize_runtime(VirtualMachine *vm) {
 
     // __cccc_pc_to_source(void *pc, const char **file, int *line) -> int
     // 3 arguments; returns int (returns_double=0).
-    cc_register_cfunc(vm, "__cccc_pc_to_source", (void *)__cccc_pc_to_source, 3, 0);
+    cc_register_cfunc(vm, "__cccc_pc_to_source", (void *)__cccc_pc_to_source, 3,
+                      0);
 }
 
 long long generate_random_canary(void) {

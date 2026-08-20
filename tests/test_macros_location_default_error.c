@@ -1,5 +1,6 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: test_macros_location_default_error\.c:[0-9]+:.*default_loc
+// CCCC_EXPECT_STDERR:
+// test_macros_location_default_error\.c:[0-9]+:.*default_loc
 
 [[cccc::comptime]]
 Node *default_loc(void) {

@@ -7,9 +7,9 @@
 #error "<dlfcn.h> is only available on POSIX targets in CCCC"
 #endif
 
-#define RTLD_LAZY 0x1
-#define RTLD_NOW 0x2
-#define RTLD_LOCAL 0x0
+#define RTLD_LAZY   0x1
+#define RTLD_NOW    0x2
+#define RTLD_LOCAL  0x0
 #define RTLD_GLOBAL 0x100
 
 extern void *dlopen(const char *path, int mode);

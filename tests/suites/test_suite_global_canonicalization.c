@@ -1,9 +1,11 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: extern global redeclaration canonicalization (#957)
-// Source tests: test_global_canon_extern_then_define, test_global_canon_define_then_extern,
-//   test_global_canon_tentative_then_init, test_global_canon_init_then_tentative,
-//   test_global_canon_static_redecl, test_global_canon_incomplete_array,
-//   test_global_canon_address_relocation, test_global_canon_sizeof_never_defined
+// Source tests: test_global_canon_extern_then_define,
+// test_global_canon_define_then_extern,
+//   test_global_canon_tentative_then_init,
+//   test_global_canon_init_then_tentative, test_global_canon_static_redecl,
+//   test_global_canon_incomplete_array, test_global_canon_address_relocation,
+//   test_global_canon_sizeof_never_defined
 
 // Every declaration of a same-named global variable within one translation
 // unit must canonicalize onto a single Obj (src/parse.c's global_variable(),
@@ -15,27 +17,29 @@
 // happened to hold (typically 0), regardless of a later definition.
 
 extern int canon_a;
-int use_canon_a_before_define(void) { return canon_a; }
-int canon_a = 42;
+int use_canon_a_before_define(void) {
+    return canon_a;
+}
+int        canon_a = 42;
 
-int canon_b = 42;
+int        canon_b = 42;
 extern int canon_b;
 
-int canon_t1;
-int canon_t1 = 5;
+int        canon_t1;
+int        canon_t1 = 5;
 
-int canon_t2 = 6;
-int canon_t2;
+int        canon_t2 = 6;
+int        canon_t2;
 
 static int canon_s1;
 static int canon_s1 = 3;
 
 extern int canon_arr[];
-int canon_arr[3] = {1, 2, 3};
+int        canon_arr[3] = {1, 2, 3};
 
-int canon_q = 7;
+int        canon_q      = 7;
 extern int canon_q;
-int *canon_pq = &canon_q;
+int       *canon_pq = &canon_q;
 
 extern int canon_never_defined;
 
@@ -79,7 +83,8 @@ int test_global_canon_incomplete_array(void) {
     // The incomplete `extern int canon_arr[];` declaration must adopt the
     // later complete-array definition's size, since the data-segment
     // allocation loop sizes the slot from var->ty->size.
-    if (sizeof(canon_arr) != 3 * sizeof(int)) return 1;
+    if (sizeof(canon_arr) != 3 * sizeof(int))
+        return 1;
     return canon_arr[0] + canon_arr[1] + canon_arr[2] == 6 ? 42 : 2;
 }
 

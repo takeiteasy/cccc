@@ -7,10 +7,11 @@
 #include <string.h>
 
 int main(void) {
-    char buf[64];
+    char  buf[64];
     float arr[4];
     arr[0] = 1.0f;
     snprintf(buf, sizeof(buf), "x=%f\n", arr[0]);
-    if (strcmp(buf, "x=1.000000\n") != 0) return 1;
+    if (strcmp(buf, "x=1.000000\n") != 0)
+        return 1;
     return 42;
 }

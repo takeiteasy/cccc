@@ -5,7 +5,9 @@
 static int math_count = 0;
 
 [[cccc::test_setup(suite = "math", inherit)]]
-void setup_math(void) { math_count++; }
+void setup_math(void) {
+    math_count++;
+}
 
 #pragma cccc suite begin "math"
 

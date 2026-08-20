@@ -8,9 +8,9 @@
 // identifiers in the initializer) is now forwarded into the comptime
 // declaration snapshot so its value is actually readable at compile time.
 
-static const char *g_str = "hello";
-static const int g_num = 4;
-static const int g_arr[3] = {1, 2, 3};
+static const char *g_str    = "hello";
+static const int   g_num    = 4;
+static const int   g_arr[3] = {1, 2, 3};
 
 [[cccc::comptime]]
 Node *gen(void) {

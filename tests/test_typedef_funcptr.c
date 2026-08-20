@@ -11,7 +11,7 @@ int apply(callback_t func, int value) {
 }
 
 int main() {
-    callback_t f = double_it;
-    int result = apply(f, 21);  // 21 * 2 = 42
+    callback_t f      = double_it;
+    int        result = apply(f, 21); // 21 * 2 = 42
     return result;
 }

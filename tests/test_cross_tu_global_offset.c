@@ -9,4 +9,6 @@
 // test_cross_tu_global_offset_reversed.c for the opposite file order.
 extern int canon_g;
 
-int main(void) { return canon_g; }
+int main(void) {
+    return canon_g;
+}

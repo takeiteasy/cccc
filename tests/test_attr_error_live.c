@@ -6,6 +6,7 @@
 void __chk_fail(void) __attribute__((error("buffer overflow detected")));
 
 int main(void) {
-    if (1) __chk_fail();   // live branch → compile error
+    if (1)
+        __chk_fail(); // live branch → compile error
     return 0;
 }

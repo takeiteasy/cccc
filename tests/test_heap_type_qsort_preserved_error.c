@@ -15,15 +15,15 @@ static int cmp_int(const void *a, const void *b) {
 
 int main(void) {
     int *arr = malloc(sizeof(int) * 4);
-    arr[0] = 4;
-    arr[1] = 1;
-    arr[2] = 3;
-    arr[3] = 2; // stamps arr's whole range as int
+    arr[0]   = 4;
+    arr[1]   = 1;
+    arr[2]   = 3;
+    arr[3]   = 2; // stamps arr's whole range as int
 
     qsort(arr, 4, sizeof(int), cmp_int);
 
     float *fbuf = (float *)arr;
-    float v = fbuf[0]; // load as float: mismatches the still-stamped int type
+    float  v = fbuf[0]; // load as float: mismatches the still-stamped int type
     free(arr);
     return (int)v;
 }

@@ -7,8 +7,8 @@ const char *get_const(void) {
 
 int main(void) {
     const char *p = "hello";
-    char *q = p;
-    char *r = get_const();
+    char       *q = p;
+    char       *r = get_const();
     (void)q;
     (void)r;
     return 42;
