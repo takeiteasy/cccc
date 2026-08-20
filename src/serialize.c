@@ -302,11 +302,20 @@ typedef struct {
     EnumConstRename *enum_renames;
     int enum_renames_len;
     int enum_renames_cap;
+    // #1085: bumped once per va_list-forwarding call-site shim emitted (see
+    // ND_FUNCALL below) so nested/repeated occurrences in one TU each get
+    // their own __cccc_va_fwd_N local instead of shadowing.
+    int va_fwd_seq;
 } SerializeContext;
 
 // Forward declaration
 static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int parent_prec);
+// #1062/#1085: matches CCCC's own struct va_list structurally (defined
+// further down, near its own long comment) -- forward-declared here so
+// ND_FUNCALL (inside serialize_expr's own switch, above the definition
+// textually) can call it too.
+static bool type_is_cccc_va_list(Type *ty);
 static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx, Node *node,
                            int indent);
 // #964: mutually recursive with serialize_stmt -- see the comment on its
@@ -2208,6 +2217,50 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             fprintf(f, ")");
             break;
         }
+        // #1085: any argument whose type is CCCC's own struct va_list must
+        // arrive at the callee as an independent copy, never the caller's
+        // own storage. A struct/union-by-value argument is passed here by
+        // the caller's own address (#714/#1078), so *any* callee that
+        // itself calls va_arg on the parameter -- a CCCC-emitted callee
+        // (which also gets its own copy via #1062's shim, so a second copy
+        // here is redundant but harmless) or, the case this fixes, a host
+        // libc v*-family function (vprintf/vsnprintf/vsscanf/vsyslog/...,
+        // which has no CCCC-emitted prologue to shim into and, on glibc,
+        // has its own array-typed va_list that decays to a pointer in
+        // parameter position, C17 6.7.6.3p7) -- would otherwise silently
+        // advance the *caller's* va_list. Deliberately not narrowed to
+        // "callee has no body" (host libc only): a call through a function
+        // pointer would slip past that predicate and still alias on glibc,
+        // and widening it costs nothing here. Wraps the whole call
+        // (including the #1074 static-link injection just below, so a
+        // nested-function callee stays correct too) in a statement
+        // expression that declares one va_copy'd local per such argument
+        // and substitutes it in the argument list below; no va_end on the
+        // copy, mirroring #1062's own reasoning (verified there that
+        // va_end expands to nothing observable for either va_list
+        // representation this project targets).
+        bool has_va_list_arg = false;
+        for (Node *va_arg_scan = node->args; va_arg_scan; va_arg_scan = va_arg_scan->next) {
+            if (type_is_cccc_va_list(va_arg_scan->ty)) {
+                has_va_list_arg = true;
+                break;
+            }
+        }
+        char va_fwd_names[8][32];
+        if (has_va_list_arg) {
+            fprintf(f, "__extension__ ({ ");
+            int va_fwd_idx = 0;
+            for (Node *arg = node->args; arg; arg = arg->next, va_fwd_idx++) {
+                if (va_fwd_idx >= 8 || !type_is_cccc_va_list(arg->ty))
+                    continue;
+                snprintf(va_fwd_names[va_fwd_idx], sizeof va_fwd_names[va_fwd_idx],
+                         "__cccc_va_fwd_%d", ctx->va_fwd_seq++);
+                fprintf(f, "va_list %s; va_copy(%s, ", va_fwd_names[va_fwd_idx],
+                        va_fwd_names[va_fwd_idx]);
+                serialize_expr(f, vm, ctx, arg, 2);
+                fprintf(f, "); ");
+            }
+        }
         serialize_expr(f, vm, ctx, node->lhs, node_prec);
         fprintf(f, "(");
         // #1074: a direct call to a nested function needs its hidden
@@ -2245,7 +2298,9 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             if (node->args)
                 fprintf(f, ", ");
         }
-        for (Node *arg = node->args; arg; arg = arg->next) {
+        {
+        int va_fwd_idx = 0;
+        for (Node *arg = node->args; arg; arg = arg->next, va_fwd_idx++) {
             // #1042(b): a comma-expression argument (e.g. from a macro like
             // ivalue(r) that expands to one) must stay parenthesized here --
             // the comma is the argument separator in this context, so an
@@ -2253,11 +2308,23 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx, N
             // ("too many arguments to function call"). parent_prec 2 is
             // above get_precedence(ND_COMMA)'s 1 but below every other node
             // kind's precedence, so only a bare top-level comma gets wrapped.
-            serialize_expr(f, vm, ctx, arg, 2);
+            //
+            // #1085: a va_list-typed argument prints the va_copy'd local
+            // declared just above instead of re-serializing the original
+            // expression -- both for correctness (the callee must see the
+            // copy, not the caller's own storage) and to avoid evaluating a
+            // (rare, but legal) side-effecting va_list expression twice.
+            if (va_fwd_idx < 8 && has_va_list_arg && type_is_cccc_va_list(arg->ty))
+                fprintf(f, "%s", va_fwd_names[va_fwd_idx]);
+            else
+                serialize_expr(f, vm, ctx, arg, 2);
             if (arg->next)
                 fprintf(f, ", ");
         }
+        }
         fprintf(f, ")");
+        if (has_va_list_arg)
+            fprintf(f, "; })");
         break;
 
     case ND_MEMBER:
@@ -3132,13 +3199,16 @@ static bool type_is_cccc_va_list(Type *ty) {
 // a shimmed `va_list __cccc_va_param_ap` definition for the same function
 // are both legal, compatible declarations of the same function type.
 //
-// Known residual, not closed by this fix: host libc `v*`-family consumers
-// (vprintf/vsnprintf/vfprintf/vsscanf/vsyslog/...) are the *host's own*
-// functions -- passing `ap` to one of them still aliases on glibc, since
-// there's no callee prologue of ours to inject the shim into. The standard
-// leaves `ap` indeterminate after such a call, so no conforming program can
-// observe the difference; tracked as a follow-up, not attempted here (see
-// man/COVERAGE.md's <stdarg.h> row).
+// Residual this shim alone doesn't close, fixed separately by #1085: host
+// libc `v*`-family consumers (vprintf/vsnprintf/vfprintf/vsscanf/vsyslog/
+// ...) are the *host's own* functions, with no callee prologue of ours to
+// inject this shim into. See the ND_FUNCALL case above (the
+// has_va_list_arg / va_fwd_names block) for the call-site fix: any call
+// passing a va_list-typed argument gets its own va_copy'd statement
+// expression there instead, which covers this case too (and, since it's
+// not narrowed to bodiless callees, indirect calls through a function
+// pointer as well). See man/COVERAGE.md's <stdarg.h> row for the full
+// writeup.
 static const char *va_list_shim_param_name(char *buf, size_t bufsz,
                                             const char *orig) {
     snprintf(buf, bufsz, "__cccc_va_param_%s", orig ? orig : "ap");

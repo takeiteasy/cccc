@@ -79,7 +79,7 @@ int cccc_snprintf(char *buf, size_t count, const char *fmt, ...) {
 #include "va_ffi_helper.h"
 
 long long wrap_cccc_vprintf(const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    CCCC_VA_LOCAL(va, va_ptr);
     int types[CCCC_VA_MAX_ARGS];
     int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
@@ -89,7 +89,7 @@ long long wrap_cccc_vprintf(const char *fmt, long long va_ptr) {
 }
 
 long long wrap_cccc_vsprintf(char *str, const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    CCCC_VA_LOCAL(va, va_ptr);
     int types[CCCC_VA_MAX_ARGS];
     int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
@@ -99,7 +99,7 @@ long long wrap_cccc_vsprintf(char *str, const char *fmt, long long va_ptr) {
 }
 
 long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    CCCC_VA_LOCAL(va, va_ptr);
     int types[CCCC_VA_MAX_ARGS];
     int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];
@@ -109,7 +109,7 @@ long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt, long l
 }
 
 long long wrap_cccc_vfprintf(FILE *stream, const char *fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    CCCC_VA_LOCAL(va, va_ptr);
     int types[CCCC_VA_MAX_ARGS];
     int n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];

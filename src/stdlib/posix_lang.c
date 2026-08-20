@@ -151,7 +151,7 @@ static int cccc_parse_syslog_fmt(const char *fmt, int *types, int max_args) {
 }
 
 static long long wrap_vsyslog(long long priority, long long fmt, long long va_ptr) {
-    cccc_va_list_t *va = (cccc_va_list_t *)va_ptr;
+    CCCC_VA_LOCAL(va, va_ptr);
     int types[CCCC_VA_MAX_ARGS];
     int n = cccc_parse_syslog_fmt((const char *)fmt, types, CCCC_VA_MAX_ARGS);
     int64_t vals[CCCC_VA_MAX_ARGS];

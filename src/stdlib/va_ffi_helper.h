@@ -1,15 +1,29 @@
 // Bridge between cccc's va_list layout and host libffi variadic calls.
 //
 // cccc's va_list (see include/stdarg.h) is:
-//   struct { char *reg_ptr; char *stack_ptr; int reg_count; }
+//   struct { char *reg_ptr; char *stack_ptr; int reg_count; char __reserved[40]; }
 // which is incompatible with the host va_list. When cccc-compiled code
 // forwards a va_list to a v*-family wrapper (vprintf, vsprintf, ...), the
-// wrapper receives a pointer to cccc's va_list struct as an int64 argument.
+// wrapper receives a pointer to cccc's va_list struct as an int64 argument
+// -- the guest passes a struct va_list by the caller's own address (#714),
+// same as every other struct/union by-value argument, and there is no
+// FFI-side prologue to copy it the way #1078 gives a CCCC-emitted callee.
 //
 // This helper extracts individual args from that struct using cccc's own
 // va_arg semantics, then dispatches them to the real host function via
 // ffi_prep_cif_var, which builds a genuine host variadic frame so the
 // callee's own va_start/va_arg work correctly. (#407)
+//
+// #1085: extraction must happen on a *snapshot*, never on the struct in
+// place. CCCC's own va_list is by-value semantics throughout (#1078) --
+// every wrapper below used to mutate through the caller's own pointer
+// (reg_count--/reg_ptr-=8/stack_ptr+=8), silently advancing the *caller's*
+// va_list. Confirmed directly on the VM on macOS (a two-forward repro
+// returned the wrong second value pre-fix); this code path is plain,
+// architecture-independent C with no host-specific branch, and the fixed
+// binary was separately verified clean on both Linux containers -- the
+// same class of bug #1062 fixed for a va_list passed to a CCCC-emitted
+// callee, just one layer further out. See CCCC_VA_LOCAL below.
 
 #ifndef CCCC_VA_FFI_HELPER_H
 #define CCCC_VA_FFI_HELPER_H
@@ -20,12 +34,21 @@
 
 #define CCCC_VA_MAX_ARGS 64
 
-// Mirrors the va_list struct layout from include/stdarg.h.
+// Mirrors the va_list struct layout from include/stdarg.h. Only the leading
+// three members are ever read/written here; __reserved is never touched.
 typedef struct {
     char *reg_ptr;
     char *stack_ptr;
     int   reg_count;
 } cccc_va_list_t;
+
+// #1085: declare a local snapshot of the caller's va_list and point `name`
+// at it, so every extraction site below advances only the copy. Always use
+// this instead of casting va_ptr to cccc_va_list_t * directly -- a direct
+// cast lets cccc_va_extract mutate the struct at the caller's own address.
+#define CCCC_VA_LOCAL(name, va_ptr) \
+    cccc_va_list_t name##__snap = *(cccc_va_list_t *)(intptr_t)(va_ptr); \
+    cccc_va_list_t *name = &name##__snap
 
 #define CCCC_VAARG_INT    0  // int64 / pointer slot
 #define CCCC_VAARG_DOUBLE 1  // double slot

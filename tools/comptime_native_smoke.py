@@ -4766,11 +4766,77 @@ def case_va_list_param_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "va_list_param_1062_rt", VA_LIST_PARAM_PROGRAM)
 
 
+VA_LIST_LIBC_CALL_PROGRAM = (
+    "#include <stdio.h>\n"
+    "#include <stdarg.h>\n"
+    "static int test_vsnprintf_basic(int count, ...) {\n"
+    "    va_list ap;\n"
+    "    va_start(ap, count);\n"
+    "    int first = va_arg(ap, int);\n"
+    "    char buf[32];\n"
+    "    vsnprintf(buf, sizeof buf, \"%d\", ap);\n"
+    "    int second = va_arg(ap, int);\n"
+    "    va_end(ap);\n"
+    "    if (first != 10) return 1;\n"
+    "    if (buf[0] != '2' || buf[1] != '0' || buf[2] != 0) return 2;\n"
+    "    if (second != 20) return 3;\n"
+    "    return 0;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    return test_vsnprintf_basic(2, 10, 20) == 0 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_va_list_libc_call_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  117: a va_list forwarded to a HOST LIBC v*-family function "
+          "(vprintf/vsnprintf/vfprintf/vsscanf/vsyslog/...) used to "
+          "disagree between VM and native on EVERY host, not just glibc -- "
+          "the mirror bug to #1062 (a va_list forwarded as an ordinary "
+          "function *parameter*), one layer further out (#1085). #1062's "
+          "own filed premise ('the VM is always genuinely by-value') was "
+          "backwards for this half: a struct/union by-value argument "
+          "reaches an FFI cfunc by the caller's own address (#714), and the "
+          "v*-family FFI wrappers (src/stdlib/format_printf.c and friends) "
+          "had no prologue copy the way #1078 gives a CCCC-emitted callee -- "
+          "they extracted straight out of the caller's own va_list struct, "
+          "silently advancing it, on the VM on every platform. Fixed on the "
+          "VM side by CCCC_VA_LOCAL (src/stdlib/va_ffi_helper.h), a "
+          "snapshot-before-extract macro used at all twelve wrapper sites. "
+          "Separately, -c=native genuinely does alias on glibc (real "
+          "va_list array-decay, C17 6.7.6.3p7) when a va_list reaches ANY "
+          "function taking one, host libc included -- fixed by wrapping any "
+          "call passing a va_list-typed argument in a va_copy'd statement "
+          "expression at the call site itself (serialize_expr's ND_FUNCALL "
+          "case), not narrowed to bodiless callees only, so an indirect "
+          "call through a function pointer is covered too. Asserts -m "
+          "output wraps the vsnprintf call in "
+          "'__extension__ ({ va_list __cccc_va_fwd' and leaks none of "
+          "reg_ptr/reg_count/stack_ptr, plus VM 42 -> native 42 (the VM "
+          "half of this bug is observable on macOS by construction, unlike "
+          "#1062's own glibc-only residual -- see "
+          "tests/test_serialize_va_list_libc_1085.c for the fuller case "
+          "list, including the canonical measure-then-format idiom).")
+    src = Path(tmp) / "va_list_libc_call_1085.c"
+    write(src, VA_LIST_LIBC_CALL_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "__extension__ ({ va_list __cccc_va_fwd" not in m_result.stdout:
+        print(f"    FAIL: -m output missing va_copy call-site shim\n    {m_result.stdout}")
+        return False
+    for leak in ("reg_ptr", "reg_count", "stack_ptr"):
+        if leak in m_result.stdout:
+            print(f"    FAIL: -m output leaks CCCC-internal va_list member '{leak}'\n    {m_result.stdout}")
+            return False
+
+    return _vm_and_native_run_case(cccc, tmp, "va_list_libc_call_1085_rt", VA_LIST_LIBC_CALL_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4894,6 +4960,7 @@ def main() -> int:
             case_ctor_dtor_native_round_trip,
             case_attribute_survives_after_stdio_include,
             case_va_list_param_native_round_trip,
+            case_va_list_libc_call_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
