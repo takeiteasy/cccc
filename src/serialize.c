@@ -3850,6 +3850,53 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm, SerializeContext *
 }
 
 // Serialize global variable
+// #1022: `include/pthread.h` hands off `-c=native`'s replayed
+// `#include <pthread.h>` to the real host header (#1021/#1040-style
+// #include_next guard), so a static of type pthread_mutex_t/pthread_cond_t
+// initialized with PTHREAD_MUTEX_INITIALIZER/PTHREAD_COND_INITIALIZER can no
+// longer be serialized as CCCC's own projected designated-initializer image
+// (`{ .__handle = 0, .__state = 0, .__type = 0 }`) -- the real host struct
+// doesn't have those members at all. Narrow, type-keyed fix (not the general
+// #1018 macro-provenance annotation, per user sign-off): if the global's
+// type is one of these `from_include` pthread types and its init image is
+// all-zero -- the only image CCCC's own macros ever produce -- print the
+// bare host macro name instead of walking the projected members. Known
+// limitation, documented rather than silently assumed away: a user's own
+// literal `= {0}` on one of these types is indistinguishable from the macro
+// and also becomes the macro spelling -- semantically equivalent either way
+// (both are "the type's zero/default-initialized state"), so this is a safe
+// over-approximation, not a soundness gap.
+static const char *pthread_initializer_macro(SerializeContext *ctx, Obj *var) {
+    if (!var->ty || !var->init_data)
+        return NULL;
+    TypeName *tn = find_typedef_name(ctx, var->ty);
+    if (!tn || !tn->from_include)
+        return NULL;
+
+    // Only pthread_mutex_t/pthread_cond_t are declared in include/pthread.h
+    // today -- rwlock/once have no CCCC type or FFI wrappers at all yet, so
+    // there's no initializer image for either to collide with.
+    static const struct { const char *type_name; const char *macro; } table[] = {
+        {"pthread_mutex_t", "PTHREAD_MUTEX_INITIALIZER"},
+        {"pthread_cond_t", "PTHREAD_COND_INITIALIZER"},
+    };
+    const char *macro = NULL;
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+        if (tn->name_len == (int)strlen(table[i].type_name) &&
+            !strncmp(tn->name, table[i].type_name, tn->name_len)) {
+            macro = table[i].macro;
+            break;
+        }
+    }
+    if (!macro)
+        return NULL;
+
+    for (int i = 0; i < var->ty->size; i++)
+        if (var->init_data[i] != 0)
+            return NULL;
+    return macro;
+}
+
 static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *var) {
     if (var->is_function)
@@ -3894,11 +3941,26 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *
         // collides with the real symbol at link time.
         fprintf(f, "extern ");
 
+    // #1022: Obj.is_tls (_Thread_local/__thread storage class) was parsed
+    // and tracked but never re-emitted here -- a `_Thread_local` global
+    // silently serialized as an ordinary global, so every thread shared one
+    // instance instead of getting its own copy (confirmed:
+    // test_thread_local_isolation.c's cross-thread-visibility check would
+    // pass, i.e. the isolation it exists to test would be gone, under
+    // -c=native). Emitted right after static/extern per C11 6.7.1's
+    // storage-class-specifier ordering.
+    if (var->is_tls)
+        fprintf(f, "_Thread_local ");
+
     serialize_type_decl(f, ctx, var->ty, var->name);
 
     if (var->init_data) {
         fprintf(f, " = ");
-        serialize_init_bytes(f, vm, ctx, var, var->ty, 0);
+        const char *pthread_init_macro = pthread_initializer_macro(ctx, var);
+        if (pthread_init_macro)
+            fprintf(f, "%s", pthread_init_macro);
+        else
+            serialize_init_bytes(f, vm, ctx, var, var->ty, 0);
     }
 
     fprintf(f, ";\n");
@@ -6643,6 +6705,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
             if (type_needs_anon_aggregate(&ctx, obj->ty))
                 continue;
             fprintf(f, obj->is_static ? "static " : "extern ");
+            if (obj->is_tls) // #1022: see serialize_global_var's own comment
+                fprintf(f, "_Thread_local ");
             serialize_type_decl(f, &ctx, obj->ty, obj->name);
             fprintf(f, ";\n");
         }
@@ -6861,6 +6925,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog, bool generated
         if (global_is_header_supplied(vm, &ctx, obj))
             continue;
         fprintf(f, obj->is_static ? "static " : "extern ");
+        if (obj->is_tls) // #1022: see serialize_global_var's own comment
+            fprintf(f, "_Thread_local ");
         serialize_type_decl(f, &ctx, obj->ty, obj->name);
         fprintf(f, ";\n");
     }

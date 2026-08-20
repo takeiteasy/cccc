@@ -205,6 +205,23 @@ by default). Two things follow from that:
   __cccc_dec_*` symbols that exist only inside the VM's FFI runtime, so
   re-deriving would only trade one unresolvable reference for another; it
   is a hard compile error instead.
+  A cccc-only header's own **nested** `#include`s need separate handling
+  from the re-derivation above (found closing #1022): re-derivation only
+  covers types the parser itself saw declarations for, not a header pulled
+  in transitively, so `include/threads.h`'s own `#include "pthread.h"`/
+  `"time.h"` were neither replayed (the auto-capture gate only fired for a
+  command-line input file) nor re-derived — a real host compiler
+  reprocessing the re-derived text hit "unknown type name 'pthread_key_t'"/
+  "'struct timespec' will not be visible outside of this function", types
+  nothing declared. `mark_cccc_only_file` for the outer header runs before
+  its own body is walked, so `cc_file_is_cccc_only` on the *including*
+  file is already true by the time its own nested `#include` lines are
+  processed — the auto-capture gate now also fires for those, not just
+  command-line input files, so a plain (non-cccc-only) nested header gets
+  replayed like any other captured include. The existing
+  `cc_file_is_cccc_only` suppression in `serialize.c`'s own replay loop is
+  unchanged, so a cccc-only header nested inside another cccc-only header
+  is still correctly suppressed rather than replayed.
 - CCCC's own polyfill headers (`stdio.h`, `errno.h`, `getopt.h` in
   `src/std.c`) define a handful of identifiers (`stdout`/`stderr`/`stdin`,
   `errno`, `optarg`/`optind`/`opterr`/`optopt`) as macros that expand, at
@@ -548,12 +565,17 @@ directly, not assumed:
   host compiler reads CCCC's own `math.h`/`float.h` as the *complete*,
   self-contained implementation, the same content the VM parsed — there is
   no second, genuinely-different real header for anything to leak into.
-  Every other non-owned bundled header (`pthread.h`, `unistd.h`,
-  `sys/socket.h`, `time.h`, `signal.h`, `stdlib.h`, `string.h`, `dirent.h`,
-  `fcntl.h`, `netdb.h`, …) is the same shape: a complete polyfill, never
-  handed off, so there's no real-vs-CCCC collision to leak across — and any
-  of the already-heavily-exercised full `--native` suite would have caught
-  a silent behavior change in one of these long before this audit.
+  At the time of this audit, every other non-owned bundled header
+  (`pthread.h`, `unistd.h`, `sys/socket.h`, `time.h`, `signal.h`,
+  `stdlib.h`, `string.h`, `dirent.h`, `fcntl.h`, `netdb.h`, …) was the same
+  shape: a complete polyfill, never handed off, so there was no real-vs-CCCC
+  collision to leak across. `pthread.h` has since gained its own hand-off
+  (#1022, see below) — the underlying ABI-layout class this audit's own
+  "complete polyfill" reasoning doesn't cover is now a named, tracked
+  follow-up (a bundled polyfill header whose *struct layout*, not a macro,
+  silently diverges from the real host's once something reaches it — see
+  #1022's own ticket comment for the pthread_mutex_t/pthread_cond_t
+  instance this class was first found in).
 - `assert.h` unconditionally `#include <stdio.h>` (angle-bracket, outside
   any guard) — confirmed harmless directly (`cc -I<repo>/include -E` on
   `#include <assert.h>` followed by an `__attribute__`): `stdio.h` resolves
@@ -651,6 +673,72 @@ guest-side preprocessing, the same way it already does for
 __CCCC__` would falsely report as "declared conditionally but registered
 unconditionally" against `src/stdlib/*.c`'s unconditional
 `cc_register_cfunc` calls.
+
+**`include/pthread.h`'s bundled `pthread_mutex_t`/`pthread_cond_t` were a
+struct-layout divergence, not a macro-leak one — a distinct hazard class
+from everything else in this file** (#1022). Under the VM, `pthread_mutex_t`
+is genuinely just a `{void *__handle; long __state; int __type;}` handle:
+the real host mutex is lazily heap-allocated on first lock
+(`src/stdlib/pthread.c`), and the guest never sees its real layout. Before
+`-c=native`'s `-I./include` forwarding could ever put a real host compiler
+in front of this same file, that was harmless. Once it can, the exact same
+`{void*,long,int}` struct gets fed to the *real* `pthread_mutex_init()` —
+24 bytes handed to a function that (macOS arm64) writes 64, silent heap
+corruption with no compile or link error, flaking `test_pthread_mutex.c`'s
+exit code under repeated native runs. Fixed with the same
+`#ifdef __CCCC__` … `#else #include_next <pthread.h>` shape as
+`stdio.h`/`errno.h`/`fenv.h`: a real host compiler now reads the real
+`pthread_mutex_t`/`pthread_cond_t`/`pthread_t`/etc. directly, so the VM's
+own opaque-handle projection is never present when the host's own
+`pthread_*` functions actually run.
+
+Handing `pthread.h` off surfaced two further instances of hazards this file
+already documents elsewhere, both worth recording as *this specific header's*
+concrete cases:
+
+- **`_STRUCT_TIMESPEC`, an `-I./include`-shadowing collision (the general
+  class first documented in `setjmp.h`'s own paragraph above), fixed
+  narrowly instead of by handing off the colliding header too.** Both real
+  glibc (`bits/types/struct_timespec.h`) and real macOS
+  (`sys/_types/_timespec.h`) guard their own `struct timespec` behind the
+  identical macro name `_STRUCT_TIMESPEC` (glibc's own header comments "NB:
+  Include guard matches what `<linux/time.h>` uses"). Once `pthread.h`
+  hands off, the real host `<pthread.h>`'s own internal chain reaches this
+  struct — but `-I./include` still resolves that `#include <time.h>` to
+  CCCC's own bundled (non-hand-off) copy first, which defined `struct
+  timespec` unconditionally: "redefinition of 'timespec'" once the real
+  chain's own copy is reached moments later. A full hand-off for
+  `include/time.h` itself was tried and reverted — exactly the "no clean
+  stopping point" shape `MB_CUR_MAX`'s own paragraph above already warns
+  about: it also drags in the real host's `clockid_t`, which collides with
+  the plain `typedef int clockid_t;` its sibling `include/sys/types.h`
+  supplies, with no narrow fix available for *that* collision. Instead,
+  `include/time.h` stays a plain bundled header and now additionally
+  `#define`s `_STRUCT_TIMESPEC` right after its own `struct timespec`
+  definition — mimicking the real headers' own guard so that whichever
+  chain reaches the type second (real or CCCC's) sees it as already
+  provided and no-ops instead of redefining it.
+- **`__clockid_t`, glibc's private name for the same type its own public
+  `clockid_t` aliases.** Real glibc `<pthread.h>`'s clock-based extensions
+  (`pthread_mutex_clocklock`/`pthread_cond_clockwait`) spell their
+  parameter with the leading-underscore name, normally supplied by glibc's
+  own `<bits/types.h>` — but `-I./include` shadows that transitively too,
+  via CCCC's own bundled (non-hand-off) `include/sys/types.h`, which only
+  ever defined the public name. Added `typedef int __clockid_t;` alongside
+  the existing `clockid_t` typedef, Linux branch only (Apple's own
+  `<pthread.h>` has no such glibc-only extension to reach).
+- **`pthread_t`'s own layout still cosmetically diverges, deliberately left
+  as-is.** CCCC's own `pthread_t` is `void *`; glibc's real one is
+  `unsigned long`. Both are 8 bytes on every platform/arch this project
+  targets, so a native `pthread_create(&t, ...)` call built against the
+  guest's own `pthread_t`-typed variable and the real host's
+  `pthread_t *__restrict` parameter is bit-for-bit correct either way — the
+  host compiler emits an `-Wincompatible-pointer-types` warning, not an
+  error (CCCC doesn't forward `-Werror` to the host `cc` by default, the
+  same acceptance already recorded for `stddef.h`'s `NULL` redefinition
+  warning above). Not pursued further: fixing the *typedef spelling* to
+  match would need a host-conditional `pthread_t`, more machinery than a
+  cosmetic, harmless warning justifies.
 
 ## Private headers
 

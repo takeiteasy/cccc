@@ -17,6 +17,20 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`: `include/pthread.h`'s bundled `pthread_mutex_t`/
+  `pthread_cond_t` were a VM-only opaque-handle projection (24/16 bytes on
+  macOS arm64) that `-I./include` fed straight to the real host
+  `pthread_mutex_init()`/etc. — which writes the real struct's full size
+  (64/48 bytes), silently corrupting adjacent memory with no compile or
+  link error. `include/pthread.h` now hands off to the real host
+  `<pthread.h>` (`#ifdef __CCCC__`/`#include_next`, matching `stdio.h`/
+  `errno.h`/`fenv.h`), `PTHREAD_MUTEX_INITIALIZER`/`PTHREAD_COND_INITIALIZER`
+  now re-emit as the bare host macro instead of CCCC's own designated
+  initializer, and `_Thread_local`/`__thread` globals are now emitted with
+  their storage class (previously silently dropped). A cccc-only header's
+  own nested `#include`s (e.g. `include/threads.h`'s `"pthread.h"`/
+  `"time.h"`) are now replayed too, instead of being neither replayed nor
+  re-derived.
 - `src/serialize.c`: a `float` global initializer whose value prints with
   no decimal point under `%.9g` (e.g. `1.0f`) used to emit the invalid
   token `1f`; now forces a decimal point before the `f` suffix.

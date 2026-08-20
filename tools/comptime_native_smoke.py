@@ -4832,11 +4832,98 @@ def case_va_list_libc_call_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _vm_and_native_run_case(cccc, tmp, "va_list_libc_call_1085_rt", VA_LIST_LIBC_CALL_PROGRAM)
 
 
+PTHREAD_NATIVE_PROGRAM = (
+    "#include <pthread.h>\n"
+    "static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;\n"
+    "_Thread_local int tls_val = 0;\n"
+    "static void *worker(void *arg) {\n"
+    "    (void)arg;\n"
+    "    tls_val = 7;\n"
+    "    pthread_mutex_lock(&mutex);\n"
+    "    pthread_mutex_unlock(&mutex);\n"
+    "    return (void *)(long)(tls_val == 7 ? 0 : 1);\n"
+    "}\n"
+    "int main(void) {\n"
+    "    tls_val = 42;\n"
+    "    pthread_t t;\n"
+    "    if (pthread_create(&t, 0, worker, 0) != 0) return 1;\n"
+    "    void *rc = 0;\n"
+    "    pthread_join(t, &rc);\n"
+    "    if ((long)rc != 0) return 2;\n"
+    "    if (tls_val != 42) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_pthread_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  118: include/pthread.h's own bundled pthread_mutex_t/"
+          "pthread_cond_t were a VM-ABI struct-layout divergence, not a "
+          "macro leak -- CCCC's own polyfill is a plain {void*,long,int} "
+          "opaque-handle projection (24 bytes on macOS arm64), genuinely "
+          "correct for the VM (the real host mutex is lazily heap-allocated "
+          "on first lock, src/stdlib/pthread.c), but under -c=native the "
+          "same 24-byte object got handed straight to the real host "
+          "pthread_mutex_init() (which writes 64 bytes on macOS arm64) -- "
+          "silent heap corruption, no compile/link error, flaking exit "
+          "codes across repeated runs (#1022). Fixed by giving "
+          "include/pthread.h a real #ifdef __CCCC__ / #include_next "
+          "hand-off (#1021/#1040-style), a narrow PTHREAD_MUTEX_INITIALIZER/"
+          "PTHREAD_COND_INITIALIZER re-emission fix (the real host struct "
+          "has no .__handle/.__state/.__type members to designated-init), "
+          "and emitting _Thread_local for Obj.is_tls (previously silently "
+          "dropped -- every thread shared one instance instead of getting "
+          "its own copy). Deliberately passes an explicit -I<repo>/include, "
+          "like case 101/115 -- without it the replayed #include <pthread.h> "
+          "wouldn't resolve through CCCC's own bundled header at all and "
+          "the case would pass vacuously either way (the pre-#1022 bug only "
+          "reproduces via the -I./include-forwarding path). Asserts -m "
+          "output carries the bare PTHREAD_MUTEX_INITIALIZER macro name "
+          "(not CCCC's own .__handle/.__state/.__type designators) and "
+          "_Thread_local on tls_val, plus VM 42 -> native 42.")
+    src = Path(tmp) / "pthread_native_1022.c"
+    write(src, PTHREAD_NATIVE_PROGRAM)
+    include_dir = cccc.parent / "include"
+
+    vm_result = run([str(cccc), "-I", str(include_dir), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-I", str(include_dir), "-m", src.name], cwd=tmp)
+    if "PTHREAD_MUTEX_INITIALIZER" not in m_result.stdout:
+        print(f"    FAIL: -m output missing bare PTHREAD_MUTEX_INITIALIZER\n    {m_result.stdout}")
+        return False
+    if ".__handle" in m_result.stdout or ".__state" in m_result.stdout:
+        print(f"    FAIL: -m output still leaks CCCC's own mutex projection\n    {m_result.stdout}")
+        return False
+    if "_Thread_local int tls_val" not in m_result.stdout:
+        print(f"    FAIL: -m output missing _Thread_local on tls_val\n    {m_result.stdout}")
+        return False
+
+    out = Path(tmp) / "pthread_native_1022_out"
+    compile_result = run(
+        [str(cccc), "-I", str(include_dir), "-c=native", "-o", out.name, src.name],
+        cwd=tmp,
+    )
+    if compile_result.returncode != 0:
+        print(f"    FAIL: native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -4961,6 +5048,7 @@ def main() -> int:
             case_attribute_survives_after_stdio_include,
             case_va_list_param_native_round_trip,
             case_va_list_libc_call_native_round_trip,
+            case_pthread_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

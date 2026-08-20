@@ -4874,10 +4874,30 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                        // path once that's known
         {
             ComptimeCtxEntry *_ac = ctx_top(vm);
+            // #1022 (found closing #1022's own pthread.h work): a
+            // cccc-only header's (is_cccc_supplied_only_header --
+            // stdbit.h/uchar.h/threads.h/Availability.h/decimal_math.h)
+            // #include line is deliberately suppressed by serialize.c's
+            // replay loop (cc_file_is_cccc_only), and its own type/function
+            // definitions are re-derived to compensate (#896) -- but a
+            // *plain, non-cccc-only* header that IT #includes (threads.h's
+            // own `#include "pthread.h"`/`"time.h"`) was neither replayed
+            // (this gate only fired for a command-line input file) nor
+            // re-derived (re-derivation only covers types the parser itself
+            // saw declarations for, not a header pulled in transitively) --
+            // so a real host compiler reprocessing the re-derived text hit
+            // "unknown type name 'pthread_key_t'"/"'struct timespec' will
+            // not be visible", types nothing declared. mark_cccc_only_file
+            // for the outer header runs before its own body is walked (see
+            // the PP_INCLUDE case below), so cc_file_is_cccc_only(start->
+            // file->name) is already true here for a directive nested
+            // inside one -- widen the gate to also auto-capture from a
+            // cccc-only includer, not just a command-line input file.
             if (!vm->compiler.emit_strict &&
                 !vm->compiler.in_macro_mode &&
                 start->file &&
-                cc_file_is_command_line_input(vm, start->file->name) &&
+                (cc_file_is_command_line_input(vm, start->file->name) ||
+                 cc_file_is_cccc_only(vm, start->file->name)) &&
                 !(_ac && _ac->type == CTX_COMPTIME) &&
                 !is_pragma_cccc(start)) {
                 char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED ||

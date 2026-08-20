@@ -53,6 +53,17 @@ typedef unsigned int      useconds_t;
 typedef unsigned short    sa_family_t;
 typedef unsigned int      socklen_t;
 typedef int               clockid_t;
+// #1022: `__clockid_t` (leading-underscore, glibc's own internal name for
+// the same type `clockid_t` is a public alias of) is needed by real glibc
+// <pthread.h> once include/pthread.h hands off to it (#1022) --
+// pthread_mutex_clocklock()/pthread_cond_clockwait() (glibc-only extensions,
+// declared unconditionally in glibc's own header) spell their clockid_t
+// parameter with the private name. Since -I./include shadows glibc's own
+// <sys/types.h>/<bits/types.h> (which would otherwise supply it) for every
+// #include in the TU, not just ones this file itself issues, it has to be
+// supplied here too. Not needed on the __APPLE__ side: Apple's own
+// <pthread.h> has no such glibc-only extension to reach.
+typedef int                __clockid_t;
 typedef void              *timer_t;
 typedef int                key_t;
 typedef unsigned int       id_t;

@@ -155,22 +155,43 @@ NATIVE_SKIP_TESTS = {
     # value in the *test*, not a real saturating-cast semantics gap; once
     # #1038 fixed the literal, VM and native agree) no longer need an entry
     # here.
-    # --- #1022: pthread/threads native support gaps ---
-    "test_thread_local_isolation.c": "threads fail under native (#1022)",
-    "test_threads_basic.c": "threads fail under native (#1022)",
-    "test_threads_mutex.c": "threads fail under native (#1022)",
-    "test_threads_tss.c": "threads fail under native (#1022)",
-    "test_pthread_nonrecursive_deadlock_detect.c": "threads fail under native (#1022)",
-    "test_pthread_recursive_mutex.c": "threads fail under native (#1022)",
-    # test_pthread_cond.c: compiles fine, then genuinely deadlocks at
-    # pthread_cond_wait() under -c=native on real Linux/aarch64 (confirmed
-    # in the cccc-linux-arm64 container -- did not reproduce on the amd64
-    # container, so this looks aarch64-specific rather than a general
-    # condvar gap). --native has no per-test timeout, so an unskipped hang
-    # here blocks the entire suite on that host. Found and skipped while
-    # verifying #1067 (unrelated -- limits.h touches no threading code);
-    # same #1022 bug class as the entries above, just never added.
-    "test_pthread_cond.c": "threads fail under native (#1022)",
+    # --- #1022, closed this pass: pthread/threads native support gaps ---
+    # Root cause was `-I./include`'s host cc reading CCCC's own polyfill
+    # pthread_mutex_t/pthread_cond_t projection (24/16 bytes) instead of the
+    # real host layout (64/48 bytes on macOS arm64) while linking against
+    # real libpthread -- silent memory corruption, not a compile/link
+    # failure, so test_pthread_mutex.c (never skipped) was flaking non-42
+    # exit codes. Fixed by giving include/pthread.h a real #include_next
+    # hand-off (#1021/#1040-style), a narrow PTHREAD_MUTEX/COND_INITIALIZER
+    # re-emission fix (src/serialize.c), and emitting `_Thread_local` for
+    # Obj.is_tls (previously silently dropped). See #1022's own close
+    # comment / NATIVE_1018_PLAN.md for the full writeup.
+    #
+    # test_pthread_recursive_mutex.c and test_pthread_nonrecursive_
+    # deadlock_detect.c dropped from this table: the former now round-trips
+    # VM 42 -> native 42; the latter is a --thread-safety VM diagnostic
+    # (EDEADLK from re-locking a default mutex) with no host equivalent --
+    # it now auto-skips via NATIVE_VM_ONLY_FLAGS instead (it used to hang
+    # forever natively, since a real default mutex genuinely deadlocks).
+    #
+    # The four <threads.h> files (thrd_create/mtx_lock/tss_create/etc.) are
+    # a distinct, larger problem -- those are VM cfuncs (src/stdlib/
+    # pthread.c) with no host libc symbol to link against at all on any
+    # platform, and no real <threads.h> exists on macOS in the first place.
+    # Retagged to #1088, not fixed here.
+    "test_thread_local_isolation.c": "no <threads.h> lowering for -c=native (#1088)",
+    "test_threads_basic.c": "no <threads.h> lowering for -c=native (#1088)",
+    "test_threads_mutex.c": "no <threads.h> lowering for -c=native (#1088)",
+    "test_threads_tss.c": "no <threads.h> lowering for -c=native (#1088)",
+    # test_pthread_cond.c dropped from this table too: the aarch64-Linux
+    # pthread_cond_wait() "deadlock" recorded here previously (found while
+    # verifying #1067, unrelated to it) turned out to be the *same* root
+    # cause as the rest of #1022, not a distinct glibc condvar bug --
+    # -I./include shadowed the real pthread_cond_t layout with CCCC's own
+    # 16-byte polyfill projection, corrupting the condvar's internal state.
+    # Re-verified directly in the cccc-linux-arm64 container (image rebuilt
+    # from current source): compiles and round-trips VM 42 -> native 42,
+    # 8/8 repeated runs clean, no flakiness. No separate ticket needed.
 
     # --- singleton bugs, one ticket each ---
     "test_minilua.c": "3 unrelated native-compile bugs remain: by-value "
@@ -381,6 +402,14 @@ NATIVE_VM_ONLY_FLAGS = {
     "--uninitialized-detection",
     "--posix-emulation",
     "--stack-canaries",
+    # #1022: `--thread-safety`'s double-lock (EDEADLK) diagnostic is a CCCC
+    # VM enforcement layer -- a real default (non-recursive) pthread mutex
+    # re-locked by the same thread genuinely deadlocks on the real host
+    # instead, matching the existing "VM-only enforcement dropped by
+    # -c=native" warning `cccc -c=native --thread-safety` already prints.
+    # Without this, test_pthread_nonrecursive_deadlock_detect.c's native
+    # binary hangs forever (confirmed) instead of skipping cleanly.
+    "--thread-safety",
     "-V",
     "-1", "-2", "-3",
     "--safety=basic", "--safety=standard", "--safety=max",
