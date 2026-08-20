@@ -5377,18 +5377,26 @@ static void *open_libc_handle_for_probe(void) {
 // this file) -- so a program that never hands the host compiler a real
 // header at all (this test; also any program with zero `#include`s) can
 // never trip the probe, matching the actual hazard's own precondition.
-static bool line_is_conditional_directive(const char *line); // forward decl
+// `emit_directives` captures every top-level directive CCCC replays --
+// #include lines AND ordinary ones (#define/#pragma/...), the latter with
+// no entry in `emit_include_paths` at all (only ever populated for the
+// PP_INCLUDE case). Only a line WITH a resolved path is an #include in the
+// first place; anything else (a re-derived cccc-only header's own #define
+// lines included) must be skipped outright, not fall through to "no
+// suppression rule matched, so this counts as real" -- that fallthrough was
+// the actual bug in an earlier version of this function: a re-derived
+// polyfill header's own #define lines have no `resolved` path either, so
+// they hit every one of the three `resolved &&`-guarded skip conditions
+// below as false and were wrongly counted as a real replayed include.
 static bool any_real_include_replayed(VirtualMachine *vm) {
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
-        if (!vm->compiler.emit_cccc && resolved &&
-            cc_file_is_cccc_only(vm, resolved))
+        if (!resolved)
+            continue; // not a captured #include line at all
+        if (!vm->compiler.emit_cccc && cc_file_is_cccc_only(vm, resolved))
             continue;
-        if (!vm->compiler.emit_cccc && resolved &&
-            path_basename_is(resolved, "setjmp.h"))
-            continue;
-        if (!vm->compiler.emit_cccc && line_is_conditional_directive(line))
+        if (!vm->compiler.emit_cccc && path_basename_is(resolved, "setjmp.h"))
             continue;
         return true;
     }
