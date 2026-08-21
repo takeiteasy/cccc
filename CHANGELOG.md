@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-21
+
 ### Added
 
 - `--testing[=vm|bytecode|native]` (#1033): the testing backend is now a
@@ -63,9 +65,6 @@ All notable changes to CCCC are documented here. Format loosely follows
   cast-expression site when the pointee resolves to a `from_include`
   typedef, whose real declaration is always already visible via the host's
   own `#include_next`.
-
-### Fixed
-
 - `-c=native`, Linux only: a replayed `#include <sys/mount.h>` doesn't bring
   `struct statfs` into scope on real glibc (the struct lives in
   `<sys/vfs.h>` there, not `<sys/mount.h>` as on macOS/BSD), so a
