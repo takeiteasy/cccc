@@ -1265,6 +1265,17 @@ static int eval_has_include(VirtualMachine *vm, Token **rest, Token *tok) {
     tok   = skip(vm, tok, ")");
     *rest = tok;
 
+    // URL probes fetch into the shared cache (cache-first), so a probe
+    // answers exactly what a following `#include` of the same URL would
+    // do -- including reusing an already-cached copy without network I/O.
+    if (is_url(filename)) {
+#ifdef CCCC_HAS_CURL
+        return fetch_url_to_cache(vm, filename) != NULL;
+#else
+        return 0;
+#endif
+    }
+
     char *path =
         resolve_include_probe(vm, start, filename, filename_len, is_dquote);
     return path && file_exists(path);
@@ -1570,18 +1581,34 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
             char *filename =
                 read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
 
-            tok        = skip(vm, tok, ")");
-
-            char *path = resolve_include_probe(vm, start, filename,
-                                               filename_len, is_dquote);
+            tok = skip(vm, tok, ")");
 
             // Determine result: 0 = not found, 1 = non-empty, 2 = empty
             int result = 0;
-            if (path && file_exists(path)) {
-                size_t         file_size;
-                unsigned char *data = read_binary_file(vm, path, &file_size);
-                if (data) {
-                    result = (file_size == 0) ? 2 : 1;
+
+            if (is_url(filename)) {
+                // Same URL policy as __has_include above: fetch into the
+                // shared cache and judge the cached copy, so both probes
+                // agree with each other and with a real `#embed`.
+#ifdef CCCC_HAS_CURL
+                char *cache_path = fetch_url_to_cache(vm, filename);
+                if (cache_path) {
+                    struct stat st;
+                    if (!stat(cache_path, &st))
+                        result = (st.st_size == 0) ? 2 : 1;
+                }
+#endif
+            } else {
+                char *path = resolve_include_probe(vm, start, filename,
+                                                   filename_len, is_dquote);
+
+                if (path && file_exists(path)) {
+                    size_t         file_size;
+                    unsigned char *data =
+                        read_binary_file(vm, path, &file_size);
+                    if (data) {
+                        result = (file_size == 0) ? 2 : 1;
+                    }
                 }
             }
 

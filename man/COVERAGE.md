@@ -193,10 +193,10 @@ language coverage figures apply.
 |---|---|---|
 | `#elifdef` / `#elifndef` | ✓ | |
 | `#warning` | ✓ | |
-| `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()`; the filename may also be a URL (`#embed <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into the same cache URL `#include` uses. `__has_embed()` never probes URLs and reports 0 for them |
+| `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()`; the filename may also be a URL (`#embed <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into the same cache URL `#include` uses. `__has_embed()` is URL-aware there too, probing through that same shared cache |
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
-| `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths |
+| `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths; also accepts URLs in curl-enabled builds, probing the same shared cache a real fetch uses (non-curl builds report 0 for URLs) |
 | Leading `#!` (shebang) line | ✓ | CCCC-specific: a `#!` on line 1 of the command-line input file (or a file piped via `-`) is blanked before tokenization, so line numbers are unaffected. Not applied to `#include`d files, which still error on a stray `#!`. |
 
 ---

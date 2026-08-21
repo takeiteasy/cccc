@@ -444,6 +444,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --url-cache-dir <path> Directory for caching #include/#embed "
            "<https://...> fetches\n");
     printf("\t   --url-cache-clear     Clear the URL fetch cache and exit\n");
+    printf("\t   --url-timeout=SECONDS Set URL fetch timeout in seconds "
+           "(default: 30)\n");
+    printf("\t   --url-max-size=SIZE   Cap fetched URL payload size (e.g., "
+           "50MB, default: 10MB)\n");
 #endif
     printf("\t-D/--define <macro>[=def] Define a macro\n");
     printf("\t-U/--undef <macro>       Undefine a macro\n");
@@ -1331,18 +1335,20 @@ int main(int argc, const char *argv[]) {
                // (#665)
     bool cli_opt_level_set =
         false; // True if -O/--optimize was passed on the CLI (#357)
-    int print_tokens        = 0;  // -p
-    int preprocess_only     = 0;  // -E
-    int dump_expanded_only  = 0;  // -m
-    int emit_generated_only = 0;  // -c=generated
-    int emit_only           = 0;  // --emit-only
-    int skip_preprocess     = 0;  // -X
-    int skip_stdlib         = 0;  // -S
-    int output_json         = 0;  // -j (general "emit JSON" flag)
-    int output_ffi_decls    = 0;  // -J/--ffi-decls
+    int print_tokens        = 0;   // -p
+    int preprocess_only     = 0;   // -E
+    int dump_expanded_only  = 0;   // -m
+    int emit_generated_only = 0;   // -c=generated
+    int emit_only           = 0;   // --emit-only
+    int skip_preprocess     = 0;   // -X
+    int skip_stdlib         = 0;   // -S
+    int output_json         = 0;   // -j (general "emit JSON" flag)
+    int output_ffi_decls    = 0;   // -J/--ffi-decls
 #ifdef CCCC_HAS_CURL
-    char *url_cache_dir   = NULL; // --url-cache-dir
-    int   url_cache_clear = 0;    // --url-cache-clear
+    char  *url_cache_dir   = NULL; // --url-cache-dir
+    int    url_cache_clear = 0;    // --url-cache-clear
+    int    url_timeout     = 0;    // --url-timeout (0 = use default)
+    size_t url_max_size    = 0;    // --url-max-size (0 = use default)
 #endif
     CCCCAttrTarget attr_target    = CCCC_ATTR_TARGET_AUTO; // --attr-target
     int            emit_cccc_mode = 0;                     // --emit-cccc
@@ -1494,6 +1500,8 @@ int main(int argc, const char *argv[]) {
         {"undef", required_argument, 0, 'U'},
         {"url-cache-dir", required_argument, 0, 1008},
         {"url-cache-clear", no_argument, 0, 1009},
+        {"url-timeout", required_argument, 0, 1010},
+        {"url-max-size", required_argument, 0, 1011},
         {"max-errors", required_argument, 0, 'n'},
         {"Werror", no_argument, 0, 'w'},
         {"embed-limit", required_argument, 0, 1048},
@@ -1865,6 +1873,20 @@ int main(int argc, const char *argv[]) {
                 break;
             case 1009:
                 url_cache_clear = 1;
+                break;
+            case 1010: { // --url-timeout
+                char *end;
+                long  secs = strtol(optarg, &end, 10);
+                if (*end != '\0' || secs <= 0 || secs > 24L * 60 * 60) {
+                    fprintf(stderr, "error: --url-timeout expects a positive "
+                                    "number of seconds (max 86400)\n");
+                    exit(1);
+                }
+                url_timeout = (int)secs;
+                break;
+            }
+            case 1011: // --url-max-size
+                url_max_size = parse_size(optarg, "--url-max-size");
                 break;
 #endif
             case 'n': // --max-errors
@@ -2904,6 +2926,12 @@ int main(int argc, const char *argv[]) {
     }
     if (url_cache_clear) {
         clear_url_cache(&vm);
+    }
+    if (url_timeout > 0) {
+        vm.compiler.url_timeout = url_timeout;
+    }
+    if (url_max_size > 0) {
+        vm.compiler.url_max_size = url_max_size;
     }
 #endif
 

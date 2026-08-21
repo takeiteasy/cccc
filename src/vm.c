@@ -1132,6 +1132,12 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->compiler.embed_limit      = 10 * 1024 * 1024; // 10MB soft warning limit
     vm->compiler.embed_hard_limit = 50 * 1024 * 1024; // 50MB secondary warning
     vm->compiler.embed_hard_error = false; // Default to warnings, not errors
+
+    // URL fetch defaults (only consulted in curl-enabled builds; see also
+    // the --url-timeout/--url-max-size overrides in main.c)
+    vm->compiler.url_timeout           = 30;               // seconds
+    vm->compiler.url_max_size          = 10 * 1024 * 1024; // 10MB fetch cap
+
     vm->compiler.macro_recursion_limit = 256;
     vm->compiler.warnings              = 0;
     vm->compiler.warning_errors        = 0;

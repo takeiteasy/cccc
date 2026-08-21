@@ -230,6 +230,9 @@ Language Standard:
 Preprocessor Options:
 	   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
 	   --embed-hard-limit         Make #embed limit a hard error instead of warning
+	   --url-timeout=SECONDS      Set URL #include/#embed fetch timeout in seconds (curl builds; default: 30)
+	   --url-max-size=SIZE        Cap fetched URL payload size (curl builds; default: 10MB, independent
+	                              of the #embed limits)
 	   --macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)
 	-n/--max-errors=N             Cap diagnostics at N (default: 20)
 	-C/--no-comptime              Skip the comptime/macro phase entirely (for
@@ -311,8 +314,13 @@ CCCC requires libffi for native FFI calls. Both the Makefile and `build.c` use
 URL includes and embeds (`#include <https://...>` / `#embed <https://...>`) are
 an optional feature requiring libcurl:
 `CCCC_HAS_CURL=1 ./cccc --build build.c`. Fetched files are cached in the
-directory set by `--url-cache-dir` (default `$TMPDIR/.cccc`), and curl-enabled
-builds predefine `__CCCC_HAS_CURL__` so code can feature-detect.
+directory set by `--url-cache-dir` (default `$TMPDIR/.cccc`, capped at
+`--url-max-size`, default 10MB, with a `--url-timeout` of 30s), and curl-enabled
+builds predefine `__CCCC_HAS_CURL__` so code can feature-detect. The
+`__has_include()`/`__has_embed()` probes are URL-aware in those builds too:
+both fetch into the same shared cache (cache-first) so they agree with each
+other and with what a real `#include`/`#embed` would do; non-curl builds
+report 0 for URLs.
 
 Host C stack traces on crash (the `src/backtrace/` library) are on by default
 in every `build.c` target and require no extra system dependencies — they

@@ -3607,7 +3607,10 @@ typedef struct Compiler {
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
     // URL include cache (only used when CCCC_HAS_CURL is enabled)
-    char       *url_cache_dir;   // Directory for caching downloaded headers
+    char  *url_cache_dir;        // Directory for caching downloaded headers
+    int    url_timeout;          // curl fetch timeout in seconds (default 30)
+    size_t url_max_size;         // Cap on any fetched URL payload (default
+                                 // 10MB), independent of the #embed limits
     HashMap     url_to_path;     // Maps URLs to cached file paths
     StringArray emit_directives; // Preprocessor directives to prepend to
                                  // serialized output

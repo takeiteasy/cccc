@@ -30,14 +30,11 @@ bool is_url(const char *filename) {
 #include <dirent.h>
 #include <curl/curl.h>
 
-// Maximum size for downloaded files (10MB) -- caps both URL #include
-// headers and URL #embed payloads fetched into the cache
-// TODO: Make this configurable
-#define MAX_HEADER_SIZE (10 * 1024 * 1024)
-
-// Network timeout in seconds
-// TODO: Make this configurable
-#define URL_TIMEOUT 30
+// Fetch knobs live in vm->compiler (url_timeout / url_max_size), defaulted
+// in vm.c's init and overridable via --url-timeout/--url-max-size. One cap
+// governs every fetched payload (URL #include headers and URL #embed data
+// alike); it is independent of the #embed limits, which still apply to the
+// embed itself afterwards.
 
 void init_url_cache(VirtualMachine *vm) {
     if (!vm->compiler.url_cache_dir) {
@@ -133,7 +130,11 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
     // Check if already cached
     struct stat st;
     if (stat(cache_path, &st) == 0) {
-        // File exists in cache
+        // File exists in cache; the size cap still applies so
+        // --url-max-size behaves the same whether or not the copy is
+        // already local
+        if ((size_t)st.st_size > vm->compiler.url_max_size)
+            return NULL;
         return cache_path;
     }
 
@@ -156,7 +157,7 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)URL_TIMEOUT);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)vm->compiler.url_timeout);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER,
                      1L); // Verify SSL certificates
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -184,9 +185,9 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
         return NULL;
     }
 
-    // Verify file size is reasonable
+    // Reject oversized payloads
     if (stat(cache_path, &st) == 0) {
-        if (st.st_size > MAX_HEADER_SIZE) {
+        if ((size_t)st.st_size > vm->compiler.url_max_size) {
             unlink(cache_path);
             return NULL;
         }

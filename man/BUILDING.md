@@ -908,7 +908,7 @@ in `src/preprocess.c`):
 
 | Env var | Feature | Extra dependency |
 |---|---|---|
-| `CCCC_HAS_CURL=1` | URL-based `#include`/`#embed` directives | `libcurl` |
+| `CCCC_HAS_CURL=1` | URL-based `#include`/`#embed` directives (plus URL-aware `__has_include()`/`__has_embed()` probes); fetch knobs: `--url-cache-dir`, `--url-cache-clear`, `--url-timeout`, `--url-max-size` | `libcurl` |
 | `CCCC_HAS_DECIMAL=1` | `_Decimal32/64/128` via the Intel BID library | never vendored — run `tools/fetch_intel_bid.sh` first |
 | `CCCC_HAS_NDBM=1` | `<ndbm.h>` on Linux (macOS/BSD have it natively, no knob needed there) | `libgdbm-compat-dev` (links `-lgdbm_compat`) |
 | `CCCC_HAS_BACKTRACE=0` | opts *out* of the vendored libbacktrace (nicer crash traces); on by default | — |

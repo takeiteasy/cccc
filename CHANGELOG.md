@@ -17,11 +17,25 @@ All notable changes to CCCC are documented here. Format loosely follows
   otherwise. The tokenizer now preserves `//` inside `#embed <...>` paths
   (it previously only did so for `#include`, so an angle-bracket URL was
   truncated at the first `//` and died with "expected '>' after #embed
-  filename"). `__has_embed()` deliberately never probes URLs and reports 0
-  for them, matching `__has_include()`'s no-network behavior.
+  filename").
 - Guest-visible feature predefine `__CCCC_HAS_CURL__` — defined as `1` in
   curl-enabled builds (same republishing pattern as `__CCCC_HAS_NDBM__`),
   so code and tests can tell URL-capable builds apart.
+- URL-aware `__has_include()`/`__has_embed()` probes (#1107): in curl-enabled
+  builds both probes accept URLs and resolve through the same shared cache a
+  real `#include`/`#embed` uses (cache-first, so an already-cached copy is
+  probed without network I/O). They agree with each other by construction,
+  and answer what the actual directive would do — closing the gap where
+  `#include <url>` could succeed while `__has_embed(<same-url>)` reported 0.
+  Non-curl builds report 0 for URLs from both probes (a binary without fetch
+  support cannot truthfully promise one).
+- `--url-timeout=SECONDS` and `--url-max-size=SIZE` (#1108): the previously
+  hardcoded URL fetch knobs (30s timeout, 10MB payload cap) are now CLI-
+  configurable in curl-enabled builds, following the existing
+  `--embed-limit=SIZE` size-suffix style. Defaults unchanged. The cap now
+  also applies to cache hits, not just fresh downloads, so the knob behaves
+  the same whether or not the copy is already local; it stays independent of
+  the `#embed` limits, which still govern the embed itself afterwards.
 
 ### Fixed
 
