@@ -1177,6 +1177,39 @@ layout or serialized output.
 
 ---
 
+## `-c=native` scope: parity, not portability
+
+`-c=native` v1 is a parity guarantee, not a portability guarantee. Any
+program that already passes on the VM should produce correct native output
+too, on the two currently-supported platform × arch combinations (macOS/
+Linux × aarch64/x86_64), using the real host's standard library wherever
+CCCC's own header is a mere polyfill for VM-internal plumbing (auto-capture
+replays the user's real `#include` verbatim, CCCC's own bundled headers are
+never forwarded to the native `cc`, see [HEADERS.md](HEADERS.md)), and —
+wherever CCCC's header instead encodes genuine VM-specific ABI with no host
+equivalent (the fixed `is_compiler_owned_header` list: `stdarg.h`,
+`setjmp.h`, `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `complex.h`,
+`stdatomic.h`, `stdckdint.h`) — either a real translation to the host's own
+ABI, or an explicit diagnosed rejection, never silent divergence. Blocks and
+GNU vector `?:` meet the bar (lowered to portable C, not printed verbatim
+assuming a specific host compiler); `asm(...)` is the one deliberate,
+documented exception (always verbatim, since there's no VM equivalent to
+translate to or from — see the table below).
+
+`--testing=native` (#1033) is the last piece of that batch: it doesn't
+change this bar, but it's what finally exercises the entire
+`tests/suites/` `[[cccc::test]]` corpus against it — see this file's own
+`--testing=native` section in [TESTING.md](TESTING.md) for what it covers.
+
+A larger direction — CCCC as a genuinely portable C compiler that runs any
+valid C (including its own supported extensions) on *any* host, POSIX or
+not, polyfilling missing platform facilities rather than just targeting the
+two platforms the VM itself already supports — is real and worth pursuing,
+but is a different product bet (portability over parity) and a much bigger
+undertaking. Deliberately not folded into the parity work above — tracked
+as a placeholder, ticket #1055, with no expected action until this batch's
+own v1 scope area above needs revisiting.
+
 ## Serialized-output divergences
 
 `-c=native`, `-m` and `-c=generated` re-emit the program as C and hand it to a

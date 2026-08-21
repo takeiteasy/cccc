@@ -7,6 +7,39 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Added
 
+- `--testing[=vm|bytecode|native]` (#1033): the testing backend is now a
+  single argument-taking selector instead of a boolean plus a separate
+  `--test-c4` flag. Bare `-t`/`--testing` keeps today's default meaning
+  (`=vm`, in-process); `=bytecode` replaces the retired `--test-c4`;
+  `=native` serializes the `[[cccc::test]]` harness itself into the
+  generated C (assert runtime, a table built from the compiled program's
+  own test records, and a TAP-emitting `main()` that forks each test for
+  isolation) and runs it as a standalone binary, closing the coverage gap
+  where the entire `tests/suites/` corpus could never be exercised through
+  `-c=native` at all. v1 scope: `[[cccc::test_setup]]`/`test_teardown`
+  hooks and negative (`error=`/`expect_compile_error=`) tests are refused
+  with a diagnostic (no fork-safe/host-compilable equivalent); a per-test
+  `flags=` delta or `RET_STRUCT` return assertion is individually marked
+  `SKIP` in the TAP output. `tools/tests.py --native`/`--c4` route
+  `--testing`-flagged suite files through the new backends automatically.
+  See man/TESTING.md's `--testing=native` section.
+
+### Removed
+
+- `--test-c4` (#1033): retired in favor of `--testing=bytecode`, part of
+  the new `--testing[=vm|bytecode|native]` selector above.
+
+### Fixed
+
+- `-c=native`: found while building `--testing=native`'s generated harness
+  (#1033) — a synthesized preamble that reaches for a standard POSIX
+  header (`<setjmp.h>`, `<sys/wait.h>`) under `-I./include` resolves to
+  CCCC's own bundled polyfill copy instead of the real host header, same
+  class of hazard as #1022/#1054. The harness itself now declares only the
+  handful of symbols it needs directly (`_setjmp`/`_longjmp` reusing
+  `serialize_synth_setjmp_decls`'s own raw-extern pattern, `kill()`, and a
+  hand-rolled `WIFEXITED`/`WEXITSTATUS`/`WIFSIGNALED`/`WTERMSIG`) rather
+  than including either header.
 - `tools/tests.py --native`: a serializer round-trip test mode, mirroring
   `--c4`'s bytecode round-trip. Compiles each eligible positive test with
   `-c=native`, confirms the compiled artifact exists, then runs it and

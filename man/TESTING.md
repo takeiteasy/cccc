@@ -391,13 +391,40 @@ compile step rather than causing a skip — they tune the VM bytecode pipeline
 `-c=native` doesn't use, and `-c=native` hard-errors if it sees them
 verbatim.
 
-**Coverage gap:** every `[[cccc::test]]` suite file (`tests/suites/`, ~70
-files, `--testing` in `CCCC_FLAGS`) is skipped. `--test-c4` can compile,
-save, reload, and run a whole TAP suite inside one `cccc` invocation because
-`cc_load_bytecode` is a VM-internal API; there is no equivalent
-`--test-native`, since the native artifact is a wholly separate binary that
-would need the `[[cccc::test]]` harness's own registration/dispatch/TAP
-output serialized into it to run standalone. Tracked as a follow-up.
+**`[[cccc::test]]` suite files (`--testing=native`, #1033):** unlike
+`--testing=bytecode` (an in-process round-trip, since `cc_load_bytecode` is
+a VM-internal API), a native artifact is a wholly separate binary with no
+`cc_run_tests` to call — so `--testing=native` serializes a standalone TAP
+harness *into* the generated C: the `__builtin_assert_*` runtime
+transliterated with real C types, a table built from the compiled
+program's own `[[cccc::test]]` records, and a `main()` that forks each test
+(the native analogue of the VM's data-segment snapshot/restore, giving
+per-test isolation, `exit_code=` support via `WIFEXITED`/`WIFSIGNALED`,
+stdout/stderr regex capture, and per-test timeouts) and emits the same TAP
+wire format `cc_run_tests` does. `tools/tests.py --native` routes any
+`--testing`-flagged suite file through this path automatically.
+
+Two categories are out of v1's scope, refused by the compiler with a clear
+diagnostic (not silently mis-serialized) rather than attempted:
+
+- **`[[cccc::test_setup]]`/`[[cccc::test_teardown]]` hooks** — a `once`
+  hook exists specifically so a mutation outlives one test, which cannot
+  work once each test is its own forked child. No hook machinery is
+  emitted; use `--testing=vm`/`=bytecode` for a suite that needs hooks.
+- **Negative tests** (`error=`/`expect_compile_error=`) — the function
+  body for a test expected *not* to compile cleanly is the parser's
+  error-recovery AST, not something safe to hand to a real host compiler.
+  A file containing any negative test is rejected outright.
+
+A per-test `flags=` delta (a different safety/optimisation/warning
+configuration, applied via an in-process VM recompile in `cc_run_tests`)
+has no native equivalent either — each such test is individually marked
+`SKIP` in the generated TAP output rather than rejecting the whole file,
+since flags= is a per-test, not a per-file, concern. `RET_STRUCT` return
+assertions (a compound-literal `return = {...}`) are also individually
+skipped in v1 — the VM's field-by-field comparison walks `Type` metadata
+that would need type-directed comparison codegen; narrow enough in
+practice (a handful of tests) that it's deferred.
 
 **Known divergences:** the mode ships with a populated skip table
 (`NATIVE_SKIP_TESTS` in `tools/testing/__init__.py`) recording every test
@@ -1663,31 +1690,49 @@ Line-delimited JSON objects, one per test, wrapped in an array:
 
 The process exits with code `0` if all tests pass, `1` if any fail.
 
-### Bytecode round-trip mode (`--test-c4`)
+### Testing backends (`--testing[=vm|bytecode|native]`)
 
-`--test-c4` (implies `--testing`) compiles the source, saves the bytecode to a temporary `.c4` file, reloads it via `cc_load_bytecode`, and then runs the test suite against the reloaded bytecode. This exercises FFI-table persistence and bytecode round-trip correctness.
+`--testing`/`-t` takes an optional backend selector. Bare `-t`/`--testing`
+(no `=`) means `=vm` — the default, in-process behaviour described above.
+
+`--testing=bytecode` (replaces the retired `--test-c4` boolean) compiles
+the source, saves the bytecode to a temporary `.c4` file, reloads it via
+`cc_load_bytecode`, and then runs the test suite against the reloaded
+bytecode. This exercises FFI-table persistence and bytecode round-trip
+correctness:
 
 ```
-./cccc --testing --test-c4 myfile.c
+./cccc --testing=bytecode myfile.c
 ```
 
-The round-trip is transparent to the test suite — all assertion macros, setup/teardown hooks, and output formats work identically. Tests with per-test `flags =` attributes that trigger lazy recompilation still execute correctly; their specific run uses freshly compiled bytecode rather than the round-tripped copy, which is expected behaviour.
+The round-trip is transparent to the test suite — all assertion macros,
+setup/teardown hooks, and output formats work identically. Tests with
+per-test `flags =` attributes that trigger lazy recompilation still execute
+correctly; their specific run uses freshly compiled bytecode rather than
+the round-tripped copy, which is expected behaviour.
 
-The `tools/tests.py --c4` runner uses this flag automatically for `[[cccc::test]]` suite files:
+The `tools/tests.py --c4` runner uses this backend automatically for
+`[[cccc::test]]` suite files:
 
 ```
 python3 tools/tests.py --suites --c4
 ```
 
-### Combining with `-c` (compile pre-pass)
+`--testing=native` serializes the harness itself into a standalone native
+binary — see "`[[cccc::test]]` suite files (`--testing=native`, #1033)"
+above for what it covers and its v1 scope cuts.
 
-`--testing` can be combined with `-c=bytecode` or `-c=native` to run tests as a pre-pass before compilation. If all tests pass the compile step proceeds; if any test fails the compile step is skipped and the process exits non-zero.
+### Combining `--testing` with `-c` (compile pre-pass)
 
-```
-./cccc --testing -c=bytecode -o out.c4 myfile.c
-```
-
-This is useful in build scripts that want to guard bytecode or native compilation behind a passing test run.
+`--testing`/`-t` (bare, i.e. the VM backend) can be combined with
+`-c=bytecode`/`-c=native` on the command line, but as of this writing the
+compile step never actually runs afterward regardless of whether the tests
+passed — `--testing` without `--build` always exits right after the VM
+test run. This is a known, tracked gap (#1106), not documented behavior to
+rely on; do not depend on `--testing -c=native`/`-c=bytecode` producing an
+artifact. `--testing=native` itself is unaffected (that combination is
+`--testing`'s own compile-and-run-the-harness mode, not a VM pre-pass in
+front of a separate `-c=native`).
 
 ### `--test-run[=LEVEL]`: smoke-test the program itself before compiling
 
@@ -1880,8 +1925,11 @@ options. Both can coexist: per-test `flags=` takes precedence over
 
 ### Native mode
 
-`flags=` is silently ignored when the test is compiled and run in native
-mode. It applies only to the bytecode/VM execution path.
+`flags=` applies only to the bytecode/VM execution path. Under
+`--testing=native` (#1033) a test carrying a `flags=` delta is not
+silently ignored — it is individually marked `SKIP` in the generated TAP
+output, since a per-test safety/optimisation/warning configuration would
+need a separate native binary per test, which v1 doesn't attempt.
 
 ## Per-test output assertions
 

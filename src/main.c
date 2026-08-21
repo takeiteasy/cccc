@@ -201,7 +201,7 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
                               int libs_count, const char **defines,
                               int defines_count, const char **undefs,
                               int undefs_count, const char *std_arg,
-                              bool emit_cccc) {
+                              bool emit_cccc, bool emit_test_harness) {
     if (!out_file) {
         fprintf(
             stderr,
@@ -252,7 +252,7 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
         free(cc);
         return 1;
     }
-    cc_serialize_program(f, vm, prog, false);
+    cc_serialize_program(f, vm, prog, false, emit_test_harness);
     // #1017: cc_serialize_program() can itself queue a warning (e.g.
     // CCCC_WARN_NATIVE_NAME_COLLISION) via warn_tok()/vm->collect_errors --
     // nothing upstream of this call flushes vm->errors again, so print (and
@@ -536,12 +536,21 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         Combine with --json to also dump the "
            "profile as JSON to stdout\n");
     printf("\nTesting Options:\n");
-    printf("\t-t/--testing             Discover and run [[cccc::test]] "
-           "functions\n");
-    printf("\t   --test-c4             Bytecode round-trip: compile, save .c4, "
-           "reload, then run tests\n");
-    printf("\t                         (implies --testing; exercises FFI-table "
-           "and bytecode persistence)\n");
+    printf("\t-t/--testing[=vm|bytecode|native]\n");
+    printf("\t                         Discover and run [[cccc::test]] "
+           "functions. Bare -t/--testing\n");
+    printf("\t                         (default =vm) runs them in-process; "
+           "=bytecode compiles, saves\n");
+    printf("\t                         .c4, reloads, then runs (exercises "
+           "FFI-table and bytecode\n");
+    printf("\t                         persistence); =native serializes the "
+           "harness itself and runs\n");
+    printf("\t                         it as a standalone binary via "
+           "CCCC_NATIVE_CC (implies -c=native;\n");
+    printf("\t                         [[cccc::test_setup/teardown]] hooks "
+           "and negative tests are not\n");
+    printf("\t                         supported under =native, see "
+           "man/TESTING.md)\n");
     printf("\t   --test=GLOB           Run only tests whose name matches GLOB "
            "(implies --testing)\n");
     printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites "
@@ -1391,17 +1400,25 @@ int main(int argc, const char *argv[]) {
     int            run_fusion      = 0; // 0 = off; >0 = enabled, value is top-N
     CcNgramState  *ngram_state     = NULL;
     CcFusionState *fusion_state    = NULL;
-    int            testing_mode    = 0; // --testing
-    int            test_c4_mode    = 0; // --test-c4
-    const char    *test_glob       = NULL;            // --test=GLOB
-    const char    *suite_filter    = NULL;            // --test-suite=NAME
-    int            list_tests      = 0;               // --list-tests
-    int            fail_fast       = 0;               // --fail-fast
-    int            test_timeout    = 0;               // --test-timeout=N
-    CcTestFormat   test_format     = TEST_FORMAT_TAP; // --test-format=FORMAT
-    int            build_mode      = 0;               // --build
-    const char    *build_entry     = NULL;            // --build-entry=NAME
-    const char    *build_target    = NULL;            // --build-target=NAME
+    int testing_mode = 0; // any --testing[=...]/--test*/--list-tests flag
+    // --testing[=vm|bytecode|native]: bare -t/--testing defaults to VM
+    // (today's behaviour, unchanged); =bytecode replaces the old --test-c4
+    // boolean; =native drives a serialized-harness -c=native round-trip
+    // (#1033).
+    enum {
+        TESTING_BACKEND_VM,
+        TESTING_BACKEND_BYTECODE,
+        TESTING_BACKEND_NATIVE
+    } testing_backend          = TESTING_BACKEND_VM;
+    const char  *test_glob     = NULL;            // --test=GLOB
+    const char  *suite_filter  = NULL;            // --test-suite=NAME
+    int          list_tests    = 0;               // --list-tests
+    int          fail_fast     = 0;               // --fail-fast
+    int          test_timeout  = 0;               // --test-timeout=N
+    CcTestFormat test_format   = TEST_FORMAT_TAP; // --test-format=FORMAT
+    int          build_mode    = 0;               // --build
+    const char  *build_entry   = NULL;            // --build-entry=NAME
+    const char  *build_target  = NULL;            // --build-target=NAME
     const char  *build_out_dir = NULL; // --build-out-dir=PATH (default "build")
     int          build_dry_run = 0;    // --build-dry-run
     int          build_verbose = 0;    // --build-verbose
@@ -1502,8 +1519,7 @@ int main(int argc, const char *argv[]) {
         {"allow-comptime-pp-bleed", no_argument, 0, 1068},
         {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 'A'},
-        {"testing", no_argument, 0, 't'},
-        {"test-c4", no_argument, 0, 1110},
+        {"testing", optional_argument, 0, 't'},
         {"test", required_argument, 0, 1061},
         {"test-suite", required_argument, 0, 1062},
         {"list-tests", no_argument, 0, 1063},
@@ -1565,7 +1581,7 @@ int main(int argc, const char *argv[]) {
     }
     int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
     const char *optstring =
-        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::FbTmptn:rs:ABf:w";
+        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABf:w";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1994,15 +2010,26 @@ int main(int argc, const char *argv[]) {
                 inline_node_limit = (int)val;
                 break;
             }
-            case 'A':  // --asm-passthru
+            case 'A': // --asm-passthru
                 asm_passthru = 1;
                 break;
-            case 't':  // --testing
+            case 't': // --testing[=vm|bytecode|native]
                 testing_mode = 1;
-                break;
-            case 1110: // --test-c4
-                test_c4_mode = 1;
-                testing_mode = 1;
+                if (optarg) {
+                    if (strcmp(optarg, "vm") == 0) {
+                        testing_backend = TESTING_BACKEND_VM;
+                    } else if (strcmp(optarg, "bytecode") == 0) {
+                        testing_backend = TESTING_BACKEND_BYTECODE;
+                    } else if (strcmp(optarg, "native") == 0) {
+                        testing_backend = TESTING_BACKEND_NATIVE;
+                    } else {
+                        fprintf(stderr,
+                                "error: --testing: unknown backend '%s' "
+                                "(expected vm, bytecode, or native)\n",
+                                optarg);
+                        usage(argv[0], 1);
+                    }
+                }
                 break;
             case 1061: // --test=GLOB
                 test_glob    = optarg;
@@ -2428,6 +2455,26 @@ int main(int argc, const char *argv[]) {
         // carrying these bits costs the eventual native/bytecode artifact
         // nothing.
         flags |= test_run_flags;
+    }
+
+    if (testing_backend == TESTING_BACKEND_NATIVE) {
+        // --testing=native serializes the [[cccc::test]] harness itself and
+        // hands off to the host toolchain (#1033) -- it's a compile-then-run
+        // pipeline in the same spirit as --test-run/-c=native, not the
+        // in-process cc_run_tests path --testing=vm/=bytecode use.
+        if (build_mode || repl_mode || test_run_mode ||
+            (compile_format != COMPILE_NONE &&
+             compile_format != COMPILE_NATIVE) ||
+            disassemble || preprocess_only || dump_expanded_only ||
+            print_tokens || output_json || output_ffi_decls || dump_ast) {
+            fprintf(stderr,
+                    "error: --testing=native cannot be combined with "
+                    "--build, --repl, --test-run, -c=bytecode, -c=generated, "
+                    "-d, -E, -m, --ast, -j, -J, or other output modes\n");
+            usage(argv[0], 1);
+        }
+        compile_format = COMPILE_NATIVE;
+        compile_only   = 1;
     }
 
     if (repl_mode) {
@@ -3195,7 +3242,7 @@ int main(int argc, const char *argv[]) {
         // cc_compile() first and already sees the merged list) for the
         // same reason.
         vm.compiler.globals = merged_prog;
-        cc_serialize_program(f, &vm, merged_prog, emit_generated_only);
+        cc_serialize_program(f, &vm, merged_prog, emit_generated_only, false);
         // #1017: as above (run_native_backend) -- a warning queued by
         // cc_serialize_program() itself (e.g. CCCC_WARN_NATIVE_NAME_COLLISION)
         // is otherwise silently dropped, since this path bails out to BAIL
@@ -3364,8 +3411,12 @@ int main(int argc, const char *argv[]) {
     // for ticket #300: previously `compile_only` short-circuited at
     // `goto BAIL;` before the legacy `out_file` save block, silently
     // swallowing `-c -o foo.c4`.
-    if (testing_mode) {
-        if (test_c4_mode) {
+    // --testing=native skips cc_run_tests entirely -- there's no in-process
+    // harness to run against; control falls through to the
+    // compile_format == COMPILE_NATIVE dispatch below, which serializes the
+    // [[cccc::test]] harness itself into the generated C (#1033).
+    if (testing_mode && testing_backend != TESTING_BACKEND_NATIVE) {
+        if (testing_backend == TESTING_BACKEND_BYTECODE) {
             // In-process bytecode round-trip: compile → save .c4 → reload → run
             // tests. test_fns/test_setups survive cc_load_bytecode (not stored
             // in .c4); text_ptr is reset correctly (bytecode.c:925); only FFI
@@ -3374,7 +3425,7 @@ int main(int argc, const char *argv[]) {
             void **ffi_ptrs =
                 n_ffi > 0 ? malloc((size_t)n_ffi * sizeof(void *)) : NULL;
             if (n_ffi > 0 && !ffi_ptrs) {
-                fprintf(stderr, "error: --test-c4: out of memory\n");
+                fprintf(stderr, "error: --testing=bytecode: out of memory\n");
                 exit_code = 1;
                 goto BAIL;
             }
@@ -3384,13 +3435,15 @@ int main(int argc, const char *argv[]) {
             char *c4_tmp = make_tmp_path(".c4");
             if (!c4_tmp) {
                 fprintf(stderr,
-                        "error: --test-c4: failed to create temp file\n");
+                        "error: --testing=bytecode: failed to create temp "
+                        "file\n");
                 free(ffi_ptrs);
                 exit_code = 1;
                 goto BAIL;
             }
             if (cc_save_bytecode(&vm, c4_tmp) != 0) {
-                fprintf(stderr, "error: --test-c4: failed to save bytecode\n");
+                fprintf(stderr, "error: --testing=bytecode: failed to save "
+                                "bytecode\n");
                 unlink(c4_tmp);
                 free(c4_tmp);
                 free(ffi_ptrs);
@@ -3398,8 +3451,8 @@ int main(int argc, const char *argv[]) {
                 goto BAIL;
             }
             if (cc_load_bytecode(&vm, c4_tmp) != 0) {
-                fprintf(stderr,
-                        "error: --test-c4: failed to reload bytecode\n");
+                fprintf(stderr, "error: --testing=bytecode: failed to reload "
+                                "bytecode\n");
                 unlink(c4_tmp);
                 free(c4_tmp);
                 free(ffi_ptrs);
@@ -3521,13 +3574,67 @@ int main(int argc, const char *argv[]) {
     }
 
     if (compile_format == COMPILE_NATIVE) {
+        if (testing_backend == TESTING_BACKEND_NATIVE) {
+            // The generated harness supplies its own main(); a test file
+            // that defines one too would collide (mirrors the --build
+            // check above).
+            for (Obj *o = merged_prog; o; o = o->next) {
+                if (o->is_function && o->name && strcmp(o->name, "main") == 0) {
+                    fprintf(stderr,
+                            "error: --testing=native: input must not define "
+                            "main() -- the generated harness supplies its "
+                            "own\n");
+                    exit_code = 1;
+                    goto BAIL;
+                }
+            }
+            // #1033 v1 scope cuts, refused with a clear diagnostic rather
+            // than silently mis-serialized: [[cccc::test_setup/teardown]]
+            // hooks have no fork-safe native equivalent (a `once` hook
+            // exists precisely so a mutation outlives one test, which
+            // can't work once each test is its own forked child), and a
+            // negative test's ([[cccc::test(error=...)]] /
+            // expect_compile_error=) body is the parser's error-recovery
+            // AST for source that was never meant to compile cleanly --
+            // not something safe to hand to a real host compiler. Both are
+            // narrow in practice (7 and 4 files respectively in this
+            // repo's own suite corpus) and stay on --testing=vm/=bytecode.
+            if (vm.compiler.test_setups) {
+                fprintf(stderr,
+                        "error: --testing=native: [[cccc::test_setup]] / "
+                        "[[cccc::test_teardown]] hooks are not supported "
+                        "(#1033 v1) -- use --testing=vm or "
+                        "--testing=bytecode\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+            for (TestFnRecord *r = vm.compiler.test_fns; r; r = r->next) {
+                if (r->error_pat || r->expect_compile_error) {
+                    fprintf(stderr,
+                            "error: --testing=native: negative test '%s' "
+                            "(error=/expect_compile_error=) is not "
+                            "supported (#1033 v1) -- use --testing=vm or "
+                            "--testing=bytecode\n",
+                            r->display_name ? r->display_name : r->name);
+                    exit_code = 1;
+                    goto BAIL;
+                }
+            }
+            if (!vm.compiler.test_fns) {
+                fprintf(stderr, "error: --testing=native: no [[cccc::test]] "
+                                "functions found in any input file\n");
+                exit_code = 1;
+                goto BAIL;
+            }
+        }
         // -c=native defaults out_file to "a.out" above, so exe_path is
         // always a non-NULL path here.
         exit_code = run_native_backend(
             &vm, merged_prog, out_file, inc_paths, inc_paths_count,
             sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
             libs, libs_count, defines, defines_count, undefs, undefs_count,
-            std_arg, (bool)emit_cccc_mode);
+            std_arg, (bool)emit_cccc_mode,
+            testing_backend == TESTING_BACKEND_NATIVE);
         goto BAIL;
     }
 

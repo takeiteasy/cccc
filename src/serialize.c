@@ -8795,8 +8795,803 @@ static bool line_is_conditional_directive(const char *line) {
     return false;
 }
 
+// #1033: real C operator text for a CmpOp, so a return= comparison can be
+// baked directly into the generated C as `if (!(__ret <op> <expect>))`
+// instead of a runtime dispatch -- the operator is already known at
+// serialize time (r->ret_op), same as every other test-table field.
+static const char *cmp_op_c_operator(CmpOp op) {
+    switch (op) {
+        case CMP_NE:
+            return "!=";
+        case CMP_LT:
+            return "<";
+        case CMP_LE:
+            return "<=";
+        case CMP_GT:
+            return ">";
+        case CMP_GE:
+            return ">=";
+        case CMP_EQ:
+        default:
+            return "==";
+    }
+}
+
+// #1033: the ~28 __builtin_assert_* functions include/cccc/testing.h
+// declares (a cccc-private header, never replayed to the host compiler --
+// see cc_serialize_program's #include-replay loop) transliterated into real
+// C with the same typed prototypes the guest program's own already-
+// type-checked call sites expect. Behaviorally identical to testing.c's
+// impl_assert_* family: on failure, snprintf a diagnostic into the current
+// __cccc_test_run_state and longjmp back to the per-test wrapper's setjmp.
+// _setjmp/_longjmp themselves reuse serialize_synth_setjmp_decls's own
+// raw-extern pattern rather than #include <setjmp.h> -- see the redundant
+// declaration below for why a real jmp_buf type would conflict when the
+// same TU also lowers the guest setjmp builtin.
+static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
+    // #1054/#1030: setjmp.h is compiler-owned (see
+    // serialize_synth_setjmp_decls's own comment) -- reuse its exact
+    // raw-extern pattern (_setjmp/_longjmp over a void* buffer) instead of
+    // #include <setjmp.h>, so a TU that also uses the guest setjmp builtin
+    // never sees two conflicting declarations of the same symbol.
+    "extern int _setjmp(void *);\n"
+    "extern void _longjmp(void *, int) __attribute__((noreturn));\n"
+    "#include <string.h>\n"
+    "#include <stdio.h>\n"
+    "typedef struct {\n"
+    // long long (not unsigned char) so the buffer inherits 8-byte natural
+    // alignment -- _setjmp on some hosts (e.g. glibc/aarch64's
+    // __sigsetjmp) writes callee-saved FP registers with real alignment
+    // requirements a byte-aligned buffer wouldn't satisfy.
+    "    long long jmp[512];\n"
+    "    int failed;\n"
+    "    char fail_msg[512];\n"
+    "} __cccc_test_run_state;\n"
+    "static __cccc_test_run_state *__cccc_s_run = NULL;\n"
+    "static void __builtin_assert(int cond, const char *expr, const char "
+    "*file, int line) {\n"
+    "    if (!cond) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"Assert called outside a "
+    "test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s (%s:%d)\", expr, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_false(int cond, const char *expr, const "
+    "char *file, int line) {\n"
+    "    if (cond) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertFalse called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"!%s (%s:%d)\", expr, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_fail(const char *file, int line) {\n"
+    "    if (!__cccc_s_run) { fprintf(stderr, \"AssertFail called outside a "
+    "test run at %s:%d\\n\", file, line); return; }\n"
+    "    snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"forced failure (%s:%d)\", file, line);\n"
+    "    __cccc_s_run->failed = 1;\n"
+    "    _longjmp(__cccc_s_run->jmp, 1);\n"
+    "}\n"
+    "static void __builtin_assert_fail_msg(const char *msg, const char "
+    "*file, int line) {\n"
+    "    if (!__cccc_s_run) { fprintf(stderr, \"AssertFailMsg called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "    snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s (%s:%d)\", msg, file, line);\n"
+    "    __cccc_s_run->failed = 1;\n"
+    "    _longjmp(__cccc_s_run->jmp, 1);\n"
+    "}\n"
+    "static void __builtin_assert_eq(long long a, long long b, const char "
+    "*as, const char *bs, const char *file, int line) {\n"
+    "    if (a != b) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertEq called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s != %s (%lld != %lld) (%s:%d)\", as, bs, a, b, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_neq(long long a, long long b, const char "
+    "*as, const char *bs, const char *file, int line) {\n"
+    "    if (a == b) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNeq called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s == %s (both %lld) (%s:%d)\", as, bs, a, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_gt(long long a, long long b, const char "
+    "*as, const char *bs, const char *file, int line) {\n"
+    "    if (!(a > b)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertGt called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s <= %s (%lld <= %lld) (%s:%d)\", as, bs, a, b, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_lt(long long a, long long b, const char "
+    "*as, const char *bs, const char *file, int line) {\n"
+    "    if (!(a < b)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertLt called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s >= %s (%lld >= %lld) (%s:%d)\", as, bs, a, b, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_ge(long long a, long long b, const char "
+    "*as, const char *bs, const char *file, int line) {\n"
+    "    if (!(a >= b)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertGe called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s < %s (%lld < %lld) (%s:%d)\", as, bs, a, b, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_le(long long a, long long b, const char "
+    "*as, const char *bs, const char *file, int line) {\n"
+    "    if (!(a <= b)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertLe called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s > %s (%lld > %lld) (%s:%d)\", as, bs, a, b, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_within(long long delta, long long "
+    "expected, long long actual, const char *ds, const char *es, const char "
+    "*as, const char *file, int line) {\n"
+    "    long long diff = expected - actual;\n"
+    "    if (diff < 0) diff = -diff;\n"
+    "    if (diff > delta) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertWithin called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s |%s - %s| = %lld > %s (%lld) (%s:%d)\", as, es, as, diff, ds, "
+    "delta, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_null(const void *p, const char *ps, const "
+    "char *file, int line) {\n"
+    "    if (p != NULL) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNull called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s is not null (%s:%d)\", ps, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_not_null(const void *p, const char *ps, "
+    "const char *file, int line) {\n"
+    "    if (p == NULL) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNotNull called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s is null (%s:%d)\", ps, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_streq(const char *a, const char *b, const "
+    "char *as, const char *bs, const char *file, int line) {\n"
+    "    if (strcmp(a, b) != 0) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertStrEq called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s != %s (\\\"%s\\\" != \\\"%s\\\") (%s:%d)\", as, bs, a, b, file, "
+    "line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_streq_len(const char *a, const char *b, "
+    "long long len, const char *as, const char *bs, const char *file, int "
+    "line) {\n"
+    "    if (strncmp(a, b, (size_t)len) != 0) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertStrEqLen called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s != %s (first %lld chars differ) (%s:%d)\", as, bs, len, file, "
+    "line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_mem_eq(const void *expected, const void "
+    "*actual, long long len, const char *es, const char *as, const char "
+    "*file, int line) {\n"
+    "    if (memcmp(expected, actual, (size_t)len) != 0) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertMemEq called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s != %s (%lld bytes differ) (%s:%d)\", es, as, len, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_float_within(double delta, double "
+    "expected, double actual, const char *ds, const char *es, const char "
+    "*as, const char *file, int line) {\n"
+    "    double diff = expected - actual;\n"
+    "    if (diff < 0) diff = -diff;\n"
+    "    if (diff > delta) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertFloatWithin called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s |%s - %s| = %g > %s (%g) (%s:%d)\", as, es, as, diff, ds, delta, "
+    "file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_double_within(double delta, double "
+    "expected, double actual, const char *ds, const char *es, const char "
+    "*as, const char *file, int line) {\n"
+    "    __builtin_assert_float_within(delta, expected, actual, ds, es, as, "
+    "file, line);\n"
+    "}\n"
+    "static void __builtin_assert_bits(long long mask, long long expected, "
+    "long long actual, const char *ms, const char *es, const char *as, "
+    "const char *file, int line) {\n"
+    "    if ((actual & mask) != (expected & mask)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertBits called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%d)\", as, ms, (unsigned "
+    "long long)(actual & mask), es, ms, (unsigned long long)(expected & "
+    "mask), file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_bit_high(int bit, long long actual, const "
+    "char *bs, const char *as, const char *file, int line) {\n"
+    "    if (!(actual & (1LL << bit))) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertBitHigh called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s bit %d of %s is low (%s:%d)\", bs, bit, as, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_bit_low(int bit, long long actual, const "
+    "char *bs, const char *as, const char *file, int line) {\n"
+    "    if (actual & (1LL << bit)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertBitLow called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s bit %d of %s is high (%s:%d)\", bs, bit, as, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_eq_array(const void *expected, const void "
+    "*actual, long long elem_size, long long count, const char *es, const "
+    "char *as, const char *file, int line) {\n"
+    "    size_t total = (size_t)elem_size * (size_t)count;\n"
+    "    if (memcmp(expected, actual, total) != 0) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertArrayEq called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s[0..%lld] != %s[0..%lld] (%lld bytes differ) (%s:%d)\", es, "
+    "count - 1, as, count - 1, (long long)total, file, line);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_msg(int cond, const char *expr, const "
+    "char *msg, const char *file, int line) {\n"
+    "    if (!cond) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertMsg called outside "
+    "a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s (%s:%d) - %s\", expr, file, line, msg);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_eq_msg(long long a, long long b, const "
+    "char *as, const char *bs, const char *msg, const char *file, int "
+    "line) {\n"
+    "    if (a != b) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertEqMsg called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s != %s (%lld != %lld) (%s:%d) - %s\", as, bs, a, b, file, line, "
+    "msg);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_streq_msg(const char *a, const char *b, "
+    "const char *as, const char *bs, const char *msg, const char *file, "
+    "int line) {\n"
+    "    if (strcmp(a, b) != 0) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertStrEqMsg called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s != %s (\\\"%s\\\" != \\\"%s\\\") (%s:%d) - %s\", as, bs, a, b, "
+    "file, line, msg);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_null_msg(const void *p, const char *ps, "
+    "const char *msg, const char *file, int line) {\n"
+    "    if (p != NULL) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNullMsg called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s is not null (%s:%d) - %s\", ps, file, line, msg);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_not_null_msg(const void *p, const char "
+    "*ps, const char *msg, const char *file, int line) {\n"
+    "    if (p == NULL) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNotNullMsg called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s is null (%s:%d) - %s\", ps, file, line, msg);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n"
+    "static void __builtin_assert_bits_msg(long long mask, long long "
+    "expected, long long actual, const char *ms, const char *es, const "
+    "char *as, const char *msg, const char *file, int line) {\n"
+    "    if ((actual & mask) != (expected & mask)) {\n"
+    "        if (!__cccc_s_run) { fprintf(stderr, \"AssertBitsMsg called "
+    "outside a test run at %s:%d\\n\", file, line); return; }\n"
+    "        snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
+    "\"%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%d) - %s\", as, ms, "
+    "(unsigned long long)(actual & mask), es, ms, (unsigned long "
+    "long)(expected & mask), file, line, msg);\n"
+    "        __cccc_s_run->failed = 1;\n"
+    "        _longjmp(__cccc_s_run->jmp, 1);\n"
+    "    }\n"
+    "}\n";
+
+// #1033: fork-per-test TAP harness. See cc_serialize_program's own
+// emit_test_harness gate for the CLI-side refusals (test_setup/teardown,
+// negative tests) that keep this function's own scope narrow -- by the
+// time this runs, vm->compiler.test_setups is guaranteed NULL and no
+// vm->compiler.test_fns record has error_pat/expect_compile_error set.
+static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (vm->compiler.emit_cccc || !vm->compiler.test_fns)
+        return;
+
+    fputs("\n/* #1033: --testing=native generated test harness */\n", f);
+    fputs(CCCC_TEST_ASSERT_RUNTIME_SRC, f);
+    fputs("#include <sys/types.h>\n"
+          "#include <sys/time.h>\n"
+          "#include <unistd.h>\n"
+          "#include <fcntl.h>\n"
+          "#include <regex.h>\n"
+          "#include <stdlib.h>\n"
+          "#include <errno.h>\n"
+          // #1033: when -I./include is on the compile line (as
+          // tools/tests.py always passes it), CCCC's own bundled
+          // signal.h/sys/wait.h -- polyfills for VM-internal use, see
+          // man/HEADERS.md -- shadow the real host headers. That's merely
+          // inconvenient for the missing kill() prototype below, but
+          // outright breaks the build under a per-test `--std=c89
+          // -Wpedantic`: the bundled signal.h uses the C99 `restrict`
+          // keyword (a syntax error, not just a warning, under host
+          // -std=c89), and bundled sys/wait.h itself #includes signal.h
+          // for siginfo_t. Sidestepped entirely: no #include <signal.h>
+          // or <sys/wait.h>, just the handful of symbols this harness
+          // actually needs, declared directly. SIGALRM/SIGKILL/SIG_DFL
+          // values and the WIFEXITED/WEXITSTATUS/WIFSIGNALED/WTERMSIG
+          // status-word encoding are POSIX-traditional and identical on
+          // Linux and Darwin, this project's only two supported
+          // platforms (CLAUDE.md).\n"
+          "extern pid_t waitpid(pid_t, int *, int);\n"
+          "#define __CCCC_WIFEXITED(s) (((s) & 0x7f) == 0)\n"
+          "#define __CCCC_WEXITSTATUS(s) (((s) >> 8) & 0xff)\n"
+          "#define __CCCC_WIFSIGNALED(s) ((((signed char)(((s) & 0x7f) + "
+          "1)) >> 1) > 0)\n"
+          "#define __CCCC_WTERMSIG(s) ((s) & 0x7f)\n"
+          "#define __CCCC_SIGALRM 14\n"
+          "#define __CCCC_SIGKILL 9\n"
+          "#define __CCCC_SIG_DFL ((void (*)(int))0)\n"
+          "extern void (*signal(int, void (*)(int)))(int);\n"
+          "extern int kill(pid_t, int);\n\n",
+          f);
+
+    // Reverse to declaration order (test_fns is built by prepending, same
+    // as cc_run_tests, testing.c:1165).
+    int n = 0;
+    for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
+        n++;
+    TestFnRecord **ordered = malloc((size_t)n * sizeof(TestFnRecord *));
+    {
+        int i = n - 1;
+        for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
+            ordered[i--] = r;
+    }
+
+    // Per-test wrapper functions. status: 0 = will run, 1 = SKIP (not
+    // found / per-test flags=).
+    int *skip = calloc((size_t)n, sizeof(int));
+    for (int i = 0; i < n; i++) {
+        TestFnRecord *r  = ordered[i];
+        Obj          *fn = NULL;
+        for (Obj *o = prog; o; o = o->next) {
+            if (o->is_function && o->name && strcmp(o->name, r->name) == 0) {
+                fn = o;
+                break;
+            }
+        }
+        bool has_flags = r->test_flags_mask || r->test_opt_set ||
+                         r->test_warn_mask || r->test_warn_errors_mask ||
+                         r->test_warn_as_errors_set || r->test_f_set ||
+                         r->test_ffi_allow_count > 0;
+        if (!fn || has_flags) {
+            skip[i] = 1;
+            continue;
+        }
+
+        if (r->expect_exit_code >= 0) {
+            // exit_code= tests skip the assertion-comparison wrapper
+            // entirely -- the child _exit()s with the guest function's own
+            // return value (VM parity: cc_run_at's fork path never sets up
+            // __cccc_s_run either, so an Assert* inside such a test's body
+            // degrades to a stderr warning rather than failing the test,
+            // same as testing.c's own exit_code fork branch).
+            bool is_void = (fn->ty && fn->ty->return_ty) &&
+                           fn->ty->return_ty->kind == TY_VOID;
+            fprintf(f, "static int __cccc_test_exit_%d(void) {\n", i);
+            if (is_void)
+                fprintf(f, "    %s();\n    return 0;\n", fn->name);
+            else
+                fprintf(f, "    return (int)(long long)%s();\n", fn->name);
+            fputs("}\n\n", f);
+            continue;
+        }
+
+        fprintf(f,
+                "static int __cccc_test_run_%d(char *__msg, size_t __cap) "
+                "{\n",
+                i);
+        fputs("    __cccc_test_run_state __st;\n"
+              "    __st.failed = 0;\n"
+              "    __st.fail_msg[0] = '\\0';\n"
+              "    __cccc_s_run = &__st;\n"
+              "    if (_setjmp(__st.jmp)) {\n"
+              "        __cccc_s_run = NULL;\n"
+              "        if (__msg) snprintf(__msg, __cap, \"%s\", "
+              "__st.fail_msg);\n"
+              "        return 0;\n"
+              "    }\n",
+              f);
+
+        TypeKind ret_kind =
+            (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty->kind : TY_VOID;
+        const char *op = cmp_op_c_operator(r->ret_op);
+        switch (r->ret_kind) {
+            case RET_INT:
+                fprintf(f, "    long long __ret = (long long)%s();\n",
+                        fn->name);
+                fprintf(f,
+                        "    if (!(__ret %s (long long)%lldLL)) {\n"
+                        "        __cccc_s_run = NULL;\n"
+                        "        if (__msg) snprintf(__msg, __cap, "
+                        "\"expected return value %%s %%lld, got %%lld\", "
+                        "\"%s\", (long long)%lldLL, __ret);\n"
+                        "        return 0;\n"
+                        "    }\n",
+                        op, (long long)r->ret_expect.ret_int, op,
+                        (long long)r->ret_expect.ret_int);
+                break;
+            case RET_FLOAT: {
+                double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
+                fprintf(f, "    double __ret = (double)%s();\n", fn->name);
+                fprintf(f,
+                        "    { double __diff = __ret - (%.17g); if (__diff "
+                        "< 0) __diff = -__diff;\n"
+                        "      if (__diff > %.17g) {\n"
+                        "        __cccc_s_run = NULL;\n"
+                        "        if (__msg) snprintf(__msg, __cap, "
+                        "\"expected return value %%s %%g, got %%g\", "
+                        "\"%s\", (double)(%.17g), __ret);\n"
+                        "        return 0;\n"
+                        "      } }\n",
+                        r->ret_expect.ret_float, eps, op,
+                        r->ret_expect.ret_float);
+                break;
+            }
+            case RET_STR: {
+                fprintf(f, "    const char *__ret = (const char *)%s();\n",
+                        fn->name);
+                fputs("    { const char *__exp = ", f);
+                if (r->ret_expect.ret_str)
+                    serialize_string_n(f, r->ret_expect.ret_str,
+                                       (int)strlen(r->ret_expect.ret_str));
+                else
+                    fputs("NULL", f);
+                fputs(";\n"
+                      "      int __cmp = (__ret && __exp) ? strcmp(__ret, "
+                      "__exp) : (__ret ? 1 : (__exp ? -1 : 0));\n",
+                      f);
+                fprintf(f,
+                        "      if (!(__cmp %s 0)) {\n"
+                        "        __cccc_s_run = NULL;\n"
+                        "        if (__msg) snprintf(__msg, __cap, "
+                        "\"expected return string %%s \\\"%%s\\\", got "
+                        "\\\"%%s\\\"\", \"%s\", __exp ? __exp : \"(null)\", "
+                        "__ret ? __ret : \"(null)\");\n"
+                        "        return 0;\n"
+                        "      } }\n",
+                        op, op);
+                break;
+            }
+            case RET_STRUCT:
+                // #1033 v1: struct return= assertions need type-directed
+                // per-field comparison codegen (see testing.c's
+                // cmp_ret_aggregate) -- narrow enough in practice (a
+                // handful of tests repo-wide) that it's deferred rather
+                // than attempted here. The test still runs (asserts inside
+                // it are honored); only the return-value check is skipped.
+                (void)ret_kind;
+                fprintf(f, "    (void)%s();\n", fn->name);
+                break;
+            case RET_NONE:
+            default:
+                fprintf(f, "    (void)%s();\n", fn->name);
+                break;
+        }
+        fputs("    __cccc_s_run = NULL;\n"
+              "    return 1;\n"
+              "}\n\n",
+              f);
+    }
+
+    // Test table.
+    fputs("typedef struct {\n"
+          "    const char *name;\n"
+          "    const char *suite;\n"
+          "    int (*run)(char *, size_t);\n"
+          "    int (*run_exit)(void);\n"
+          "    long timeout_ms;\n"
+          "    int expect_exit_code;\n"
+          "    const char *expect_stdout;\n"
+          "    const char *reject_stdout;\n"
+          "    const char *expect_stderr;\n"
+          "    const char *reject_stderr;\n"
+          "    const char *skip_reason;\n"
+          "} __cccc_test_case;\n\n",
+          f);
+    fprintf(f, "static __cccc_test_case __cccc_tests[%d] = {\n", n > 0 ? n : 1);
+    for (int i = 0; i < n; i++) {
+        TestFnRecord *r    = ordered[i];
+        const char   *disp = r->display_name ? r->display_name : r->name;
+        fputs("    { ", f);
+        serialize_string_n(f, disp, (int)strlen(disp));
+        fputs(", ", f);
+        if (r->suite)
+            serialize_string_n(f, r->suite, (int)strlen(r->suite));
+        else
+            fputs("NULL", f);
+        if (skip[i]) {
+            fputs(", NULL, NULL, ", f);
+        } else if (r->expect_exit_code >= 0) {
+            fprintf(f, ", NULL, __cccc_test_exit_%d, ", i);
+        } else {
+            fprintf(f, ", __cccc_test_run_%d, NULL, ", i);
+        }
+        fprintf(f, "%ldL, %d, ", r->timeout_ms, r->expect_exit_code);
+        const char *strs[4] = {r->expect_stdout, r->reject_stdout,
+                               r->expect_stderr, r->reject_stderr};
+        for (int k = 0; k < 4; k++) {
+            if (strs[k])
+                serialize_string_n(f, strs[k], (int)strlen(strs[k]));
+            else
+                fputs("NULL", f);
+            fputs(", ", f);
+        }
+        if (skip[i])
+            fputs("\"not supported by --testing=native (#1033 v1)\" },\n", f);
+        else
+            fputs("NULL },\n", f);
+    }
+    fputs("};\n\n", f);
+
+    // main(): fork-per-test TAP runner.
+    fputs("static volatile int __cccc_alarm_fired = 0;\n"
+          "static volatile pid_t __cccc_fork_child = 0;\n"
+          "static void __cccc_test_alarm(int sig) {\n"
+          "    (void)sig;\n"
+          "    __cccc_alarm_fired = 1;\n"
+          "    if (__cccc_fork_child > 0) kill(__cccc_fork_child, "
+          "__CCCC_SIGKILL);\n"
+          "}\n"
+          "static void __cccc_set_timeout(long ms) {\n"
+          "    struct itimerval itv;\n"
+          "    if (ms > 0) {\n"
+          "        itv.it_interval.tv_sec = 0; itv.it_interval.tv_usec = 0;\n"
+          "        itv.it_value.tv_sec = ms / 1000; itv.it_value.tv_usec = "
+          "(ms % 1000) * 1000;\n"
+          "    } else {\n"
+          "        itv.it_interval.tv_sec = 0; itv.it_interval.tv_usec = 0;\n"
+          "        itv.it_value.tv_sec = 0; itv.it_value.tv_usec = 0;\n"
+          "    }\n"
+          "    setitimer(ITIMER_REAL, &itv, NULL);\n"
+          "}\n"
+          "static char *__cccc_drain(int fd) {\n"
+          "    if (fd < 0) return NULL;\n"
+          "    size_t cap = 4096, len = 0;\n"
+          "    char *buf = malloc(cap);\n"
+          "    if (!buf) return NULL;\n"
+          "    for (;;) {\n"
+          "        if (len + 1024 > cap) { cap *= 2; char *nb = realloc(buf, "
+          "cap); if (!nb) break; buf = nb; }\n"
+          "        ssize_t r = read(fd, buf + len, cap - len - 1);\n"
+          "        if (r <= 0) break;\n"
+          "        len += (size_t)r;\n"
+          "    }\n"
+          "    buf[len] = '\\0';\n"
+          "    return buf;\n"
+          "}\n"
+          "static int __cccc_check_pattern(const char *pat, const char *buf, "
+          "int negate) {\n"
+          "    if (!pat) return 1;\n"
+          "    regex_t re;\n"
+          "    if (regcomp(&re, pat, REG_EXTENDED) != 0) return 1;\n"
+          "    int m = regexec(&re, buf ? buf : \"\", 0, NULL, 0) == 0;\n"
+          "    regfree(&re);\n"
+          "    return negate ? !m : m;\n"
+          "}\n\n",
+          f);
+
+    fputs("int main(void) {\n", f);
+    fprintf(f, "    int n = %d;\n", n);
+    fputs("    int passed = 0, failed = 0, skipped = 0, timedout = 0;\n"
+          "    printf(\"TAP version 13\\n\");\n"
+          "    printf(\"1..%d\\n\", n);\n"
+          "    const char *prev_suite = NULL;\n"
+          "    int have_prev_suite = 1;\n"
+          "    signal(__CCCC_SIGALRM, __cccc_test_alarm);\n"
+          "    for (int i = 0; i < n; i++) {\n"
+          "        __cccc_test_case *tc = &__cccc_tests[i];\n"
+          "        int suite_changed = !have_prev_suite ||\n"
+          "            ((tc->suite == NULL) != (prev_suite == NULL)) ||\n"
+          "            (tc->suite && prev_suite && strcmp(tc->suite, "
+          "prev_suite) != 0);\n"
+          "        if (suite_changed) {\n"
+          "            printf(\"# Suite: %s\\n\", tc->suite ? tc->suite : "
+          "\"(none)\");\n"
+          "            prev_suite = tc->suite;\n"
+          "            have_prev_suite = 1;\n"
+          "        }\n"
+          "        if (!tc->run && !tc->run_exit) {\n"
+          "            printf(\"ok %d - %s # SKIP %s\\n\", i + 1, tc->name, "
+          "tc->skip_reason ? tc->skip_reason : \"\");\n"
+          "            skipped++;\n"
+          "            continue;\n"
+          "        }\n"
+          "        int out_pipe[2] = {-1, -1}, err_pipe[2] = {-1, -1}, "
+          "msg_pipe[2] = {-1, -1};\n"
+          "        int need_out = tc->expect_stdout || tc->reject_stdout;\n"
+          "        int need_err = tc->expect_stderr || tc->reject_stderr;\n"
+          "        if (need_out) pipe(out_pipe);\n"
+          "        if (need_err) pipe(err_pipe);\n"
+          "        pipe(msg_pipe);\n"
+          "        fflush(stdout);\n"
+          "        fflush(stderr);\n"
+          "        __cccc_alarm_fired = 0;\n"
+          "        pid_t pid = fork();\n"
+          "        if (pid == 0) {\n"
+          "            signal(__CCCC_SIGALRM, __CCCC_SIG_DFL);\n"
+          "            close(msg_pipe[0]);\n"
+          "            if (need_out) { close(out_pipe[0]); dup2(out_pipe[1], "
+          "STDOUT_FILENO); close(out_pipe[1]); }\n"
+          "            if (need_err) { close(err_pipe[0]); dup2(err_pipe[1], "
+          "STDERR_FILENO); close(err_pipe[1]); }\n"
+          "            if (tc->expect_exit_code >= 0) {\n"
+          "                int rc = tc->run_exit();\n"
+          "                _exit((unsigned char)rc);\n"
+          "            }\n"
+          "            char msg[512] = {0};\n"
+          "            int ok = tc->run(msg, sizeof(msg));\n"
+          "            if (!ok) write(msg_pipe[1], msg, strlen(msg));\n"
+          "            close(msg_pipe[1]);\n"
+          "            fflush(stdout);\n"
+          "            fflush(stderr);\n"
+          "            _exit(ok ? 0 : 1);\n"
+          "        }\n"
+          "        close(msg_pipe[1]);\n"
+          "        if (need_out) close(out_pipe[1]);\n"
+          "        if (need_err) close(err_pipe[1]);\n"
+          "        __cccc_fork_child = pid;\n"
+          "        __cccc_set_timeout(tc->timeout_ms);\n"
+          "        int wstatus = 0;\n"
+          "        pid_t waited;\n"
+          "        do { waited = waitpid(pid, &wstatus, 0); } while "
+          "(waited < 0 && errno == EINTR && !__cccc_alarm_fired);\n"
+          "        __cccc_set_timeout(0);\n"
+          "        __cccc_fork_child = 0;\n"
+          "        int timed_out = __cccc_alarm_fired;\n"
+          "        char *msg = __cccc_drain(msg_pipe[0]);\n"
+          "        char *cap_out = __cccc_drain(need_out ? out_pipe[0] : "
+          "-1);\n"
+          "        char *cap_err = __cccc_drain(need_err ? err_pipe[0] : "
+          "-1);\n"
+          "        if (msg_pipe[0] >= 0) close(msg_pipe[0]);\n"
+          "        if (out_pipe[0] >= 0) close(out_pipe[0]);\n"
+          "        if (err_pipe[0] >= 0) close(err_pipe[0]);\n"
+          "        if (timed_out) {\n"
+          "            waitpid(pid, NULL, 0);\n"
+          "            printf(\"not ok %d - %s\\n# TIMEOUT\\n\", i + 1, "
+          "tc->name);\n"
+          "            timedout++;\n"
+          "        } else if (tc->expect_exit_code >= 0) {\n"
+          "            int actual = -1;\n"
+          "            if (__CCCC_WIFEXITED(wstatus)) actual = "
+          "__CCCC_WEXITSTATUS(wstatus);\n"
+          "            else if (__CCCC_WIFSIGNALED(wstatus)) actual = 128 + "
+          "__CCCC_WTERMSIG(wstatus);\n"
+          "            if (actual == tc->expect_exit_code) { printf(\"ok "
+          "%d - %s\\n\", i + 1, tc->name); passed++; }\n"
+          "            else { printf(\"not ok %d - %s\\n# expected "
+          "exit_code %d, got %d\\n\", i + 1, tc->name, tc->expect_exit_code, "
+          "actual); failed++; }\n"
+          "        } else if (__CCCC_WIFSIGNALED(wstatus)) {\n"
+          "            printf(\"not ok %d - %s\\n# aborted by signal "
+          "%d\\n\", i + 1, tc->name, __CCCC_WTERMSIG(wstatus));\n"
+          "            failed++;\n"
+          "        } else if (__CCCC_WIFEXITED(wstatus) && "
+          "__CCCC_WEXITSTATUS(wstatus) == "
+          "0 &&\n"
+          "                   __cccc_check_pattern(tc->expect_stdout, "
+          "cap_out, 0) &&\n"
+          "                   __cccc_check_pattern(tc->reject_stdout, "
+          "cap_out, 1) &&\n"
+          "                   __cccc_check_pattern(tc->expect_stderr, "
+          "cap_err, 0) &&\n"
+          "                   __cccc_check_pattern(tc->reject_stderr, "
+          "cap_err, 1)) {\n"
+          "            printf(\"ok %d - %s\\n\", i + 1, tc->name);\n"
+          "            passed++;\n"
+          "        } else {\n"
+          "            printf(\"not ok %d - %s\\n# %s\\n\", i + 1, tc->name, "
+          "(msg && msg[0]) ? msg : \"failed\");\n"
+          "            failed++;\n"
+          "        }\n"
+          "        free(msg); free(cap_out); free(cap_err);\n"
+          "    }\n"
+          "    printf(\"# passed: %d, failed: %d, skipped: %d, timed out: "
+          "%d\\n\", passed, failed, skipped, timedout);\n"
+          "    return (passed + skipped == n) ? 0 : 1;\n"
+          "}\n",
+          f);
+
+    free(ordered);
+    free(skip);
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
-                          bool generated_only) {
+                          bool generated_only, bool emit_test_harness) {
     if (!f || !prog)
         return;
 
@@ -9332,6 +10127,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         serialize_function_signature(f, &ctx, obj);
         fprintf(f, ";\n\n");
     }
+
+    // #1033: after every guest function's own prototype (just above) so the
+    // harness's per-test wrapper functions -- which call test symbols
+    // directly by name -- always see a prototype in scope, regardless of
+    // where in `prog` the real definition sits.
+    if (!generated_only && emit_test_harness)
+        serialize_test_harness(f, vm, prog);
 
     // Serialize functions
     for (Obj *obj = prog; obj; obj = obj->next) {

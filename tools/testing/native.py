@@ -44,11 +44,90 @@ def _skip_result(idx, test_name, reason, is_negative_test, expects_runtime_error
     }
 
 
+def _run_testing_suite(idx, test_file, test_name, cccc, script_dir, cccc_args,
+                       per_test_flags, bench, process_timeout):
+    """#1033: compile+run a [[cccc::test]] suite file through the generated
+    native harness. `--testing` in per_test_flags is replaced with
+    `--testing=native` (bare `--testing` alone means the VM backend, see
+    src/main.c); `-O<n>`/`-f<pass>` are stripped like the single-file path
+    (native.py's own docstring), same reasoning.
+
+    The compiled artifact is a self-contained TAP runner (its own main()) --
+    pass/fail is its exit code, matching cc_run_tests's own `passed == n`
+    convention, not the exit-42 single-test convention.
+    """
+    testing_flags = [
+        f for f in per_test_flags
+        if f != "--testing"
+        and not (f.startswith("-O") and len(f) > 2 and f[2].isdigit())
+        and f not in ("-O", "--optimize")
+        and not f.startswith("--optimize=")
+        and not f.startswith("-f")
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = Path(tmp) / (test_file.stem + "_native_out")
+        compile_cmd = [
+            str(cccc), "-I./include", *cccc_args, *testing_flags,
+            "--testing=native", "-o", str(out_path), str(test_file),
+        ]
+        start = time.perf_counter() if bench else None
+        try:
+            compiled = subprocess.run(
+                compile_cmd, capture_output=True, text=True, cwd=script_dir,
+                timeout=process_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "idx": idx, "test_name": test_name, "exit_code": -1,
+                "status": "native_compile_failed", "output": "TIMEOUT",
+                "is_negative_test": False, "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": (time.perf_counter() - start) if start else None,
+                "vm_profile": None,
+            }
+
+        artifact_ok = compiled.returncode == 0 and out_path.exists()
+        if not artifact_ok:
+            return {
+                "idx": idx, "test_name": test_name,
+                "exit_code": compiled.returncode,
+                "status": "native_compile_failed",
+                "output": compiled.stderr or compiled.stdout,
+                "is_negative_test": False, "expects_runtime_error": False,
+                "stderr_mismatch": None, "elapsed": None, "vm_profile": None,
+            }
+
+        try:
+            run = subprocess.run(
+                [str(out_path)], capture_output=True, text=True, cwd=script_dir,
+                timeout=process_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "idx": idx, "test_name": test_name, "exit_code": -1,
+                "status": "native_failed", "output": "TIMEOUT",
+                "is_negative_test": False, "expects_runtime_error": False,
+                "stderr_mismatch": None,
+                "elapsed": (time.perf_counter() - start) if start else None,
+                "vm_profile": None,
+            }
+        elapsed = (time.perf_counter() - start) if bench else None
+        status = "native_passed" if run.returncode == 0 else "native_failed"
+        return {
+            "idx": idx, "test_name": test_name, "exit_code": run.returncode,
+            "status": status, "output": run.stdout + run.stderr,
+            "is_negative_test": False, "expects_runtime_error": False,
+            "stderr_mismatch": None, "elapsed": elapsed, "vm_profile": None,
+        }
+
+
 def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                          per_test_flags, per_test_run_args, is_negative_test,
                          expects_runtime_error, bench, is_diagnostic_test=False,
                          expect_stdout=None, reject_stdout=None,
-                         process_timeout=None, platform=None):
+                         process_timeout=None, platform=None,
+                         is_testing_mode=False):
     """Compile a test with -c=native, then (for FULL-tier tests) run the
     resulting binary. Returns a result dict shaped like c4.run_c4_roundtrip's.
 
@@ -61,10 +140,31 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
     platform:               "macos"/"linux"/"windows" (runner.py's own
                             detection) -- forwarded to native_skip_reason so
                             a platform-only gap (e.g. #1028) skips just there.
+    is_testing_mode:        CCCC_FLAGS carries --testing -- this is a
+                            [[cccc::test]] suite file, not a single-file
+                            EXPECT-style test. Routed to _run_testing_suite
+                            below (#1033): compile with --testing=native
+                            (which implies -c=native and serializes the
+                            harness itself) instead of the exit-42 tier
+                            logic, since the compiled artifact is its own
+                            TAP-emitting test runner, not a single program
+                            whose own exit code is the verdict.
     """
     reason = native_skip_reason(test_file.name, per_test_flags, cccc_args, platform)
     if reason:
         return _skip_result(idx, test_name, reason, is_negative_test, expects_runtime_error)
+
+    # A negative/EXPECT_RUNTIME_ERROR/diagnostic-only test that also
+    # happens to carry --testing in its CCCC_FLAGS (a handful of legacy
+    # single-file tests exercising the --testing frontend itself, not a
+    # [[cccc::test]] suite corpus file) already has correct handling
+    # further below -- generic compile-fail/stderr-match, same as any
+    # other negative test. Only a genuinely positive testing-mode file
+    # routes to the generated suite harness.
+    if is_testing_mode and not (is_negative_test or expects_runtime_error
+                                or is_diagnostic_test):
+        return _run_testing_suite(idx, test_file, test_name, cccc, script_dir,
+                                  cccc_args, per_test_flags, bench, process_timeout)
 
     # -O<n>/--optimize=<n>/-f<pass> tune the VM bytecode pipeline; -c=native
     # rejects them outright ("cannot be combined with VM bytecode options",
@@ -114,7 +214,15 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                 "elapsed": None, "vm_profile": None,
             }
 
-        artifact_ok = compiled.returncode == 0 and out_path.exists()
+        # #1033: a diagnostic-only test that also carries bare --testing in
+        # its CCCC_FLAGS (VM backend, the default) never reaches -c=native
+        # at all -- cc_run_tests runs the [[cccc::test]] suite in-VM and
+        # bails before the native dispatch, by design, so no artifact is
+        # ever written even on a fully successful compile+test run. Only
+        # require the artifact to exist for the ordinary (non-testing-mode)
+        # diagnostic path, where -c=native genuinely does produce one.
+        artifact_ok = compiled.returncode == 0 and (
+            out_path.exists() or (compile_only and is_testing_mode))
         if not artifact_ok:
             return {
                 "idx": idx, "test_name": test_name,

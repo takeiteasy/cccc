@@ -30,10 +30,15 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
     if not is_negative_test and test_file.name in C4_SKIP_TESTS:
         skip_reason = "c4-incompatible"
     elif not is_negative_test and is_testing_mode:
-        # --test-c4 handles the round-trip internally (compile → save .c4 → reload → run).
-        # Run as a single invocation; per_test_flags already contains "--testing".
-        cmd = [str(cccc), "-I./include", *cccc_args, *per_test_flags,   # noqa: E501
-               "--test-c4", str(test_file)]
+        # --testing=bytecode handles the round-trip internally (compile ->
+        # save .c4 -> reload -> run), replacing the retired --test-c4
+        # boolean (#1033). per_test_flags contains bare "--testing" (the
+        # VM backend since #1033); swap it for the bytecode backend rather
+        # than appending a second, conflicting --testing flag.
+        flags = ["--testing=bytecode" if f == "--testing" else f
+                 for f in per_test_flags]
+        cmd = [str(cccc), "-I./include", *cccc_args, *flags,   # noqa: E501
+               str(test_file)]
         start = time.perf_counter() if bench else None
         try:
             result = subprocess.run(

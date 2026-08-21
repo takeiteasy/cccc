@@ -4844,9 +4844,14 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog);
  @param generated_only If true, only serialize objects created by pragma macros
                        (those with is_macro_generated set). Used with
  -c=generated.
+ @param emit_test_harness If true, additionally emit a standalone TAP test
+                          harness (assert runtime, test table, main()) for
+                          the program's [[cccc::test]] functions. Used with
+                          --testing=native (#1033); ignored when
+                          generated_only is true.
 */
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
-                          bool generated_only);
+                          bool generated_only, bool emit_test_harness);
 
 /*!
  @brief Link multiple parsed programs (Obj lists) into a single program.

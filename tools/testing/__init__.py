@@ -273,6 +273,67 @@ NATIVE_SKIP_TESTS = {
 
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
+    "test_testing_no_tests_1007.c": "#1033: CCCC_EXPECT_STDERR without "
+                 "EXPECT_COMPILE_ERROR assumes the diagnostic-test tier's "
+                 "own assumption (compile succeeds, diagnostic is just a "
+                 "warning) -- this one's diagnostic is a hard compile "
+                 "failure (zero [[cccc::test]] functions found), same in "
+                 "both --testing=vm and --testing=native",
+
+    # --- #1033 v1: --testing=native scope cuts, refused by the compiler
+    # itself with the same reason (main.c) -- listed here too so the
+    # runner skips them instead of recording a spurious native_compile_failed.
+    "test_suite_attributes.c": "#1033 v1: uses [[cccc::test_setup]] -- no "
+                 "fork-safe native equivalent, see man/TESTING.md",
+    "test_suite_testing_framework.c": "#1033 v1: uses "
+                 "[[cccc::test_setup/teardown]] and negative "
+                 "(expect_compile_error=) tests -- neither supported "
+                 "natively, see man/TESTING.md",
+    "test_hook_inherit_per_test.c": "#1033 v1: uses "
+                 "[[cccc::test_setup/teardown]] -- no fork-safe native "
+                 "equivalent, see man/TESTING.md",
+    "test_hook_inherit_stacked_once.c": "#1033 v1: uses "
+                 "[[cccc::test_setup/teardown]] -- no fork-safe native "
+                 "equivalent, see man/TESTING.md",
+    "test_hook_inherit_reentry.c": "#1033 v1: uses "
+                 "[[cccc::test_setup/teardown]] -- no fork-safe native "
+                 "equivalent, see man/TESTING.md",
+    "test_hook_inherit_prefix_guard.c": "#1033 v1: uses "
+                 "[[cccc::test_setup/teardown]] -- no fork-safe native "
+                 "equivalent, see man/TESTING.md",
+    "test_hook_inherit_once.c": "#1033 v1: uses "
+                 "[[cccc::test_setup/teardown]] -- no fork-safe native "
+                 "equivalent, see man/TESTING.md",
+    "test_suite_compile_errors.c": "#1033 v1: negative "
+                 "(error=/expect_compile_error=) tests -- the parser's "
+                 "error-recovery AST is not safe to hand to a real host "
+                 "compiler, see man/TESTING.md",
+    "test_suite_stack_safety.c": "#1033 v1: contains a negative "
+                 "(expect_compile_error=) test, see man/TESTING.md",
+    "test_suite_std_c17.c": "#1033 v1: contains a negative "
+                 "(expect_compile_error=) test, see man/TESTING.md",
+
+    # --- pre-existing -c=native serializer gaps, surfaced by #1033's
+    # corpus run (tests/suites/ was never exercised under --native before).
+    # Each is its own ticket; the file goes back on the corpus once fixed.
+    "test_suite_atomics.c": "_Atomic address-of miscompiles, #1101",
+    "test_suite_optimizer.c": "_Atomic address-of miscompiles, #1101",
+    "test_suite_c23.c": "rvalue compound-literal address-of, #1102",
+    "test_suite_structs.c": "rvalue compound-literal address-of, #1102",
+    "test_suite_std_c11.c": "myabs(-5) mis-serialized as --5, #1102",
+    "test_suite_std_c99.c": "myabs(-5) mis-serialized as --5, #1102",
+    "test_suite_posix.c": "rename-collision __cccc_dupN undeclared "
+                 "identifiers (dbm_*), #1103",
+    "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
+    "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104",
+    "test_suite_embed.c": "#embed relative path breaks from native's temp "
+                 "compile dir, #1104",
+    "test_suite_misc.c": "0-byte union global initializer, #1104",
+    "test_suite_typesystem.c": "TdSize undeclared, #1104",
+    "test_suite_floats.c": "__cccc_creall/__cccc_cimagl undeclared, #1104",
+    "test_suite_ffi.c": "test_dlfcn returns 3 instead of 42 natively, #1105",
+    "test_suite_overflow.c": "test_invalid_funcptr has no native "
+                 "invalid-function-pointer trap, #1105",
 }
 
 # Platform-specific -c=native skips, checked only when the running host
@@ -411,8 +472,13 @@ def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
     for f in all_flags:
         if f == "--build" or f.startswith("--build="):
             return "--build mode"
-        if f == "--testing" or f.startswith("--test"):
-            return "--testing: no --test-native (#1033)"
+        # #1033: --testing now has a real --test-native path (a generated
+        # TAP harness, run_native_roundtrip's is_testing_mode branch) --
+        # only the narrow v1 exclusions below (test_setup/teardown hooks,
+        # negative tests) still skip, via NATIVE_SKIP_TESTS entries.
+        # --test=GLOB/--test-suite/--fail-fast/--test-timeout/--list-tests
+        # are baked into the generated harness at compile time, same as
+        # --testing itself, so none of them need a skip here either.
         if f in ("-c", "-o", "--out") or f.startswith("-c=") or f.startswith("-o=") \
                 or f.startswith("--compile") or f.startswith("--out="):
             return "test drives -c/-o itself"

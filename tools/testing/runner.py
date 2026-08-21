@@ -205,6 +205,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             reject_stdout=reject_stdout,
             process_timeout=process_timeout,
             platform=platform,
+            is_testing_mode=is_testing_mode,
         )
 
     run_args = ["--", *per_test_run_args] if per_test_run_args else []

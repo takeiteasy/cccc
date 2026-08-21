@@ -124,9 +124,14 @@ Options:
 	                         Combine with --json to also dump the profile as JSON to stdout
 
 Testing Options:
-	-t/--testing             Discover and run [[cccc::test]] functions
-	   --test-c4             Bytecode round-trip: compile, save .c4, reload, then run tests
-	                         (implies --testing; exercises FFI-table and bytecode persistence)
+	-t/--testing[=vm|bytecode|native]
+	                         Discover and run [[cccc::test]] functions. Bare -t/--testing
+	                         (default =vm) runs them in-process; =bytecode compiles, saves
+	                         .c4, reloads, then runs (exercises FFI-table and bytecode
+	                         persistence); =native serializes the harness itself and runs
+	                         it as a standalone binary via CCCC_NATIVE_CC (implies -c=native;
+	                         [[cccc::test_setup/teardown]] hooks and negative tests are not
+	                         supported under =native, see man/TESTING.md)
 	   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)
 	   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);
 	                         glob metacharacters (*?[) switch to fnmatch (implies --testing)
