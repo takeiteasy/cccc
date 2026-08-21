@@ -659,6 +659,19 @@ static const char *enum_const_spelling(SerializeContext *ctx, Type *ty,
 static bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                       Obj *obj);
 
+// #1091: true when `ty` has no tag of its own but `cand` does -- spelling
+// `ty` with `cand`'s tag would be wrong (a tagless aggregate is a distinct
+// type from a same-shaped tagged one; C only lets same_type_or_origin's
+// structural fallback treat them as interchangeable because it also backs
+// the #1006/#1046 same-declaration-reparsed dedup, which never needs to
+// distinguish the two). This can never reject a genuine origin-identity
+// match: two Type objects sharing a pointer necessarily agree on
+// struct_tag, since it's the same object -- so this only ever fires against
+// a match same_type_or_origin() found through its structural fallback.
+static bool tag_spelling_mismatch(Type *ty, Type *cand) {
+    return ty && cand && !ty->struct_tag && cand->struct_tag;
+}
+
 static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
         return NULL;
@@ -673,11 +686,13 @@ static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (ctx->tag_renamed)
         for (int i = 0; i < ctx->tags_len; i++)
             if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+                !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
                 same_type_strong(ctx->tags[i].ty, ty))
                 return &ctx->tags[i];
 
     for (int i = 0; i < ctx->tags_len; i++)
         if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+            !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
             same_type_or_origin(ctx->tags[i].ty, ty))
             return &ctx->tags[i];
     return NULL;
@@ -716,9 +731,26 @@ static TypeName *find_tag_name_for_provenance(SerializeContext *ctx, Type *ty) {
     return first_match;
 }
 
+static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty);
+
+// #1091: two tagless typedefs of structurally-identical aggregates (e.g.
+// `typedef struct { long quot, rem; } ldiv_t;` / `... lldiv_t;`, byte-
+// identical on any 64-bit target CCCC's `long`/`long long` share a
+// representation on) used to collapse into one spelling here, since the
+// loop below only ever compared members. Try exact (pointer-identity, via
+// the ->origin chain find_typedef_name_exact() already walks) first --
+// resolves every ordinary reference to the typedef that actually declared
+// it, including a return type's own Type -- and only fall back to the
+// structural scan when identity finds nothing, which keeps every existing
+// caller relying on the structural match (e.g. spelling a use-site copy
+// with no traceable origin) working exactly as before.
 static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
         return NULL;
+
+    TypeName *exact = find_typedef_name_exact(ctx, ty);
+    if (exact)
+        return exact;
 
     for (int i = 0; i < ctx->typedefs_len; i++)
         if (name_visible(&ctx->typedefs[i], ctx->current_fn) &&
@@ -757,6 +789,100 @@ static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty) {
                 name_visible(&ctx->typedefs[i], ctx->current_fn))
                 return &ctx->typedefs[i];
     return NULL;
+}
+
+// #1091: true when `a` and `b` are structurally identical (the caller has
+// already checked same_type_or_origin) but each is its OWN tagless
+// typedef -- e.g. `typedef struct { long quot, rem; } ldiv_t;` next to
+// `typedef struct { long long quot, rem; } lldiv_t;`, byte-identical on any
+// 64-bit target CCCC's `long`/`long long` share a representation on. Both
+// need their own printed definition, not just the first one collected.
+// A tagged struct/union is excluded: same_type_or_origin()'s own tag check
+// already keeps two differently-tagged complete aggregates apart, so this
+// only needs to cover the tagless case that check can't reach. Falls back
+// to "not distinct" (today's behavior) whenever identity can't resolve
+// BOTH sides to their own typedef record -- e.g. the #1006/#1046 same-
+// declaration-reparsed case, which must keep deduping exactly as before.
+static bool nominally_distinct_typedefs(SerializeContext *ctx, Type *a,
+                                        Type *b) {
+    if (!ctx || !a || !b || a == b)
+        return false;
+    // same_type_or_origin() may have matched `a` and `b` two different ways:
+    // a genuine origin-identity match (one is a copy_type() descendant of
+    // the other -- e.g. a per-declarator copy made while parsing a local
+    // variable's type, which keeps its own struct_tag field untouched even
+    // after rename_anon_globals() mutates the CANONICAL Type's struct_tag
+    // in place), or a purely structural coincidence between two otherwise
+    // unrelated Type objects. Only the latter is what this function needs
+    // to catch -- an origin-identical pair is the same type by construction
+    // and must never be treated as nominally distinct, regardless of which
+    // copy happens to carry the tag right now.
+    for (Type *pa = a; pa; pa = pa->origin)
+        for (Type *pb = b; pb; pb = pb->origin)
+            if (pa == pb)
+                return false;
+    // A tag identifies a type on its own; same_type_or_origin()'s own tag
+    // check (#892) already keeps two DIFFERENTLY-tagged complete aggregates
+    // from ever reaching here structurally-matched, so both sides tagged
+    // means either the same tag (a genuine re-parse, #1006/#1046 -- keep
+    // deduping) or this path wasn't reached at all. The combination that
+    // check can't see is one side tagged and the other not: a tagless
+    // aggregate is a distinct type from a same-shaped tagged one (#1091
+    // symptom 3) and must never share its printed definition.
+    if (a->struct_tag && b->struct_tag)
+        return false;
+    if (a->struct_tag || b->struct_tag)
+        return true;
+
+    TypeName *na = find_typedef_name_exact(ctx, a);
+    TypeName *nb = find_typedef_name_exact(ctx, b);
+    if (!na || !nb)
+        return false;
+    return na->name_len != nb->name_len ||
+           strncmp(na->name, nb->name, na->name_len) != 0;
+}
+
+// #1091: type_vec_contains()/type_vec_find()/type_vec_push(), but a
+// structural match against a nominally-distinct tagless typedef (see just
+// above) doesn't count as "already present" -- used only at the two sites
+// that decide whether a struct/union/enum DEFINITION gets printed
+// (collect_type()'s ctx->seen/ctx->defs, and emit_typedef_and_deps()'s
+// ctx->emitted_defs), never at the many other type_vec_* call sites, whose
+// looser structural dedup (#1006/#1046) must stay untouched.
+static bool type_vec_contains_nominal(SerializeContext *ctx, TypeVec *vec,
+                                      Type *ty) {
+    for (int i = 0; i < vec->len; i++) {
+        if (!same_type_or_origin(vec->data[i], ty))
+            continue;
+        if (nominally_distinct_typedefs(ctx, vec->data[i], ty))
+            continue;
+        return true;
+    }
+    return false;
+}
+
+static int type_vec_find_nominal(SerializeContext *ctx, TypeVec *vec,
+                                 Type *ty) {
+    for (int i = 0; i < vec->len; i++) {
+        if (!same_type_or_origin(vec->data[i], ty))
+            continue;
+        if (nominally_distinct_typedefs(ctx, vec->data[i], ty))
+            continue;
+        return i;
+    }
+    return -1;
+}
+
+static void type_vec_push_nominal(SerializeContext *ctx, TypeVec *vec,
+                                  Type *ty) {
+    if (!ty || type_vec_contains_nominal(ctx, vec, ty))
+        return;
+
+    if (vec->len >= vec->cap) {
+        vec->cap  = vec->cap ? vec->cap * 2 : 16;
+        vec->data = realloc(vec->data, sizeof(Type *) * vec->cap);
+    }
+    vec->data[vec->len++] = ty;
 }
 
 // #952: matches a typedef that actually names `ty` itself, not merely a
@@ -854,7 +980,13 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
         return;
 
-    int seen_idx = type_vec_find(&ctx->seen, ty);
+    // #1091: type_vec_find_nominal() (not the plain, purely-structural
+    // type_vec_find()) so a tagless typedef that's structurally identical
+    // to -- but nominally distinct from -- an already-collected one (e.g.
+    // ldiv_t/lldiv_t) isn't treated as already seen here; it falls through
+    // to its own seen/defs entry below instead, exactly as if it were an
+    // unrelated shape.
+    int seen_idx = type_vec_find_nominal(ctx, &ctx->seen, ty);
     if (seen_idx >= 0) {
         // #1010 defect B: same_type_or_origin() deliberately treats a
         // tagged *incomplete* struct/union as equal to the tagged
@@ -886,12 +1018,12 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
         }
         return;
     }
-    type_vec_push(&ctx->seen, ty);
+    type_vec_push_nominal(ctx, &ctx->seen, ty);
 
     for (Member *m = ty->members; m; m = m->next)
         collect_type(ctx, m->ty);
 
-    type_vec_push(&ctx->defs, ty);
+    type_vec_push_nominal(ctx, &ctx->defs, ty);
 }
 
 static void collect_obj_types(SerializeContext *ctx, Obj *obj) {
@@ -4726,6 +4858,15 @@ static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
                                    Obj *owner_fn) {
     for (int i = 0; i < ctx->tags_len; i++)
         if (ctx->tags[i].owner_fn == owner_fn &&
+            // #1091: same guard as find_tag_name() -- a tagless `ty`
+            // structurally matching a *differently*-tagged record (e.g. a
+            // tagless typedef next to a same-shaped tagged struct) does not
+            // mean `ty` itself "has" that tag; without this,
+            // aggregate_typedef_is_definition() wrongly concludes the
+            // tagless typedef isn't the definition, and its own standalone
+            // body (correctly printed elsewhere, via serialize_struct_def)
+            // gets a second, redundant copy from serialize_typedef_alias.
+            !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
             same_type_or_origin(ctx->tags[i].ty, ty))
             return true;
     return false;
@@ -5318,9 +5459,9 @@ static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
     // idempotent) and the same header-suppression rule
     // serialize_typedef_alias applies to the alias line itself.
     if (aggregate_typedef_is_definition(ctx, td) &&
-        !type_vec_contains(&ctx->emitted_defs, real_ty) &&
+        !type_vec_contains_nominal(ctx, &ctx->emitted_defs, real_ty) &&
         !typedef_alias_header_suppressed(ctx, td)) {
-        type_vec_push(&ctx->emitted_defs, real_ty);
+        type_vec_push_nominal(ctx, &ctx->emitted_defs, real_ty);
         if (real_ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, real_ty);
         else
@@ -5527,9 +5668,9 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // this iteration reaching it directly. type_vec_push returns false
         // (a no-op) when already present, so this is the same emitted_defs
         // dedup emit_typedef_and_deps itself uses, just applied here too.
-        if (type_vec_contains(&ctx->emitted_defs, ty))
+        if (type_vec_contains_nominal(ctx, &ctx->emitted_defs, ty))
             continue;
-        type_vec_push(&ctx->emitted_defs, ty);
+        type_vec_push_nominal(ctx, &ctx->emitted_defs, ty);
         if (ty->kind == TY_ENUM)
             serialize_enum_def(f, ctx, ty);
         else

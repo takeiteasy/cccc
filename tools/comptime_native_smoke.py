@@ -5589,11 +5589,81 @@ def case_nested_fn_in_block_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     NESTED_FN_IN_BLOCK_1081_PROGRAM)
 
 
+TYPEDEF_IDENTITY_1091_PROGRAM = (
+    "typedef struct { int a, b; } Pair;\n"
+    "typedef struct { int a, b; } Span;\n"
+    "struct Tag { int v; };\n"
+    "typedef struct { int v; } Tagless;\n"
+    "typedef struct { long quot, rem; } ldiv_t;\n"
+    "typedef struct { long long quot, rem; } lldiv_t;\n"
+    "static Pair mk_pair(void) { Pair p; p.a = 1; p.b = 2; return p; }\n"
+    "static Span mk_span(void) { Span s; s.a = 3; s.b = 4; return s; }\n"
+    "static Tagless mk_tagless(void) { Tagless t; t.v = 5; return t; }\n"
+    "int main(void) {\n"
+    "    Pair p = mk_pair();\n"
+    "    Span s = mk_span();\n"
+    "    if (p.a + p.b != 3 || s.a + s.b != 7) return 1;\n"
+    "    struct Tag tag; tag.v = 6;\n"
+    "    Tagless t = mk_tagless();\n"
+    "    if (tag.v != 6 || t.v != 5) return 2;\n"
+    "    ldiv_t l = { .quot = -3, .rem = -2 };\n"
+    "    lldiv_t ll = { .quot = -3, .rem = 2 };\n"
+    "    if (l.quot != -3 || l.rem != -2 || ll.quot != -3 || ll.rem != 2) return 3;\n"
+    "    int total = (p.a + p.b) + (s.a + s.b) + tag.v + t.v +\n"
+    "                (int)(l.quot + l.rem) + (int)(ll.quot + ll.rem);\n"
+    "    return total == 15 ? 42 : 4;\n"
+    "}\n"
+)
+
+
+def case_typedef_identity_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  129: -c=native's serializer collapsed structurally-identical-"
+          "but-nominally-distinct typedef'd structs into one printed type "
+          "-- same_type_or_origin()'s structural fallback (load-bearing for "
+          "#1006/#1046's own same-declaration-reparsed dedup) meant two "
+          "UNRELATED same-shaped typedefs (e.g. ldiv_t/lldiv_t, byte-"
+          "identical on every 64-bit target this project supports) "
+          "collapsed into one spelling, and a tagless typedef next to a "
+          "same-shaped TAGGED struct got spelled with the tagged struct's "
+          "own name (#1091). Found verifying #1090's div/ldiv/lldiv fix. "
+          "Fixed with identity-before-structure in find_typedef_name() "
+          "(find_typedef_name_exact()'s existing ->origin-chain walk, tried "
+          "first), a tag_spelling_mismatch() guard in find_tag_name()/"
+          "type_has_tag_for_owner() (a tagless type is never spelled with a "
+          "same-shaped tagged one's tag), and nominal-aware ctx->defs/"
+          "ctx->emitted_defs dedup (type_vec_push_nominal(), gated on two "
+          "structurally-equal Type objects each resolving via identity to "
+          "a DIFFERENTLY-named typedef record) so each nominally-distinct "
+          "type gets its own printed definition. Asserts -m output prints "
+          "standalone bodies for both Pair and Span (not one collapsed "
+          "onto the other's name), Tagless as its own tagless body (not "
+          "spelled `struct Tag`), plus VM 42 -> native 42 -- this is the "
+          "round-trip proof: a pre-fix build fails outright under "
+          "-c=native (redefinition, or \"assigning to X from incompatible "
+          "type Y\"), not just wrong text.")
+    src = Path(tmp) / "typedef_identity_1091.c"
+    write(src, TYPEDEF_IDENTITY_1091_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = m_result.stdout
+    if "} Pair;" not in out or "} Span;" not in out:
+        print(f"    FAIL: -m output missing standalone Pair/Span bodies "
+              f"(nominally-distinct tagless typedefs collapsed)\n    {out}")
+        return False
+    if "struct Tag A" in out or "struct Tag Tagless" in out:
+        print(f"    FAIL: -m output spells Tagless using struct Tag's own "
+              f"tag\n    {out}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "typedef_identity_1091",
+                                    TYPEDEF_IDENTITY_1091_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -5729,6 +5799,7 @@ def main() -> int:
             case_static_assert_native_round_trip,
             case_block_in_nested_native_round_trip,
             case_nested_fn_in_block_native_round_trip,
+            case_typedef_identity_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

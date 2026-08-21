@@ -1340,17 +1340,27 @@ closed this batch:
   captures is the spec. Write-propagation still requires `__block`, the
   same rule blocks already have.
 
-A third, structurally similar shape is a distinct, still-open gap —
-**#1100** — found while fixing #1081: calling a nested function whose own
-parent sits *beyond* a block ancestor (a sibling/cousin call reached only
-by climbing out of a block first, not a plain variable read) needs the
-block's own *enclosing frame*, which a heap-copyable block's descriptor
-deliberately never stores — by design, the same reason #1081's own
-snapshot decision above was made. Confirmed broken on both back ends
-(VM: wrong answer; `-c=native`: compiles clean, segfaults at runtime) and
-now rejected with a diagnostic ("calling a nested function whose parent is
-beyond a block ancestor is not supported (#1081 residual)") on both, rather
-than left to miscompile silently.
+A third, structurally similar shape is a distinct, permanent gap —
+**#1100**, closed `WONT_FIX` — found while fixing #1081: calling a nested
+function whose own parent sits *beyond* a block ancestor (a sibling/cousin
+call reached only by climbing out of a block first, not a plain variable
+read) needs the block's own *enclosing frame*, which a heap-copyable
+block's descriptor deliberately never stores — by design, the same reason
+#1081's own snapshot decision above was made. Confirmed broken on both
+back ends pre-fix (VM: wrong answer; `-c=native`: compiles clean,
+segfaults at runtime) and now rejected with a diagnostic ("calling a
+nested function whose parent is beyond a block ancestor is not supported
+(#1081 residual)") on both — `codegen_expr.c`'s `calling_nested`
+static-link walk (VM) and `serialize.c`'s `collect_nested_refs()` (native,
+checked ahead of `nested_env_ptr_expr()`'s own call-site rewrite) — rather
+than left to miscompile silently. A real fix would need a fundamentally
+different mechanism (e.g. passing the block's own creating frame's address
+down through the descriptor for the duration of a synchronous nested call
+only, never stored past it, with escape analysis to guarantee the block
+never outlives that frame) — significant new scope and safety machinery
+for a shape with no known real-world occurrence, so this stays a
+diagnosed rejection rather than a miscompile, same disposition as #1099
+above.
 
 A nested (non-`static`) function *definition* whose name matches an
 enclosing file-scope function is supported (#1075): C17 6.2.1p4 treats scope
@@ -1655,6 +1665,56 @@ only this one case today; the #1014/#1015 tag-vs-tag and
 enumerator-vs-enumerator unrepresentable cases described above do not yet
 emit it, though the category is deliberately generic enough to extend to
 them later.
+
+The opposite direction — two *unrelated* typedefs whose underlying shapes
+happen to be structurally identical, not two independently-completed copies
+of one shared tag — used to collapse into a single printed type (#1091).
+Found verifying #1090's `div`/`ldiv`/`lldiv` fix, in a native round-trip
+using both `ldiv_t` and `lldiv_t` in one TU: on every 64-bit target this
+project supports, `long` and `long long` share a representation, so CCCC's
+own `typedef struct { long quot, rem; } ldiv_t;` and `typedef struct { long
+long quot, rem; } lldiv_t;` are byte-identical. `find_typedef_name()`
+(`src/serialize.c`) matched by `same_type_or_origin()`'s structural
+(member-wise) fallback — deliberately load-bearing elsewhere, since it's
+what dedupes two independently re-parsed copies of *the same* declaration
+under comptime re-parse or #1001's per-TU preprocessor isolation (#1006,
+#1046) — so only the second-collected of two structurally-identical
+tagless typedefs was ever printed, and every use of the first (including a
+function prototype's own return type) was spelled with the second's name; a
+real host compiler then rejects the resulting type mismatch. A third,
+narrower symptom of the same root cause: a tagless typedef structurally
+identical to a separately-tagged struct got spelled with the tagged
+struct's own tag (valid C, but the wrong type identity) via
+`type_has_tag_for_owner()`'s own structural match.
+
+Fixed without touching `same_type_or_origin()` itself (its structural
+fallback stays exactly as load-bearing as before): `find_typedef_name()`
+now tries pointer/origin identity first (`find_typedef_name_exact()`'s
+existing `->origin`-chain walk, already used elsewhere for a non-aggregate
+typedef, #999), falling back to the structural scan only when identity
+finds nothing — this alone resolves an *ordinary* reference to a typedef
+correctly, including one reached through a per-declarator `copy_type()`
+copy. `find_tag_name()`/`type_has_tag_for_owner()` gained a
+`tag_spelling_mismatch()` guard: a tagless type is never spelled with (or
+considered to already have) a same-shaped tagged type's own tag — provably
+safe, since two `Type` objects sharing a pointer anywhere on their
+`->origin` chains necessarily agree on `struct_tag` already, so this can
+only ever suppress a purely structural coincidence, never a genuine
+identity match. Finally, the two struct/union/enum-definition dedup sites
+(`ctx->defs`, populated by `collect_type()`'s post-order walk, and
+`ctx->emitted_defs`, the typedef-dependency-chase skip-set) both gained a
+nominal-aware variant (`type_vec_push_nominal()`/`nominally_distinct_
+typedefs()`) that still dedupes two `Type` objects reachable from one
+another via `->origin` (the same genuine-identity check as above) or
+resolving to the *same* typedef name (#1006/#1046's re-parse case), but no
+longer dedupes two structurally-equal objects that resolve to *different*
+typedef names — each such nominally-distinct type now gets its own printed
+definition. Verified via `tools/comptime_native_smoke.py` case 129 and
+`tests/test_serialize_typedef_identity_1091.c` — a pre-fix build fails
+outright under `-c=native` (a hard "redefinition" or "assigning to X from
+incompatible type Y" from the host compiler), not merely wrong text, so
+both are round-trip proofs (VM 42 → native 42), not just `-m` text
+assertions.
 
 Separately, `--checked-pointers` enforcement is VM-only — those modes warn and
 drop it; see [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).

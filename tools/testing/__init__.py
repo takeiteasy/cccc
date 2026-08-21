@@ -132,15 +132,6 @@ NATIVE_SKIP_TESTS = {
     # results (see the block at the top of this dict for the rest) ---
     "test_attr_vector_size_variadic.c": "variadic serialization gives wrong result (#1018)",
 
-    # --- found verifying #1090's div/ldiv/lldiv fix: -c=native collapses
-    # ldiv_t/lldiv_t (structurally identical on every target this project
-    # supports -- long and long long are both 8 bytes) into one printed
-    # struct type, so a TU using both gets a bogus type mismatch from the
-    # real host compiler. Not a #1090 regression -- the VM itself keeps the
-    # two distinct; only -c=native's own struct-type printing conflates
-    # them. General serializer defect, not div-family-specific.
-    "test_ffi_struct_byval_return_1090.c": "-c=native collapses ldiv_t/lldiv_t into one printed type (#1091)",
-
     # --- #1020's 7th file (test_constructor_c23.c) and #1083 itself, both
     # RESOLVED: CCCC's own Availability.h stub's `#define __attribute__(x)`
     # used to leak past the first <stdio.h>-pulled-in sys/cdefs.h and strip
