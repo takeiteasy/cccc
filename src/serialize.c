@@ -1543,6 +1543,20 @@ static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
     fprintf(f, "}");
 }
 
+// #1109: is this alias the one bundled-header scalar typedef whose host
+// meaning diverges structurally -- `atomic_flag`? CCCC's stdatomic.h spells
+// it as an integer-flavoured `typedef _Atomic _Bool atomic_flag;`, while a
+// real host <stdatomic.h> follows C11 7.17 and makes it a struct, so any
+// generated-C use resolved through the host header is a type error (see the
+// #1109 comment in serialize_type). Matched by name AND shape (kind +
+// is_atomic): a user's own unrelated typedef that happens to reuse the name,
+// or an alias to any other underlying type, keeps its normal spelling.
+static bool is_host_divergent_atomic_flag_alias(Type *ty, TypeName *alias) {
+    return ty && ty->kind == TY_BOOL && ty->is_atomic && alias &&
+           alias->name_len == 11 &&
+           strncmp(alias->name, "atomic_flag", 11) == 0;
+}
+
 // Serialize type to string
 static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty) {
@@ -1610,8 +1624,29 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         ty->kind != TY_FUNC) {
         TypeName *alias = find_typedef_name_exact(ctx, ty);
         if (alias) {
-            fprintf(f, "%.*s", alias->name_len, alias->name);
-            return;
+            // #1109: atomic_flag is the one bundled-header typedef whose
+            // host spelling diverges structurally -- C11 7.17 makes it a
+            // *struct* type (macOS SDK/glibc: `typedef struct atomic_flag
+            // atomic_flag;`) while CCCC's own stdatomic.h spells it as an
+            // integer-flavoured `_Atomic _Bool`. The generated C re-includes
+            // <stdatomic.h>, so whichever header the HOST compiler resolves
+            // decides: with CCCC's own (the -I./include the native harness
+            // always passes) everything compiles, but against a real host
+            // header every integer-style use dies ("used type 'atomic_flag'
+            // (aka 'struct atomic_flag') where arithmetic or pointer type is
+            // required"). Spell the canonical `_Atomic _Bool` instead --
+            // valid C11 on every host, needs no header at all, and denotes
+            // exactly the type the VM modelled, so output compiled through
+            // either header is unaffected. Scoped to this one name + shape:
+            // every other atomic_* typedef means the same _Atomic-qualified
+            // scalar on both sides, so their aliases keep printing (and
+            // `atomic_bool`, whose host spelling agrees with CCCC's, is
+            // deliberately left alone).
+            if (!is_host_divergent_atomic_flag_alias(ty, alias)) {
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+                return;
+            }
+            fprintf(f, "_Atomic ");
         }
     }
 

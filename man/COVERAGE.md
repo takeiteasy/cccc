@@ -1194,7 +1194,13 @@ ABI, or an explicit diagnosed rejection, never silent divergence. Blocks and
 GNU vector `?:` meet the bar (lowered to portable C, not printed verbatim
 assuming a specific host compiler); `asm(...)` is the one deliberate,
 documented exception (always verbatim, since there's no VM equivalent to
-translate to or from — see the table below).
+translate to or from — see the table below). `atomic_flag` used to violate
+the bar the other way around: spelled through the bundled typedef name,
+which the host's own `<stdatomic.h>` defines as a *struct* (C11 7.17)
+wherever CCCC's integer-flavoured header wasn't shadowing it on the include
+path — every integer-style use failed to compile. Serialized output now
+always spells the canonical `_Atomic _Bool` (#1109), which needs no header
+and denotes exactly the type the VM modelled.
 
 `--testing=native` (#1033) is the last piece of that batch: it doesn't
 change this bar, but it's what finally exercises the entire

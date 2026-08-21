@@ -30,6 +30,16 @@ All notable changes to CCCC are documented here. Format loosely follows
   operands serialize byte-identical to before. This un-skips
   `test_suite_atomics.c` and `test_suite_optimizer.c` from the
   `tools/tests.py --native` corpus (the two files #1033's sweep flagged).
+- `-c=native`/`-c=generated` output no longer depends on which
+  `<stdatomic.h>` the host compiler resolves (#1109): `atomic_flag` was
+  spelled through the bundled typedef name, but a real host header defines
+  it as a *struct* (C11 7.17) while cccc's own header makes it an integer
+  flavour of `_Atomic _Bool` — so every integer-style use failed to compile
+  wherever cccc's headers weren't first on the include path (the native test
+  harness always passes `-I./include`, plain `-c=native` runs don't).
+  Serialized output now always emits the canonical `_Atomic _Bool` for
+  declarations and casts; output compiled against either header is
+  unchanged.
 
 ## [0.3.1] - 2026-08-21
 
