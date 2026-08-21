@@ -64,18 +64,21 @@ enum {
     thrd_nomem    = ENOMEM,
 };
 
-/* call_once: under the GIL, bytecode execution is serialised so a simple
-   flag check + call is atomic from the VM's perspective. */
+/* call_once: #1088 -- this used to be a macro expanding to a plain
+   `if (!*flag) { *flag = 1; func(); }`, safe only because the VM's GIL
+   serialises bytecode execution. That expansion happens in CCCC's own
+   preprocessor, before either backend (VM cfunc dispatch or -c=native's
+   serializer) ever sees it, so a -c=native shim could never intercept it --
+   the AST already holds the racy expansion with no record it started life
+   as call_once. Under -c=native's real parallelism two threads could both
+   observe the flag unset and both run func(). Made a real function instead,
+   backed by an atomic CAS on the flag on both backends (VM: wrap_call_once,
+   src/stdlib/pthread.c; -c=native: the threads_native_shims entry,
+   src/serialize.c) -- so it's race-free everywhere, not just under the GIL. */
 typedef _Atomic int once_flag;
 #define ONCE_FLAG_INIT 0
 
-#define call_once(flag, func)                                                  \
-    do {                                                                       \
-        if (!(*(flag))) {                                                      \
-            *(flag) = 1;                                                       \
-            (func)();                                                          \
-        }                                                                      \
-    } while (0)
+void call_once(once_flag *flag, void (*func)(void));
 
 /* ---- Thread lifecycle ---- */
 int thrd_create(thrd_t *thr, thrd_start_t func, void *arg);

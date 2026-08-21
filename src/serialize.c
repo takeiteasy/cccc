@@ -5913,6 +5913,517 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
         fprintf(f, "\n");
 }
 
+// #1088: real definitions for the C11 <threads.h> family (thrd_*/mtx_*/
+// cnd_*/tss_*/call_once) under -c=native. <threads.h> is on
+// is_cccc_supplied_only_header() (preprocess.c) -- its own #include is
+// suppressed and its types (mtx_t/cnd_t/thrd_t/tss_t/etc) are re-derived like
+// any other cccc-only header, but until now no *definition* of any of these
+// functions existed anywhere reachable from the generated TU: they're VM
+// cfuncs (src/stdlib/pthread.c), and a native binary has no VM to call into
+// -- every use failed at the host linker with an undefined symbol.
+//
+// Deliberately a self-contained shim written over the real host <pthread.h>
+// (already replayed via the #1022-widened auto-capture gate,
+// preprocess.c:5304), NOT a #include_next hand-off onto a real host
+// <threads.h> the way include/pthread.h itself hands off -- two reasons,
+// both load-bearing (user sign-off): (1) CCCC's own thrd_error/thrd_timedout/
+// thrd_busy/thrd_nomem encoding (include/threads.h) does not match glibc's,
+// and those values are folded to bare integer literals at guest compile
+// time, so any comparison other than `!= thrd_success` would silently change
+// meaning once glibc's own enum reached the output -- the same FP_*/isnan
+// asymmetry native_accessor_shims's own comment documents above; (2) Darwin
+// has no <threads.h> at all, so a hand-off would leave macOS permanently
+// unsupported. A self-contained shim closes both platforms in one change,
+// consulting the host's own <threads.h> on neither.
+//
+// Each function below is a near-verbatim port of its VM cfunc counterpart in
+// src/stdlib/pthread.c (named in each comment), minus the GIL save/release
+// dance and the --thread-safety lock-order bookkeeping -- both meaningless
+// without a VM -- but NOT a verbatim port of the VM's lazy mtx_t/cnd_t
+// handle allocation: ensure_mtx/ensure_cond (pthread.c:991/463) are
+// check-then-malloc-then-store, safe only because the GIL serializes every
+// VM cfunc call. Two real threads racing that check under -c=native's actual
+// parallelism could each allocate a host mutex and store its own, silently
+// locking two different mutexes -- a wrong answer, not a crash, and the
+// wrong side of this batch's own "works on the VM -> correct natively" bar.
+// __cccc_ensure_mtx/__cccc_ensure_cnd below use a real atomic
+// compare-exchange on the ->__handle field instead, so exactly one raced
+// allocation wins and every other caller adopts it.
+static bool threads_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
+                                    const char *name) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->is_used || obj->body)
+            continue;
+        if (strcmp(obj->name, name) != 0)
+            continue;
+        Token *t = obj->tok;
+        if (!t || !t->file)
+            continue;
+        if (!cc_file_is_cccc_only(vm, t->file->name))
+            continue;
+        if (!path_basename_is(t->file->name, "threads.h"))
+            continue;
+        return true;
+    }
+    return false;
+}
+
+static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    // #1088's own --emit-cccc exemption: under --emit-cccc the cccc-only
+    // suppression above is exempted (see the include-replay loop's own
+    // gate, cc_serialize_program) so `#include <threads.h>` IS replayed,
+    // reaching a consumer cccc that already has the real cfuncs registered
+    // -- emitting definitions here would shadow them with a second,
+    // divergent implementation. Same gating as serialize_synth_setjmp_decls.
+    if (vm->compiler.emit_cccc)
+        return;
+
+    bool use_thrd_create  = threads_shim_fn_is_used(vm, prog, "thrd_create");
+    bool use_thrd_join    = threads_shim_fn_is_used(vm, prog, "thrd_join");
+    bool use_thrd_exit    = threads_shim_fn_is_used(vm, prog, "thrd_exit");
+    bool use_thrd_detach  = threads_shim_fn_is_used(vm, prog, "thrd_detach");
+    bool use_thrd_yield   = threads_shim_fn_is_used(vm, prog, "thrd_yield");
+    bool use_thrd_sleep   = threads_shim_fn_is_used(vm, prog, "thrd_sleep");
+    bool use_thrd_current = threads_shim_fn_is_used(vm, prog, "thrd_current");
+    bool use_thrd_equal   = threads_shim_fn_is_used(vm, prog, "thrd_equal");
+    bool any_thrd     = use_thrd_create || use_thrd_join || use_thrd_exit ||
+                        use_thrd_detach || use_thrd_yield || use_thrd_sleep ||
+                        use_thrd_current || use_thrd_equal;
+
+    bool use_mtx_init = threads_shim_fn_is_used(vm, prog, "mtx_init");
+    bool use_mtx_lock = threads_shim_fn_is_used(vm, prog, "mtx_lock");
+    bool use_mtx_trylock   = threads_shim_fn_is_used(vm, prog, "mtx_trylock");
+    bool use_mtx_timedlock = threads_shim_fn_is_used(vm, prog, "mtx_timedlock");
+    bool use_mtx_unlock    = threads_shim_fn_is_used(vm, prog, "mtx_unlock");
+    bool use_mtx_destroy   = threads_shim_fn_is_used(vm, prog, "mtx_destroy");
+    bool any_mtx      = use_mtx_init || use_mtx_lock || use_mtx_trylock ||
+                        use_mtx_timedlock || use_mtx_unlock || use_mtx_destroy;
+
+    bool use_cnd_init = threads_shim_fn_is_used(vm, prog, "cnd_init");
+    bool use_cnd_wait = threads_shim_fn_is_used(vm, prog, "cnd_wait");
+    bool use_cnd_signal    = threads_shim_fn_is_used(vm, prog, "cnd_signal");
+    bool use_cnd_broadcast = threads_shim_fn_is_used(vm, prog, "cnd_broadcast");
+    bool use_cnd_timedwait = threads_shim_fn_is_used(vm, prog, "cnd_timedwait");
+    bool use_cnd_destroy   = threads_shim_fn_is_used(vm, prog, "cnd_destroy");
+    bool any_cnd = use_cnd_init || use_cnd_wait || use_cnd_signal ||
+                   use_cnd_broadcast || use_cnd_timedwait || use_cnd_destroy;
+
+    bool use_tss_create = threads_shim_fn_is_used(vm, prog, "tss_create");
+    bool use_tss_get    = threads_shim_fn_is_used(vm, prog, "tss_get");
+    bool use_tss_set    = threads_shim_fn_is_used(vm, prog, "tss_set");
+    bool use_tss_delete = threads_shim_fn_is_used(vm, prog, "tss_delete");
+    bool any_tss =
+        use_tss_create || use_tss_get || use_tss_set || use_tss_delete;
+
+    bool use_call_once = threads_shim_fn_is_used(vm, prog, "call_once");
+
+    if (!any_thrd && !any_mtx && !any_cnd && !any_tss && !use_call_once)
+        return;
+
+    // Self-contained #includes rather than trusting the nested-include
+    // capture, following the __cccc_iseqsig_* precedent above -- harmless if
+    // repeated thanks to each header's own include guard.
+    fprintf(f, "#include <pthread.h>\n"
+               "#include <time.h>\n"
+               "#include <errno.h>\n"
+               "#include <stdlib.h>\n");
+    // #1054-class hazard: CCCC's own bundled include/sched.h and
+    // include/string.h have no #include_next hand-off, so a plain
+    // `#include` of either here (under the same -I./include forwarding
+    // every other replayed header sees) would re-pull CCCC's own
+    // polyfill copies, colliding with the real ones already reached via
+    // <pthread.h>'s own hand-off (struct sched_param redefinition,
+    // confirmed). sched_yield() is declared directly instead
+    // (POSIX-portable, no header needed); memcpy is replaced by the
+    // portable __builtin_memcpy below, avoiding <string.h> entirely.
+    // call_once's spin-wait (below) also needs sched_yield -- see its own
+    // comment for why.
+    if (use_thrd_yield || use_call_once)
+        fprintf(f, "extern int sched_yield(void);\n");
+    // <stdatomic.h> is NOT usable here for the same reason <sched.h>/
+    // <string.h> aren't above, but for a stricter cause: it's on
+    // is_compiler_owned_header() (preprocess.c), so force_cccc makes
+    // search_include_paths() resolve a plain #include to CCCC's own
+    // macro-based polyfill unconditionally -- even under
+    // --use-system-headers -- rather than ever reaching the real host
+    // <stdatomic.h>. CCCC's own copy expands atomic_compare_exchange_strong
+    // to __builtin_compare_and_swap, a CCCC-internal builtin absent on a
+    // real clang/gcc ("use of undeclared identifier", confirmed). The
+    // call_once shim below uses the plain __atomic_compare_exchange_n
+    // builtin on a pointer-to-plain-int instead (like __cccc_ensure_mtx's
+    // ->__handle CAS above), reached by casting away once_flag's own
+    // _Atomic qualifier -- the same reason that cast is needed here as for
+    // the VM-side wrap_call_once (src/stdlib/pthread.c): passing a pointer
+    // to an _Atomic-qualified type straight to the GCC/clang __atomic_*
+    // builtins is rejected outright ("address argument to atomic operation
+    // must be a pointer to integer or pointer"), since the compiler treats
+    // that argument shape as a request for the C11 stdatomic API instead.
+
+    if (any_thrd) {
+        // thrd_t is re-derived as CCCC's own `pthread_t` polyfill
+        // (include/pthread.h: `typedef void *pthread_t;`), i.e. a plain
+        // void*, while the real host pthread_t is `unsigned long` on glibc
+        // and an opaque pointer on Darwin -- both exactly pointer-sized, but
+        // not the same *type*, so a plain cast is not portable. The shims
+        // below round-trip through __builtin_memcpy instead of a cast
+        // (avoiding a <string.h> dependency -- see the sched_yield comment
+        // below for why that header can't just be #include-d here); the
+        // _Static_assert makes the sizing assumption checked rather than
+        // silently assumed.
+        fprintf(f,
+                "_Static_assert(sizeof(pthread_t) <= sizeof(void *),\n"
+                "               \"cccc: host pthread_t must fit in a "
+                "pointer-sized thrd_t\");\n"
+                "struct __cccc_thrd_args { int (*fn)(void *); void *arg; };\n"
+                "static void *__cccc_thrd_trampoline(void *argp) {\n"
+                "    struct __cccc_thrd_args *a = "
+                "(struct __cccc_thrd_args *)argp;\n"
+                "    int rc = a->fn(a->arg);\n"
+                "    free(a);\n"
+                "    return (void *)(long)rc;\n"
+                "}\n");
+    }
+
+    if (any_mtx || any_cnd) {
+        // Port of ensure_mtx (src/stdlib/pthread.c:991-1014), with the
+        // lazy-allocation race closed by an atomic compare-exchange on
+        // ->__handle instead of the VM's GIL-only check-then-store (see
+        // this function's own comment above). mtx_recursive (1, CCCC's own
+        // enum, include/threads.h) is remapped to the real host
+        // PTHREAD_MUTEX_RECURSIVE -- forwarding ->__type straight through
+        // would be wrong, since CCCC's C11 enum and the host's pthread
+        // mutex-type constants don't share a numbering.
+        fprintf(f, "static pthread_mutex_t *__cccc_ensure_mtx(mtx_t *mtx) {\n"
+                   "    if (!mtx) return NULL;\n"
+                   "    void *h = __atomic_load_n(&mtx->__handle, "
+                   "__ATOMIC_ACQUIRE);\n"
+                   "    if (h) return (pthread_mutex_t *)h;\n"
+                   "    pthread_mutex_t *host = malloc(sizeof(*host));\n"
+                   "    if (!host) return NULL;\n"
+                   "    pthread_mutexattr_t attr;\n"
+                   "    pthread_mutexattr_init(&attr);\n"
+                   "    if (mtx->__type == 1)\n"
+                   "        pthread_mutexattr_settype(&attr, "
+                   "PTHREAD_MUTEX_RECURSIVE);\n"
+                   "    if (pthread_mutex_init(host, &attr) != 0) {\n"
+                   "        pthread_mutexattr_destroy(&attr);\n"
+                   "        free(host);\n"
+                   "        return NULL;\n"
+                   "    }\n"
+                   "    pthread_mutexattr_destroy(&attr);\n"
+                   "    void *expected = NULL;\n"
+                   "    if (!__atomic_compare_exchange_n(&mtx->__handle, "
+                   "&expected, host, 0,\n"
+                   "                                      __ATOMIC_ACQ_REL, "
+                   "__ATOMIC_ACQUIRE)) {\n"
+                   "        pthread_mutex_destroy(host);\n"
+                   "        free(host);\n"
+                   "        return (pthread_mutex_t *)expected;\n"
+                   "    }\n"
+                   "    mtx->__state = 1;\n"
+                   "    return host;\n"
+                   "}\n");
+    }
+    if (any_cnd) {
+        // Port of ensure_cond (src/stdlib/pthread.c:463-478); same
+        // atomic-compare-exchange race closure as __cccc_ensure_mtx above.
+        fprintf(f, "static pthread_cond_t *__cccc_ensure_cnd(cnd_t *cond) {\n"
+                   "    if (!cond) return NULL;\n"
+                   "    void *h = __atomic_load_n(&cond->__handle, "
+                   "__ATOMIC_ACQUIRE);\n"
+                   "    if (h) return (pthread_cond_t *)h;\n"
+                   "    pthread_cond_t *host = malloc(sizeof(*host));\n"
+                   "    if (!host) return NULL;\n"
+                   "    if (pthread_cond_init(host, NULL) != 0) {\n"
+                   "        free(host);\n"
+                   "        return NULL;\n"
+                   "    }\n"
+                   "    void *expected = NULL;\n"
+                   "    if (!__atomic_compare_exchange_n(&cond->__handle, "
+                   "&expected, host, 0,\n"
+                   "                                      __ATOMIC_ACQ_REL, "
+                   "__ATOMIC_ACQUIRE)) {\n"
+                   "        pthread_cond_destroy(host);\n"
+                   "        free(host);\n"
+                   "        return (pthread_cond_t *)expected;\n"
+                   "    }\n"
+                   "    cond->__state = 1;\n"
+                   "    return host;\n"
+                   "}\n");
+    }
+
+    // ---- Thread lifecycle (port of pthread.c:923-981) ----
+    if (use_thrd_create)
+        fprintf(f,
+                "int thrd_create(thrd_t *thr, thrd_start_t func, void *arg) {\n"
+                "    struct __cccc_thrd_args *a = malloc(sizeof(*a));\n"
+                "    if (!a) return ENOMEM;\n"
+                "    a->fn = func;\n"
+                "    a->arg = arg;\n"
+                "    pthread_t host;\n"
+                "    int rc = pthread_create(&host, NULL, "
+                "__cccc_thrd_trampoline, a);\n"
+                "    if (rc != 0) {\n"
+                "        free(a);\n"
+                "        return rc == ENOMEM ? ENOMEM : 1;\n"
+                "    }\n"
+                "    thrd_t out = 0;\n"
+                "    __builtin_memcpy(&out, &host, sizeof(host));\n"
+                "    *thr = out;\n"
+                "    return 0;\n"
+                "}\n");
+    if (use_thrd_join)
+        fprintf(f, "int thrd_join(thrd_t thr, int *res) {\n"
+                   "    pthread_t host;\n"
+                   "    __builtin_memcpy(&host, &thr, sizeof(host));\n"
+                   "    void *retval = NULL;\n"
+                   "    if (pthread_join(host, &retval) != 0) return 1;\n"
+                   "    if (res) *res = (int)(long)retval;\n"
+                   "    return 0;\n"
+                   "}\n");
+    if (use_thrd_exit)
+        // Matches thrd_create's trampoline encoding: returning `rc` from the
+        // thread function is equivalent (POSIX) to pthread_exit() with that
+        // same value, so thrd_join's narrowing agrees regardless of which
+        // path a thread actually exits through.
+        fprintf(f, "_Noreturn void thrd_exit(int res) {\n"
+                   "    pthread_exit((void *)(long)res);\n"
+                   "}\n");
+    if (use_thrd_detach)
+        fprintf(f, "int thrd_detach(thrd_t thr) {\n"
+                   "    pthread_t host;\n"
+                   "    __builtin_memcpy(&host, &thr, sizeof(host));\n"
+                   "    return pthread_detach(host) == 0 ? 0 : "
+                   "1;\n"
+                   "}\n");
+    if (use_thrd_yield)
+        fprintf(f, "void thrd_yield(void) { sched_yield(); }\n");
+    if (use_thrd_sleep)
+        fprintf(f, "int thrd_sleep(const struct timespec *duration, struct "
+                   "timespec *remaining) {\n"
+                   "    if (!duration) return -2;\n"
+                   "    int rc = nanosleep(duration, remaining);\n"
+                   "    if (rc == 0) return 0;\n"
+                   "    return errno == EINTR ? -1 : -2;\n"
+                   "}\n");
+    if (use_thrd_current)
+        fprintf(f, "thrd_t thrd_current(void) {\n"
+                   "    pthread_t self = pthread_self();\n"
+                   "    thrd_t out = 0;\n"
+                   "    __builtin_memcpy(&out, &self, sizeof(self));\n"
+                   "    return out;\n"
+                   "}\n");
+    if (use_thrd_equal)
+        fprintf(f, "int thrd_equal(thrd_t a, thrd_t b) {\n"
+                   "    pthread_t pa, pb;\n"
+                   "    __builtin_memcpy(&pa, &a, sizeof(pa));\n"
+                   "    __builtin_memcpy(&pb, &b, sizeof(pb));\n"
+                   "    return pthread_equal(pa, pb) != 0;\n"
+                   "}\n");
+
+    // ---- Mutex (port of pthread.c:1016-1130) ----
+    if (use_mtx_init)
+        fprintf(f,
+                "int mtx_init(mtx_t *mtx, int type) {\n"
+                "    if (!mtx) return 1;\n"
+                "    if (__atomic_load_n(&mtx->__handle, __ATOMIC_ACQUIRE))\n"
+                "        return 1;\n"
+                "    mtx->__type = type;\n"
+                "    return __cccc_ensure_mtx(mtx) ? 0 : "
+                "1;\n"
+                "}\n");
+    if (use_mtx_lock)
+        fprintf(f, "int mtx_lock(mtx_t *mtx) {\n"
+                   "    pthread_mutex_t *host = __cccc_ensure_mtx(mtx);\n"
+                   "    if (!host) return 1;\n"
+                   "    return pthread_mutex_lock(host) == 0 ? 0 : "
+                   "1;\n"
+                   "}\n");
+    if (use_mtx_trylock)
+        fprintf(f, "int mtx_trylock(mtx_t *mtx) {\n"
+                   "    pthread_mutex_t *host = __cccc_ensure_mtx(mtx);\n"
+                   "    if (!host) return 1;\n"
+                   "    int rc = pthread_mutex_trylock(host);\n"
+                   "    if (rc == 0) return 0;\n"
+                   "    return rc == EBUSY ? EBUSY : 1;\n"
+                   "}\n");
+    if (use_mtx_timedlock)
+        // #824 note: this is not new lossy emulation -- it is byte-for-byte
+        // the same __linux__ / trylock-poll split the VM's own
+        // wrap_mtx_timedlock already ships (pthread.c:1067-1105), matching
+        // existing CCCC behaviour rather than inventing a new one. macOS has
+        // no pthread_mutex_timedlock at all.
+        //
+        // The macOS branch's own clock_gettime(CLOCK_REALTIME, ...) can't
+        // reach either declaration via a plain #include: <time.h> is NOT on
+        // this function's own #include list above (nor is it usable if it
+        // were -- same #1054-class hazard as <sched.h>/<string.h>, and
+        // documented in man/HEADERS.md's own pthread_native_1022 writeup as
+        // the reason CCCC never gave <time.h> itself a full #include_next
+        // hand-off: the cascade has no clean stopping point). clock_gettime
+        // is declared directly instead (POSIX-portable, no header needed);
+        // CLOCK_REALTIME is spelled as its own literal value (0 on both
+        // glibc and Darwin, confirmed) rather than the macro name, the same
+        // "spell CCCC's own fixed values as literals" precedent
+        // native_accessor_shims's own FP_*/fpclassify comment documents --
+        // this branch never runs on Linux, so only Darwin's value matters.
+        fprintf(f,
+                "int mtx_timedlock(mtx_t *mtx, const struct timespec *ts) {\n"
+                "    pthread_mutex_t *host = __cccc_ensure_mtx(mtx);\n"
+                "    if (!host || !ts) return 1;\n"
+                "    int rc;\n"
+                "#if defined(__linux__)\n"
+                "    rc = pthread_mutex_timedlock(host, ts);\n"
+                "#else\n"
+                "    extern int clock_gettime(int, struct timespec *);\n"
+                "    for (;;) {\n"
+                "        rc = pthread_mutex_trylock(host);\n"
+                "        if (rc == 0) break;\n"
+                "        struct timespec now;\n"
+                "        clock_gettime(0 /* CLOCK_REALTIME */, &now);\n"
+                "        if (now.tv_sec > ts->tv_sec ||\n"
+                "            (now.tv_sec == ts->tv_sec && now.tv_nsec >= "
+                "ts->tv_nsec)) {\n"
+                "            rc = ETIMEDOUT;\n"
+                "            break;\n"
+                "        }\n"
+                "        struct timespec delay = {0, 1000000};\n"
+                "        nanosleep(&delay, NULL);\n"
+                "    }\n"
+                "#endif\n"
+                "    if (rc == 0) return 0;\n"
+                "    return rc == ETIMEDOUT ? ETIMEDOUT : 1;\n"
+                "}\n");
+    if (use_mtx_unlock)
+        fprintf(f, "int mtx_unlock(mtx_t *mtx) {\n"
+                   "    if (!mtx || !mtx->__handle) return 1;\n"
+                   "    return pthread_mutex_unlock((pthread_mutex_t "
+                   "*)mtx->__handle) == 0 ? 0 : 1;\n"
+                   "}\n");
+    if (use_mtx_destroy)
+        fprintf(f, "void mtx_destroy(mtx_t *mtx) {\n"
+                   "    if (!mtx || !mtx->__handle) return;\n"
+                   "    pthread_mutex_destroy((pthread_mutex_t "
+                   "*)mtx->__handle);\n"
+                   "    free(mtx->__handle);\n"
+                   "    mtx->__handle = NULL;\n"
+                   "    mtx->__state = 0;\n"
+                   "}\n");
+
+    // ---- Condition variable (port of pthread.c:1132-1178) ----
+    if (use_cnd_init)
+        fprintf(f, "int cnd_init(cnd_t *cond) {\n"
+                   "    if (!cond) return 1;\n"
+                   "    return __cccc_ensure_cnd(cond) ? 0 : "
+                   "1;\n"
+                   "}\n");
+    if (use_cnd_wait)
+        fprintf(f, "int cnd_wait(cnd_t *cond, mtx_t *mtx) {\n"
+                   "    pthread_cond_t *c = __cccc_ensure_cnd(cond);\n"
+                   "    pthread_mutex_t *m = __cccc_ensure_mtx(mtx);\n"
+                   "    if (!c || !m) return 1;\n"
+                   "    return pthread_cond_wait(c, m) == 0 ? 0 : "
+                   "1;\n"
+                   "}\n");
+    if (use_cnd_signal)
+        fprintf(f, "int cnd_signal(cnd_t *cond) {\n"
+                   "    pthread_cond_t *c = __cccc_ensure_cnd(cond);\n"
+                   "    if (!c) return 1;\n"
+                   "    return pthread_cond_signal(c) == 0 ? 0 : "
+                   "1;\n"
+                   "}\n");
+    if (use_cnd_broadcast)
+        fprintf(f, "int cnd_broadcast(cnd_t *cond) {\n"
+                   "    pthread_cond_t *c = __cccc_ensure_cnd(cond);\n"
+                   "    if (!c) return 1;\n"
+                   "    return pthread_cond_broadcast(c) == 0 ? 0 : "
+                   "1;\n"
+                   "}\n");
+    if (use_cnd_timedwait)
+        fprintf(f, "int cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct "
+                   "timespec *ts) {\n"
+                   "    pthread_cond_t *c = __cccc_ensure_cnd(cond);\n"
+                   "    pthread_mutex_t *m = __cccc_ensure_mtx(mtx);\n"
+                   "    if (!c || !m || !ts) return 1;\n"
+                   "    int rc = pthread_cond_timedwait(c, m, ts);\n"
+                   "    if (rc == 0) return 0;\n"
+                   "    return rc == ETIMEDOUT ? ETIMEDOUT : 1;\n"
+                   "}\n");
+    if (use_cnd_destroy)
+        fprintf(f, "void cnd_destroy(cnd_t *cond) {\n"
+                   "    if (!cond || !cond->__handle) return;\n"
+                   "    pthread_cond_destroy((pthread_cond_t "
+                   "*)cond->__handle);\n"
+                   "    free(cond->__handle);\n"
+                   "    cond->__handle = NULL;\n"
+                   "    cond->__state = 0;\n"
+                   "}\n");
+
+    // ---- Thread-specific storage (port of pthread.c:1180-1195) ----
+    // tss_t is re-derived as a plain alias of the host's own pthread_key_t
+    // (include/threads.h: `typedef pthread_key_t tss_t;`, and pthread_key_t
+    // itself comes from the replayed real <pthread.h>) and tss_dtor_t
+    // (`void (*)(void *)`) already matches pthread's own destructor
+    // signature exactly -- so these forward straight through, no adapter
+    // needed.
+    if (use_tss_create)
+        fprintf(f, "int tss_create(tss_t *key, tss_dtor_t dtor) {\n"
+                   "    return pthread_key_create(key, dtor) == 0 ? "
+                   "0 : 1;\n"
+                   "}\n");
+    if (use_tss_get)
+        fprintf(f,
+                "void *tss_get(tss_t key) { return pthread_getspecific(key); "
+                "}\n");
+    if (use_tss_set)
+        fprintf(f, "int tss_set(tss_t key, void *val) {\n"
+                   "    return pthread_setspecific(key, val) == 0 ? "
+                   "0 : 1;\n"
+                   "}\n");
+    if (use_tss_delete)
+        fprintf(f, "void tss_delete(tss_t key) { pthread_key_delete(key); "
+                   "}\n");
+
+    // ---- call_once (#1088; see include/threads.h's own comment on why
+    // this is a real function now, not a macro) ----
+    //
+    // Three states, not a plain two-state CAS: 0 (not started) -> 1 (in
+    // progress) -> 2 (done). A first attempt used a plain 0->1
+    // compare-exchange with no wait for the losing side, mirroring
+    // wrap_call_once's own VM-side CAS -- but that's only correct there
+    // because the GIL serializes every cfunc call end-to-end: a losing
+    // guest thread can't even enter wrap_call_once until the winning
+    // thread's own call (guest callback included) has already returned and
+    // released the GIL, so the winner's func() is unconditionally done by
+    // the time any loser observes the flag. -c=native has no GIL, so a
+    // losing thread reaching the two-state version could return, and a
+    // caller relying on call_once to have initialized shared state before
+    // proceeding (the standard idiom) would race -- caught by stress-
+    // running tests/test_threads_call_once_1088.c (occasional non-42 exit
+    // out of dozens of runs). The 1 (in-progress) state gives every losing
+    // thread something to spin-wait on until the winner stores 2, matching
+    // real pthread_once/glibc's own blocking behaviour, which is what
+    // C11 programs actually rely on in practice even though 7.26.6.2p2's
+    // literal text only promises a happens-before ordering.
+    if (use_call_once)
+        fprintf(f,
+                "void call_once(once_flag *flag, void (*func)(void)) {\n"
+                "    int *raw = (int *)flag;\n"
+                "    int expected = 0;\n"
+                "    if (__atomic_compare_exchange_n(raw, &expected, 1, 0,\n"
+                "                                     __ATOMIC_ACQ_REL, "
+                "__ATOMIC_ACQUIRE)) {\n"
+                "        func();\n"
+                "        __atomic_store_n(raw, 2, __ATOMIC_RELEASE);\n"
+                "    } else {\n"
+                "        while (__atomic_load_n(raw, __ATOMIC_ACQUIRE) != 2)\n"
+                "            sched_yield();\n"
+                "    }\n"
+                "}\n");
+
+    fprintf(f, "\n");
+}
+
 // #1025: an asm("symbol") label names the real linker symbol directly,
 // bypassing the compiler's own C-name-mangling -- which on Darwin adds a
 // leading '_' to every external symbol and on Linux/ELF does not. Writing
@@ -8580,6 +9091,15 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // Serialize file-scope type definitions before declarations that reference
     // them.
     serialize_type_defs_for_owner(f, &ctx, NULL);
+
+    // #1088: real definitions for the C11 <threads.h> family -- run after
+    // serialize_type_defs_for_owner just above (the shim bodies name mtx_t/
+    // cnd_t/thrd_t/tss_t, re-derived there like any other cccc-only header's
+    // types) and before the block/nested preambles below, which don't
+    // reference threads.h's own types. !generated_only-gated like its
+    // neighbours; also skips --emit-cccc internally (see its own comment).
+    if (!generated_only)
+        serialize_threads_shims(f, vm, prog);
 
     // #965/#993: see the comment on the generated_only branch's own call
     // above -- must run after both the #include replay and the file-scope

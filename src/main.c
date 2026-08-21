@@ -338,6 +338,16 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
     // (glibc's newer functions aside) or into libSystem (macOS), the flag
     // is simply a no-op.
     argv_push(&cc_args, "-lm");
+    // #1088: pthread is never linked otherwise -- the <threads.h> shims
+    // (serialize_threads_shims, serialize.c) call real pthread_create/
+    // pthread_mutex_*/pthread_cond_*/pthread_key_* directly, same as any
+    // guest program using <pthread.h> itself. This stayed invisible for
+    // pthread until now for the same reason -lm did (#1051): glibc >= 2.34
+    // folds libpthread into libc.so.6 and macOS always had it in
+    // libSystem, so every existing native pthread test linked fine with no
+    // flag at all. An older glibc (< 2.34) needs it explicitly. Harmless
+    // where unnecessary, same rationale as -lm just above.
+    argv_push(&cc_args, "-pthread");
     // #1064: plain `char` is signed under every one of CCCC's own type
     // rules (ty_char, src/type.c), but a real host's plain `char` isn't
     // universally signed -- measured directly in the cccc-linux-arm64

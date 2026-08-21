@@ -1194,6 +1194,39 @@ static long long wrap_tss_delete(long long key) {
     return wrap_pthread_key_delete(key);
 }
 
+// call_once(once_flag *, void (*)(void)) -- #1088. Used to be a guest-side
+// macro (see include/threads.h's own comment on the change); now a real cfunc
+// so both backends share one race-free implementation instead of relying on
+// the GIL. __atomic_compare_exchange_n makes exactly one caller, among any
+// number racing on the same flag, observe the 0->1 transition and run func();
+// every other caller either sees it already 1 (already run or in progress)
+// or loses the race and returns without running func() itself. Unlike
+// call_tss_destructor_top_level/drain_exit_handlers_nested this can't spin-
+// wait for a concurrent initializer to finish (C11 doesn't require it to),
+// so a caller that loses the race may return before func() completes on
+// another thread -- matches the standard's own minimal guarantee (7.26.6.2p2:
+// "on return from call_once the completion of the function pointed to by
+// func synchronizes with all subsequent calls to call_once with the same
+// flag" -- i.e. ordering only, not "func has already run by the time we
+// return"). func is a guest function pointer, so it must be invoked through
+// cccc_call_guest_callback -- this cfunc is itself running as a nested,
+// mid-vm_eval FFI call (GIL held), exactly the context that requires,
+// matching drain_exit_handlers_nested (stdlib.c) and run_tss_destructors
+// above.
+static long long wrap_call_once(long long flagp, long long func) {
+    VirtualMachine *vm   = current_vm();
+    int            *flag = (int *)flagp;
+    if (!vm || !flag)
+        return 0;
+    int expected = 0;
+    if (__atomic_compare_exchange_n(flag, &expected, 1, 0, __ATOMIC_SEQ_CST,
+                                    __ATOMIC_SEQ_CST)) {
+        long long ignored;
+        cccc_call_guest_callback(vm, func, NULL, 0, &ignored);
+    }
+    return 0;
+}
+
 void register_threads_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "thrd_create", (void *)wrap_thrd_create, 3, 0);
     cc_register_cfunc(vm, "thrd_join", (void *)wrap_thrd_join, 2, 0);
@@ -1219,6 +1252,7 @@ void register_threads_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "tss_get", (void *)wrap_tss_get, 1, 0);
     cc_register_cfunc(vm, "tss_set", (void *)wrap_tss_set, 2, 0);
     cc_register_cfunc(vm, "tss_delete", (void *)wrap_tss_delete, 1, 0);
+    cc_register_cfunc(vm, "call_once", (void *)wrap_call_once, 2, 0);
 }
 
 void cccc_pthread_cleanup(VirtualMachine *vm) {

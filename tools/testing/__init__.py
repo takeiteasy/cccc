@@ -174,15 +174,24 @@ NATIVE_SKIP_TESTS = {
     # it now auto-skips via NATIVE_VM_ONLY_FLAGS instead (it used to hang
     # forever natively, since a real default mutex genuinely deadlocks).
     #
-    # The four <threads.h> files (thrd_create/mtx_lock/tss_create/etc.) are
-    # a distinct, larger problem -- those are VM cfuncs (src/stdlib/
-    # pthread.c) with no host libc symbol to link against at all on any
-    # platform, and no real <threads.h> exists on macOS in the first place.
-    # Retagged to #1088, not fixed here.
-    "test_thread_local_isolation.c": "no <threads.h> lowering for -c=native (#1088)",
-    "test_threads_basic.c": "no <threads.h> lowering for -c=native (#1088)",
-    "test_threads_mutex.c": "no <threads.h> lowering for -c=native (#1088)",
-    "test_threads_tss.c": "no <threads.h> lowering for -c=native (#1088)",
+    # The four <threads.h> files (thrd_create/mtx_lock/tss_create/etc.)
+    # dropped from this table too (#1088, RESOLVED): those are VM cfuncs
+    # (src/stdlib/pthread.c) with no host libc symbol to link against, so a
+    # native binary calling one failed at the linker with no CCCC-side
+    # diagnostic. Fixed with a self-contained shim
+    # (serialize_threads_shims, src/serialize.c) defining thrd_*/mtx_*/
+    # cnd_*/tss_*/call_once directly over the already-replayed real host
+    # <pthread.h>, rather than a #include_next hand-off onto a real host
+    # <threads.h> the way include/pthread.h itself hands off -- CCCC's own
+    # thrd_error/thrd_timedout/thrd_busy/thrd_nomem encoding doesn't match
+    # glibc's, and Darwin has no <threads.h> at all, so a hand-off would
+    # leave macOS permanently unsupported. Consulting the host's own
+    # <threads.h> on neither platform closes both in one change -- no
+    # NATIVE_SKIP_TESTS_MACOS entry needed either, unlike what #1088 itself
+    # anticipated. call_once also stopped being a guest-side macro (a
+    # plain, non-atomic flag check, safe only under the VM's own GIL) and
+    # became a real function, backed by an atomic CAS on both backends --
+    # see tests/test_threads_call_once_1088.c.
     # test_pthread_cond.c dropped from this table too: the aarch64-Linux
     # pthread_cond_wait() "deadlock" recorded here previously (found while
     # verifying #1067, unrelated to it) turned out to be the *same* root

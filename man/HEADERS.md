@@ -246,6 +246,39 @@ by default). Two things follow from that:
   `cc_file_is_cccc_only` suppression in `serialize.c`'s own replay loop is
   unchanged, so a cccc-only header nested inside another cccc-only header
   is still correctly suppressed rather than replayed.
+- A cccc-only header's *functions* are a third case, distinct from both
+  bullets above: `include/threads.h`'s own `thrd_*`/`mtx_*`/`cnd_*`/`tss_*`/
+  `call_once` are VM cfuncs (`src/stdlib/pthread.c`) with no host libc
+  symbol behind them at all, so re-deriving only the header's *types* (the
+  first bullet's own treatment) left every call an undefined reference at
+  the host linker — not a `file not found` (the header itself was never
+  missing) and not `decimal_math.h`'s hard-error case either (there *is* a
+  host equivalent to build on: real pthreads, already replayed via #1022's
+  own hand-off). Fixed (#1088) with `serialize_threads_shims`
+  (`src/serialize.c`): a synthesized *definition* for each function
+  actually used, written over the already-replayed real `<pthread.h>`,
+  emitted after `serialize_type_defs_for_owner` (so the shim bodies can
+  name `mtx_t`/`cnd_t`/`thrd_t`/`tss_t`) and gated off under `--emit-cccc`
+  (whose consumer already has the real cfuncs registered, so a shim
+  definition there would shadow them) — same site and gating shape as
+  `serialize_synth_setjmp_decls`. A raw `#include` of a needed host header
+  from inside the shim text itself is not always safe even when nothing
+  else in this bullet applies: `<sched.h>`/`<string.h>` have no
+  `#include_next` hand-off of their own, so a plain `#include` under the
+  same `-I./include` forwarding every other replayed header sees re-pulls
+  CCCC's own bundled copy — colliding with the real one already reached
+  transitively via `<pthread.h>`'s own hand-off (`struct sched_param`
+  redefinition, confirmed) — sidestepped by declaring `sched_yield`
+  directly and using `__builtin_memcpy` instead of `<string.h>`'s `memcpy`.
+  `<stdatomic.h>` is unusable here for a stricter reason: it's on
+  `is_compiler_owned_header()`, so `force_cccc` resolves a plain `#include`
+  to CCCC's own macro-based polyfill unconditionally, even under
+  `--use-system-headers` — the shim's `call_once` uses the plain
+  `__atomic_compare_exchange_n` builtin on a pointer with `once_flag`'s own
+  `_Atomic` qualifier cast away instead (passing a pointer to an
+  `_Atomic`-qualified type straight to that builtin is rejected outright,
+  since the compiler treats that argument shape as a request for the C11
+  stdatomic API instead).
 - CCCC's own polyfill headers (`stdio.h`, `errno.h`, `getopt.h` in
   `src/std.c`) define a handful of identifiers (`stdout`/`stderr`/`stdin`,
   `errno`, `optarg`/`optind`/`opterr`/`optopt`) as macros that expand, at

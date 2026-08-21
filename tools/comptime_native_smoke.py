@@ -5659,11 +5659,186 @@ def case_typedef_identity_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     TYPEDEF_IDENTITY_1091_PROGRAM)
 
 
+THREADS_NATIVE_PROGRAM = (
+    # Exercises every one of the 24 thrd_*/mtx_*/cnd_*/tss_*/call_once shim
+    # functions at least once -- each is emitted as raw fprintf'd C text,
+    # gated per-function on whether the program actually calls it, so a
+    # program touching only a handful (as an earlier version of this case
+    # did) leaves the rest never compiled by any host compiler at all.
+    # mtx_t/cnd_t are file-scope `static` (zero-initialized by C's own
+    # static-storage-duration rule), matching every other <threads.h> test
+    # in this repo -- the shims' lazy ->__handle allocation reads that
+    # field before mtx_init/cnd_init would otherwise touch it, so an
+    # uninitialized *automatic* mtx_t/cnd_t is not a supported starting
+    # point here (the same assumption src/stdlib/pthread.c's own
+    # ensure_mtx/ensure_cond already make on the VM side).
+    "#include <threads.h>\n"
+    "#include <stdatomic.h>\n"
+    "#include <time.h>\n"
+    "static mtx_t mutex;\n"
+    "static cnd_t cond;\n"
+    "static int ready = 0;\n"
+    "static int shared_val = 0;\n"
+    "static _Atomic int woke_count = 0;\n"
+    "static _Atomic int detached_ran = 0;\n"
+    "static once_flag once = ONCE_FLAG_INIT;\n"
+    "static int once_calls = 0;\n"
+    "static void init_once(void) { once_calls++; }\n"
+    "static int waiter(void *arg) {\n"
+    "    (void)arg;\n"
+    "    mtx_lock(&mutex);\n"
+    "    while (!ready)\n"
+    "        cnd_wait(&cond, &mutex);\n"
+    "    atomic_fetch_add(&woke_count, 1);\n"
+    "    mtx_unlock(&mutex);\n"
+    "    return 0;\n"
+    "}\n"
+    "static int broadcaster(void *arg) {\n"
+    "    (void)arg;\n"
+    "    call_once(&once, init_once);\n"
+    "    mtx_lock(&mutex);\n"
+    "    shared_val = 1;\n"
+    "    ready = 1;\n"
+    "    cnd_broadcast(&cond);\n"
+    "    mtx_unlock(&mutex);\n"
+    "    return 0;\n"
+    "}\n"
+    "static int detached_worker(void *arg) {\n"
+    "    (void)arg;\n"
+    "    atomic_store(&detached_ran, 1);\n"
+    "    thrd_exit(7);\n"
+    "    return 99;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    if (mtx_init(&mutex, mtx_plain) != thrd_success) return 1;\n"
+    "    if (cnd_init(&cond) != thrd_success) return 2;\n"
+    "\n"
+    "    thrd_t w1, w2, b;\n"
+    "    if (thrd_create(&w1, waiter, 0) != thrd_success) return 3;\n"
+    "    if (thrd_create(&w2, waiter, 0) != thrd_success) return 4;\n"
+    "    struct timespec nap = {0, 20000000};\n"
+    "    thrd_sleep(&nap, 0);\n"
+    "    if (thrd_create(&b, broadcaster, 0) != thrd_success) return 5;\n"
+    "    thrd_join(w1, 0);\n"
+    "    thrd_join(w2, 0);\n"
+    "    thrd_join(b, 0);\n"
+    "    if (shared_val != 1 || atomic_load(&woke_count) != 2) return 6;\n"
+    "    if (once_calls != 1) return 7;\n"
+    "\n"
+    "    if (mtx_trylock(&mutex) != thrd_success) return 8;\n"
+    "    mtx_unlock(&mutex);\n"
+    "\n"
+    "    struct timespec ts;\n"
+    "    timespec_get(&ts, TIME_UTC);\n"
+    "    ts.tv_sec += 1;\n"
+    "    if (mtx_timedlock(&mutex, &ts) != thrd_success) return 9;\n"
+    "    mtx_unlock(&mutex);\n"
+    "\n"
+    "    struct timespec deadline;\n"
+    "    timespec_get(&deadline, TIME_UTC);\n"
+    "    deadline.tv_nsec += 20000000;\n"
+    "    if (deadline.tv_nsec >= 1000000000) {\n"
+    "        deadline.tv_sec += 1;\n"
+    "        deadline.tv_nsec -= 1000000000;\n"
+    "    }\n"
+    "    mtx_lock(&mutex);\n"
+    "    int rc = cnd_timedwait(&cond, &mutex, &deadline);\n"
+    "    mtx_unlock(&mutex);\n"
+    "    if (rc != thrd_timedout) return 10;\n"
+    "\n"
+    "    thrd_t self = thrd_current();\n"
+    "    if (!thrd_equal(self, thrd_current())) return 11;\n"
+    "    if (thrd_equal(w1, w2)) return 12;\n"
+    "\n"
+    "    thrd_t t3;\n"
+    "    if (thrd_create(&t3, detached_worker, 0) != thrd_success) return 13;\n"
+    "    if (thrd_detach(t3) != thrd_success) return 14;\n"
+    "    for (int i = 0; i < 1000 && !atomic_load(&detached_ran); i++) {\n"
+    "        struct timespec poll_nap = {0, 1000000};\n"
+    "        thrd_sleep(&poll_nap, 0);\n"
+    "    }\n"
+    "    if (!atomic_load(&detached_ran)) return 15;\n"
+    "\n"
+    "    cnd_destroy(&cond);\n"
+    "    mtx_destroy(&mutex);\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_threads_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  130: no real <threads.h> lowering existed for -c=native at all"
+          " -- thrd_create/mtx_lock/etc. (include/threads.h) are VM cfuncs "
+          "(src/stdlib/pthread.c) with no host libc symbol to link against, "
+          "so a native binary calling one failed at the linker with no "
+          "CCCC-side diagnostic (#1088). threads.h is already on "
+          "is_cccc_supplied_only_header() (preprocess.c), so its types "
+          "(mtx_t/cnd_t/thrd_t/tss_t) already re-derived correctly -- only "
+          "the function *definitions* were missing. Fixed with a "
+          "self-contained shim (serialize_threads_shims, src/serialize.c) "
+          "defining thrd_*/mtx_*/cnd_*/tss_*/call_once directly over the "
+          "already-replayed real host <pthread.h>, rather than a "
+          "#include_next hand-off onto a real host <threads.h> the way "
+          "include/pthread.h itself hands off (#1022) -- CCCC's own "
+          "thrd_error/thrd_timedout/thrd_busy/thrd_nomem encoding does not "
+          "match glibc's, and Darwin has no <threads.h> at all, so a "
+          "hand-off would leave macOS permanently unsupported; a "
+          "self-contained shim closes both platforms in one change, "
+          "consulting the host's own <threads.h> on neither. call_once "
+          "also stopped being a guest-side macro (a plain, non-atomic flag "
+          "check, safe only under the VM's own GIL) and became a real "
+          "function, backed by an atomic CAS on both backends. Deliberately "
+          "passes an explicit -I<repo>/include, like case 118 -- without it "
+          "the replayed #include <pthread.h> wouldn't resolve through "
+          "CCCC's own bundled header at all. Asserts -m output carries a "
+          "real 'int thrd_create(' *definition* (not merely a prototype -- "
+          "distinguished by checking no bare 'int thrd_create(thrd_t *thr, "
+          "thrd_start_t func, void *arg);' prototype-only line follows "
+          "immediately after a definition's closing brace on the same "
+          "construct), plus VM 42 -> native 42 with two threads racing a "
+          "mutex-protected counter and a call_once initializer.")
+    src = Path(tmp) / "threads_native_1088.c"
+    write(src, THREADS_NATIVE_PROGRAM)
+    include_dir = cccc.parent / "include"
+
+    vm_result = run([str(cccc), "-I", str(include_dir), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-I", str(include_dir), "-m", src.name], cwd=tmp)
+    out = m_result.stdout
+    if "int thrd_create(thrd_t *thr, thrd_start_t func, void *arg) {" not in out:
+        print(f"    FAIL: -m output missing a real thrd_create definition\n    {out}")
+        return False
+    if "void call_once(once_flag *flag, void (*func)(void)) {" not in out:
+        print(f"    FAIL: -m output missing a real call_once definition\n    {out}")
+        return False
+
+    out_bin = Path(tmp) / "threads_native_1088_out"
+    compile_result = run(
+        [str(cccc), "-I", str(include_dir), "-c=native", "-o", out_bin.name,
+         src.name],
+        cwd=tmp,
+    )
+    if compile_result.returncode != 0:
+        print(f"    FAIL: native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -5800,6 +5975,7 @@ def main() -> int:
             case_block_in_nested_native_round_trip,
             case_nested_fn_in_block_native_round_trip,
             case_typedef_identity_native_round_trip,
+            case_threads_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

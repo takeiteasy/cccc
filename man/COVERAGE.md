@@ -32,9 +32,19 @@ binary calls real host pthread functions directly with no VM/FFI layer in
 between — see [Serialized-output divergences](#serialized-output-divergences)
 and [man/HEADERS.md](HEADERS.md) for the header-hand-off mechanics.
 Thread-local storage (`_Thread_local`/`__thread`) is also emitted correctly
-in serialized output. `<threads.h>` (C11 `thrd_*`/`mtx_*`/`cnd_*`/`tss_*`)
-does **not** round-trip under `-c=native` yet — those are VM cfuncs with no
-host libc symbol to link against; tracked separately (#1088).
+in serialized output. `<threads.h>` (C11 `thrd_*`/`mtx_*`/`cnd_*`/`tss_*`/
+`call_once`) round-trips under `-c=native` too (#1088) — unlike `<pthread.h>`,
+this is *not* a `#include_next` hand-off onto a real host `<threads.h>`:
+CCCC's own `thrd_error`/`thrd_timedout`/`thrd_busy`/`thrd_nomem` encoding
+doesn't match glibc's, and Darwin has no `<threads.h>` at all. Instead a
+self-contained shim (`serialize_threads_shims`, `src/serialize.c`) defines
+`thrd_*`/`mtx_*`/`cnd_*`/`tss_*`/`call_once` directly over the real host
+`<pthread.h>` that's already replayed — the host's own `<threads.h>` is
+never consulted on either platform, so both macOS and Linux round-trip from
+one change. `call_once` is a real function on both back ends now, not the
+guest-side macro it used to be (safe only under the VM's own GIL) — see
+[Serialized-output divergences](#serialized-output-divergences) for the
+shim's shape and its residual gaps.
 
 ---
 
@@ -1955,6 +1965,52 @@ the loop's two existing per-line filters (cccc-only headers, `setjmp.h`) —
 dialect-fidelity output expects a cccc-aware reader that understands the
 routing syntax anyway.
 
+**C11 `<threads.h>` lowering (#1088, RESOLVED).** `thrd_create`/`mtx_lock`/
+`cnd_wait`/`tss_create`/`call_once`/etc. (`include/threads.h`) are VM cfuncs
+(`src/stdlib/pthread.c`) with no host libc symbol behind them, so a
+`-c=native` binary calling one used to fail at the host linker with an
+undefined symbol and no CCCC-side diagnostic. `<threads.h>` was already on
+`is_cccc_supplied_only_header()` (`src/preprocess.c`), so its `#include` was
+already suppressed and its types (`mtx_t`/`cnd_t`/`thrd_t`/`tss_t`) already
+re-derived correctly — only the function *definitions* were missing.
+
+Fixed with a self-contained shim (`serialize_threads_shims`, `src/serialize.c`),
+each function a near-verbatim port of its VM cfunc counterpart minus the GIL
+save/release dance and the `--thread-safety` lock-order bookkeeping, written
+over the real host `<pthread.h>` already replayed by the #1022 hand-off —
+**not** a `#include_next` hand-off onto a real host `<threads.h>` the way
+`include/pthread.h` itself hands off. Two reasons: CCCC's own
+`thrd_error`/`thrd_timedout`/`thrd_busy`/`thrd_nomem` encoding doesn't match
+glibc's (folded to bare integer literals at guest compile time, so any
+comparison other than `!= thrd_success` would silently change meaning had
+glibc's own enum reached the output — the same `FP_*`/`isnan` asymmetry
+`native_accessor_shims` documents), and Darwin has no `<threads.h>` at all,
+so a hand-off would leave macOS permanently unsupported. A self-contained
+shim consults the host's own `<threads.h>` on neither platform, closing both
+in one change — the only residual is `thrd_t`/`mtx_t`/`cnd_t` staying
+CCCC's own opaque-handle projections rather than the host's real types
+(same shape as `<pthread.h>`'s own `pthread_mutex_t`/`pthread_cond_t`), and
+`--thread-safety` lock-order checking remaining VM-only.
+
+The VM's own lazy mtx_t/cnd_t handle allocation (`ensure_mtx`/`ensure_cond`,
+`src/stdlib/pthread.c`) is check-then-malloc-then-store, safe only because
+the GIL serializes every cfunc call — the native shim's own
+`__cccc_ensure_mtx`/`__cccc_ensure_cnd` instead use a real atomic
+compare-exchange on the `->__handle` field, since two threads racing that
+check under `-c=native`'s genuine parallelism could otherwise each allocate
+a host mutex and silently lock two different ones. `call_once` stopped
+being a guest-side macro (a plain, non-atomic flag check safe only under the
+VM's own GIL) and became a real function on both back ends, backed by an
+atomic CAS; the native shim specifically needs a three-state protocol (not
+started / in progress / done), not a plain two-state CAS, so a losing
+thread spin-waits until the winner's initializer has actually completed —
+matching real `pthread_once`/glibc's own blocking behaviour, which is what
+C11 programs rely on in practice even though 7.26.6.2p2's literal text only
+promises a happens-before ordering. `mtx_timedlock` mirrors the VM's own
+`#if __linux__` / trylock-poll split for macOS (which lacks
+`pthread_mutex_timedlock`) byte-for-byte, so both back ends agree by
+construction.
+
 ---
 
 ## Standard Library and Built-in Functions
@@ -2172,7 +2228,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stdalign.h>` | ✓ | |
 | `<stdatomic.h>` | ~ | Header present; `atomic_fetch_add/sub/or/xor/and` and `atomic_load/store/exchange/compare_exchange` work correctly in single-threaded and thread-local contexts; cross-thread atomicity requires the GIL or an explicit mutex |
 | `<stdnoreturn.h>` | ✓ | |
-| `<threads.h>` | ✓ | Thread lifecycle (`thrd_create/join/exit/detach/yield/sleep/current/equal`), mutex (`mtx_init/lock/trylock/unlock/destroy`), condition variables (`cnd_init/wait/signal/broadcast/destroy`), and thread-specific storage (`tss_create/get/set/delete`); backed by host pthreads via POSIX `<pthread.h>`. `tss_create` destructors run when the owning thread exits (up to `TSS_DTOR_ITERATIONS` re-checks per C11 7.26.1p7), matching `pthread_key_create`; a plain `return` from `main()` does not run them (matching glibc), but an explicit `pthread_exit()`/`thrd_exit()` call on the main thread does |
+| `<threads.h>` | ✓ | Thread lifecycle (`thrd_create/join/exit/detach/yield/sleep/current/equal`), mutex (`mtx_init/lock/trylock/timedlock/unlock/destroy`), condition variables (`cnd_init/wait/signal/broadcast/timedwait/destroy`), thread-specific storage (`tss_create/get/set/delete`), and `call_once`; backed by host pthreads via POSIX `<pthread.h>`. `tss_create` destructors run when the owning thread exits (up to `TSS_DTOR_ITERATIONS` re-checks per C11 7.26.1p7), matching `pthread_key_create`; a plain `return` from `main()` does not run them (matching glibc), but an explicit `pthread_exit()`/`thrd_exit()` call on the main thread does. Round-trips under `-c=native`/`-m`/`-c=generated` too (#1088) — see [Serialized-output divergences](#serialized-output-divergences) for the shim's shape |
 | `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere) |
 | `aligned_alloc` | ✓ | Routed through the VM heap (`MALCA` opcode, #668) when the VM heap is enabled (the default); backed by host aligned allocation only under `-V`/`--no-vm-heap` |
 | `malloc`/`free`/`calloc`/`realloc`/`reallocarray`/`aligned_alloc`/`posix_memalign` as function-pointer values | ✓ | Taking one of these by name and calling it indirectly (e.g. `void (*fp)(void*) = free; fp(p);`, or passing it as a callback — `tss_create(&key, free)` is a common idiom) gets the same VM-heap-aware behavior as a direct call, matching the `MALC`/`MFRE`/`CALC`/`REALC`/`REALCA`/`MALCA`/`PMEMA` opcodes' semantics exactly (#865) |

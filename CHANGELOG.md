@@ -17,6 +17,21 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`: no real `<threads.h>` lowering existed at all —
+  `thrd_create`/`mtx_lock`/`cnd_wait`/`tss_create`/`call_once`/etc. are VM
+  cfuncs with no host libc symbol to link against, so a native binary
+  calling one failed at the host linker with no CCCC-side diagnostic
+  (#1088). Fixed with a self-contained shim (`serialize_threads_shims`,
+  `src/serialize.c`) defining each function directly over the real host
+  `<pthread.h>` already replayed by the `#1022` hand-off, rather than a
+  `#include_next` hand-off onto a real host `<threads.h>` — CCCC's own
+  `thrd_error`/`thrd_timedout`/`thrd_busy`/`thrd_nomem` encoding doesn't
+  match glibc's, and Darwin has no `<threads.h>` at all, so a self-contained
+  shim closes both platforms in one change. `call_once` is now a real
+  function on both back ends (VM cfunc + native shim), backed by an atomic
+  compare-exchange, rather than the guest-side macro it used to be — safe
+  only under the VM's own GIL, and a genuine race under `-c=native`'s real
+  parallelism.
 - `-c=native`: a block literal defined inside a genuinely nested function,
   capturing a variable owned by that function's own ancestor, was rejected
   outright (`#1074` follow-up); now lowers correctly by registering the
