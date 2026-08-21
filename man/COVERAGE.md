@@ -1297,6 +1297,25 @@ the same handle the VM's own FFI loader uses, never `RTLD_DEFAULT`/
 renames a colliding `static` the same way it already renames a cross-TU
 collision.
 
+Three more serializer bugs found by #1033's native-corpus sweep of
+`tests/suites/` are likewise fixed, not divergences (#1102): (1) `&` over
+a block-scope compound literal — lowered to `ND_ADDR` over a comma chain of
+memzero + assignments + hidden temp — used to spell the `&` over the whole
+chain, but C's comma operator never yields an lvalue, so every host
+compiler rejected the output; it now binds to the chain's addressable tail
+(`(memset(...), t.x = 30, &t)`). (2) `-(-5)` — a macro-expanded
+double negation, possibly behind an implicit widening cast that serializes
+as nothing (`_Generic`-selected arms) — spelled flat as `--5` and re-lexed
+by the host as pre-decrement; the inner negation keeps its parentheses.
+(3) a const-element aggregate local (`const int a[3] = {1,2,3}`) hoists
+declaration and initializer apart like any local (#1029), but the
+qualifier lives on the *element* type one level below where #1029's strip
+looked, leaving a genuinely-const object for the per-element assignments
+to store into — clang rejects any statically-const store even through an
+explicitly-cast-away pointer ("read-only variable is not assignable"), so
+both the hoisted declarator and the byte-offset cast-back now drop the
+element qualifier.
+
 `__builtin_pc_function_name(pc)` and `__builtin_pc_source_location(pc, &file,
 &line)` are also a hard error under `-m`/`-c=native`/`-c=generated`, rather
 than a divergence — the opposite direction from the `__builtin_return_address`

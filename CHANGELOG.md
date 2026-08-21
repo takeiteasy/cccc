@@ -7,6 +7,30 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`/`-c=generated` output compiles again around three spellings
+  surfaced by #1033's native-corpus sweep of `tests/suites/` (#1102):
+  - Address-of a block-scope compound literal (`&(struct P){30, 12}`) no
+    longer emits `&(memset(...), t.x = 30, t)` — C's comma operator never
+    yields an lvalue, so every host compiler rejected that outright
+    ("cannot take the address of an rvalue"). The `&` now binds to the
+    chain's addressable tail: `(memset(...), t.x = 30, &t)`.
+  - `-(-5)` — typically a macro like `#define abs(x) ((x) < 0 ? -(x) :
+    (x))` expanded on `-5`, or a `_Generic`-selected arm — serialized flat
+    as `--5` and re-lexed as pre-decrement ("expression is not
+    assignable"). The inner negation keeps its parentheses; all other
+    unary spellings are unchanged.
+  - A const-element aggregate local (`const int a[3] = {1,2,3}`) hoists to
+    a declaration plus per-element assignment statements (#1029's scheme),
+    but C spells the qualifier on the element type one level below where
+    #1029 stripped it, leaving a genuinely-const object that the
+    assignments stored into ("read-only variable is not assignable" from
+    clang, which rejects any statically-const store). The hoisted
+    declarator and the byte-offset cast-back both drop the element
+    qualifier now.
+  This un-skips `test_suite_structs.c`, `test_suite_std_c11.c` and
+  `test_suite_std_c99.c` from the `tools/tests.py --native` corpus;
+  `test_suite_c23.c` stays skipped pending #1111 (the `(nullptr_t)x` cast
+  spelling) and #1104 (`_Decimal` lowering).
 - `--testing` (VM/`=bytecode` backends) combined with `-c=bytecode` or
   `-c=native` now really compiles after the suite passes (#1106): the tests
   act as a pre-pass guard, and only a fully green run reaches the compile

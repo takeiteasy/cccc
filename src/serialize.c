@@ -2138,6 +2138,112 @@ static Type *va_arg_promoted_type(Type *ty) {
     return ty;
 }
 
+// #1102: the rightmost operand of a comma chain, drilling through nested
+// ND_COMMA nodes (an initializer's balanced-comma tree nests both ways, but
+// the compound literal's hidden temp always sits on the right spine).
+static Node *comma_chain_tail(Node *node) {
+    while (node && node->kind == ND_COMMA && node->rhs)
+        node = node->rhs;
+    return node;
+}
+
+// #1102: is this chain's tail something whose address C allows taking? A
+// plain variable, a member access, or a dereference -- exactly the lvalue
+// shapes a lowered expression can end in. Anything else (a number, a binary
+// result, another rvalue) falls back to the generic spelling.
+static bool addr_comma_tail_is_lvalue(Node *chain) {
+    Node *tail = comma_chain_tail(chain);
+    return tail && (tail->kind == ND_VAR || tail->kind == ND_MEMBER ||
+                    tail->kind == ND_DEREF);
+}
+
+// #1102: serialize `&(A, B, x)` as `(A, B, &x)` -- see the ND_ADDR case in
+// serialize_expr(). Flattens nested comma levels into one parenthesized
+// sequence (the comma operator is associative, so grouping is free --
+// balanced_comma() in parse_init.c relies on the same fact), binds the &
+// to the rightmost operand, and leaves every other operand to the ordinary
+// serializer. `tail` is the pre-computed rightmost operand -- compared by
+// pointer identity so the &, and only the &, lands on it: an initializer's
+// balanced-comma tree terminates on *both* sides, and spelling `&` at the
+// first non-comma child would bind it to a mid-chain assignment instead.
+// The caller emits the enclosing parentheses unconditionally: a bare comma
+// chain must never leak into a context that saw `&(...)`'s precedence
+// (e.g. `p = &(cl)` would otherwise re-parse as `(p = a), b`).
+static void serialize_addr_comma(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Node *comma,
+                                 Node *tail) {
+    // Left side: flatten nested comma chains into the same sequence. The
+    // tail can only sit on the right spine, so lhs never gets the &.
+    if (comma->lhs && comma->lhs->kind == ND_COMMA &&
+        !is_noop_expr(comma->lhs->lhs) && !is_noop_expr(comma->lhs->rhs))
+        serialize_addr_comma(f, vm, ctx, comma->lhs, NULL);
+    else
+        // Argument-separator precedence (2), same guard ND_FUNCALL's
+        // argument loop uses (#1042(b)) -- keeps a top-level `=` or `,`
+        // inside the chain from leaking.
+        serialize_expr(f, vm, ctx, comma->lhs, 2);
+    fprintf(f, " , ");
+    if (comma->rhs == tail) {
+        fprintf(f, "&");
+        serialize_expr(f, vm, ctx, comma->rhs, get_precedence(ND_ADDR) + 1);
+    } else if (comma->rhs && comma->rhs->kind == ND_COMMA) {
+        serialize_addr_comma(f, vm, ctx, comma->rhs, tail);
+    } else {
+        // A flattened left branch's own last element: plain spelling.
+        serialize_expr(f, vm, ctx, comma->rhs, 2);
+    }
+}
+
+// #1102: spell the synthesized byte-offset cast-back -- the leading `(T *)`
+// of `((T *)((char *)ptr + off))` from #918's pointer-arithmetic spelling --
+// with any element/pointee qualifier stripped. A const-qualified element
+// (`const int arr[3]`) makes usual_arith_conv's decay cast and this
+// cast-back print `(const int *)`, and clang rejects ANY store through a
+// statically-qualified lvalue ("read-only variable is not assignable") even
+// though every explicit cast in the chain legally strips the qualifier and
+// the underlying object is genuinely mutable -- an aggregate initializer's
+// assignment sequence, whose declaration hoist_mutable_type() has already
+// de-qualified (#1029/#1102). Reads are unaffected by the missing
+// qualifier, so strip whenever present; anything unqualified keeps its
+// exact previous spelling. Shallow copy with origin severed so
+// find_typedef_name_exact() cannot re-spell a qualified typedef alias
+// (same trick serialize_atomic_addr()/#1101 uses).
+static void serialize_offset_cast_type(FILE *f, VirtualMachine *vm,
+                                       SerializeContext *ctx, Type *ty) {
+    bool qualified =
+        ty && ty->base &&
+        (ty->base->is_const || ty->base->is_volatile || ty->base->is_atomic);
+    fprintf(f, "(");
+    if (!qualified) {
+        if (ty && (ty->kind == TY_ARRAY || ty->kind == TY_VLA)) {
+            serialize_type(f, ctx, ty->base);
+            fprintf(f, " *");
+        } else {
+            serialize_type(f, ctx, ty);
+        }
+    } else {
+        // Strip the qualifiers onto a fresh unqualified pointee, then
+        // re-spell a plain pointer TO it through serialize_type() rather
+        // than printing `pointee *` by hand -- the pointee may itself be
+        // a pointer (an array of const-qualified function pointers, e.g.
+        // `static int (*const table[])(void)`), where naive concatenation
+        // produces the unparseable `(int (*)(void) *)`.
+        Type pointee        = *ty->base;
+        pointee.is_const    = false;
+        pointee.is_volatile = false;
+        pointee.is_atomic   = false;
+        pointee.origin      = NULL;
+        Type ptr            = {0};
+        ptr.kind            = TY_PTR;
+        ptr.size            = 8;
+        ptr.align           = 8;
+        ptr.is_unsigned     = true;
+        ptr.base            = &pointee;
+        serialize_type(f, ctx, &ptr);
+    }
+    fprintf(f, ")");
+}
+
 // Print indentation
 static void print_indent_level(FILE *f, int indent) {
     for (int i = 0; i < indent; i++)
@@ -2458,15 +2564,10 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // ND_DEREF this node is wrapped in still reads the right value
                 // through it. #964: node->ty can also be TY_VLA (`int[n]`),
                 // same fix applies.
-                fprintf(f, "(");
-                if (node->ty &&
-                    (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
-                    serialize_type(f, ctx, node->ty->base);
-                    fprintf(f, " *");
-                } else {
-                    serialize_type(f, ctx, node->ty);
-                }
-                fprintf(f, ")((char *)");
+                // #1102: the cast-back drops pointee qualifiers -- see
+                // serialize_offset_cast_type().
+                serialize_offset_cast_type(f, vm, ctx, node->ty);
+                fprintf(f, "((char *)");
                 serialize_expr(f, vm, ctx, node->lhs, 14);
                 fprintf(f, " %s ", get_binary_op_str(node->kind));
                 serialize_expr(f, vm, ctx, rhs_inner, node_prec + 1);
@@ -2481,16 +2582,9 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // Print lhs_inner for the same reason as above.
                 // #928: same array-cast fix as the ptr+num arm above; #964
                 // extends it to TY_VLA (a cast to `int[n]` is equally invalid
-                // C).
-                fprintf(f, "(");
-                if (node->ty &&
-                    (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)) {
-                    serialize_type(f, ctx, node->ty->base);
-                    fprintf(f, " *");
-                } else {
-                    serialize_type(f, ctx, node->ty);
-                }
-                fprintf(f, ")((char *)");
+                // C). #1102: qualifier-stripping cast-back, as above.
+                serialize_offset_cast_type(f, vm, ctx, node->ty);
+                fprintf(f, "((char *)");
                 serialize_expr(f, vm, ctx, node->rhs, 14);
                 fprintf(f, " + ");
                 serialize_expr(f, vm, ctx, lhs_inner, node_prec + 1);
@@ -2545,7 +2639,52 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         case ND_BITNOT:
         case ND_ADDR:
         case ND_DEREF:
+            if (node->kind == ND_ADDR && node->lhs &&
+                node->lhs->kind == ND_COMMA && !is_noop_expr(node->lhs->lhs) &&
+                !is_noop_expr(node->lhs->rhs) &&
+                addr_comma_tail_is_lvalue(node->lhs)) {
+                // #1102: & never distributes over a comma chain -- C's comma
+                // operator yields an rvalue even when its last operand is an
+                // lvalue, so the naive spelling of `&(struct P){30, 12}`
+                // (a block-scope compound literal lowers to
+                // ND_ADDR(ND_COMMA(memzero+assigns..., hidden temp var)))
+                // came out as `&(memset(...), t.x = 30, t)` and clang
+                // rejected it outright ("cannot take the address of an
+                // rvalue"). Re-spell with the & binding to the chain's
+                // addressable tail instead: `(memset(...), t.x = 30, &t)`.
+                // Same evaluation order, same resulting pointer; the VM
+                // never re-parses the text, but every host compiler does.
+                fprintf(f, "(");
+                serialize_addr_comma(f, vm, ctx, node->lhs,
+                                     comma_chain_tail(node->lhs));
+                fprintf(f, ")");
+                break;
+            }
             fprintf(f, "%s", get_unary_op_str(node->kind));
+            // #1102: two adjacent '-' tokens re-lex as pre-decrement, so
+            // `-(-5)` -- ND_NEG over ND_NEG, typically from a macro like
+            // `#define abs(x) ((x) < 0 ? -(x) : (x))` expanded on -5 --
+            // must keep its inner operand parenthesized; the old flat
+            // spelling emitted `--5` and every host compiler read it as
+            // "--5" ("expression is not assignable"). The check drills
+            // through ND_CAST chains: a widening cast serializes as
+            // nothing (the suppression arm below), so the nested '-'
+            // can hide behind one (_Generic-selected arms are exactly
+            // this shape). Only this pairing glues: `!!x`, `~~x` and
+            // `**p` are ordinary token sequences, and every other prefix
+            // operator's own spelling ends in a non-'-' character, so
+            // all other operands keep the exact spelling they had.
+            if (node->kind == ND_NEG && node->lhs) {
+                Node *op = node->lhs;
+                while (op->kind == ND_CAST && op->lhs)
+                    op = op->lhs;
+                if (op->kind == ND_NEG) {
+                    fprintf(f, "(");
+                    serialize_expr(f, vm, ctx, node->lhs, 2);
+                    fprintf(f, ")");
+                    break;
+                }
+            }
             serialize_expr(f, vm, ctx, node->lhs, node_prec);
             break;
 
@@ -4128,6 +4267,50 @@ static bool var_is_deferred_label_static(SerializeContext *ctx, Obj *var) {
     return false;
 }
 
+// #1102: does this type, or anything reachable down its aggregate spine
+// (array -> array -> ... -> element), carry a qualifier? A multi-dimensional
+// `const int a[2][3]` spells const on the innermost element, arbitrarily
+// far down.
+static bool aggregate_spine_is_qualified(Type *ty) {
+    while (ty) {
+        if (ty->is_const)
+            return true;
+        if (ty->kind != TY_ARRAY && ty->kind != TY_VLA && ty->kind != TY_VECTOR)
+            return false;
+        ty = ty->base;
+    }
+    return false;
+}
+
+// #1102: a hoisted local's declarator must not carry any qualifier the
+// split declaration/assignment scheme can't honour. #1029 already strips a
+// scalar's top-level `const` (the declaration is hoisted, the initializer
+// became an assignment in the body below). Aggregate locals need one more
+// step: for `const int arr[3]` (or a const-element VLA/vector) C spells the
+// qualifier on the *element* type, so is_const lives on ty->base -- one
+// level further down than #1029's arm looked -- and the per-element
+// initializer assignments (`*(const int *)((char *)arr + i) = v`) would
+// still store into a genuinely-qualified object, which every host compiler
+// rejects ("read-only variable is not assignable"). Copy the type chain,
+// clearing is_const on the aggregate itself and recursively down its array/
+// vector bases only; a pointer local's pointee qualifier (`const char *p`)
+// is deliberately left alone, same as #1029. Returns ty untouched when
+// there is nothing to strip.
+static Type *hoist_mutable_type(VirtualMachine *vm, Type *ty) {
+    if (!ty)
+        return ty;
+    bool agg =
+        ty->kind == TY_ARRAY || ty->kind == TY_VLA || ty->kind == TY_VECTOR;
+    if (!aggregate_spine_is_qualified(ty))
+        return ty;
+    Type *cpy     = copy_type(vm, ty);
+    cpy->is_const = false;
+    cpy->origin   = NULL;
+    if (agg)
+        cpy->base = hoist_mutable_type(vm, cpy->base);
+    return cpy;
+}
+
 // Serialize a function
 static void serialize_function(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Obj *fn) {
@@ -4349,13 +4532,14 @@ static void serialize_function(FILE *f, VirtualMachine *vm,
             // dimension can't disagree with anything else emitted for this
             // object. See SerializeContext.allow_layout_dims's own comment.
             ctx->allow_layout_dims = true;
-            if (var->ty->is_const) {
-                Type *mutable_ty     = copy_type(vm, var->ty);
-                mutable_ty->is_const = false;
-                serialize_type_decl(f, ctx, mutable_ty, var->name);
-            } else {
-                serialize_type_decl(f, ctx, var->ty, var->name);
-            }
+            // #1029: strip the top-level const on the hoisted declarator;
+            // #1102: and any qualifier spelled on an aggregate's *element*
+            // type (`const int a[3]`, arbitrarily deep for multi-dimensional
+            // arrays) -- see hoist_mutable_type(), which returns the type
+            // untouched when there is nothing to strip. A pointer-level
+            // const on a pointee (`const char *p`) is untouched by both.
+            serialize_type_decl(f, ctx, hoist_mutable_type(vm, var->ty),
+                                var->name);
             ctx->allow_layout_dims = false;
             fprintf(f, ";\n");
         }
