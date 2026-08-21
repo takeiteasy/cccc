@@ -3443,6 +3443,11 @@ int main(int argc, const char *argv[]) {
     // harness to run against; control falls through to the
     // compile_format == COMPILE_NATIVE dispatch below, which serializes the
     // [[cccc::test]] harness itself into the generated C (#1033).
+    // The vm/bytecode backends run the suite as a pre-pass (#1106): on a
+    // passing (or --list-tests) run, control falls through into the -c
+    // dispatches below, so `--testing -c=bytecode/-c=native` really does
+    // compile after the tests; a failing suite bails before any artifact is
+    // written.
     if (testing_mode && testing_backend != TESTING_BACKEND_NATIVE) {
         if (testing_backend == TESTING_BACKEND_BYTECODE) {
             // In-process bytecode round-trip: compile → save .c4 → reload → run
@@ -3508,7 +3513,15 @@ int main(int argc, const char *argv[]) {
 
         exit_code = cc_run_tests(&vm, merged_prog, &test_opts);
 
-        if (!build_mode || (fail_fast && exit_code != 0))
+        // Fall through into the compile dispatch below only when there is a
+        // compile step to run AND the suite passed (#1106): --testing acts as
+        // a pre-pass guard, so -c=bytecode/-c=native/--build all refuse to
+        // produce an artifact once any test has failed. This is deliberately
+        // independent of --fail-fast, which only stops the test *run* early;
+        // a red suite never reaches the compile step.
+        if ((!build_mode && compile_format != COMPILE_BYTECODE &&
+             compile_format != COMPILE_NATIVE) ||
+            exit_code != 0)
             goto BAIL;
     }
 

@@ -5,6 +5,20 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `--testing` (VM/`=bytecode` backends) combined with `-c=bytecode` or
+  `-c=native` now really compiles after the suite passes (#1106): the tests
+  act as a pre-pass guard, and only a fully green run reaches the compile
+  step (`-c=bytecode` writes `-o FILE`/`a.c4`, `-c=native` builds through
+  the host toolchain). Any failing test exits nonzero without producing an
+  artifact — independent of `--fail-fast`, which only stops the test run
+  early. The same guard now applies to `--testing --build`: a build whose
+  suite fails is refused before any target compiles (previously only
+  `--fail-fast` stopped it). `-c=generated` still combines with `--testing`
+  unguarded: its serialization runs before the suite (existing behaviour,
+  relied on by tooling).
+
 ## [0.3.1] - 2026-08-21
 
 ### Added

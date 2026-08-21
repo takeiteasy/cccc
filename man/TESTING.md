@@ -1724,15 +1724,34 @@ above for what it covers and its v1 scope cuts.
 
 ### Combining `--testing` with `-c` (compile pre-pass)
 
-`--testing`/`-t` (bare, i.e. the VM backend) can be combined with
-`-c=bytecode`/`-c=native` on the command line, but as of this writing the
-compile step never actually runs afterward regardless of whether the tests
-passed — `--testing` without `--build` always exits right after the VM
-test run. This is a known, tracked gap (#1106), not documented behavior to
-rely on; do not depend on `--testing -c=native`/`-c=bytecode` producing an
-artifact. `--testing=native` itself is unaffected (that combination is
+`--testing`/`-t` (the VM and `=bytecode` backends) can be combined with
+`-c=bytecode` or `-c=native`, where the test suite acts as a pre-pass guard
+in front of the compile: the suite runs first, and only if every collected
+`[[cccc::test]]` passes does the compile step proceed —
+`-c=bytecode` writes the `.c4` to `-o FILE` (or `a.c4` by default, matching
+cc's `a.out` convention), and `-c=native` builds an executable through the
+host toolchain. Any test failure (or a run that hits its timeout) exits
+nonzero without producing an artifact, so an artifact's existence certifies
+that the suite was green at compile time:
+
+```
+./cccc --testing -c=bytecode -o out.c4 myfile.c   # tests, then bytecode artifact
+./cccc --testing -c=native -o prog myfile.c       # tests, then host compile
+```
+
+The gate is independent of `--fail-fast`: that flag only stops the test
+*run* after the first failure, while any failing test blocks the compile
+regardless. The same guard applies to `--testing --build` — a build script
+whose suite fails is refused before any target compiles.
+
+`--testing=native` is unaffected by all this (that combination is
 `--testing`'s own compile-and-run-the-harness mode, not a VM pre-pass in
-front of a separate `-c=native`).
+front of a separate `-c=native`). `-c=generated` also combines with
+`--testing`, but is *not* suite-guarded: its portable-C serialization runs
+before the test dispatch (the serialized output is emitted regardless of
+the suite's result) — the combination exists so tooling can inspect
+generated output with `--testing`-active preprocessing, e.g. the `@test`
+route-token leak check.
 
 ### `--test-run[=LEVEL]`: smoke-test the program itself before compiling
 
