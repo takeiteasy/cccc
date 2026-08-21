@@ -2039,6 +2039,41 @@ static bool atomic_serializable_pointee(Node *addr) {
            base->size == 8;
 }
 
+// #1101: an address operand handed to a __atomic_* builtin must not carry
+// the _Atomic qualifier in its static type -- clang rejects
+// `__atomic_store_n(&x, ...)` outright when x is spelled through a host
+// atomic typedef ("address argument to atomic operation must be a pointer
+// to integer or pointer ('atomic_int *' (aka '_Atomic(int) *') invalid)"),
+// because declarations print through those typedef names (atomic_int -> the
+// real <stdatomic.h> _Atomic int) and so &x has type _Atomic(int)*. The
+// builtins' own contract wants a pointer to the *unqualified* pointee --
+// atomicity lives in the object, not the argument's spelling, exactly as
+// the hand-written __cccc_ensure_mtx/__cccc_ensure_cnd shims below already
+// assume when they cast once_flag/mtx->__handle for their own __atomic_*
+// calls. So when the operand is a pointer to an _Atomic-qualified pointee,
+// emit a cast to that pointee with the qualifier stripped: a shallow copy
+// of the pointee Type with origin severed, so find_typedef_name_exact
+// cannot re-spell the atomic typedef by identity and the canonical spelling
+// ("int", "long", "_Bool", "void *"...) falls out instead. Anything else
+// serializes byte-identical to before.
+static void serialize_atomic_addr(FILE *f, VirtualMachine *vm,
+                                  SerializeContext *ctx, Node *addr) {
+    if (!addr || !addr->ty || addr->ty->kind != TY_PTR || !addr->ty->base ||
+        !addr->ty->base->is_atomic) {
+        serialize_expr(f, vm, ctx, addr, 2);
+        return;
+    }
+    Type pointee      = *addr->ty->base;
+    pointee.is_atomic = false;
+    pointee.origin    = NULL;
+    fprintf(f, "(");
+    serialize_type(f, ctx, &pointee);
+    fprintf(f, " *)");
+    // Same comma-guarded argument position the bare operand occupied
+    // before (#1042(b)).
+    serialize_expr(f, vm, ctx, addr, 2);
+}
+
 // #1018 follow-up: C's default argument promotions (C17 6.5.2.2p6/7,
 // applied to a variadic call's own trailing arguments) mean a real
 // `va_arg(ap, T)` may never spell a promotable T -- clang/gcc both
@@ -3057,8 +3092,8 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // pointee and the VM is not being atomic there either.
             if (atomic_serializable_pointee(node->lhs)) {
                 fprintf(f, "__atomic_load_n(");
-                // #1042(b): see ND_OVERFLOW_ARITH above.
-                serialize_expr(f, vm, ctx, node->lhs, 2);
+                // #1101: strip _Atomic from the operand's static type.
+                serialize_atomic_addr(f, vm, ctx, node->lhs);
                 fprintf(f, ", __ATOMIC_SEQ_CST)");
             } else {
                 fprintf(f, "(*(");
@@ -3080,8 +3115,8 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 fprintf(f, ")) __cccc_astore_v = (");
                 serialize_expr(f, vm, ctx, node->rhs, 0);
                 fprintf(f, "); __atomic_store_n(");
-                // #1042(b): real argument separator to the builtin.
-                serialize_expr(f, vm, ctx, node->lhs, 2);
+                // #1101: strip _Atomic from the operand's static type.
+                serialize_atomic_addr(f, vm, ctx, node->lhs);
                 fprintf(f, ", __cccc_astore_v, __ATOMIC_SEQ_CST); "
                            "__cccc_astore_v; })");
             } else {
@@ -3101,8 +3136,8 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // codegen rejects float/odd-size pointees outright for exchange and
             // compare-and-swap, so these two map 1:1 with no fallback arm.
             fprintf(f, "__atomic_exchange_n(");
-            // #1042(b): see ND_OVERFLOW_ARITH above.
-            serialize_expr(f, vm, ctx, node->lhs, 2);
+            // #1101: strip _Atomic from the operand's static type.
+            serialize_atomic_addr(f, vm, ctx, node->lhs);
             fprintf(f, ", ");
             serialize_expr(f, vm, ctx, node->rhs, 2);
             fprintf(f, ", __ATOMIC_SEQ_CST)");
@@ -3113,10 +3148,12 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // contract: cas_old is a *pointer* to the expected value, as
             // __atomic_compare_ exchange_n also takes. weak = 0.
             fprintf(f, "__atomic_compare_exchange_n(");
-            // #1042(b): see ND_OVERFLOW_ARITH above.
-            serialize_expr(f, vm, ctx, node->cas_addr, 2);
+            // #1101: strip _Atomic from both pointer operands' static types
+            // (the address, and the pointer to the expected value -- the
+            // builtin wants both to point at unqualified objects).
+            serialize_atomic_addr(f, vm, ctx, node->cas_addr);
             fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->cas_old, 2);
+            serialize_atomic_addr(f, vm, ctx, node->cas_old);
             fprintf(f, ", ");
             serialize_expr(f, vm, ctx, node->cas_new, 2);
             fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
@@ -3735,8 +3772,8 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             print_indent_level(f, indent);
             if (atomic_serializable_pointee(node->lhs)) {
                 fprintf(f, "__atomic_store_n(");
-                // #1042(b): real argument separator to the builtin.
-                serialize_expr(f, vm, ctx, node->lhs, 2);
+                // #1101: strip _Atomic from the operand's static type.
+                serialize_atomic_addr(f, vm, ctx, node->lhs);
                 fprintf(f, ", ");
                 serialize_expr(f, vm, ctx, node->rhs, 2);
                 fprintf(f, ", __ATOMIC_SEQ_CST);\n");

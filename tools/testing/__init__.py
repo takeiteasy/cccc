@@ -316,8 +316,6 @@ NATIVE_SKIP_TESTS = {
     # --- pre-existing -c=native serializer gaps, surfaced by #1033's
     # corpus run (tests/suites/ was never exercised under --native before).
     # Each is its own ticket; the file goes back on the corpus once fixed.
-    "test_suite_atomics.c": "_Atomic address-of miscompiles, #1101",
-    "test_suite_optimizer.c": "_Atomic address-of miscompiles, #1101",
     "test_suite_c23.c": "rvalue compound-literal address-of, #1102",
     "test_suite_structs.c": "rvalue compound-literal address-of, #1102",
     "test_suite_std_c11.c": "myabs(-5) mis-serialized as --5, #1102",

@@ -18,6 +18,18 @@ All notable changes to CCCC are documented here. Format loosely follows
   `--fail-fast` stopped it). `-c=generated` still combines with `--testing`
   unguarded: its serialization runs before the suite (existing behaviour,
   relied on by tooling).
+- `-c=native`/`-c=generated` atomic operations against `_Atomic`-qualified
+  lvalues now compile (#1101): the serializer emitted `&x` straight into
+  `__atomic_load_n`/`__atomic_store_n`/`__atomic_exchange_n`/
+  `__atomic_compare_exchange_n`, but declarations spell through the host
+  typedef names (`atomic_int x;` is the real `<stdatomic.h>` `_Atomic int`),
+  so clang rejected every such call ("address argument to atomic operation
+  must be a pointer to integer or pointer"). Address operands now cast to
+  their pointee with the qualifier stripped — `(int *)&x`, `(_Bool *)&f` for
+  `atomic_flag` — leaving the object itself genuinely `_Atomic`; non-atomic
+  operands serialize byte-identical to before. This un-skips
+  `test_suite_atomics.c` and `test_suite_optimizer.c` from the
+  `tools/tests.py --native` corpus (the two files #1033's sweep flagged).
 
 ## [0.3.1] - 2026-08-21
 
