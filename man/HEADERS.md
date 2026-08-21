@@ -855,7 +855,8 @@ serialized quantities disagree about the same value":
   `VarScope`) rather than assumed away.
 
 **Still open, and not merely deferred — both are unsound to fix, not just
-incomplete:**
+incomplete (#1099, closed `WONT_FIX` — record-keeping only, no code change
+expected):**
 
 - A **bitfield width** (`int x : sizeof(struct statfs);`) determines the
   *containing struct's own layout*, and CCCC emits that struct's body with
@@ -869,12 +870,49 @@ incomplete:**
   scope — closing it would mean re-deriving the byte image itself against
   the real host layout, not just the declared dimension.
 
-`_Static_assert(sizeof(struct statfs) == N, "...")` is a different problem
-from the two above, not a residual of this same fix: the serializer never
-emits `_Static_assert` at all, so there is no *divergence* in the emitted
-C — the gap is that a host whose real layout would fail the same check is
-never re-checked. Closing it means genuinely emitting the assert for the
-host to re-verify, a small feature rather than a re-materialization fix.
+**`_Static_assert(sizeof(struct statfs) == N, "...")` was a different
+problem from the two above, not a residual of this same fix, and is now
+closed (#1098):** the serializer never emitted `_Static_assert` at all, so
+there was no *divergence* in the emitted C to fix — the gap was that a host
+whose real layout would fail the same check compiled anyway, silently. This
+needed genuinely emitting the assert for the host to re-verify, a small
+feature rather than a re-materialization fix. `static_assert_decl()`
+(`src/parse_stmt.c`) now keeps the parsed condition `Node` (previously
+discarded the moment `const_expr()` folded and checked it) instead of just
+the folded `int64_t`, threading it through a new `Node.static_assert_cond`/
+`static_assert_msg` pair for the block-scope form (stashed on the otherwise-
+empty `ND_BLOCK` `stmt()` already returns) and a new `Compiler.
+static_asserts` list for the file-scope form (which has no `Node` of its
+own to hang it off). `serialize_static_assert()` (`src/serialize.c`)
+re-emits `_Static_assert(cond, "msg")` — always the two-arg spelling, even
+for a C23 single-arg `static_assert` source, since it needs no `<assert.h>`
+and is valid on every host this project supports — through
+`serialize_expr()` (so tag/typedef renames apply, unlike a raw-token
+replay) and `serialize_string_n()` (so an escaped/embedded-quote message
+round-trips). Gated on two conditions, both required:
+
+- `expr_has_host_owned_layout()` walks the condition tree for a bare
+  `sizeof`/`_Alignof`-of-a-`from_include`-type leaf (`node_layout_const()`)
+  whose type is host-owned (`type_layout_is_host_owned()`) — deliberately
+  narrower than that function itself, which accepts any `Type` kind despite
+  its own doc comment saying "struct/union": a bare scalar type like plain
+  `int` can spuriously `same_type_or_origin()`-match an unrelated
+  `from_include` *typedef* of `int` (e.g. `sys/types.h`'s `__int32_t`,
+  reached merely by including `<sys/mount.h>`) via that function's
+  pointer-identity walk up the `origin` chain — harmless for #1031's own
+  re-materialization (`sizeof(int)` prints identically either way) but
+  would make this gate fire on ordinary, fully portable asserts having
+  nothing to do with a host-divergent layout. Restricted to `TY_STRUCT`/
+  `TY_UNION` (peeled through `TY_ARRAY`/`TY_VLA`) instead, matching every
+  real-world case in this batch's own tickets.
+- The assert's own token must be from a command-line input file (the same
+  `cc_file_is_command_line_input()`/`cc_file_is_cccc_only()` test #901/
+  #1096's bodiless-declaration gate uses) — load-bearing: `include/
+  sys/stat.h`, `signal.h`, `fts.h`, `aio.h`, `mqueue.h`, and `ndbm.h` all
+  carry their own per-platform `_Static_assert(sizeof(struct X) == N)` on
+  types that *are* `from_include` and not compiler-owned; without this
+  gate they would be re-emitted and fail against the real host layout for
+  reasons the user never wrote.
 
 Documented in `man/COVERAGE.md`'s Serialized-output divergences table.
 

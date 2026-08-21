@@ -1126,6 +1126,16 @@ static bool type_has_printable_name(SerializeContext *ctx, Type *ty);
 // every caller's own fallback (the plain folded literal) still applies.
 static bool serialize_layout_const(FILE *f, SerializeContext *ctx,
                                    Type *layout_ty, bool is_align);
+// #1098: forward-declared for the same reason as the two above -- defined
+// near type_layout_is_host_owned (which expr_has_host_owned_layout calls),
+// but serialize_stmt's ND_BLOCK case, much earlier in this file, needs to
+// call serialize_static_assert.
+static bool expr_has_host_owned_layout(SerializeContext *ctx, Node *node,
+                                       int depth);
+static void serialize_static_assert(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Node *cond,
+                                    const char *msg, int msg_len, Token *tok,
+                                    int indent);
 
 // Emit a float initializer value as a C `f`-suffixed floating constant.
 // `%.9g` of an integral value like 1.0f prints "1" with no '.'/'e' -- append
@@ -3202,6 +3212,20 @@ static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             break;
 
         case ND_BLOCK:
+            // #1098: a block-scope _Static_assert/static_assert parses to
+            // an otherwise-empty ND_BLOCK with its condition/message
+            // stashed on it (static_assert_decl(), parse_stmt.c) -- emit
+            // the real assert here instead of an empty `{}` when it
+            // qualifies (see serialize_static_assert's own gate); an
+            // unqualifying one is left as the pre-existing empty block,
+            // same as before this ticket.
+            if (node->static_assert_cond) {
+                serialize_static_assert(f, vm, ctx, node->static_assert_cond,
+                                        node->static_assert_msg,
+                                        node->static_assert_msg_len, node->tok,
+                                        indent);
+                break;
+            }
             print_indent_level(f, indent);
             fprintf(f, "{\n");
             for (Node *s = node->body; s; s = s->next) {
@@ -4885,6 +4909,96 @@ static bool serialize_layout_const(FILE *f, SerializeContext *ctx,
     serialize_type(f, ctx, layout_ty);
     fprintf(f, ")");
     return true;
+}
+
+// #1098: true when `node` (a `_Static_assert` condition tree) contains, at
+// any depth, a bare sizeof/_Alignof-of-a-from_include-type leaf
+// (node_layout_const(), parse_analysis.c -- the same #1031/#1095 stash
+// used by serialize_expr's own ND_NUM arm) whose type is a from_include
+// struct/union (or an array thereof) that is host-owned
+// (type_layout_is_host_owned()) and nameable (type_has_printable_name()).
+// This is the "does this assert actually depend on a layout the VM might
+// have gotten wrong" gate -- an ordinary compile-time-only assert (no
+// from_include type involved anywhere in it) gets no redundant host-side
+// re-check. Deliberately narrower than type_layout_is_host_owned()'s own
+// implementation (which accepts any Type kind, not just struct/union,
+// despite its own doc comment saying "struct/union"): a bare scalar type
+// like plain `int` can spuriously same_type_or_origin()-match an unrelated
+// from_include *typedef* of `int` (e.g. sys/types.h's __int32_t, reached
+// merely by including <sys/mount.h>) via same_type_or_origin()'s pointer-
+// identity walk up the origin chain -- harmless for #1031's own
+// re-materialization (sizeof(int) prints identically either way) but would
+// make this gate fire on ordinary, fully portable asserts having nothing
+// to do with a host-divergent layout. Restricting to aggregates (matching
+// every real-world case in this batch's own tickets, e.g. struct statfs)
+// sidesteps that without touching the shared same_type_or_origin() itself.
+// Plain recursion over lhs/rhs/cond/then/els covers every shape a
+// constant-expression tree can take (unary: lhs only; binary: lhs+rhs;
+// ternary: cond/then/els; cast: lhs) -- this walks a single expression
+// tree, not a whole function body, so the explicit-stack/pointer-identity
+// discipline SCRATCH.md documents for AST-wide walkers doesn't apply here.
+// depth cap mirrors type_layout_is_host_owned()'s own guard.
+static bool expr_has_host_owned_layout(SerializeContext *ctx, Node *node,
+                                       int depth) {
+    if (!node || depth > 32)
+        return false;
+    Type *layout_ty    = NULL;
+    bool  layout_align = false;
+    if (node_layout_const(node, &layout_ty, &layout_align)) {
+        Type *base_ty = layout_ty;
+        while (base_ty &&
+               (base_ty->kind == TY_ARRAY || base_ty->kind == TY_VLA))
+            base_ty = base_ty->base;
+        if (base_ty &&
+            (base_ty->kind == TY_STRUCT || base_ty->kind == TY_UNION) &&
+            type_layout_is_host_owned(ctx, layout_ty, 0) &&
+            type_has_printable_name(ctx, layout_ty))
+            return true;
+    }
+    return expr_has_host_owned_layout(ctx, node->lhs, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->rhs, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->cond, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->then, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->els, depth + 1);
+}
+
+// #1098: emits `_Static_assert(cond, "msg");` (always the two-arg
+// spelling, even for a C23 single-arg `static_assert` source -- valid
+// C11-and-later on any supported host, needs no <assert.h>) so the host
+// compiler re-checks an assertion whose condition depends on a
+// from_include type's real layout, which CCCC only ever checked against
+// its own (possibly wrong-for-this-host) projection at parse time. Two
+// gates, both required, mirroring the #901/#1096 bodiless-declaration
+// provenance gate (serialize.c's function-prototype loop) so this can
+// never fire on one of CCCC's own bundled headers' own layout asserts
+// (include/sys/stat.h, signal.h, fts.h, aio.h, mqueue.h, ndbm.h all carry
+// per-platform `_Static_assert(sizeof(struct X) == N)` on types that ARE
+// from_include and not compiler-owned -- re-emitting those against the
+// real host would fail for reasons the user never wrote):
+//   1. expr_has_host_owned_layout(cond) -- the condition actually depends
+//      on a host-owned layout, not just an ordinary compile-time fact.
+//   2. `tok` is from a command-line input file (the same
+//      file_is_command_line_input()/cc_file_is_cccc_only() test #901/#1096
+//      use) -- a header-sourced assert (bundled OR a real host header
+//      reached via a replayed #include) is left unemitted.
+// Prints nothing when either gate fails.
+static void serialize_static_assert(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Node *cond,
+                                    const char *msg, int msg_len, Token *tok,
+                                    int indent) {
+    if (!cond || !tok || !tok->file)
+        return;
+    if (!cc_file_is_command_line_input(vm, tok->file->name) &&
+        !cc_file_is_cccc_only(vm, tok->file->name))
+        return;
+    if (!expr_has_host_owned_layout(ctx, cond, 0))
+        return;
+    print_indent_level(f, indent);
+    fprintf(f, "_Static_assert(");
+    serialize_expr(f, vm, ctx, cond, 0);
+    fprintf(f, ", ");
+    serialize_string_n(f, msg, msg_len);
+    fprintf(f, ");\n");
 }
 
 static bool aggregate_typedef_is_definition(SerializeContext *ctx,
@@ -8248,6 +8362,23 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         }
         free(reloc_fns.data);
     }
+
+    // #1098: file-scope _Static_assert/static_assert records. Placed here
+    // -- after tag forward decls, type definitions, and the #include
+    // replay above, so an asserted type's own definition (or its replayed
+    // #include) is already visible; before global-variable definitions,
+    // which is the only real ordering constraint (no global depends on a
+    // preceding assert or vice versa). Every record here came from a
+    // hand-written source declaration (never macro-generated -- there is
+    // no synthesis path that produces one), so -c=generated (which only
+    // re-emits macro-generated additions layered onto the original
+    // source) skips this pass entirely, the same reasoning the
+    // global-variable loop just below applies per-Obj via is_macro_generated.
+    if (!generated_only)
+        for (StaticAssertRecord *sa = vm->compiler.static_asserts; sa;
+             sa                     = sa->next)
+            serialize_static_assert(f, vm, &ctx, sa->cond, sa->msg, sa->msg_len,
+                                    sa->tok, 0);
 
     // Serialize global variables
     for (Obj *obj = prog; obj; obj = obj->next) {

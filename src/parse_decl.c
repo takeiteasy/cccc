@@ -1368,7 +1368,22 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         // _Static_assert or static_assert (C23) - check before declspec
         if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
-            tok = static_assert_decl(vm, tok);
+            Token *decl_tok = tok;
+            Node  *cond     = NULL;
+            char  *msg      = NULL;
+            int    msg_len  = 0;
+            tok = static_assert_decl(vm, tok, &cond, &msg, &msg_len);
+            // #1098: file scope leaves no Node to stash onto (unlike the
+            // block-scope arm in stmt()), so keep it in its own list on
+            // Compiler for serialize.c to re-emit -- see
+            // StaticAssertRecord's own comment.
+            StaticAssertRecord *rec     = calloc(1, sizeof(StaticAssertRecord));
+            rec->cond                   = cond;
+            rec->msg                    = msg;
+            rec->msg_len                = msg_len;
+            rec->tok                    = decl_tok;
+            rec->next                   = vm->compiler.static_asserts;
+            vm->compiler.static_asserts = rec;
             continue;
         }
 

@@ -395,7 +395,8 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
                               Token *tok);
 Token *skip_to_decl_boundary(VirtualMachine *vm, Token *tok);
 Token *skip_to_stmt_end(VirtualMachine *vm, Token *tok);
-Token *static_assert_decl(VirtualMachine *vm, Token *tok);
+Token *static_assert_decl(VirtualMachine *vm, Token *tok, Node **out_cond,
+                          char **out_msg, int *out_msg_len);
 int static_branch_value(VirtualMachine *vm, Node *cond);
 Node *stmt(VirtualMachine *vm, Token **rest, Token *tok);
 Node *to_assign(VirtualMachine *vm, Node *binary);

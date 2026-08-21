@@ -1741,7 +1741,19 @@ struct Node {
     // ND_NUM (ordinary literals, constant-folded arithmetic, etc). See
     // serialize.c's ND_NUM integer arm and type_layout_is_host_owned().
     Type *layout_ty;
-    bool  layout_is_align;           // layout_ty came from _Alignof, not sizeof
+    bool  layout_is_align; // layout_ty came from _Alignof, not sizeof
+
+    // #1098: a block-scope `_Static_assert`/`static_assert` parses to an
+    // otherwise-empty ND_BLOCK (see static_assert_decl(), src/parse_stmt.c) --
+    // its condition Node and message are stashed here (rather than a new
+    // ND_ kind, keeping codegen/eval's switches untouched) so serialize.c
+    // can re-emit the assert for the host compiler to re-check when the
+    // condition folds a host-owned layout. NULL for every ordinary
+    // ND_BLOCK. See serialize_static_assert()/expr_has_host_owned_layout().
+    Node *static_assert_cond;
+    char *static_assert_msg;
+    int   static_assert_msg_len;
+
     int   cleanup_target_depth;      // for ND_GOTO (break/continue):
                                      // cleanup_scope_depth of target
     CleanupChainNode *cleanup_chain; // ND_GOTO/ND_LABEL: innermost active
@@ -2589,6 +2601,23 @@ struct ComptimeDeclRecord {
     ComptimeDeclRecord *next;
 };
 
+// #1098: a file-scope `_Static_assert`/`static_assert` -- unlike the
+// block-scope one (Node.static_assert_cond), static_assert_decl() has no
+// Node of its own to stash onto at file scope (parse_file_scope_decls()
+// just skips its tokens), so this list is where it survives instead.
+// serialize.c re-emits it for the host compiler to re-check when the
+// condition folds a host-owned layout (type_layout_is_host_owned()) and
+// `tok` is from a command-line input file -- see
+// serialize_static_assert()/expr_has_host_owned_layout().
+typedef struct StaticAssertRecord StaticAssertRecord;
+struct StaticAssertRecord {
+    Node               *cond;
+    char               *msg;
+    int                 msg_len;
+    Token              *tok; // Declaration site, for the provenance gate
+    StaticAssertRecord *next;
+};
+
 // A factory function registered via [[cccc::build_target]] (or with
 // kind=native). When --build-target=NAME matches a factory name the runner
 // calls the factory directly (skipping build_main) and builds its returned
@@ -3316,6 +3345,8 @@ typedef struct Compiler {
     MacroFn            *macro_fns; // Linked list of captured macro functions
     ComptimeDeclRecord *comptime_decls; // Linked list of bodyless
                                         // [[cccc::comptime]] decls (#884)
+    StaticAssertRecord *static_asserts; // #1098: file-scope _Static_assert
+                                        // records, for native re-emission
     ComptimeVar
         *comptime_vars;     // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns; // Linked list of [[cccc::test]] function names

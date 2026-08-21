@@ -125,26 +125,50 @@ static Node *stmt_or_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     return stmt(vm, rest, tok);
 }
 
-Token *static_assert_decl(VirtualMachine *vm, Token *tok) {
-    bool c23_static_assert = equal(tok, "static_assert");
-    tok                    = skip(vm, tok->next, "(");
-    long long val          = const_expr(vm, &tok, tok);
-    char     *message      = "static assertion failed";
+// #1098: out_cond/out_msg/out_msg_len (may be NULL, ignored) hand back the
+// parsed condition Node and its exact message text/length -- eval() folds
+// and discards val the same as before, but a caller that wants to
+// re-emit the assert for -c=native (serialize.c's serialize_static_assert)
+// needs the Node itself, not just the folded int64_t. tok->str/tok->len is
+// the already-decoded string (escapes resolved), which is what a caller
+// re-emitting the message must reuse rather than the raw source spelling.
+Token *static_assert_decl(VirtualMachine *vm, Token *tok, Node **out_cond,
+                          char **out_msg, int *out_msg_len) {
+    bool   c23_static_assert = equal(tok, "static_assert");
+    Token *start_tok         = tok;
+    tok                      = skip(vm, tok->next, "(");
+    Node     *cond_node      = conditional(vm, &tok, tok);
+    long long val            = eval(vm, cond_node);
+    char     *message        = "static assertion failed";
+    int       message_len    = (int)strlen(message);
 
     if (consume(vm, &tok, tok, ",")) {
         if (tok->kind != TK_STR)
             error_tok(vm, tok, "expected string literal, found '%.*s'",
                       tok->len, tok->loc);
-        message = tok->str;
-        tok     = tok->next;
+        // #1098: tok->len is the raw source span (quotes/backslashes
+        // included) -- tok->str is the already-decoded, NUL-terminated
+        // buffer read_string_literal() built (tokenize.c), so its real
+        // length is strlen(), not tok->len.
+        message     = tok->str;
+        message_len = (int)strlen(message);
+        tok         = tok->next;
     } else if (!c23_static_assert || vm->compiler.c_std < CCCC_STD_C23) {
         error_tok(vm, tok, "expected ','");
     }
 
     if (!val)
-        error_tok(vm, tok, "%s", message);
+        error_tok(vm, start_tok, "%s", message);
     tok = skip(vm, tok, ")");
-    return skip(vm, tok, ";");
+    tok = skip(vm, tok, ";");
+
+    if (out_cond)
+        *out_cond = cond_node;
+    if (out_msg)
+        *out_msg = message;
+    if (out_msg_len)
+        *out_msg_len = message_len;
+    return tok;
 }
 
 static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok);
@@ -167,8 +191,18 @@ static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw);
 //      | expr-stmt
 Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
-        *rest = static_assert_decl(vm, tok);
-        return new_node(vm, ND_BLOCK, tok);
+        Node *cond    = NULL;
+        char *msg     = NULL;
+        int   msg_len = 0;
+        *rest         = static_assert_decl(vm, tok, &cond, &msg, &msg_len);
+        // #1098: stash on the otherwise-empty ND_BLOCK -- serialize.c's
+        // ND_BLOCK case re-emits it for the host to re-check when the
+        // condition folds a host-owned layout. See Node.static_assert_cond.
+        Node *node                  = new_node(vm, ND_BLOCK, tok);
+        node->static_assert_cond    = cond;
+        node->static_assert_msg     = msg;
+        node->static_assert_msg_len = msg_len;
+        return node;
     }
 
     if (equal(tok, "return")) {

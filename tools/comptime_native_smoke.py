@@ -5345,10 +5345,12 @@ def case_layout_const_sites_native_round_trip(cccc: Path, tmp: str) -> bool:
           "propagated to a later auto-incrementing enumerator that "
           "depends on this one's value, which stays folded instead, the "
           "same 'leave the inconsistent case folded' rule as the "
-          "initialized-global exclusion). Bitfield widths, "
-          "_Static_assert, and an initialized global's byte image remain "
-          "open -- see man/COVERAGE.md's own entry for why those three "
-          "are not merely deferred. Asserts -m output prints "
+          "initialized-global exclusion). Bitfield widths and an "
+          "initialized global's byte image remain open (#1099, WONT_FIX "
+          "-- see man/COVERAGE.md's own entry for why those two are "
+          "actively unsound to fix the same way, not merely deferred); "
+          "_Static_assert re-emission is #1098, a separate case below. "
+          "Asserts -m output prints "
           "'buf[sizeof(struct statfs)]', 'case sizeof(struct statfs)', "
           "and 'N = sizeof(struct statfs)' rather than a folded literal "
           "in each of the three sites, that the initialized global's own "
@@ -5384,11 +5386,83 @@ def case_layout_const_sites_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     LAYOUT_CONST_SITES_PROGRAM)
 
 
+STATIC_ASSERT_PROGRAM = """
+#include <sys/mount.h>
+
+// #1098: the file-scope form. Deliberately `>=`, not `==` -- true against
+// BOTH CCCC's own guest projection of struct statfs and the real host's
+// (much larger) one, so this exercises the RE-EMISSION itself rather than
+// a projection-vs-real-layout mismatch (see test_serialize_static_assert_
+// 1098.c for that half, and dbg5-style manual verification in the ticket
+// for a deliberately-failing `==` case).
+_Static_assert(sizeof(struct statfs) >= 8, "struct statfs too small");
+
+int main(void) {
+    // Block-scope form, same gate.
+    static_assert(sizeof(struct statfs) >= 8, "struct statfs too small (block)");
+
+    // Negative half: an ordinary compile-time-only assert (no from_include
+    // type anywhere in its condition) must NOT be re-emitted -- confirms
+    // the host-owned-layout gate (expr_has_host_owned_layout(),
+    // serialize.c) doesn't fire indiscriminately on every static_assert in
+    // a TU that merely includes a header with from_include types in scope.
+    _Static_assert(sizeof(int) == 4, "int must be 4 bytes");
+
+    return 42;
+}
+"""
+
+
+def case_static_assert_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  126: #1098 -- a `_Static_assert`/`static_assert` is evaluated "
+          "against CCCC's own type projection at parse time; a failing "
+          "assertion is a compile error, so only a passing one ever "
+          "reaches the serializer, which never emitted `_Static_assert` "
+          "at all -- a host whose real layout would fail the same check "
+          "compiled anyway. -c=native now re-emits the assert (both file- "
+          "and block-scope forms) for the host to re-check, gated on the "
+          "condition actually depending on a host-owned from_include "
+          "struct/union layout (expr_has_host_owned_layout(), narrower "
+          "than type_layout_is_host_owned() itself to sidestep a scalar-"
+          "typedef same_type_or_origin() false-positive -- see that "
+          "function's own comment) AND the assert being written in a "
+          "command-line input file (the #901/#1096 provenance gate), so "
+          "one of CCCC's own bundled headers' own per-platform layout "
+          "asserts (include/sys/stat.h, signal.h, fts.h, aio.h, etc.) is "
+          "never re-emitted against the wrong host. Asserts -m output "
+          "contains both re-emitted asserts with their message text "
+          "intact, does NOT contain the ordinary sizeof(int)==4 assert, "
+          "plus VM 42 -> native 42.")
+    src = Path(tmp) / "static_assert_1098.c"
+    write(src, STATIC_ASSERT_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = m_result.stdout
+    if "_Static_assert((unsigned long)8 <= sizeof(struct statfs), " \
+       "\"struct statfs too small\")" not in out:
+        print(f"    FAIL: -m output missing re-materialized file-scope "
+              f"_Static_assert\n    {out}")
+        return False
+    if "_Static_assert((unsigned long)8 <= sizeof(struct statfs), " \
+       "\"struct statfs too small (block)\")" not in out:
+        print(f"    FAIL: -m output missing re-materialized block-scope "
+              f"_Static_assert\n    {out}")
+        return False
+    if "sizeof(int)" in out and "int must be 4 bytes" in out:
+        print(f"    FAIL: an ordinary compile-time-only assert (no "
+              f"from_include type) was re-emitted -- must stay "
+              f"unemitted\n    {out}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "static_assert_1098_rt",
+                                    STATIC_ASSERT_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -5521,6 +5595,7 @@ def main() -> int:
             case_static_label_table_native_round_trip,
             case_bundled_header_bodiless_decl_no_include_dir,
             case_layout_const_sites_native_round_trip,
+            case_static_assert_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

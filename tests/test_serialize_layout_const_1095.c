@@ -5,9 +5,11 @@
 // eval() consumer kept only the folded int64_t and stayed folded against
 // CCCC's own (possibly stale/wrong) guest projection -- #1095 closes three
 // of those: array dimensions, `case` labels, and enum values (see
-// man/HEADERS.md and man/COVERAGE.md for the residual that's still open:
-// bitfield widths, `_Static_assert`, and an initialized global's byte
-// image, plus an array dimension appearing on a struct/union member).
+// man/HEADERS.md and man/COVERAGE.md for the residual that's still open,
+// WONT_FIX per #1099: bitfield widths and an initialized global's byte
+// image, plus an array dimension appearing on a struct/union member.
+// `_Static_assert` was a separate, since-closed case -- see #1098 and
+// tests/test_serialize_static_assert_1098.c).
 //
 // The enum and case-label checks are plain value comparisons against an
 // ordinary bare `sizeof(struct statfs)` expression, which #1031 already
