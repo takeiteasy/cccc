@@ -1,11 +1,8 @@
-// CCCC_FLAGS: tests/fixtures/dup_enum_obj_1016_a.c
-// tests/fixtures/dup_enum_obj_1016_b.c -m -Wall CCCC_C4_SKIP: multi-source
-// compile, not a single-TU bytecode round-trip CCCC_EXPECT_STDOUT:
-// (?=[\s\S]*AA1016__cccc_dup[0-9]+ = 100,)(?=[\s\S]*BB1016__cccc_dup[0-9]+ =
-// 101,)(?=[\s\S]*CC1016__cccc_dup[0-9]+ = 102)(?=[\s\S]*static int
-// AA1016;)(?=[\s\S]*extern int BB1016;)(?=[\s\S]*int CC1016\(void\);)
-// CCCC_REJECT_STDOUT: static int AA1016__cccc_dup|extern int
-// BB1016__cccc_dup|int CC1016__cccc_dup #1017: -Wall added -- false-positive
+// CCCC_FLAGS: tests/fixtures/dup_enum_obj_1016_a.c tests/fixtures/dup_enum_obj_1016_b.c -m -Wall
+// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
+// CCCC_EXPECT_STDOUT: (?=[\s\S]*AA1016__cccc_dup[0-9]+ = 100,)(?=[\s\S]*BB1016__cccc_dup[0-9]+ = 101,)(?=[\s\S]*CC1016__cccc_dup[0-9]+ = 102)(?=[\s\S]*static int AA1016;)(?=[\s\S]*extern int BB1016;)(?=[\s\S]*int CC1016\(void\);)
+// CCCC_REJECT_STDOUT: static int AA1016__cccc_dup|extern int BB1016__cccc_dup|int CC1016__cccc_dup
+// #1017: -Wall added -- false-positive
 // canary for -Wnative-name-collision. None of AA1016/BB1016/CC1016's enum group
 // is header-exposed here (no #include at all in either fixture), so tier 1
 // never fires and the warning must not appear even though every enumerator

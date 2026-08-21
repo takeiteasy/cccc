@@ -138,7 +138,7 @@ def assert_condition_never_fires(line, condition):
 
 def test_integer_local_regression():
     # Loop increments x from 10 to 15; must stop on exactly the x == 12 hit.
-    assert_condition_fires(34, "x == 12")
+    assert_condition_fires(48, "x == 12")
 
 
 def test_assignment_and_comma_regression():
@@ -149,43 +149,43 @@ def test_assignment_and_comma_regression():
     # trailing i == 2 comma operand only turns the whole condition true on
     # one specific iteration, matching assert_condition_fires' single-hit
     # assumption.
-    assert_condition_fires(34, "(x = 999, i == 2)")
+    assert_condition_fires(48, "(x = 999, i == 2)")
 
 
 def test_float_arithmetic_was_previously_unsupported():
     # The old evaluator was integer-only end to end; a bare float comparison
     # in a condition always errored out. It must now work like any other
     # scalar condition.
-    assert_condition_never_fires(37, "fx > 4.0")  # fx is still 3.0 here
-    assert_condition_fires(38, "fx > 4.0")         # fx is 4.5 by here
+    assert_condition_never_fires(51, "fx > 4.0")  # fx is still 3.0 here
+    assert_condition_fires(52, "fx > 4.0")         # fx is 4.5 by here
 
 
 def test_integer_call_regression():
-    assert_condition_fires(38, "add(x, 100) == 115")
+    assert_condition_fires(52, "add(x, 100) == 115")
 
 
 def test_float_call_args_and_return():
-    assert_condition_fires(39, "half(fx) > 2.0")
+    assert_condition_fires(53, "half(fx) > 2.0")
 
 
 def test_pointer_to_local_argument():
-    assert_condition_fires(40, "add_ptr(&x, 1) == 16")
+    assert_condition_fires(54, "add_ptr(&x, 1) == 16")
 
 
 def test_struct_by_value_argument_and_member_regression():
-    assert_condition_fires(41, "sum_point(pt) == 7 && pt.x == 3")
+    assert_condition_fires(55, "sum_point(pt) == 7 && pt.x == 3")
 
 
 def test_indirect_call():
-    assert_condition_fires(42, "fp(3, 4) == 7")
+    assert_condition_fires(56, "fp(3, 4) == 7")
 
 
 def test_stack_passed_arguments():
-    assert_condition_fires(43, "sum10(1,2,3,4,5,6,7,8,9,10) == 55")
+    assert_condition_fires(57, "sum10(1,2,3,4,5,6,7,8,9,10) == 55")
 
 
 def test_nested_function_static_link():
-    assert_condition_fires(44, "outer(2) == 21")
+    assert_condition_fires(58, "outer(2) == 21")
 
 
 def test_non_scalar_condition_is_rejected():
@@ -193,7 +193,7 @@ def test_non_scalar_condition_is_rejected():
     # (compiled on the breakpoint's first hit), not when it's set.
     child = debugger()
     child.expect(PROMPT)
-    child.send("break 41 if pt")
+    child.send("break 55 if pt")
     child.expect(PROMPT)
     child.send("continue")
     child.expect(b"condition must have scalar type")

@@ -1,6 +1,5 @@
-// CCCC_FLAGS: --build --build-out-dir=build/test_bytecode_cache_out
-// --build-cache --build-target=bc_cached CCCC_EXPECT_STDOUT: build succeeded
-// \(1 target, 0 errors\)
+// CCCC_FLAGS: --build --build-out-dir=build/test_bytecode_cache_out --build-cache --build-target=bc_cached
+// CCCC_EXPECT_STDOUT: build succeeded \(1 target, 0 errors\)
 //
 // Smoke test for --build-cache with kind=bytecode targets (#562): the runner
 // must enable incremental caching without errors and the build must succeed.

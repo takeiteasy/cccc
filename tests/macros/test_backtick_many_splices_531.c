@@ -3,10 +3,7 @@
 [[cccc::comptime]]
 Node *sum10(Node *a, Node *b, Node *c, Node *d, Node *e, Node *f, Node *g,
             Node *h, Node *i, Node *j) {
-    return `${a} + ${b} + ${c} + ${d} + ${e} + ${f} + ${g} + ${h} + ${i} + $ {
-        j
-    }
-    `;
+    return `${a} + ${b} + ${c} + ${d} + ${e} + ${f} + ${g} + ${h} + ${i} + ${j}`;
 }
 
 int main(void) {

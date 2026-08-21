@@ -7,5 +7,5 @@
 #define puts(x...) puts(%:x)
 
 int main() {
-    puts(Hello, world !);
+    puts(Hello, world!);
 }

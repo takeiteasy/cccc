@@ -61,6 +61,17 @@ extern int fstatfs(int fd, struct statfs *buf);
 
 #include_next <sys/mount.h>
 
+// On Linux, glibc's own <sys/mount.h> only carries mount(2) flags -- it does
+// not define `struct statfs` at all (unlike the BSD/Darwin convention this
+// file otherwise follows). The real struct lives in <sys/vfs.h> (glibc's
+// preferred spelling; <sys/statfs.h> is the same definition under a
+// different name). Without this, sizeof(struct statfs) re-materialization
+// (see #1031/#1095) hits a real host compiler with only an incomplete
+// forward declaration and fails to compile.
+#ifdef __linux__
+#include <sys/vfs.h>
+#endif
+
 #endif /* __CCCC__ */
 
 #endif /* __SYS_MOUNT_H */

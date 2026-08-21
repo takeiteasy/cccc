@@ -1,6 +1,5 @@
-// CCCC_FLAGS: --build --build-install
-// --build-out-dir=/tmp/cccc_test_install_559 CCCC_EXPECT_STDOUT:
-// install_test_app
+// CCCC_FLAGS: --build --build-install --build-out-dir=/tmp/cccc_test_install_559
+// CCCC_EXPECT_STDOUT: install_test_app
 //
 // InstallArtifact / SetInstallPrefix / BuildWantsInstall:
 // Register an artifact for installation and verify the install message appears.

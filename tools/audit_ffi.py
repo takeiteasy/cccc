@@ -324,7 +324,11 @@ RUNTIME_GATE_MARKER = "vm->flags &"
 # The real pattern (src/stdlib/posix_poll.c/posix_sched.c's ppoll/sched_setparam et al.) is
 # "if (vm->flags & CCCC_POSIX_EMULATION) {" one line above a small run of
 # registration calls; this just needs to comfortably cover that block.
-RUNTIME_GATE_LOOKBACK_LINES = 8
+# posix_sched.c's --posix-emulation block registers 5 functions (some spanning
+# 2 lines each), so the last one (sched_rr_get_interval) sits 9 lines below
+# the "if" -- 8 was one short and produced a false-positive guard mismatch on
+# exactly that entry; bumped to comfortably cover a run this long.
+RUNTIME_GATE_LOOKBACK_LINES = 12
 
 
 def audit():

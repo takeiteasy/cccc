@@ -1,5 +1,4 @@
-// CCCC_FLAGS: --build --build-option=foo=bar --build-option=baz=1
-// --build-option=empty=
+// CCCC_FLAGS: --build --build-option=foo=bar --build-option=baz=1 --build-option=empty=
 //
 // GetBuildOption / HaveBuildOption: query Zig-style typed build options
 // passed via --build-option=key=value on the CLI.

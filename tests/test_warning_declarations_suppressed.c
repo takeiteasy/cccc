@@ -1,5 +1,5 @@
-// CCCC_FLAGS: -Wall -Wno-implicit-int -Wno-implicit-function-declaration
-// -Wno-return-type CCCC_REJECT_STDERR: warning:
+// CCCC_FLAGS: -Wall -Wno-implicit-int -Wno-implicit-function-declaration -Wno-return-type
+// CCCC_REJECT_STDERR: warning:
 global_value;
 
 int zero(void) {

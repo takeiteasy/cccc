@@ -121,12 +121,12 @@ def debugger():
 
 
 def at_return_line():
-    """Break at the `return ok ? 42 : 1;` line (24), where every local in
+    """Break at the `return ok ? 42 : 1;` line (30), where every local in
     the fixture is fully initialized, and let the program run to
     completion afterward (proving `continue` still works post-inspection)."""
     child = debugger()
     child.expect(PROMPT)
-    child.send("break 24")
+    child.send("break 30")
     child.expect(PROMPT)
     child.send("continue")
     child.expect(b"Breakpoint hit")

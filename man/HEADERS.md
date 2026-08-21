@@ -835,6 +835,34 @@ set confirmed by compiling the real chain to exhaustion (`clang
 -ferror-limit=0`) rather than assumed, unlike the `time.h` full hand-off
 attempt above, this one did **not** keep growing.
 
+**On real Linux, a replayed `#include <sys/mount.h>` does not bring
+`struct statfs` into scope at all — a distinct, platform-specific gap
+found only by actually verifying the above fix through a Linux/x86_64
+container, not on macOS.** glibc's own `<sys/mount.h>` carries only
+`mount(2)` flags; unlike the BSD/Darwin convention `include/sys/mount.h`'s
+own hand-off assumes, the real struct lives in `<sys/vfs.h>` instead. This
+bites in exactly the case the fix above depends on: once a folded
+`sizeof(struct statfs)`/`_Alignof`/`_Static_assert` re-materializes
+textually against "whatever the replayed `#include` brings in", a real
+Linux host compiler sees only a forward declaration and rejects it
+outright ("invalid application of `sizeof` to an incomplete type"). Note
+this is a *different* code path from the `-I./include`-explicit hand-off
+case above: `cc_serialize_program`'s own `#include`-replay loop re-emits
+the captured `#include <sys/mount.h>` line verbatim, resolved against the
+host compiler's *own* search path — not through `include/sys/mount.h` at
+all unless the caller happens to pass `-I <repo>/include` explicitly (the
+same distinction `#1096`'s `close()` fix, above, had to draw). Fixed at
+that replay site (`cc_serialize_program`, `src/serialize.c`): a replayed
+`#include <sys/mount.h>` line is immediately followed by
+`#include <sys/vfs.h>` when this cccc binary is itself running on Linux
+(`run_native_backend` never cross-compiles, so the host `cc` it spawns
+always targets the same OS this process runs on — gating on `__linux__`
+here is safe, not a target-triple assumption). `include/sys/mount.h`'s own
+`#else` branch (the explicit-`-I` path) got the matching
+`#include <sys/vfs.h>` addition too, for consistency, though it's the
+replay-site fix above that actually closes the smoke-case failure this
+was found through.
+
 **`stdarg.h`'s `va_list` and `setjmp.h`'s `jmp_buf` are deliberately
 excluded from this re-materialization** — both use the *opposite* strategy
 (widen CCCC's own layout to cover every supported host's real one, so the

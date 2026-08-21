@@ -1,4 +1,7 @@
-@define CT_VALUE 42 @ifdef CT_VALUE @define CT_SEEN 1 @endif
+@define CT_VALUE 42
+@ifdef CT_VALUE
+@define CT_SEEN 1
+@endif
 
     [[cccc::comptime]]
     Node *answer(void) {

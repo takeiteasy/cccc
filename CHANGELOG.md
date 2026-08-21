@@ -17,6 +17,21 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`, Linux only: a replayed `#include <sys/mount.h>` doesn't bring
+  `struct statfs` into scope on real glibc (the struct lives in
+  `<sys/vfs.h>` there, not `<sys/mount.h>` as on macOS/BSD), so a
+  re-materialized `sizeof`/`_Alignof`/`_Static_assert` of `struct statfs`
+  hit "invalid application of `sizeof` to an incomplete type" — found by
+  running `tools/comptime_native_smoke.py` in a real Linux/x86_64 container,
+  not reproducible on macOS. Fixed by following a replayed
+  `#include <sys/mount.h>` with `#include <sys/vfs.h>` when running on
+  Linux (`cc_serialize_program`, `src/serialize.c`).
+- `tools/audit_ffi.py`: a fixed 8-line lookback window for detecting a
+  runtime-gated (`--posix-emulation`) FFI registration was one line short
+  of covering `posix_sched.c`'s `sched_rr_get_interval` (the 5th and last
+  registration in that block), producing a false-positive "declared
+  conditionally but registered unconditionally" guard mismatch. Bumped to
+  12 lines.
 - `-c=native`: no real `<threads.h>` lowering existed at all —
   `thrd_create`/`mtx_lock`/`cnd_wait`/`tss_create`/`call_once`/etc. are VM
   cfuncs with no host libc symbol to link against, so a native binary

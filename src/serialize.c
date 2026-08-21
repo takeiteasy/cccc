@@ -9050,6 +9050,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         if (!vm->compiler.emit_cccc && line_is_conditional_directive(line))
             continue;
         fprintf(f, "%s\n", line);
+        // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
+        // `struct statfs` into scope the way it does on macOS/BSD -- real
+        // glibc's own <sys/mount.h> only carries mount(2) flags; the struct
+        // lives in <sys/vfs.h> instead (include/sys/mount.h's own #ifdef
+        // __linux__ branch documents this same asymmetry for the
+        // explicit-`-I` case, but that branch is never reached here since
+        // this loop replays the bare `#include` line verbatim, resolved
+        // against the host's OWN header search path, not CCCC's bundled
+        // one). Without this, a folded sizeof(struct statfs)/_Alignof
+        // re-materialized textually (#1031/#1095/#1098) hits "invalid
+        // application of 'sizeof' to an incomplete type" on a real Linux
+        // host. run_native_backend never cross-compiles -- the host cc it
+        // spawns always targets the same OS this cccc binary itself runs
+        // on -- so gating on __linux__ here (this translation unit's own
+        // host, not some target flag) is safe.
+#ifdef __linux__
+        if (resolved && path_basename_is(resolved, "mount.h") &&
+            strstr(resolved, "sys/mount.h"))
+            fprintf(f, "#include <sys/vfs.h>\n");
+#endif
     }
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
