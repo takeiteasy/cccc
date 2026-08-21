@@ -30,7 +30,8 @@ bool is_url(const char *filename) {
 #include <dirent.h>
 #include <curl/curl.h>
 
-// Maximum size for downloaded headers (10MB)
+// Maximum size for downloaded files (10MB) -- caps both URL #include
+// headers and URL #embed payloads fetched into the cache
 // TODO: Make this configurable
 #define MAX_HEADER_SIZE (10 * 1024 * 1024)
 

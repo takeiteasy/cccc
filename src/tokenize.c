@@ -1499,16 +1499,17 @@ Token *tokenize(VirtualMachine *vm, File *file) {
     vm->compiler.at_bol       = true;
     vm->compiler.has_space    = false;
 
-    // State tracking for #include directive to preserve // in URLs
-    bool after_include_directive = false; // True after we see #include
-    bool in_include_path = false; // True when inside <...> or "..." of #include
-    bool in_backtick_splice     = false;
-    int  backtick_brace_depth   = 0;
+    // State tracking for #include/#embed directives to preserve // in URLs
+    bool after_include_directive = false; // True after we see #include/#embed
+    bool in_include_path =
+        false; // True when inside <...> or "..." of #include/#embed
+    bool  in_backtick_splice    = false;
+    int   backtick_brace_depth  = 0;
     char *backtick_splice_start = NULL;
 
     while (*p) {
-        // Skip line comments (but NOT inside #include paths where URLs may
-        // contain //)
+        // Skip line comments (but NOT inside #include/#embed paths where
+        // URLs may contain //)
         if (startswith(vm, p, "//") && !in_include_path) {
             if (vm->compiler.c_std < CCCC_STD_C99)
                 warn_at(vm, p, CCCC_WARN_PEDANTIC,
@@ -1520,7 +1521,7 @@ Token *tokenize(VirtualMachine *vm, File *file) {
             continue;
         }
 
-        // Skip block comments (also not inside #include paths)
+        // Skip block comments (also not inside #include/#embed paths)
         if (startswith(vm, p, "/*") && !in_include_path) {
             char *q = strstr(p + 2, "*/");
             if (!q)
@@ -1664,18 +1665,24 @@ Token *tokenize(VirtualMachine *vm, File *file) {
 
         // Detect # at beginning of line (potential directive)
         if (vm->compiler.at_bol && *p == '#') {
-            // Check if this is #include by peeking ahead
+            // Check if this is #include or #embed by peeking ahead; both
+            // take a <path> or "path" operand whose URLs may contain //
             char *peek = p + 1;
             while (isspace(*peek) && *peek != '\n')
                 peek++;
-            if (strncmp(peek, "include", 7) == 0 &&
-                (peek[7] == '\0' || (!isalnum(peek[7]) && peek[7] != '_'))) {
+            bool is_include =
+                strncmp(peek, "include", 7) == 0 &&
+                (peek[7] == '\0' || (!isalnum(peek[7]) && peek[7] != '_'));
+            bool is_embed =
+                strncmp(peek, "embed", 5) == 0 &&
+                (peek[5] == '\0' || (!isalnum(peek[5]) && peek[5] != '_'));
+            if (is_include || is_embed) {
                 after_include_directive = true;
             }
         }
 
-        // Track entering/exiting path in #include directive
-        // Handle both #include <...> and #include "..."
+        // Track entering/exiting path in #include/#embed directives
+        // Handle both #include/#embed <...> and "..."
         if (after_include_directive) {
             if (*p == '<' || *p == '"') {
                 in_include_path         = true;

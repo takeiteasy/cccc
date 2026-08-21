@@ -89,7 +89,7 @@ shim's shape and its residual gaps.
 | K&R-style function definitions | ✓ | |
 | Trigraphs | ✗ | Removed in C23; intentionally not supported |
 | Digraphs (`<:` `:>` `<%` `%>` `%:` `%:%:`) | ✓ | Equivalent to `[` `]` `{` `}` `#` `##` (C23 §6.4.6); original spelling preserved during stringification |
-| `#include`, `#define`, `#undef` | ✓ | |
+| `#include`, `#define`, `#undef` | ✓ | `#include` also accepts URLs (`#include <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into a cache (`--url-cache-dir`) |
 | `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif` | ✓ | |
 | CCCC-routed preprocessor directives | ✓ | `@emit` routes directives to generated output; `@comptime` routes directives to the comptime stream |
 | `#error` | ✓ | |
@@ -193,7 +193,7 @@ language coverage figures apply.
 |---|---|---|
 | `#elifdef` / `#elifndef` | ✓ | |
 | `#warning` | ✓ | |
-| `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()` |
+| `#embed` | ✓ | Supports `limit()`, `prefix()`, `suffix()`, `if_empty()`, `__has_embed()`; the filename may also be a URL (`#embed <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into the same cache URL `#include` uses. `__has_embed()` never probes URLs and reports 0 for them |
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
 | `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths |

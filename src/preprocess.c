@@ -2782,7 +2782,23 @@ static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
     // Resolve file path
     char *path = NULL;
 
-    if (filename[0] == '/') {
+    if (is_url(filename)) {
+        // URL embeds fetch into the same cache URL #include uses, then
+        // embed from the cached copy; limit/prefix/suffix/if_empty apply
+        // to the fetched bytes exactly as they do for local files.
+#ifdef CCCC_HAS_CURL
+        char *cache_path = fetch_url_to_cache(vm, filename);
+        if (!cache_path) {
+            error_tok(vm, directive_start, "failed to fetch URL: %s", filename);
+        }
+        // Track URL -> cache path mapping for error reporting
+        hashmap_put(&vm->compiler.url_to_path, cache_path, (void *)filename);
+        path = cache_path;
+#else
+        error_tok(vm, directive_start,
+                  "URL embeds require CCCC to be built with CCCC_HAS_CURL=1");
+#endif
+    } else if (filename[0] == '/') {
         // Absolute path
         path = filename;
     } else if (is_dquote) {
@@ -5984,6 +6000,12 @@ void init_macros(VirtualMachine *vm) {
     // namespace so include/ndbm.h can guard itself on Linux (#871).
 #ifdef CCCC_HAS_NDBM
     define_macro(vm, "__CCCC_HAS_NDBM__", "1");
+#endif
+
+    // Same republishing for the libcurl knob: lets guest code (and tests)
+    // tell URL #include/#embed-capable builds apart.
+#ifdef CCCC_HAS_CURL
+    define_macro(vm, "__CCCC_HAS_CURL__", "1");
 #endif
 
     define_macro(vm, "__has_include(x)", "0");

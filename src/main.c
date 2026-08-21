@@ -441,9 +441,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) "
            "built with -c=bytecode\n");
 #ifdef CCCC_HAS_CURL
-    printf("\t   --url-cache-dir <path> Directory for caching #include "
+    printf("\t   --url-cache-dir <path> Directory for caching #include/#embed "
            "<https://...> fetches\n");
-    printf("\t   --url-cache-clear     Clear the URL include cache and exit\n");
+    printf("\t   --url-cache-clear     Clear the URL fetch cache and exit\n");
 #endif
     printf("\t-D/--define <macro>[=def] Define a macro\n");
     printf("\t-U/--undef <macro>       Undefine a macro\n");

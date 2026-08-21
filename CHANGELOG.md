@@ -5,6 +5,36 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- URL `#embed` — `#embed <https://...>` and `#embed "https://..."` now fetch
+  the file into the same cache URL `#include` uses (`--url-cache-dir`,
+  default `$TMPDIR/.cccc`) and embed the fetched bytes; `limit()`,
+  `prefix()`, `suffix()`, and `if_empty()` apply to the fetched data exactly
+  as they do for local files, and the existing large-embed warnings/limits
+  still govern the result. Like URL includes this requires a curl-enabled
+  build (`CCCC_HAS_CURL=1 ./cccc --build build.c`) and is a compile error
+  otherwise. The tokenizer now preserves `//` inside `#embed <...>` paths
+  (it previously only did so for `#include`, so an angle-bracket URL was
+  truncated at the first `//` and died with "expected '>' after #embed
+  filename"). `__has_embed()` deliberately never probes URLs and reports 0
+  for them, matching `__has_include()`'s no-network behavior.
+- Guest-visible feature predefine `__CCCC_HAS_CURL__` — defined as `1` in
+  curl-enabled builds (same republishing pattern as `__CCCC_HAS_NDBM__`),
+  so code and tests can tell URL-capable builds apart.
+
+### Fixed
+
+- `tests/test_url_include_basic.c` was doubly broken and could never have
+  exercised its network path: its `#ifdef CCCC_HAS_CURL` guard tested a
+  macro CCCC never predefined for guest code (the test always took its
+  trivially-passing fallback), and its URL was misspelled with a space
+  (`https: //...`) to dodge the old tokenizer bug above. The guard now
+  tests `__CCCC_HAS_CURL__`, the URL is spelled correctly, and the test
+  probes header macros instead of calling `stbsp_sprintf`, which has no
+  implementation behind it in the VM (stb_sprintf's body lives in
+  stb_sprintf.c).
+
 ## [0.3.0] - 2026-08-21
 
 ### Added
