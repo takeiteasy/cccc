@@ -24,6 +24,14 @@
 
 // ========== Block Literal Support (Apple Blocks Extension) ==========
 
+// #1081: forward declaration -- collect_captures_in_node's own
+// ND_BLOCK_LITERAL arm (below) and collect_captures_for_fn_body (below that)
+// are mutually recursive: a nested block's own nested_children need walking
+// too, the same way a nested function's own further-nested children do.
+static void collect_captures_for_fn_body(VirtualMachine *vm, Obj *fn,
+                                         Obj *outer_locals, Obj ***captures,
+                                         int *num_captures, int *cap_capacity);
+
 // Recursively collect variables from outer scopes that are referenced in an
 // expression
 static void collect_captures_in_node(VirtualMachine *vm, Node *node,
@@ -89,9 +97,32 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node,
 
     // Recurse into nested block literals so intermediate blocks pick up
     // transitive captures (e.g. outer block sees x used inside inner block).
+    // #1081: also walk the inner block's own nested_children (a nested
+    // function defined inside it) the same way -- see
+    // collect_captures_for_fn_body.
     if (node->kind == ND_BLOCK_LITERAL && node->block_fn)
-        collect_captures_in_node(vm, node->block_fn->body, outer_locals,
-                                 captures, num_captures, cap_capacity);
+        collect_captures_for_fn_body(vm, node->block_fn, outer_locals, captures,
+                                     num_captures, cap_capacity);
+}
+
+// #1081: like collect_captures_in_node(fn->body, ...), but also walks every
+// nested function defined directly inside `fn`'s own body (fn->
+// nested_children, recursively -- a nested-in-nested chain inside a block
+// needs every level). compound_stmt() (parse_stmt.c) never appends an AST
+// node for a nested function definition, so a plain node walk from `fn->body`
+// alone can never reach such a child's own body -- this is the only way a
+// variable referenced ONLY inside it (never directly inside `fn`'s own body)
+// still gets registered as one of `fn`'s (a block, in every caller of this
+// function today) own captures.
+static void collect_captures_for_fn_body(VirtualMachine *vm, Obj *fn,
+                                         Obj *outer_locals, Obj ***captures,
+                                         int *num_captures, int *cap_capacity) {
+    collect_captures_in_node(vm, fn->body, outer_locals, captures, num_captures,
+                             cap_capacity);
+    for (Obj *child = fn->nested_children; child;
+         child      = child->next_nested_sibling)
+        collect_captures_for_fn_body(vm, child, outer_locals, captures,
+                                     num_captures, cap_capacity);
 }
 
 // #965: collect every `return` statement in a block literal's own body, used
@@ -357,10 +388,15 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     Obj **captures     = NULL;
     int   num_captures = 0, cap_capacity = 0;
 
-    // Level 0: immediate parent's locals
+    // Level 0: immediate parent's locals. #1081: uses
+    // collect_captures_for_fn_body rather than a bare collect_captures_in_node
+    // so a variable referenced only inside a nested function defined directly
+    // in this block's own body (compound_stmt() never appends an AST node for
+    // one, so a plain node walk from block_fn->body alone could never reach
+    // it) is still registered as one of this block's own captures.
     if (saved_locals)
-        collect_captures_in_node(vm, block_fn->body, saved_locals, &captures,
-                                 &num_captures, &cap_capacity);
+        collect_captures_for_fn_body(vm, block_fn, saved_locals, &captures,
+                                     &num_captures, &cap_capacity);
     // Levels 1+: walk the ancestor chain via block_outer_locals snapshots.
     // #1076: keyed off is_nested rather than is_block deliberately -- a
     // block literal defined inside a *genuine* nested function must still
@@ -373,8 +409,8 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // genuinely nested" check it added.
     for (Obj *anc = outer_fn; anc && anc->is_nested && anc->block_outer_locals;
          anc      = anc->parent_fn)
-        collect_captures_in_node(vm, block_fn->body, anc->block_outer_locals,
-                                 &captures, &num_captures, &cap_capacity);
+        collect_captures_for_fn_body(vm, block_fn, anc->block_outer_locals,
+                                     &captures, &num_captures, &cap_capacity);
 
     block_fn->captures     = captures;
     block_fn->num_captures = num_captures;

@@ -385,13 +385,52 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
     int depth = calculate_chain_depth(current_fn, owner_fn);
     // First link already loaded above, so start from 1.
     int hop = static_link_hop_bytes(vm);
+    // #1081: `anc` is the ancestor whose bp dest_reg currently holds --
+    // current_fn's immediate parent, right after the load above. Every hop
+    // below reads THAT ancestor's own __static_link slot: for a genuine
+    // nested function that slot holds its own parent's bp (the assumption
+    // every hop here used to make unconditionally), but for a BLOCK it
+    // holds that block's own descriptor pointer instead (ND_BLOCK_CALL,
+    // codegen_expr.c, always passes the descriptor as its callee's A0/
+    // __static_link). Reading it and continuing to add var->offset*8, as
+    // if it were a frame bp, produced this ticket's own garbage address.
+    // Since #1081's parse-side fix (block_literal()'s transitive-capture
+    // climb now also walks every nested_children function defined directly
+    // inside a block, parse_blocks.c) guarantees `var` is captured by the
+    // first block ancestor on this chain (if any), the chase terminates
+    // there instead: read the descriptor (the same load that used to be
+    // misread as a bp) and index into it exactly like gen_addr's own
+    // cap_idx >= 0 arm above does for a plain in-block reference. The
+    // single-hop case (owner_fn == current_fn's immediate parent, depth ==
+    // 1) needs no such check -- the loop below never runs for it -- and
+    // already worked before this fix (confirmed: a block's own param, read
+    // directly by a nested function defined inside it, is an ordinary
+    // frame-relative access into the block's very real stack frame).
+    Obj *anc = current_fn->parent_fn;
     for (int i = 1; i < depth; i++) {
+        if (anc->is_block) {
+            int cap_idx = find_capture_index(anc, var);
+            if (cap_idx < 0)
+                error("internal error: static-link chase reached a block "
+                      "ancestor that never captured '%s' (#1081)",
+                      var->name);
+            long cap_offset = cc_block_capture_offset(anc, cap_idx);
+            emit_addi3(vm, dest_reg, dest_reg, hop);
+            emit_rr(vm, LDR_D, dest_reg,
+                    dest_reg); // load anc's own descriptor ptr
+            emit_addi3(vm, dest_reg, dest_reg, cap_offset);
+            if (var->is_block_var)
+                emit_rr(vm, LDR_D, dest_reg,
+                        dest_reg); // heap ptr from slot
+            return;
+        }
         // Each parent also has its own __static_link, at hop bytes below its
         // own bp (#1082: bp-1 without canaries, bp-2 with them -- a bare -8
         // here silently read the wrong slot under --stack-canaries/-3 once
         // depth reached 2).
         emit_addi3(vm, dest_reg, dest_reg, hop);
         emit_rr(vm, LDR_D, dest_reg, dest_reg); // load grandparent's bp
+        anc = anc->parent_fn;
     }
 
     // dest_reg now holds owner_fn's bp; add the variable's offset. Variable

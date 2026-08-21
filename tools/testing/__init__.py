@@ -271,27 +271,6 @@ NATIVE_SKIP_TESTS = {
                  "convention to, see COVERAGE.md Serialized-output "
                  "divergences (#1060)",
 
-    # --- #1076: RESOLVED on the VM side (a block literal inside a
-    # genuinely nested function, capturing a variable owned by one of that
-    # function's own ancestors, was silently miscompiled -- wrong answer,
-    # no diagnostic, no -c=native involvement at all). Fixed by recording
-    # the same block_outer_locals ancestor-climb snapshot for nested
-    # functions that block literals already record for each other
-    # (parse_decl.c/parse_blocks.c), and by adding the missing
-    # belongs_to_outer_function()-based static-link-chase arm to the
-    # block's own capture-population loop (codegen_expr.c), sharing
-    # gen_addr's own chase via the new emit_static_chain_var_addr
-    # (codegen_addr.c) so the two can't drift apart the way #994 warned
-    # about. -c=native itself stays out of scope (#1074's own rejection for
-    # this exact shape, "a block literal inside a nested function capturing
-    # ... is not supported", now fires as intended instead of being dead
-    # code -- see #1080, the native-lowering follow-up).
-    "test_block_in_nested_1076.c": "a block literal inside a nested "
-                 "function capturing a variable owned by one of that "
-                 "function's own ancestors has no native lowering yet "
-                 "(#1074's own rejection); the VM-side miscompile itself "
-                 "is fixed (#1076), see #1080",
-
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
 }

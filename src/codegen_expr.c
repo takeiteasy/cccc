@@ -3201,6 +3201,25 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         int hop = static_link_hop_bytes(vm);
                         for (Obj *fn = current_fn->parent_fn;
                              fn && fn != callee_parent; fn = fn->parent_fn) {
+                            // #1081 residual (tracked separately, not fixed
+                            // here): this hop reads `fn`'s own __static_link
+                            // slot expecting the next ancestor's bp -- true
+                            // for a genuine nested function, but a block's
+                            // own slot holds its descriptor pointer instead
+                            // (emit_static_chain_var_addr, codegen_addr.c,
+                            // has the fix for a plain VARIABLE read through
+                            // a block ancestor; a CALL to a nested function
+                            // whose parent sits beyond a block ancestor has
+                            // no equivalent -- it would need the block's
+                            // *enclosing frame*, which a heap-copied block's
+                            // descriptor deliberately never stores). Reject
+                            // with a diagnostic instead of silently chasing
+                            // descriptor bytes as a frame pointer.
+                            if (fn->is_block)
+                                error_tok(vm, node->tok,
+                                          "calling a nested function whose "
+                                          "parent is beyond a block ancestor "
+                                          "is not supported (#1081 residual)");
                             emit_addi3(vm, REG_A0, REG_A0, hop);
                             emit_rr(vm, LDR_D, REG_A0, REG_A0);
                         }

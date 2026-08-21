@@ -581,6 +581,16 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // walk in block_literal() (parse_blocks.c) that now keys off
         // is_nested rather than is_block.
         fn->block_outer_locals = saved_locals;
+        // #1081: register `fn` as one of parent_fn's nested_children --
+        // compound_stmt() (parse_stmt.c) never appends an AST node for a
+        // nested function definition, so this is the only way a block
+        // literal's own transitive-capture climb (block_literal(),
+        // parse_blocks.c) can reach a variable referenced only inside a
+        // nested function defined directly in the block's own body.
+        // parent_fn may itself be a block (Obj.is_block) -- that's the
+        // exact shape #1081 is about.
+        fn->next_nested_sibling    = parent_fn->nested_children;
+        parent_fn->nested_children = fn;
     } else {
         fn->parent_fn     = NULL;
         fn->is_nested     = false;

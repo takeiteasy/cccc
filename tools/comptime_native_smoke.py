@@ -5458,11 +5458,142 @@ def case_static_assert_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     STATIC_ASSERT_PROGRAM)
 
 
+BLOCK_IN_NESTED_1080_PROGRAM = (
+    "int ticket_repro(void) {\n"
+    "    int g = 7;\n"
+    "    int mid(int m) {\n"
+    "        int (^blk)(void) = ^{ return g + m; };\n"
+    "        return blk();\n"
+    "    }\n"
+    "    return mid(3);\n"
+    "}\n"
+    "int block_var_ancestor(void) {\n"
+    "    __block int g = 0;\n"
+    "    int mid(int m) {\n"
+    "        void (^blk)(void) = ^{ g += m; };\n"
+    "        blk();\n"
+    "        return 0;\n"
+    "    }\n"
+    "    mid(4);\n"
+    "    return g;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    if (ticket_repro() != 10) return 1;\n"
+    "    if (block_var_ancestor() != 4) return 2;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_block_in_nested_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  127: -c=native rejected a block literal inside a genuinely "
+          "nested function capturing a variable owned by one of that "
+          "function's own ancestors ('a block literal inside a nested "
+          "function capturing ... is not supported (#1074 follow-up)') -- "
+          "the VM-side miscompile itself was fixed by #1076, but the "
+          "native-lowering follow-up (#1080) was never done: "
+          "collect_nested_refs()'s ND_BLOCK_LITERAL arm now registers the "
+          "ancestor-owned capture as an upvar of the real owner "
+          "(record_nested_upvar()) instead of rejecting it, and the "
+          "capture-copy loop in serialize_expr()'s ND_BLOCK_LITERAL case "
+          "reads it back through the same env chase (nested_env_ptr_expr) "
+          "an ordinary nested-function upvar reference uses. A "
+          "__block-storage ancestor capture (previously rejected "
+          "outright) is supported too, via an extra level of indirection "
+          "in the env field (T ** instead of T *). Asserts VM 42 -> "
+          "native 42 (both cases previously a hard compile-time rejection "
+          "under -c=native).")
+    return _vm_and_native_run_case(cccc, tmp, "block_in_nested_1080",
+                                    BLOCK_IN_NESTED_1080_PROGRAM)
+
+
+NESTED_FN_IN_BLOCK_1081_PROGRAM = (
+    "int ticket_repro(void) {\n"
+    "    int g = 7;\n"
+    "    int (^blk)(int) = ^(int m) {\n"
+    "        int inner(void) { return g + m; }\n"
+    "        return inner();\n"
+    "    };\n"
+    "    return blk(3);\n"
+    "}\n"
+    "int snapshot_consistency(void) {\n"
+    "    int g = 5;\n"
+    "    int (^blk)(void) = ^{\n"
+    "        int inner(void) { return g; }\n"
+    "        return inner();\n"
+    "    };\n"
+    "    g = 100;\n"
+    "    return blk();\n"
+    "}\n"
+    "int block_var_write(void) {\n"
+    "    __block int g = 1;\n"
+    "    int (^blk)(void) = ^{\n"
+    "        int inner(void) { g += 3; return g; }\n"
+    "        return inner();\n"
+    "    };\n"
+    "    int r1 = blk();\n"
+    "    int r2 = g;\n"
+    "    return (r1 == 4 && r2 == 4) ? 1 : 0;\n"
+    "}\n"
+    "int plain_write_stays_in_snapshot(void) {\n"
+    "    int g = 5;\n"
+    "    int (^blk)(void) = ^{\n"
+    "        int inner(void) { g = 99; return g; }\n"
+    "        return inner();\n"
+    "    };\n"
+    "    int r = blk();\n"
+    "    return (r == 99 && g == 5) ? 1 : 0;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    if (ticket_repro() != 10) return 1;\n"
+    "    if (snapshot_consistency() != 5) return 2;\n"
+    "    if (!block_var_write()) return 3;\n"
+    "    if (!plain_write_stays_in_snapshot()) return 4;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_nested_fn_in_block_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  128: a nested function defined INSIDE a block, reading a "
+          "variable owned by the block's own enclosing function, is a "
+          "distinct VM miscompile from #1080's mirror nesting order -- "
+          "broken on BOTH back-ends, not just -c=native (#1081). VM root "
+          "cause: emit_static_chain_var_addr()'s static-link chase "
+          "(codegen_addr.c) assumed every intermediate ancestor's own "
+          "__static_link slot holds a plain frame bp; a block's own slot "
+          "holds its descriptor pointer instead, so a chase that needs to "
+          "hop THROUGH a block ancestor (depth >= 2 only) silently misread "
+          "descriptor bytes as a frame pointer. Fixed by detecting the "
+          "nearest block ancestor on the chase and terminating there, "
+          "reading the variable out of that block's own capture "
+          "descriptor -- which requires block_literal()'s transitive-"
+          "capture climb (parse_blocks.c) to also walk every nested "
+          "function defined directly inside a block's own body (Obj."
+          "nested_children, parse_decl.c), so a variable referenced only "
+          "inside such a nested function still ends up captured. Design "
+          "decision: the nested function sees the block's OWN creation-"
+          "time snapshot of an ancestor-owned variable (by-value, like a "
+          "sibling direct block read already does), not a live read -- "
+          "snapshot_consistency() pins this by mutating the ancestor "
+          "variable between block creation and invocation. -c=native was "
+          "independently broken too (compiled clean, segfaulted at "
+          "runtime) -- its own nested-function-upvar machinery "
+          "(NestedEnvEntry) was applied to a block ancestor as if it were "
+          "a real nested function's env, chasing the block's real "
+          "__static_link (its descriptor pointer) as another such env; "
+          "fixed by stopping at the block and reading its real descriptor "
+          "instead (block_ancestor_desc_ptr_expr(), serialize.c). Asserts "
+          "VM 42 -> native 42.")
+    return _vm_and_native_run_case(cccc, tmp, "nested_fn_in_block_1081",
+                                    NESTED_FN_IN_BLOCK_1081_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -5596,6 +5727,8 @@ def main() -> int:
             case_bundled_header_bodiless_decl_no_include_dir,
             case_layout_const_sites_native_round_trip,
             case_static_assert_native_round_trip,
+            case_block_in_nested_native_round_trip,
+            case_nested_fn_in_block_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

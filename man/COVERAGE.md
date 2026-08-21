@@ -1277,40 +1277,80 @@ local/param reference from inside a nested body is rewritten to
 `(*env->__uvK)` instead of the bare (otherwise out-of-scope-at-file-scope)
 identifier.
 
-Three shapes have no portable lowering and are rejected with a diagnostic
+Two shapes have no portable lowering and are rejected with a diagnostic
 naming the construct, rather than serialized wrong, per this file's own
-"explicit diagnosed rejection, never silent divergence" rule: a
+"explicit diagnosed rejection, never silent divergence" rule (a third,
+distinct shape involving a block ancestor is rejected too — see #1100
+below): a
 variable-length-array local (or a not-yet-declared-at-that-point
 pointer-to-VLA local) read by a nested function, since its declaration can't
-be hoisted ahead of the point that would need `&var`; a `__block`-storage
-local likewise captured by a nested function, since its own C storage is
-already a pointer (one level too many for the env field's plain `T *`);
-and any bare reference to a nested function's own value that ISN'T the
-direct callee of a call to it (e.g. `int (*fp)(int) = inner;`, or passing
-`inner` as a callback) — the hoisted signature's extra leading
-`__static_link` parameter has no portable function-pointer type. A nested
-function defined *inside* an Apple block literal is supported (the block's
-own env chains via `->__up` exactly like an ordinary nested-in-nested case);
-a block literal defined *inside* a nested function that captures a variable
-owned by that function's *own* ancestor (not the nested function's own
-local) is rejected too, for a different reason than the other three: the VM
-itself silently miscompiled this exact shape until #1076 fixed it (a
-parse-time capture-collection gap plus a missing codegen source arm — see
-that ticket's own resolution comment) — a *native* lowering for it is real,
-unstarted work (chaining the block's own env through the nested env's
-`->__up`, tracked as **#1080**), not merely un-rejecting what #1074 already
-rejects. Closed, #1074.
+be hoisted ahead of the point that would need `&var`; and any bare
+reference to a nested function's own value that ISN'T the direct callee of
+a call to it (e.g. `int (*fp)(int) = inner;`, or passing `inner` as a
+callback) — the hoisted signature's extra leading `__static_link` parameter
+has no portable function-pointer type. A `__block`-storage local captured
+by a nested function IS supported: its own C storage is already a pointer
+(the shared heap box), so the env field holding its address is one level
+of indirection deeper (`T **` instead of the ordinary upvar's `T *`) and
+every read/write goes through an extra dereference (#1080/#1081, below).
 
-A nested function defined *inside* a block literal, reading a variable
-captured by that *block's own* enclosing function (the opposite nesting
-order from the paragraph above), is a separate, still-open gap — **#1081** —
-found while fixing #1076: a block's own `__static_link` slot holds a
-descriptor pointer, not a plain frame base pointer, which breaks the VM's
-own multi-hop static-link chase the moment an intermediate ancestor is a
-block rather than a genuine nested function (a single hop, reading the
-block's own local/param directly, is unaffected). Native serialization
-never reaches this case in the first place today, since the VM path itself
-gives a wrong answer for it.
+Both nesting orders of "a block literal and a genuinely nested function,
+one directly inside the other" are fully supported on both back ends,
+closed this batch:
+
+- A block literal defined *inside* a nested function, capturing a variable
+  owned by that function's *own* ancestor (not the nested function's own
+  local): the VM itself silently miscompiled this shape until #1076 fixed
+  it (a parse-time capture-collection gap plus a missing codegen source
+  arm — see that ticket's own resolution comment); `-c=native` rejected it
+  outright until **#1080** gave it a real lowering — `collect_nested_refs()`
+  registers the ancestor-owned capture as an upvar of its real owner
+  (`record_nested_upvar()`) instead of rejecting it, and `ND_BLOCK_LITERAL`'s
+  own capture-copy loop reads it back through the same env chase
+  (`nested_env_ptr_expr()`) an ordinary nested-function upvar reference
+  uses.
+- A nested function defined *inside* a block literal, reading a variable
+  owned by the block's own enclosing function (the opposite nesting order)
+  — **#1081** — was broken on BOTH back ends independently: a block's own
+  `__static_link` slot holds its descriptor pointer, not a plain frame base
+  pointer, which broke the VM's uniform multi-hop static-link chase
+  (`emit_static_chain_var_addr`, `src/codegen_addr.c`) the moment it needed
+  to hop *through* a block ancestor (a single hop, reading the block's own
+  local/param directly, was already correct and is unaffected); `-c=native`
+  independently misapplied its nested-function-upvar machinery
+  (`NestedEnvEntry`) to a block ancestor as if it were a real nested
+  function's env, chasing the block's real `__static_link` (its descriptor
+  pointer) as another such env — compiling clean and segfaulting at
+  runtime. Fixed on both back ends by detecting the nearest block ancestor
+  on the chase and terminating there: the VM reads the variable out of that
+  block's own capture descriptor instead of continuing to hop through it as
+  a frame pointer, and `-c=native` reads it out of the block's real
+  descriptor the same way (`block_ancestor_desc_ptr_expr()`,
+  `src/serialize.c`). This requires the variable to actually be captured by
+  that block — `block_literal()`'s transitive-capture climb now also walks
+  every nested function defined directly inside a block's own body
+  (`Obj.nested_children`, recorded by `parse_decl.c`), so a variable
+  referenced only inside such a nested function still ends up in the
+  block's own captures list. **Design decision:** the nested function sees
+  the block's own creation-time snapshot of an ancestor-owned variable —
+  exactly like a sibling direct block read already does — not a live read
+  of the ancestor's frame; there is no reference implementation to defer to
+  for this exact combination (clang has blocks but no nested functions,
+  gcc the reverse), so internal consistency with the block's own direct
+  captures is the spec. Write-propagation still requires `__block`, the
+  same rule blocks already have.
+
+A third, structurally similar shape is a distinct, still-open gap —
+**#1100** — found while fixing #1081: calling a nested function whose own
+parent sits *beyond* a block ancestor (a sibling/cousin call reached only
+by climbing out of a block first, not a plain variable read) needs the
+block's own *enclosing frame*, which a heap-copyable block's descriptor
+deliberately never stores — by design, the same reason #1081's own
+snapshot decision above was made. Confirmed broken on both back ends
+(VM: wrong answer; `-c=native`: compiles clean, segfaults at runtime) and
+now rejected with a diagnostic ("calling a nested function whose parent is
+beyond a block ancestor is not supported (#1081 residual)") on both, rather
+than left to miscompile silently.
 
 A nested (non-`static`) function *definition* whose name matches an
 enclosing file-scope function is supported (#1075): C17 6.2.1p4 treats scope

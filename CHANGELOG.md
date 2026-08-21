@@ -17,6 +17,25 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`: a block literal defined inside a genuinely nested function,
+  capturing a variable owned by that function's own ancestor, was rejected
+  outright (`#1074` follow-up); now lowers correctly by registering the
+  capture as an upvar of its real owner and reading it back through the
+  same env chase an ordinary nested-function upvar reference uses (#1080).
+  A `__block`-storage ancestor capture is supported too, via one extra
+  level of indirection in the env field.
+- A nested function defined *inside* a block literal, reading a variable
+  owned by the block's own enclosing function, was a wrong-answer bug on
+  the VM and an independent segfault under `-c=native` (both compiled
+  clean) — a block's own `__static_link` slot holds its descriptor
+  pointer, not a plain frame pointer, which broke the uniform static-link
+  chase the moment it needed to hop through a block ancestor. Both back
+  ends now terminate the chase at the nearest block ancestor and read the
+  variable out of that block's own capture descriptor instead (#1081). A
+  structurally similar but distinct shape — calling a nested function
+  whose own parent sits beyond a block ancestor — is not fixed by this;
+  both back ends now reject it with a diagnostic instead of miscompiling
+  silently (#1081 residual, tracked separately as #1100).
 - `-c=native`: `include/pthread.h`'s bundled `pthread_mutex_t`/
   `pthread_cond_t` were a VM-only opaque-handle projection (24/16 bytes on
   macOS arm64) that `-I./include` fed straight to the real host

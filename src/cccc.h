@@ -2185,9 +2185,24 @@ struct Obj {
     int   stack_size;
 
     // Nested function support (GNU C extension)
-    struct Obj *parent_fn;     // Enclosing function (NULL if top-level)
-    bool        is_nested;     // True if defined inside another function
-    int         nesting_depth; // 0 = top-level, 1 = one level deep, etc.
+    struct Obj *parent_fn;           // Enclosing function (NULL if top-level)
+    bool        is_nested;           // True if defined inside another function
+    int         nesting_depth;       // 0 = top-level, 1 = one level deep, etc.
+    struct Obj *nested_children;     // #1081: linked list (via
+                                     // next_nested_sibling below) of every
+                                     // nested function defined directly inside
+                                     // this function/block's own body.
+                                     // compound_stmt() (parse_stmt.c) never
+                                     // appends an AST node for a nested
+                                     // function definition, so a block literal
+                                     // parsed inside this body has no other way
+                                     // to reach a variable referenced only
+                                     // inside such a child's own body when
+                                     // collecting its transitive captures
+                                     // (block_literal(), parse_blocks.c).
+    struct Obj *next_nested_sibling; // #1081: next entry in the parent's own
+                                     // nested_children list (see above); NULL
+                                     // for a top-level function.
 
     // Block support (Apple blocks extension)
     bool  is_block;         // True if this is a block's synthetic function
