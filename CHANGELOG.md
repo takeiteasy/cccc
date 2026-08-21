@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-21
+
 ### Added
 
 - URL `#embed` — `#embed <https://...>` and `#embed "https://..."` now fetch
