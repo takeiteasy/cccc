@@ -47,6 +47,22 @@ All notable changes to CCCC are documented here. Format loosely follows
   `-c=native` compiles and runs cleanly but returns a different answer than
   the VM. Opt-in (not wired into CI yet); see man/TESTING.md's "Native
   round-trip mode" section.
+- `-c=native` (#1107): an implicit argument-coercion cast to a *derived*
+  pointer type built from a `from_include` scalar typedef — e.g.
+  `pthread_t *`, the parameter type `pthread_create()`'s first argument
+  coerces to — printed the fully structurally-decomposed spelling
+  (`void **`) instead of the typedef's own name, because the cast-printing
+  path only ever consulted the typedef table for the exact cast target, not
+  a pointer built on top of it. Harmless when the decomposed and aliased
+  spellings denote the same real host type (macOS's own `pthread_t` is a
+  real pointer), but a hard `incompatible pointer type` compile error on
+  glibc, where `pthread_t` is `unsigned long int` — found running the
+  `tests/suites/` corpus through `--testing=native` for the first time (see
+  `--testing[=vm|bytecode|native]` above) via `tools/comptime_native_smoke.py`
+  case 118 on Linux CI. Fixed by spelling the alias directly at this one
+  cast-expression site when the pointee resolves to a `from_include`
+  typedef, whose real declaration is always already visible via the host's
+  own `#include_next`.
 
 ### Fixed
 

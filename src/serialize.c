@@ -2613,7 +2613,40 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 serialize_expr(f, vm, ctx, node->lhs, parent_prec);
             } else {
                 fprintf(f, "(");
-                serialize_type(f, ctx, node->ty);
+                // #1107: a pointer-typed scalar typedef reached only through
+                // a DERIVED pointer-to-it (e.g. `pthread_t *`, the type
+                // pthread_create()'s first arg coerces to) used to always
+                // fully decompose here -- serialize_type()/serialize_type_
+                // decl() recurse straight into ty->base with no alias
+                // lookup at this level, so only a cast to the *scalar*
+                // typedef itself (`(pthread_t)x`) ever spelled its alias;
+                // a cast to `pthread_t *` printed the fully-decomposed
+                // structural spelling ("void **") instead. Harmless when
+                // the aliased and canonical spellings denote the same real
+                // host type (e.g. macOS's own pthread_t is a real pointer),
+                // but a hard "incompatible pointer type" error when they
+                // don't -- glibc's pthread_t is `unsigned long int`, so the
+                // decomposed "void **" cast rejected the real `pthread_t *`
+                // parameter type from the host's own #include_next'd
+                // <pthread.h> (#1022) outright. Scoped narrowly to this one
+                // cast-expression site (not a general serialize_type_decl()
+                // fix): a from_include pointer typedef's own real
+                // declaration is always already visible here (the host's
+                // #include_next runs before any guest declaration), so
+                // there is no forward-reference hazard the way a plain
+                // struct/user typedef's own declarator position would have
+                // (verified against tests/test_minilua.c's own
+                // `lua_CFunction`, whose typedef line is only emitted late
+                // in ctx->typedefs' own pass -- an early cast to it here
+                // would need a typedef this file hasn't printed yet).
+                TypeName *ptr_alias =
+                    dst && dst->kind == TY_PTR && dst->base
+                        ? find_typedef_name_exact(ctx, dst->base)
+                        : NULL;
+                if (ptr_alias && ptr_alias->from_include)
+                    fprintf(f, "%.*s *", ptr_alias->name_len, ptr_alias->name);
+                else
+                    serialize_type(f, ctx, node->ty);
                 fprintf(f, ")");
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);
             }
