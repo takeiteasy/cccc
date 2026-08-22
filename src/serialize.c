@@ -367,6 +367,12 @@ typedef struct {
 // Forward declaration
 static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                            Node *node, int parent_prec);
+// #1124: serialize_expr's actual switch-on-node->kind body, renamed so the
+// public serialize_expr can wrap it with the _BitInt width-mask check below
+// without recursing into itself.
+static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
+                               SerializeContext *ctx, Node *node,
+                               int parent_prec);
 // #1062/#1085: matches CCCC's own struct va_list structurally (defined
 // further down, near its own long comment) -- forward-declared here so
 // ND_FUNCALL (inside serialize_expr's own switch, above the definition
@@ -2453,8 +2459,9 @@ static void print_indent_level(FILE *f, int indent) {
 }
 
 // Serialize an expression
-static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                           Node *node, int parent_prec) {
+static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
+                               SerializeContext *ctx, Node *node,
+                               int parent_prec) {
     (void)vm; // May be used later
 
     if (!node) {
@@ -3876,6 +3883,97 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         fprintf(f, ")");
 }
 
+// #1124: does `ty` need an explicit width mask after a value-producing
+// operation under -c=native/-m? serialize_type's TY_BITINT case (above)
+// picks a container purely from ty->size -- signed char/short/int/long/
+// __int128 -- and nowhere re-masks a computed value back down to
+// ty->bit_width the way the VM's own emit_bitint_trunc (src/codegen_emit.c)
+// does. The host container only truncates for free when its own width
+// exactly matches the declared _BitInt(N) width (N in {8,16,32,64,128});
+// every other N needs the mask this wrapper emits. ty->size > 16 already
+// hard-errors at serialize_type (#1121/#1123), so this never fires for
+// those.
+static bool bitint_needs_mask(Type *ty) {
+    return ty && ty->kind == TY_BITINT && ty->size <= 16 &&
+           ty->bit_width != ty->size * 8;
+}
+
+// Kinds whose *result* can carry bits above the declared bit_width that the
+// host container wouldn't otherwise truncate: arithmetic that can overflow
+// the value's own N bits, a cast that (re)establishes the type, and the two
+// unary ops that can set bits above N (~x always can; -x can too, e.g. the
+// INT_MIN-style all-ones-into-sign-bit case). Deliberately excluded:
+// comparisons/logical ops (int-valued, never produce a _BitInt result) and
+// ND_MOD/ND_SHR/ND_BITAND/ND_BITOR/ND_BITXOR (structurally cannot widen an
+// already-in-range operand's own value beyond N bits).
+static bool bitint_op_needs_mask(NodeKind kind) {
+    switch (kind) {
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_SHL:
+        case ND_NEG:
+        case ND_BITNOT:
+        case ND_CAST:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// #1124: public serialize_expr entry point. Wraps serialize_expr_raw's own
+// switch-on-node->kind body with a width mask when `node` is a _BitInt(N)
+// result that needs one -- every recursive serialize_expr call inside the
+// raw body (sub-expressions) re-enters here, so nested operands are masked
+// at their own width independently.
+//
+// The shift-pair mirrors emit_bitint_trunc exactly, but must run in a fixed
+// *computation* width (WT: `long`/`unsigned long`, 64 bits, or __int128 for
+// a size==16 container) rather than the container type T itself -- casting
+// straight to a narrow T (e.g. `signed char` for _BitInt(5)) and shifting
+// there would be silently wrong, since C's integer promotions re-widen a
+// char/short operand to `int` for the shift regardless of the preceding
+// cast, making the shift amount (computed against T's own width) apply in
+// the wrong width. Casting to WT first pins the shift's actual width; the
+// outer "(T)" then narrows the already-correctly-truncated result back down
+// to the container type, which is well-defined (two's-complement wrap on
+// every host this project targets, same as any ordinary narrowing
+// conversion).
+//
+// The left shift always runs on the *unsigned* wide type (UWT), even when
+// `ty` is signed: `x << S` where x is a negative signed value is only
+// well-defined starting C23 (two's-complement wraparound; UB before that),
+// and clang warns on it (-Wshift-negative-value) regardless of the TU's own
+// -std, since the generated file's #include chain can pull in headers
+// parsed under a different effective mode. Shifting the unsigned bit
+// pattern instead sidesteps the question entirely -- left shift of an
+// unsigned type is always well-defined overflow-as-wraparound. The
+// right shift then runs on the signed WT so it arithmetic-shifts (sign-
+// extends) exactly like the VM's own SHR3, which is implementation-defined
+// but universal on every real gcc/clang target.
+static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                           Node *node, int parent_prec) {
+    if (node && bitint_needs_mask(node->ty) &&
+        bitint_op_needs_mask(node->kind)) {
+        Type       *ty      = node->ty;
+        bool        wide_wt = ty->size == 16;
+        int         wt_bits = wide_wt ? 128 : 64;
+        int         shift   = wt_bits - ty->bit_width;
+        const char *wt =
+            wide_wt ? (ty->is_unsigned ? "unsigned __int128" : "__int128")
+                    : (ty->is_unsigned ? "unsigned long" : "long");
+        const char *uwt = wide_wt ? "unsigned __int128" : "unsigned long";
+        fprintf(f, "((");
+        serialize_type(f, ctx, ty);
+        fprintf(f, ")((%s)((%s)(", wt, uwt);
+        serialize_expr_raw(f, vm, ctx, node, 0);
+        fprintf(f, ") << %d) >> %d))", shift, shift);
+        return;
+    }
+    serialize_expr_raw(f, vm, ctx, node, parent_prec);
+}
+
 // Serialize a statement
 static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                            Node *node, int indent) {
@@ -5045,6 +5143,14 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
                 if (m->name)
                     fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
                 if (m->is_bitfield) {
+                    // #1126: `sz` clamps to 8 regardless of m->ty->size (16
+                    // for a wide-_BitInt-typed bitfield, e.g. `_BitInt(128)
+                    // f : 100;`), and `bits` is printed as a plain %llu
+                    // literal -- so any bit at or above bit 64 of the
+                    // field's own value is silently dropped for such a
+                    // member. Not fixed here: found while adding native
+                    // coverage for #1125 (the runtime codegen path this
+                    // bug is unrelated to), filed separately.
                     int64_t container = 0;
                     int     sz        = m->ty->size < 8 ? m->ty->size : 8;
                     memcpy(&container, var->init_data + offset + m->offset, sz);

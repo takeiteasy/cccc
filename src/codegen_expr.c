@@ -1446,6 +1446,67 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // If RHS is a function call, it will clobber temp registers.
             // Computing LHS address after ensures we get a fresh temp reg.
 
+            // #1125: a wide _BitInt *bitfield* (node->ty is_wide_bitint via
+            // node->lhs->ty == mem->ty) would otherwise fall into the plain
+            // MCPY path just below, which copies node->ty->size bytes -- the
+            // full declared-type width -- at node->lhs's address. That's
+            // wrong twice over for a bitfield: it ignores mem->bit_offset
+            // entirely (clobbering any neighbouring bitfield packed into the
+            // same bytes) and it ignores mem->bit_width, writing past the
+            // struct whenever the storage unit isn't fully present (cccc
+            // lays bitfields out compactly -- see src/stdlib/wide_bitint.c's
+            // __cccc_bitfield_insert comment). Route through the same
+            // byte-granular RMW helper the read side uses, before the
+            // generic MCPY arm ever sees this node.
+            if (node->lhs->kind == ND_MEMBER &&
+                node->lhs->member->is_bitfield &&
+                is_wide_bitint(node->lhs->member->ty)) {
+                Member *mem   = node->lhs->member;
+                int     r_src = alloc_temp_reg();
+                gen_expr(vm, node->rhs, r_src); // RHS is address (wide _BitInt)
+                mark_temp_reg_used(r_src);
+
+                // #581: gen_addr(node->lhs) below may itself contain a
+                // function call (e.g. a pointer sub-expression with side
+                // effects), and emit_wide_helper's own CALLF always clobbers
+                // every caller-saved temp register regardless -- spill r_src
+                // across both, then reload it for the call's A1 arg and (if
+                // needed) the assignment's own result value.
+                long long r_src_spill = alloc_wide_bitint_temp(vm, 1);
+                emit_local_store(vm, ty_long, r_src, r_src_spill);
+                free_temp_reg(r_src);
+
+                int r_dest = alloc_temp_reg();
+                gen_addr(vm, node->lhs,
+                         r_dest); // struct base + mem->offset (byte, not bit)
+                mark_temp_reg_used(r_dest);
+
+                int r_val = alloc_temp_reg();
+                emit_local_load(vm, ty_long, r_val, r_src_spill);
+
+                if (vm->flags & CCCC_POINTER_CHECKS) {
+                    mark_temp_reg_used(r_val);
+                    emit_rr(vm, CHKP3, r_dest, 0);
+                    emit_rr(vm, CHKP3, r_val, 0);
+                }
+
+                emit_mov3(vm, REG_A0, r_dest);
+                emit_mov3(vm, REG_A1, r_val);
+                emit_li3(vm, REG_A2, mem->bit_offset);
+                emit_li3(vm, REG_A3, mem->bit_width);
+                emit_wide_helper(vm, "__cccc_bitfield_insert", 4);
+
+                free_temp_reg(r_val);
+                free_temp_reg(r_dest);
+
+                // Assignment result is the (untruncated) RHS value's address,
+                // matching the narrow-bitfield RMW arm's convention below
+                // ("If bitfield, r_val holds the RHS value").
+                if (dest_reg != REG_ZERO)
+                    emit_local_load(vm, ty_long, dest_reg, r_src_spill);
+                return;
+            }
+
             // For struct/union assignments, we need memcpy (both LHS and RHS
             // are addresses)
             if (node->ty &&
@@ -1870,41 +1931,74 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
             if (node->member->is_bitfield) {
                 Member *mem = node->member;
-                // Load container value
-                emit_load_ex(vm, mem->ty, dest_reg, r_addr, !local_frame);
+                if (is_wide_bitint(mem->ty)) {
+                    // #1125: mem->ty is wide, so emit_load_ex's wide-_BitInt
+                    // arm would just hand back r_addr unchanged (wide values
+                    // are address-based, not register-based) -- the scalar
+                    // SHR3/AND3/SHL3 shift/mask code below would then run on
+                    // that *address*, corrupting it. r_addr is still the raw
+                    // container base (struct + mem->offset, not adjusted for
+                    // mem->bit_offset -- gen_addr doesn't know this member is
+                    // a bitfield), and the enclosing struct isn't guaranteed
+                    // to hold the full mem->ty->size bytes at all (compact
+                    // bitfield layout), so a whole-container load is out
+                    // regardless. Extract byte-granularly instead, into a
+                    // fresh words-sized (mem->ty's own declared width) temp,
+                    // sign/zero-extended per mem->ty->is_unsigned; see
+                    // src/stdlib/wide_bitint.c's __cccc_bitfield_extract.
+                    int       words      = mem->ty->size / 8;
+                    long long dst_offset = alloc_wide_bitint_temp(vm, words);
+                    // r_addr aliases dest_reg here (temp_addr is false for
+                    // bitfields), which may itself be REG_A0 -- move it into
+                    // A1 before the A0 lea can overwrite it.
+                    emit_mov3(vm, REG_A1, r_addr);
+                    emit_lea3(vm, REG_A0, dst_offset);
+                    emit_li3(vm, REG_A2, mem->bit_offset);
+                    emit_li3(vm, REG_A3, mem->bit_width);
+                    emit_li3(vm, REG_A4, words);
+                    emit_li3(vm, REG_A5, mem->ty->is_unsigned ? 0 : 1);
+                    if (vm->flags & CCCC_POINTER_CHECKS)
+                        emit_rr(vm, CHKP3, REG_A1, 0);
+                    emit_wide_helper(vm, "__cccc_bitfield_extract", 6);
+                    emit_lea3(vm, dest_reg, dst_offset);
+                } else {
+                    // Load container value
+                    emit_load_ex(vm, mem->ty, dest_reg, r_addr, !local_frame);
 
-                if (mem->ty->is_unsigned) {
-                    // Unsigned: (val >> bit_offset) & mask
-                    if (mem->bit_offset > 0) {
-                        int r_shift = alloc_temp_reg();
-                        emit_li3(vm, r_shift, mem->bit_offset);
+                    if (mem->ty->is_unsigned) {
+                        // Unsigned: (val >> bit_offset) & mask
+                        if (mem->bit_offset > 0) {
+                            int r_shift = alloc_temp_reg();
+                            emit_li3(vm, r_shift, mem->bit_offset);
+                            emit_rrr(vm, SHR3, dest_reg, dest_reg,
+                                     r_shift); // Logical shift right
+                            free_temp_reg(r_shift);
+                        }
+                        // #1122: see the RMW-store arm's comment above -- same
+                        // `1ULL << 64` UB for a `T f : 64` unsigned bitfield.
+                        long long mask =
+                            mem->bit_width >= 64
+                                ? -1LL
+                                : (long long)((1ULL << mem->bit_width) - 1);
+                        int r_mask = alloc_temp_reg();
+                        emit_li3(vm, r_mask, mask);
+                        emit_rrr(vm, AND3, dest_reg, dest_reg, r_mask);
+                        free_temp_reg(r_mask);
+                    } else {
+                        // Signed: (val << (64 - width - offset)) >> (64 -
+                        // width)
+                        int r_shift     = alloc_temp_reg();
+                        int left_shift  = 64 - mem->bit_width - mem->bit_offset;
+                        int right_shift = 64 - mem->bit_width;
+
+                        emit_li3(vm, r_shift, left_shift);
+                        emit_rrr(vm, SHL3, dest_reg, dest_reg, r_shift);
+
+                        emit_li3(vm, r_shift, right_shift);
                         emit_rrr(vm, SHR3, dest_reg, dest_reg,
-                                 r_shift); // Logical shift right
+                                 r_shift); // Arithmetic shift preserves sign
                         free_temp_reg(r_shift);
                     }
-                    // #1122: see the RMW-store arm's comment above -- same
-                    // `1ULL << 64` UB for a `T f : 64` unsigned bitfield.
-                    long long mask =
-                        mem->bit_width >= 64
-                            ? -1LL
-                            : (long long)((1ULL << mem->bit_width) - 1);
-                    int r_mask = alloc_temp_reg();
-                    emit_li3(vm, r_mask, mask);
-                    emit_rrr(vm, AND3, dest_reg, dest_reg, r_mask);
-                    free_temp_reg(r_mask);
-                } else {
-                    // Signed: (val << (64 - width - offset)) >> (64 - width)
-                    int r_shift     = alloc_temp_reg();
-                    int left_shift  = 64 - mem->bit_width - mem->bit_offset;
-                    int right_shift = 64 - mem->bit_width;
-
-                    emit_li3(vm, r_shift, left_shift);
-                    emit_rrr(vm, SHL3, dest_reg, dest_reg, r_shift);
-
-                    emit_li3(vm, r_shift, right_shift);
-                    emit_rrr(vm, SHR3, dest_reg, dest_reg,
-                             r_shift); // Arithmetic shift preserves sign
-                    free_temp_reg(r_shift);
                 }
             } else {
                 // Standard member

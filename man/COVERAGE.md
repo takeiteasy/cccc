@@ -171,7 +171,7 @@ language coverage figures apply.
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)`. Serializes under `-c=native`/`-m`/`-c=generated`: cast destinations spell `(void *)` (#1111), since casting *to* `nullptr_t` is not valid C23 syntax; declarations keep the typedef name |
-| `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits. A file-scope/`static` initializer for a `_BitInt(N)` global (any `N`, including arbitrary constant arithmetic, not just a bare literal) folds at compile time via the same word-array runtime helpers, so the value matches what a local of the same type would compute at runtime |
+| `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits. A file-scope/`static` initializer for a `_BitInt(N)` global (any `N`, including arbitrary constant arithmetic, not just a bare literal) folds at compile time via the same word-array runtime helpers, so the value matches what a local of the same type would compute at runtime. This mask/shift truncation description is the VM's own behaviour; `-c=native`/`-m` reproduces it via an explicit emitted mask whenever `N` isn't already exactly the host container's own width -- see [Serialized-output divergences](#serialized-output-divergences) for the one-time #1124 gap where it didn't. A bitfield whose declared type is itself a wide `_BitInt` (`T f : W;` where `T`'s width is over 64 bits) is accessed byte-granularly rather than through either the scalar shift/mask path or a whole-container load/store, since the enclosing struct is laid out compactly and need not contain the full `sizeof(T)` bytes (#1125) |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
 | `[[...]]` attributes | ~ | Parsed; see [Attributes](#attributes) below for per-attribute status |
@@ -1282,6 +1282,57 @@ type-emission under `-c=native`/`-m`, same as any other `_BitInt(N > 128)`
 use. `_Complex` global initializers are real-valued only (this compiler has
 no imaginary-literal syntax), which `serialize_init_bytes`'s new `TY_COMPLEX`
 arm relies on directly.
+
+Found in the same #1121 audit but out of its scope, both now resolved:
+`serialize_type`'s container-by-`size` mapping above picks the *smallest*
+standard container that fits `N` bits (e.g. `_BitInt(5)` → a plain `char`),
+which naturally over-shoots `N` for any width that isn't itself exactly
+8/16/32/64/128 — and nothing re-masked a computed value back down to `N`
+bits the way the VM's own `emit_bitint_trunc` (`src/codegen_emit.c`) does,
+so e.g. `unsigned _BitInt(5) u = 31; u = u + 1;` gave `0` under the VM but
+`32` under `-c=native`/`-m` (#1124). Fixed by wrapping every arithmetic/
+cast/unary result of such a type in an explicit shift-pair mask
+(`serialize_expr`'s `bitint_needs_mask`/`bitint_op_needs_mask` gate,
+`src/serialize.c`) — computed in a fixed-width intermediate (`long`/
+`unsigned long`, or `__int128` for a `(64,128]` container) rather than the
+container type itself, since C's integer promotions would otherwise re-widen
+a `char`/`short` container back to `int` for the shift regardless of a
+preceding cast to it; the left shift specifically runs on the *unsigned*
+variant of that intermediate even for a signed `_BitInt`, since shifting a
+negative signed value left is only well-defined starting C23 and clang warns
+on it (`-Wshift-negative-value`) regardless of the output file's own
+`-std=`. A width exactly matching its container (8/16/32/64/128) emits no
+mask, since the container already truncates for free there.
+
+Separately, a bitfield whose declared type is itself a wide `_BitInt`
+(`T f : W;`, `T`'s width over 64 bits) used to crash the VM outright:
+`emit_load_ex`'s wide-`_BitInt` arm hands back the storage unit's *address*
+unchanged (wide values are address-based everywhere else in this compiler),
+and the ordinary scalar bitfield shift/mask code then ran on that address as
+if it were a value, corrupting it before any consumer dereferenced it
+(#1125). The struct/union/wide-`_BitInt` assignment fast path
+(`src/codegen_expr.c`'s `ND_ASSIGN`) had the mirror problem on the write
+side: a bitfield's assignment type is its *container* type, so it took the
+whole-container `MCPY` path, which ignores `bit_offset` entirely and can
+write past the struct (bitfields are laid out compactly — `struct W
+{ _BitInt(256) f : 193; }` is 25 bytes, though its container spans 32).
+Fixed with two new runtime helpers, `__cccc_bitfield_extract`/
+`__cccc_bitfield_insert` (`src/stdlib/wide_bitint.c`), that walk only the
+exact bytes the field spans rather than assuming a whole container is
+present or fits a register; the parse-time global-initializer RMW
+(`write_gvar_data`, `src/parse_init.c`) now shares the same `insert` helper
+instead of its own word-array loop, which had an analogous past-the-object
+overwrite. This fix is VM-only — a wide-`_BitInt`-typed bitfield's ordinary
+runtime read/write is correct under `-c=native`/`-m` too, since the emitted
+C just spells it as a real bitfield of that width and lets the host compiler
+handle storage, but a **global initializer** for such a bitfield still
+diverges there: `serialize_init_bytes`'s own bitfield-value re-extraction
+clamps its read to 8 bytes and prints a plain `%llu` literal, silently
+dropping any bit at or above bit 64 of the field's value (#1126, found
+while adding native-corpus coverage for #1125, not fixed by it) —
+`tests/suites/test_suite_typesystem.c` is on `NATIVE_SKIP_TESTS` for this
+reason (its own `test_wide_global_init`, from #1122, has apparently never
+actually been clean under `--native` despite that ticket's landing comment).
 
 A function-local `static` array initialized with computed-goto label
 addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual

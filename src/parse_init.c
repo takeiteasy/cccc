@@ -1655,42 +1655,33 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
 
                 char *loc = buf + offset + mem->offset;
                 if (mem->ty->size > 8) {
-                    // #1122: a bit-precise bitfield wider than 8 bytes (e.g.
-                    // `_BitInt(128) f : 100;`) -- read_buf/write_buf only
-                    // handle sizes up to 8, so RMW the whole storage-unit
-                    // container as a word array instead. eval_wide folds
-                    // the value at the *member*'s type width, then
-                    // __cccc_bitint_shl (which truncates to container_width)
-                    // both masks to bit_width and positions it at
-                    // bit_offset in one call.
+                    // #1125: a bit-precise bitfield wider than 8 bytes (e.g.
+                    // `_BitInt(128) f : 100;`) used to RMW the whole
+                    // storage-unit container (mem->ty->size bytes) as a word
+                    // array -- but `buf` is only allocated var->ty->size
+                    // bytes (the *struct's* compact size, e.g. 25 for a
+                    // `_BitInt(256) f : 193;` whose container is 32 bytes),
+                    // so that write ran past the arena allocation. Use the
+                    // same byte-granular __cccc_bitfield_insert the runtime
+                    // RMW path uses (src/codegen_expr.c's ND_ASSIGN,
+                    // mirrored here since this runs at parse/compile time,
+                    // not inside the VM) -- it touches only the bytes the
+                    // field actually spans.
+                    //
+                    // eval_wide writes mem->ty->size bytes (the *container*
+                    // type's own width, e.g. 16 for `_BitInt(128) f : 60;`,
+                    // not the 8 bytes ceil(60/64) alone would need) -- newval
+                    // must be sized for that, even though only the low
+                    // ceil(bit_width/64) words end up meaningful once
+                    // truncated below.
                     int       container_words = mem->ty->size / 8;
-                    int       container_width = mem->ty->size * 8;
+                    int       value_words     = (mem->bit_width + 63) / 64;
                     uint64_t *newval = arena_alloc(&vm->compiler.parser_arena,
                                                    (size_t)container_words * 8);
                     eval_wide(vm, expr, mem->ty, newval);
-                    // __cccc_bitint_trunc only masks dst[words-1] -- it
-                    // assumes words == ceil(width/64), which container_words
-                    // is NOT in general (mem->ty->size is the *container*'s
-                    // size, e.g. 16 bytes/2 words for a `_BitInt(128) f :
-                    // 60;`, while ceil(60/64) is 1 word). Zero the words
-                    // above the value's own width first, then trunc the
-                    // correct (value, not container) top word.
-                    int value_words = (mem->bit_width + 63) / 64;
-                    if (value_words < container_words)
-                        memset(newval + value_words, 0,
-                               (size_t)(container_words - value_words) * 8);
                     __cccc_bitint_trunc(newval, value_words, mem->bit_width);
-                    uint64_t *shifted =
-                        arena_alloc(&vm->compiler.parser_arena,
-                                    (size_t)container_words * 8);
-                    __cccc_bitint_shl(shifted, newval, mem->bit_offset,
-                                      container_words, container_width);
-                    for (int i = 0; i < container_words; i++) {
-                        uint64_t old;
-                        memcpy(&old, loc + i * 8, 8);
-                        uint64_t combined = old | shifted[i];
-                        memcpy(loc + i * 8, &combined, 8);
-                    }
+                    __cccc_bitfield_insert((unsigned char *)loc, newval,
+                                           mem->bit_offset, mem->bit_width);
                 } else {
                     uint64_t oldval = read_buf(loc, mem->ty->size);
                     uint64_t newval = eval(vm, expr);

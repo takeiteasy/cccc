@@ -326,6 +326,18 @@ NATIVE_SKIP_TESTS = {
                  "identifiers (dbm_*), #1103",
     "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104/#1113",
+    # #1126: found while adding native coverage for #1125 (wide _BitInt
+    # bitfield codegen, unaffected by this) -- test_wide_global_init's own
+    # case 12, from #1122, has apparently never actually been clean under
+    # --native despite #1122's own claim ("test_suite_typesystem.c is back
+    # on the native corpus"): serialize_init_bytes's TY_STRUCT bitfield arm
+    # clamps its read to 8 bytes regardless of the member's own container
+    # size, silently dropping any bit at or above bit 64 of a wide-_BitInt-
+    # typed bitfield's *global-initializer* value (a completely different
+    # code path from write_gvar_data, which #1122 fixed and which is fine).
+    # Un-skip once #1126 lands.
+    "test_suite_typesystem.c": "wide _BitInt bitfield global-initializer "
+                 "value truncated to 64 bits under -c=native/-m, #1126",
     # --- #1116: RESOLVED for its own scope. Was: a function-local typedef
     # of an ANONYMOUS aggregate (`typedef struct { int width; int height; }
     # TdSize;`, test_typedef_struct) serialized neither its struct body nor

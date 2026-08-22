@@ -477,6 +477,15 @@ int test_wide_global_init(void) {
     // handled sizes up to 8, so a `_BitInt(128) f : 100;` member crashed
     // (`internal error at src/parse_init.c:1587`) rather than working the
     // way it already did for a local of the same type.
+    //
+    // #1126: this assertion is VM-only-clean -- under -c=native/-m, gb's
+    // own global-initializer serialization (serialize_init_bytes, a
+    // completely different code path from the write_gvar_data fold this
+    // comment is about) silently drops bit 90 of the value, an unrelated
+    // pre-existing bug found while adding native coverage for #1125. Not
+    // gating this test off the native corpus over it -- see #1126's ticket
+    // for the actual gap and man/COVERAGE.md's Serialized-output
+    // divergences section.
     struct WideBox1122 {
         _BitInt(128) f : 100;
     };
@@ -1442,5 +1451,42 @@ int test_typedef_comprehensive(void) {
     (void)arr;
     return x + b; // 10+32=42
 }
+
+// #1125: a bitfield whose declared type is a wide _BitInt (N > 64) used to
+// crash (VM) or silently corrupt/overrun (parse-time global-init RMW). The
+// runtime read/write codegen coverage (bit_offset > 0, two narrow fields
+// sharing one wide container) lives in the standalone
+// tests/test_wide_bitfield_offsets_1125.c instead of here, so it stays on
+// the native corpus independent of this file's own #1126 skip-list entry.
+// This test keeps only the piece that's inherently VM-only anyway: a
+// nonzero-bit_offset *global* initializer compared against the identical
+// local, extending test_wide_global_init's case 12 (bit_offset == 0 only)
+// -- see this comment's own note there.
+struct WideBitfieldGlobalOffset1125 {
+    _BitInt(128) a : 5;   // bit_offset 0
+    _BitInt(128) b : 100; // bit_offset 5 -- straddles into word 1
+};
+static struct WideBitfieldGlobalOffset1125 g_wbo = {
+    -3, ((_BitInt(128))1 << 90) + 7};
+
+// test_wide_bitfield_global_offset
+[[cccc::test(return = 42)]]
+int test_wide_bitfield_global_offset(void) {
+    struct WideBitfieldGlobalOffset1125 l;
+    l.a = -3;
+    l.b = ((_BitInt(128))1 << 90) + 7;
+
+    if (g_wbo.a != l.a)
+        return 1;
+    if (g_wbo.b != l.b)
+        return 2;
+
+    return 42;
+}
+
+// #1124's own width-masking coverage lives in the standalone
+// tests/test_bitint_width_semantics_1124.c instead of here -- this whole
+// file is on NATIVE_SKIP_TESTS (see #1126, above), which would otherwise
+// leave #1124's native-side correctness with no automated coverage at all.
 
 #pragma cccc suite end

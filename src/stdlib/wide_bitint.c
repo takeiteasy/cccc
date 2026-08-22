@@ -584,6 +584,92 @@ void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base, int words,
     __cccc_bitint_trunc(dst, words, width);
 }
 
+// ---------- bitfield access (#1125) ----------
+//
+// A bitfield whose declared type is a wide _BitInt is stored in the
+// enclosing struct/union exactly like any other bitfield -- packed at
+// `bit_off` bits into the byte at `base`, with no guarantee that the full
+// sizeof(declared type) bytes are even present (cccc lays bitfields out
+// compactly, so e.g. `_BitInt(256) f : 193;` lives in a 25-byte struct even
+// though _BitInt(256) itself is 32 bytes). The scalar-register shift/mask
+// idiom src/codegen_expr.c uses for narrow bitfields cannot represent such a
+// value at all, and reading/writing the full declared-type width would run
+// past the object. These helpers instead walk the exact
+// ceil((bit_off%8 + width)/8) bytes the field occupies, one byte at a time.
+
+// Read `width` bits starting at bit `bit_off` (relative to `base`) into the
+// low bits of the `words`-word buffer at `dst`, then sign- or zero-extend
+// (per `is_signed`) up through the rest of `dst`. `words` is the *declared
+// type's* word count (e.g. 4 for _BitInt(256)), which may exceed
+// ceil(width/64) -- the field's own bit_width may be narrower than its
+// declared type, same as any other bitfield.
+void __cccc_bitfield_extract(uint64_t *dst, const unsigned char *base,
+                             long long bit_off, int width, int words,
+                             int is_signed) {
+    memset(dst, 0, (size_t)words * 8);
+    long long byte_idx  = bit_off / 8;
+    int       cur_shift = (int)(bit_off % 8);
+    int       bits_left = width;
+    int       dst_bit   = 0;
+    while (bits_left > 0) {
+        unsigned int avail = 8 - cur_shift;
+        unsigned int take =
+            avail < (unsigned int)bits_left ? avail : (unsigned int)bits_left;
+        unsigned int chunk =
+            (unsigned int)((base[byte_idx] >> cur_shift) & ((1u << take) - 1));
+        int word_idx     = dst_bit / 64;
+        int bit_in_word  = dst_bit % 64;
+        dst[word_idx]   |= (uint64_t)chunk << bit_in_word;
+        if (bit_in_word + (int)take > 64) {
+            int overflow       = bit_in_word + (int)take - 64;
+            dst[word_idx + 1] |= (uint64_t)chunk >> (take - overflow);
+        }
+        dst_bit   += (int)take;
+        bits_left -= (int)take;
+        cur_shift  = 0;
+        byte_idx++;
+    }
+    if (is_signed) {
+        int cw = (width + 63) / 64;
+        sign_extend_top(dst, cw, width);
+        uint64_t fill = (dst[cw - 1] & ((uint64_t)1 << 63)) ? ~(uint64_t)0 : 0;
+        for (int i = cw; i < words; i++)
+            dst[i] = fill;
+    }
+}
+
+// Write the low `width` bits of `src` into the bitfield at bit `bit_off`
+// (relative to `base`), leaving every other bit in the spanned bytes intact
+// (the RMW proper -- surrounding bitfields packed into the same bytes must
+// survive).
+void __cccc_bitfield_insert(unsigned char *base, const uint64_t *src,
+                            long long bit_off, int width) {
+    long long byte_idx  = bit_off / 8;
+    int       cur_shift = (int)(bit_off % 8);
+    int       bits_left = width;
+    int       src_bit   = 0;
+    while (bits_left > 0) {
+        unsigned int avail = 8 - cur_shift;
+        unsigned int take =
+            avail < (unsigned int)bits_left ? avail : (unsigned int)bits_left;
+        int      word_idx    = src_bit / 64;
+        int      bit_in_word = src_bit % 64;
+        uint64_t chunk       = src[word_idx] >> bit_in_word;
+        if (bit_in_word + (int)take > 64) {
+            int overflow  = bit_in_word + (int)take - 64;
+            chunk        |= src[word_idx + 1] << (take - overflow);
+        }
+        unsigned int val  = (unsigned int)(chunk & (((uint64_t)1 << take) - 1));
+        unsigned int mask = (unsigned int)(((1u << take) - 1) << cur_shift);
+        base[byte_idx] =
+            (unsigned char)((base[byte_idx] & ~mask) | (val << cur_shift));
+        src_bit   += (int)take;
+        bits_left -= (int)take;
+        cur_shift  = 0;
+        byte_idx++;
+    }
+}
+
 // ---------- registration ----------
 
 void register_wide_bitint_functions(VirtualMachine *vm) {
@@ -627,4 +713,8 @@ void register_wide_bitint_functions(VirtualMachine *vm) {
                       (void *)__cccc_bitint_nonzero, 2, 0);
     cc_register_cfunc(vm, "__cccc_bitint_from_str",
                       (void *)__cccc_bitint_from_str, 5, 0);
+    cc_register_cfunc(vm, "__cccc_bitfield_extract",
+                      (void *)__cccc_bitfield_extract, 6, 0);
+    cc_register_cfunc(vm, "__cccc_bitfield_insert",
+                      (void *)__cccc_bitfield_insert, 4, 0);
 }

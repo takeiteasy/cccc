@@ -244,6 +244,39 @@ Multi-word arithmetic and shift opcodes for `_BitInt(N)` types wider than 64 bit
 | `WIDE_SHR` | `dst[i] = src[i] >> shift_amount` (arithmetic, signed) |
 | `WIDE_USHR` | `dst[i] = src[i] >> shift_amount` (logical, unsigned) |
 
+#### Wide _BitInt bitfields (#1125)
+
+A bitfield whose *declared type* is itself a wide `_BitInt` (`T f : W;`,
+`T`'s width over 64 bits) is not accessed through either the ordinary
+scalar-register shift/mask idiom (the value doesn't fit one register) or a
+whole-container load/store CALLF (the enclosing struct is laid out
+compactly — `struct { _BitInt(256) f : 193; }` is 25 bytes, though its
+container spans 32, so nothing guarantees the full container is even
+present). Instead two dedicated runtime helpers
+(`src/stdlib/wide_bitint.c`, registered via `register_wide_bitint_functions`
+alongside the `__cccc_bitint_*` family above) walk only the exact bytes the
+field spans, one byte at a time:
+
+- **`__cccc_bitfield_extract(dst, base, bit_off, width, words, is_signed)`** —
+  reads `width` bits starting `bit_off` bits into `base` into the low bits
+  of the `words`-word buffer at `dst`, then sign- or zero-extends up through
+  the rest of `dst` (per `is_signed`) so the result is a full value of the
+  bitfield's *declared* type, not just its `bit_width`.
+- **`__cccc_bitfield_insert(base, src, bit_off, width)`** — writes the low
+  `width` bits of `src` into the bitfield at `bit_off`, leaving every other
+  bit in the spanned bytes untouched (the RMW proper — a neighbouring
+  bitfield packed into the same bytes must survive).
+
+Codegen reaches these from two places: the ordinary member-read path
+(`ND_MEMBER`, `src/codegen_expr.c`) for `extract`, and — since a bitfield's
+assignment type is its container type, which would otherwise route through
+the generic struct/union/wide-`_BitInt` `MCPY` fast path in `ND_ASSIGN` —
+a dedicated bitfield-aware arm ahead of that fast path for `insert`. The
+same `insert` helper is also called directly (host-side, not via CALLF —
+this runs at parse time, not inside the VM) from the global-initializer RMW
+in `write_gvar_data` (`src/parse_init.c`), replacing that function's former
+own word-array loop, which had the same past-the-object overwrite risk.
+
 ### Data Movement
 
 | Opcode | Operands | Description |

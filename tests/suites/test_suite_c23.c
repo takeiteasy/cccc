@@ -776,6 +776,64 @@ int test_c23_bitint_wide(void) {
     return 42;
 }
 
+// #1125: a bitfield whose declared type is a wide _BitInt(N > 128) --
+// beyond even the __int128 native/-m serializer container (#1121/#1123),
+// so this stays VM-only, same as this file's own N>128 coverage elsewhere.
+// The container read/write codegen (src/codegen_expr.c) and the parse-time
+// global-init RMW (src/parse_init.c) used to assume the storage unit fit a
+// single 64-bit register or one whole-container word array respectively;
+// neither holds once mem->ty->size > 8 and > 16. This is the ticket's own
+// literal repro (`_BitInt(256) f : 193;`), plus the unsigned counterpart
+// and a nonzero-bit_offset variant.
+struct WideBitfield256_1125 {
+    _BitInt(256) f : 193;
+};
+struct WideBitfield256Unsigned1125 {
+    unsigned _BitInt(256) f : 193;
+};
+struct WideBitfield256Offset1125 {
+    _BitInt(256) a : 20;
+    _BitInt(256) b : 193; // bit_offset 20
+};
+static struct WideBitfield256Offset1125 g_wbo256 = {
+    -5, ((_BitInt(256))1 << 200) + 11};
+
+// test_c23_bitint_wide_bitfield_over128
+[[cccc::test(return = 42)]]
+int test_c23_bitint_wide_bitfield_over128(void) {
+    struct WideBitfield256_1125 l;
+    l.f            = 3;
+    _BitInt(256) v = l.f;
+    if (v != 3)
+        return 1;
+
+    struct WideBitfield256Unsigned1125 lu;
+    lu.f                     = 3;
+    unsigned _BitInt(256) uv = lu.f;
+    if (uv != 3)
+        return 2;
+
+    // Negative value / sign extension through a 193-bit field in a
+    // 256-bit container.
+    l.f = -3;
+    v   = l.f;
+    if (v != -3)
+        return 3;
+
+    // Nonzero bit_offset, local and global (see #1126 for the separate,
+    // pre-existing global-initializer-serialization gap this does NOT
+    // exercise -- this file is VM-only regardless).
+    struct WideBitfield256Offset1125 lo;
+    lo.a = -5;
+    lo.b = ((_BitInt(256))1 << 200) + 11;
+    if (lo.a != g_wbo256.a)
+        return 4;
+    if (lo.b != g_wbo256.b)
+        return 5;
+
+    return 42;
+}
+
 // #838: two inline wide-_BitInt binops compared directly, e.g.
 // `(a+b) == (c+d)`, evaluated wrong (false negative) because the LHS
 // result's address (held live in a T register across the RHS recursion)

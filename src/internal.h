@@ -720,6 +720,14 @@ long long __cccc_bitint_to_double(const uint64_t *a, int words, int width,
                                   int is_signed);
 void __cccc_bitint_from_double(uint64_t *dst, long long val_bits, int words,
                                int width, int is_signed);
+// #1125: byte-granular bitfield access for a wide _BitInt storage unit --
+// see src/stdlib/wide_bitint.c's own comment for why the scalar
+// shift/mask idiom can't represent this.
+void __cccc_bitfield_extract(uint64_t *dst, const unsigned char *base,
+                             long long bit_off, int width, int words,
+                             int is_signed);
+void __cccc_bitfield_insert(unsigned char *base, const uint64_t *src,
+                            long long bit_off, int width);
 
 // #832: `env` selects which BID rounding mode/exception-flag policy an
 // entry point uses -- CCCC_DEC_ENV_DYNAMIC translates the host's *current*
