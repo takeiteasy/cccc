@@ -105,7 +105,38 @@ Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned) {
         sz = 8;
     else
         sz = (width + 63) / 64 * 8; // ceil to 8-byte word boundary
-    int   al        = sz > 8 ? 8 : sz;
+    // #1135: alignment for the sz>8 containers. clang/gcc are NOT
+    // self-consistent across targets here, so "match clang" cannot be the
+    // rule -- verified via _Static_assert cross-checks (Homebrew clang 22
+    // darwin + Ubuntu clang 18 linux, all four supported host targets):
+    //   target            _BitInt(65..128) align   __int128 align
+    //   x86_64 (any OS)   8                        16
+    //   aarch64 (any OS)  16                       16
+    // The rule adopted instead: match the layout of the C that cccc itself
+    // *emits*. serialize.c's TY_BITINT arm lowers every 16-byte container
+    // (whether spelled _BitInt(65..128) or __int128) to host __int128 /
+    // unsigned __int128 on every target -- the only size==16 emission path,
+    // confirmed no native_resolve_std_ladder rung passes _BitInt(N) through
+    // directly. So giving every 16-byte container align 16 here keeps
+    // parse-time sizeof/_Alignof (folded at guest parse time, e.g. into a
+    // malloc() argument -- see #1127) matching what -c=native/-m's host
+    // compiler actually lays out on all four targets, closing the VM<->
+    // native split that was #1127's whole failure mode. The cost is a
+    // deliberate divergence from clang's own native _BitInt(65..128) on
+    // x86_64 (align 8 there); __int128 -- the spelling that actually shows
+    // up in real code and FFI-visible layouts -- is correct everywhere.
+    // sz>16 (N>128) stays at 8: sizeof(_BitInt(129))==24 and 24%16!=0, so
+    // 16-alignment isn't representable without inventing size padding that
+    // would break the word-count assumptions in src/stdlib/wide_bitint.c.
+    // No host compiler defines _BitInt(N>128) on any supported target
+    // anyway (#1121), so there's nothing to match.
+    int al;
+    if (sz <= 8)
+        al = sz;
+    else if (sz == 16)
+        al = 16;
+    else
+        al = 8;
     Type *ty        = new_type(vm, TY_BITINT, sz, al);
     ty->is_unsigned = is_unsigned;
     ty->bit_width   = width;

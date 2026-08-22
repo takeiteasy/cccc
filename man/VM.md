@@ -249,10 +249,14 @@ Multi-word arithmetic and shift opcodes for `_BitInt(N)` types wider than 64 bit
 A bitfield whose *declared type* is itself a wide `_BitInt` (`T f : W;`,
 `T`'s width over 64 bits) is not accessed through either the ordinary
 scalar-register shift/mask idiom (the value doesn't fit one register) or a
-whole-container load/store CALLF (the enclosing struct is laid out
-compactly — `struct { _BitInt(256) f : 193; }` is 25 bytes, though its
-container spans 32, so nothing guarantees the full container is even
-present). Instead two dedicated runtime helpers
+whole-container load/store CALLF (the *bit packing* within the struct is
+compact regardless of container width — `struct { _BitInt(256) f : 193; }`
+packs `f` into bits `[0,193)`, though its container spans 32 bytes; the
+struct itself is 32 bytes, not just enough to cover those bits, since #1127
+made a named bitfield member's declared type also set the struct's own
+size/alignment floor to its storage unit — so nothing guarantees the full
+container is even present *at that offset*, only that the struct is at least
+as large as the container). Instead two dedicated runtime helpers
 (`src/stdlib/wide_bitint.c`, registered via `register_wide_bitint_functions`
 alongside the `__cccc_bitint_*` family above) walk only the exact bytes the
 field spans, one byte at a time:

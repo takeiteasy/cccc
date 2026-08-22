@@ -7,6 +7,21 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `__int128`/`unsigned __int128` (and `_BitInt(N)` for `N` in `(64, 128]`,
+  which `__int128` is sugar for) is now aligned 16 on every supported
+  target, matching clang/gcc's own `__int128` everywhere and matching the
+  `__int128` host container `-c=native`/`-m` always lowers a 16-byte
+  `_BitInt` container to (`bitint_type()` previously capped every
+  `_BitInt` alignment at 8 regardless of container width). This closes a
+  parse-time `sizeof`/`_Alignof`-fold divergence from the layout of the C
+  cccc itself emits — `struct { char c; __int128 x; }` is now `sizeof 32`
+  / `_Alignof 16`, not `24`/`8` — the same class of bug as #1127. Note
+  this is a deliberate divergence from clang's/gcc's own *native*
+  `_BitInt(65..128)` spelling on x86_64, which is align 8 there (though
+  align 16 on aarch64); cccc keeps the one rule everywhere so its VM and
+  native output never disagree with each other. `_BitInt(N)` for `N > 128`
+  is unaffected: no host container exists to match, so alignment stays 8
+  (#1135).
 - A struct containing a bitfield now reserves each *named* bitfield member's
   full declared-type storage unit in the struct's own size/alignment,
   matching clang/gcc (`struct A { int f : 5; }` is now `sizeof 4` /

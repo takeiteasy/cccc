@@ -78,6 +78,40 @@ struct tc_bf1127_packed {
     int f : 5;
 } __attribute__((packed)); // clang: sizeof 1, _Alignof 1
 
+// #1135: every 16-byte _BitInt container (whether spelled _BitInt(65..128)
+// or __int128) now gets _Alignof 16, matching the __int128 host container
+// -c=native/-m always lowers it to. This is deliberately NOT what clang's
+// own native _BitInt(65..128) does on x86_64 (align 8 there) -- see
+// bitint_type() (src/type.c) and man/COVERAGE.md's Serialized-output
+// divergences section for the cross-target rationale. __int128 itself is
+// aligned 16 on every target in clang/gcc, with no such divergence.
+struct tc_bi1135_i128_member {
+    char     c;
+    __int128 x;
+}; // clang (all targets): sizeof 32, _Alignof 16 (was 24/8)
+
+struct tc_bi1135_bitint_member {
+    char c;
+    _BitInt(100) x;
+}; // aarch64 clang: sizeof 32, _Alignof 16; x86_64 clang: 24/8 (cccc: 32/16
+   // everywhere -- deliberate divergence from x86_64 clang, see above)
+
+struct tc_bi1135_bitfield {
+    _BitInt(128) f : 100;
+}; // aarch64 clang: sizeof 16, _Alignof 16; x86_64 clang: 16/8 (cccc: 16/16
+   // everywhere -- the #1135 ticket's own repro, only reproduced on arm64)
+
+struct tc_bi1135_wide {
+    char c;
+    _BitInt(129) x;
+}; // clang (all targets): sizeof 32, _Alignof 8 (unchanged -- N>128 has no
+   // host container to match; forced by 24%16!=0, see bitint_type())
+
+struct tc_bi1135_packed {
+    char     c;
+    __int128 x;
+} __attribute__((packed)); // clang: sizeof 17, _Alignof 1 (unaffected)
+
 // [from test_compound_struct_minimal]
 // Minimal test for struct compound literal with address-of
 // Expected return: 42
@@ -1002,6 +1036,55 @@ int test_bitfield_storage_unit_layout(void) {
     if (p->f != 5)
         return 2;
     free(p);
+
+    return 42;
+}
+
+// test_bitint128_alignment
+// #1135: 16-byte _BitInt containers (_BitInt(65..128) and __int128) are now
+// aligned 16, matching the __int128 host container -c=native/-m always
+// lowers them to. See the tc_bi1135_* struct definitions above for the
+// layout this pins.
+[[cccc::test(return = 42)]]
+int test_bitint128_alignment(void) {
+    _Static_assert(_Alignof(__int128) == 16, "cccc");
+    _Static_assert(_Alignof(unsigned __int128) == 16, "cccc");
+    _Static_assert(_Alignof(__int128_t) == 16, "cccc");
+    _Static_assert(_Alignof(__uint128_t) == 16, "cccc");
+    _Static_assert(_Alignof(_BitInt(65)) == 16, "cccc");
+    _Static_assert(_Alignof(_BitInt(100)) == 16, "cccc");
+    _Static_assert(_Alignof(_BitInt(128)) == 16, "cccc");
+    _Static_assert(_Alignof(_BitInt(64)) == 8, "cccc");  // unaffected
+    _Static_assert(_Alignof(_BitInt(129)) == 8, "cccc"); // N>128: unaffected
+    _Static_assert(_Alignof(_BitInt(256)) == 8, "cccc"); // N>128: unaffected
+
+    _Static_assert(sizeof(struct tc_bi1135_i128_member) == 32, "cccc");
+    _Static_assert(_Alignof(struct tc_bi1135_i128_member) == 16, "cccc");
+
+    _Static_assert(sizeof(struct tc_bi1135_bitint_member) == 32, "cccc");
+    _Static_assert(_Alignof(struct tc_bi1135_bitint_member) == 16, "cccc");
+
+    _Static_assert(sizeof(struct tc_bi1135_bitfield) == 16, "cccc");
+    _Static_assert(_Alignof(struct tc_bi1135_bitfield) == 16, "cccc");
+
+    _Static_assert(sizeof(struct tc_bi1135_wide) == 32, "cccc");
+    _Static_assert(_Alignof(struct tc_bi1135_wide) == 8, "cccc");
+
+    _Static_assert(sizeof(struct tc_bi1135_packed) == 17, "cccc");
+    _Static_assert(_Alignof(struct tc_bi1135_packed) == 1, "cccc");
+
+    // Layout round-trip, not just _Alignof folding -- exercises the actual
+    // member offset (padded to 16 after the leading char) under both the VM
+    // and, via the native corpus, a real host compiler.
+    struct tc_bi1135_i128_member v;
+    v.c = 'A';
+    v.x = ((__int128)1 << 100) + 12345;
+    if (v.c != 'A')
+        return 1;
+    if (v.x != ((__int128)1 << 100) + 12345)
+        return 2;
+    if ((unsigned long long)((char *)&v.x - (char *)&v) != 16)
+        return 3;
 
     return 42;
 }

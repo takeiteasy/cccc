@@ -171,7 +171,7 @@ language coverage figures apply.
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)`. Serializes under `-c=native`/`-m`/`-c=generated`: cast destinations spell `(void *)` (#1111), since casting *to* `nullptr_t` is not valid C23 syntax; declarations keep the typedef name |
-| `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits. A file-scope/`static` initializer for a `_BitInt(N)` global (any `N`, including arbitrary constant arithmetic, not just a bare literal) folds at compile time via the same word-array runtime helpers, so the value matches what a local of the same type would compute at runtime. This mask/shift truncation description is the VM's own behaviour; `-c=native`/`-m` reproduces it via an explicit emitted mask whenever `N` isn't already exactly the host container's own width -- see [Serialized-output divergences](#serialized-output-divergences) for the one-time #1124 gap where it didn't. A bitfield whose declared type is itself a wide `_BitInt` (`T f : W;` where `T`'s width is over 64 bits) is accessed byte-granularly rather than through either the scalar shift/mask path or a whole-container load/store, since the enclosing struct is laid out compactly and need not contain the full `sizeof(T)` bytes (#1125) |
+| `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits. A file-scope/`static` initializer for a `_BitInt(N)` global (any `N`, including arbitrary constant arithmetic, not just a bare literal) folds at compile time via the same word-array runtime helpers, so the value matches what a local of the same type would compute at runtime. This mask/shift truncation description is the VM's own behaviour; `-c=native`/`-m` reproduces it via an explicit emitted mask whenever `N` isn't already exactly the host container's own width -- see [Serialized-output divergences](#serialized-output-divergences) for the one-time #1124 gap where it didn't. A bitfield whose declared type is itself a wide `_BitInt` (`T f : W;` where `T`'s width is over 64 bits) is accessed byte-granularly rather than through either the scalar shift/mask path or a whole-container load/store, since the enclosing struct is laid out compactly and need not contain the full `sizeof(T)` bytes (#1125). `_Alignof` for a `_BitInt(N)` container: `N<=64` follows the container's own natural size/alignment (1/2/4/8); `N` in `(64,128]` is 16 (the `__int128` host container `-c=native`/`-m` always lowers it to, see the `__int128` row below and [Serialized-output divergences](#serialized-output-divergences) for why this deliberately diverges from clang's own native `_BitInt(65..128)` on x86_64); `N>128` stays at 8 (no host container to match, and `sizeof` for such an `N` is not always a multiple of 16) (#1135) |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
 | `[[...]]` attributes | ~ | Parsed; see [Attributes](#attributes) below for per-attribute status |
@@ -206,7 +206,7 @@ language coverage figures apply.
 | Feature | Status | Notes |
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
-| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths. A file-scope/`static` `__int128` initializer (constant arithmetic, not just a bare literal) folds at compile time the same way as any other wide `_BitInt`. Serializes under `-c=native`/`-m`/`-c=generated` too, as the real host `__int128`/`unsigned __int128` — see [Serialized-output divergences](#serialized-output-divergences) for `_BitInt(N)` widths beyond 128 bits, which those backends reject |
+| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths. `sizeof` is 16 and `_Alignof` is 16, matching clang/gcc on every supported target (x86_64 and aarch64, Linux and macOS) (#1135). A file-scope/`static` `__int128` initializer (constant arithmetic, not just a bare literal) folds at compile time the same way as any other wide `_BitInt`. Serializes under `-c=native`/`-m`/`-c=generated` too, as the real host `__int128`/`unsigned __int128` — see [Serialized-output divergences](#serialized-output-divergences) for `_BitInt(N)` widths beyond 128 bits, which those backends reject |
 | `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel`, `alloc_size`, `malloc` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
@@ -1325,6 +1325,19 @@ project's general fail-loudly policy for what these backends cannot represent
 (#824, #1121). This is also why `tests/suites/test_suite_c23.c` (which uses
 `_BitInt(256)`/`_BitInt(4096)`) stays off the native corpus (`NATIVE_SKIP_TESTS`)
 even once its unrelated `_Decimal` blocker (#1104) is cleared.
+
+`_BitInt(N)` with `N` in `(64, 128]` is aligned 16 on every target (see the
+`_BitInt(N)` row above), matching the `__int128` host container it always
+lowers to under `-c=native`/`-m` — but clang's/gcc's own *native*
+`_BitInt(65..128)` (the spelling, not `__int128`) is align 8 on x86_64 and
+align 16 on aarch64; they are not self-consistent with each other across
+targets. cccc picks the rule that keeps its own parse-time `sizeof`/`_Alignof`
+matching the layout of the C it itself emits on all four supported targets,
+rather than chasing a target-dependent host rule — so a struct or expression
+mixing a cccc-compiled `_BitInt(65..128)` object with a real clang-compiled
+one on x86_64 must not assume they share layout for that spelling. `__int128`
+itself has no such divergence: it is align 16 in clang/gcc on every target,
+matching cccc (#1135).
 
 Until #1122, none of the above was actually reachable for a *global
 initializer*: any file-scope object whose type needed writing more than 8
