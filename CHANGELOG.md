@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-22
+
 ### Fixed
 
 - `__int128`/`unsigned __int128` (and `_BitInt(N)` for `N` in `(64, 128]`,
