@@ -1169,6 +1169,12 @@ if (triple && strstr(triple, "aarch64"))
 
 ## Bootstrapping (`Makefile` + `build.c`, #842)
 
+**"Bootstrap" here means the stage0 `src/std.c` chicken-and-egg** described
+below — a real host `cc` builds every stage. It does **not** mean compiling
+cccc with cccc; nothing in this repo does that today. That's a distinct,
+tracked future direction — self-hosting, v0.5.0 scope — see #1055's own
+tickets if you're looking for it.
+
 The repo-root `Makefile` is a bare-minimum bootstrap: it builds just enough
 of a `cccc` (no `libbacktrace`, no readline — both optional, gated behind
 their own `#ifdef`s) to run `./cccc --build build.c`, which is the real

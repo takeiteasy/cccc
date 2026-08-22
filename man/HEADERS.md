@@ -89,6 +89,16 @@ Two different classifications drive the rules above:
 `-c=native` emits C and hands it to a real host compiler (`cc`/`clang`/`gcc`
 by default). Two things follow from that:
 
+- The `-std=` flag `run_native_backend` forwards is a **flag-spelling probe
+  only** (`native_resolve_std_ladder`, `src/main.c:139-194`) — it confirms the
+  host accepts a given `-std=<ver>` string via `cc -fsyntax-only -std=<ver>
+  -x c /dev/null`, nothing more. It never checks whether the host
+  *implements* every construct the serializer emits, and the serializer
+  itself never reads the resolved standard back — the emitted dialect is a
+  fixed GNU C11 floor regardless of what `--std=` was passed on the CCCC
+  command line. See `man/COVERAGE.md`'s "`-c=native` scope for v0.4.0"
+  section for the full dialect statement and required host flags
+  (`-lm`/`-pthread`/`-fsigned-char`).
 - CCCC's own bundled include directory is **never** forwarded to the native
   compiler (`run_native_backend` in `src/main.c` only forwards user-supplied
   `-I`/`-i`). If it were, the native compiler would see CCCC's polyfill

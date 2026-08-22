@@ -317,15 +317,15 @@ NATIVE_SKIP_TESTS = {
     # corpus run (tests/suites/ was never exercised under --native before).
     # Each is its own ticket; the file goes back on the corpus once fixed.
     "test_suite_c23.c": "_Decimal32/64/128 declarations have no -c=native "
-                 "lowering (#1104); also uses _BitInt(256)/_BitInt(4096), "
+                 "lowering (#1113); also uses _BitInt(256)/_BitInt(4096), "
                  "which -c=native now (#1121) hard-errors rather than "
-                 "silently truncates -- clearing #1104 alone will not be "
+                 "silently truncates -- clearing #1113 alone will not be "
                  "enough to un-skip this file, see #1123 (deferred "
                  "multi-word native lowering)",
     "test_suite_posix.c": "rename-collision __cccc_dupN undeclared "
                  "identifiers (dbm_*), #1103",
     "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
-    "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104/#1113",
+    "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1113",
     # #1126: found while adding native coverage for #1125 (wide _BitInt
     # bitfield codegen, unaffected by this) -- test_wide_global_init's own
     # case 12, from #1122, has apparently never actually been clean under

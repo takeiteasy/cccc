@@ -1177,16 +1177,16 @@ layout or serialized output.
 
 ---
 
-## `-c=native` scope: parity, not portability
+## `-c=native` scope for v0.4.0
 
-`-c=native` v1 is a parity guarantee, not a portability guarantee. Any
-program that already passes on the VM should produce correct native output
-too, on the two currently-supported platform × arch combinations (macOS/
-Linux × aarch64/x86_64), using the real host's standard library wherever
-CCCC's own header is a mere polyfill for VM-internal plumbing (auto-capture
-replays the user's real `#include` verbatim, CCCC's own bundled headers are
-never forwarded to the native `cc`, see [HEADERS.md](HEADERS.md)), and —
-wherever CCCC's header instead encodes genuine VM-specific ABI with no host
+`-c=native` v1 (parity) is the floor, not the ceiling. Any program that
+already passes on the VM should produce correct native output too, on the
+two currently-supported platform × arch combinations (macOS/Linux ×
+aarch64/x86_64), using the real host's standard library wherever CCCC's own
+header is a mere polyfill for VM-internal plumbing (auto-capture replays the
+user's real `#include` verbatim, CCCC's own bundled headers are never
+forwarded to the native `cc`, see [HEADERS.md](HEADERS.md)), and — wherever
+CCCC's header instead encodes genuine VM-specific ABI with no host
 equivalent (the fixed `is_compiler_owned_header` list: `stdarg.h`,
 `setjmp.h`, `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `complex.h`,
 `stdatomic.h`, `stdckdint.h`) — either a real translation to the host's own
@@ -1207,14 +1207,76 @@ change this bar, but it's what finally exercises the entire
 `tests/suites/` `[[cccc::test]]` corpus against it — see this file's own
 `--testing=native` section in [TESTING.md](TESTING.md) for what it covers.
 
+### The admissibility rule
+
+A feature is admissible in serialized output iff it is **fully consumed
+before `cc_serialize_program` runs** — i.e. by the time the serializer walks
+the tree, nothing remains but ordinary typed AST nodes that already have
+serializer support. This is enforced mechanically for both `NodeKind`s and
+`TypeKind`s: `serialize_expr`'s and `serialize_type`'s `default:` arms
+hard-error on any unhandled kind rather than silently emitting a comment or a
+null statement (`src/serialize.c:3855-3880`, `:1950-1962`, #963c) — a
+construct that reaches the serializer either has an explicit case or the
+compile fails loudly, on the spot, naming the kind.
+
+That guarantee does **not** yet extend to type *attributes and qualifiers* —
+`packed`, `aligned(N)`, `_Alignas`, `section`, `weak`, `visibility` are fields
+on a `Type`/`Obj`, not `NodeKind`s or `TypeKind`s, so no `default:` arm can
+ever catch a dropped one. This is a real, confirmed gap (silently dropped
+attributes producing self-inconsistent native output — see the divergence
+table below) rather than a theoretical hole, and closing it is v0.4.0 scope.
+
+The rule to apply when auditing an attribute: is it a **hint** (no observable
+effect if ignored — `always_inline`, `unused`, `deprecated`, `hot`/`cold`,
+`noinline`), safe to drop silently; or a **contract** (changes layout,
+linkage, placement, or semantics — `packed`, `aligned`, `_Alignas`, `section`,
+`weak`, `visibility`, `constructor`/`destructor`, `vector_size`, `noreturn`),
+which must be emitted, or refused where no emission is possible, but never
+silently dropped.
+
+### Output dialect: GNU C11 required
+
+The emitted C is **not** a fixed ISO standard — it requires a GCC/clang-
+compatible host compiler. Within that requirement, the language-standard
+floor is **C11**: `_Atomic`, `_Thread_local`, `_Static_assert`, `_Alignof`,
+and `_Complex` are the newest ISO spellings ever emitted. Everything past C11
+is already lowered rather than passed through — `nullptr_t` → `void *`
+(#1111), `_BitInt(N)` → the smallest fixed integer container that holds it,
+up to `__int128` (#1121/#1124), `atomic_flag` → `_Atomic _Bool` (#1109).
+
+The GNU-extension axis, by contrast, is maximal and load-bearing — emitted
+unconditionally, with no feature detection or fallback: `__attribute__
+((vector_size(N)))`, `__attribute__((constructor/destructor[(prio)]))`,
+`__int128`/`unsigned __int128`, `__extension__ ({ ... })` statement
+expressions with `__typeof__`, `&&label`/`goto *(expr)`, `case A ... B` range
+labels, `__asm__(...)` (verbatim — the one deliberate exception, since
+there's no VM equivalent to translate to or from), and roughly two dozen
+`__builtin_*` spellings including the entire `__atomic_*`/`__ATOMIC_*` family
+the `<threads.h>` shim rests on. **`--std=` governs what cccc's parser
+accepts, never what the serializer emits** — the native `-std=` flag
+`run_native_backend` forwards is a *flag-spelling* probe
+(`native_resolve_std_ladder`, `src/main.c:139-194`), confirming the host
+accepts a given `-std=<ver>` string, not that it implements every construct
+above.
+
+**Required host flags, beyond `-std=`.** `run_native_backend`
+(`src/main.c`) unconditionally appends three flags a hand-compiled `-m`/
+`-c=generated` build must supply manually: `-lm` (`:341`) and `-pthread`
+(`:350`) for the math/threads shims, and `-fsigned-char` (`:363`, #1064) —
+plain `char` is always signed under CCCC's own type rules, but a real host's
+plain `char` is not universally signed (glibc/aarch64 defines
+`__CHAR_UNSIGNED__`); its absence produces silently wrong answers on aarch64
+Linux, not a compile failure.
+
+### v2 — universal C lowerer (v0.5.0, tracked as #1055)
+
 A larger direction — CCCC as a genuinely portable C compiler that runs any
 valid C (including its own supported extensions) on *any* host, POSIX or
 not, polyfilling missing platform facilities rather than just targeting the
 two platforms the VM itself already supports — is real and worth pursuing,
 but is a different product bet (portability over parity) and a much bigger
-undertaking. Deliberately not folded into the parity work above — tracked
-as a placeholder, ticket #1055, with no expected action until this batch's
-own v1 scope area above needs revisiting.
+undertaking. Deliberately not folded into the v0.4.0 work above — tracked as
+the v2 epic, #1055, targeting v0.5.0.
 
 ## Serialized-output divergences
 
