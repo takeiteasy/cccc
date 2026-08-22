@@ -317,7 +317,11 @@ NATIVE_SKIP_TESTS = {
     # corpus run (tests/suites/ was never exercised under --native before).
     # Each is its own ticket; the file goes back on the corpus once fixed.
     "test_suite_c23.c": "_Decimal32/64/128 declarations have no -c=native "
-                 "lowering (#1104)",
+                 "lowering (#1104); also uses _BitInt(256)/_BitInt(4096), "
+                 "which -c=native now (#1121) hard-errors rather than "
+                 "silently truncates -- clearing #1104 alone will not be "
+                 "enough to un-skip this file, see #1123 (deferred "
+                 "multi-word native lowering)",
     "test_suite_posix.c": "rename-collision __cccc_dupN undeclared "
                  "identifiers (dbm_*), #1103",
     "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
@@ -343,15 +347,31 @@ NATIVE_SKIP_TESTS = {
     # owner_fn, and making type_decl_owner() prefer exact-pointer matches
     # over structural ones so split entries resolve to their own owner.
     #
-    # This file STAYS off the corpus for a different, pre-existing reason the
-    # un-skip exposed (it could never run natively before, so nobody had seen
-    # it): test_int128's native backend gets __int128 multiply/divide wrong
-    # once values exceed 64 bits (`a * 1000000000LL` for a = 1e12 yields a
-    # wrong low word; dividing the product back divides the wrong thing) --
-    # the VM computes all of it correctly. Retagged to its own ticket rather
-    # than folded into #1116; covered there (#1121).
-    "test_suite_typesystem.c": "test_int128 native __int128 mul/div wrong "
-                 "beyond 64 bits, #1121",
+    # This file STAYED off the corpus for a different, pre-existing reason
+    # the un-skip exposed (it could never run natively before, so nobody had
+    # seen it): #1121, RESOLVED. serialize_type()'s TY_BITINT case emitted
+    # every width from 65 bits up as a plain 8-byte `long` (its final `else`
+    # arm caught size==16 along with size==8) -- so it wasn't really a
+    # mul/div lowering bug as first suspected, it was that __int128 had NO
+    # container wide enough to be right about anything: multiply, divide,
+    # shifts past bit 63, and the whole-value truthiness checks were all
+    # silently wrong. Fixed by giving size==16 its own __int128/unsigned
+    # __int128 arm (host-supported everywhere this project targets) and
+    # hard-erroring size>16 (_BitInt(N>128) has no native/-m lowering,
+    # VM/-c=bytecode only, per the #824 no-lossy-emulation policy) --
+    # test_suite_c23.c above is the file that refusal newly blocks. Also
+    # fixed the two adjacent gaps the audit turned up: wb/uwb literals over
+    # 64 bits ignored node->wide_digits and printed the truncated 64-bit
+    # node->val (ND_NUM arm), and serialize_init_bytes had no TY_BITINT arm
+    # at all for a _BitInt global initializer of any width (currently
+    # unreachable in practice -- write_gvar_data itself crashes on any
+    # global initializer needing a >8-byte scalar write, a pre-existing,
+    # VM-inclusive bug, filed as #1122). test_suite_typesystem.c is back on
+    # the native corpus; see git history for the resolved skip entry. Also
+    # found in the same audit but out of #1121's scope: the serializer
+    # applies no _BitInt value-semantics masking at any width outside
+    # bitfields (#1124), and _BitInt(N>128) still has no real multi-word
+    # native lowering, only the new hard error (#1123).
     # --- #1117: RESOLVED. Was: spelled complex accessors surviving into the
     # generated text as ordinary identifiers (fabs/carg/... via tgmath,
     # creal/cimag/conj via complex.h) were expanded by the HOST compiler

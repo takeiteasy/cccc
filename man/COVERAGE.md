@@ -206,7 +206,7 @@ language coverage figures apply.
 | Feature | Status | Notes |
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
-| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths |
+| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths. Serializes under `-c=native`/`-m`/`-c=generated` too, as the real host `__int128`/`unsigned __int128` — see [Serialized-output divergences](#serialized-output-divergences) for `_BitInt(N)` widths beyond 128 bits, which those backends reject |
 | `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel`, `alloc_size`, `malloc` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
@@ -1246,6 +1246,23 @@ A variable-length array declared in a `for`-loop initializer
 comma-joined assignments and C forbids mixing a declaration with expressions
 there, so it is rejected with a diagnostic rather than emitted as broken C
 (#964).
+
+`_BitInt(N)` with `N` in `(64, 128]` — including `__int128`/`__int128_t`/
+`__uint128_t` (sugar for `_BitInt(128)`, see the GNU Extensions table above) —
+serializes as the real host `__int128`/`unsigned __int128` under `-c=native`/
+`-m`/`-c=generated`; supported by clang and gcc on every host this project
+targets. `_BitInt(N)` with `N > 128` is a hard error there instead: those
+backends have no multi-word lowering (only the VM's own address-based
+`wide_bitint.c` path handles arbitrary widths up to `BITINT_MAXWIDTH`), so
+rather than silently truncate into a container too narrow to hold the value —
+the #1121 bug this replaced, where `_BitInt(65..128)` fell into the same
+64-bit `long` arm as `_BitInt(N<=64)` and every operation beyond 64 bits was
+silently wrong — an out-of-range width now fails loudly at the type-emission
+site (`serialize_type`'s `TY_BITINT` case, `src/serialize.c`), matching the
+project's general fail-loudly policy for what these backends cannot represent
+(#824, #1121). This is also why `tests/suites/test_suite_c23.c` (which uses
+`_BitInt(256)`/`_BitInt(4096)`) stays off the native corpus (`NATIVE_SKIP_TESTS`)
+even once its unrelated `_Decimal` blocker (#1104) is cleared.
 
 A function-local `static` array initialized with computed-goto label
 addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual

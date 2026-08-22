@@ -1421,6 +1421,35 @@ static void format_ldouble_literal(char *buf, size_t cap, long double v) {
     }
 }
 
+// #1121: decode a wb/uwb literal's full-precision digit text (base 2/8/10/16,
+// tokenize.c) into a 128-bit value. Mirrors __cccc_bitint_from_str's
+// shift-and-add algorithm (wide_bitint.c, the VM's own runtime copy of this
+// same conversion) but stays host-side and width-capped at 128 bits, since
+// this compiler's own build is a real host toolchain with unsigned __int128
+// available -- serialize_type() (case TY_BITINT above) has already refused
+// any type wider than that before an expression of that type can reach here.
+static unsigned __int128 decode_wide_digits(const char *digits, int base) {
+    unsigned __int128 v = 0;
+    for (const char *p = digits; *p; p++) {
+        if (*p == '\'')
+            continue; // digit separator
+        int  digit;
+        char c = *p;
+        if (c >= '0' && c <= '9')
+            digit = c - '0';
+        else if (c >= 'a' && c <= 'f')
+            digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F')
+            digit = c - 'A' + 10;
+        else
+            break;
+        if (digit >= base)
+            break;
+        v = v * (unsigned __int128)base + (unsigned __int128)digit;
+    }
+    return v;
+}
+
 // --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
 // (+ count()/byte_count()/bounds() bounds form, if any) qualifier for
 // re-emission in the post-'*' declarator position it was originally written
@@ -1850,15 +1879,43 @@ static void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             fprintf(f, "void *");
             break;
         case TY_BITINT:
-            // Emit as the underlying container integer type
+            // Emit as the underlying container integer type. bitint_type()
+            // (type.c) rounds bit_width up to whole 8-byte words, so
+            // size==16 covers every width in (64, 128] -- __int128/unsigned
+            // __int128 is supported by clang and gcc on every host this
+            // project targets (macOS/Linux x aarch64/x86_64), including
+            // under the strict -std=cNN native_resolve_std_ladder passes,
+            // and round-trips back through this compiler's own parser
+            // (DK_INT128, parse_types.c) for -c=bytecode re-serialization.
+            // #1121: previously fell into the size==8 "long" arm below,
+            // silently truncating every 128-bit value/operation to 64 bits.
             if (ty->size == 1)
                 fprintf(f, ty->is_unsigned ? "unsigned char" : "signed char");
             else if (ty->size == 2)
                 fprintf(f, ty->is_unsigned ? "unsigned short" : "short");
             else if (ty->size == 4)
                 fprintf(f, ty->is_unsigned ? "unsigned int" : "int");
-            else
+            else if (ty->size == 8)
                 fprintf(f, ty->is_unsigned ? "unsigned long" : "long");
+            else if (ty->size == 16)
+                fprintf(f, ty->is_unsigned ? "unsigned __int128" : "__int128");
+            else
+                // #1121: no multi-word lowering exists for _BitInt(N>128) in
+                // the native/-m serializer (only the VM's address-based
+                // wide_bitint.c path handles it) -- refuse loudly per the
+                // no-lossy-emulation policy (#824) rather than silently
+                // truncating to a container that cannot hold the value.
+                // Implementing a real lowering is deferred to #1123. No
+                // Token is available at a bare type-emission site (unlike
+                // error_tok's usual call sites), so this can't go through
+                // the batched cc_print_all_errors() summary path -- the
+                // trailer is appended by hand to match the "N error(s)
+                // generated." phrasing the test harness's compile-error
+                // heuristic (tools/testing/runner.py) already scans for.
+                error("cccc: _BitInt(%d) exceeds 128 bits, which has no "
+                      "native/-m lowering (VM and -c=bytecode only)\n\n1 "
+                      "error generated.",
+                      ty->bit_width);
             break;
         case TY_BLOCK:
             // #965: on the default (non `-fblocks`) lowering path a block value
@@ -2558,6 +2615,24 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // _Static_assert, and a global initializer's byte image
                 // remain -- see man/COVERAGE.md's own entry for why those
                 // three are not merely deferred.
+            } else if (node->ty && node->ty->kind == TY_BITINT &&
+                       node->ty->bit_width > 64 && node->wide_digits) {
+                // #1121: a wb/uwb literal beyond 64 bits carries its full
+                // precision out-of-band in wide_digits/wide_base (cccc.h) --
+                // node->val alone is truncated to 64 bits by the tokenizer
+                // (tokenize.c). Only the VM path previously consumed
+                // wide_digits (codegen_expr.c); this arm is the -m/-c=native
+                // counterpart. bit_width > 128 already can't reach here: the
+                // enclosing type would have hard-errored out of
+                // serialize_type() (case TY_BITINT above) first.
+                unsigned __int128 v =
+                    decode_wide_digits(node->wide_digits, node->wide_base);
+                fprintf(f,
+                        "((%s%s)(((unsigned __int128)0x%llxULL << 64) | "
+                        "0x%llxULL))",
+                        node->ty->is_unsigned ? "unsigned " : "", "__int128",
+                        (unsigned long long)(uint64_t)(v >> 64),
+                        (unsigned long long)(uint64_t)v);
             } else if (node->ty && is_integer(node->ty)) {
                 // #1031: the old unconditional `%lld` of the raw bit pattern
                 // had two failures for a folded integer literal. (1) An
@@ -5082,6 +5157,40 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
             iv |= (-1LL << (sz * 8));
         fprintf(f, "%lld", (long long)iv);
         return;
+    }
+
+    if (ty->kind == TY_BITINT) {
+        // #1121: was entirely absent from this function -- any _BitInt(N)
+        // global initializer (narrow or wide) fell straight through to the
+        // "cannot serialize" error below. size<=8 mirrors the TY_LONG-family
+        // narrow-integer read just above (sign-extend by size); size==16
+        // (__int128/unsigned __int128, the only wide width serialize_type()
+        // now supports -- case TY_BITINT there refuses anything larger)
+        // reads both little-endian words and reassembles the same
+        // ((unsigned __int128)hi << 64) | lo shape the wide-literal ND_NUM
+        // arm above uses.
+        if (ty->size <= 8) {
+            int64_t iv = 0;
+            memcpy(&iv, var->init_data + offset, ty->size);
+            if (ty->size < 8 && !ty->is_unsigned &&
+                (iv >> (ty->size * 8 - 1)) & 1)
+                iv |= (-1LL << (ty->size * 8));
+            fprintf(f, "%lld", (long long)iv);
+            return;
+        }
+        if (ty->size == 16) {
+            uint64_t lo, hi;
+            memcpy(&lo, var->init_data + offset, 8);
+            memcpy(&hi, var->init_data + offset + 8, 8);
+            fprintf(f,
+                    "((%s__int128)(((unsigned __int128)0x%llxULL << 64) | "
+                    "0x%llxULL))",
+                    ty->is_unsigned ? "unsigned " : "", (unsigned long long)hi,
+                    (unsigned long long)lo);
+            return;
+        }
+        // size > 16 (bit_width > 128): fall through to the loud error below,
+        // consistent with serialize_type()'s own refusal for this width.
     }
 
     // TY_COMPLEX and anything else with no verified byte layout here: fail

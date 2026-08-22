@@ -449,6 +449,23 @@ int test_int128(void) {
     if (iters != 1)
         return 12; // for-condition truthiness
 
+    // #1121: a wb/uwb literal beyond 64 bits (full precision carried
+    // out-of-band as digit text, not the truncated node->val) previously
+    // serialized truncated to 64 bits under -c=native.
+    unsigned __int128 w = 123456789012345678901234567890uwb;
+    if ((unsigned long long)(w >> 64) != 6692605942ULL)
+        return 13;
+    if ((unsigned long long)w != 14083847773837265618ULL)
+        return 14;
+
+    // Modulo on a value with a nonzero high word.
+    __int128 md = c % 1000000000000000000LL; // 1e21 % 1e18 == 0
+    if (md != 0)
+        return 15;
+    __int128 md2 = (c + 7) % 1000000000000000000LL;
+    if (md2 != 7)
+        return 16;
+
     return 42;
 }
 

@@ -905,6 +905,16 @@ static bool is_blacklisted_path(shell_ctx *ctx, const char *path) {
     return false;
 }
 
+/* Reaps terminated background children so they do not linger as zombies;
+ * WNOHANG leaves live children alone and keeps foreground waitpid() working. */
+static void sigchld_reaper(int sig) {
+    (void)sig;
+    int saved_errno = errno;
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+        ;
+    errno = saved_errno;
+}
+
 /* CCCC patch: returns the child's real exit code (non-negative) or a
  * SHELL_ERR_* constant (negative) on error.  Builtins return 0 (their
  * return type is void so a real code is unavailable).
@@ -996,6 +1006,8 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
 
     /* Background: register reaper and return immediately */
     struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigchld_reaper;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
     sigaction(SIGCHLD, &sa, NULL);
