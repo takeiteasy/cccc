@@ -2157,37 +2157,90 @@ static bool addr_comma_tail_is_lvalue(Node *chain) {
                     tail->kind == ND_DEREF);
 }
 
+// #1102 followup: drill through a postfix lvalue shell -- member accesses,
+// plus the explicit ND_DEREF that `->` lowers to -- down to whatever sits
+// at its base (`&((struct P){30, 12}).x` is ADDR(MEMBER(COMMA))). Returns
+// that base only when it is a comma chain; NULL otherwise, leaving every
+// other shape to the generic spelling.
+static Node *addr_comma_base(Node *shell) {
+    Node *n = shell;
+    while (n && (n->kind == ND_MEMBER || n->kind == ND_DEREF))
+        n = n->lhs;
+    return n && n->kind == ND_COMMA ? n : NULL;
+}
+
+// #1102 followup: spell a MEMBER/DEREF shell exactly as serialize_expr()
+// would, except that the comma chain at its bottom -- already emitted
+// earlier in the surrounding `(chain..., ...)` sequence -- is replaced by
+// the bare tail operand. This is what lets the & bind *inside* the chain
+// while still covering every `.member`/`*` step above it:
+// `&(memset(...) , t, t).x` re-spells as `(memset(...) , &t.x)`. Precedence
+// bookkeeping mirrors serialize_expr's own (MEMBER 15 / DEREF 14), so a
+// deref under a member access keeps its parentheses -- `->` lowers to
+// MEMBER(DEREF(base)), which must come out `(*t).m`, not `*t.m`.
+static void serialize_addr_shell(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Node *n, Node *base,
+                                 Node *tail, int parent_prec) {
+    if (!n || n == base) {
+        serialize_expr(f, vm, ctx, n == base ? tail : n, parent_prec);
+        return;
+    }
+    int  node_prec   = get_precedence(n->kind);
+    bool need_parens = node_prec < parent_prec;
+    if (need_parens)
+        fprintf(f, "(");
+    if (n->kind == ND_MEMBER) {
+        serialize_addr_shell(f, vm, ctx, n->lhs, base, tail, node_prec);
+        if (n->member && n->member->name)
+            fprintf(f, ".%.*s", n->member->name->len, n->member->name->loc);
+        else if (!n->member)
+            // Same unresolved-member placeholder ND_MEMBER itself emits.
+            fprintf(f, "./* unknown */");
+        // else: an anonymous struct/union member -- transparent in C, no
+        // spelling of its own (see ND_MEMBER's case for both).
+    } else { // ND_DEREF -- the only other kind addr_comma_base() accepts
+        fprintf(f, "*");
+        serialize_addr_shell(f, vm, ctx, n->lhs, base, tail, node_prec);
+    }
+    if (need_parens)
+        fprintf(f, ")");
+}
+
 // #1102: serialize `&(A, B, x)` as `(A, B, &x)` -- see the ND_ADDR case in
 // serialize_expr(). Flattens nested comma levels into one parenthesized
 // sequence (the comma operator is associative, so grouping is free --
 // balanced_comma() in parse_init.c relies on the same fact), binds the &
 // to the rightmost operand, and leaves every other operand to the ordinary
-// serializer. `tail` is the pre-computed rightmost operand -- compared by
-// pointer identity so the &, and only the &, lands on it: an initializer's
+// serializer. `end` is the pre-computed rightmost operand -- compared by
+// pointer identity so the &, and only the &, lands there: an initializer's
 // balanced-comma tree terminates on *both* sides, and spelling `&` at the
 // first non-comma child would bind it to a mid-chain assignment instead.
-// The caller emits the enclosing parentheses unconditionally: a bare comma
+// #1102 followup: `wrap` is the addressed expression *above* the chain's
+// tail -- a MEMBER/DEREF shell such as `.x` from `&((struct P){30, 12}).x`
+// -- spelled by serialize_addr_shell() with the chain itself elided. The
+// caller emits the enclosing parentheses unconditionally: a bare comma
 // chain must never leak into a context that saw `&(...)`'s precedence
 // (e.g. `p = &(cl)` would otherwise re-parse as `(p = a), b`).
 static void serialize_addr_comma(FILE *f, VirtualMachine *vm,
-                                 SerializeContext *ctx, Node *comma,
-                                 Node *tail) {
+                                 SerializeContext *ctx, Node *comma, Node *end,
+                                 Node *wrap) {
     // Left side: flatten nested comma chains into the same sequence. The
     // tail can only sit on the right spine, so lhs never gets the &.
     if (comma->lhs && comma->lhs->kind == ND_COMMA &&
         !is_noop_expr(comma->lhs->lhs) && !is_noop_expr(comma->lhs->rhs))
-        serialize_addr_comma(f, vm, ctx, comma->lhs, NULL);
+        serialize_addr_comma(f, vm, ctx, comma->lhs, NULL, NULL);
     else
         // Argument-separator precedence (2), same guard ND_FUNCALL's
         // argument loop uses (#1042(b)) -- keeps a top-level `=` or `,`
         // inside the chain from leaking.
         serialize_expr(f, vm, ctx, comma->lhs, 2);
     fprintf(f, " , ");
-    if (comma->rhs == tail) {
+    if (comma->rhs == end) {
         fprintf(f, "&");
-        serialize_expr(f, vm, ctx, comma->rhs, get_precedence(ND_ADDR) + 1);
+        serialize_addr_shell(f, vm, ctx, wrap, comma, end,
+                             get_precedence(ND_ADDR) + 1);
     } else if (comma->rhs && comma->rhs->kind == ND_COMMA) {
-        serialize_addr_comma(f, vm, ctx, comma->rhs, tail);
+        serialize_addr_comma(f, vm, ctx, comma->rhs, end, wrap);
     } else {
         // A flattened left branch's own last element: plain spelling.
         serialize_expr(f, vm, ctx, comma->rhs, 2);
@@ -2638,25 +2691,35 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         case ND_NOT:
         case ND_BITNOT:
         case ND_ADDR:
-        case ND_DEREF:
-            if (node->kind == ND_ADDR && node->lhs &&
-                node->lhs->kind == ND_COMMA && !is_noop_expr(node->lhs->lhs) &&
-                !is_noop_expr(node->lhs->rhs) &&
-                addr_comma_tail_is_lvalue(node->lhs)) {
-                // #1102: & never distributes over a comma chain -- C's comma
-                // operator yields an rvalue even when its last operand is an
-                // lvalue, so the naive spelling of `&(struct P){30, 12}`
-                // (a block-scope compound literal lowers to
-                // ND_ADDR(ND_COMMA(memzero+assigns..., hidden temp var)))
-                // came out as `&(memset(...), t.x = 30, t)` and clang
-                // rejected it outright ("cannot take the address of an
-                // rvalue"). Re-spell with the & binding to the chain's
-                // addressable tail instead: `(memset(...), t.x = 30, &t)`.
-                // Same evaluation order, same resulting pointer; the VM
-                // never re-parses the text, but every host compiler does.
+        case ND_DEREF: {
+            // #1102: & never distributes over a comma chain -- C's comma
+            // operator yields an rvalue even when its last operand is an
+            // lvalue, so the naive spelling of `&(struct P){30, 12}`
+            // (a block-scope compound literal lowers to
+            // ND_ADDR(ND_COMMA(memzero+assigns..., hidden temp var)))
+            // came out as `&(memset(...), t.x = 30, t)` and clang
+            // rejected it outright ("cannot take the address of an
+            // rvalue"). Re-spell with the & binding to the chain's
+            // addressable tail instead: `(memset(...), t.x = 30, &t)`.
+            // Same evaluation order, same resulting pointer; the VM
+            // never re-parses the text, but every host compiler does.
+            // #1102 followup: the addressed expression can also carry a
+            // postfix shell above the chain -- `&((struct P){30, 12}).x`
+            // (parenthesized literals take the ordinary postfix path, so
+            // `.x`/`->x` layer MEMBER (and DEREF) nodes over the comma) --
+            // which used to emit the equally-invalid `&(..., t).x`. The &
+            // binds inside the chain there too, covering the whole shell:
+            // `(..., &t.x)`.
+            Node *addr_base = node->kind == ND_ADDR && node->lhs
+                                  ? addr_comma_base(node->lhs)
+                                  : NULL;
+            if (node->kind == ND_ADDR && addr_base &&
+                !is_noop_expr(addr_base->lhs) &&
+                !is_noop_expr(addr_base->rhs) &&
+                addr_comma_tail_is_lvalue(addr_base)) {
                 fprintf(f, "(");
-                serialize_addr_comma(f, vm, ctx, node->lhs,
-                                     comma_chain_tail(node->lhs));
+                serialize_addr_comma(f, vm, ctx, addr_base,
+                                     comma_chain_tail(addr_base), node->lhs);
                 fprintf(f, ")");
                 break;
             }
@@ -2687,6 +2750,7 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             }
             serialize_expr(f, vm, ctx, node->lhs, node_prec);
             break;
+        }
 
         case ND_CAST: {
             // #1035: include/fenv.h's FE_DFL_ENV sentinel is spelled

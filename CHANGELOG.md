@@ -13,7 +13,10 @@ All notable changes to CCCC are documented here. Format loosely follows
     longer emits `&(memset(...), t.x = 30, t)` — C's comma operator never
     yields an lvalue, so every host compiler rejected that outright
     ("cannot take the address of an rvalue"). The `&` now binds to the
-    chain's addressable tail: `(memset(...), t.x = 30, &t)`.
+    chain's addressable tail: `(memset(...), t.x = 30, &t)` — including
+    when a postfix shell sits above the chain, as in `&((struct P){40,
+    41}).x` or a pointer-typed literal's `->y`: `(..., &t.x)` and
+    `(..., &(*t).y)` respectively.
   - `-(-5)` — typically a macro like `#define abs(x) ((x) < 0 ? -(x) :
     (x))` expanded on `-5`, or a `_Generic`-selected arm — serialized flat
     as `--5` and re-lexed as pre-decrement ("expression is not

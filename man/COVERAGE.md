@@ -1303,7 +1303,10 @@ a block-scope compound literal — lowered to `ND_ADDR` over a comma chain of
 memzero + assignments + hidden temp — used to spell the `&` over the whole
 chain, but C's comma operator never yields an lvalue, so every host
 compiler rejected the output; it now binds to the chain's addressable tail
-(`(memset(...), t.x = 30, &t)`). (2) `-(-5)` — a macro-expanded
+(`(memset(...), t.x = 30, &t)`) — including under a postfix shell above the
+chain (`&((struct P){40, 41}).x`, or `->y` through a pointer-typed
+literal, whose `->` lowers to an explicit deref): `(..., &t.x)` /
+`(..., &(*t).y)`. (2) `-(-5)` — a macro-expanded
 double negation, possibly behind an implicit widening cast that serializes
 as nothing (`_Generic`-selected arms) — spelled flat as `--5` and re-lexed
 by the host as pre-decrement; the inner negation keeps its parentheses.
