@@ -55,6 +55,267 @@ Node *constexpr_expr_for_node(Node *node) {
 
 static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label);
 
+// ========== Wide (>8-byte) compile-time constant folding (#1122) ==========
+//
+// eval2 above is int64_t end-to-end, so it has no channel for a value wider
+// than 64 bits. That's fine for everyday constant expressions, but two
+// things need more: a scalar global initializer whose *own* type is a
+// _BitInt(65..65535)/__int128 (write_gvar_data's scalar tail, previously an
+// unconditional 64-bit eval2 + write_buf that either crashed on the >8-byte
+// write or silently truncated), and any narrower constant expression that
+// merely *contains* wide arithmetic (e.g. `(unsigned long long)((wide_expr)
+// / 3)` -- eval2 would fold the wide subexpression in 64 bits and get a
+// wrong answer with no diagnostic at all).
+//
+// Rather than a bespoke 128-bit evaluator, this reuses the arbitrary-width
+// word-array helpers in src/stdlib/wide_bitint.c (declared in internal.h)
+// that the VM itself uses for runtime _BitInt(>64) arithmetic -- so a global
+// initializer folds to exactly the same bytes a local variable would compute
+// at runtime, and arbitrary width (up to BITINT_MAXWIDTH) comes for free.
+
+// words/width for a wide-or-narrow integer type's own storage. Narrow types
+// (<=8 bytes) are treated as a single 64-bit word for extension purposes --
+// eval2 already produces a correctly sign/zero-extended 64-bit value for
+// them, so width=64 here is exact, not an approximation.
+static void wide_words_of(Type *ty, int *words, int *width) {
+    *words = ty->size > 8 ? ty->size / 8 : 1;
+    *width = (ty->kind == TY_BITINT && ty->bit_width > 64) ? ty->bit_width
+                                                           : *words * 64;
+}
+
+typedef struct {
+    uint64_t *buf;
+    int       words;
+    int       width;
+    bool      is_unsigned;
+} WideVal;
+
+static void eval_wide_node(VirtualMachine *vm, Node *node, uint64_t *dst);
+
+// Evaluate `node` at its own type's width, allocating the backing buffer in
+// the parser arena. Narrow (<=8-byte) nodes go through eval2 -- a single
+// 64-bit word is exact for them (see wide_words_of above).
+static WideVal eval_wide_operand(VirtualMachine *vm, Node *node) {
+    add_type(vm, node);
+    WideVal v;
+    v.is_unsigned = node->ty && node->ty->is_unsigned;
+    if (is_wide_bitint(node->ty)) {
+        wide_words_of(node->ty, &v.words, &v.width);
+        v.buf = arena_alloc(&vm->compiler.parser_arena, (size_t)v.words * 8);
+        eval_wide_node(vm, node, v.buf);
+    } else {
+        v.words  = 1;
+        v.width  = 64;
+        v.buf    = arena_alloc(&vm->compiler.parser_arena, 8);
+        v.buf[0] = (uint64_t)eval2(vm, node, NULL);
+    }
+    return v;
+}
+
+// Extend/truncate an already-evaluated operand into a (words,width)-sized
+// destination buffer (which the caller owns).
+static void wide_extend_into(WideVal v, int words, int width, uint64_t *dst) {
+    __cccc_bitint_extend(dst, v.buf, v.words, v.width, words, width,
+                         !v.is_unsigned);
+}
+
+// True if `node` (already add_type'd) is non-zero, folding wide operands via
+// __cccc_bitint_nonzero instead of a truncating eval2 call.
+static bool eval_wide_truthy(VirtualMachine *vm, Node *node) {
+    add_type(vm, node);
+    if (is_wide_bitint(node->ty)) {
+        WideVal v = eval_wide_operand(vm, node);
+        return __cccc_bitint_nonzero(v.buf, v.words) != 0;
+    }
+    return eval2(vm, node, NULL) != 0;
+}
+
+// Evaluate `node`, which must itself have a wide _BitInt type, into dst
+// (node->ty->size bytes, little-endian words). Mirrors eval2's node-kind
+// coverage, but every arithmetic/bitwise/shift op routes through the
+// wide_bitint.c word-array helpers instead of native int64_t operators.
+static void eval_wide_node(VirtualMachine *vm, Node *node, uint64_t *dst) {
+    add_type(vm, node);
+    Type *ty = node->ty;
+    int   words, width;
+    wide_words_of(ty, &words, &width);
+
+    switch (node->kind) {
+        case ND_NUM:
+            if (node->wide_digits)
+                __cccc_bitint_from_str(dst, node->wide_digits, node->wide_base,
+                                       words, width);
+            else if (ty->is_unsigned)
+                __cccc_bitint_from_u64(dst, (unsigned long long)node->val,
+                                       words, width);
+            else
+                __cccc_bitint_from_i64(dst, (long long)node->val, words, width);
+            return;
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR: {
+            WideVal   l = eval_wide_operand(vm, node->lhs);
+            WideVal   r = eval_wide_operand(vm, node->rhs);
+            uint64_t *le =
+                arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+            uint64_t *re =
+                arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+            wide_extend_into(l, words, width, le);
+            wide_extend_into(r, words, width, re);
+            switch (node->kind) {
+                case ND_ADD:
+                    __cccc_bitint_add(dst, le, re, words, width);
+                    break;
+                case ND_SUB:
+                    __cccc_bitint_sub(dst, le, re, words, width);
+                    break;
+                case ND_MUL:
+                    __cccc_bitint_mul(dst, le, re, words, width);
+                    break;
+                case ND_BITAND:
+                    __cccc_bitint_and(dst, le, re, words, width);
+                    break;
+                case ND_BITOR:
+                    __cccc_bitint_or(dst, le, re, words, width);
+                    break;
+                default:
+                    __cccc_bitint_xor(dst, le, re, words, width);
+                    break;
+            }
+            return;
+        }
+        case ND_DIV:
+        case ND_MOD: {
+            WideVal   l = eval_wide_operand(vm, node->lhs);
+            WideVal   r = eval_wide_operand(vm, node->rhs);
+            uint64_t *le =
+                arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+            uint64_t *re =
+                arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+            wide_extend_into(l, words, width, le);
+            wide_extend_into(r, words, width, re);
+            if (!__cccc_bitint_nonzero(re, words))
+                error_tok(vm, node->rhs->tok,
+                          "division by zero in constant expression");
+            bool is_signed = !ty->is_unsigned;
+            if (node->kind == ND_DIV) {
+                if (is_signed)
+                    __cccc_bitint_sdiv(dst, le, re, words, width);
+                else
+                    __cccc_bitint_udiv(dst, le, re, words, width);
+            } else {
+                if (is_signed)
+                    __cccc_bitint_smod(dst, le, re, words, width);
+                else
+                    __cccc_bitint_umod(dst, le, re, words, width);
+            }
+            return;
+        }
+        case ND_SHL:
+        case ND_SHR: {
+            WideVal   l = eval_wide_operand(vm, node->lhs);
+            uint64_t *le =
+                arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+            wide_extend_into(l, words, width, le);
+            long long shift = eval2(vm, node->rhs, NULL);
+            if (node->kind == ND_SHL)
+                __cccc_bitint_shl(dst, le, shift, words, width);
+            else if (ty->is_unsigned)
+                __cccc_bitint_ushr(dst, le, shift, words, width);
+            else
+                __cccc_bitint_sshr(dst, le, shift, words, width);
+            return;
+        }
+        case ND_NEG:
+        case ND_BITNOT: {
+            WideVal   l = eval_wide_operand(vm, node->lhs);
+            uint64_t *le =
+                arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+            wide_extend_into(l, words, width, le);
+            if (node->kind == ND_NEG)
+                __cccc_bitint_neg(dst, le, words, width);
+            else
+                __cccc_bitint_not(dst, le, words, width);
+            return;
+        }
+        case ND_COND:
+            if (eval_wide_truthy(vm, node->cond))
+                eval_wide_node(vm, node->then, dst);
+            else
+                eval_wide_node(vm, node->els, dst);
+            return;
+        case ND_COMMA:
+            eval_wide_node(vm, node->rhs, dst);
+            return;
+        case ND_CAST:
+            if (is_flonum(node->lhs->ty)) {
+                double    val = eval_double(vm, node->lhs);
+                long long bits;
+                memcpy(&bits, &val, sizeof(bits));
+                __cccc_bitint_from_double(dst, bits, words, width,
+                                          !ty->is_unsigned);
+                return;
+            }
+            if (is_decimal(node->lhs->ty))
+                error_tok(vm, node->tok,
+                          "_Decimal to wide _BitInt constant folding is not "
+                          "supported");
+            {
+                WideVal l = eval_wide_operand(vm, node->lhs);
+                wide_extend_into(l, words, width, dst);
+            }
+            return;
+        case ND_VAR:
+            if (node->var->is_constexpr) {
+                Node *expr = constexpr_expr_for_node(node);
+                if (!expr)
+                    error_tok(vm, node->tok,
+                              "not a scalar compile-time constant");
+                eval_wide_node(vm, expr, dst);
+                return;
+            }
+            error_tok(vm, node->tok,
+                      "not a compile-time constant (variable reference)");
+            return;
+        default:
+            error_tok(vm, node->tok,
+                      "not a compile-time constant (wide integer expression)");
+    }
+}
+
+// Public entry point (declared in parse_internal.h): fold `node` to a
+// constant of type `ty` (which must be an integer type; `ty->size` bytes are
+// written to dst, little-endian words). `node`'s own type need not already
+// be `ty` -- e.g. a global `_BitInt(128) g = 3;` folds the narrow literal
+// `3` and then extends it, exactly like the pre-existing narrow path does
+// for e.g. `long g = 3;`.
+void eval_wide(VirtualMachine *vm, Node *node, Type *ty, uint64_t *dst) {
+    int words, width;
+    wide_words_of(ty, &words, &width);
+    WideVal v = eval_wide_operand(vm, node);
+    wide_extend_into(v, words, width, dst);
+}
+
+// #1122: compare two (possibly mixed narrow/wide) operands at their common
+// width, for eval2's EQ/NE/LT/LE arms when either side is a wide _BitInt.
+// Signedness is keyed off the left operand only, matching the pre-existing
+// (imperfect, but unchanged here) convention already used by ND_LT/ND_LE
+// below for the narrow case.
+static long long eval_wide_cmp(VirtualMachine *vm, Node *node) {
+    WideVal   l     = eval_wide_operand(vm, node->lhs);
+    WideVal   r     = eval_wide_operand(vm, node->rhs);
+    int       words = l.words > r.words ? l.words : r.words;
+    int       width = l.width > r.width ? l.width : r.width;
+    uint64_t *le = arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+    uint64_t *re = arena_alloc(&vm->compiler.parser_arena, (size_t)words * 8);
+    wide_extend_into(l, words, width, le);
+    wide_extend_into(r, words, width, re);
+    return __cccc_bitint_cmp(le, re, words, width, !l.is_unsigned);
+}
+
 // Evaluate a given node as a constant expression.
 //
 // A constant expression is either just a number or ptr+n where ptr
@@ -87,6 +348,19 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
         // subexpression needs folding into an integer-typed constant
         // context (e.g. under an outer ND_CAST to an integer type).
         return cccc_f64_to_i64(eval_double(vm, node));
+
+    // #1122: a node whose own type (after usual arithmetic conversions) is
+    // a wide _BitInt/__int128 can't be folded by this function's plain
+    // int64_t arithmetic below without silently discarding everything past
+    // bit 63 -- e.g. `(unsigned long long)(((unsigned __int128)1<<64|7)/3)`
+    // used to fold the division in 64 bits and get 2 instead of the correct
+    // 6148914691236517207. Delegate the whole subtree to the wide evaluator
+    // and narrow the result exactly like a runtime `(int64_t)wide_val`
+    // cast would (__cccc_bitint_to_i64 takes the low word).
+    if (is_wide_bitint(node->ty)) {
+        WideVal v = eval_wide_operand(vm, node);
+        return __cccc_bitint_to_i64(v.buf, v.words, v.width, !v.is_unsigned);
+    }
 
     switch (node->kind) {
         case ND_ADD:
@@ -127,15 +401,29 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
             if (node->ty->is_unsigned && node->ty->size == 8)
                 return (uint64_t)eval(vm, node->lhs) >> eval(vm, node->rhs);
             return eval(vm, node->lhs) >> eval(vm, node->rhs);
+        // #1122: EQ/NE/LT/LE produce an `int` result, so the wide
+        // interception above (keyed on node->ty) doesn't apply here even
+        // when the *operands* are wide -- fold those through
+        // __cccc_bitint_cmp instead of a truncating eval(), which could
+        // silently compare 64-bit-truncated garbage (e.g. a `<<` by >=64
+        // bits is UB in the int64_t path but well-defined in the wide one).
         case ND_EQ:
+            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
+                return eval_wide_cmp(vm, node) == 0;
             return eval(vm, node->lhs) == eval(vm, node->rhs);
         case ND_NE:
+            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
+                return eval_wide_cmp(vm, node) != 0;
             return eval(vm, node->lhs) != eval(vm, node->rhs);
         case ND_LT:
+            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
+                return eval_wide_cmp(vm, node) < 0;
             if (node->lhs->ty->is_unsigned)
                 return (uint64_t)eval(vm, node->lhs) < eval(vm, node->rhs);
             return eval(vm, node->lhs) < eval(vm, node->rhs);
         case ND_LE:
+            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
+                return eval_wide_cmp(vm, node) <= 0;
             if (node->lhs->ty->is_unsigned)
                 return (uint64_t)eval(vm, node->lhs) <= eval(vm, node->rhs);
             return eval(vm, node->lhs) <= eval(vm, node->rhs);
@@ -145,12 +433,20 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
         case ND_COMMA:
             return eval2(vm, node->rhs, label);
         case ND_NOT:
+            if (is_wide_bitint(node->lhs->ty))
+                return !eval_wide_truthy(vm, node->lhs);
             return !eval(vm, node->lhs);
         case ND_BITNOT:
             return ~eval(vm, node->lhs);
         case ND_LOGAND:
+            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
+                return eval_wide_truthy(vm, node->lhs) &&
+                       eval_wide_truthy(vm, node->rhs);
             return eval(vm, node->lhs) && eval(vm, node->rhs);
         case ND_LOGOR:
+            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
+                return eval_wide_truthy(vm, node->lhs) ||
+                       eval_wide_truthy(vm, node->rhs);
             return eval(vm, node->lhs) || eval(vm, node->rhs);
         case ND_CAST: {
             // #832: a decimal-to-integer cast (e.g. `(int)1.5dd`, legal in an
@@ -212,6 +508,13 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
         case ND_ADDR:
             return eval_rval(vm, node->lhs, label);
         case ND_LABEL_VAL:
+            // #1122: same NULL-`label` hazard as eval_rval's ND_VAR arm --
+            // a caller with no relocation channel (eval()/eval_wide_operand's
+            // narrow fallback) reaching a label-as-value here used to
+            // dereference NULL unconditionally.
+            if (!label)
+                error_tok(vm, node->tok,
+                          "not a compile-time constant (label address)");
             *label = &node->unique_label;
             return 0;
         case ND_MEMBER: {
@@ -254,6 +557,24 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
 }
 
 static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label) {
+    // #1122: a caller with no way to carry a relocation (eval()/eval() via
+    // eval_wide_operand's narrow fallback, both of which pass label==NULL)
+    // reaching an address-of-global here used to dereference that NULL
+    // unconditionally at `*label = ...` below -- e.g. `(int)&global` inside
+    // a bitfield initializer, or `(__int128)&global`, both pre-existing
+    // crashes (the latter newly reachable through eval_wide as of #1122).
+    // Reject with the same diagnostic eval2's own ND_VAR arm uses for a
+    // non-constant reference, instead of segfaulting. ND_MEMBER must NOT be
+    // included here even though it also writes nothing to `*label` itself
+    // -- offsetof(T, m)'s expansion `&(((T*)0)->m)` bottoms out an
+    // ND_MEMBER/ND_DEREF chain at a null-pointer constant (see
+    // is_offsetof_chain below) and folds fine with label==NULL; erroring on
+    // ND_MEMBER here would reject every offsetof() use in a constant
+    // expression, not just an actual `&global.member`, which already hits
+    // this same check when the recursion bottoms out at ND_VAR.
+    if (!label && node->kind == ND_VAR)
+        error_tok(vm, node->tok,
+                  "not a compile-time constant (address of variable)");
     switch (node->kind) {
         case ND_VAR:
             if (node->var->is_local)

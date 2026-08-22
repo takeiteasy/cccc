@@ -313,6 +313,11 @@ int64_t eval(VirtualMachine *vm, Node *node);
 int64_t eval2(VirtualMachine *vm, Node *node, char ***label);
 void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out);
 double eval_double(VirtualMachine *vm, Node *node);
+// Compile-time fold of a constant expression at arbitrary integer width
+// (#1122). ty->size bytes are written to dst (little-endian words); ty must
+// be an integer type. Reuses the src/stdlib/wide_bitint.c runtime helpers so
+// the fold is bit-identical to the VM's own wide-_BitInt arithmetic.
+void eval_wide(VirtualMachine *vm, Node *node, Type *ty, uint64_t *dst);
 Node *expr(VirtualMachine *vm, Token **rest, Token *tok);
 MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok);
 MacroFn *find_macro_fn(VirtualMachine *vm, Token *tok);

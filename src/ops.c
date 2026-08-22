@@ -4009,27 +4009,9 @@ static inline int op_MSET_fn(VirtualMachine *vm) {
 // ========== Wide _BitInt(N>64) multi-word arithmetic/shifts ==========
 // Thin dispatch into the existing runtime helpers in src/stdlib/wide_bitint.c
 // (still used directly by the FFI/CALLF path for AND/OR/XOR/CMP/casts) —
-// bypasses CALLF argument marshalling for the 8 hot ops in #456.
-extern void __cccc_bitint_add(uint64_t *dst, const uint64_t *a,
-                              const uint64_t *b, int words, int width);
-extern void __cccc_bitint_sub(uint64_t *dst, const uint64_t *a,
-                              const uint64_t *b, int words, int width);
-extern void __cccc_bitint_mul(uint64_t *dst, const uint64_t *a,
-                              const uint64_t *b, int words, int width);
-extern void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a,
-                               const uint64_t *b, int words, int width);
-extern void __cccc_bitint_udiv(uint64_t *dst, const uint64_t *a,
-                               const uint64_t *b, int words, int width);
-extern void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a,
-                               const uint64_t *b, int words, int width);
-extern void __cccc_bitint_umod(uint64_t *dst, const uint64_t *a,
-                               const uint64_t *b, int words, int width);
-extern void __cccc_bitint_shl(uint64_t *dst, const uint64_t *a, long long shift,
-                              int words, int width);
-extern void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a,
-                               long long shift, int words, int width);
-extern void __cccc_bitint_ushr(uint64_t *dst, const uint64_t *a,
-                               long long shift, int words, int width);
+// bypasses CALLF argument marshalling for the 8 hot ops in #456. Declared in
+// internal.h (shared with parse_analysis.c's compile-time wide-const folder,
+// #1122).
 
 static inline int op_WIDE_ADD_fn(VirtualMachine *vm) {
     __cccc_bitint_add((uint64_t *)vm->regs[REG_A0],

@@ -171,7 +171,7 @@ language coverage figures apply.
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
 | `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)`. Serializes under `-c=native`/`-m`/`-c=generated`: cast destinations spell `(void *)` (#1111), since casting *to* `nullptr_t` is not valid C23 syntax; declarations keep the typedef name |
-| `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits |
+| `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits. A file-scope/`static` initializer for a `_BitInt(N)` global (any `N`, including arbitrary constant arithmetic, not just a bare literal) folds at compile time via the same word-array runtime helpers, so the value matches what a local of the same type would compute at runtime |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
 | `[[...]]` attributes | ~ | Parsed; see [Attributes](#attributes) below for per-attribute status |
@@ -206,7 +206,7 @@ language coverage figures apply.
 | Feature | Status | Notes |
 |---|---|---|
 | Statement expressions `({ ... })` | ✓ | |
-| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths. Serializes under `-c=native`/`-m`/`-c=generated` too, as the real host `__int128`/`unsigned __int128` — see [Serialized-output divergences](#serialized-output-divergences) for `_BitInt(N)` widths beyond 128 bits, which those backends reject |
+| 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths. A file-scope/`static` `__int128` initializer (constant arithmetic, not just a bare literal) folds at compile time the same way as any other wide `_BitInt`. Serializes under `-c=native`/`-m`/`-c=generated` too, as the real host `__int128`/`unsigned __int128` — see [Serialized-output divergences](#serialized-output-divergences) for `_BitInt(N)` widths beyond 128 bits, which those backends reject |
 | `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel`, `alloc_size`, `malloc` supported (see [Attributes](#attributes) below) |
 | Labels as values `&&label` | ✓ | |
 | Computed goto `goto *expr` | ✓ | |
@@ -1263,6 +1263,25 @@ project's general fail-loudly policy for what these backends cannot represent
 (#824, #1121). This is also why `tests/suites/test_suite_c23.c` (which uses
 `_BitInt(256)`/`_BitInt(4096)`) stays off the native corpus (`NATIVE_SKIP_TESTS`)
 even once its unrelated `_Decimal` blocker (#1104) is cleared.
+
+Until #1122, none of the above was actually reachable for a *global
+initializer*: any file-scope object whose type needed writing more than 8
+bytes at once — `_BitInt(N)` for `N > 64`, `__int128`, `long double`, or
+`_Complex` — crashed at parse time (`write_gvar_data`'s scalar tail only
+handled 1/2/4/8-byte writes) under the plain VM as well as under
+`-c=native`/`-m`. That crash, not any width limit, is what made
+`serialize_init_bytes`'s `_BitInt(N)` arm (added by #1121, above) dead code
+in practice. #1122 fixed the underlying compile-time constant folder (now
+arbitrary-width, reusing the VM's own `wide_bitint.c` runtime helpers so a
+global folds to the same bytes a local would compute) and added `long
+double`/`_Complex` arms alongside it. The result is exactly the divergence
+already documented in this section, now actually reachable: a `_BitInt(N)`
+global with `N` in `(64, 128]` (including `__int128`) serializes under
+`-c=native`/`-m`; one with `N > 128` works under the VM and is refused at
+type-emission under `-c=native`/`-m`, same as any other `_BitInt(N > 128)`
+use. `_Complex` global initializers are real-valued only (this compiler has
+no imaginary-literal syntax), which `serialize_init_bytes`'s new `TY_COMPLEX`
+arm relies on directly.
 
 A function-local `static` array initialized with computed-goto label
 addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual

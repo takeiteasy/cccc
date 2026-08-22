@@ -5,6 +5,53 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- File-scope initializers needing a >8-byte scalar write no longer crash at
+  parse time (#1122): `write_gvar_data`'s scalar tail only handled 1/2/4/8-byte
+  writes, so any global of a `_BitInt(N)` with `N > 64` (including `__int128`),
+  `long double`, or `_Complex` type hit `internal error at
+  src/parse_init.c:1601` — under the plain VM as well as `-c=native`/`-m`,
+  regardless of backend. The constant folder for such an initializer is now
+  arbitrary-width, reusing the same `src/stdlib/wide_bitint.c` word-array
+  helpers the VM itself uses for runtime `_BitInt(>64)` arithmetic, so a
+  global's folded value always matches what an equivalent local would compute
+  at runtime; `long double`/`_Complex` initializers (real-valued only — this
+  compiler has no imaginary-literal syntax) got their own `write_gvar_data`
+  arms, and the matching `-c=native`/`-m` serializer gap for `_Complex`
+  globals was closed too. This also makes #1121's `serialize_init_bytes`
+  `TY_BITINT` arm reachable for the first time — it was dead code until now,
+  since `write_gvar_data` could never produce the bytes it reads.
+
+  Two adjacent bugs found in the same code paths, fixed alongside it:
+  a *narrow* global whose initializer merely contained wide arithmetic used
+  to silently fold wrong rather than crash or error — `eval2` is `int64_t`
+  end-to-end, so e.g. `(unsigned long long)((wide_expr) / 3)` computed the
+  division in 64 bits and got a plausible-looking but incorrect answer with
+  no diagnostic; `eval2` now delegates any wide-typed subexpression to the
+  same arbitrary-width folder. And a `T f : 64` bitfield (a bit-precise field
+  spanning its entire container) computed its mask as `1ULL << 64`, which is
+  undefined behaviour and, observed on this host, evaluates to 0 — silently
+  discarding the whole field on both the global-initializer read-modify-write
+  path and ordinary runtime bitfield load/store (`src/codegen_expr.c`). A
+  bit-precise bitfield wider than 8 bytes (e.g. `_BitInt(128) f : 100;`) in a
+  global initializer is now read-modify-written as a word array too, instead
+  of crashing at `read_buf`; and `eval_rval`'s `ND_VAR`/`ND_LABEL_VAL` arms no
+  longer dereference a NULL relocation-label pointer for an address-of-global
+  expression reached from a context with nowhere to put a relocation (a
+  bitfield initializer, or `eval_wide`'s narrow-operand fallback) — both
+  `(int)&global` inside a bitfield and `(__int128)&global` used to segfault
+  instead of erroring; `not a compile-time constant (address of variable)` in
+  `tests/test_wide_int128_addr_of_global_1122.c` pins both routes. The guard
+  deliberately excludes `ND_MEMBER`, since `offsetof(T, m)`'s expansion
+  bottoms an `ND_MEMBER`/`ND_DEREF` chain out at a null-pointer constant and
+  must keep folding with no relocation label at all.
+
+  A pre-existing, unrelated bug was found in passing and filed separately
+  rather than fixed here: reading a bitfield member whose *container* type is
+  itself a wide `_BitInt` (e.g. `_BitInt(256) f : 193;`) can crash at runtime
+  for some bit-widths, independent of any global initializer (#1125).
+
 ## [0.3.2] - 2026-08-22
 
 ### Fixed

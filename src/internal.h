@@ -662,8 +662,64 @@ bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_vector(Type *ty);
 bool is_decimal(Type *ty);
-int dec_width_code(Type *ty); // 0/1/2 for _Decimal32/64/128, else -1
+int dec_width_code(Type *ty);  // 0/1/2 for _Decimal32/64/128, else -1
 bool is_error_type(Type *ty);
+bool is_wide_bitint(Type *ty); // _BitInt(N), N > 64 -- multi-word storage
+                               // (defined in codegen_emit.c; also declared
+                               // in codegen_internal.h for the codegen TU
+                               // group)
+
+// Wide _BitInt(N>64) runtime helpers (src/stdlib/wide_bitint.c). Little-
+// endian word arrays, "words" = ceil(N/64), "width" = exact bit count N.
+// Shared here (rather than duplicated per call site) so both the VM
+// interpreter fast path (ops.c) and the parser's compile-time constant
+// folder (parse_analysis.c, #1122) link against one declaration set.
+void __cccc_bitint_trunc(uint64_t *dst, int words, int width);
+void __cccc_bitint_add(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                       int words, int width);
+void __cccc_bitint_sub(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                       int words, int width);
+void __cccc_bitint_mul(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                       int words, int width);
+void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                        int words, int width);
+void __cccc_bitint_udiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                        int words, int width);
+void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                        int words, int width);
+void __cccc_bitint_umod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                        int words, int width);
+void __cccc_bitint_shl(uint64_t *dst, const uint64_t *a, long long shift,
+                       int words, int width);
+void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a, long long shift,
+                        int words, int width);
+void __cccc_bitint_ushr(uint64_t *dst, const uint64_t *a, long long shift,
+                        int words, int width);
+void __cccc_bitint_and(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                       int words, int width);
+void __cccc_bitint_or(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                      int words, int width);
+void __cccc_bitint_xor(uint64_t *dst, const uint64_t *a, const uint64_t *b,
+                       int words, int width);
+void __cccc_bitint_not(uint64_t *dst, const uint64_t *a, int words, int width);
+void __cccc_bitint_neg(uint64_t *dst, const uint64_t *a, int words, int width);
+int __cccc_bitint_nonzero(const uint64_t *a, int words);
+long long __cccc_bitint_cmp(const uint64_t *a, const uint64_t *b, int words,
+                            int width, int is_signed);
+void __cccc_bitint_extend(uint64_t *dst, const uint64_t *src, int words_src,
+                          int width_src, int words_dst, int width_dst,
+                          int is_signed_src);
+void __cccc_bitint_from_i64(uint64_t *dst, long long val, int words, int width);
+void __cccc_bitint_from_u64(uint64_t *dst, unsigned long long val, int words,
+                            int width);
+void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base, int words,
+                            int width);
+long long __cccc_bitint_to_i64(const uint64_t *a, int words, int width,
+                               int is_signed);
+long long __cccc_bitint_to_double(const uint64_t *a, int words, int width,
+                                  int is_signed);
+void __cccc_bitint_from_double(uint64_t *dst, long long val_bits, int words,
+                               int width, int is_signed);
 
 // #832: `env` selects which BID rounding mode/exception-flag policy an
 // entry point uses -- CCCC_DEC_ENV_DYNAMIC translates the host's *current*

@@ -8,6 +8,7 @@
 //   test_typedef_simple, test_typedef_struct, test_typedef_enum_union,
 //   test_typedef_funcptr, test_typedef_comprehensive
 
+#include <complex.h>
 #include <stdint.h>
 
 // [from test_generic]
@@ -395,6 +396,97 @@ int test_generic(void) {
         return 10;
 
     return 42; // Success
+}
+
+// #1122: file-scope initializers wider than 8 bytes (__int128,
+// _BitInt(65..128), long double, _Complex) used to crash write_gvar_data
+// (`internal error at src/parse_init.c:1601`) at parse time -- and, for the
+// scalar tail specifically, would have silently truncated to 64 bits even
+// if the crash were merely papered over, since eval2 is int64_t end-to-end.
+// These fold via eval_wide, which reuses the same src/stdlib/wide_bitint.c
+// word-array helpers the VM uses for runtime _BitInt(>64) arithmetic, so
+// each global below is checked against the identical expression computed
+// in a local at runtime (test_wide_global_init) rather than just checked
+// for "doesn't crash".
+static __int128          g_i128 = ((__int128)1 << 100) + 12345;
+static unsigned __int128 g_u128 =
+    (unsigned __int128)123456789012345678901234567890uwb;
+static _BitInt(65) g_bi65   = ((_BitInt(65))1 << 64) | 7;
+static _BitInt(128) g_bi128 = -((_BitInt(128))1 << 100);
+static long double     g_ld = 12345.6789L;
+static _Complex double g_cd = 3.5;
+static _Complex float  g_cf = 2.5f;
+// #1122: a *narrow* global whose initializer merely contains wide
+// arithmetic used to silently fold wrong -- eval2 evaluated the division in
+// 64 bits and got 2 instead of the correct value below.
+static unsigned long long g_narrow =
+    (unsigned long long)((((unsigned __int128)1 << 64) | 7) / 3);
+
+struct WideBitfield1122 {
+    // #1122: a `T f : 64` bitfield's mask was computed as `1ULL <<
+    // mem->bit_width` for bit_width==64 -- UB, observed to evaluate to 0 on
+    // this host, silently discarding the entire field on both the global-
+    // initializer RMW path (src/parse_init.c) and ordinary runtime bitfield
+    // load/store (src/codegen_expr.c).
+    unsigned long long f : 64;
+};
+static struct WideBitfield1122 g_bf = {0xFFFFFFFFFFFFFFFFull};
+
+// test_wide_global_init
+[[cccc::test(return = 42)]]
+int test_wide_global_init(void) {
+    __int128 l_i128 = ((__int128)1 << 100) + 12345;
+    if (g_i128 != l_i128)
+        return 1;
+
+    unsigned __int128 l_u128 =
+        (unsigned __int128)123456789012345678901234567890uwb;
+    if (g_u128 != l_u128)
+        return 2;
+
+    _BitInt(65) l_bi65 = ((_BitInt(65))1 << 64) | 7;
+    if (g_bi65 != l_bi65)
+        return 3;
+
+    _BitInt(128) l_bi128 = -((_BitInt(128))1 << 100);
+    if (g_bi128 != l_bi128)
+        return 4;
+
+    long double l_ld = 12345.6789L;
+    if ((double)g_ld != (double)l_ld)
+        return 5;
+
+    if (creal(g_cd) != 3.5)
+        return 6;
+    if (cimag(g_cd) != 0.0)
+        return 7;
+    if (crealf(g_cf) != 2.5f)
+        return 8;
+
+    unsigned long long l_narrow =
+        (unsigned long long)((((unsigned __int128)1 << 64) | 7) / 3);
+    if (g_narrow != l_narrow)
+        return 9;
+    if (g_narrow != 6148914691236517207ULL)
+        return 10;
+
+    if (g_bf.f != 0xFFFFFFFFFFFFFFFFull)
+        return 11;
+
+    // Wide bitfield RMW in a global initializer: read_buf/write_buf only
+    // handled sizes up to 8, so a `_BitInt(128) f : 100;` member crashed
+    // (`internal error at src/parse_init.c:1587`) rather than working the
+    // way it already did for a local of the same type.
+    struct WideBox1122 {
+        _BitInt(128) f : 100;
+    };
+    static struct WideBox1122 gb = {((_BitInt(128))1 << 90) + 7};
+    struct WideBox1122        lb;
+    lb.f = ((_BitInt(128))1 << 90) + 7;
+    if (gb.f != lb.f)
+        return 12;
+
+    return 42;
 }
 
 // test_int128

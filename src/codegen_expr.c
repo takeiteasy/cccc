@@ -1676,8 +1676,14 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                              !lhs_local_frame); // Use member type (container)
 
                 // Clear the bitfield bits: container &= ~(mask << bit_offset)
-                int       r_mask = alloc_temp_reg();
-                long long mask   = ((1ULL << mem->bit_width) - 1);
+                int r_mask = alloc_temp_reg();
+                // #1122: `1ULL << 64` is UB (and, observed on this host,
+                // evaluates to 0, silently discarding the whole bitfield --
+                // a `T f : 64` bitfield writes as if it were `f : 0`).
+                long long mask =
+                    mem->bit_width >= 64
+                        ? -1LL
+                        : (long long)((1ULL << mem->bit_width) - 1);
                 emit_li3(vm, r_mask, ~(mask << mem->bit_offset));
                 emit_rrr(vm, AND3, r_container, r_container, r_mask);
 
@@ -1876,8 +1882,13 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                  r_shift); // Logical shift right
                         free_temp_reg(r_shift);
                     }
-                    long long mask   = (1ULL << mem->bit_width) - 1;
-                    int       r_mask = alloc_temp_reg();
+                    // #1122: see the RMW-store arm's comment above -- same
+                    // `1ULL << 64` UB for a `T f : 64` unsigned bitfield.
+                    long long mask =
+                        mem->bit_width >= 64
+                            ? -1LL
+                            : (long long)((1ULL << mem->bit_width) - 1);
+                    int r_mask = alloc_temp_reg();
                     emit_li3(vm, r_mask, mask);
                     emit_rrr(vm, AND3, dest_reg, dest_reg, r_mask);
                     free_temp_reg(r_mask);

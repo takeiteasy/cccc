@@ -363,11 +363,19 @@ NATIVE_SKIP_TESTS = {
     # fixed the two adjacent gaps the audit turned up: wb/uwb literals over
     # 64 bits ignored node->wide_digits and printed the truncated 64-bit
     # node->val (ND_NUM arm), and serialize_init_bytes had no TY_BITINT arm
-    # at all for a _BitInt global initializer of any width (currently
-    # unreachable in practice -- write_gvar_data itself crashes on any
-    # global initializer needing a >8-byte scalar write, a pre-existing,
-    # VM-inclusive bug, filed as #1122). test_suite_typesystem.c is back on
-    # the native corpus; see git history for the resolved skip entry. Also
+    # at all for a _BitInt global initializer of any width -- that arm was
+    # unreachable in practice until #1122 (RESOLVED): write_gvar_data itself
+    # crashed on any global initializer needing a >8-byte scalar write, a
+    # pre-existing, VM-inclusive bug (__int128/_BitInt(N>64)/long
+    # double/_Complex globals all hit it). #1122 also fixed a narrow global
+    # whose initializer merely *contained* wide arithmetic silently folding
+    # wrong (eval2 truncated it to 64 bits with no diagnostic) and a
+    # `T f : 64` bitfield mask that was UB for bit_width==64. Wide global
+    # initializers now have their own coverage in
+    # test_suite_typesystem.c's test_wide_global_init (N<=128, native
+    # corpus) and test_suite_c23.c's test_c23_bitint_wide_global_init
+    # (N>128, native-skipped). test_suite_typesystem.c is back on the
+    # native corpus; see git history for the resolved skip entry. Also
     # found in the same audit but out of #1121's scope: the serializer
     # applies no _BitInt value-semantics masking at any width outside
     # bitfields (#1124), and _BitInt(N>128) still has no real multi-word

@@ -1653,13 +1653,59 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
                 if (!expr)
                     break;
 
-                char    *loc    = buf + offset + mem->offset;
-                uint64_t oldval = read_buf(loc, mem->ty->size);
-                uint64_t newval = eval(vm, expr);
-                uint64_t mask   = (1L << mem->bit_width) - 1;
-                uint64_t combined =
-                    oldval | ((newval & mask) << mem->bit_offset);
-                write_buf(loc, combined, mem->ty->size);
+                char *loc = buf + offset + mem->offset;
+                if (mem->ty->size > 8) {
+                    // #1122: a bit-precise bitfield wider than 8 bytes (e.g.
+                    // `_BitInt(128) f : 100;`) -- read_buf/write_buf only
+                    // handle sizes up to 8, so RMW the whole storage-unit
+                    // container as a word array instead. eval_wide folds
+                    // the value at the *member*'s type width, then
+                    // __cccc_bitint_shl (which truncates to container_width)
+                    // both masks to bit_width and positions it at
+                    // bit_offset in one call.
+                    int       container_words = mem->ty->size / 8;
+                    int       container_width = mem->ty->size * 8;
+                    uint64_t *newval = arena_alloc(&vm->compiler.parser_arena,
+                                                   (size_t)container_words * 8);
+                    eval_wide(vm, expr, mem->ty, newval);
+                    // __cccc_bitint_trunc only masks dst[words-1] -- it
+                    // assumes words == ceil(width/64), which container_words
+                    // is NOT in general (mem->ty->size is the *container*'s
+                    // size, e.g. 16 bytes/2 words for a `_BitInt(128) f :
+                    // 60;`, while ceil(60/64) is 1 word). Zero the words
+                    // above the value's own width first, then trunc the
+                    // correct (value, not container) top word.
+                    int value_words = (mem->bit_width + 63) / 64;
+                    if (value_words < container_words)
+                        memset(newval + value_words, 0,
+                               (size_t)(container_words - value_words) * 8);
+                    __cccc_bitint_trunc(newval, value_words, mem->bit_width);
+                    uint64_t *shifted =
+                        arena_alloc(&vm->compiler.parser_arena,
+                                    (size_t)container_words * 8);
+                    __cccc_bitint_shl(shifted, newval, mem->bit_offset,
+                                      container_words, container_width);
+                    for (int i = 0; i < container_words; i++) {
+                        uint64_t old;
+                        memcpy(&old, loc + i * 8, 8);
+                        uint64_t combined = old | shifted[i];
+                        memcpy(loc + i * 8, &combined, 8);
+                    }
+                } else {
+                    uint64_t oldval = read_buf(loc, mem->ty->size);
+                    uint64_t newval = eval(vm, expr);
+                    // #1122: (1L << 64) is UB (and, being `1L`, was already
+                    // wrong on an LP64 host for bit_width==63/64 -- the sign
+                    // bit of the shift result overlaps the arithmetic).
+                    // unsigned long long f : 64 in a global previously
+                    // serialized silently as 0.
+                    uint64_t mask = mem->bit_width >= 64
+                                        ? ~0ULL
+                                        : ((1ULL << mem->bit_width) - 1);
+                    uint64_t combined =
+                        oldval | ((newval & mask) << mem->bit_offset);
+                    write_buf(loc, combined, mem->ty->size);
+                }
             } else {
                 cur = write_gvar_data(vm, cur, init->children[mem->idx],
                                       mem->ty, buf, offset + mem->offset);
@@ -1691,8 +1737,34 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
         return cur;
     }
 
-    if (ty->kind == TY_DOUBLE) {
+    if (ty->kind == TY_DOUBLE || ty->kind == TY_LDOUBLE) {
+        // #1122: TY_LDOUBLE (size 16) used to fall through to the >8-byte
+        // integer scalar tail and crash write_buf. This compiler stores
+        // `long double` as a plain 8-byte double everywhere else (the VM's
+        // FLDR_LOCAL/FSTR_LOCAL, serialize_init_bytes's TY_LDOUBLE arm) --
+        // matching that here keeps the upper 8 bytes of the slot correctly
+        // zeroed (gvar_initializer memsets buf before this call) rather than
+        // reading/writing past what any consumer looks at.
         *(double *)(buf + offset) = eval_double(vm, init->expr);
+        return cur;
+    }
+
+    if (ty->kind == TY_COMPLEX) {
+        // #1122: TY_COMPLEX (size 8/16/32) also used to fall through to the
+        // integer scalar tail and crash (or, for _Complex float at size 8,
+        // silently write an eval2'd integer bit pattern into the real+imag
+        // pair). This compiler has no imaginary-literal syntax (`3.5if` is
+        // a parse error) and `I`/`_Complex_I` from complex.h is a runtime
+        // value, not a compile-time constant, so a foldable complex
+        // initializer is always real-valued -- eval_double naturally
+        // rejects anything else ("not a compile-time constant") rather than
+        // silently dropping an imaginary part. The imaginary half is left
+        // zero (buf was memset in gvar_initializer).
+        double real = eval_double(vm, init->expr);
+        if (ty->base && ty->base->kind == TY_FLOAT)
+            *(float *)(buf + offset) = (float)real;
+        else
+            *(double *)(buf + offset) = real;
         return cur;
     }
 
@@ -1703,6 +1775,17 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
         // Always CCCC_DEC_ENV_STATIC internally (round-to-nearest, flags
         // discarded, host fenv untouched -- see eval_decimal's own comment).
         eval_decimal(vm, init->expr, dec_width_code(ty), buf + offset);
+        return cur;
+    }
+
+    if (is_integer(ty) && ty->size > 8) {
+        // #1122: __int128 / _BitInt(65..65535). A relocation (the address
+        // of a global +/- an offset) can't be represented in a wide integer
+        // slot; eval_wide_node has no ND_ADDR/ND_LABEL_VAL arm, so an
+        // attempt to initialize a wide integer that way falls through to
+        // its default case and reports "not a compile-time constant"
+        // cleanly instead of silently mis-evaluating.
+        eval_wide(vm, init->expr, ty, (uint64_t *)(buf + offset));
         return cur;
     }
 

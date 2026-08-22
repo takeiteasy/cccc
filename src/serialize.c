@@ -5121,6 +5121,32 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
             return;
         }
 
+        case TY_COMPLEX: {
+            // #1122: write_gvar_data's TY_COMPLEX arm (src/parse_init.c)
+            // only ever folds a real-valued complex initializer -- this
+            // compiler has no imaginary-literal syntax, so the imaginary
+            // half of init_data is always zero. A real constant assigned to
+            // a complex-typed target performs the usual real->complex
+            // conversion in C, so printing just the real part is exact; no
+            // need to reconstruct an `x + y*I` expression.
+            int part_size = ty->base ? ty->base->size : 8;
+            if (ty->base && ty->base->kind == TY_FLOAT) {
+                float fv;
+                memcpy(&fv, var->init_data + offset, 4);
+                if (!serialize_flonum_special(f, (long double)fv, "f")) {
+                    char buf[64];
+                    format_float_literal(buf, sizeof buf, (double)fv);
+                    fprintf(f, "%sf", buf);
+                }
+            } else {
+                double dv;
+                memcpy(&dv, var->init_data + offset, part_size >= 8 ? 8 : 4);
+                if (!serialize_flonum_special(f, (long double)dv, ""))
+                    fprintf(f, "%.17g", dv);
+            }
+            return;
+        }
+
         default:
             break;
     }
