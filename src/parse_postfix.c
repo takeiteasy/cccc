@@ -242,6 +242,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 //              | "++"
 //              | "--"
 static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
+    Node *node;
+
     if (is_compound_literal_head(vm, tok)) {
         // Compound literal
         Token *start = tok;
@@ -269,16 +271,25 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             var->is_local_symbol     = vm->compiler.scope->next != NULL;
             var->is_compound_literal = true;
             gvar_initializer(vm, rest, tok, var);
-            return new_var_node(vm, var, start);
+            node = new_var_node(vm, var, start);
+        } else {
+            Obj  *var = new_lvar(vm, "", 0, ty);
+            Node *lhs = lvar_initializer(vm, rest, tok, var);
+            node = new_binary(vm, ND_COMMA, lhs, new_var_node(vm, var, start),
+                              start);
         }
-
-        Obj  *var = new_lvar(vm, "", 0, ty);
-        Node *lhs = lvar_initializer(vm, rest, tok, var);
-        Node *rhs = new_var_node(vm, var, tok);
-        return new_binary(vm, ND_COMMA, lhs, rhs, start);
+        // #1112: a compound literal is a postfix-expression like any other
+        // -- `.member` / `[index]` / `->member` bind tighter than any unary
+        // operator above it (C99 6.5.2p5), so it must run through the same
+        // tail loop primary()-based expressions get. This used to return
+        // directly from each literal branch, making `(struct P){30,12}.x`
+        // a syntax error ("expected ','") even though real compilers accept
+        // it; only the parenthesized spelling parsed. The initializers left
+        // *rest just past the literal's closing '}' -- resume there.
+        tok = *rest;
+    } else {
+        node = primary(vm, &tok, tok);
     }
-
-    Node *node = primary(vm, &tok, tok);
 
     for (;;) {
         if (equal(tok, "(")) {

@@ -7,6 +7,15 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- Postfix tails after a compound literal (`(struct P){30, 12}.x`,
+  `(int[]){1,2,3}[0]`, `((struct T *){p})->m`) now parse (#1112): C99 6.5.2p5
+  binds `.member`/`[index]`/`->member` tighter than the literal itself, but
+  postfix() returned directly from its compound-literal branch without
+  running the shared tail loop, so every bare form was a syntax error
+  ("expected ','") unless the literal was parenthesized. The literal now
+  falls through to the same tail loop as any other primary expression;
+  block-scope literals keep their comma-chain lowering and file-scope/
+  static literals their anonymous-global one, so codegen is untouched.
 - `-c=native`/`-c=generated` output compiles again around three spellings
   surfaced by #1033's native-corpus sweep of `tests/suites/` (#1102):
   - Address-of a block-scope compound literal (`&(struct P){30, 12}`) no
