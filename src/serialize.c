@@ -731,6 +731,9 @@ static TypeName *find_tag_name_for_provenance(SerializeContext *ctx, Type *ty) {
     return first_match;
 }
 
+static TypeName *find_typedef_name_exact_vis(SerializeContext *ctx, Type *ty,
+                                             bool require_visible);
+
 static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty);
 
 // #1091: two tagless typedefs of structurally-identical aggregates (e.g.
@@ -771,7 +774,8 @@ static TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
 // copy_type()s a scalar typedef's Type specifically so this exact check
 // can tell "this node's type really is the DyValue typedef" apart from
 // "this node's type merely has the same underlying representation".
-static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty) {
+static TypeName *find_typedef_name_exact_vis(SerializeContext *ctx, Type *ty,
+                                             bool require_visible) {
     if (!ctx || !ty)
         return NULL;
     // Walk the ->origin chain copy_type() builds, not just `ty` itself: a
@@ -786,9 +790,43 @@ static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty) {
     for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
         for (int i = 0; i < ctx->typedefs_len; i++)
             if (ctx->typedefs[i].ty == ty &&
-                name_visible(&ctx->typedefs[i], ctx->current_fn))
+                (!require_visible ||
+                 name_visible(&ctx->typedefs[i], ctx->current_fn)))
                 return &ctx->typedefs[i];
     return NULL;
+}
+
+static TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty) {
+    return find_typedef_name_exact_vis(ctx, ty, true);
+}
+
+// #1116: pointer-identity counterpart to find_tag_name()'s structural
+// match, resolving whichever tag record names `ty` itself (via the same
+// ->origin-chain walk find_typedef_name_exact_vis() uses). Deliberately
+// UNFILTERED by name_visible(): nominal identity -- "which declaration
+// owns this type" -- must not depend on which scope the pass asking
+// happens to be emitting or collecting under. The global collect_obj_types()
+// pre-pass runs with ctx->current_fn == NULL, so a visibility-filtered
+// lookup sees no function-local record at all there, and each function's
+// own emission pass sees only its own -- exactly the asymmetry that made
+// the structural dedup below merge distinct types. Returns false when no
+// record names `ty`; true otherwise, with *owner set to the record's
+// owner_fn -- which may legitimately be NULL (file scope), so callers must
+// branch on the return value, not the pointer.
+static bool tag_record_owner_exact(SerializeContext *ctx, Type *ty,
+                                   Obj **owner) {
+    if (owner)
+        *owner = NULL;
+    if (!ctx || !ty)
+        return false;
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
+        for (int i = 0; i < ctx->tags_len; i++)
+            if (ctx->tags[i].ty == ty) {
+                if (owner)
+                    *owner = ctx->tags[i].owner_fn;
+                return true;
+            }
+    return false;
 }
 
 // #1091: true when `a` and `b` are structurally identical (the caller has
@@ -829,13 +867,46 @@ static bool nominally_distinct_typedefs(SerializeContext *ctx, Type *a,
     // check can't see is one side tagged and the other not: a tagless
     // aggregate is a distinct type from a same-shaped tagged one (#1091
     // symptom 3) and must never share its printed definition.
+    //
+    // #1116: EXCEPT when the same-tag pair is genuinely two declarations --
+    // a function-local `struct Point { ...; };` shadows a same-shaped
+    // file-scope `struct Point` (C11 6.2.1p4), and two sibling functions'
+    // locals shadow each other just as well. Both sides complete and both
+    // resolvable to their own tag record but with different owner_fn means
+    // different declaration scopes, i.e. distinct types that must each get
+    // their own ctx->defs entry (the file-scope one emitted by the file-
+    // scope pass, each local inside its own function -- legal shadowed
+    // redefinition). Same owner on both sides covers every dedup contract
+    // this check exists to protect: the comptime re-parse (#1006/#1046)
+    // re-records at the same scope, header-supplied types record at file
+    // scope (owner NULL), and #989's hoist_local_type_to_file_scope()
+    // rewrites its capture type's records to owner NULL precisely so the
+    // file-scope pass owns them.
+    if (type_is_complete_tagged(a) && type_is_complete_tagged(b)) {
+        Obj *oa = NULL, *ob = NULL;
+        bool fa = tag_record_owner_exact(ctx, a, &oa);
+        bool fb = tag_record_owner_exact(ctx, b, &ob);
+        if (fa && fb && oa != ob)
+            return true;
+    }
     if (a->struct_tag && b->struct_tag)
         return false;
     if (a->struct_tag || b->struct_tag)
         return true;
 
-    TypeName *na = find_typedef_name_exact(ctx, a);
-    TypeName *nb = find_typedef_name_exact(ctx, b);
+    // #1116: resolve both sides through the UNFILTERED exact lookup (not
+    // find_typedef_name_exact's name_visible gate). The global collection
+    // pass runs with current_fn == NULL, where NO function-local alias is
+    // visible, and each function's own emission pass sees only its own --
+    // under either of those, one side's record always came back NULL here,
+    // the `!na || !nb` fallback then declared the pair "not distinct", and
+    // the second function's anonymous-aggregate typedef silently merged
+    // into the first one's (TdSize vs TdComp_Rectangle in
+    // test_suite_typesystem.c): its body was never collected into
+    // ctx->defs, and emit_typedef_and_deps' emitted_defs nominal check
+    // suppressed the combined `typedef struct {...} Name;` line too.
+    TypeName *na = find_typedef_name_exact_vis(ctx, a, false);
+    TypeName *nb = find_typedef_name_exact_vis(ctx, b, false);
     if (!na || !nb)
         return false;
     return na->name_len != nb->name_len ||
@@ -913,6 +984,27 @@ static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
 }
 
 static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
+    // #1116: resolve `ty`'s own record by pointer identity first. Once
+    // nominally_distinct_typedefs() splits two structurally identical
+    // aggregates into separate ctx->defs entries, the structural scan below
+    // can no longer tell them apart -- whichever record comes first in
+    // ctx->tags/ctx->typedefs order wins, returning the OTHER declaration's
+    // owner and making serialize_type_defs_for_owner() skip this entry in
+    // its own function's pass ("owner mismatch") even though it was just
+    // split out precisely so that pass could emit it. The identity match is
+    // strictly more precise; the structural fallback keeps every pre-#1116
+    // caller (use-site copies with no traceable record of their own)
+    // behaving exactly as before.
+    Type *orig = ty;
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++) {
+        for (int i = 0; i < ctx->tags_len; i++)
+            if (ctx->tags[i].ty == ty)
+                return ctx->tags[i].owner_fn;
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].ty == ty)
+                return ctx->typedefs[i].owner_fn;
+    }
+    ty = orig;
     for (int i = 0; i < ctx->tags_len; i++)
         if (same_type_or_origin(ctx->tags[i].ty, ty))
             return ctx->tags[i].owner_fn;
@@ -8285,6 +8377,211 @@ static void serialize_synth_f2i_helpers(FILE *f, Obj *prog) {
     fprintf(f, "\n");
 }
 
+// #1117: the bundled include/complex.h and include/tgmath.h spell every
+// complex accessor as a cccc-internal builtin -- creal(z) -> __cccc_creal(z)
+// etc. (include/complex.h), and tgmath's type-generic _Generic arms reach
+// the l/f variants through cabsl/cargl (include/tgmath.h). Those names only
+// have definitions inside the VM; parse_postfix.c lowers the calls to
+// __builtin_creal*/__builtin_cimag*/__builtin_conj at AST level, but any
+// plain spelled call that survives into the generated text as an ordinary
+// identifier gets expanded by the HOST compiler instead -- and because
+// run_native_backend forwards the guest's -I paths to the host cc
+// (src/main.c), a replayed `#include <complex.h>`/`#include <tgmath.h>`
+// resolves to CCCC's OWN bundled copies, whose macros then expand to
+// __cccc_* names nothing ever defined for the host ("use of undeclared
+// identifier '__cccc_creall'", test_suite_floats.c). Only the long-double
+// arms happened to error under that corpus's exact invocation, but
+// preprocessing the same output shows every double/float arm equally
+// exposed depending on host/std -- so the whole family is emitted, not just
+// the failing pair.
+//
+// Fix follows the #1050/#1054 synth-decl precedent: emit static inline
+// definitions mapping each helper straight onto its __builtin_*, whenever
+// the names are reachable. Reachable means ANY of:
+//   - a captured #include replay resolved to a bundled complex.h or
+//     tgmath.h (the replay re-defines creal/cabs/I/... as macros pointing
+//     at __cccc_* for everything the host compiles afterwards),
+//   - the program contains any TY_COMPLEX-typed object (the AST-level
+//     lowering emits __builtin_* calls directly, but the same TU usually
+//     spells accessors too, and there is no downside to covering it),
+//   - the program declares any Obj whose name is one of the __cccc_c*
+//     helpers themselves (e.g. reached via a private-header parse such as
+//     reflection.h's implicit includes, which are deliberately NOT
+//     auto-captured and so never replayed).
+// The __cccc_cmplx/f/l constructors are included alongside the nine
+// accessors: the replayed complex.h spells _Complex_I/I and CMPLX() in
+// terms of them, so any macro text the host expands reaches them too.
+// Emitted unconditionally rather than emit_cccc-gated, mirroring #1068's
+// f2i reasoning: spelled text can appear under --emit-cccc output too.
+// Unused static inline functions cost no codegen, so over-triggering is
+// harmless; under-triggering is what produced #1117.
+static const char *const complex_shim_defs[] = {
+    "static inline double _Complex __cccc_cmplx(double re, double im) {\n"
+    "    return __builtin_complex(re, im);\n"
+    "}\n",
+    "static inline float _Complex __cccc_cmplxf(float re, float im) {\n"
+    "    return __builtin_complex(re, im);\n"
+    "}\n",
+    "static inline long double _Complex __cccc_cmplxl(long double re, long "
+    "double im) {\n"
+    "    return __builtin_complex(re, im);\n"
+    "}\n",
+#define CCCC_COMPLEX_SHIM(name, ret, arg, builtin)                             \
+    "static inline " ret " " name "(" arg " _Complex z) {\n"                   \
+    "    return __builtin_" builtin "(z);\n"                                   \
+    "}\n",
+    CCCC_COMPLEX_SHIM("__cccc_creal", "double", "double", "creal")
+        CCCC_COMPLEX_SHIM("__cccc_crealf", "float", "float", "crealf")
+            CCCC_COMPLEX_SHIM("__cccc_creall", "long double", "long double",
+                              "creall") CCCC_COMPLEX_SHIM("__cccc_cimag",
+                                                          "double", "double",
+                                                          "cimag")
+                CCCC_COMPLEX_SHIM("__cccc_cimagf", "float", "float", "cimagf")
+                    CCCC_COMPLEX_SHIM("__cccc_cimagl", "long double",
+                                      "long double", "cimagl")
+                        CCCC_COMPLEX_SHIM("__cccc_conj", "double _Complex",
+                                          "double", "conj")
+                            CCCC_COMPLEX_SHIM("__cccc_conjf", "float _Complex",
+                                              "float", "conjf")
+                                CCCC_COMPLEX_SHIM("__cccc_conjl",
+                                                  "long double _Complex",
+                                                  "long double", "conjl")
+#undef CCCC_COMPLEX_SHIM
+};
+
+// hashmap_foreach callback over emit_include_paths: true when any captured
+// include resolved to a bundled complex.h/tgmath.h (#1117 -- see the shim
+// table above for why those two specifically).
+static int collect_complex_header_path(char *key, int keylen, void *val,
+                                       void *user_data) {
+    (void)key;
+    (void)keylen;
+    bool *want = user_data;
+    if (path_basename_is(val, "complex.h") || path_basename_is(val, "tgmath.h"))
+        *want = true;
+    return 0;
+}
+
+// Cycle guard for type_scan_complex_native: a struct that points to its own
+// kind (tree nodes, lua_State links, ...) would otherwise recurse forever,
+// since peeling the pointer lands back on the same aggregate. collect_type()
+// guards the equivalent walk with ctx->seen; this scanner is standalone, so
+// it carries its own (tiny) visited list.
+typedef struct {
+    Type **data;
+    int    len, cap;
+} TypeSeenSet;
+
+static bool type_seen_set_has(TypeSeenSet *set, Type *ty) {
+    for (int i = 0; i < set->len; i++)
+        if (set->data[i] == ty)
+            return true;
+    return false;
+}
+
+static void type_seen_set_push(TypeSeenSet *set, Type *ty) {
+    if (set->len >= set->cap) {
+        set->cap  = set->cap ? set->cap * 2 : 8;
+        set->data = realloc(set->data, sizeof(Type *) * set->cap);
+    }
+    set->data[set->len++] = ty;
+}
+
+static void type_scan_complex_native(Type *ty, bool *want, TypeSeenSet *seen) {
+    while (ty &&
+           (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA))
+        ty = ty->base;
+    if (!ty || *want)
+        return;
+    if (ty->kind == TY_COMPLEX) {
+        *want = true;
+        return;
+    }
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->members &&
+        !type_seen_set_has(seen, ty)) {
+        type_seen_set_push(seen, ty);
+        for (Member *m = ty->members; m; m = m->next)
+            type_scan_complex_native(m->ty, want, seen);
+        return;
+    }
+    if (ty->kind == TY_FUNC) {
+        type_scan_complex_native(ty->return_ty, want, seen);
+        for (Type *p = ty->params; p; p = p->next)
+            type_scan_complex_native(p, want, seen);
+    }
+}
+
+// Same recursive-field traversal shape as node_scan_f2i_native (above) --
+// exhaustive over every child-pointing field Node has.
+static void node_scan_complex_native(Node *node, bool *want,
+                                     TypeSeenSet *seen) {
+    if (!node || *want)
+        return;
+    type_scan_complex_native(node->ty, want, seen);
+    if (node->var)
+        type_scan_complex_native(node->var->ty, want, seen);
+    if (node->member)
+        type_scan_complex_native(node->member->ty, want, seen);
+    if (node->func_ty)
+        type_scan_complex_native(node->func_ty, want, seen);
+    node_scan_complex_native(node->lhs, want, seen);
+    node_scan_complex_native(node->rhs, want, seen);
+    node_scan_complex_native(node->cond, want, seen);
+    node_scan_complex_native(node->then, want, seen);
+    node_scan_complex_native(node->els, want, seen);
+    node_scan_complex_native(node->init, want, seen);
+    node_scan_complex_native(node->inc, want, seen);
+    node_scan_complex_native(node->body, want, seen);
+    node_scan_complex_native(node->args, want, seen);
+    node_scan_complex_native(node->next, want, seen);
+}
+
+// True when `name` is one of the cccc-internal complex helpers themselves
+// (#1117): reachable via a private-header parse (e.g. reflection.h's
+// implicit includes), which is deliberately never auto-captured and hence
+// never replayed -- nothing else would define them for the host.
+static bool obj_name_is_complex_shim(const char *name) {
+    static const char *const prefixes[] = {"__cccc_creal", "__cccc_cimag",
+                                           "__cccc_conj", "__cccc_cmplx"};
+    if (!name)
+        return false;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++)
+        if (!strncmp(name, prefixes[i], strlen(prefixes[i])))
+            return true;
+    return false;
+}
+
+static void serialize_synth_complex_decls(FILE *f, VirtualMachine *vm,
+                                          Obj *prog) {
+    bool        want = false;
+    TypeSeenSet seen = {0};
+    hashmap_foreach(&vm->compiler.emit_include_paths,
+                    collect_complex_header_path, &want);
+    for (Obj *obj = prog; obj && !want; obj = obj->next) {
+        if (obj_name_is_complex_shim(obj->name))
+            want = true;
+        else {
+            type_scan_complex_native(obj->ty, &want, &seen);
+            for (Obj *param = obj->params; param && !want; param = param->next)
+                type_scan_complex_native(param->ty, &want, &seen);
+            for (Obj *local = obj->locals; local && !want; local = local->next)
+                type_scan_complex_native(local->ty, &want, &seen);
+        }
+        if (!want && obj->is_function && obj->body)
+            node_scan_complex_native(obj->body, &want, &seen);
+    }
+    free(seen.data);
+    if (!want)
+        return;
+    fprintf(f, "\n/* #1117: cccc-internal complex accessors the bundled "
+               "complex.h/tgmath.h\n   macros expand to; mapped onto the "
+               "host's own builtins */\n\n");
+    for (size_t i = 0;
+         i < sizeof(complex_shim_defs) / sizeof(complex_shim_defs[0]); i++)
+        fprintf(f, "%s", complex_shim_defs[i]);
+    fprintf(f, "\n");
+}
+
 // #1057: type-name sibling of #1050's synth-libc-call mechanism just above.
 // A comptime builder can fold a standard scalar typedef name -- GetType(
 // "size_t")/"ptrdiff_t"/"wchar_t" -- into a generated function's signature
@@ -10342,6 +10639,14 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // --emit-cccc output needs them defined too, or it calls an
         // undefined function.
         serialize_synth_f2i_helpers(f, prog);
+        // #1117: same unconditional-on-emit_cccc placement (#1068
+        // reasoning) -- the bundled complex.h/tgmath.h macros expand plain
+        // spelled accessors to cccc-internal names that need host-side
+        // definitions no replay can supply. Sits after the f2i pass and
+        // before the typedef/accessor-shim passes; nothing here references
+        // anything those emit, and everything downstream of the include
+        // replay above can already see it.
+        serialize_synth_complex_decls(f, vm, prog);
     }
 
     // #1057: headers for comptime-folded standard typedef names (size_t/

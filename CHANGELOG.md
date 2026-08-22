@@ -5,7 +5,51 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-22
+
 ### Fixed
+
+- `-c=native`/`-m` keeps function-local typedefs of anonymous aggregates
+  distinct across scopes (#1116): a function-local
+  `typedef struct { int width; int height; } TdSize;` serialized neither its
+  struct body nor its alias whenever a structurally identical anonymous
+  aggregate typedef existed in a sibling function (or the type otherwise
+  merged with a same-shaped one collected earlier) — the global collection
+  pre-pass runs with no current function, so the nominal-distinctness check's
+  exact-pointer alias lookup was visibility-filtered and saw no function-local
+  record on either side, declared the pair "not distinct", and the second
+  Type collapsed into the first's definition slot; the losing function then
+  referenced an undeclared alias ("use of undeclared identifier 'TdSize'").
+  The same asymmetry also merged a file-scope tagged struct with an identical
+  same-tag function-local shadow, so only the local definition ever printed
+  and every other function saw an incomplete type. Nominal identity is now
+  resolved through unfiltered exact-pointer record lookups (a declaration's
+  owner must not depend on which scope happens to be asking), complete
+  same-tag aggregates whose defining tag records carry different owners are
+  treated as the distinct types they are (each emitted under its own scope,
+  legal shadowed redefinition), and `type_decl_owner()` prefers
+  pointer-identity matches over structural ones so split definitions resolve
+  to their own owner. This surfaced a pre-existing, previously unreachable
+  native bug in `test_int128`'s own right — `__int128` multiply/divide
+  produce wrong results beyond 64 bits natively while the VM is correct —
+  now tracked as #1121, with the suite retagged to it.
+- `-c=native` emits host definitions for the cccc-internal complex accessors
+  (#1117): spelled complex calls that survive into the generated text as
+  ordinary identifiers (`fabs`, `carg`, `creal`, ...) are expanded by the
+  HOST compiler through the replayed `#include <complex.h>` /
+  `#include <tgmath.h>` — which resolve to CCCC's own bundled copies, since
+  the native backend forwards the guest `-I` paths — whose type-generic macro
+  bodies reference VM-only builtins (`__cccc_creall`/`__cccc_cimagl` via
+  tgmath's long-double-complex arms, and likewise every double/float arm),
+  so the host compile died on "use of undeclared identifier '__cccc_creall'".
+  A new demand-gated synth pass emits static inline definitions of the whole
+  family — the nine `__cccc_creal/cimag/conj {,f,l}` accessors plus the three
+  `__cccc_cmplx {,f,l}` constructors the replayed `CMPLX()`/`I` macros reach
+  — mapped onto the host's own `__builtin_creal*`/`cimag*`/`conj*`/
+  `complex`, whenever a captured include resolves to bundled complex.h or
+  tgmath.h, any complex-typed object is reachable, or any helper name itself
+  appears (private-header parses are deliberately never replayed). This
+  un-skips `test_suite_floats.c` from the native corpus.
 
 - `-c=native`/`-m` output stops replaying captured `#embed` directive lines
   (#1114): auto-capture records every top-level directive verbatim, so a

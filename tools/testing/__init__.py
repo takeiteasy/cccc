@@ -322,8 +322,51 @@ NATIVE_SKIP_TESTS = {
                  "identifiers (dbm_*), #1103",
     "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104/#1113",
-    "test_suite_typesystem.c": "TdSize undeclared, #1104",
-    "test_suite_floats.c": "__cccc_creall/__cccc_cimagl undeclared, #1104",
+    # --- #1116: RESOLVED for its own scope. Was: a function-local typedef
+    # of an ANONYMOUS aggregate (`typedef struct { int width; int height; }
+    # TdSize;`, test_typedef_struct) serialized neither its struct body nor
+    # its alias, leaving the later local declaration `TdSize s;` referencing
+    # nothing. Root cause: the global collect_obj_types() pre-pass runs with
+    # current_fn == NULL, where find_typedef_name_exact's name_visible gate
+    # hides EVERY function-local alias -- so nominally_distinct_typedefs'
+    # `!na || !nb` fallback declared TdSize structurally identical to
+    # test_typedef_comprehensive's same-shaped anonymous TdComp_Rectangle
+    # "not distinct", and the second Type merged into the first's ctx->seen/
+    # ctx->defs slot (never collected, never emitted). A second manifestation
+    # rode the same asymmetry: the file-scope `struct Point {...}` merged
+    # with test_sizeof_expressions' identical function-local one, so only the
+    # local definition ever printed and every other function saw an
+    # incomplete type. Fixed by resolving both sides' defining records with
+    # an UNFILTERED exact-pointer lookup inside nominally_distinct_typedefs
+    # (nominal identity must not depend on which scope is asking), splitting
+    # complete same-tag aggregates whose tag records carry different
+    # owner_fn, and making type_decl_owner() prefer exact-pointer matches
+    # over structural ones so split entries resolve to their own owner.
+    #
+    # This file STAYS off the corpus for a different, pre-existing reason the
+    # un-skip exposed (it could never run natively before, so nobody had seen
+    # it): test_int128's native backend gets __int128 multiply/divide wrong
+    # once values exceed 64 bits (`a * 1000000000LL` for a = 1e12 yields a
+    # wrong low word; dividing the product back divides the wrong thing) --
+    # the VM computes all of it correctly. Retagged to its own ticket rather
+    # than folded into #1116; covered there (#1121).
+    "test_suite_typesystem.c": "test_int128 native __int128 mul/div wrong "
+                 "beyond 64 bits, #1121",
+    # --- #1117: RESOLVED. Was: spelled complex accessors surviving into the
+    # generated text as ordinary identifiers (fabs/carg/... via tgmath,
+    # creal/cimag/conj via complex.h) were expanded by the HOST compiler
+    # through the replayed `#include <complex.h>`/`#include <tgmath.h>`
+    # resolving to CCCC's own bundled copies (run_native_backend forwards
+    # the guest -I paths), whose macro bodies reference cccc-internal
+    # __cccc_creal*/__cccc_cimag*/__cccc_conj* builtins that only exist
+    # inside the VM ("use of undeclared identifier '__cccc_creall'",
+    # test_complex_l ops). Fixed by serialize_synth_complex_decls()
+    # (src/serialize.c): a demand-gated pass emitting static inline
+    # definitions of the whole family -- nine accessors plus the
+    # __cccc_cmplx/f/l constructors the replayed CMPLX()/I macros reach --
+    # mapped onto the host's own __builtin_creal*/cimag*/conj*/complex,
+    # whenever a captured include resolves to bundled complex.h/tgmath.h, or
+    # any TY_COMPLEX-typed object, or any __cccc_c* helper Obj is reachable.
     "test_suite_ffi.c": "test_dlfcn returns 3 instead of 42 natively, #1105",
     "test_suite_overflow.c": "test_invalid_funcptr has no native "
                  "invalid-function-pointer trap, #1105",
