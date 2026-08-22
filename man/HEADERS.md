@@ -117,6 +117,17 @@ by default). Two things follow from that:
   taken branch inside it captured (#1064). `--emit-cccc` is exempted, like
   the loop's other filters — dialect-fidelity output expects a cccc-aware
   reader.
+- A captured `#embed` directive is likewise never replayed (#1114): the
+  directive's whole effect — reading the file and splicing its bytes plus
+  `prefix`/`suffix`/`limit`/`if_empty` into the token stream — already
+  happened at parse time, so the serialized AST carries the evaluated bytes
+  and a replay would only duplicate them at top level, where a host's
+  expansion of the directive is a bare byte list with no initializer
+  context (a syntax error even when the file resolves). Replaying would
+  also re-resolve the filename against the native compile's own temp
+  directory instead of the original source file's directory, so a
+  source-relative operand breaks outright ("file not found").
+  `--emit-cccc` is exempted like the filters above.
 - Every captured `#include` is replayed as one block, unconditionally, at
   the very top of the emitted C — ahead of every prototype and definition
   — regardless of where it actually appeared in the source. This can

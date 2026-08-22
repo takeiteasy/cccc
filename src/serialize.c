@@ -4897,6 +4897,15 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
         }
 
         case TY_UNION: {
+            // #1115: an empty (0-byte) union has no members at all, so the
+            // largest-member reconstruction below would refuse it -- but there
+            // is nothing to reconstruct. An empty brace initializer is
+            // accepted by every host for a zero-sized object and matches the
+            // VM's own semantics exactly (no bytes to represent).
+            if (ty->size == 0) {
+                fprintf(f, "{ }");
+                return;
+            }
             // Reconstruct via the largest member (first on a tie) -- byte-exact
             // whenever some member spans the whole object, which is the normal
             // case; a union with no full-size member falls through to the
@@ -10216,6 +10225,22 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // filters above -- dialect-fidelity output expects a cccc-aware
         // reader.
         if (!vm->compiler.emit_cccc && line_is_conditional_directive(line))
+            continue;
+        // #1114: a captured #embed line must never be replayed. The
+        // directive's whole effect -- reading the file and splicing its
+        // bytes (plus prefix/suffix/limit/if_empty) into the token stream --
+        // already happened at parse time (handle_embed_directive,
+        // preprocess.c), so the serialized AST carries the evaluated bytes
+        // and the replay would duplicate them at top level, where a host's
+        // expansion of the directive is a bare byte list with no initializer
+        // context (a syntax error even when the file resolves). Replaying
+        // also re-resolves the filename against the native compile's own
+        // temp directory (make_tmp_path, exec.c) instead of the original
+        // source file's directory, so a source-relative operand breaks
+        // outright ("file not found"). `--emit-cccc` is exempted like the
+        // filters above -- dialect-fidelity output expects a cccc-aware
+        // reader.
+        if (!vm->compiler.emit_cccc && !strncmp(line, "#embed", 6))
             continue;
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring

@@ -321,12 +321,12 @@ NATIVE_SKIP_TESTS = {
     "test_suite_posix.c": "rename-collision __cccc_dupN undeclared "
                  "identifiers (dbm_*), #1103",
     "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
-    "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104",
-    "test_suite_embed.c": "#embed relative path breaks from native's temp "
-                 "compile dir, #1104",
-    "test_suite_misc.c": "0-byte union global initializer, #1104",
+    "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104/#1113",
     "test_suite_typesystem.c": "TdSize undeclared, #1104",
     "test_suite_floats.c": "__cccc_creall/__cccc_cimagl undeclared, #1104",
+    "test_suite_misc.c": "emoji-macro directive replay (#1118) + inline-asm "
+                 "VM-vs-native divergence (#1119); empty-union half fixed "
+                 "by #1115",
     "test_suite_ffi.c": "test_dlfcn returns 3 instead of 42 natively, #1105",
     "test_suite_overflow.c": "test_invalid_funcptr has no native "
                  "invalid-function-pointer trap, #1105",

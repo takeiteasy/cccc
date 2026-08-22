@@ -7,6 +7,32 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`/`-m` output stops replaying captured `#embed` directive lines
+  (#1114): auto-capture records every top-level directive verbatim, so a
+  guest file's `#embed` lines were re-emitted into the serialized C for the
+  host compiler to re-evaluate — where the filename operand re-resolved
+  against the native compile's own temp directory instead of the original
+  source file's directory ("'../embed_data/test_data.bin' file not
+  found"), and would stay broken even with an absolute path, since a
+  host's expansion of a top-level `#embed` is a bare byte list with no
+  initializer context. The directive's whole effect already happened at
+  parse time (the spliced bytes are in the AST), so the replay was pure
+  duplication; it is now dropped like the other non-replayable captures,
+  with `--emit-cccc` exempted. This un-skips `test_suite_embed.c` from the
+  `tools/tests.py --native` corpus.
+- `-c=native` serializes global initializers of empty (0-byte) unions
+  (#1115): the union-initializer path reconstructs through the largest
+  member and refused unions with no members at all ("cannot serialize
+  initializer ... union has no member spanning the full 0-byte object");
+  they now emit an empty brace initializer, matching VM semantics exactly.
+  Normal unions keep the largest-member path; covered by the new
+  `tests/test_native_empty_union.c` in both backends. `test_suite_misc.c`
+  itself stays off the native corpus — the fix let it get further into the
+  native compile than before and unmasked two independent residual
+  blockers, now tracked as #1118 (auto-captured `#define`/`#undef` lines
+  with non-ASCII macro names are rejected by hosts under the std ladder's
+  spelling) and #1119 (inline `asm(...)` serializes verbatim to the host
+  assembler; the suite's fake/x86 mnemonics assemble nowhere).
 - `-c=native`/`-m`/`-c=generated` output compiles around C23 `nullptr_t`
   (#1111): implicit conversions into `nullptr_t` — assignment conversion, or
   null-pointer-constant equalization in comparisons — spelled their cast
