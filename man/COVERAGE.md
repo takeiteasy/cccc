@@ -60,7 +60,7 @@ shim's shape and its residual gaps.
 | Structs — declaration, member access, nested | ✓ | |
 | Unions | ✓ | |
 | Enums — explicit values, use in expressions and switch | ✓ | |
-| Bitfields — signed/unsigned, read-modify-write | ✓ | |
+| Bitfields — signed/unsigned, read-modify-write | ✓ | Bit packing within a struct is always compact (a member starts at the next free bit, crossing into a new storage unit only when it wouldn't fit in the current one). A struct's own overall size/alignment additionally rounds up to cover each *named* bitfield member's full declared-type storage unit, matching clang/gcc (`int f : 5;` reserves a whole 4-byte `int` slot, not just 5 bits) — an *unnamed* member (including width-0, which affects only the next member's starting bit) is pure padding and does not affect the struct's alignment, and a `packed` struct keeps the fully compact layout regardless (#1127) |
 | `typedef` — including function pointer typedefs | ✓ | |
 | All arithmetic, bitwise, comparison, logical operators | ✓ | |
 | Assignment operators (`+=`, `<<=`, etc.) | ✓ | |
@@ -1376,8 +1376,13 @@ if it were a value, corrupting it before any consumer dereferenced it
 (`src/codegen_expr.c`'s `ND_ASSIGN`) had the mirror problem on the write
 side: a bitfield's assignment type is its *container* type, so it took the
 whole-container `MCPY` path, which ignores `bit_offset` entirely and can
-write past the struct (bitfields are laid out compactly — `struct W
-{ _BitInt(256) f : 193; }` is 25 bytes, though its container spans 32).
+write past the struct (bit *packing* within a struct is laid out compactly
+regardless of container width — `struct W { _BitInt(256) f : 193; }` packs
+`f` into bits `[0,193)`, though its container spans 32 bytes; since #1127
+the *struct itself* is 32 bytes here (not 25) because a named bitfield
+member's declared type also sets the struct's own size/alignment floor to
+its storage unit — see the Bitfields row under [C89 / C90](#c89--c90)
+above).
 Fixed with two new runtime helpers, `__cccc_bitfield_extract`/
 `__cccc_bitfield_insert` (`src/stdlib/wide_bitint.c`), that walk only the
 exact bytes the field spans rather than assuming a whole container is

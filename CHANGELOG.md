@@ -7,6 +7,19 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- A struct containing a bitfield now reserves each *named* bitfield member's
+  full declared-type storage unit in the struct's own size/alignment,
+  matching clang/gcc (`struct A { int f : 5; }` is now `sizeof 4` /
+  `_Alignof 4`, not `1`/`1`) — an unnamed member (including width-0) stays
+  pure padding and does not affect alignment, and `packed` structs are
+  unaffected (#1127). Member offsets and bit-packing within the container
+  were already correct; only the struct-level rounding was missing. This
+  was more than cosmetic under `-c=native`/`-m`: `sizeof` folds at guest
+  parse time to the old, undersized value, so a `malloc(sizeof *p)`
+  allocation for such a struct was too small for the struct the host
+  compiler itself lays out — a real heap overflow in generated code
+  (confirmed via clang's own `-Walloc-size` diagnostic on the emitted
+  output, and clean under `-fsanitize=address` after this fix).
 - File-scope initializers needing a >8-byte scalar write no longer crash at
   parse time (#1122): `write_gvar_data`'s scalar tail only handled 1/2/4/8-byte
   writes, so any global of a `_BitInt(N)` with `N > 64` (including `__int128`),

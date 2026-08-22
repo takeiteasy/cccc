@@ -2690,6 +2690,23 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             mem->offset      = align_down(bits / 8, sz);
             mem->bit_offset  = bits % (sz * 8);
             bits            += mem->bit_width;
+
+            // #1127: clang/gcc round a bitfield struct's size/alignment up to
+            // cover the declared member type's own storage unit -- an
+            // "int f : 5" reserves a full 4-byte int-sized slot, not just the
+            // 5 bits actually used, even though the standard treats this as
+            // implementation-defined rather than mandatory. cccc's member
+            // *offsets* and bit packing above are already correct; only this
+            // struct-level rounding was missing, silently under-allocating
+            // every bitfield struct relative to every real-world ABI this
+            // project targets (confirmed: `-c=native`/`-m` then emits a
+            // `sizeof`-folded `malloc()` call too small for the struct the
+            // host compiler itself lays out, a real heap overflow, not a
+            // cosmetic-only mismatch). Only a *named* member counts -- an
+            // unnamed bitfield (including width-0, handled above) is pure
+            // padding and does not, matching clang/gcc exactly.
+            if (!ty->is_packed && mem->name && ty->align < mem->align)
+                ty->align = mem->align;
         } else {
             // Flexible array members (array with size 0) should not add padding
             // before them, but they DO affect struct alignment (for final size

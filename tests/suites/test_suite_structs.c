@@ -28,6 +28,56 @@ struct tc_bitfields_mixed {
     unsigned int more : 7;
 };
 
+// #1127: a named bitfield member now reserves its declared type's full
+// storage unit (size/alignment), matching clang/gcc, instead of cccc's
+// previous compact-only layout (offsets/bit-packing within the container
+// were always correct; only this struct-level rounding was missing). Each
+// struct below pins one row of the divergence this fixed, verified against
+// real clang/gcc output.
+struct tc_bf1127_single {
+    int f : 5;
+}; // clang: sizeof 4, _Alignof 4 (was 1/1)
+
+struct tc_bf1127_three {
+    unsigned int a : 3;
+    unsigned int b : 5;
+    unsigned int c : 8;
+}; // clang: sizeof 4, _Alignof 4 (was 2/1)
+
+struct tc_bf1127_leading_char {
+    char c;
+    int  f : 5;
+}; // clang: sizeof 4, _Alignof 4 (was 2/1)
+
+struct tc_bf1127_wide64 {
+    unsigned long long f : 64;
+}; // clang: sizeof 8, _Alignof 8 (was 8/1)
+
+struct tc_bf1127_after_array {
+    char c[5];
+    int  f : 5;
+}; // clang: sizeof 8, _Alignof 4 (was 6/1)
+
+// Regression guards: these three already matched clang before the fix and
+// must keep doing so -- an unnamed (including zero-width) bitfield is pure
+// padding and must NOT contribute to struct alignment, and a packed struct
+// must keep cccc's compact layout regardless.
+struct tc_bf1127_zero_width {
+    char c;
+    int : 0;
+    char d;
+}; // clang: sizeof 5, _Alignof 1
+
+struct tc_bf1127_unnamed {
+    char c;
+    int : 3;
+    char d;
+}; // clang: sizeof 3, _Alignof 1
+
+struct tc_bf1127_packed {
+    int f : 5;
+} __attribute__((packed)); // clang: sizeof 1, _Alignof 1
+
 // [from test_compound_struct_minimal]
 // Minimal test for struct compound literal with address-of
 // Expected return: 42
@@ -903,6 +953,57 @@ int test_union_advanced(void) {
     int ptr_ok                = (ptr->i == 200) ? 10 : 0;
 
     return byte_ok + nested_ok + ptr_ok + 12; // 10+10+10+12 = 42
+}
+
+// test_bitfield_storage_unit_layout
+// #1127: bitfield struct size/alignment now match clang/gcc's storage-unit
+// rounding. See the tc_bf1127_* struct definitions above for the layout this
+// pins.
+[[cccc::test(return = 42)]]
+int test_bitfield_storage_unit_layout(void) {
+    _Static_assert(sizeof(struct tc_bf1127_single) == 4, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_single) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1127_three) == 4, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_three) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1127_leading_char) == 4, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_leading_char) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1127_wide64) == 8, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_wide64) == 8, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1127_after_array) == 8, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_after_array) == 4, "cccc");
+
+    // Regression guards: unnamed/zero-width bitfields stay padding-only, and
+    // a packed struct keeps cccc's compact layout.
+    _Static_assert(sizeof(struct tc_bf1127_zero_width) == 5, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_zero_width) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1127_unnamed) == 3, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_unnamed) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1127_packed) == 1, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1127_packed) == 1, "cccc");
+
+    // The miscompile this fixes: under -c=native/-m, `sizeof` folds at
+    // guest parse time to cccc's own struct size. Before this fix that was
+    // smaller than the storage unit the host compiler actually lays the
+    // (verbatim-emitted) struct out at, so a `malloc(sizeof *p)` allocation
+    // was too small for the very struct being written through it -- a real
+    // heap overflow in generated code (confirmed via clang's own
+    // -Walloc-size diagnostic on the emitted output, and clean under
+    // -fsanitize=address after this fix).
+    struct tc_bf1127_single *p = malloc(sizeof *p);
+    if (!p)
+        return 1;
+    p->f = 5;
+    if (p->f != 5)
+        return 2;
+    free(p);
+
+    return 42;
 }
 
 #pragma cccc suite end
