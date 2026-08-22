@@ -2805,6 +2805,26 @@ static void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // signedness.
             Type *dst = node->ty;
             Type *src = node->lhs ? node->lhs->ty : NULL;
+            // #1111: casting TO nullptr_t is not valid C23 syntax even where
+            // assignment/conversion would be -- every implicit conversion the
+            // type checker inserts when nullptr meets an assignment or
+            // comparison (assignment conversion, null-pointer-constant
+            // equalization) serializes as an explicit cast, and
+            // serialize_type() above would spell its destination through its
+            // own #999 scalar typedef-name lookup as the bundled <stddef.h>
+            // name "nullptr_t". Real clang rejects every such cast outright
+            // ("cannot cast an object of type 'int' to 'nullptr_t'"). The host
+            // nullptr_t is typeof(nullptr) == void *, same size and
+            // representation, so spelling the destination "(void *)" keeps
+            // every assignment and comparison meaning-preserving while
+            // compiling under any host. Scoped to cast destinations only:
+            // declarations of nullptr_t objects keep their typedef name (valid
+            // C23, resolves via the output's <stddef.h>).
+            if (dst && dst->kind == TY_NULLPTR_T) {
+                fprintf(f, "(void *)");
+                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+                break;
+            }
             // #1068: a bare "(dst_type)float_expr" cast is UB in the *host*
             // compiler for NaN/out-of-range values, same reason cccc_f64_to_i64
             // et al exist in src/internal.h for the VM's own F2I3/F2U3 opcodes

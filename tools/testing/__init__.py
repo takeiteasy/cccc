@@ -316,9 +316,8 @@ NATIVE_SKIP_TESTS = {
     # --- pre-existing -c=native serializer gaps, surfaced by #1033's
     # corpus run (tests/suites/ was never exercised under --native before).
     # Each is its own ticket; the file goes back on the corpus once fixed.
-    "test_suite_c23.c": "(nullptr_t)x cast spelling, #1111; "
-                 "_Decimal32/64/128 declarations have no -c=native lowering "
-                 "(#1104)",
+    "test_suite_c23.c": "_Decimal32/64/128 declarations have no -c=native "
+                 "lowering (#1104)",
     "test_suite_posix.c": "rename-collision __cccc_dupN undeclared "
                  "identifiers (dbm_*), #1103",
     "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",

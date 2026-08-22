@@ -7,6 +7,16 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`/`-m`/`-c=generated` output compiles around C23 `nullptr_t`
+  (#1111): implicit conversions into `nullptr_t` — assignment conversion, or
+  null-pointer-constant equalization in comparisons — spelled their cast
+  destination through the bundled `<stddef.h>` typedef name
+  (`np = (nullptr_t)0;`), but casting *to* `nullptr_t` is not valid C23
+  syntax even where assignment/conversion would be, so every host compiler
+  rejected it outright. Cast destinations now emit `(void *)` — the host
+  `nullptr_t` is `typeof(nullptr) == void *`, same size/representation, so
+  every assignment/comparison keeps its meaning; declarations of `nullptr_t`
+  objects keep their typedef name.
 - Postfix tails after a compound literal (`(struct P){30, 12}.x`,
   `(int[]){1,2,3}[0]`, `((struct T *){p})->m`) now parse (#1112): C99 6.5.2p5
   binds `.member`/`[index]`/`->member` tighter than the literal itself, but
@@ -41,8 +51,7 @@ All notable changes to CCCC are documented here. Format loosely follows
     qualifier now.
   This un-skips `test_suite_structs.c`, `test_suite_std_c11.c` and
   `test_suite_std_c99.c` from the `tools/tests.py --native` corpus;
-  `test_suite_c23.c` stays skipped pending #1111 (the `(nullptr_t)x` cast
-  spelling) and #1104 (`_Decimal` lowering).
+  `test_suite_c23.c` stays skipped pending #1104 (`_Decimal` lowering).
 - `--testing` (VM/`=bytecode` backends) combined with `-c=bytecode` or
   `-c=native` now really compiles after the suite passes (#1106): the tests
   act as a pre-pass guard, and only a fully green run reaches the compile

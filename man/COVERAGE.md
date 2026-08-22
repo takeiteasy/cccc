@@ -170,7 +170,7 @@ language coverage figures apply.
 | `thread_local` storage-class spelling | ✓ | C23 keyword; allocates in the TLS segment |
 | Compound literal storage classes | ✓ | C23 `(static T){...}`, `(constexpr T){...}`, `(register T){...}`, and TLS spellings are parsed; static/constexpr/TLS literals use anonymous static storage, while register keeps automatic storage |
 | `auto` type inference | ✓ | Deduces type as `typeof_unqual(initializer)` with array-to-pointer and function-to-pointer decay; pointer declarators (`auto *p = &x`) validated; initializer required |
-| `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)` |
+| `nullptr` keyword / `nullptr_t` | ✓ | `nullptr_t` is defined in `<stddef.h>` via `typeof(nullptr)`. Serializes under `-c=native`/`-m`/`-c=generated`: cast destinations spell `(void *)` (#1111), since casting *to* `nullptr_t` is not valid C23 syntax; declarations keep the typedef name |
 | `_BitInt(N)` arbitrary-precision integers | ✓ | `N` in `[1,65535]` (`BITINT_MAXWIDTH`). `N<=64` uses scalar-register storage with mask/shift truncation; `N>64` uses multi-word (address-based) storage with runtime helper functions for arithmetic, shifts, comparisons, and conversions. `wb`/`uwb` literal suffixes infer their full-precision width directly from the literal's digit text, including widths beyond 64 bits |
 | Binary integer literals `0b10101010` | ✓ | |
 | Digit separators `1'000'000` | ✓ | |
@@ -1317,7 +1317,17 @@ looked, leaving a genuinely-const object for the per-element assignments
 to store into — clang rejects any statically-const store even through an
 explicitly-cast-away pointer ("read-only variable is not assignable"), so
 both the hoisted declarator and the byte-offset cast-back now drop the
-element qualifier.
+element qualifier. A fourth spelling from the same sweep is likewise fixed
+(#1111): an implicit conversion into C23 `nullptr_t` — assignment
+conversion, or null-pointer-constant equalization in a comparison — printed
+its cast destination as the bundled `<stddef.h>` typedef name,
+`np = (nullptr_t)0;`, but casting *to* `nullptr_t` is not valid C23 syntax
+even where assignment/conversion would be, and every host compiler rejects
+it outright. Cast destinations now spell `(void *)`: the host `nullptr_t`
+is `typeof(nullptr) == void *`, same size and representation, so every
+assignment and comparison keeps its exact meaning. Declarations of
+`nullptr_t` objects keep their typedef name (valid C23), so only cast
+sites rewrite.
 
 `__builtin_pc_function_name(pc)` and `__builtin_pc_source_location(pc, &file,
 &line)` are also a hard error under `-m`/`-c=native`/`-c=generated`, rather
