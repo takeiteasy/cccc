@@ -1,9 +1,8 @@
 // CCCC_FLAGS: --testing
 // Consolidated suite: miscellaneous: volatile, builtins, compound literals,
 //   comma operator, block scope, token paste, digraphs, edge cases, regression
-//   tests, malloc/realloc/calloc, stdio, printf/snprintf/sprintf/sscanf, binary
-//   format specs, setjmp/longjmp, signal handling, stack recursion, designated
-//   initializers
+//   tests, malloc/realloc/calloc, stdio, printf/snprintf/sprintf/sscanf,
+//   setjmp/longjmp, signal handling, stack recursion, designated initializers
 // Source tests: test_builtins, test_volatile, test_cast_const, test_comma,
 //   test_block_scope, test_compound_simple, test_compound_struct_access,
 //   test_define_only, test_simple_paste, test_vm_profile_smoke,
@@ -11,21 +10,30 @@
 //   test_coalesce, test_block_partial_init,
 //   test_edge_digraph_braces, test_edge_digraph_directive,
 //   test_edge_digraph_paste, test_edge_digraph_subscript,
-//   test_edge_empty_union_varargs, test_edge_worm_emoji_macros,
+//   test_edge_worm_emoji_macros,
 //   test_simple_malloc, test_realloc_calloc, test_designated_init,
 //   test_c11_stdlib_additions, test_string_char_array_init,
 //   test_stack_normal_recursion, test_stack_overflow_recursion,
 //   test_builtin_choose_expr, test_simple_printf, test_snprintf,
-//   test_sprintf_sscanf, test_scanf_binary, test_vprintf_binary,
-//   test_signal, test_setjmp,
+//   test_sprintf_sscanf, test_signal, test_setjmp,
 //   test_literals, test_multidim_arrays, test_forward_decl,
 //   test_forward_decl_advanced, test_oneword_struct, test_flexible_simple,
 //   test_flexible_array, test_flexible_long, test_printf, test_printf_simple,
-//   test_printf_binary, test_malloc_basic, test_asm, test_load_stdlib,
+//   test_malloc_basic, test_load_stdlib,
 //   test_missing_headers, test_preproc_inline_alias
 // Kept legacy: test_realc_simple (redeclares malloc/free, conflicts with
 // <stdlib.h>),
 //   test_mode_macro_comp (__CCCC_TEST_MODE__ is defined in --testing mode)
+// Moved out: test_asm -> tests/suites/test_suite_asm.c (#1119: this file
+//   round-trips through -c=native; the asm suite never can -- VM treats
+//   ND_ASM as a no-op, native hands the string verbatim to the host
+//   assembler)
+// Moved out (#1120): test_printf_binary/test_scanf_binary/test_vprintf_binary
+//   -> tests/suites/test_suite_printf_c23.c (macOS libc lacks C23 %b/%B;
+//   macOS-only native skip), and test_edge_empty_union_varargs ->
+//   tests/suites/test_suite_empty_union.c (zero-sized union through varargs
+//   is an inherent VM-vs-host divergence). test_realloc_calloc's
+//   realloc(p, 0) check relaxed to the implementation-defined contract.
 
 #include <iso646.h>
 #include <locale.h>
@@ -151,29 +159,6 @@ static volatile int misc_side_effects = 0;
 static int misc_bump(void) {
     misc_side_effects++;
     return 1;
-}
-
-// [from test_vprintf_binary]
-static int misc_vb_my_printf(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int r = vprintf(fmt, ap);
-    va_end(ap);
-    return r;
-}
-static int misc_vb_my_sprintf(char *buf, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int r = vsprintf(buf, fmt, ap);
-    va_end(ap);
-    return r;
-}
-static int misc_vb_my_sscanf(const char *str, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int r = vsscanf(str, fmt, ap);
-    va_end(ap);
-    return r;
 }
 
 // [from test_signal]
@@ -896,26 +881,6 @@ int test_edge_digraph_subscript(void) {
     return sum == 60 ? 42 : 1;
 }
 
-// [from test_edge_empty_union_varargs]
-// Empty union variables (global, local, array) compile and have size 0.
-union {
-} misc_empty_global = {};
-union {
-} misc_empty_global_arr[3] = {};
-
-[[cccc::test(return = 42, expect_stdout = "Let's count: 3 0 2 1")]]
-int test_edge_empty_union_varargs(void) {
-    union {
-    } local_empty = {};
-    union {
-    } var[100] = {};
-    (void)misc_empty_global;
-    (void)misc_empty_global_arr[0];
-    (void)local_empty;
-    printf("Let's count: %d %d %d %d\n", 3, var[42], 2, 1);
-    return 42;
-}
-
 // [from test_edge_worm_emoji_macros] (moved below; see suite end)
 // -~ (right worm, +1) and ~- (left worm, -1) chains; emoji macro identifiers.
 [[cccc::test(return = 42, expect_stdout = "-42 \\+ 5 = -37")]]
@@ -1131,52 +1096,6 @@ int test_sprintf_sscanf(void) {
     sscanf("42 99", "%d %d", &a, &b);
     if (a != 42 || b != 99)
         return 2;
-    return 42;
-}
-
-// [from test_scanf_binary]
-// C23 %b/%B binary conversion specifier.
-[[cccc::test(return = 42)]]
-int test_scanf_binary(void) {
-    int a = 0, b = 0, c = 0, d = 0;
-    sscanf("101010", "%b", &a);
-    if (a != 42)
-        return 1;
-    sscanf("0b101010", "%b", &b);
-    if (b != 42)
-        return 2;
-    sscanf("0B1111", "%B", &c);
-    if (c != 15)
-        return 3;
-    sscanf("101111", "%4b", &d);
-    if (d != 11)
-        return 4; // 0b1011 = 11
-    int x = 0, y = 0, z = 0;
-    int n = sscanf("10 0x1F 0b110", "%d %x %b", &x, &y, &z);
-    if (n != 3 || x != 10 || y != 31 || z != 6)
-        return 5;
-    return 42;
-}
-
-// [from test_vprintf_binary]
-// %b/%B with v*printf/v*scanf multi-arg forwarding.
-[[cccc::test(return = 42)]]
-int test_vprintf_binary(void) {
-    char buf[64];
-    misc_vb_my_sprintf(buf, "%#b", 255u);
-    if (__builtin_strcmp(buf, "0b11111111") != 0)
-        return 1;
-    int v = 0;
-    misc_vb_my_sscanf("0b101", "%b", &v);
-    if (v != 5)
-        return 2;
-    misc_vb_my_sprintf(buf, "%d+%d=%d", 10, 20, 30);
-    if (__builtin_strcmp(buf, "10+20=30") != 0)
-        return 3;
-    int a = 0, b = 0, c = 0;
-    misc_vb_my_sscanf("7 8 9", "%d %d %d", &a, &b, &c);
-    if (a != 7 || b != 8 || c != 9)
-        return 4;
     return 42;
 }
 
@@ -1458,27 +1377,6 @@ int test_printf_simple(void) {
     return 42;
 }
 
-// [from test_printf_binary]
-// C23 %b/%B binary integer format specifier.
-[[cccc::test(return = 42)]]
-int test_printf_binary(void) {
-    char buf[64];
-    sprintf(buf, "%b", 42u);
-    if (strcmp(buf, "101010") != 0)
-        return 1;
-    sprintf(buf, "%#b", 42u);
-    if (strcmp(buf, "0b101010") != 0)
-        return 2;
-    sprintf(buf, "%B", 10u);
-    if (strcmp(buf, "1010") != 0)
-        return 3;
-    int v = 0;
-    sscanf("101010", "%b", &v);
-    if (v != 42)
-        return 4;
-    return 42;
-}
-
 // [from test_fprintf]
 // fprintf to stderr and stdout.
 [[cccc::test(return = 42)]]
@@ -1532,12 +1430,20 @@ int test_realloc_calloc(void) {
     int *arr4 = (int *)realloc(NULL, 4 * sizeof(int));
     if (!arr4)
         return 7;
-    arr4[0]     = 42;
-    int *arr5   = (int *)malloc(sizeof(int));
-    *arr5       = 999;
+    arr4[0]   = 42;
+    int *arr5 = (int *)malloc(sizeof(int));
+    *arr5     = 999;
+    // realloc(p, 0) is implementation-defined when no new memory is
+    // allocated (C17/C23 7.22.3.5): the VM and glibc free and return NULL,
+    // while macOS libc returns a valid zero-size block (#1120 -- unmasked
+    // natively by #1118; same over-specification #1066 relaxed for fromfp).
+    // Assert only what both conforming behaviours share: never the old
+    // pointer itself.
     int *result = (int *)realloc(arr5, 0);
-    if (result != NULL)
+    if (result == arr5)
         return 8;
+    if (result)
+        free(result);
     char *large = (char *)calloc(1000, 1);
     if (!large)
         return 9;
@@ -1548,21 +1454,6 @@ int test_realloc_calloc(void) {
     free(arr4);
     free(large);
     return 42;
-}
-
-// [from test_asm]
-// Inline asm statements are no-ops without a registered callback; code
-// continues normally.
-[[cccc::test(return = 42)]]
-int test_asm(void) {
-    int result = 10;
-    asm("nop");
-    asm("mov $42, %eax");
-    asm volatile("nop");
-    asm("instruction1");
-    asm("instruction2");
-    result = 42;
-    return result;
 }
 
 // [from test_load_stdlib]

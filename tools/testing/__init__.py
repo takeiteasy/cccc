@@ -324,12 +324,39 @@ NATIVE_SKIP_TESTS = {
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1104/#1113",
     "test_suite_typesystem.c": "TdSize undeclared, #1104",
     "test_suite_floats.c": "__cccc_creall/__cccc_cimagl undeclared, #1104",
-    "test_suite_misc.c": "emoji-macro directive replay (#1118) + inline-asm "
-                 "VM-vs-native divergence (#1119); empty-union half fixed "
-                 "by #1115",
     "test_suite_ffi.c": "test_dlfcn returns 3 instead of 42 natively, #1105",
     "test_suite_overflow.c": "test_invalid_funcptr has no native "
                  "invalid-function-pointer trap, #1105",
+    # test_suite_misc.c was in this table for two blockers (#1118 emoji-
+    # macro directive replay + #1119 inline-asm divergence; empty-union half
+    # fixed by #1115). Both now resolved -- the former by suppressing
+    # non-ASCII-macro-name define/undef replay (src/serialize.c), the latter
+    # by moving the asm coverage to test_suite_asm.c below -- so misc is
+    # back on the native corpus.
+
+    # --- by-design divergence, permanent: see COVERAGE.md ---
+    # Inline asm is a VM no-op by default but serializes verbatim into plain
+    # asm("...") for the host assembler: there is no way to evaluate host
+    # assembly inside the VM (it would mean separately compiling each
+    # snippet and calling out to it, or parsing every host dialect into one
+    # uniform behaviour), so VM-vs-native behaviour cannot be merged from
+    # the VM side. The fake-mnemonic cases in the suite are rejected by
+    # every real assembler everywhere, so they can only ever run through the
+    # VM (#1119, decided option c+b: genuinely target-specific mnemonics get
+    # arch-guarded with CCCC's predefined __x86_64__-style macros inside the
+    # file itself, and the whole suite is split out of test_suite_misc.c and
+    # skipped natively rather than extending [[cccc::test]] with per-test
+    # native controls). See COVERAGE.md Serialized-output divergences.
+    "test_suite_asm.c": "inline asm: VM no-op vs verbatim host-assembler "
+                 "input is a documented divergence (#1119), not a bug",
+    # test_suite_empty_union.c: passing a zero-sized union through varargs
+    # consumes no argument slot in the VM's own varargs machinery (it formats
+    # as 0) but hands the host ABI garbage from a register -- an inherent
+    # VM-leniency divergence with no host equivalent to merge to, not
+    # serializer-fixable (#1120, unmasked by #1118). Permanent; see
+    # COVERAGE.md Serialized-output divergences.
+    "test_suite_empty_union.c": "zero-sized union through varargs is a "
+                 "documented VM-vs-host divergence (#1120), not a bug",
 }
 
 # Platform-specific -c=native skips, checked only when the running host
@@ -407,6 +434,18 @@ NATIVE_SKIP_TESTS_MACOS = {
                                     "and the VM heap both implement C17/C23 "
                                     "(#1061, WONT_FIX, permanent platform "
                                     "gap)",
+    # test_suite_printf_c23.c: macOS 15 libc implements neither the C23 %b
+    # nor %B conversion in printf or scanf (printf emits a literal 'b',
+    # sscanf reports zero matches). CCCC's VM formats through its own C23
+    # formatter, so the VM passes; -c=native output calls real host libc.
+    # glibc has printf %b since 2.35 and scanf %b since 2.38, so Linux keeps
+    # exercising this suite natively -- same disposition as
+    # reallocarray/#1028 and the fmaximum family/#1037 (#1120, unmasked by
+    # #1118).
+    "test_suite_printf_c23.c": "macOS libc lacks C23 %b/%B conversions in "
+                                "printf and scanf (#1120, WONT_FIX, "
+                                "permanent platform gap), still exercised on "
+                                "Linux",
 }
 
 # CLI flags that -c=native drops with a warning rather than enforcing

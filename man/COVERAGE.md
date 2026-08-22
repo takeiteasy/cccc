@@ -220,7 +220,7 @@ language coverage figures apply.
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
 | `__inline` / `__inline__` | ✓ | Spelling aliases for `inline`; recognized as GCC keyword aliases (GCC compatibility) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
-| `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending. **`-c=native`/`-m`/`-c=generated` always emit the `asm(...)` verbatim**, regardless of `--asm-passthru` — the one construct where serialized output deliberately does not mirror default VM behaviour, since there is no way to evaluate host assembly inside the VM at all. Executing it is the host compiler's job, and `--asm-passthru` governs VM execution only. See [Serialized-output divergences](#serialized-output-divergences) |
+| `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending. **`-c=native`/`-m`/`-c=generated` always emit the `asm(...)` verbatim**, regardless of `--asm-passthru` — the one construct where serialized output deliberately does not mirror default VM behaviour, since there is no way to evaluate host assembly inside the VM at all. Executing it is the host compiler's job, and `--asm-passthru` governs VM execution only. See [Serialized-output divergences](#serialized-output-divergences) and the #1119 note there (dedicated asm suite, skipped natively) |
 | GNU `asm("symbol")` declaration labels | ~ | Supported on function declarations, including typedef-based and multi-declarator declarations; the label is used as the external FFI symbol name |
 | `__attribute__((vector_size(N)))` generic vectors | ~ | 128-, 256-, and 512-bit vectors (16/32/64-byte total size) — e.g. `v4f32`/`v8f32`/`v16f32`, `v2f64`/`v4f64`/`v8f64`, `v4i32`/`v8i32`/`v16i32`, and the corresponding `i64`/`i16`/`i8` lane layouts at each width; any other width (non-power-of-two byte counts, or wider than 64 bytes) is rejected with a diagnostic. Element-wise `+ - * /` and unary `-`/`~` on all lane types; integer lanes additionally support `% & \| ^` and integer `/`/`%`, each trapping per-lane on a zero divisor or `MIN/-1` overflow (stricter than default scalar `/`, which does not trap — matches scalar `DIVC`'s policy); `&`/`\|`/`^`/`~` are rejected on float lanes. Comparisons `== != < <= > >=` produce a per-lane all-ones(`-1`)/all-zero mask in a same-width **signed** integer vector (GCC semantics); ordered `< <=` on unsigned-int lanes compare the unsigned view. GNU vector `?:` select is supported (nonzero-per-lane condition, matching lane count/width). Scalar operands broadcast through arithmetic (`v + 5.0f`), matching GCC/clang — a bare scalar cannot initialize or be assigned to a whole vector. `v[i]` subscript supports a runtime-variable index. Brace-initializer syntax (`v4sf a = {1,2,3,4};`, including partial and nested forms) is supported, as are compound literals (`(v4sf){1,2,3,4}`) used as expressions, with a `static` storage-class specifier, or as the entire initializer of another global/static variable (`v4sf g = (v4sf){1,2,3,4};`). Designated lane initializers (`{[2]=3.0f}`) are rejected with a diagnostic, matching GCC/clang — vector types are non-aggregate in their model, and designated initializers only apply to aggregates. `__builtin_convertvector(expr, type)` converts between vectors with the same lane count; only `int32<->float32` and `int64<->float64` lane pairs are representable (matching lane counts forces matching element byte sizes), so same-domain conversions (e.g. changing signedness/width without crossing int/float) are rejected. `__builtin_shuffle` supports both a **compile-time-constant, brace-enclosed** index mask (`__builtin_shuffle(v, {3,2,1,0})`, 1- or 2-vector form — CCCC's own constant-mask form, closer to clang's `__builtin_shufflevector` than upstream GCC's syntax) and a **runtime or named integer vector mask** (`__builtin_shuffle(v, mask)` / `__builtin_shuffle(v1, v2, mask)`, matching upstream GCC's general form) — the mask must be an integer vector with the same lane count and element byte width as the vector being shuffled. Both forms lower via the same vector-subscript machinery with no dedicated opcode; the constant form range-checks each index at compile time (an out-of-range index is a compile error), while the runtime form takes each index modulo the lane count (1-vector) or twice the lane count (2-vector), matching GCC's documented wraparound semantics — a runtime index can't be rejected at compile time. Vectors can be passed as function parameters and returned by value: passed by memory (a caller-side scratch copy sized to the argument's own width, address handed to the callee, like a struct-by-value arg), returned via the RETBUF rotating pool (like a struct-by-value return) — see [VM.md](VM.md#simd--vector-operations). This includes a variadic `...` parameter: the by-memory scratch-pointer convention means a variadic vector arg always occupies exactly one 8-byte slot regardless of the vector's width, and `<stdarg.h>`'s `va_arg` detects a vector `type` via `__builtin_classify_type` and dereferences the slot instead of reading it directly — matches gcc/clang, which also accept a vector through `...` (verified). Not supported through the native FFI marshalling path (extern/`dlopen`ed functions — libffi has no portable vector type, and there's no struct-by-value FFI path to build on either) or a GNU/Apple block invocation — each rejected with a diagnostic. See [VM.md](VM.md#simd--vector-operations) for the opcode set |
 
@@ -1220,12 +1220,13 @@ own v1 scope area above needs revisiting.
 
 `-c=native`, `-m` and `-c=generated` re-emit the program as C and hand it to a
 host compiler. The rule everywhere else in this document is that the emitted C
-behaves as the VM behaves. Nine constructs cannot fully honour that, and they
+behaves as the VM behaves. Ten constructs cannot fully honour that, and they
 are listed here rather than left to be discovered:
 
 | Construct | VM | Serialized output |
 |---|---|---|
-| `asm(...)` | no-op by default; `--asm-passthru` compiles via native CC and executes through FFI | always emitted verbatim and executed by the host binary. There is no way to evaluate host assembly inside the VM, so this is offloaded to the host by design |
+| `asm(...)` | no-op by default; `--asm-passthru` compiles via native CC and executes through FFI | always emitted verbatim and executed by the host binary. There is no way to evaluate host assembly inside the VM — it would mean separately compiling each snippet and calling out to it, or parsing every host dialect into one uniform behaviour — so this is offloaded to the host by design, and the divergence is not mergeable from the VM side (#1119). Test-side consequence: inline-asm coverage lives in `tests/suites/test_suite_asm.c`, which is permanently skipped by the `--native` corpus (`NATIVE_SKIP_TESTS`); genuinely target-specific mnemonics inside it are arch-guarded with CCCC's predefined `__x86_64__`-style macros so they only exist where a real assembler accepts them |
+| a zero-sized union passed through varargs (`printf("…", var[42])`) | the VM's own varargs machinery consumes no argument slot for a 0-byte aggregate; a `%d`-style conversion reading past it formats `0` | the host ABI passes the empty aggregate through a register and printf reads whatever is there — measured directly: clang `-std=gnu23` compiles it (empty unions are themselves a CCCC extension the host tolerates as GNU) and the conversion prints garbage (#1120). Not serializer-fixable: the emitted call site is verbatim guest source, and only the VM gives the argument defined semantics. Coverage lives in `tests/suites/test_suite_empty_union.c`, skipped by the native corpus entirely |
 | `__builtin_return_address(n)` | a VM bytecode offset (`Pc`) cast to `void*` | a real host return address. Both are "the return address `n` frames up" in their own runtime; the numeric values are unrelated |
 | `__builtin_dynamic_object_size(p, t)` | reads the VM allocation header, so the exact size is always known | the host builtin, which answers its documented "unknown" (`(size_t)-1` for types 0/1) unless the host optimizer can see the allocation — exact at `-O2`, unknown at `-O0` |
 | `__builtin_unreachable()` / `__builtin_trap()` / `__builtin_debugtrap()` | all three trap (one `BTRAP` opcode) | all three emit `__builtin_trap()`. The original spelling is not recoverable after lowering, and emitting `__builtin_unreachable()` would be undefined behaviour the host optimizer deletes — trapping is what matches the VM |
@@ -1878,6 +1879,28 @@ native 42 on Linux; only macOS's own permanent libm gap (#1037) remains,
 so it moved from the general `NATIVE_SKIP_TESTS` table to the
 macOS-specific `NATIVE_SKIP_TESTS_MACOS` one.
 
+The C23 `%b`/`%B` binary integer conversions are the same class of platform
+gap on macOS (#1120): CCCC's VM formats printf/scanf through its own C23
+formatter (`src/stdlib/format_printf.c`/`format_scanf.c`), so binary
+conversions work everywhere in VM mode; `-c=native` output calls real host
+libc, and macOS 15 libc implements neither conversion — `printf("%b", …)`
+emits a literal `b` and `sscanf("101010", "%b", &a)` reports zero matches
+(measured directly). glibc has carried printf `%b` since 2.35 and scanf
+`%b` since 2.38, so Linux round-trips cleanly and keeps exercising the
+coverage: the three format-specifier tests live in
+`tests/suites/test_suite_printf_c23.c`, skipped by the native corpus only
+via `NATIVE_SKIP_TESTS_MACOS`. Decided: same reasoning as #1028/#1037 — no
+CCCC-owned runtime ships alongside a `-c=native` binary, so libc lag is not
+CCCC's to polyfill.
+
+A sibling finding from the same sweep (#1120) needed no skip at all:
+`realloc(p, 0)`'s contract is implementation-defined when no new memory is
+allocated (C17/C23 7.22.3.5) — the VM and glibc free and return `NULL`,
+macOS libc returns a valid zero-size block. `test_realloc_calloc`
+over-specified the glibc answer; relaxed to assert only what both conforming
+behaviours share (never the old pointer itself), matching #1066's
+over-specification precedent.
+
 #1052's four new `native_accessor_shims` entries above missed a step
 `isnan`/`isinf`/`signbit`/`fpclassify`'s own entries had already needed
 (#1021): `include/math.h`'s `__cccc_issignaling_f`/`_d` and
@@ -2035,6 +2058,27 @@ replay loop, gated off (i.e. still replayed) under `--emit-cccc`, matching
 the loop's two existing per-line filters (cccc-only headers, `setjmp.h`) —
 dialect-fidelity output expects a cccc-aware reader that understands the
 routing syntax anyway.
+
+**Captured non-ASCII-macro-name `#define`/`#undef` lines, not replayed
+(#1118, RESOLVED).** The same replay loop used to hand every auto-captured
+directive line from command-line inputs to the host compiler verbatim —
+including lines whose macro *name* is non-ASCII (emoji identifiers, an
+accepted CCCC extension; `tests/suites/test_suite_misc.c`'s worm/snake
+operator macros are the live example). Every in-AST use of such a macro is
+already expanded at parse time, but the host preprocessor rejects a
+non-ASCII macro name outright ("macro name must be an identifier", once per
+`#define` plus its matching `#undef`), so replaying those lines failed an
+otherwise-clean native compile — and no other replayed directive text can
+legally reference such a name either, since the host applies the same
+rejection there. Fixed by dropping `#define`/`#undef` lines whose name starts
+with a non-ASCII byte from ordinary replay (`line_macro_name_is_non_ascii`,
+`src/serialize.c`), beside the loop's existing per-line filters and exempted
+under `--emit-cccc` like all of them. ASCII-named defines still replay
+unchanged; a demand-driven replay (emit a captured define only when some
+other replayed line references its name) was considered and rejected as
+over-engineering — no consumer of define replay is known to remain post-#1114
+(the LIMIT_EXPR-inside-#embed-limit case that motivated define replay is
+gone).
 
 **C11 `<threads.h>` lowering (#1088, RESOLVED).** `thrd_create`/`mtx_lock`/
 `cnd_wait`/`tss_create`/`call_once`/etc. (`include/threads.h`) are VM cfuncs

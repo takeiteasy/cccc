@@ -435,7 +435,11 @@ some `CCCC_EXPECT_STDERR` tests are deliberately invalid C (a bad `main()`
 signature, a non-void function falling off its end, an unterminated
 `#pragma`) written to exercise a CCCC-specific warning the VM tolerates as
 non-fatal; the host compiler on the regenerated C correctly treats the same
-construct as a hard error. Those are recorded in
+construct as a hard error. `tests/suites/test_suite_asm.c` is likewise a
+permanent, deliberate skip rather than a tracked gap: inline asm is a VM
+no-op but serializes verbatim into host-assembler input (#1119, see
+[COVERAGE.md](COVERAGE.md#serialized-output-divergences)), so its fake-
+mnemonic cases can only ever run through the VM. Those are recorded in
 [COVERAGE.md](COVERAGE.md#serialized-output-divergences), not tracked as
 serializer bugs.
 

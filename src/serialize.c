@@ -9177,6 +9177,46 @@ static bool line_is_conditional_directive(const char *line) {
     return false;
 }
 
+// #1118: true if `line` (a raw captured directive line, `#...`, from
+// copy_raw_directive_line()/copy_routed_directive_line() in preprocess.c) is
+// a #define or #undef whose macro NAME starts with a non-ASCII byte (UTF-8
+// lead/continuation bytes -- emoji and other non-ASCII identifiers, a CCCC
+// extension the host preprocessor rejects outright: "macro name must be an
+// identifier"). See the call site in cc_serialize_program()'s
+// emit_directives loop for why these lines are dropped from ordinary
+// replay. Matches on the directive word after `#` and optional whitespace,
+// deliberately textual rather than pp_directive() (token-level, not
+// available on this already-flattened string), same style as
+// line_is_conditional_directive above.
+static bool line_macro_name_is_non_ascii(const char *line) {
+    if (!line || line[0] != '#')
+        return false;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    static const char *const kw[] = {"define", "undef"};
+    for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
+        size_t len = strlen(kw[i]);
+        if (strncmp(p, kw[i], len) != 0)
+            continue;
+        // Word boundary: "#defined" is not a directive (and a function-like
+        // "#define NAME(" still has whitespace before NAME, so the plain
+        // space/tab boundary covers both spellings).
+        char c = p[len];
+        if (c != '\0' && c != ' ' && c != '\t')
+            continue;
+        const char *name = p + len;
+        while (*name == ' ' || *name == '\t')
+            name++;
+        // Only the NAME's first byte matters: any UTF-8 encoding of a
+        // non-ASCII identifier starts with a byte >= 0x80, and an ASCII name
+        // never does. A replacement list referencing an ASCII macro is not
+        // touched -- only names that are themselves non-ASCII are filtered.
+        return (unsigned char)*name >= 0x80;
+    }
+    return false;
+}
+
 // #1033: real C operator text for a CmpOp, so a return= comparison can be
 // baked directly into the generated C as `if (!(__ret <op> <expect>))`
 // instead of a runtime dispatch -- the operator is already known at
@@ -10241,6 +10281,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // filters above -- dialect-fidelity output expects a cccc-aware
         // reader.
         if (!vm->compiler.emit_cccc && !strncmp(line, "#embed", 6))
+            continue;
+        // #1118: a captured #define/#undef whose macro NAME contains
+        // non-ASCII bytes (emoji identifiers -- an accepted CCCC extension,
+        // e.g. tests/suites/test_suite_misc.c's worm/snake operator macros)
+        // must never be replayed: every in-AST use of the macro was already
+        // expanded at parse time, and the host preprocessor rejects a
+        // non-ASCII macro name outright ("macro name must be an identifier",
+        // xN for the defines plus their matching #undefs), so replaying the
+        // line can only fail an otherwise-clean native compile. No other
+        // replayed directive text can legally reference such a name either --
+        // the host applies the same rejection there. The demand-driven
+        // alternative (emit a captured define only when some other replayed
+        // line references it) would be safer by construction against hidden
+        // consumers, but no consumer is known to remain post-#1114 (the
+        // LIMIT_EXPR-inside-#embed-limit case that motivated define replay
+        // is gone), so the plain name filter matches the surrounding
+        // per-line filters in both mechanism and cost. `--emit-cccc` is
+        // exempted like the filters above -- dialect-fidelity output expects
+        // a cccc-aware reader.
+        if (!vm->compiler.emit_cccc && line_macro_name_is_non_ascii(line))
             continue;
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring

@@ -5943,11 +5943,70 @@ def case_threads_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+EMOJI_MACRO_PROGRAM = (
+    "#define \U0001FAB1 - ~\n"
+    "#define \U0001F40D ~-\n"
+    "#define ascii_worm - ~\n"
+    "#ifndef ascii_worm\n"
+    "#error \"ASCII-named define was lost\"\n"
+    "#endif\n"
+    "int main(void) {\n"
+    "    if ((\U0001FAB1 42) != 43) return 1;\n"   # -~42
+    "    if ((\U0001F40D 42) != 41) return 2;\n"   # ~-42
+    "    if ((ascii_worm 40) != 41) return 3;\n"
+    "#undef \U0001FAB1\n"
+    "#undef \U0001F40D\n"
+    "#ifdef \U0001FAB1\n"
+    "#error \"emoji #undef did not take effect\"\n"
+    "#endif\n"
+    "    if (-~41 != 42) return 4;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_native_emoji_macro_define_not_replayed(cccc: Path, tmp: str) -> bool:
+    print("  131: auto-captured #define/#undef lines whose macro NAME is "
+          "non-ASCII (emoji identifiers -- an accepted CCCC extension, e.g. "
+          "test_suite_misc.c's worm/snake operator macros) used to replay "
+          "verbatim into -m/-c=native output, where the host preprocessor "
+          "rejects the name outright ('macro name must be an identifier', xN "
+          "for defines plus matching #undefs), failing an otherwise-clean "
+          "native compile even though every in-AST use was already expanded "
+          "at parse time (#1118). Fixed by dropping such lines from "
+          "cc_serialize_program()'s emit_directives replay loop "
+          "(line_macro_name_is_non_ascii, src/serialize.c), gated off under "
+          "--emit-cccc like every other filter in that loop; ASCII-named "
+          "defines still replay. Asserts -m output contains no non-ASCII-"
+          "named define/undef line (while ASCII ones still replay), and "
+          "VM 42 -> native 42 for a program defining/using/undefining emoji "
+          "macros at file scope.")
+    src = Path(tmp) / "emoji_macro_1118.c"
+    write(src, EMOJI_MACRO_PROGRAM)
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    non_ascii_replayed = [
+        line for line in m_result.stdout.splitlines()
+        if any(ord(ch) >= 0x80 for ch in line)
+        and ("define" in line or "undef" in line)
+    ]
+    if non_ascii_replayed:
+        print(f"    FAIL: -m output still replays a non-ASCII-macro "
+              f"directive line: {non_ascii_replayed}")
+        return False
+    if not any(line.strip().startswith("#define ascii_worm")
+               for line in m_result.stdout.splitlines()):
+        print(f"    FAIL: -m output stopped replaying ASCII-named defines\n"
+              f"    {m_result.stdout}")
+        return False
+    return _vm_and_native_run_case(cccc, tmp, "emoji_macro_1118",
+                                    EMOJI_MACRO_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -6089,6 +6148,7 @@ def main() -> int:
             case_nested_fn_in_block_native_round_trip,
             case_typedef_identity_native_round_trip,
             case_threads_native_round_trip,
+            case_native_emoji_macro_define_not_replayed,
         ]
         results = [case(cccc, tmp) for case in cases]
 
