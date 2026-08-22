@@ -330,10 +330,14 @@ static long long wrap_pthread_create(long long threadp, long long attrp,
         free(rec);
         return EAGAIN;
     }
-    // Allocate per-thread TLS copy initialised from the template
+    // Allocate per-thread TLS copy initialised from the template. #1136:
+    // posix_memalign, not malloc -- see vm.c's cc_run_at main-thread copy
+    // for the same rationale (LDTLS3 needs the base itself aligned, not
+    // just the offset into it).
     if (vm->tls_template_size > 0) {
-        rec->tls_seg = malloc(vm->tls_template_size);
-        if (!rec->tls_seg) {
+        rec->tls_seg = NULL;
+        if (posix_memalign((void **)&rec->tls_seg, CCCC_MAX_DATA_ALIGN,
+                           vm->tls_template_size) != 0) {
             cccc_exec_state_release_stack(vm, &rec->exec);
             free(rec);
             return EAGAIN;

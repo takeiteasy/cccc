@@ -201,6 +201,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog);
 void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str);
 void check_data_capacity(VirtualMachine *vm, long long needed);
 void check_tls_capacity(VirtualMachine *vm, size_t needed);
+int cc_effective_align(int obj_align, int ty_align);
 void define_label(VirtualMachine *vm, char *name);
 void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
 void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,

@@ -82,6 +82,13 @@
 // CCCC_FFI_TOKEN_BASE).
 #define CCCC_FFI_TOKEN_BASE (-0x4a434380LL)
 
+// #1136: widest alignment the data-segment / TLS-template allocator (and
+// the TLS per-thread/per-copy base allocation) will honour -- the widest
+// alignment any type requests today (64-byte vectors, #722). An explicit
+// _Alignas(N) with N > this is placed at this alignment, not N; see
+// cc_effective_align() (src/codegen_emit.c) and man/VM.md.
+#define CCCC_MAX_DATA_ALIGN 64
+
 #define REG_ZERO            0 // Always zero (writes discarded)
 #define REG_RA              1 // Return address
 #define REG_SP              2 // Stack pointer (unused for now - we have vm->sp)

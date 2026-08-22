@@ -56,6 +56,43 @@ void check_data_capacity(VirtualMachine *vm, long long needed) {
               vm->poolsize_max);
 }
 
+// #1136: effective alignment of an object placed in the data segment / TLS
+// template. An explicit _Alignas (Obj.align) overrides the type's own
+// alignment (ty_align); floored at 8 so every object that was already
+// (correctly) placed on an 8-byte boundary keeps that exact placement --
+// this also guards against obj_align/ty_align == 0 (extern/incomplete/
+// tentative decls can plausibly carry either as unset), which would
+// otherwise collapse the round-up mask to 0 and clobber offset 0. Capped at
+// CCCC_MAX_DATA_ALIGN (64), the widest alignment any *type* requests today
+// (64-byte vectors, #722). An explicit _Alignas(N) with N > 64 is accepted
+// by the parser but only gets 64-byte placement from this allocator, not
+// the full N -- a documented limitation (see man/VM.md), not a silent
+// truncation bug: the object is still more correctly placed than the
+// pre-#1136 hardcoded 8-byte rounding.
+int cc_effective_align(int obj_align, int ty_align) {
+    int a = obj_align > ty_align ? obj_align : ty_align;
+    if (a < 8)
+        a = 8;
+    if (a > CCCC_MAX_DATA_ALIGN)
+        a = CCCC_MAX_DATA_ALIGN;
+    // A well-formed _Alignas is always a power of two (C11 6.7.5p6), but
+    // parse_types.c's DK_ALIGNAS arm (src/parse_types.c) never validates
+    // that -- a pre-existing parser gap, not introduced here, out of this
+    // ticket's scope to fix. Round up to the next power of two defensively
+    // rather than feeding a non-power-of-two mask into the round-up below:
+    // an odd 'a' would compute a wrong mask and could under-align (or, via
+    // sign/shift edge cases, corrupt) the very placement this function
+    // exists to get right, silently turning a pre-existing parser gap into
+    // a data-segment correctness bug.
+    if (a & (a - 1)) {
+        int p = 8;
+        while (p < a)
+            p <<= 1;
+        a = p;
+    }
+    return a;
+}
+
 // Grow tls_template to hold at least `needed` bytes.
 void check_tls_capacity(VirtualMachine *vm, size_t needed) {
     if (needed <= vm->tls_template_cap)

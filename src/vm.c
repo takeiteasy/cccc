@@ -2346,11 +2346,17 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     if (vm->heap_reclaim_enabled && !vm->thread_records)
         heap_marks_truncate_to(vm, vm->bp);
 
-    // Initialise main thread's TLS copy from the template built by gen()
+    // Initialise main thread's TLS copy from the template built by gen().
+    // #1136: posix_memalign, not malloc -- LDTLS3 computes
+    // current_tls_seg + offset (ops.c), and gen() now places TLS variables
+    // at up to CCCC_MAX_DATA_ALIGN alignment within the template, so the
+    // base itself must carry that same alignment for the sum to actually
+    // land on it. Still free()-able.
     if (vm->tls_template_size > 0) {
         free(vm->current_tls_seg);
-        vm->current_tls_seg = malloc(vm->tls_template_size);
-        if (!vm->current_tls_seg)
+        vm->current_tls_seg = NULL;
+        if (posix_memalign((void **)&vm->current_tls_seg, CCCC_MAX_DATA_ALIGN,
+                           vm->tls_template_size) != 0)
             error("cc_run_at: failed to allocate main-thread TLS segment");
         memcpy(vm->current_tls_seg, vm->tls_template, vm->tls_template_size);
     }

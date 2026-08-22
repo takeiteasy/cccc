@@ -5,6 +5,28 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The data-segment/TLS-template allocator (`gen()`, `src/codegen_func.c`)
+  placed every global and thread-local at a hardcoded 8-byte boundary,
+  ignoring the object's own declared alignment — an explicit `_Alignas(N)`,
+  or a type whose natural alignment exceeds 8 (`__int128`/wide `_BitInt`
+  after #1135, or a 16/32/64-byte vector, #722). Nothing faulted (VM
+  loads/stores are byte-granular), but the placed address itself was wrong,
+  which matters for FFI calls into real host code and for the return-buffer
+  pool a by-value struct/union/vector/wide-`_BitInt` return goes through.
+  Fixed by rounding every such allocation site — including the return-buffer
+  pool, `cc_load_module`'s cross-module data/TLS re-anchoring, and the
+  per-thread TLS base allocation (now `posix_memalign`, not `malloc`) — to
+  the object's own effective alignment, capped at 64 bytes (the widest any
+  type requests today). `-c=native`/`-m` had the same gap from the other
+  direction: an explicit `_Alignas(N)` was never re-emitted, so it silently
+  reverted to natural alignment in generated C; `serialize.c` now emits
+  `_Alignas(N)` wherever a declaration's alignment was explicitly widened
+  (#1136). Local (stack-frame) variables still only get 8-byte alignment —
+  not reachable from the calling convention's own fixed frame layout — and
+  remain a known limitation, tracked as a follow-up.
+
 ## [0.3.3] - 2026-08-22
 
 ### Fixed

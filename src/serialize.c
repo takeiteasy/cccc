@@ -383,6 +383,11 @@ static bool type_is_cccc_va_list(Type *ty);
 // machinery); forward-declared here so ND_BLOCK_LITERAL's capture-copy
 // (serialize_expr, above that machinery in file order) can reuse it.
 static bool nested_var_is_own(Obj *fn, Obj *var);
+// #1136: defined near serialize_global_var (with the rest of the
+// declaration-printing machinery); forward-declared here so the hoisted-local
+// declarator (serialize_function, above that machinery in file order) can
+// reuse it too.
+static void serialize_alignas_if_needed(FILE *f, Obj *var);
 static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                            Node *node, int indent);
 // #964: mutually recursive with serialize_stmt -- see the comment on its
@@ -4881,6 +4886,8 @@ static void serialize_function(FILE *f, VirtualMachine *vm,
             // dimension can't disagree with anything else emitted for this
             // object. See SerializeContext.allow_layout_dims's own comment.
             ctx->allow_layout_dims = true;
+            // #1136: see serialize_alignas_if_needed's own comment.
+            serialize_alignas_if_needed(f, var);
             // #1029: strip the top-level const on the hoisted declarator;
             // #1102: and any qualifier spelled on an aggregate's *element*
             // type (`const int a[3]`, arbitrarily deep for multi-dimensional
@@ -5385,6 +5392,23 @@ static const char *pthread_initializer_macro(SerializeContext *ctx, Obj *var) {
     return macro;
 }
 
+// #1136: an explicit _Alignas(N) (Obj.align) requesting more than the
+// type's own natural alignment is otherwise dropped by -c=native -- neither
+// _Alignas nor __attribute__((aligned)) was emitted anywhere in this file,
+// so `_Alignas(32) int g;` compiled fine but round-tripped through native
+// output as a plain `int g;`, silently losing the requested alignment (the
+// same "stated vs actual" bug class as the VM-side data-segment allocator
+// this ticket also fixes). Natural (<=type-align) cases need nothing here:
+// the host compiler derives those from the emitted type on its own.
+// Called at every declaration site for one Obj (definition and forward
+// declarations alike) -- C11 6.7.5p7 requires every declaration of an
+// object to carry equivalent alignment, so they must all agree, not just
+// the definition.
+static void serialize_alignas_if_needed(FILE *f, Obj *var) {
+    if (var->align > var->ty->align)
+        fprintf(f, "_Alignas(%d) ", var->align);
+}
+
 static void serialize_global_var(FILE *f, VirtualMachine *vm,
                                  SerializeContext *ctx, Obj *var) {
     if (var->is_function)
@@ -5445,6 +5469,9 @@ static void serialize_global_var(FILE *f, VirtualMachine *vm,
     // storage-class-specifier ordering.
     if (var->is_tls)
         fprintf(f, "_Thread_local ");
+
+    // #1136: see serialize_alignas_if_needed's own comment.
+    serialize_alignas_if_needed(f, var);
 
     // #1095: only when no byte-image initializer follows -- an initialized
     // global's array dimension must stay folded so it can't disagree with
@@ -10662,6 +10689,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             fprintf(f, obj->is_static ? "static " : "extern ");
             if (obj->is_tls) // #1022: see serialize_global_var's own comment
                 fprintf(f, "_Thread_local ");
+            // #1136: see serialize_alignas_if_needed's own comment.
+            serialize_alignas_if_needed(f, obj);
             // #1095: same rule as serialize_global_var's own -- only when
             // no byte-image initializer will follow for this object.
             ctx.allow_layout_dims = !obj->init_data;
@@ -10965,6 +10994,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         fprintf(f, obj->is_static ? "static " : "extern ");
         if (obj->is_tls) // #1022: see serialize_global_var's own comment
             fprintf(f, "_Thread_local ");
+        // #1136: see serialize_alignas_if_needed's own comment.
+        serialize_alignas_if_needed(f, obj);
         // #1095: same rule as serialize_global_var's own -- only when no
         // byte-image initializer will follow for this object, so the
         // forward declaration and the real definition further down never

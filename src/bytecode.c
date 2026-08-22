@@ -1341,15 +1341,26 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
     // PC shift: staging instruction at index s maps to host index s + pc_shift.
     Pc pc_shift = vm->text_ptr; // host's current last-word index
 
-    // Data byte base in host VM where staging data will land.
-    long long data_shift = (long long)(vm->data_ptr - vm->data_seg);
+    // Data byte base in host VM where staging data will land. #1136: rounded
+    // up to CCCC_MAX_DATA_ALIGN -- the staged module's own gen() pass baked
+    // every var->offset relative to *its* data_seg[0], so unless data_shift
+    // itself preserves at least the widest alignment any object in that
+    // blob was placed at, re-anchoring by simple addition (below) could
+    // reintroduce exactly the misalignment #1136 fixes for a freshly
+    // compiled program. vm->data_ptr is advanced to match immediately below
+    // so the padding gap is never reused by anything else.
+    long long data_old_off = vm->data_ptr - vm->data_seg;
+    long long data_shift   = (data_old_off + (CCCC_MAX_DATA_ALIGN - 1)) &
+                             ~(long long)(CCCC_MAX_DATA_ALIGN - 1);
 
     // Text byte shift for LTA3 immediates.
     long long text_byte_shift =
         (long long)pc_shift * (long long)sizeof(InstrWord);
 
-    // TLS base in host VM.
-    size_t tls_shift = vm->tls_template_size;
+    // TLS base in host VM. #1136: same rounding rationale as data_shift.
+    size_t tls_old_size = vm->tls_template_size;
+    size_t tls_shift    = (tls_old_size + (CCCC_MAX_DATA_ALIGN - 1)) &
+                          ~(size_t)(CCCC_MAX_DATA_ALIGN - 1);
 
     // --- Grow host text segment and copy+patch module instructions ---
     if (stage_code_words > 0) {
@@ -1379,6 +1390,16 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
             cc_destroy(&stage);
             return -1;
         }
+        // #1136: land at the rounded data_shift, not wherever vm->data_ptr
+        // happened to be -- see data_shift's own comment above. Zero the
+        // padding gap itself: freshly-committed data_seg pages are already
+        // zero (mmap-backed, cccc_vm_reserve/cccc_vm_commit), but this gap
+        // sits inside memory committed by an earlier allocation, not
+        // necessarily untouched -- don't assume it's still zero.
+        if (data_shift > data_old_off)
+            memset(vm->data_seg + data_old_off, 0,
+                   (size_t)(data_shift - data_old_off));
+        vm->data_ptr = vm->data_seg + data_shift;
         memcpy(vm->data_ptr, stage.data_seg, (size_t)stage_data_size);
         vm->data_ptr += stage_data_size;
     }
@@ -1425,7 +1446,10 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
 
     // --- Append TLS template ---
     if (stage.tls_template_size > 0) {
-        size_t new_tls_size = vm->tls_template_size + stage.tls_template_size;
+        // #1136: land at the rounded tls_shift, not wherever
+        // vm->tls_template_size happened to be -- see tls_shift's own
+        // comment above.
+        size_t new_tls_size = tls_shift + stage.tls_template_size;
         if (new_tls_size > vm->tls_template_cap) {
             size_t new_cap = new_tls_size * 2;
             void  *tmp     = realloc(vm->tls_template, new_cap);
@@ -1438,7 +1462,16 @@ int cc_load_module(VirtualMachine *vm, const char *path) {
             vm->tls_template     = tmp;
             vm->tls_template_cap = new_cap;
         }
-        memcpy(vm->tls_template + vm->tls_template_size, stage.tls_template,
+        // #1136: zero the padding gap -- unlike data_seg (mmap-backed,
+        // pages start zero), tls_template is realloc'd, which never zeroes
+        // either the bytes a shrink-then-regrow left behind or genuinely
+        // fresh memory. Left uninitialized, this gap would flow straight
+        // into every thread's TLS copy via the vm->tls_template_size-sized
+        // memcpy at vm.c's cc_run_at / pthread.c's thread-create path.
+        if (tls_shift > tls_old_size)
+            memset(vm->tls_template + tls_old_size, 0,
+                   tls_shift - tls_old_size);
+        memcpy(vm->tls_template + tls_shift, stage.tls_template,
                stage.tls_template_size);
         vm->tls_template_size = new_tls_size;
 

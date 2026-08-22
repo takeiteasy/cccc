@@ -48,13 +48,15 @@ A third register file, `vregs[32]` (`VReg`, see [SIMD / Vector Operations](#simd
 
 All segments are reserved upfront as large virtual ranges and committed in `poolsize` chunks (default 256 KiB elements, max 64 MiB elements).  This gives the VM stable base pointers while keeping resident memory modest.
 
+A global (and TLS, see below) object is placed at its own **declared alignment**, not a hardcoded 8 bytes: an explicit `_Alignas(N)` overrides the type's own alignment, capped at `CCCC_MAX_DATA_ALIGN` (64 bytes — the widest alignment any type requests today, a 512-bit vector, #722). `_Alignas(N)` with `N > 64` is accepted but only gets 64-byte placement, a known limitation. `cc_effective_align()` (`src/codegen_emit.c`) computes this for every data-segment/TLS-template allocation site, including `cc_load_module`'s cross-module re-anchoring (#1136). This does not extend to **local** (stack-frame) variables — see [Function Frame](#function-frame)'s own note.
+
 ### Thread-Local Storage (TLS)
 
 Variables declared `_Thread_local`, `__thread`, or `thread_local` are placed in a dedicated TLS segment:
 
-1. **Template (`vm->tls_template`)** — built once by `gen()` alongside the data segment.  Each TLS variable is allocated a slot and its initialiser is written here.  The `LDTLS3` opcode emits the byte offset baked at compile time.
-2. **Per-thread copy (`vm->current_tls_seg`)** — allocated by `malloc` for the main thread and for each spawned `pthread_t` or `thrd_t`.  The thread inherits an `memcpy` of the template at creation time (C11 §6.2.4p4 — static initialisation).  On context switch the VM updates `vm->current_tls_seg` to point to the calling thread's copy.
-3. **Access (`LDTLS3 rd, imm24`)** — loads the effective address `vm->current_tls_seg + imm24` into `rd`.  Subsequent loads/stores through that pointer are ordinary data-segment accesses.
+1. **Template (`vm->tls_template`)** — built once by `gen()` alongside the data segment.  Each TLS variable is allocated a slot, rounded to its own declared alignment (see above), and its initialiser is written here.  The `LDTLS3` opcode emits the byte offset baked at compile time.
+2. **Per-thread copy (`vm->current_tls_seg`)** — allocated by `posix_memalign` (aligned to `CCCC_MAX_DATA_ALIGN`, #1136 — before that, a plain `malloc`, which only guarantees the platform's default `max_align_t`) for the main thread and for each spawned `pthread_t` or `thrd_t`.  The thread inherits an `memcpy` of the template at creation time (C11 §6.2.4p4 — static initialisation).  On context switch the VM updates `vm->current_tls_seg` to point to the calling thread's copy.
+3. **Access (`LDTLS3 rd, imm24`)** — loads the effective address `vm->current_tls_seg + imm24` into `rd`.  Subsequent loads/stores through that pointer are ordinary data-segment accesses.  Since both the base and the offset are now alignment-correct, this address itself carries the TLS variable's full declared alignment.
 
 TLS variable assignment (`vm->tls_template` write) happens in `gen()` at compile time; the per-thread copy is kept consistent via the pthreads context-switch wrappers in `src/stdlib/pthread.c`.
 
@@ -182,6 +184,8 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `ADJ` | 2 | Adjust stack pointer by signed immediate |
 | `PSH3` | 1 | Push `regs[rs]` onto the stack |
 | `POP3` | 1 | Pop stack into `regs[rd]` |
+
+Local/parameter offsets (`assign_stack_offsets`, `src/codegen_stmt.c`) are word slots counted down from `bp`, and only get 8-byte (one-slot) alignment — unlike the data segment/TLS template above, a local's declared alignment `> 8` (an `_Alignas(16)+` local, a wide `__int128`/`_BitInt`, or a 16/32/64-byte vector) is **not honoured** (#1136, tracked as a follow-up). `bp` itself cannot simply be aligned at `ENT3`: the calling convention pins `bp[+1]` to the return address and `bp[+2..]` to stack-passed arguments, so its absolute parity varies from call to call. A real fix needs a hidden aligned-base slot computed once at function entry with indirect addressing for the over-aligned local — out of scope for the allocator-level fix the rest of this section describes.
 
 ### Integer Arithmetic (3-Register)
 
@@ -892,6 +896,8 @@ compilers can honour them.
 | Opcode | Description |
 |--------|-------------|
 | `RETBUF` | Return the next buffer from the rotating pool (for non-scalar returns) |
+
+The pool itself (`alloc_return_buffer_pool`, `src/codegen_func.c`) is allocated in the data segment at `CCCC_MAX_DATA_ALIGN` (64-byte) alignment (#1136), covering the widest by-value return this convention carries — a 512-bit vector (#722).
 
 A registered FFI cfunc (`cc_register_cfunc`) must honor this convention on
 both ends, not just the host C ABI's own: a struct/union argument arrives as

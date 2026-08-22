@@ -326,9 +326,13 @@ static void alloc_return_buffer_pool(VirtualMachine *vm) {
     if (vm->compiler.return_buffer_pool[0] != NULL)
         return;
     for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
-        // Align to 8-byte boundary
+        // #1136: align to CCCC_MAX_DATA_ALIGN, not a hardcoded 8 -- this
+        // pool backs by-value struct/union/vector/wide-_BitInt returns, and
+        // a vector return (#722, up to 64-byte alignment) needs the wider
+        // boundary just as much as a global of the same type would.
         long long offset = vm->data_ptr - vm->data_seg;
-        offset           = (offset + 7) & ~7;
+        offset           = (offset + (CCCC_MAX_DATA_ALIGN - 1)) &
+                           ~(long long)(CCCC_MAX_DATA_ALIGN - 1);
         check_data_capacity(vm, offset + vm->compiler.return_buffer_size);
         vm->data_ptr                          = vm->data_seg + offset;
         vm->compiler.return_buffer_pool[i]    = vm->data_ptr;
@@ -362,8 +366,17 @@ void gen(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
         if (!var->is_function) {
             if (var->is_tls) {
-                // Thread-local variable: allocate in tls_template
-                size_t tls_offset = (vm->tls_template_size + 7) & ~(size_t)7;
+                // Thread-local variable: allocate in tls_template. #1136:
+                // rounded to the variable's own effective alignment (an
+                // explicit _Alignas overriding its type's), not a hardcoded
+                // 8 -- see cc_effective_align()'s own comment. The
+                // per-thread base this offset is later added to
+                // (vm->current_tls_seg / pthread.c's rec->tls_seg) is
+                // aligned to match, see vm.c/pthread.c.
+                int    align = cc_effective_align(var->align, var->ty->align);
+                size_t tls_offset =
+                    (vm->tls_template_size + (size_t)(align - 1)) &
+                    ~(size_t)(align - 1);
                 check_tls_capacity(vm, tls_offset + (size_t)var->ty->size);
                 var->offset = (long long)tls_offset;
                 if (var->init_data)
@@ -371,9 +384,11 @@ void gen(VirtualMachine *vm, Obj *prog) {
                            (size_t)var->ty->size);
                 vm->tls_template_size = tls_offset + (size_t)var->ty->size;
             } else {
-                // Align data pointer to 8-byte boundary
+                // #1136: align data pointer to the variable's own effective
+                // alignment, not a hardcoded 8 -- see cc_effective_align().
+                int align = cc_effective_align(var->align, var->ty->align);
                 long long offset = vm->data_ptr - vm->data_seg;
-                offset           = (offset + 7) & ~7;
+                offset = (offset + (align - 1)) & ~(long long)(align - 1);
                 check_data_capacity(vm, offset + var->ty->size);
                 vm->data_ptr = vm->data_seg + offset;
 
@@ -702,7 +717,12 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
         for (int i = 0; i < num_new_vars; i++) {
             Obj *var = arr[i];
             if (var->is_tls) {
-                size_t tls_offset = (vm->tls_template_size + 7) & ~(size_t)7;
+                // #1136: see gen()'s own comment on this same allocation
+                // shape above.
+                int    align = cc_effective_align(var->align, var->ty->align);
+                size_t tls_offset =
+                    (vm->tls_template_size + (size_t)(align - 1)) &
+                    ~(size_t)(align - 1);
                 check_tls_capacity(vm, tls_offset + (size_t)var->ty->size);
                 var->offset = (long long)tls_offset;
                 if (var->init_data)
@@ -710,8 +730,11 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                            (size_t)var->ty->size);
                 vm->tls_template_size = tls_offset + (size_t)var->ty->size;
             } else {
+                // #1136: see gen()'s own comment on this same allocation
+                // shape above.
+                int align = cc_effective_align(var->align, var->ty->align);
                 long long offset = vm->data_ptr - vm->data_seg;
-                offset           = (offset + 7) & ~7;
+                offset = (offset + (align - 1)) & ~(long long)(align - 1);
                 check_data_capacity(vm, offset + var->ty->size);
                 vm->data_ptr = vm->data_seg + offset;
                 var->offset  = vm->data_ptr - vm->data_seg;
