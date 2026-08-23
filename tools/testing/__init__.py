@@ -430,9 +430,25 @@ NATIVE_SKIP_TESTS = {
     # mapped onto the host's own __builtin_creal*/cimag*/conj*/complex,
     # whenever a captured include resolves to bundled complex.h/tgmath.h, or
     # any TY_COMPLEX-typed object, or any __cccc_c* helper Obj is reachable.
-    "test_suite_ffi.c": "test_dlfcn returns 3 instead of 42 natively, #1105",
-    "test_suite_overflow.c": "test_invalid_funcptr has no native "
-                 "invalid-function-pointer trap, #1105",
+    # test_suite_ffi.c (#1105, RESOLVED): test_dlfcn returned 3 instead of
+    # 42 natively -- the VM's own dlclose refuses to close a handle with any
+    # still-live dlsym'd symbol, which a bare host dlclose() doesn't
+    # enforce. Fixed by serialize_dlfcn_shims() (src/serialize_shims.c): a
+    # registry shim reproducing the VM's own dynamic-library bookkeeping
+    # (cccc_rt_dlopen/dlsym/dlclose/dlerror, src/vm.c) instead of forwarding
+    # straight to libdl -- see man/COVERAGE.md's <dlfcn.h> entry for the
+    # shape and its residuals. A second, unrelated blocker found while
+    # verifying this (#1151, RESOLVED): the #999 reloc-forward-declare loop
+    # emitted a conflicting prototype for a libc function only referenced
+    # by address in a global initializer (`static FfiOps ops = {strlen,
+    # strcmp};`) -- fixed by giving that loop the same header-supplied
+    # suppression the ordinary prototype-emission pass already had.
+    "test_suite_overflow.c": "test_invalid_funcptr exercises *default*"
+                 " dispatch-validation (no explicit safety flag), so"
+                 " NATIVE_VM_ONLY_FLAGS doesn't catch it -- same"
+                 " safety-semantics-parity bucket as CHKR/#935 (lower VM"
+                 " safety opcodes into serialized output), not a #1105 bug"
+                 " (triage confirmed on #1105 itself)",
     # test_suite_misc.c was in this table for two blockers (#1118 emoji-
     # macro directive replay + #1119 inline-asm divergence; empty-union half
     # fixed by #1115). Both now resolved -- the former by suppressing

@@ -27,6 +27,19 @@ All notable changes to CCCC are documented here. Format loosely follows
   and a 128-bit hex literal for values that don't fit a `long long`.
   `tests/suites/test_suite_typesystem.c` is back on the native test corpus
   as a result (#1126).
+- `-c=native`: `dlclose` forwarded straight to the host's libdl, which
+  doesn't enforce the VM's own "refuse to close a handle with a still-live
+  `dlsym`'d symbol" policy — a valid handle closed successfully natively
+  where the VM refuses it. Fixed with a registry shim
+  (`serialize_dlfcn_shims`) reproducing the VM's own dynamic-library
+  bookkeeping over the replayed real `<dlfcn.h>`. `tests/suites/test_suite_ffi.c`
+  is back on the native test corpus as a result (#1105).
+- `-c=native`: a global initializer taking a libc function's address (e.g.
+  `static FfiOps ops = {strlen, strcmp};`) emitted a second, conflicting
+  prototype for that function — CCCC's own bundled-header spelling,
+  colliding with the real one the replayed `#include` already supplied.
+  Fixed by giving the reloc-forward-declare pass the same header-supplied
+  suppression the ordinary function-prototype pass already had (#1151).
 
 ## [0.3.6] - 2026-08-23
 

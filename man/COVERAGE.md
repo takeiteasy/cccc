@@ -1765,7 +1765,18 @@ to reach the output with nothing declaring `later_fn` yet, since the
 global-definitions pass ran ahead of the function-prototype pass; a
 targeted pass now forward-declares exactly the functions a global's
 initializer relocations reference, without hoisting every prototype
-unconditionally (which would reopen #953's struct-tag-scope hazard).
+unconditionally (which would reopen #953's struct-tag-scope hazard). That
+targeted pass had its own gap, found and fixed under #1151: it forward-declared
+*every* such function unconditionally, including one whose declaration is
+already header-supplied (e.g. a vtable naming a real libc function directly,
+`static FfiOps ops = {strlen, strcmp};`) — emitting a second prototype
+spelled in CCCC's own bundled-header types, which collides with the real
+one the replayed `#include <string.h>` already brought into scope
+("conflicting types for 'strlen'"). Fixed by giving the pass the identical
+header-supplied suppression the ordinary function-prototype pass already
+had (factored into one shared predicate), deliberately without adopting
+that other pass's `is_implicit`/macro-generated skip arms — those would
+reintroduce the "nothing in scope" bug #999 fixed in the first place.
 Separately, a translation unit holding only typedefs/prototypes and no
 definitions is not a compile failure — `parse()`'s own contract returns
 `NULL` for that case, previously treated by `main.c`'s per-TU loop as
@@ -2323,6 +2334,51 @@ with the real symbols never sees a second, competing definition. The two
 copies have no shared source and are kept in sync by hand; a follow-up
 tracks folding them into one generated source shared by both build paths.
 
+**`<dlfcn.h>` policy parity (#1105, RESOLVED).** `dlopen`/`dlsym`/`dlclose`/
+`dlerror` are real host libc symbols (unlike `<threads.h>`/`<uchar.h>`
+above), so `-c=native` used to forward guest calls straight to the host's
+libdl — correct for `dlopen`/`dlsym`, but not for `dlclose`: the VM's own
+registry (`cccc_rt_dlclose`, `src/vm.c`) refuses to close a handle with any
+still-"live" `dlsym`'d symbol (`live_symbol_count`, incremented on every
+`dlsym`, never decremented — once any symbol has been resolved through a
+handle, that handle can never be closed), while a bare host `dlclose()`
+enforces no such thing. `tests/suites/test_suite_ffi.c`'s `test_dlfcn`
+asserted the VM's refusal and got the host's success instead (3, not 42).
+
+Fixed with a registry shim (`serialize_dlfcn_shims`, `src/serialize_shims.c`),
+the same shape as `<threads.h>`'s/`<uchar.h>`'s own self-contained shims
+above but layered *over* the replayed real `#include <dlfcn.h>` rather than
+replacing it (`dlopen`/`dlsym`/`dlclose`/`dlerror` are renamed to
+`__cccc_native_dl*` — same `rename_bundled_extern_for_native_shim`
+mechanism `<poll.h>`'s shim uses below — so the shim body is free to call
+the real host functions under their original names). The registry cannot be
+keyed by the *host* handle: `dlopen(NULL)` returns the same pointer on
+every call, while the VM mints a fresh token (with its own live-symbol
+count starting at 0) per `dlopen` — keying on the host handle would let one
+subtest's `dlsym` poison a later, unrelated subtest's `dlclose` in the same
+process (exactly what `--testing=native`'s single generated harness process
+does, running `test_dlfcn`/`test_dlfcn_close_no_symbols`/`test_dlfcn_missing`
+back to back). So the guest's `void *handle` is an **opaque per-open
+token** (a registry node's own address), exactly like the VM's own token —
+it must never be passed to anything but these four functions. Nodes are
+never freed or reused, matching the VM's own registry, which lives until VM
+teardown; the table is unbounded, not capacity-limited. Every mutation goes
+through `__atomic_*` builtins (never `<stdatomic.h>`, for the same reason
+`<threads.h>`'s shim avoids it) since, unlike the VM's GIL-protected
+registry, this table has no serialization of its own. The error slot is
+`_Thread_local` — a deliberate *improvement* over the VM, whose
+`vm->dyn_error` is one field shared by every guest thread under the GIL —
+and, matching `cccc_rt_dlerror` exactly, is **not** cleared on read; each of
+`dlopen`/`dlsym`/`dlclose` clears it on entry instead.
+
+Known, separately tracked divergence (not fixed here): `include/dlfcn.h`'s
+`RTLD_LOCAL`/`RTLD_GLOBAL` use glibc's numeric encoding on every platform,
+which is wrong on macOS (`RTLD_LOCAL`/`RTLD_GLOBAL` differ there, and
+glibc's `RTLD_GLOBAL` value collides with macOS's own `RTLD_FIRST`) — a
+pre-existing bug in the VM as much as in `-c=native`, since `mode` was
+already forwarded to the host `dlopen()` unchanged before this fix and
+still is.
+
 ---
 
 ## Standard Library and Built-in Functions
@@ -2654,7 +2710,7 @@ storage directly, so guest code observes the real outcome.
 | `<arpa/inet.h>` | ✓ | Network byte-order conversion (`htonl`, `htons`, `ntohl`, `ntohs`), address manipulation (`inet_addr`, `inet_ntoa`, `inet_ntop`, `inet_pton`). `inet_ntoa(struct in_addr in)` takes its argument by value; CCCC marshals a guest struct-by-value FFI argument as a pointer to the caller's own storage, so `wrap_inet_ntoa` (`src/stdlib/posix_net.c`) dereferences that pointer to build a real host `struct in_addr` rather than registering the host symbol raw (a raw registration read the low 32 bits of the guest's pointer as `s_addr`) |
 | `<cpio.h>` | ✓ | Extended cpio archive format constants (`MAGIC`, `C_I*` mode bits, `C_IS*` file-type bits) -- values fixed by POSIX.1 itself, identical on every platform, header-only (no wrapper functions) |
 | `<dirent.h>` | ✓ | Directory entry iteration (`opendir`, `readdir`, `readdir_r`, `closedir`, `seekdir`, `telldir`, `rewinddir`, `alphasort`, `scandir`, `DIR`, `struct dirent`) |
-| `<dlfcn.h>` | ✓ | VM-managed dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`); `dlsym` function symbols are callable through typed function pointers for scalar/pointer signatures |
+| `<dlfcn.h>` | ✓ | VM-managed dynamic loading (`dlopen`, `dlsym`, `dlclose`, `dlerror`); `dlsym` function symbols are callable through typed function pointers for scalar/pointer signatures. `dlclose` refuses to close a handle with any still-"live" `dlsym`'d symbol (`live_symbol_count`, `src/vm.c`) -- and that count is never decremented, so once a handle has had any symbol resolved through it, it can never be closed. Serializes under `-c=native`/`-m`/`-c=generated` too (#1105) via a registry shim reproducing this exact policy rather than forwarding to the host's libdl -- see [Serialized-output divergences](#serialized-output-divergences) for the shim's shape. Known divergence, tracked separately: `RTLD_LOCAL`/`RTLD_GLOBAL` (`include/dlfcn.h`) use glibc's numeric encoding on every platform, which is wrong on macOS (both VM and native) -- `mode` is passed through to the host `dlopen()` unchanged, matching current behaviour |
 | `<fcntl.h>` | ✓ | File control (`open`, `creat`, `fcntl`), `O_*` (including `O_DIRECTORY`, `O_NOFOLLOW`, `O_SYNC`, `O_NOCTTY`, `O_DSYNC`, plus Linux `O_RSYNC`) and `S_*` permission constants, record-locking `F_*` commands (including `F_GETOWN`/`F_SETOWN`), `FD_CLOEXEC`, `struct flock`; `fallocate` declared and registered under `__linux__`. The Linux aarch64 `O_DIRECTORY`/`O_NOFOLLOW` values have been empirically verified against a real header on native aarch64 (Colima VM) |
 | `<fnmatch.h>` | ✓ | Filename pattern matching (`fnmatch`, `FNM_*` constants) |
 | `<fts.h>` | ✓ | File tree traversal (`fts_open`, `fts_read`, `fts_children`, `fts_set`, `fts_close`, `FTS`, `FTSENT`, `FTS_*` option/info/flags/instruction constants) (#811). Not in POSIX.1, but present on both macOS/BSD and glibc. `FTS` is opaque to the guest (never dereferenced, same shape as `<dirent.h>`'s `DIR`); `FTSENT` is 112 bytes on macOS and 120 bytes on both glibc targets, verified against the macOS SDK and both Linux containers -- the two glibc layouts differ from each other only in `fts_level`'s offset (96 on x86_64, 92 on aarch64), which falls entirely out of `nlink_t`'s width (`<sys/types.h>` already splits that per-arch), so a single shared glibc struct definition reproduces both and only the `_Static_assert` on `fts_level`'s offset is arch-split. `fts_statp` is a host `struct stat *` handed straight to the guest -- safe because `<sys/stat.h>` is itself already a byte-exact per-platform pass-through, not a marshalled canonical struct. `fts_open()`'s comparator callback runs through the same `cccc_call_guest_callback` trampoline as `scandir()`'s `compar` (#738); unlike `scandir()`'s callbacks, though, libc retains the comparator on the `FTS` handle and calls it again from every `fts_read()` as it descends into each directory, not just once inside `fts_open()`, so the handle-to-comparator binding is tracked for the handle's whole lifetime. `fts_open`/`fts_set`/`fts_close` don't block meaningfully and keep the VM GIL; `fts_read`/`fts_children` release it for the real directory I/O only when the handle has no guest comparator bound -- a bound comparator needs the GIL held so it can safely reenter the VM to run the callback, so a traversal with a comparator holds the GIL across `fts_read`/`fts_children` for its duration |

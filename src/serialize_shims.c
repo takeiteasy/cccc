@@ -1991,3 +1991,192 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 
     fprintf(f, "\n");
 }
+
+// #1105: dlopen/dlsym/dlclose/dlerror shims that reproduce the VM's own
+// dynamic-library registry (cccc_rt_dlopen/dlsym/dlclose/dlerror, src/vm.c)
+// instead of forwarding straight to the host libdl. Ported deliberately,
+// not incidentally: the VM's dlclose refuses to close a handle with any
+// still-"live" dlsym'd symbol (`live_symbol_count > 0`, and that count is
+// never decremented -- there is no "un-dlsym" in the VM's own model), which
+// a bare host dlclose() does not enforce. Reproducing that refusal natively
+// is a deliberate policy choice (ticket #1105, user sign-off) that trades
+// away otherwise-valid POSIX code (`h=dlopen(); f=dlsym(h,...);
+// dlclose(h);` succeeds on every real libdl but fails here, exactly as it
+// already does on the VM) for exact VM-vs-native parity of test_dlfcn
+// (tests/suites/test_suite_ffi.c).
+//
+// Registry design note: a table keyed by the *host* handle would be wrong
+// -- dlopen(NULL) returns the very same pointer on every call, while the
+// VM mints a fresh token (with its own live-symbol count starting at 0)
+// per dlopen (cccc_add_dynamic_library, src/vm.c). Two dlopen(NULL) calls
+// in the same process -- exactly what tests/suites/test_suite_ffi.c's
+// test_dlfcn/test_dlfcn_close_no_symbols/test_dlfcn_missing do, back to
+// back, under --testing=native's single generated harness process -- would
+// otherwise share one entry and let an earlier subtest's dlsym poison a
+// later, unrelated one's dlclose. So the guest's `void *handle` here is an
+// **opaque per-open token** (a registry node's own address), exactly like
+// the VM's: it must never be passed to anything but these four functions,
+// the same constraint the VM's own token already imposes. Nodes are never
+// freed or reused (same as the VM's own dynlibs array, which lives until
+// VM teardown) -- unbounded, not gated on a fixed table size.
+//
+// Thread safety: the VM's registry is entirely GIL-protected; this table
+// is not, so every mutation goes through __atomic_* builtins (never
+// <stdatomic.h> -- see serialize_threads_shims' own comment on why CCCC's
+// copy of that header is unusable in emitted output), the same choice
+// __cccc_ensure_mtx/__cccc_ensure_cnd made for the identical reason
+// (serialize_threads_shims, this file).
+//
+// The error slot is `_Thread_local`, which is NOT parity with the VM --
+// `vm->dyn_error` is one field shared by every guest thread under the GIL
+// -- but a deliberate improvement a native binary can afford now that
+// there is no GIL serializing concurrent dl* calls. dlerror() itself does
+// NOT clear the slot on read, matching cccc_rt_dlerror (src/vm.c) exactly;
+// each of dlopen/dlsym/dlclose clears it on entry instead, also matching
+// cccc_clear_dyn_error's own call sites.
+//
+// `mode` is passed through to the real dlopen() unchanged, matching the
+// VM's own behaviour byte-for-byte -- including its documented, unrelated
+// bug of assuming glibc's RTLD_LOCAL/RTLD_GLOBAL encoding even on macOS,
+// where the real values differ (tracked separately, not fixed here).
+void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    // #1088-style --emit-cccc exemption: a consumer cccc already has the
+    // real DLOPEN/DLSYM/DLCLOSE/DLERROR opcodes, so emitting shim
+    // definitions here would shadow them with a second, divergent
+    // implementation.
+    if (vm->compiler.emit_cccc)
+        return;
+
+    bool use_dlopen  = bundled_shim_fn_is_used(vm, prog, "dlopen", "dlfcn.h");
+    bool use_dlsym   = bundled_shim_fn_is_used(vm, prog, "dlsym", "dlfcn.h");
+    bool use_dlclose = bundled_shim_fn_is_used(vm, prog, "dlclose", "dlfcn.h");
+    bool use_dlerror = bundled_shim_fn_is_used(vm, prog, "dlerror", "dlfcn.h");
+    bool any_dlfcn   = use_dlopen || use_dlsym || use_dlclose || use_dlerror;
+    if (!any_dlfcn)
+        return;
+
+    if (use_dlopen)
+        rename_bundled_extern_for_native_shim(vm, prog, "dlopen", "dlfcn.h");
+    if (use_dlsym)
+        rename_bundled_extern_for_native_shim(vm, prog, "dlsym", "dlfcn.h");
+    if (use_dlclose)
+        rename_bundled_extern_for_native_shim(vm, prog, "dlclose", "dlfcn.h");
+    if (use_dlerror)
+        rename_bundled_extern_for_native_shim(vm, prog, "dlerror", "dlfcn.h");
+
+    // Self-contained #includes, same rationale as serialize_threads_shims'
+    // own comment -- harmless if <dlfcn.h> was already replayed (its own
+    // include guard makes a repeat #include a no-op).
+    fprintf(f, "#include <dlfcn.h>\n"
+               "#include <stdlib.h>\n"
+               "struct __cccc_dl_node {\n"
+               "    void *handle;\n"
+               "    int live;\n"
+               "    int closed;\n"
+               "    struct __cccc_dl_node *next;\n"
+               "};\n"
+               "static struct __cccc_dl_node *__cccc_dl_head = 0;\n"
+               "static _Thread_local char *__cccc_dl_error = 0;\n"
+               // Matches cccc_find_dynamic_library (src/vm.c): a token whose
+               // node is marked closed is treated as unknown, same as one
+               // that was never registered -- a double dlclose/dlsym on an
+               // already-closed handle gets "invalid dynamic library
+               // handle", not a use of the freed host handle.
+               "static struct __cccc_dl_node *__cccc_dl_find(void *token) {\n"
+               "    for (struct __cccc_dl_node *n = "
+               "__atomic_load_n(&__cccc_dl_head, __ATOMIC_ACQUIRE); n;\n"
+               "         n = n->next)\n"
+               "        if ((void *)n == token && "
+               "!__atomic_load_n(&n->closed, __ATOMIC_ACQUIRE))\n"
+               "            return n;\n"
+               "    return 0;\n"
+               "}\n"
+               "static void __cccc_dl_push(struct __cccc_dl_node *n) {\n"
+               "    struct __cccc_dl_node *old_head;\n"
+               "    do {\n"
+               "        old_head = __atomic_load_n(&__cccc_dl_head, "
+               "__ATOMIC_ACQUIRE);\n"
+               "        n->next = old_head;\n"
+               "    } while (!__atomic_compare_exchange_n(&__cccc_dl_head, "
+               "&old_head, n, 0,\n"
+               "                                          __ATOMIC_ACQ_REL, "
+               "__ATOMIC_ACQUIRE));\n"
+               "}\n");
+
+    if (use_dlopen)
+        fprintf(f, "static void *__cccc_native_dlopen(const char *path, int "
+                   "mode) {\n"
+                   "    __cccc_dl_error = 0;\n"
+                   "    void *h = dlopen(path, mode ? mode : RTLD_LAZY);\n"
+                   "    if (!h) {\n"
+                   "        char *err = dlerror();\n"
+                   "        __cccc_dl_error = err ? err : \"dlopen failed\";\n"
+                   "        return 0;\n"
+                   "    }\n"
+                   "    struct __cccc_dl_node *n = malloc(sizeof(*n));\n"
+                   "    if (!n) {\n"
+                   "        __cccc_dl_error = \"dynamic library registry "
+                   "allocation failed\";\n"
+                   "        return 0;\n"
+                   "    }\n"
+                   "    n->handle = h;\n"
+                   "    n->live = 0;\n"
+                   "    n->closed = 0;\n"
+                   "    __cccc_dl_push(n);\n"
+                   "    return (void *)n;\n"
+                   "}\n");
+    if (use_dlsym)
+        fprintf(
+            f, "static void *__cccc_native_dlsym(void *token, const char "
+               "*symbol) {\n"
+               "    __cccc_dl_error = 0;\n"
+               "    if (!symbol) {\n"
+               "        __cccc_dl_error = \"dlsym requires a symbol name\";\n"
+               "        return 0;\n"
+               "    }\n"
+               "    struct __cccc_dl_node *n = __cccc_dl_find(token);\n"
+               "    if (!n) {\n"
+               "        __cccc_dl_error = \"invalid dynamic library handle\";\n"
+               "        return 0;\n"
+               "    }\n"
+               "    dlerror();\n"
+               "    void *ptr = dlsym(n->handle, symbol);\n"
+               "    char *err = dlerror();\n"
+               "    if (err) {\n"
+               "        __cccc_dl_error = err;\n"
+               "        return 0;\n"
+               "    }\n"
+               "    __atomic_fetch_add(&n->live, 1, __ATOMIC_ACQ_REL);\n"
+               "    return ptr;\n"
+               "}\n");
+    if (use_dlclose)
+        fprintf(f, "static int __cccc_native_dlclose(void *token) {\n"
+                   "    __cccc_dl_error = 0;\n"
+                   "    struct __cccc_dl_node *n = __cccc_dl_find(token);\n"
+                   "    if (!n) {\n"
+                   "        __cccc_dl_error = \"invalid dynamic library "
+                   "handle\";\n"
+                   "        return -1;\n"
+                   "    }\n"
+                   "    if (__atomic_load_n(&n->live, __ATOMIC_ACQUIRE) > 0) "
+                   "{\n"
+                   "        __cccc_dl_error = \"cannot dlclose handle with "
+                   "live callable symbols\";\n"
+                   "        return -1;\n"
+                   "    }\n"
+                   "    if (dlclose(n->handle) != 0) {\n"
+                   "        char *err = dlerror();\n"
+                   "        __cccc_dl_error = err ? err : \"dlclose "
+                   "failed\";\n"
+                   "        return -1;\n"
+                   "    }\n"
+                   "    __atomic_store_n(&n->closed, 1, __ATOMIC_RELEASE);\n"
+                   "    return 0;\n"
+                   "}\n");
+    if (use_dlerror)
+        fprintf(f, "static char *__cccc_native_dlerror(void) {\n"
+                   "    return __cccc_dl_error;\n"
+                   "}\n");
+
+    fprintf(f, "\n");
+}

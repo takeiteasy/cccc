@@ -2551,6 +2551,38 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
 }
 
+// #1151: the bodiless-declaration counterpart of the from_input/
+// cccc_bundled_uncaptured test the prototype-emission loop below applies to
+// a `!obj->is_definition && !obj->body` Obj (a bare declaration, e.g. `extern
+// long strlen(const char *s);`). Factored out so the #999 reloc-forward-
+// declare loop further up this file can ask the identical question for a
+// function only referenced by address in a global initializer (e.g. `static
+// FfiOps ops = {strlen, strcmp};`) -- that loop used to emit a signature
+// unconditionally, which for a real libc function like `strlen` re-declares
+// it with CCCC's own bundled-header spelling (`long` where the host's
+// string.h says `size_t`), conflicting with the real declaration the
+// replayed `#include <string.h>` already supplied (#1151).
+//
+// Returns true when `obj`'s bodiless declaration is NOT already supplied by
+// an ordinary replayed #include -- i.e. the caller still needs to emit its
+// own signature. Deliberately does not fold in the is_implicit/
+// is_macro_generated arms the caller (both loops) already special-cases:
+// those two have opposite-direction safety implications for a reloc target
+// (skipping there would reintroduce the undeclared-identifier bug #999
+// fixed in the first place) and this helper does not decide them.
+static bool bodyless_decl_from_input_or_bundled(VirtualMachine   *vm,
+                                                SerializeContext *ctx,
+                                                Obj              *obj) {
+    Token *t          = obj->tok;
+    bool   from_input = t && t->file &&
+                        (file_is_command_line_input(vm, t->file->name) ||
+                         cc_file_is_cccc_only(vm, t->file->name));
+    bool cccc_bundled_uncaptured = obj->is_used && t && t->file &&
+                                   cc_file_is_cccc_bundled(vm, t->file->name) &&
+                                   !path_is_captured(ctx, t->file->name);
+    return from_input || cccc_bundled_uncaptured;
+}
+
 // #1047: the global-variable counterpart to function_is_header_supplied()
 // just above. Unlike functions, globals had no include-provenance gate at
 // all -- the #918 forward-declare-every-global pass and serialize_global_var
@@ -3914,6 +3946,17 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     if (!generated_only)
         serialize_canonical_const_shims(f, vm, prog);
 
+    // #1105: real definitions for dlopen/dlsym/dlclose/dlerror that mirror
+    // the VM's own dynamic-library registry (src/vm.c's cccc_rt_dl*) rather
+    // than passing straight through to the host's -- specifically its
+    // "dlclose refuses a handle with live callable symbols" policy. Same
+    // placement/gating rationale as serialize_posix_compat_shims and
+    // serialize_canonical_const_shims just above (bundled dlfcn.h is a real
+    // host header CCCC merely ships its own copy of; no dependency on
+    // serialize_type_defs_for_owner).
+    if (!generated_only)
+        serialize_dlfcn_shims(f, vm, prog);
+
     // #965/#993: see the comment on the generated_only branch's own call
     // above -- must run after both the #include replay and the file-scope
     // type-def pass just above, so a capture's type (however it reaches the
@@ -4003,6 +4046,23 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                     target == vm->compiler.builtin_block_copy ||
                     obj_vec_contains(&reloc_fns, target))
                     continue;
+                // #1151: a header-supplied declaration (either a `static`
+                // definition re-derived from its own replayed #include, or
+                // a bodiless extern like libc's own `strlen`/`strcmp`)
+                // already has a prototype in scope from that replay --
+                // emitting a second one here, spelled in CCCC's own
+                // bundled-header types, conflicts with the real one
+                // ("conflicting types for 'strlen'"). Deliberately does NOT
+                // skip an is_implicit or is_macro_generated target -- unlike
+                // the header-supplied case, dropping either of those here
+                // would leave the reloc'd initializer with nothing in scope
+                // at all, the exact undeclared-identifier bug #999 this loop
+                // exists to prevent.
+                if (function_is_header_supplied(vm, &ctx, target) ||
+                    (!target->is_definition && !target->body &&
+                     !target->is_implicit && !target->is_macro_generated &&
+                     !bodyless_decl_from_input_or_bundled(vm, &ctx, target)))
+                    continue;
                 obj_vec_push(&reloc_fns, target);
                 serialize_function_signature(f, &ctx, target);
                 fprintf(f, ";\n");
@@ -4083,46 +4143,36 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             // it -- treat every macro-generated prototype as eligible
             // regardless of origin, matching the emit-event path's
             // unconditional hoist above.
-            if (!obj->is_macro_generated) {
-                Token *t = obj->tok;
-                // #1002 (investigation): file_is_command_line_input(), not a
-                // primary_file-only comparison -- see that function's
-                // comment. Variable renamed from from_primary to
-                // from_input to match.
-                bool from_input =
-                    t && t->file &&
-                    (file_is_command_line_input(vm, t->file->name) ||
-                     cc_file_is_cccc_only(vm, t->file->name));
-                // #1096: a declaration sourced from one of CCCC's own
-                // bundled headers (e.g. bundled fcntl.h's own
-                // `#include "unistd.h"` declaring close()) is NOT supplied
-                // by the auto-captured #include the way a real host
-                // header's transitively-reached declaration is -- the
-                // replayed `#include <fcntl.h>` resolves to the *host's*
-                // fcntl.h under -c=native, which may not declare it (the
-                // real bug this whole branch is scoped to catch: see
-                // is_compiler_owned_header's own scope note and
-                // test_sys_mount_statfs.c). Only applies when that bundled
-                // header's own #include was never replayed
-                // (path_is_captured()) -- when it was replayed, the usual
-                // from_include suppression is correct and this declaration
-                // really is already supplied by that replay. Also gated on
-                // obj->is_used: a bundled header like unistd.h declares
-                // dozens of functions the primary file never references --
-                // emitting every one of them (rather than just the handful
-                // the program actually calls) would needlessly bloat the
-                // output and risk a real conflict for some declaration
-                // whose signature the host's own header spells slightly
-                // differently. is_used is set by the parser on any
-                // identifier lookup (see its own doc comment on Obj), which
-                // is exactly "does this TU actually reference it".
-                bool cccc_bundled_uncaptured =
-                    obj->is_used && t && t->file &&
-                    cc_file_is_cccc_bundled(vm, t->file->name) &&
-                    !path_is_captured(&ctx, t->file->name);
-                if (!from_input && !cccc_bundled_uncaptured)
-                    continue;
-            }
+            // #1002 (investigation): file_is_command_line_input(), not a
+            // primary_file-only comparison -- see that function's comment.
+            // #1096: a declaration sourced from one of CCCC's own bundled
+            // headers (e.g. bundled fcntl.h's own `#include "unistd.h"`
+            // declaring close()) is NOT supplied by the auto-captured
+            // #include the way a real host header's transitively-reached
+            // declaration is -- the replayed `#include <fcntl.h>` resolves
+            // to the *host's* fcntl.h under -c=native, which may not
+            // declare it (the real bug this whole branch is scoped to
+            // catch: see is_compiler_owned_header's own scope note and
+            // test_sys_mount_statfs.c). Only applies when that bundled
+            // header's own #include was never replayed (path_is_captured())
+            // -- when it was replayed, the usual from_include suppression is
+            // correct and this declaration really is already supplied by
+            // that replay. Also gated on obj->is_used: a bundled header like
+            // unistd.h declares dozens of functions the primary file never
+            // references -- emitting every one of them (rather than just
+            // the handful the program actually calls) would needlessly
+            // bloat the output and risk a real conflict for some
+            // declaration whose signature the host's own header spells
+            // slightly differently. is_used is set by the parser on any
+            // identifier lookup (see its own doc comment on Obj), which is
+            // exactly "does this TU actually reference it". #1151: both
+            // conditions factored into bodyless_decl_from_input_or_bundled()
+            // (this file) so the #999 reloc-forward-declare loop above can
+            // ask the identical question for a function only referenced by
+            // address.
+            if (!obj->is_macro_generated &&
+                !bodyless_decl_from_input_or_bundled(vm, &ctx, obj))
+                continue;
         }
         serialize_function_signature(f, &ctx, obj);
         fprintf(f, ";\n\n");
