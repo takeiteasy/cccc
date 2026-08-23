@@ -15,11 +15,13 @@
 // emitted C, guarded `#if !defined(__linux__)` so Linux keeps calling the
 // real glibc symbols unchanged.
 //
-// Deliberately does NOT #include <pthread.h> -- doing so alongside <sched.h>
-// hits the unrelated, still-open #1143 (CCCC's own re-emitted 4-byte
-// `struct sched_param` collides with the host's 8-byte one reached through
-// <pthread.h>'s #include_next hand-off). This file's own point is to prove
-// the nine symbols round-trip; #1143 is orthogonal and untouched here.
+// Deliberately does NOT #include <pthread.h> -- combining it with <sched.h>
+// used to hit the unrelated #1143 (now fixed: CCCC's own bundled include
+// dirs are demoted to `-idirafter` when forwarded to the host compiler, so
+// a real host <pthread.h> reached that way no longer collides with this
+// file's own <sched.h>/<locale.h> -- see test_native_bundled_include_1143.c
+// for that regression test). This file's own point is to prove the nine
+// symbols round-trip; pthread.h stays out of scope here regardless.
 //
 // Deliberately does NOT use POLLWRNORM/POLLWRBAND in the ppoll test --
 // CCCC's canonical POLLWRNORM/POLLWRBAND numbering is translated to the

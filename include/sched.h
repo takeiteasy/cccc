@@ -34,16 +34,28 @@
 #include "sys/types.h"
 #include "time.h"
 
-// #1143 (found, not fixed, while verifying #1138/#1139/#1141/#1142): this
-// header has no #ifdef __CCCC__/#include_next hand-off (unlike fenv.h/
-// pthread.h/sys/mount.h), so a program that both `#include <sched.h>`
-// directly and uses <pthread.h> collides under -c=native -- the replayed
-// `#include <sched.h>` re-emits this file's own struct sched_param, while
-// pthread.h's own #include_next hand-off (#1022) separately reaches the
-// real host's differently-shaped one in the same TU ("redefinition of
-// sched_param", confirmed with tests/suites/test_suite_posix.c). Exactly
-// the risk serialize.c's own serialize_threads_shims() comment already
-// flags and avoids triggering itself.
+// #1143: this header deliberately does NOT have an #ifdef __CCCC__/
+// #include_next hand-off the way fenv.h/pthread.h/sys/mount.h do. A
+// program that both `#include <sched.h>` directly and uses <pthread.h>
+// used to collide under -c=native when a user -I named CCCC's own bundled
+// include dir (this repo's own test harness's `-I./include` is exactly
+// that) -- the replayed `#include <sched.h>` re-emitted this file's own
+// struct sched_param, while pthread.h's own #include_next hand-off
+// (#1022) separately reached the real host's differently-shaped one in
+// the same TU ("redefinition of sched_param", confirmed with
+// tests/suites/test_suite_posix.c). Investigated for a hand-off here too,
+// but the same TU also hits five other collisions from CCCC's own
+// signal.h/netinet/in.h/netdb.h/locale.h shadowing real host declarations
+// (SIG_SETMASK, htonl, gethostbyname_r, lconv/locale_t/freelocale) that a
+// hand-off scoped to this file alone can't reach -- fixed instead at the
+// root: run_native_backend() (main.c) now demotes any user -I/-isystem
+// entry that resolved one of CCCC's own bundled headers to `-idirafter`,
+// so the real host header always wins the search regardless of which
+// bundled header the collision would otherwise come from. This file
+// itself is unmodified by that fix (the host cc never reads it under
+// -c=native once its dir is demoted), so its own struct sched_param stays
+// exactly this simple, guest-visible 4-byte form -- see the file comment
+// above for why.
 struct sched_param {
     int sched_priority;
 };

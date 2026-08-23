@@ -345,17 +345,21 @@ NATIVE_SKIP_TESTS = {
     # once the file compiles at all -- a previously-invisible surface,
     # never run until #1138/#1139/#1144 cleared the compile-time
     # blockers, and its own investigation on the scale of #967's
-    # original native corpus sweep. Separately, this file would also hit
-    # the same pre-existing, unrelated -I./include + sched.h/locale.h
-    # host-header collision documented on
-    # test_posix_native_shims_1140.c/test_posix_native_canonical_1146.c
-    # above (it #include's both <sched.h> and <pthread.h>-reaching
-    # headers) -- moot while #1145 already keeps it skipped, but not
-    # itself fixed by #1146/#1147.
+    # original native corpus sweep. The separate, pre-existing -I./include
+    # + sched.h/locale.h host-header collision this file also used to hit
+    # (it #include's both <sched.h> and <pthread.h>-reaching headers) is
+    # now fixed too (#1143: CCCC's own bundled include dirs are demoted to
+    # `-idirafter` when forwarded to the host compiler, so the real host
+    # headers always win) -- confirmed directly, `--posix-emulation
+    # -I./include` compiles and runs this file clean under -c=native on
+    # macOS/arm64, with the same 3 subtest failures #1145 already covers
+    # (test_posix_sysconf_pathconf_confstr/test_posix_sigaction/
+    # test_posix_sigaction_siginfo -- present with or without -I./include,
+    # so not a header-search artifact; see #1145's own comment).
     "test_suite_posix.c": "compiles clean on both platforms now "
-                 "(#1140/#1146/#1147 all fixed); still skipped for "
+                 "(#1140/#1143/#1146/#1147 all fixed); still skipped for "
                  "#1145 (14 subtests fail at native runtime on "
-                 "Linux/glibc)",
+                 "Linux/glibc, plus 3 more on macOS/arm64)",
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1113",
     # #1126: found while adding native coverage for #1125 (wide _BitInt
     # bitfield codegen, unaffected by this) -- test_wide_global_init's own
@@ -471,32 +475,6 @@ NATIVE_SKIP_TESTS = {
     # COVERAGE.md Serialized-output divergences.
     "test_suite_empty_union.c": "zero-sized union through varargs is a "
                  "documented VM-vs-host divergence (#1120), not a bug",
-
-    # --- pre-existing, unrelated to #1146/#1147: found while adding
-    # test_posix_native_canonical_1146.c, confirmed to reproduce identically
-    # against trunk with none of #1146/#1147's own changes applied. The
-    # runner's own -I./include (native.py) puts CCCC's bundled include/ on
-    # the host cc's search path; combined with a TU that both `#include
-    # <sched.h>` directly AND pulls in <pthread.h> (directly, or via the
-    # xlocale.h injection #1140 added for the "_l" locale family), the
-    # replayed #include <sched.h> re-emits CCCC's own struct sched_param
-    # polyfill while <pthread.h>'s real #include_next hand-off (#1022)
-    # separately reaches the host's own, differently-shaped one --
-    # "redefinition of sched_param". That specific collision is #1143
-    # (open, unrelated to #1146/#1147, root-caused there in detail). This
-    # run additionally surfaced a sibling collision through the same
-    # -I./include + xlocale.h path: CCCC's own struct lconv/locale_t
-    # (include/locale.h) against the host's real ones reached transitively
-    # through xlocale.h -- not yet its own ticket; same header-resolution
-    # hazard class as #1143 (no #include_next hand-off for locale.h either).
-    "test_posix_native_shims_1140.c": "pre-existing -I./include + "
-                 "sched.h/locale.h host-header collision, unrelated to "
-                 "#1146/#1147 (see #1143 for the sched_param half)",
-    "test_posix_native_canonical_1146.c": "same pre-existing -I./include "
-                 "collision as test_posix_native_shims_1140.c above -- "
-                 "the fix itself is verified by hand without -I./include "
-                 "(see this file's own header comment) and separately by "
-                 "the corpus's own test_suite_posix.c ppoll subtest",
 }
 
 # Platform-specific -c=native skips, checked only when the running host

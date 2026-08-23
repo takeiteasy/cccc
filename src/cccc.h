@@ -3655,8 +3655,24 @@ typedef struct Compiler {
     // -c=native, which may not declare it. See
     // cc_file_is_cccc_bundled()/mark_cccc_bundled_file() in preprocess.c.
     HashMap cccc_bundled_files; // filename/embedded-key -> (void*)1
+    // #1143: user-supplied `-I`/`-isystem` directory strings (the exact
+    // argv text cc_include()/cc_system_include() stored, no
+    // canonicalization -- same no-canonicalization contract as
+    // cc_file_is_command_line_input()) that search_include_paths()
+    // resolved one of CCCC's own bundled std headers from. run_native_
+    // backend() (main.c) uses this to demote exactly those entries to
+    // `-idirafter` instead of `-I`/`-isystem` when forwarding to the host
+    // compiler: a user -I that happens to also contain CCCC's own guest-
+    // side polyfills (this repo's own test harness's `-I./include` is
+    // exactly that) must never shadow the real host headers pthread.h's
+    // own #include_next hand-off (#1022) and friends transitively reach --
+    // confirmed to otherwise collide (struct sched_param/lconv/locale_t
+    // redefinitions, undeclared SIG_SETMASK/htonl, static-vs-extern
+    // gethostbyname_r). See cc_include_dir_is_cccc_bundled() in
+    // preprocess.c.
+    HashMap cccc_bundled_include_dirs; // -I/-isystem dir string -> (void*)1
     HashMap
-        emit_include_paths;     // auto-captured #include directive line text ->
+        emit_include_paths; // auto-captured #include directive line text ->
                             // resolved on-disk path, so run_native_backend's
                             // re-emission filter can test
     // cc_file_is_cccc_only() against the path a line in
@@ -4787,6 +4803,8 @@ bool cc_is_dropped_comptime_global(VirtualMachine *vm, const char *name,
 bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename); // #896
 bool cc_file_is_cccc_bundled(VirtualMachine *vm,
                              const char     *filename);              // #1096
+bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm,
+                                    const char     *dir);            // #1143
 bool cc_file_is_command_line_input(VirtualMachine *vm,
                                    const char     *name);            // #1006
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm);    // #1001

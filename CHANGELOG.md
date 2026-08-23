@@ -5,6 +5,36 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-08-23
+
+### Fixed
+
+- `-c=native`: a user `-I`/`-isystem` entry that also happened to hold
+  CCCC's own bundled headers (this repo's own test harness's
+  `-I./include` is exactly that) shadowed the real host headers a
+  `#include_next` hand-off (`pthread.h`, #1022, and everything it
+  transitively reaches) needs to see — confirmed to collide with a real
+  host `<pthread.h>` in the same TU as `<sched.h>`/`<locale.h>` (`struct
+  sched_param`/`struct lconv`/`locale_t`/`freelocale` redefinitions,
+  undeclared `SIG_SETMASK`/`htonl`, static-vs-extern `gethostbyname_r`).
+  Fixed by demoting exactly the `-I`/`-isystem` entries that actually
+  resolved one of CCCC's own bundled headers
+  (`cc_include_dir_is_cccc_bundled`, `src/preprocess.c`) to `-idirafter`
+  when forwarding to the host compiler (`run_native_backend`,
+  `src/main.c`), so the real host header always wins the search while a
+  header the host genuinely lacks still resolves as a last resort
+  (#1143). Un-masked, and fixed alongside: three of CCCC's own bundled
+  headers quote-`#include` a second, related standard header purely as a
+  convenience the real, minimal host header doesn't replicate (`fts.h` →
+  `sys/stat.h`, `unistd.h` → `sys/uio.h`, `sys/un.h` → `sys/socket.h`) —
+  the include-replay loop now emits the real header's own `#include`
+  alongside the replayed line so this convenience keeps working once the
+  real host header is reached; and the `mtx_timedlock` macOS shim's own
+  hand-rolled `extern int clock_gettime(int, struct timespec *)` (wrong
+  on macOS, where `clockid_t` is a real enum, not `int`) is dropped now
+  that the real host declaration is reliably reachable through the same
+  `<pthread.h>` hand-off this shim already requires.
+
 ## [0.3.5] - 2026-08-23
 
 ### Fixed

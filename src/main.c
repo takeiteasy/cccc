@@ -305,12 +305,32 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
     NativeIncludeDirCtx incdir_ctx = {&cc_args, NULL, 0, 0};
     hashmap_foreach(&vm->compiler.command_line_inputs, push_input_dir_i,
                     &incdir_ctx);
+    // #1143: a user -I/-isystem entry that also happens to hold CCCC's own
+    // bundled std headers (this repo's own test harness's `-I./include` is
+    // exactly that -- tools/testing/native.py) must not shadow the real
+    // host headers the rest of this function relies on being reachable
+    // (pthread.h's own #include_next hand-off, #1022, and everything it
+    // transitively reaches) -- confirmed to otherwise collide (struct
+    // sched_param/lconv/locale_t redefinitions, undeclared SIG_SETMASK/
+    // htonl, static-vs-extern gethostbyname_r). cc_include_dir_is_cccc_
+    // bundled() (preprocess.c) reports exactly the entries search_include_
+    // paths() actually resolved one of CCCC's own bundled headers from;
+    // forward those as `-idirafter` (supported by both gcc and clang, the
+    // only compilers cccc_find_native_cc targets) instead of `-I`/
+    // `-isystem`, so the real host header always wins the search while a
+    // header the host genuinely lacks still resolves as a last resort.
+    // Matches the policy man/HEADERS.md already documents ("CCCC's own
+    // bundled include directory is never forwarded to the native
+    // compiler") for the case that policy didn't actually cover: the
+    // directory named by a *user* -I, not cccc's own builtin_include_dir.
     for (int i = 0; i < inc_paths_count; i++) {
-        argv_push(&cc_args, "-I");
+        bool bundled = cc_include_dir_is_cccc_bundled(vm, inc_paths[i]);
+        argv_push(&cc_args, bundled ? "-idirafter" : "-I");
         argv_push(&cc_args, inc_paths[i]);
     }
     for (int i = 0; i < sys_inc_paths_count; i++) {
-        argv_push(&cc_args, "-isystem");
+        bool bundled = cc_include_dir_is_cccc_bundled(vm, sys_inc_paths[i]);
+        argv_push(&cc_args, bundled ? "-idirafter" : "-isystem");
         argv_push(&cc_args, sys_inc_paths[i]);
     }
     for (int i = 0; i < defines_count; i++)

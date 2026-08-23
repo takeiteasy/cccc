@@ -1184,8 +1184,10 @@ already passes on the VM should produce correct native output too, on the
 two currently-supported platform × arch combinations (macOS/Linux ×
 aarch64/x86_64), using the real host's standard library wherever CCCC's own
 header is a mere polyfill for VM-internal plumbing (auto-capture replays the
-user's real `#include` verbatim, CCCC's own bundled headers are never
-forwarded to the native `cc`, see [HEADERS.md](HEADERS.md)), and — wherever
+user's real `#include` verbatim, and a user `-I`/`-isystem` entry that also
+holds CCCC's own bundled headers is demoted to `-idirafter` so the real
+host header always wins the search, #1143 — see [HEADERS.md](HEADERS.md)),
+and — wherever
 CCCC's header instead encodes genuine VM-specific ABI with no host
 equivalent (the fixed `is_compiler_owned_header` list: `stdarg.h`,
 `setjmp.h`, `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `complex.h`,

@@ -7234,17 +7234,30 @@ static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
         // existing CCCC behaviour rather than inventing a new one. macOS has
         // no pthread_mutex_timedlock at all.
         //
-        // The macOS branch's own clock_gettime(CLOCK_REALTIME, ...) can't
-        // reach either declaration via a plain #include: <time.h> is NOT on
-        // this function's own #include list above (nor is it usable if it
-        // were -- same #1054-class hazard as <sched.h>/<string.h>, and
-        // documented in man/HEADERS.md's own pthread_native_1022 writeup as
-        // the reason CCCC never gave <time.h> itself a full #include_next
-        // hand-off: the cascade has no clean stopping point). clock_gettime
-        // is declared directly instead (POSIX-portable, no header needed);
-        // CLOCK_REALTIME is spelled as its own literal value (0 on both
-        // glibc and Darwin, confirmed) rather than the macro name, the same
-        // "spell CCCC's own fixed values as literals" precedent
+        // The macOS branch's own clock_gettime(CLOCK_REALTIME, ...) used to
+        // declare its own local `extern int clock_gettime(int, struct
+        // timespec *);` rather than reach a real declaration via #include:
+        // <time.h> is NOT on this function's own #include list above (nor
+        // was it usable if it were -- same #1054-class hazard as <sched.h>/
+        // <string.h>, documented in man/HEADERS.md's own pthread_native_1022
+        // writeup as the reason CCCC never gave <time.h> itself a full
+        // #include_next hand-off: the cascade has no clean stopping point).
+        // That local extern was itself wrong on macOS (clockid_t is a real
+        // enum type there, not plain int, so it disagreed with the
+        // system's own declaration) -- invisible pre-#1143 only because a
+        // user `-I./include` shadowed the real host <pthread.h> chain (and
+        // everything it transitively reaches, including <time.h>) outright.
+        // #1143 demotes CCCC's own bundled include dirs to `-idirafter`, so
+        // pthread.h's real #include_next hand-off (#1022) now reliably
+        // reaches the host's own clock_gettime declaration on macOS through
+        // the same <pthread.h> chain this function already requires --
+        // confirmed directly (`cc -idirafter ./include` resolves it with no
+        // separate #include needed) -- so the local extern is dropped
+        // rather than fixed to match the host's own clockid_t spelling,
+        // which is Darwin-specific and would need its own translation.
+        // CLOCK_REALTIME is still spelled as its own literal value (0 on
+        // both glibc and Darwin, confirmed) rather than the macro name, the
+        // same "spell CCCC's own fixed values as literals" precedent
         // native_accessor_shims's own FP_*/fpclassify comment documents --
         // this branch never runs on Linux, so only Darwin's value matters.
         fprintf(f,
@@ -7255,7 +7268,6 @@ static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                 "#if defined(__linux__)\n"
                 "    rc = pthread_mutex_timedlock(host, ts);\n"
                 "#else\n"
-                "    extern int clock_gettime(int, struct timespec *);\n"
                 "    for (;;) {\n"
                 "        rc = pthread_mutex_trylock(host);\n"
                 "        if (rc == 0) break;\n"
@@ -12177,6 +12189,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // three headers since a program can include more than one.
     bool emitted_xlocale = false;
 #endif
+    // #1143: CCCC's own bundled copy of a handful of standard headers
+    // quote-#includes a second, related standard header purely as a
+    // convenience (fts.h -> sys/stat.h for `struct stat *fts_statp`,
+    // unistd.h -> sys/uio.h for struct iovec/readv/writev, sys/un.h ->
+    // sys/socket.h for socklen_t/bind()) -- true of both macOS's and
+    // glibc's real headers too, verified directly, unlike sys/mount.h's
+    // struct statfs split above. Before #1143 demoted CCCC's own bundled
+    // include dir to `-idirafter`, a replayed `#include <fts.h>` etc at
+    // native-compile time actually resolved to CCCC's OWN copy (searched
+    // ahead of the real system headers), so this convenience pull-in rode
+    // along for free; the real host headers those angle-bracket includes
+    // now correctly resolve to are deliberately minimal and don't bundle
+    // the second header the way CCCC's own copy does (confirmed: real
+    // macOS fts.h only forward-declares `struct stat *`, doesn't include
+    // <sys/stat.h>). Same latched-injection shape as emitted_xlocale
+    // above -- one #include per program regardless of how many of that
+    // header's own directives got captured.
+    bool emitted_sys_stat_h   = false;
+    bool emitted_sys_uio_h    = false;
+    bool emitted_sys_socket_h = false;
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
@@ -12300,6 +12332,28 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             emitted_xlocale = true;
         }
 #endif
+        // #1143: see
+        // emitted_sys_stat_h/emitted_sys_uio_h/emitted_sys_socket_h's own
+        // comment above this loop -- unlike sys/mount.h's split (Linux- only)
+        // and xlocale.h's injection (macOS-only), these three convenience
+        // pull-ins are missing from the real, minimal header on BOTH supported
+        // hosts, so the emission is unconditional.
+        if (!emitted_sys_stat_h && resolved &&
+            path_basename_is(resolved, "fts.h")) {
+            fprintf(f, "#include <sys/stat.h>\n");
+            emitted_sys_stat_h = true;
+        }
+        if (!emitted_sys_uio_h && resolved &&
+            path_basename_is(resolved, "unistd.h")) {
+            fprintf(f, "#include <sys/uio.h>\n");
+            emitted_sys_uio_h = true;
+        }
+        if (!emitted_sys_socket_h && resolved &&
+            path_basename_is(resolved, "un.h") &&
+            strstr(resolved, "sys/un.h")) {
+            fprintf(f, "#include <sys/socket.h>\n");
+            emitted_sys_socket_h = true;
+        }
     }
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");

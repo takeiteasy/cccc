@@ -99,10 +99,31 @@ by default). Two things follow from that:
   command line. See `man/COVERAGE.md`'s "`-c=native` scope for v0.4.0"
   section for the full dialect statement and required host flags
   (`-lm`/`-pthread`/`-fsigned-char`).
-- CCCC's own bundled include directory is **never** forwarded to the native
-  compiler (`run_native_backend` in `src/main.c` only forwards user-supplied
-  `-I`/`-i`). If it were, the native compiler would see CCCC's polyfill
-  headers (`typedef void FILE;`, etc.) fighting with the real system ones.
+- CCCC's own bundled include directory is never forwarded as a plain `-I`
+  to the native compiler — `run_native_backend` (`src/main.c`) demotes any
+  user-supplied `-I`/`-isystem` entry that `search_include_paths`
+  (`preprocess.c`) actually resolved one of CCCC's own bundled headers
+  from (`cc_include_dir_is_cccc_bundled`) to `-idirafter` instead. This
+  matters because CCCC forwards the user's own `-I`/`-i` verbatim (needed
+  for the user's real project headers), and this repo's own test harness's
+  standard `-I./include` (`tools/testing/native.py`) is exactly the case
+  that names CCCC's bundled dir too. Un-demoted, the native compiler would
+  see CCCC's polyfill headers (`typedef void FILE;`, `struct sched_param`
+  sized for the guest ABI, etc.) shadowing the real system ones outright —
+  confirmed to collide with a real host `<pthread.h>`'s own `#include_next`
+  hand-off (`struct sched_param`/`struct lconv`/`locale_t`/`freelocale`
+  redefinitions, undeclared `SIG_SETMASK`/`htonl`, static-vs-extern
+  `gethostbyname_r`) before this demotion existed (#1143). `-idirafter`
+  keeps a header the host genuinely lacks resolvable as a last resort,
+  unlike dropping the directory outright.
+  A handful of CCCC's own bundled headers quote-`#include` a second,
+  related standard header purely as a convenience that the real, minimal
+  host header doesn't replicate (`fts.h` → `sys/stat.h`, `unistd.h` →
+  `sys/uio.h`, `sys/un.h` → `sys/socket.h`) — `cc_serialize_program`'s
+  include-replay loop emits the real header's own `#include` alongside the
+  replayed line so this convenience keeps working once the real host
+  header is reached (same mechanism as the `sys/mount.h`→`sys/vfs.h` split
+  and the `xlocale.h` injection just below).
 - CCCC auto-captures the primary source file's own top-level `#include`
   directives and re-emits them verbatim into the generated C
   (`preprocess.c`'s auto-capture; the include has to stay — e.g. `printf`

@@ -452,6 +452,23 @@ bool cc_file_is_cccc_bundled(VirtualMachine *vm, const char *filename) {
            hashmap_get(&vm->compiler.cccc_bundled_files, filename) != NULL;
 }
 
+// #1143: mark `dir` (one of vm->compiler.include_paths/system_include_paths'
+// own stored strings -- cc_include()/cc_system_include(), src/vm.c) as an
+// entry that resolved one of CCCC's own bundled std headers
+// (search_include_paths()'s is_std hit, below). See
+// Compiler.cccc_bundled_include_dirs' own comment (src/cccc.h) for why
+// run_native_backend() (main.c) needs this.
+static void mark_cccc_bundled_include_dir(VirtualMachine *vm, const char *dir) {
+    if (!dir)
+        return;
+    hashmap_put(&vm->compiler.cccc_bundled_include_dirs, dir, (void *)1);
+}
+
+bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm, const char *dir) {
+    return dir &&
+           hashmap_get(&vm->compiler.cccc_bundled_include_dirs, dir) != NULL;
+}
+
 // #1006 (investigation, filed as part of #1005/#1006's fix): true when
 // `name` is the exact path of one of the files the user listed on the
 // command line, as opposed to a header any of them #included. This used to
@@ -2315,6 +2332,14 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
             hashmap_put2(&vm->compiler.include_cache, filename, filename_len,
                          path);
             vm->compiler.include_next_idx = i + 1;
+            // #1143: this -I entry just resolved one of CCCC's own bundled
+            // std headers (e.g. a test harness's `-I./include`) -- record
+            // it so run_native_backend() (main.c) forwards it demoted
+            // (`-idirafter`) rather than as a plain `-I` that would shadow
+            // the real host headers -c=native needs.
+            if (is_std)
+                mark_cccc_bundled_include_dir(
+                    vm, vm->compiler.include_paths.data[i]);
             return path;
         }
         free(path);
@@ -2350,6 +2375,12 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                          path);
             vm->compiler.include_next_idx =
                 vm->compiler.include_paths.len + i + 1;
+            // #1143: same reasoning as the include_paths loop above, for a
+            // user `-isystem` entry that happens to also hold one of
+            // CCCC's own bundled std headers.
+            if (is_std)
+                mark_cccc_bundled_include_dir(
+                    vm, vm->compiler.system_include_paths.data[i]);
             return path;
         }
         free(path);
