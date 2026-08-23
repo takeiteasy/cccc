@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-08-23
+
 ### Changed
 
 - Split `src/serialize.c` (12,719 lines, ~200 static functions feeding a
