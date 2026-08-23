@@ -2149,10 +2149,16 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
     if (!f || !tok)
         return;
 
-    // Re-emit any libraries queued via #pragma cccc link() or
-    // #pragma comment(lib, ...) as the portable comment(lib, ...) form.
-    // The pragmas are consumed during preprocessing so they don't appear
-    // in the token stream; emit them here before the token output.
+    // Re-emit any libraries queued via #pragma cccc link() as the portable
+    // comment(lib, ...) form. #1149 (found, not fixed, while implementing
+    // #1147): despite this comment's own prior wording, a literal
+    // "#pragma comment(lib, ...)" written in guest source is NOT an
+    // alternate input spelling of #pragma cccc link() -- handle_pragma_body
+    // (src/preprocess.c) has no `comment` branch, so it's silently ignored
+    // on input and never reaches pragma_link_libs. Only the real "#pragma
+    // cccc link()" form queues anything; this block re-emits that queue,
+    // consumed during preprocessing so it doesn't appear in the token
+    // stream, before the token output.
     if (vm) {
         for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
             fprintf(f, "#pragma comment(lib, \"%s\")\n",

@@ -6904,6 +6904,41 @@ static bool bundled_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
     return false;
 }
 
+// #1146: sibling to bundled_shim_fn_is_used() above with a rename
+// side-effect -- finds the guest program's bodiless declaration of `name`
+// from CCCC's bundled `header_basename` (same provenance check) and renames
+// every reference to `__cccc_native_<name>` so a translating shim (emitted
+// under that new name, immediately below) can supply the definition without
+// colliding with the real host-declared symbol of the same name. Renaming
+// an Obj safely renames every call site through it -- every reference
+// resolves through the same Obj*, exactly the invariant
+// rename_colliding_static_names() (this file) relies on; unlike that pass's
+// own #1103 hazard (renaming an Obj whose *definition* is only ever
+// supplied by a replayed #include), this is the safe direction: the
+// renamed Obj's definition is supplied right here, and the real host
+// symbol under the original name is left completely untouched for the
+// shim body to call.
+static bool rename_bundled_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
+                                                  const char *name,
+                                                  const char *header_basename) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->is_used || obj->body)
+            continue;
+        if (strcmp(obj->name, name) != 0)
+            continue;
+        Token *t = obj->tok;
+        if (!t || !t->file)
+            continue;
+        if (!cc_file_is_cccc_bundled(vm, t->file->name))
+            continue;
+        if (!path_basename_is(t->file->name, header_basename))
+            continue;
+        obj->name = arena_format(vm, "__cccc_native_%s", name);
+        return true;
+    }
+    return false;
+}
+
 static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // #1088's own --emit-cccc exemption: under --emit-cccc the cccc-only
     // suppression above is exempted (see the include-replay loop's own
@@ -7693,7 +7728,9 @@ static void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm,
     if (vm->compiler.emit_cccc)
         return;
 
+    bool use_poll  = bundled_shim_fn_is_used(vm, prog, "poll", "poll.h");
     bool use_ppoll = bundled_shim_fn_is_used(vm, prog, "ppoll", "poll.h");
+    bool any_poll  = use_poll || use_ppoll;
 
     bool use_sched_setparam =
         bundled_shim_fn_is_used(vm, prog, "sched_setparam", "sched.h");
@@ -7718,7 +7755,24 @@ static void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm,
     bool any_resolver_r =
         use_gethostbyname_r || use_gethostbyaddr_r || use_getnetbyname_r;
 
-    if (!use_ppoll && !any_sched && !any_resolver_r)
+    // #1146: the plain gethostbyname()/gethostbyaddr()/getnetbyname() side
+    // of the NSS mutex residual (see the mutex comment below) -- only
+    // relevant, and only probed, when the guest program also uses the _r
+    // family, so a program that never touches _r is emitted byte-identical
+    // to before this change.
+    bool use_gethostbyname =
+        any_resolver_r &&
+        bundled_shim_fn_is_used(vm, prog, "gethostbyname", "netdb.h");
+    bool use_gethostbyaddr =
+        any_resolver_r &&
+        bundled_shim_fn_is_used(vm, prog, "gethostbyaddr", "netdb.h");
+    bool use_getnetbyname =
+        any_resolver_r &&
+        bundled_shim_fn_is_used(vm, prog, "getnetbyname", "netdb.h");
+    bool any_resolver_plain =
+        use_gethostbyname || use_gethostbyaddr || use_getnetbyname;
+
+    if (!any_poll && !any_sched && !any_resolver_r)
         return;
 
     fprintf(f, "#if !defined(__linux__)\n"
@@ -7727,19 +7781,113 @@ static void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm,
                "#include <errno.h>\n"
                "#include <stdint.h>\n"
                "#endif\n");
+    if (any_poll)
+        // stdlib.h for malloc/free, errno.h for errno/ENOMEM -- needed
+        // unconditionally (unlike the pthread/signal/errno/stdint bundle
+        // just above, which is only ever referenced from !defined(__linux__)
+        // code): __cccc_native_poll below is defined and used on every
+        // host, not just non-Linux ones.
+        fprintf(f, "#include <stdlib.h>\n"
+                   "#include <errno.h>\n");
 
-    // ppoll() (#821/#1140) -- pthread_sigmask()+poll() emulation, ported
-    // from ppoll_emulate_macos/wrap_ppoll_gil (src/stdlib/posix_poll.c).
-    // Not atomic like the real syscall -- a signal delivered between the
-    // mask swap and poll()'s wait is not guaranteed to interrupt it --
-    // exactly the same accepted, documented limitation as the VM's own
-    // emulation (see man/COVERAGE.md's <poll.h> entry). Deliberately does
-    // NOT translate pollfd.events/revents through CCCC's canonical
-    // POLLWRNORM/POLLWRBAND numbering the way wrap_ppoll_gil does -- a
-    // plain native poll() call in the same program doesn't translate
-    // either (#1146), and translating only here would make ppoll() and
-    // poll() natively disagree with each other in the same binary, which
-    // is worse.
+    // POLLWRNORM/POLLWRBAND (#821/#1146) -- POLLRDNORM/POLLRDBAND happen to
+    // share the same bit values on macOS and glibc, but POLLWRNORM/
+    // POLLWRBAND diverge (macOS aliases POLLWRNORM to POLLOUT and uses
+    // 0x0100 for POLLWRBAND; glibc uses 0x0100/0x0200, which is what
+    // CCCC's canonical numbering, include/poll.h, copies). Ported verbatim
+    // from guest_to_host_pollev/host_to_guest_pollev
+    // (src/stdlib/posix_poll.c), including the documented aliasing
+    // artifact: because host POLLWRNORM == POLLOUT on macOS, a host
+    // POLLOUT revent sets both canonical POLLOUT and canonical POLLWRNORM
+    // in the guest -- intentional, not a bug. Neither helper needs a
+    // top-level guard (unlike ppoll below): both compile to a no-op
+    // #else arm on Linux, where canonical already equals the host's real
+    // values.
+    if (any_poll) {
+        if (use_poll)
+            rename_bundled_extern_for_native_shim(vm, prog, "poll", "poll.h");
+        fprintf(
+            f,
+            "static short __cccc_native_guest_to_host_pollev(short "
+            "guest_events) {\n"
+            "#ifdef __APPLE__\n"
+            "    short host = guest_events & (short)~(0x0040 | 0x0080 | "
+            "0x0100 | 0x0200);\n"
+            "    if (guest_events & 0x0040) host |= POLLRDNORM;\n"
+            "    if (guest_events & 0x0080) host |= POLLRDBAND;\n"
+            "    if (guest_events & 0x0100) host |= POLLWRNORM;\n"
+            "    if (guest_events & 0x0200) host |= POLLWRBAND;\n"
+            "    return host;\n"
+            "#else\n"
+            "    return guest_events;\n"
+            "#endif\n"
+            "}\n"
+            "static short __cccc_native_host_to_guest_pollev(short "
+            "host_revents) {\n"
+            "#ifdef __APPLE__\n"
+            "    short guest = host_revents & (short)~(POLLRDNORM | "
+            "POLLRDBAND | POLLWRNORM | POLLWRBAND);\n"
+            "    if (host_revents & POLLRDNORM) guest |= 0x0040;\n"
+            "    if (host_revents & POLLRDBAND) guest |= 0x0080;\n"
+            "    if (host_revents & POLLWRNORM) guest |= 0x0100;\n"
+            "    if (host_revents & POLLWRBAND) guest |= 0x0200;\n"
+            "    return guest;\n"
+            "#else\n"
+            "    return host_revents;\n"
+            "#endif\n"
+            "}\n"
+            // Marshals through a host-side heap array rather than
+            // translating in place, same rationale as poll_marshal_in/out
+            // (posix_poll.c): never mutate guest memory in place while
+            // translating. Simpler than that function's stack-buffer fast
+            // path (no perf-critical native-mode caller identified) --
+            // always heap-allocates, still correct.
+            "static struct pollfd *__cccc_native_poll_marshal_in(struct "
+            "pollfd *guest_fds, nfds_t nfds) {\n"
+            "    struct pollfd *host = (struct pollfd *)malloc(sizeof(struct "
+            "pollfd) * (nfds ? nfds : 1));\n"
+            "    if (!host) return 0;\n"
+            "    for (nfds_t i = 0; i < nfds; i++) {\n"
+            "        host[i].fd = guest_fds[i].fd;\n"
+            "        host[i].events = "
+            "__cccc_native_guest_to_host_pollev(guest_fds[i].events);\n"
+            "        host[i].revents = 0;\n"
+            "    }\n"
+            "    return host;\n"
+            "}\n"
+            "static void __cccc_native_poll_marshal_out(struct pollfd "
+            "*host, struct pollfd *guest_fds, nfds_t nfds) {\n"
+            "    for (nfds_t i = 0; i < nfds; i++)\n"
+            "        guest_fds[i].revents = "
+            "__cccc_native_host_to_guest_pollev(host[i].revents);\n"
+            "}\n");
+        if (use_poll)
+            fprintf(f,
+                    "static int __cccc_native_poll(struct pollfd *fds, nfds_t "
+                    "nfds, int timeout) {\n"
+                    "    struct pollfd *host = "
+                    "__cccc_native_poll_marshal_in(fds, nfds);\n"
+                    "    if (!host) { errno = ENOMEM; return -1; }\n"
+                    "    int r = poll(host, nfds, timeout);\n"
+                    "    int saved_errno = errno;\n"
+                    "    __cccc_native_poll_marshal_out(host, fds, nfds);\n"
+                    "    free(host);\n"
+                    "    errno = saved_errno;\n"
+                    "    return r;\n"
+                    "}\n");
+    }
+
+    // ppoll() (#821/#1140/#1146) -- pthread_sigmask()+poll() emulation,
+    // ported from ppoll_emulate_macos/wrap_ppoll_gil
+    // (src/stdlib/posix_poll.c). Not atomic like the real syscall -- a
+    // signal delivered between the mask swap and poll()'s wait is not
+    // guaranteed to interrupt it -- exactly the same accepted, documented
+    // limitation as the VM's own emulation (see man/COVERAGE.md's
+    // <poll.h> entry). Unlike before #1146, this now DOES translate
+    // pollfd.events/revents through the same
+    // __cccc_native_poll_marshal_in/out helpers plain poll() uses just
+    // above -- the two are now consistent with each other in the same
+    // binary, closing the very residual this comment used to describe.
     if (use_ppoll)
         fprintf(f, "#if !defined(__linux__)\n"
                    "static int ppoll(struct pollfd *fds, nfds_t nfds,\n"
@@ -7756,8 +7904,13 @@ static void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm,
                    "    if (timeout)\n"
                    "        ms = (int)(timeout->tv_sec * 1000 + "
                    "timeout->tv_nsec / 1000000);\n"
-                   "    int r = poll(fds, nfds, ms);\n"
+                   "    struct pollfd *host = "
+                   "__cccc_native_poll_marshal_in(fds, nfds);\n"
+                   "    if (!host) { errno = ENOMEM; return -1; }\n"
+                   "    int r = poll(host, nfds, ms);\n"
                    "    int saved_errno = errno;\n"
+                   "    __cccc_native_poll_marshal_out(host, fds, nfds);\n"
+                   "    free(host);\n"
                    "    if (have_old)\n"
                    "        pthread_sigmask(SIG_SETMASK, &old_set, NULL);\n"
                    "    errno = saved_errno;\n"
@@ -8062,6 +8215,324 @@ static void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm,
                     "    return rc;\n"
                     "}\n"
                     "#endif\n");
+    }
+
+    // #1146: closes the residual documented above -- on the VM,
+    // nss_static_mutex (src/stdlib/posix_net.c) is taken by the plain
+    // gethostbyname()/gethostbyaddr()/getnetbyname() wrappers too, which is
+    // what makes the _r family's deep copy into the caller's own buffer
+    // race-free; a torn result was possible natively because the plain
+    // family had no wrapper to add a mutex to. Renaming the plain family
+    // (only when it's actually used alongside the _r family, per
+    // any_resolver_plain above) and giving it a same-mutex wrapper restores
+    // that mutual exclusion. Gated on any_resolver_r, not emitted at all
+    // otherwise, so a program that never uses the _r family is unaffected.
+    //
+    // Unlike the _r shims above (whole-function #if !defined(__linux__),
+    // legal because on Linux the real glibc _r functions are used directly
+    // under their own un-renamed names), these wrappers must be defined
+    // unconditionally: the rename that redirects the guest's call sites is
+    // baked in at cccc-serialize time, independent of which host later
+    // compiles this file, so a definition gated out on Linux would leave a
+    // Linux native build with an undefined __cccc_native_gethostbyname
+    // symbol. Only the mutex lock/unlock (meaningless on Linux, since
+    // __cccc_nss_native_mutex above is itself only declared under
+    // !defined(__linux__)) is guarded internally; on Linux this reduces to
+    // a plain passthrough, which is correct since no _r shim -- and so no
+    // race to guard against -- exists there either.
+    if (any_resolver_plain) {
+        if (use_gethostbyname)
+            rename_bundled_extern_for_native_shim(vm, prog, "gethostbyname",
+                                                  "netdb.h");
+        if (use_gethostbyaddr)
+            rename_bundled_extern_for_native_shim(vm, prog, "gethostbyaddr",
+                                                  "netdb.h");
+        if (use_getnetbyname)
+            rename_bundled_extern_for_native_shim(vm, prog, "getnetbyname",
+                                                  "netdb.h");
+
+        if (use_gethostbyname)
+            fprintf(f, "static struct hostent *__cccc_native_gethostbyname("
+                       "const char *name) {\n"
+                       "#if !defined(__linux__)\n"
+                       "    pthread_mutex_lock(&__cccc_nss_native_mutex);\n"
+                       "#endif\n"
+                       "    struct hostent *r = gethostbyname(name);\n"
+                       "#if !defined(__linux__)\n"
+                       "    pthread_mutex_unlock(&__cccc_nss_native_mutex);\n"
+                       "#endif\n"
+                       "    return r;\n"
+                       "}\n");
+        if (use_gethostbyaddr)
+            fprintf(f, "static struct hostent *__cccc_native_gethostbyaddr("
+                       "const void *addr, socklen_t len, int type) {\n"
+                       "#if !defined(__linux__)\n"
+                       "    pthread_mutex_lock(&__cccc_nss_native_mutex);\n"
+                       "#endif\n"
+                       "    struct hostent *r = gethostbyaddr(addr, len, "
+                       "type);\n"
+                       "#if !defined(__linux__)\n"
+                       "    pthread_mutex_unlock(&__cccc_nss_native_mutex);\n"
+                       "#endif\n"
+                       "    return r;\n"
+                       "}\n");
+        if (use_getnetbyname)
+            fprintf(f, "static struct netent *__cccc_native_getnetbyname("
+                       "const char *name) {\n"
+                       "#if !defined(__linux__)\n"
+                       "    pthread_mutex_lock(&__cccc_nss_native_mutex);\n"
+                       "#endif\n"
+                       "    struct netent *r = getnetbyname(name);\n"
+                       "#if !defined(__linux__)\n"
+                       "    pthread_mutex_unlock(&__cccc_nss_native_mutex);\n"
+                       "#endif\n"
+                       "    return r;\n"
+                       "}\n");
+    }
+
+    fprintf(f, "\n");
+}
+
+// #1146: -c=native's counterpart to the VM's own canonical-constant
+// translation. The VM folds several POSIX constant families to CCCC's own
+// canonical numbering in the bundled headers (include/poll.h, langinfo.h,
+// locale.h, sched.h) and translates to the host's real values inside a
+// wrapper before calling the real libc function (guest_to_host_pollev/
+// host_to_guest_pollev in src/stdlib/posix_poll.c, guest_to_host_nl_item in
+// posix_lang.c, guest_to_host_lc/guest_to_host_lc_mask in locale.c,
+// guest_to_host_sched_policy/host_to_guest_sched_policy in posix_sched.c).
+// -c=native had no such wrapper: every guest use of one of these constants
+// is already constant-folded to its canonical numeric value by the time an
+// AST exists (ND_NUM carries only the folded int, no macro-name
+// provenance survives to serialize_expr's ND_NUM case), so the emitted C
+// passed the guest's canonical value straight to the host function with no
+// translation at all -- silently wrong on whichever host's numbering
+// *isn't* what CCCC's canonical numbering happens to copy, with no
+// diagnostic anywhere (unlike #1140's undeclared-identifier errors, this
+// is a call that compiles and links fine and just returns/behaves wrong).
+//
+// Fixed the same way #1140 supplies functions the host doesn't declare at
+// all: rename_bundled_extern_for_native_shim() (above) renames the guest
+// program's own declared-only reference from CCCC's bundled header to
+// `__cccc_native_<name>`, and a translating wrapper is emitted under that
+// new name, calling the real host function (still reachable under its
+// original name via the replayed `#include`) with the constant translated
+// first. Unlike serialize_posix_compat_shims()'s shims (ppoll/sched_*
+// stubs/the _r resolver family), every function here IS host-declared on
+// both platforms, so the rename and the wrapper are both unconditional --
+// translate-vs-passthrough is decided *inside* each wrapper by the same
+// #ifdef the VM's own translator uses, ported verbatim, so the identical
+// generated C is correct whichever host later compiles it (mirrors how
+// serialize_posix_compat_shims's per-function #if guards keep that file's
+// output host-portable too, just pushed inside the function body here
+// since the wrapper itself must exist unconditionally).
+static void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm,
+                                            Obj *prog) {
+    if (vm->compiler.emit_cccc)
+        return;
+
+    bool use_nl_langinfo =
+        bundled_shim_fn_is_used(vm, prog, "nl_langinfo", "langinfo.h");
+    bool use_nl_langinfo_l =
+        bundled_shim_fn_is_used(vm, prog, "nl_langinfo_l", "langinfo.h");
+    bool use_setlocale =
+        bundled_shim_fn_is_used(vm, prog, "setlocale", "locale.h");
+    bool use_newlocale =
+        bundled_shim_fn_is_used(vm, prog, "newlocale", "locale.h");
+    bool use_sched_get_priority_min =
+        bundled_shim_fn_is_used(vm, prog, "sched_get_priority_min", "sched.h");
+    bool use_sched_get_priority_max =
+        bundled_shim_fn_is_used(vm, prog, "sched_get_priority_max", "sched.h");
+
+    bool any_nl_langinfo = use_nl_langinfo || use_nl_langinfo_l;
+    bool any_locale      = use_setlocale || use_newlocale;
+    bool any_sched_prio =
+        use_sched_get_priority_min || use_sched_get_priority_max;
+
+    if (!any_nl_langinfo && !any_locale && !any_sched_prio)
+        return;
+
+    // nl_item (#807/#1146) -- macOS uses a flat 0-56 sequence, which
+    // CCCC's canonical numbering (include/langinfo.h) copies verbatim, so
+    // translation is a no-op there; glibc packs (category << 16) | index.
+    // Ported verbatim from guest_to_host_nl_item (src/stdlib/posix_lang.c)
+    // including its own reasoning for using bare integer literals rather
+    // than the CODESET/DAY_1/etc. macro names on the glibc side: this
+    // generated file's own #include <langinfo.h> replay reaches the
+    // *host's* real header, so on a glibc host those names already expand
+    // to glibc's real values (e.g. CODESET is 14, not 0) and would
+    // silently compare the guest's canonical input against the wrong
+    // number if used as a switch label.
+    if (any_nl_langinfo) {
+        if (rename_bundled_extern_for_native_shim(vm, prog, "nl_langinfo",
+                                                  "langinfo.h"))
+            use_nl_langinfo = true;
+        if (rename_bundled_extern_for_native_shim(vm, prog, "nl_langinfo_l",
+                                                  "langinfo.h"))
+            use_nl_langinfo_l = true;
+
+        fprintf(
+            f, "static int __cccc_native_guest_to_host_nl_item(int guest_item, "
+               "long *host_item) {\n"
+               "#ifdef __APPLE__\n"
+               "    *host_item = guest_item;\n"
+               "    return 1;\n"
+               "#else\n"
+               "    long v = (long)guest_item;\n"
+               "    switch (v) {\n"
+               "        case 0: *host_item = 14; break;\n"
+               "        case 1: *host_item = 131112; break;\n"
+               "        case 2: *host_item = 131113; break;\n"
+               "        case 3: *host_item = 131114; break;\n"
+               "        case 4: *host_item = 131115; break;\n"
+               "        case 5: *host_item = 131110; break;\n"
+               "        case 6: *host_item = 131111; break;\n"
+               "        case 50: *host_item = 65536; break;\n"
+               "        case 51: *host_item = 65537; break;\n"
+               "        case 52: *host_item = 327680; break;\n"
+               "        case 53: *host_item = 327681; break;\n"
+               "        case 56: *host_item = 262159; break;\n"
+               "        default:\n"
+               "            if (v >= 7 && v <= 13) *host_item = 131079 + (v - "
+               "7);\n"
+               "            else if (v >= 14 && v <= 20) *host_item = 131072 + "
+               "(v - 14);\n"
+               "            else if (v >= 21 && v <= 32) *host_item = 131098 + "
+               "(v - 21);\n"
+               "            else if (v >= 33 && v <= 44) *host_item = 131086 + "
+               "(v - 33);\n"
+               "            else return 0;\n"
+               "            break;\n"
+               "    }\n"
+               "    return 1;\n"
+               "#endif\n"
+               "}\n");
+        if (use_nl_langinfo)
+            fprintf(f, "static char *__cccc_native_nl_langinfo(nl_item "
+                       "guest_item) {\n"
+                       "    long host_item;\n"
+                       "    if "
+                       "(!__cccc_native_guest_to_host_nl_item((int)guest_item, "
+                       "&host_item))\n"
+                       "        return \"\";\n"
+                       "    return nl_langinfo((nl_item)host_item);\n"
+                       "}\n");
+        if (use_nl_langinfo_l)
+            fprintf(f, "static char *__cccc_native_nl_langinfo_l(nl_item "
+                       "guest_item, locale_t loc) {\n"
+                       "    long host_item;\n"
+                       "    if "
+                       "(!__cccc_native_guest_to_host_nl_item((int)guest_item, "
+                       "&host_item))\n"
+                       "        return \"\";\n"
+                       "    return nl_langinfo_l((nl_item)host_item, loc);\n"
+                       "}\n");
+    }
+
+    // LC_* / LC_*_MASK (#819/#820/#1146) -- ported verbatim from
+    // guest_to_host_lc/guest_to_host_lc_mask (src/stdlib/locale.c). Neither
+    // needs an #ifdef: both switch/branch straight to the *host's* real
+    // LC_*/LC_*_MASK macro names (this file's own #include <locale.h>
+    // replay reaches the host's real header), which resolve to whichever
+    // host later compiles this, so the mapping is a correct no-op on
+    // whichever host CCCC's canonical numbering happens to already copy.
+    if (any_locale) {
+        if (rename_bundled_extern_for_native_shim(vm, prog, "setlocale",
+                                                  "locale.h"))
+            use_setlocale = true;
+        if (rename_bundled_extern_for_native_shim(vm, prog, "newlocale",
+                                                  "locale.h"))
+            use_newlocale = true;
+
+        if (use_setlocale)
+            fprintf(f,
+                    "static int __cccc_native_guest_to_host_lc(int "
+                    "guest_category) {\n"
+                    "    switch (guest_category) {\n"
+                    "        case 0: return LC_ALL;\n"
+                    "        case 1: return LC_COLLATE;\n"
+                    "        case 2: return LC_CTYPE;\n"
+                    "        case 3: return LC_MONETARY;\n"
+                    "        case 4: return LC_NUMERIC;\n"
+                    "        case 5: return LC_TIME;\n"
+                    "        case 6: return LC_MESSAGES;\n"
+                    "        default: return guest_category;\n"
+                    "    }\n"
+                    "}\n"
+                    "static char *__cccc_native_setlocale(int guest_category, "
+                    "const char *locale) {\n"
+                    "    return "
+                    "setlocale(__cccc_native_guest_to_host_lc(guest_category), "
+                    "locale);\n"
+                    "}\n");
+        if (use_newlocale)
+            fprintf(
+                f, "static int __cccc_native_guest_to_host_lc_mask(int "
+                   "guest_mask) {\n"
+                   "    if (guest_mask == 0x3f) return LC_ALL_MASK;\n"
+                   "    int host_mask = 0;\n"
+                   "    if (guest_mask & (1 << 0)) host_mask |= "
+                   "LC_COLLATE_MASK;\n"
+                   "    if (guest_mask & (1 << 1)) host_mask |= "
+                   "LC_CTYPE_MASK;\n"
+                   "    if (guest_mask & (1 << 2)) host_mask |= "
+                   "LC_MESSAGES_MASK;\n"
+                   "    if (guest_mask & (1 << 3)) host_mask |= "
+                   "LC_MONETARY_MASK;\n"
+                   "    if (guest_mask & (1 << 4)) host_mask |= "
+                   "LC_NUMERIC_MASK;\n"
+                   "    if (guest_mask & (1 << 5)) host_mask |= LC_TIME_MASK;\n"
+                   "    return host_mask;\n"
+                   "}\n"
+                   "static locale_t __cccc_native_newlocale(int guest_mask, "
+                   "const char *locale, locale_t base) {\n"
+                   "    return "
+                   "newlocale(__cccc_native_guest_to_host_lc_mask(guest_mask), "
+                   "locale, base);\n"
+                   "}\n");
+    }
+
+    // SCHED_* (#824/#1146) -- ported verbatim from
+    // guest_to_host_sched_policy (src/stdlib/posix_sched.c). macOS's real
+    // <sched.h> declares only sched_yield/sched_get_priority_min/max (no
+    // process-scheduling API at all), so only those two need a translating
+    // wrapper here -- sched_setscheduler/getscheduler/setparam/getparam/
+    // rr_get_interval are not host-declared on macOS at all and are
+    // already handled as ENOSYS stubs by serialize_posix_compat_shims()
+    // under their own (never renamed) names.
+    if (any_sched_prio) {
+        if (rename_bundled_extern_for_native_shim(
+                vm, prog, "sched_get_priority_min", "sched.h"))
+            use_sched_get_priority_min = true;
+        if (rename_bundled_extern_for_native_shim(
+                vm, prog, "sched_get_priority_max", "sched.h"))
+            use_sched_get_priority_max = true;
+
+        fprintf(f, "static int __cccc_native_guest_to_host_sched_policy(int "
+                   "guest_policy) {\n"
+                   "    switch (guest_policy) {\n"
+                   "        case 0: return SCHED_OTHER;\n"
+                   "        case 1: return SCHED_FIFO;\n"
+                   "        case 2: return SCHED_RR;\n"
+                   "#ifdef __linux__\n"
+                   "        case 3: return SCHED_BATCH;\n"
+                   "        case 5: return SCHED_IDLE;\n"
+                   "#endif\n"
+                   "        default: return guest_policy;\n"
+                   "    }\n"
+                   "}\n");
+        if (use_sched_get_priority_min)
+            fprintf(f, "static int __cccc_native_sched_get_priority_min(int "
+                       "policy) {\n"
+                       "    return sched_get_priority_min("
+                       "__cccc_native_guest_to_host_sched_policy(policy));\n"
+                       "}\n");
+        if (use_sched_get_priority_max)
+            fprintf(f, "static int __cccc_native_sched_get_priority_max(int "
+                       "policy) {\n"
+                       "    return sched_get_priority_max("
+                       "__cccc_native_guest_to_host_sched_policy(policy));\n"
+                       "}\n");
     }
 
     fprintf(f, "\n");
@@ -11905,6 +12376,16 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // there). Same !generated_only gating as its neighbours.
     if (!generated_only)
         serialize_posix_compat_shims(f, vm, prog);
+
+    // #1146: same placement rationale as serialize_posix_compat_shims just
+    // above (struct/typedef visibility from the #include replay, no
+    // dependency on serialize_type_defs_for_owner since poll.h/langinfo.h/
+    // locale.h/sched.h are all real host headers). Order relative to
+    // serialize_posix_compat_shims doesn't matter -- the two touch disjoint
+    // symbol sets except for sharing nothing but the file's own fprintf
+    // stream, and neither reads output the other wrote.
+    if (!generated_only)
+        serialize_canonical_const_shims(f, vm, prog);
 
     // #965/#993: see the comment on the generated_only branch's own call
     // above -- must run after both the #include replay and the file-scope

@@ -5,6 +5,46 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `-c=native`: `ppoll`, `sched_setparam`/`getparam`/`setscheduler`/
+  `getscheduler`/`rr_get_interval` (`--posix-emulation`), and
+  `gethostbyname_r`/`gethostbyaddr_r`/`getnetbyname_r` (ungated) were
+  undeclared on a host with no real primitive for them (macOS for all of
+  these) — "use of undeclared identifier". Fixed by porting the VM's own
+  emulation/shim/stub for each into the emitted C
+  (`serialize_posix_compat_shims`, `src/serialize.c`), guarded so a real
+  host symbol is always preferred where one exists. A companion
+  native-mode `<xlocale.h>` injection declares the `isalpha_l`/`toupper_l`/
+  `nl_langinfo_l`/`strfmon_l` family, which macOS declares but not from the
+  headers a plain `#include <ctype.h>`/`<langinfo.h>`/`<monetary.h>` pulls
+  in (#1140).
+- `-c=native`: CCCC's own canonical POSIX constant numbering
+  (`POLLWRNORM`/`POLLWRBAND`, `nl_item`, `LC_*`/`LC_*_MASK`, `SCHED_*`) was
+  never translated to the host's real values the way the VM's own wrappers
+  do — every guest use was already folded to a plain integer by parse
+  time, so the emitted C passed it straight to the host function with no
+  translation and no diagnostic, silently wrong on whichever host's real
+  numbering isn't what CCCC's canonical numbering happens to copy (`poll`/
+  `sched_get_priority_min`/`max`: wrong on macOS; `nl_langinfo`/
+  `setlocale`: wrong on Linux). Fixed by renaming the guest's own
+  declared-only reference to `__cccc_native_<name>` and supplying a
+  translating wrapper under the new name
+  (`rename_bundled_extern_for_native_shim`/
+  `serialize_canonical_const_shims`, `src/serialize.c`); `ppoll`'s existing
+  shim now translates too, so it stays consistent with plain `poll()` in
+  the same binary. The emitted `gethostbyname_r`/`gethostbyaddr_r`/
+  `getnetbyname_r` mutex now also covers the plain `gethostbyname()`/
+  `gethostbyaddr()`/`getnetbyname()` family (only when a program uses both),
+  matching the VM's own single shared mutex (#1146).
+- `-c=native` never linked `-liconv`, so a program calling
+  `iconv_open()`/`iconv()`/`iconv_close()` failed at link time on macOS
+  ("Undefined symbols ... _iconv") — invisible until #1140 cleared the
+  compile-time errors ahead of it. Fixed by appending `-liconv` to the
+  native `cc` invocation on Darwin only, alongside the existing
+  unconditional `-lm`/`-pthread`; glibc bundles `iconv` in libc itself, so
+  Linux is unaffected either way (#1147).
+
 ## [0.3.4] - 2026-08-23
 
 ### Fixed

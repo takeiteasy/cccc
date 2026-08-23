@@ -348,6 +348,20 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
     // flag at all. An older glibc (< 2.34) needs it explicitly. Harmless
     // where unnecessary, same rationale as -lm just above.
     argv_push(&cc_args, "-pthread");
+    // #1147: iconv is never linked otherwise -- <iconv.h>'s iconv_open/
+    // iconv/iconv_close (include/iconv.h) are real, directly-called host
+    // functions under -c=native (no CCCC wrapper, unlike the VM's own
+    // FFI-resolved iconv), and macOS ships them in a separate libiconv
+    // rather than folding them into libSystem the way glibc folds them
+    // into libc itself -- verified directly (link fails on macOS without
+    // -liconv, succeeds with it; not needed at all on Linux). Unlike -lm/
+    // -pthread just above, this can't be forwarded unconditionally: glibc
+    // has no separate libiconv, so an unconditional -liconv would convert
+    // a macOS link gap into a Linux one. Mirrors this project's own build
+    // (Makefile's Darwin-only LDFLAGS += -liconv).
+#ifdef __APPLE__
+    argv_push(&cc_args, "-liconv");
+#endif
     // #1064: plain `char` is signed under every one of CCCC's own type
     // rules (ty_char, src/type.c), but a real host's plain `char` isn't
     // universally signed -- measured directly in the cccc-linux-arm64

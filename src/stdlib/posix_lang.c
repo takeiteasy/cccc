@@ -24,6 +24,12 @@
 // translation table/range arithmetic lives in exactly one place.
 // *found is set to 0 for an unrecognized canonical item (caller returns ""
 // without touching the host at all), 1 otherwise.
+// #1148 (found, not fixed, while implementing #1146): *found is set here,
+// before the #ifdef, so the #else arm's own *found = 0 for an unrecognized
+// canonical item only ever takes effect on non-Apple hosts -- on macOS this
+// line already committed *found = 1, so an out-of-range nl_item is
+// forwarded to the host raw instead of short-circuiting to "" the way this
+// function's own comment above promises.
 static nl_item guest_to_host_nl_item(nl_item guest_item, int *found) {
     *found = 1;
 #ifdef __APPLE__
