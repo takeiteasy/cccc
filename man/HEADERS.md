@@ -1081,6 +1081,104 @@ emitted. `tools/comptime_native_smoke.py`'s own
 "any host-owned member" version of this fix introduced and this narrower
 scoping (`expr_roots_at_opaque_member()`, `src/serialize.c`) avoids.
 
+**A bundled header's macros must never name a member of a host-owned
+type (#1138)** — `include/sys/select.h`'s `FD_ZERO`/`FD_SET`/`FD_CLR`/
+`FD_ISSET` used to spell `fd_set`'s storage as `(set)->__fds_bits[...]`, a
+member access. Unlike a store through a struct's real field (the class of
+hazard #1103's `mbstate_t.__opaque` fix above handles), a *macro* is
+expanded by CCCC's own preprocessor at guest **parse** time, so the member
+name is already baked into the AST long before `-c=native`'s backend ever
+runs — which header the host compiler later reads is irrelevant, so this
+class of bug is **not** fixable with an `#ifdef __CCCC__`/`#include_next`
+hand-off (see #1142 below): the host's real `struct fd_set` (macOS's
+`fds_bits`, glibc's `__fds_bits` but a `long[16]`, not our flat byte array)
+was simply never going to have a member by that exact name. Fixed by
+indexing through a plain `(unsigned char *)(set)` reinterpretation of the
+whole object instead of any member at all — correct against both layouts,
+since `sizeof(fd_set) == 128` and bit *k* always lands at byte *k*/8, bit
+*k*%8 on every little-endian arch CCCC supports. The general rule this
+generalizes to: a macro in a bundled header, unlike a struct's field
+access, can never be rescued by a hand-off, so it must be written to be
+correct against every host's layout from the start.
+
+**`unistd.h`'s `environ` accessor leaked into `-c=native` output as an
+undeclared call (#1139)** — `environ` is `#define environ
+(*__cccc_environ_ptr())`, an accessor for a VM-only cfunc
+(`src/stdlib/posix_io.c`). Every sibling accessor (`__cccc_stdin`,
+`__cccc_errno_ptr`, `__cccc_optarg_ptr`, …) already has an entry in
+`native_accessor_shims` (`src/serialize.c`) defining a real, `static`
+function over the host's own real global — `environ` didn't. Adding the
+missing entry surfaced a second bug once tested under the harness's own
+real invocation shape (`-I./include` forwarded, per `native.py`):
+`include/unistd.h`'s own unguarded `extern char ***__cccc_environ_ptr(void);`
+also reached the real host compiler (same replay path as every other
+`-I./include`-shadowed header), conflicting with the shim's `static`
+definition of the identical name ("static declaration ... follows
+non-static declaration"). Unlike `stdio.h`'s `stdin`/`stdout`/`stderr`
+(#1040) this did **not** need the whole file guarded and handed off to the
+host's own `<unistd.h>` — that was tried first and reverted, since it broke
+`unistd.h`'s own `#include "sys/uio.h"` convenience-include (#792, losing
+`struct iovec` for any program that only ever `#include <unistd.h>`) and
+separately collided with `include/sched.h`'s own struct layout once the
+real host's transitively-reached `<sched.h>` disagreed with it (tracked
+separately as #1143 — pre-existing, not caused by this fix). The narrower
+fix that landed: guard just the `extern`/`#define` pair under `#ifdef
+__CCCC__`, nothing else — sufficient because `environ` is a macro, already
+expanded to a call to `__cccc_environ_ptr()` in the guest AST at parse
+time, so the literal token `environ` never reaches the emitted C at all;
+the only thing that could still collide was that one `extern`.
+
+**`<uchar.h>`'s C11/C23 multibyte↔UTF-16/32/8 conversions had no
+`-c=native` definition on hosts lacking the real symbols (#1141)** —
+`mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` are VM
+cfuncs (`src/stdlib/wide.c`); `uchar.h` is on
+`is_cccc_supplied_only_header()` (`src/preprocess.c`) like `threads.h`, so
+its declarations are re-derived but nothing ever defined the functions
+themselves for a native binary to link against. glibc has shipped the
+c16/c32 pair since 2.16 and the c8 pair since 2.36 — a host that new links
+against the real symbol using the re-derived `extern` alone, no help
+needed — but Darwin has never shipped any of the six
+("Undefined symbols ... _c16rtomb"). Fixed with `serialize_uchar_shims()`
+(`src/serialize.c`), the same self-contained-shim shape `serialize_threads_
+shims()` uses for `<threads.h>` (#1088): a fallback definition, a
+near-verbatim port of `src/stdlib/wide.c`'s own VM-side fallback, emitted
+only for the functions actually used and only under the identical
+`__GLIBC_PREREQ` feature test `wide.c` itself already gates its own choice
+on — nested `#if`/`#elif`, not a `&&`-combined single `#if`, since the
+preprocessor macro-expands an entire `#if` line (including a short-
+circuited `&&` operand) before evaluating any of it, so `__GLIBC_PREREQ`
+must never appear in a condition that can be reached on a host with no
+`__GLIBC__` at all. The two shim copies (`src/stdlib/wide.c`,
+`src/serialize.c`) have no shared source and must be kept in sync by hand;
+folding them into one generated `.inc` (the `reflection_ffi_*.inc`
+precedent) is a real follow-up, not attempted here.
+
+**`include/wchar.h`'s `mbstate_t` has no `#ifdef __CCCC__`/`#include_next`
+hand-off, and a full one doesn't work here (#1142)** — every other host-
+layout-sensitive bundled header (`fenv.h` #1021, `pthread.h` #1022,
+`sys/mount.h` #1031, `unistd.h` #1139 above) gets one; `wchar.h` never did.
+The obvious fenv.h-shaped fix was tried first and reverted: both macOS's
+and glibc's real `<wchar.h>` unconditionally `#include <time.h>`
+internally (for `wcsftime`'s `struct tm`), and `include/time.h` has no
+hand-off of its own — deliberately, per its own comment, after #1022's
+identical attempt at a full `<time.h>` hand-off dragged in far more than
+`struct timespec` and hit a `clockid_t` collision with no narrow fix. A
+real host compiler re-processing that `#include_next` chain hits CCCC's
+own bundled, non-hand-off `time.h` again via the same `-I./include`
+forwarding that found `wchar.h` in the first place — `struct tm`/
+`clock_t`/`time_t` redefinition, confirmed directly against both SDKs, the
+identical cascade `__cccc_mb_cur_max`'s own shim comment
+(`src/serialize.c`) documents for the same reason a `<stdlib.h>` hand-off
+was rejected. Landing the full split would trade #1103's already-fixed
+`mbstate_t`-layout mismatch for a strictly worse, unconditional compile
+failure on every host. Fell back instead to a narrow fix matching
+`_STRUCT_TIMESPEC`'s own precedent (#1022): guard just the `mbstate_t`
+typedef under the exact macro name each real host's own `mbstate_t`
+definition uses as its include guard (glibc: `__mbstate_t_defined`,
+`bits/types/mbstate_t.h`; Darwin: `_MBSTATE_T`, `sys/_types/_mbstate_t.h`
+— verified directly against both), so a future header that does gain a
+hand-off reaching this TU's real `mbstate_t` won't collide with this one.
+
 ## Private headers
 
 `include/cccc/reflection.h`, `testing.h`, and `building.h` are CCCC's own

@@ -79,6 +79,14 @@
 #include <sched.h>
 #include <search.h>
 #include <locale.h>
+// #1144: isalpha_l/toupper_l (below) are called with no #include <ctype.h>
+// in this file at all -- the VM tolerates this via an FFI-registered-
+// symbol implicit-call resolution real host compilers don't share, so
+// -c=native failed with "use of undeclared identifier 'isalpha_l'" on
+// BOTH platforms (glibc has the real symbol; this isn't #1140's "no host
+// primitive" class at all). #include <ctype.h> here provides the
+// declaration.
+#include <ctype.h>
 #include <spawn.h>
 #include <sys/select.h>
 #include <sys/ipc.h>

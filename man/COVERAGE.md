@@ -2293,6 +2293,24 @@ promises a happens-before ordering. `mtx_timedlock` mirrors the VM's own
 `pthread_mutex_timedlock`) byte-for-byte, so both back ends agree by
 construction.
 
+**C11/C23 `<uchar.h>` conversions on a host lacking the real symbols
+(#1141, RESOLVED).** `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/
+`c8rtomb` are VM cfuncs (`src/stdlib/wide.c`); `<uchar.h>` is on
+`is_cccc_supplied_only_header()` like `<threads.h>` above, so its
+declarations are re-derived but nothing defined the functions themselves
+for a native binary to link against. glibc has shipped the c16/c32 pair
+since 2.16 and the c8 pair since 2.36 — a host that new links against the
+real symbol using the re-derived `extern` alone — but Darwin has never
+shipped any of the six ("Undefined symbols ... _c16rtomb"). Fixed with
+`serialize_uchar_shims` (`src/serialize.c`), the same self-contained-shim
+shape as `<threads.h>`'s own fix above: each fallback is a near-verbatim
+port of its VM cfunc counterpart in `src/stdlib/wide.c`, emitted only for
+the functions actually used and only under the identical `__GLIBC_PREREQ`
+feature test `wide.c` itself already gates its own choice on, so a host
+with the real symbols never sees a second, competing definition. The two
+copies have no shared source and are kept in sync by hand; a follow-up
+tracks folding them into one generated source shared by both build paths.
+
 ---
 
 ## Standard Library and Built-in Functions
@@ -2511,7 +2529,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<stdatomic.h>` | ~ | Header present; `atomic_fetch_add/sub/or/xor/and` and `atomic_load/store/exchange/compare_exchange` work correctly in single-threaded and thread-local contexts; cross-thread atomicity requires the GIL or an explicit mutex |
 | `<stdnoreturn.h>` | ✓ | |
 | `<threads.h>` | ✓ | Thread lifecycle (`thrd_create/join/exit/detach/yield/sleep/current/equal`), mutex (`mtx_init/lock/trylock/timedlock/unlock/destroy`), condition variables (`cnd_init/wait/signal/broadcast/timedwait/destroy`), thread-specific storage (`tss_create/get/set/delete`), and `call_once`; backed by host pthreads via POSIX `<pthread.h>`. `tss_create` destructors run when the owning thread exits (up to `TSS_DTOR_ITERATIONS` re-checks per C11 7.26.1p7), matching `pthread_key_create`; a plain `return` from `main()` does not run them (matching glibc), but an explicit `pthread_exit()`/`thrd_exit()` call on the main thread does. Round-trips under `-c=native`/`-m`/`-c=generated` too (#1088) — see [Serialized-output divergences](#serialized-output-divergences) for the shim's shape |
-| `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere) |
+| `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere). Round-trips under `-c=native` too, including on a host with no real symbols at all (Darwin) — see [Serialized-output divergences](#serialized-output-divergences) for the shim's shape (#1141) |
 | `aligned_alloc` | ✓ | Routed through the VM heap (`MALCA` opcode, #668) when the VM heap is enabled (the default); backed by host aligned allocation only under `-V`/`--no-vm-heap` |
 | `malloc`/`free`/`calloc`/`realloc`/`reallocarray`/`aligned_alloc`/`posix_memalign` as function-pointer values | ✓ | Taking one of these by name and calling it indirectly (e.g. `void (*fp)(void*) = free; fp(p);`, or passing it as a callback — `tss_create(&key, free)` is a common idiom) gets the same VM-heap-aware behavior as a direct call, matching the `MALC`/`MFRE`/`CALC`/`REALC`/`REALCA`/`MALCA`/`PMEMA` opcodes' semantics exactly (#865) |
 | `quick_exit` / `at_quick_exit` | ✓ | |

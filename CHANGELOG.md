@@ -7,6 +7,32 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`: `FD_ZERO`/`FD_SET`/`FD_CLR`/`FD_ISSET` (`include/sys/select.h`)
+  indexed `fd_set`'s storage through a member named `__fds_bits`, baked in
+  by macro expansion at guest parse time — under `-c=native` the real host
+  `struct fd_set` has no member by that name (macOS: `fds_bits`; glibc:
+  `__fds_bits`, but a different word width), "no member named '__fds_bits'
+  in 'struct fd_set'". Fixed by indexing through a plain
+  `(unsigned char *)(set)` reinterpretation of the whole object instead,
+  correct against both layouts (#1138).
+- `-c=native`: a guest read/write of `environ` reached the output as a call
+  to `__cccc_environ_ptr`, an internal accessor with no native definition —
+  "use of undeclared identifier '__cccc_environ_ptr'". Fixed by adding it
+  to `native_accessor_shims` (`src/serialize.c`) and narrowly guarding
+  `include/unistd.h`'s own conflicting `extern` under `#ifdef __CCCC__`
+  (#1139).
+- `-c=native`: `<uchar.h>`'s C11/C23 multibyte↔UTF-16/32/8 conversions
+  (`mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb`) had no
+  definition to link against on a host lacking the real symbols (Darwin
+  has never shipped any of the six) — "Undefined symbols ... _c16rtomb".
+  Fixed with a self-contained fallback shim (`serialize_uchar_shims`,
+  `src/serialize.c`), a port of the VM's own `src/stdlib/wide.c` fallback,
+  emitted only on a host that actually needs it (#1141).
+- `include/wchar.h`'s `mbstate_t` typedef now guards itself under the same
+  include-guard macro name each real host's own `mbstate_t` definition
+  uses (glibc: `__mbstate_t_defined`; Darwin: `_MBSTATE_T`), preventing a
+  future redefinition if some other header gains a hand-off that also
+  reaches this translation unit's real `mbstate_t` (#1142).
 - `-c=native`/`-m`: `rename_colliding_static_names()`'s host-libc-symbol
   probe (Tier A, #1042(c)) renamed a `static inline` header function's call
   sites without renaming its definition whenever that definition never

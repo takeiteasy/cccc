@@ -95,6 +95,13 @@ static long long wrap_iswctype(long long c, long long desc) {
     return (long long)iswctype((wint_t)c, (wctype_t)desc);
 }
 
+// #1141: src/serialize.c's serialize_uchar_shims() carries a hand-ported
+// copy of every fallback in this #ifndef/#endif pair (and the
+// CCCC_HAVE_NATIVE_MBRTOC8 pair below it) for -c=native, guarded by the
+// identical __GLIBC_PREREQ feature test. The two copies have no shared
+// source -- this one is compiled into CCCC itself, the other is text
+// emitted into the generated guest program's own .c file -- and must be
+// kept in sync by hand whenever either changes.
 #ifndef CCCC_HAVE_NATIVE_UCHAR_CONV
 static size_t cccc_mbrtoc16(cccc_char16_t *pc16, const char *s, size_t n,
                             mbstate_t *ps) {

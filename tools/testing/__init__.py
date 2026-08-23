@@ -323,17 +323,26 @@ NATIVE_SKIP_TESTS = {
                  "enough to un-skip this file, see #1123 (deferred "
                  "multi-word native lowering)",
     # #1103's own two bugs (rename-collision dbm_* dup names, mbstate_t's
-    # __opaque layout mismatch) are fixed; both files stay skipped for the
-    # residual, unrelated failures #1103's corpus run also turned up, each
-    # now its own ticket.
-    "test_suite_posix.c": "no member named '__fds_bits' in 'struct fd_set' "
-                 "(#1138), __cccc_environ_ptr undeclared (#1139), and "
-                 "several --posix-emulation symbols with no macOS host "
-                 "primitive -- ppoll/*_l locale family/*_r resolver "
-                 "family/sched_getscheduler (#1140)",
-    "test_suite_strings.c": "c16rtomb/uchar.h C11 functions link-fail on "
-                 "Darwin (absent from Darwin libc, #1141) -- may already be "
-                 "clean on Linux/glibc",
+    # __opaque layout mismatch), #1138 (fd_set's __fds_bits spelling),
+    # #1139 (__cccc_environ_ptr) and #1144 (isalpha_l/toupper_l called
+    # with no #include <ctype.h> in this file at all) are all fixed --
+    # compiles clean natively on Linux/glibc now. Stays skipped (both
+    # platforms, general table not macOS-only) for two separate,
+    # unresolved reasons: #1140, a still-open policy question about
+    # several --posix-emulation symbols with no macOS host primitive at
+    # all (ppoll/*_l locale family/*_r resolver family/
+    # sched_getscheduler -- macOS compile-time only, Linux/glibc has
+    # every one), and #1145, 14 of 84 subtests (mostly SIGSEGV, not
+    # merely a wrong exit code) failing at native RUNTIME on Linux/glibc
+    # once the file compiles at all -- a previously-invisible surface,
+    # never run until #1138/#1139/#1144 cleared the compile-time
+    # blockers, and its own investigation on the scale of #967's
+    # original native corpus sweep.
+    "test_suite_posix.c": "compiles clean on Linux/glibc now, but 14 "
+                 "subtests fail at native runtime there (#1145) and it "
+                 "still fails to compile on macOS for several "
+                 "--posix-emulation symbols with no host primitive "
+                 "(#1140)",
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1113",
     # #1126: found while adding native coverage for #1125 (wide _BitInt
     # bitfield codegen, unaffected by this) -- test_wide_global_init's own

@@ -6779,6 +6779,24 @@ static const struct {
      "static size_t __cccc_mb_cur_max(void) { return (size_t)__mb_cur_max; }\n"
 #endif
     },
+    // #1139: include/unistd.h defines `environ` itself as
+    // `#define environ (*__cccc_environ_ptr())`, so a guest read/write of
+    // `environ` reaches the output as a call to this otherwise-undeclared
+    // accessor, same trap as every other entry in this table. The leading
+    // `#undef environ` is load-bearing, not decorative: if CCCC's own
+    // unistd.h is in scope when this shim text is compiled (the
+    // -I./include replay-forwarding case), `extern char **environ;`
+    // would otherwise itself expand through that macro into
+    // `extern char **(*__cccc_environ_ptr());` -- nonsense syntax, the
+    // same infinite-recursion-shaped trap FLT_ROUNDS/isnan/MB_CUR_MAX
+    // above each need their own workaround for. Plain
+    // `extern char **environ;` is the correct declaration for a Darwin
+    // *executable* (which is exactly what -c=native emits) -- the
+    // `_NSGetEnviron()` indirection is only required inside a dylib.
+    {"__cccc_environ_ptr",
+     "#undef environ\n"
+     "extern char **environ;\n"
+     "static char ***__cccc_environ_ptr(void) { return &environ; }\n"},
 };
 
 static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
@@ -6836,8 +6854,12 @@ static void serialize_native_accessor_shims(FILE *f, Obj *prog) {
 // __cccc_ensure_mtx/__cccc_ensure_cnd below use a real atomic
 // compare-exchange on the ->__handle field instead, so exactly one raced
 // allocation wins and every other caller adopts it.
-static bool threads_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
-                                    const char *name) {
+// #1141 generalized this from a threads.h-only helper (originally
+// threads_shim_fn_is_used) to also serve serialize_uchar_shims below --
+// same "declared-only, cccc-only-header-sourced, actually used" test,
+// just parameterized on which header's declaration it must trace back to.
+static bool shim_fn_is_used(VirtualMachine *vm, Obj *prog, const char *name,
+                            const char *header_basename) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || !obj->is_used || obj->body)
             continue;
@@ -6848,7 +6870,7 @@ static bool threads_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
             continue;
         if (!cc_file_is_cccc_only(vm, t->file->name))
             continue;
-        if (!path_basename_is(t->file->name, "threads.h"))
+        if (!path_basename_is(t->file->name, header_basename))
             continue;
         return true;
     }
@@ -6865,44 +6887,53 @@ static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     if (vm->compiler.emit_cccc)
         return;
 
-    bool use_thrd_create  = threads_shim_fn_is_used(vm, prog, "thrd_create");
-    bool use_thrd_join    = threads_shim_fn_is_used(vm, prog, "thrd_join");
-    bool use_thrd_exit    = threads_shim_fn_is_used(vm, prog, "thrd_exit");
-    bool use_thrd_detach  = threads_shim_fn_is_used(vm, prog, "thrd_detach");
-    bool use_thrd_yield   = threads_shim_fn_is_used(vm, prog, "thrd_yield");
-    bool use_thrd_sleep   = threads_shim_fn_is_used(vm, prog, "thrd_sleep");
-    bool use_thrd_current = threads_shim_fn_is_used(vm, prog, "thrd_current");
-    bool use_thrd_equal   = threads_shim_fn_is_used(vm, prog, "thrd_equal");
-    bool any_thrd     = use_thrd_create || use_thrd_join || use_thrd_exit ||
-                        use_thrd_detach || use_thrd_yield || use_thrd_sleep ||
-                        use_thrd_current || use_thrd_equal;
+    bool use_thrd_create =
+        shim_fn_is_used(vm, prog, "thrd_create", "threads.h");
+    bool use_thrd_join = shim_fn_is_used(vm, prog, "thrd_join", "threads.h");
+    bool use_thrd_exit = shim_fn_is_used(vm, prog, "thrd_exit", "threads.h");
+    bool use_thrd_detach =
+        shim_fn_is_used(vm, prog, "thrd_detach", "threads.h");
+    bool use_thrd_yield = shim_fn_is_used(vm, prog, "thrd_yield", "threads.h");
+    bool use_thrd_sleep = shim_fn_is_used(vm, prog, "thrd_sleep", "threads.h");
+    bool use_thrd_current =
+        shim_fn_is_used(vm, prog, "thrd_current", "threads.h");
+    bool use_thrd_equal = shim_fn_is_used(vm, prog, "thrd_equal", "threads.h");
+    bool any_thrd       = use_thrd_create || use_thrd_join || use_thrd_exit ||
+                          use_thrd_detach || use_thrd_yield || use_thrd_sleep ||
+                          use_thrd_current || use_thrd_equal;
 
-    bool use_mtx_init = threads_shim_fn_is_used(vm, prog, "mtx_init");
-    bool use_mtx_lock = threads_shim_fn_is_used(vm, prog, "mtx_lock");
-    bool use_mtx_trylock   = threads_shim_fn_is_used(vm, prog, "mtx_trylock");
-    bool use_mtx_timedlock = threads_shim_fn_is_used(vm, prog, "mtx_timedlock");
-    bool use_mtx_unlock    = threads_shim_fn_is_used(vm, prog, "mtx_unlock");
-    bool use_mtx_destroy   = threads_shim_fn_is_used(vm, prog, "mtx_destroy");
+    bool use_mtx_init   = shim_fn_is_used(vm, prog, "mtx_init", "threads.h");
+    bool use_mtx_lock   = shim_fn_is_used(vm, prog, "mtx_lock", "threads.h");
+    bool use_mtx_trylock =
+        shim_fn_is_used(vm, prog, "mtx_trylock", "threads.h");
+    bool use_mtx_timedlock =
+        shim_fn_is_used(vm, prog, "mtx_timedlock", "threads.h");
+    bool use_mtx_unlock = shim_fn_is_used(vm, prog, "mtx_unlock", "threads.h");
+    bool use_mtx_destroy =
+        shim_fn_is_used(vm, prog, "mtx_destroy", "threads.h");
     bool any_mtx      = use_mtx_init || use_mtx_lock || use_mtx_trylock ||
                         use_mtx_timedlock || use_mtx_unlock || use_mtx_destroy;
 
-    bool use_cnd_init = threads_shim_fn_is_used(vm, prog, "cnd_init");
-    bool use_cnd_wait = threads_shim_fn_is_used(vm, prog, "cnd_wait");
-    bool use_cnd_signal    = threads_shim_fn_is_used(vm, prog, "cnd_signal");
-    bool use_cnd_broadcast = threads_shim_fn_is_used(vm, prog, "cnd_broadcast");
-    bool use_cnd_timedwait = threads_shim_fn_is_used(vm, prog, "cnd_timedwait");
-    bool use_cnd_destroy   = threads_shim_fn_is_used(vm, prog, "cnd_destroy");
+    bool use_cnd_init = shim_fn_is_used(vm, prog, "cnd_init", "threads.h");
+    bool use_cnd_wait = shim_fn_is_used(vm, prog, "cnd_wait", "threads.h");
+    bool use_cnd_signal = shim_fn_is_used(vm, prog, "cnd_signal", "threads.h");
+    bool use_cnd_broadcast =
+        shim_fn_is_used(vm, prog, "cnd_broadcast", "threads.h");
+    bool use_cnd_timedwait =
+        shim_fn_is_used(vm, prog, "cnd_timedwait", "threads.h");
+    bool use_cnd_destroy =
+        shim_fn_is_used(vm, prog, "cnd_destroy", "threads.h");
     bool any_cnd = use_cnd_init || use_cnd_wait || use_cnd_signal ||
                    use_cnd_broadcast || use_cnd_timedwait || use_cnd_destroy;
 
-    bool use_tss_create = threads_shim_fn_is_used(vm, prog, "tss_create");
-    bool use_tss_get    = threads_shim_fn_is_used(vm, prog, "tss_get");
-    bool use_tss_set    = threads_shim_fn_is_used(vm, prog, "tss_set");
-    bool use_tss_delete = threads_shim_fn_is_used(vm, prog, "tss_delete");
+    bool use_tss_create = shim_fn_is_used(vm, prog, "tss_create", "threads.h");
+    bool use_tss_get    = shim_fn_is_used(vm, prog, "tss_get", "threads.h");
+    bool use_tss_set    = shim_fn_is_used(vm, prog, "tss_set", "threads.h");
+    bool use_tss_delete = shim_fn_is_used(vm, prog, "tss_delete", "threads.h");
     bool any_tss =
         use_tss_create || use_tss_get || use_tss_set || use_tss_delete;
 
-    bool use_call_once = threads_shim_fn_is_used(vm, prog, "call_once");
+    bool use_call_once = shim_fn_is_used(vm, prog, "call_once", "threads.h");
 
     if (!any_thrd && !any_mtx && !any_cnd && !any_tss && !use_call_once)
         return;
@@ -7307,6 +7338,299 @@ static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                 "            sched_yield();\n"
                 "    }\n"
                 "}\n");
+
+    fprintf(f, "\n");
+}
+
+// #1141: real definitions for the C11/C23 <uchar.h> multibyte<->UTF-16/32/8
+// conversions (mbrtoc16/c16rtomb/mbrtoc32/c32rtomb, mbrtoc8/c8rtomb).
+// uchar.h is on is_cccc_supplied_only_header() (preprocess.c) like
+// threads.h -- its declarations are re-derived from CCCC's own
+// include/uchar.h, but until now no *definition* reached -c=native's
+// output for any of the six, since they're VM cfuncs
+// (src/stdlib/wide.c) with nothing for a native binary to link against.
+//
+// Unlike threads.h, glibc's real libc HAS shipped these since 2.16
+// (2.36 for the c8 pair) -- #1141's own repro is Darwin-only
+// ("Undefined symbols ... _c16rtomb"; confirmed test_suite_strings.c is
+// otherwise clean under --testing=native on Linux/glibc). On a host new
+// enough, the re-derived extern declaration alone is already sufficient
+// for the linker to resolve the real symbol, so the shims below are
+// wrapped in the identical __GLIBC_PREREQ feature test src/stdlib/wide.c
+// itself uses to choose between the real symbol and its own fallback
+// (CCCC_HAVE_NATIVE_UCHAR_CONV / CCCC_HAVE_NATIVE_MBRTOC8) -- a host that
+// already has the real symbol must never see a second, competing
+// definition here ("duplicate symbol" at link time).
+//
+// Each fallback below is a near-verbatim port of its VM cfunc counterpart
+// in src/stdlib/wide.c (cccc_mbrtoc16/cccc_c16rtomb/cccc_mbrtoc32/
+// cccc_c32rtomb/cccc_mbrtoc8/cccc_c8rtomb) -- the two copies have no
+// shared source (one is compiled into CCCC itself, the other is emitted
+// text compiled by the host cc as part of the guest program) and must be
+// kept in sync by hand; folding them into one generated .inc (the
+// reflection_ffi_*.inc precedent) is a real follow-up, filed separately
+// rather than attempted here.
+//
+// Like serialize_threads_shims above, deliberately does NOT #include
+// <string.h>/<stdint.h> (same #1054-class shadowing hazard as sched.h/
+// string.h there) -- __builtin_memcpy/__builtin_memset replace memcpy/
+// memset, and internal accumulator fields use plain `unsigned` instead of
+// uint32_t. mbrtowc/wcrtomb/mbstate_t/char16_t/char32_t/char8_t/wchar_t
+// need no header of their own here: uchar.h's own `#include "wchar.h"` is
+// auto-captured from a cccc-only includer (preprocess.c's #1103-era
+// widened gate) whenever any of these six functions is used at all, so
+// their declarations/typedefs are already visible in the output by the
+// time this runs.
+static void serialize_uchar_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (vm->compiler.emit_cccc)
+        return;
+
+    bool use_mbrtoc16 = shim_fn_is_used(vm, prog, "mbrtoc16", "uchar.h");
+    bool use_c16rtomb = shim_fn_is_used(vm, prog, "c16rtomb", "uchar.h");
+    bool use_mbrtoc32 = shim_fn_is_used(vm, prog, "mbrtoc32", "uchar.h");
+    bool use_c32rtomb = shim_fn_is_used(vm, prog, "c32rtomb", "uchar.h");
+    bool use_mbrtoc8  = shim_fn_is_used(vm, prog, "mbrtoc8", "uchar.h");
+    bool use_c8rtomb  = shim_fn_is_used(vm, prog, "c8rtomb", "uchar.h");
+    bool any16_32 =
+        use_mbrtoc16 || use_c16rtomb || use_mbrtoc32 || use_c32rtomb;
+    bool any8 = use_mbrtoc8 || use_c8rtomb;
+
+    if (!any16_32 && !any8)
+        return;
+
+    fprintf(f, "#if defined(__GLIBC__)\n"
+               "#include <features.h>\n"
+               "#endif\n"
+               "#include <errno.h>\n");
+
+    if (any16_32) {
+        // Nested, not `&&`-combined: `#if defined(__GLIBC__) &&
+        // __GLIBC_PREREQ(2, 16)` looks equivalent but isn't -- the
+        // preprocessor macro-expands an ENTIRE #if line before evaluating
+        // any of it, `&&` included, so __GLIBC_PREREQ(2, 16) is expanded
+        // (and errors, "function-like macro is not defined") on a host
+        // with no __GLIBC__ at all, never mind its value. An #elif's
+        // condition, by contrast, is only expanded once every earlier
+        // branch in the same chain has already been evaluated false --
+        // exactly the short-circuit the combined form was trying (and
+        // failing) to get. Confirmed the hard way: this exact `&&` form
+        // shipped first and broke test_suite_strings.c's own native
+        // compile on macOS/clang with precisely that diagnostic.
+        fprintf(f, "#if !defined(__GLIBC__)\n"
+                   "#define __CCCC_NEED_UCHAR16_32_SHIM 1\n"
+                   "#elif !__GLIBC_PREREQ(2, 16)\n"
+                   "#define __CCCC_NEED_UCHAR16_32_SHIM 1\n"
+                   "#endif\n"
+                   "#ifdef __CCCC_NEED_UCHAR16_32_SHIM\n");
+        if (use_mbrtoc16)
+            fprintf(f, "size_t mbrtoc16(char16_t *pc16, const char *s, size_t "
+                       "n, mbstate_t *ps) {\n"
+                       "    wchar_t wc;\n"
+                       "    size_t rc = mbrtowc(&wc, s, n, ps);\n"
+                       "    if (rc == (size_t)-1 || rc == (size_t)-2 || rc == "
+                       "0)\n"
+                       "        return rc;\n"
+                       "    if (pc16) *pc16 = (char16_t)wc;\n"
+                       "    return rc;\n"
+                       "}\n");
+        if (use_c16rtomb)
+            fprintf(f, "size_t c16rtomb(char *s, char16_t c16, mbstate_t *ps) "
+                       "{\n"
+                       "    return wcrtomb(s, (wchar_t)c16, ps);\n"
+                       "}\n");
+        if (use_mbrtoc32)
+            fprintf(f, "size_t mbrtoc32(char32_t *pc32, const char *s, size_t "
+                       "n, mbstate_t *ps) {\n"
+                       "    wchar_t wc;\n"
+                       "    size_t rc = mbrtowc(&wc, s, n, ps);\n"
+                       "    if (rc == (size_t)-1 || rc == (size_t)-2 || rc == "
+                       "0)\n"
+                       "        return rc;\n"
+                       "    if (pc32) *pc32 = (char32_t)wc;\n"
+                       "    return rc;\n"
+                       "}\n");
+        if (use_c32rtomb)
+            fprintf(f, "size_t c32rtomb(char *s, char32_t c32, mbstate_t *ps) "
+                       "{\n"
+                       "    return wcrtomb(s, (wchar_t)c32, ps);\n"
+                       "}\n");
+        fprintf(f, "#endif\n");
+    }
+
+    if (any8) {
+        // Same nested-#if reasoning as the c16/c32 block above.
+        fprintf(f, "#if !defined(__GLIBC__)\n"
+                   "#define __CCCC_NEED_UCHAR8_SHIM 1\n"
+                   "#elif !__GLIBC_PREREQ(2, 36)\n"
+                   "#define __CCCC_NEED_UCHAR8_SHIM 1\n"
+                   "#endif\n"
+                   "#ifdef __CCCC_NEED_UCHAR8_SHIM\n");
+        fprintf(f,
+                "typedef struct { unsigned char magic; unsigned char buf[4];\n"
+                "                 unsigned char len; unsigned char pos; } "
+                "__cccc_c8state;\n"
+                "#define __CCCC_C8STATE_MAGIC 0xC8\n"
+                "_Static_assert(sizeof(mbstate_t) >= sizeof(__cccc_c8state),\n"
+                "               \"cccc: host mbstate_t too small to hold "
+                "__cccc_c8state\");\n"
+                "typedef struct { unsigned char buf[4]; unsigned char len;\n"
+                "                 unsigned char need; } __cccc_c8out_state;\n"
+                "_Static_assert(sizeof(mbstate_t) >= "
+                "sizeof(__cccc_c8out_state),\n"
+                "               \"cccc: host mbstate_t too small to hold "
+                "__cccc_c8out_state\");\n"
+                "static unsigned __cccc_utf8_encode(unsigned char out[4], "
+                "unsigned cp) {\n"
+                "    if (cp <= 0x7F) { out[0] = (unsigned char)cp; return 1; "
+                "}\n"
+                "    if (cp <= 0x7FF) {\n"
+                "        out[0] = (unsigned char)(0xC0 | (cp >> 6));\n"
+                "        out[1] = (unsigned char)(0x80 | (cp & 0x3F));\n"
+                "        return 2;\n"
+                "    }\n"
+                "    if (cp >= 0xD800 && cp <= 0xDFFF) return 0;\n"
+                "    if (cp <= 0xFFFF) {\n"
+                "        out[0] = (unsigned char)(0xE0 | (cp >> 12));\n"
+                "        out[1] = (unsigned char)(0x80 | ((cp >> 6) & "
+                "0x3F));\n"
+                "        out[2] = (unsigned char)(0x80 | (cp & 0x3F));\n"
+                "        return 3;\n"
+                "    }\n"
+                "    if (cp <= 0x10FFFF) {\n"
+                "        out[0] = (unsigned char)(0xF0 | (cp >> 18));\n"
+                "        out[1] = (unsigned char)(0x80 | ((cp >> 12) & "
+                "0x3F));\n"
+                "        out[2] = (unsigned char)(0x80 | ((cp >> 6) & "
+                "0x3F));\n"
+                "        out[3] = (unsigned char)(0x80 | (cp & 0x3F));\n"
+                "        return 4;\n"
+                "    }\n"
+                "    return 0;\n"
+                "}\n"
+                "static int __cccc_utf8_decode(const unsigned char *buf, "
+                "unsigned len, unsigned *out) {\n"
+                "    unsigned cp;\n"
+                "    switch (len) {\n"
+                "        case 1:\n"
+                "            if (buf[0] & 0x80) return -1;\n"
+                "            cp = buf[0];\n"
+                "            break;\n"
+                "        case 2:\n"
+                "            if ((buf[1] & 0xC0) != 0x80) return -1;\n"
+                "            cp = (unsigned)(buf[0] & 0x1F) << 6 | (buf[1] & "
+                "0x3F);\n"
+                "            if (cp < 0x80) return -1;\n"
+                "            break;\n"
+                "        case 3:\n"
+                "            if ((buf[1] & 0xC0) != 0x80 || (buf[2] & 0xC0) "
+                "!= 0x80) return -1;\n"
+                "            cp = (unsigned)(buf[0] & 0x0F) << 12 | "
+                "(unsigned)(buf[1] & 0x3F) << 6 | (buf[2] & 0x3F);\n"
+                "            if (cp < 0x800) return -1;\n"
+                "            if (cp >= 0xD800 && cp <= 0xDFFF) return -1;\n"
+                "            break;\n"
+                "        case 4:\n"
+                "            if ((buf[1] & 0xC0) != 0x80 || (buf[2] & 0xC0) "
+                "!= 0x80 ||\n"
+                "                (buf[3] & 0xC0) != 0x80) return -1;\n"
+                "            cp = (unsigned)(buf[0] & 0x07) << 18 | "
+                "(unsigned)(buf[1] & 0x3F) << 12 |\n"
+                "                 (unsigned)(buf[2] & 0x3F) << 6 | (buf[3] & "
+                "0x3F);\n"
+                "            if (cp < 0x10000 || cp > 0x10FFFF) return -1;\n"
+                "            break;\n"
+                "        default:\n"
+                "            return -1;\n"
+                "    }\n"
+                "    *out = cp;\n"
+                "    return 0;\n"
+                "}\n");
+        if (use_mbrtoc8)
+            fprintf(f,
+                    "size_t mbrtoc8(char8_t *pc8, const char *s, size_t n, "
+                    "mbstate_t *ps) {\n"
+                    "    static mbstate_t internal_state;\n"
+                    "    if (!ps) ps = &internal_state;\n"
+                    "    __cccc_c8state st;\n"
+                    "    __builtin_memcpy(&st, ps, sizeof(st));\n"
+                    "    if (st.magic == __CCCC_C8STATE_MAGIC && st.len > 0) "
+                    "{\n"
+                    "        if (pc8) *pc8 = st.buf[st.pos];\n"
+                    "        st.pos++;\n"
+                    "        st.len--;\n"
+                    "        if (st.len == 0) __builtin_memset(ps, 0, "
+                    "sizeof(*ps));\n"
+                    "        else __builtin_memcpy(ps, &st, sizeof(st));\n"
+                    "        return (size_t)-3;\n"
+                    "    }\n"
+                    "    wchar_t wc;\n"
+                    "    size_t rc = mbrtowc(&wc, s, n, ps);\n"
+                    "    if (rc == (size_t)-1 || rc == (size_t)-2) return "
+                    "rc;\n"
+                    "    if (rc == 0) { if (pc8) *pc8 = 0; return 0; }\n"
+                    "    unsigned char enc[4];\n"
+                    "    unsigned elen = __cccc_utf8_encode(enc, (unsigned)"
+                    "wc);\n"
+                    "    if (elen == 0) { errno = EILSEQ; return (size_t)-1; "
+                    "}\n"
+                    "    if (pc8) *pc8 = enc[0];\n"
+                    "    if (elen > 1) {\n"
+                    "        __cccc_c8state newst;\n"
+                    "        __builtin_memset(&newst, 0, sizeof(newst));\n"
+                    "        newst.magic = __CCCC_C8STATE_MAGIC;\n"
+                    "        __builtin_memcpy(newst.buf, enc + 1, elen - "
+                    "1);\n"
+                    "        newst.len = (unsigned char)(elen - 1);\n"
+                    "        newst.pos = 0;\n"
+                    "        __builtin_memcpy(ps, &newst, sizeof(newst));\n"
+                    "    }\n"
+                    "    return rc;\n"
+                    "}\n");
+        if (use_c8rtomb)
+            fprintf(f,
+                    "size_t c8rtomb(char *s, char8_t c8, mbstate_t *ps) {\n"
+                    "    static mbstate_t internal_state;\n"
+                    "    if (!ps) ps = &internal_state;\n"
+                    "    if (!s) { __builtin_memset(ps, 0, sizeof(*ps)); "
+                    "return 0; }\n"
+                    "    __cccc_c8out_state st;\n"
+                    "    __builtin_memcpy(&st, ps, sizeof(st));\n"
+                    "    if (c8 == 0) {\n"
+                    "        if (st.len != 0) { errno = EILSEQ; return "
+                    "(size_t)-1; }\n"
+                    "        mbstate_t wcs;\n"
+                    "        __builtin_memset(&wcs, 0, sizeof(wcs));\n"
+                    "        return wcrtomb(s, L'\\0', &wcs);\n"
+                    "    }\n"
+                    "    if (st.len == 0) {\n"
+                    "        unsigned need;\n"
+                    "        if ((c8 & 0x80) == 0x00) need = 1;\n"
+                    "        else if ((c8 & 0xE0) == 0xC0) need = 2;\n"
+                    "        else if ((c8 & 0xF0) == 0xE0) need = 3;\n"
+                    "        else if ((c8 & 0xF8) == 0xF0) need = 4;\n"
+                    "        else { errno = EILSEQ; return (size_t)-1; }\n"
+                    "        st.need = (unsigned char)need;\n"
+                    "    } else if ((c8 & 0xC0) != 0x80) {\n"
+                    "        __builtin_memset(ps, 0, sizeof(*ps));\n"
+                    "        errno = EILSEQ;\n"
+                    "        return (size_t)-1;\n"
+                    "    }\n"
+                    "    st.buf[st.len++] = (unsigned char)c8;\n"
+                    "    if (st.len < st.need) {\n"
+                    "        __builtin_memcpy(ps, &st, sizeof(st));\n"
+                    "        return 0;\n"
+                    "    }\n"
+                    "    unsigned cp;\n"
+                    "    int ok = __cccc_utf8_decode(st.buf, st.len, &cp) == "
+                    "0;\n"
+                    "    __builtin_memset(ps, 0, sizeof(*ps));\n"
+                    "    if (!ok) { errno = EILSEQ; return (size_t)-1; }\n"
+                    "    mbstate_t wcs;\n"
+                    "    __builtin_memset(&wcs, 0, sizeof(wcs));\n"
+                    "    return wcrtomb(s, (wchar_t)cp, &wcs);\n"
+                    "}\n");
+        fprintf(f, "#endif\n");
+    }
 
     fprintf(f, "\n");
 }
@@ -11108,6 +11432,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // neighbours; also skips --emit-cccc internally (see its own comment).
     if (!generated_only)
         serialize_threads_shims(f, vm, prog);
+
+    // #1141: real definitions for <uchar.h>'s mbrtoc16/c16rtomb/mbrtoc32/
+    // c32rtomb/mbrtoc8/c8rtomb -- same placement rationale (and the same
+    // !generated_only gating) as serialize_threads_shims just above.
+    if (!generated_only)
+        serialize_uchar_shims(f, vm, prog);
 
     // #965/#993: see the comment on the generated_only branch's own call
     // above -- must run after both the #include replay and the file-scope

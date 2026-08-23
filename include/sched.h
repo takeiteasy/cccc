@@ -34,6 +34,16 @@
 #include "sys/types.h"
 #include "time.h"
 
+// #1143 (found, not fixed, while verifying #1138/#1139/#1141/#1142): this
+// header has no #ifdef __CCCC__/#include_next hand-off (unlike fenv.h/
+// pthread.h/sys/mount.h), so a program that both `#include <sched.h>`
+// directly and uses <pthread.h> collides under -c=native -- the replayed
+// `#include <sched.h>` re-emits this file's own struct sched_param, while
+// pthread.h's own #include_next hand-off (#1022) separately reaches the
+// real host's differently-shaped one in the same TU ("redefinition of
+// sched_param", confirmed with tests/suites/test_suite_posix.c). Exactly
+// the risk serialize.c's own serialize_threads_shims() comment already
+// flags and avoids triggering itself.
 struct sched_param {
     int sched_priority;
 };

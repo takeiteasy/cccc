@@ -34,6 +34,31 @@ typedef long ssize_t;
 #define W_OK 2
 #define R_OK 4
 
+// #1139: unlike stdio.h's stdin/stdout/stderr (#1040) or errno.h's errno
+// (#1021/#1023), environ does NOT need this whole file guarded and handed
+// off to the host's own <unistd.h> -- a much narrower fix suffices, tried
+// first here specifically to avoid stdio.h-style collateral damage a full
+// hand-off would cause elsewhere in this file (confirmed by trying it: it
+// broke #792's own `#include "sys/uio.h"` convenience-include below,
+// losing struct iovec for any guest program that only ever `#include
+// <unistd.h>`, and separately collided with include/sched.h's own
+// non-hand-off struct sched_param once a real host's transitively-reached
+// <sched.h> disagreed with it -- both real, but out of #1139's own scope).
+// The reason a narrow guard is enough here: `environ` itself is a macro,
+// already expanded to a call to `__cccc_environ_ptr()` by CCCC's own
+// preprocessor at guest PARSE time (__CCCC__ defined then) -- the literal
+// token `environ` never reaches -c=native's emitted C at all. So the only
+// thing that can still collide once a real host reprocesses this exact
+// physical file (via -I./include forwarding, __CCCC__ undefined) is this
+// file's own unguarded `extern char ***__cccc_environ_ptr(void);` running
+// into native_accessor_shims' (src/serialize.c) own `static` definition
+// of the same name ("static declaration ... follows non-static
+// declaration", confirmed in the cccc-linux-amd64 container). Guarding
+// just that extern (and the macro that uses it, which the host never
+// needs either -- the host's own real <unistd.h>, if reached some other
+// way in this TU, declares its own real `environ` independently) removes
+// the only actual collision without touching anything else in this file.
+#ifdef __CCCC__
 /* environ aliases the host process's real environment array (via an
  * accessor function, same pattern as errno in errno.h and stdin/stdout/
  * stderr in stdio.h -- see "Host-global accessors" in src/stdlib/posix.c)
@@ -44,6 +69,7 @@ typedef long ssize_t;
  * `environ` directly once this header is included. */
 extern char ***__cccc_environ_ptr(void);
 #define environ (*__cccc_environ_ptr())
+#endif /* __CCCC__ */
 
 extern ssize_t read(int fd, void *buf, size_t count);
 extern ssize_t write(int fd, const void *buf, size_t count);
