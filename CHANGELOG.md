@@ -5,6 +5,19 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `-c=native`/`-m`: a global initializer for a wide-`_BitInt`-typed
+  bitfield member (e.g. `_BitInt(128) f : 100;`) silently dropped any bit
+  at or above bit 64 of the field's value — `serialize_init_bytes`'s
+  bitfield-value re-extraction clamped its read to 8 bytes regardless of
+  the member's own container size and printed a plain `%llu` literal.
+  Fixed with a byte-granular extract over the field's exact bit span
+  (mirrors the `__cccc_bitfield_extract` runtime helper), sign extension,
+  and a 128-bit hex literal for values that don't fit a `long long`.
+  `tests/suites/test_suite_typesystem.c` is back on the native test corpus
+  as a result (#1126).
+
 ## [0.3.6] - 2026-08-23
 
 ### Fixed

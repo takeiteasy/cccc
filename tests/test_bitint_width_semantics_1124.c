@@ -10,10 +10,9 @@
 // of merely being redundant with the container's own truncation.
 //
 // Kept standalone (not folded into tests/suites/test_suite_typesystem.c,
-// where the equivalent bitfield coverage for #1125 lives) specifically so
-// it stays on the native corpus independent of that suite's own #1126
-// skip-list entry -- #1124 is entirely about native/-m behavior, so losing
-// automated native coverage for it would be the wrong trade.
+// where the equivalent bitfield coverage for #1125 lives) -- #1124 is
+// entirely about native/-m behavior, so keeping it isolated from that
+// suite's broader surface is the safer default.
 
 [[cccc::test(return = 42)]]
 int test_bitint_width_semantics(void) {

@@ -820,9 +820,10 @@ int test_c23_bitint_wide_bitfield_over128(void) {
     if (v != -3)
         return 3;
 
-    // Nonzero bit_offset, local and global (see #1126 for the separate,
-    // pre-existing global-initializer-serialization gap this does NOT
-    // exercise -- this file is VM-only regardless).
+    // Nonzero bit_offset, local and global -- this file is VM-only
+    // regardless (>128-bit container, past serialize_type's own TY_BITINT
+    // refusal, #1123), so #1126's now-fixed global-initializer-
+    // serialization gap was never reachable from here anyway.
     struct WideBitfield256Offset1125 lo;
     lo.a = -5;
     lo.b = ((_BitInt(256))1 << 200) + 11;

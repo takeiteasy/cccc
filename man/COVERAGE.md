@@ -1405,17 +1405,26 @@ exact bytes the field spans rather than assuming a whole container is
 present or fits a register; the parse-time global-initializer RMW
 (`write_gvar_data`, `src/parse_init.c`) now shares the same `insert` helper
 instead of its own word-array loop, which had an analogous past-the-object
-overwrite. This fix is VM-only — a wide-`_BitInt`-typed bitfield's ordinary
-runtime read/write is correct under `-c=native`/`-m` too, since the emitted
-C just spells it as a real bitfield of that width and lets the host compiler
-handle storage, but a **global initializer** for such a bitfield still
-diverges there: `serialize_init_bytes`'s own bitfield-value re-extraction
-clamps its read to 8 bytes and prints a plain `%llu` literal, silently
-dropping any bit at or above bit 64 of the field's value (#1126, found
-while adding native-corpus coverage for #1125, not fixed by it) —
-`tests/suites/test_suite_typesystem.c` is on `NATIVE_SKIP_TESTS` for this
-reason (its own `test_wide_global_init`, from #1122, has apparently never
-actually been clean under `--native` despite that ticket's landing comment).
+overwrite. A wide-`_BitInt`-typed bitfield's ordinary runtime read/write is
+correct under `-c=native`/`-m` too, since the emitted C just spells it as a
+real bitfield of that width and lets the host compiler handle storage.
+A **global initializer** for such a bitfield used to diverge there:
+`serialize_init_bytes`'s own bitfield-value re-extraction clamped its read
+to 8 bytes and printed a plain `%llu` literal, silently dropping any bit at
+or above bit 64 of the field's value (#1126, found while adding
+native-corpus coverage for #1125, not fixed by it at the time). Resolved by
+replacing that clamp with a byte-granular extract over the field's exact
+`[bit_offset, bit_offset+bit_width)` span — the same shape
+`__cccc_bitfield_extract` above uses — plus sign extension and a 128-bit hex
+literal for any value that doesn't fit `long long`/`unsigned long long`
+(dodging the "sign-extended `INT64_MIN` isn't a valid `long long` constant"
+trap at `bit_width >= 64`). `_BitInt(N<=128)` bitfield globals now
+round-trip cleanly through `-c=native`/`-m`; `N>128` still hits
+`serialize_type`'s own container refusal (#1123, no multi-word lowering
+exists there yet). Covered by `tests/test_wide_bitfield_global_init_1126.c`
+and, now that the suite is back on the native corpus, by
+`tests/suites/test_suite_typesystem.c`'s own `test_wide_global_init` (case
+12, from #1122) and `test_wide_bitfield_global_offset`.
 
 A function-local `static` array initialized with computed-goto label
 addresses (`static const void *disptab[] = { &&L0, &&L1 };`, the usual

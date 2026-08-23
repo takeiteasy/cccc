@@ -15,10 +15,8 @@
 //
 // Kept standalone and local-variable-only (not folded into
 // tests/suites/test_suite_typesystem.c's own bit_offset>0 coverage, which
-// additionally checks a *global* of the same struct and is therefore
-// blocked from the native corpus by #1126, an unrelated pre-existing
-// global-initializer-serialization gap) so this file's own #1125 codegen
-// coverage stays on the native corpus independent of that.
+// additionally checks a *global* of the same struct) so this file's own
+// #1125 codegen coverage stays isolated from that suite's broader surface.
 struct WideBitfieldOffsets1125 {
     _BitInt(128) a : 5;   // bit_offset 0
     _BitInt(128) b : 100; // bit_offset 5 -- straddles into word 1

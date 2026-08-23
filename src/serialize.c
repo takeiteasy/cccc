@@ -5295,23 +5295,59 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
                 if (m->name)
                     fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
                 if (m->is_bitfield) {
-                    // #1126: `sz` clamps to 8 regardless of m->ty->size (16
-                    // for a wide-_BitInt-typed bitfield, e.g. `_BitInt(128)
-                    // f : 100;`), and `bits` is printed as a plain %llu
-                    // literal -- so any bit at or above bit 64 of the
-                    // field's own value is silently dropped for such a
-                    // member. Not fixed here: found while adding native
-                    // coverage for #1125 (the runtime codegen path this
-                    // bug is unrelated to), filed separately.
-                    int64_t container = 0;
-                    int     sz        = m->ty->size < 8 ? m->ty->size : 8;
-                    memcpy(&container, var->init_data + offset + m->offset, sz);
-                    uint64_t mask = (m->bit_width >= 64)
-                                        ? ~0ULL
-                                        : ((1ULL << m->bit_width) - 1);
-                    uint64_t bits =
-                        ((uint64_t)container >> m->bit_offset) & mask;
-                    fprintf(f, "%lluu", (unsigned long long)bits);
+                    // #1126 (RESOLVED): the old code read the storage unit
+                    // with a memcpy clamped to 8 bytes regardless of
+                    // m->ty->size (16 for a wide-_BitInt-typed bitfield,
+                    // e.g. `_BitInt(128) f : 100;`), so any bit at or above
+                    // bit 64 of the field's value was silently dropped.
+                    // Extract byte-granularly instead over the field's exact
+                    // [bit_offset, bit_offset+bit_width) span -- mirrors
+                    // __cccc_bitfield_extract (src/stdlib/wide_bitint.c,
+                    // #1125's runtime counterpart) and never over-reads the
+                    // object, so it's correct for any bit_offset/bit_width
+                    // combination, not just the wide case.
+                    if (m->bit_width > 128)
+                        error("cccc: cannot serialize initializer for "
+                              "global '%s' in native mode: bitfield wider "
+                              "than 128 bits",
+                              var->name);
+                    int               start = m->offset * 8 + m->bit_offset;
+                    unsigned __int128 bits  = 0;
+                    for (int i = 0; i < m->bit_width; i++) {
+                        int b = start + i;
+                        if ((var->init_data[offset + b / 8] >> (b % 8)) & 1)
+                            bits |= (unsigned __int128)1 << i;
+                    }
+                    bool is_signed =
+                        !m->ty->is_unsigned && m->ty->kind != TY_BOOL;
+                    __int128 sbits = (__int128)bits;
+                    if (is_signed && m->bit_width < 128 &&
+                        (bits & ((unsigned __int128)1 << (m->bit_width - 1))))
+                        sbits -= (__int128)1 << m->bit_width;
+                    if (m->bit_width < 64) {
+                        // Always in range for %lld/%lluu at this width -- no
+                        // most-negative-literal hazard (that only bites at
+                        // bit_width >= 64, handled by the hex arm below).
+                        if (is_signed)
+                            fprintf(f, "%lld", (long long)sbits);
+                        else
+                            fprintf(f, "%lluu", (unsigned long long)bits);
+                    } else {
+                        // bit_width >= 64: a sign-extended INT64_MIN printed
+                        // as %lld would be "-9223372036854775808", not a
+                        // valid `long long` constant in C -- and an unsigned
+                        // value may not fit 64 bits either. Use the same
+                        // 128-bit hex literal shape as the TY_BITINT scalar
+                        // arm below.
+                        unsigned __int128 uv =
+                            is_signed ? (unsigned __int128)sbits : bits;
+                        fprintf(f,
+                                "((%s__int128)(((unsigned __int128)0x%llxULL "
+                                "<< 64) | 0x%llxULL))",
+                                is_signed ? "" : "unsigned ",
+                                (unsigned long long)(uint64_t)(uv >> 64),
+                                (unsigned long long)(uint64_t)uv);
+                    }
                 } else {
                     serialize_init_bytes(f, vm, ctx, var, m->ty,
                                          offset + m->offset);
