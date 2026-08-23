@@ -322,9 +322,18 @@ NATIVE_SKIP_TESTS = {
                  "silently truncates -- clearing #1113 alone will not be "
                  "enough to un-skip this file, see #1123 (deferred "
                  "multi-word native lowering)",
-    "test_suite_posix.c": "rename-collision __cccc_dupN undeclared "
-                 "identifiers (dbm_*), #1103",
-    "test_suite_strings.c": "__mbstate_t.__opaque layout mismatch, #1103",
+    # #1103's own two bugs (rename-collision dbm_* dup names, mbstate_t's
+    # __opaque layout mismatch) are fixed; both files stay skipped for the
+    # residual, unrelated failures #1103's corpus run also turned up, each
+    # now its own ticket.
+    "test_suite_posix.c": "no member named '__fds_bits' in 'struct fd_set' "
+                 "(#1138), __cccc_environ_ptr undeclared (#1139), and "
+                 "several --posix-emulation symbols with no macOS host "
+                 "primitive -- ppoll/*_l locale family/*_r resolver "
+                 "family/sched_getscheduler (#1140)",
+    "test_suite_strings.c": "c16rtomb/uchar.h C11 functions link-fail on "
+                 "Darwin (absent from Darwin libc, #1141) -- may already be "
+                 "clean on Linux/glibc",
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1113",
     # #1126: found while adding native coverage for #1125 (wide _BitInt
     # bitfield codegen, unaffected by this) -- test_wide_global_init's own

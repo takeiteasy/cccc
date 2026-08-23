@@ -388,6 +388,14 @@ static bool nested_var_is_own(Obj *fn, Obj *var);
 // declarator (serialize_function, above that machinery in file order) can
 // reuse it too.
 static void serialize_alignas_if_needed(FILE *f, Obj *var);
+// #1103: defined near the other include-provenance predicates (with
+// global_is_header_supplied); forward-declared here so
+// rename_colliding_static_names() (above that machinery in file order) can
+// share the exact same "does this definition actually reach the output"
+// test the emitter itself uses, instead of a hand-rolled paraphrase that can
+// drift out of sync with it.
+static bool function_is_header_supplied(VirtualMachine   *vm,
+                                        SerializeContext *ctx, Obj *obj);
 static void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                            Node *node, int indent);
 // #964: mutually recursive with serialize_stmt -- see the comment on its
@@ -444,6 +452,129 @@ static void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                           Obj *owner_fn);
 static bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty,
                                    Obj *owner_fn);
+
+// #1103: true if `node`'s lvalue-computation subtree bottoms out on a
+// direct field access `v.__opaque` (or `v.__opaque[i]`, lowered to pointer
+// arithmetic over that field) -- the synthetic reserved-storage member
+// convention CCCC's own from_include headers use to hide a platform-
+// varying internal layout behind a fixed byte buffer with no counterpart
+// in the real host struct (include/wchar.h's mbstate_t, include/fenv.h's
+// fenv_t/fexcept_t). This is deliberately narrower than "any store into a
+// host-owned-layout type's member" -- an ordinary from_include struct's
+// real, POSIX-named members (struct timespec's tv_sec/tv_nsec, struct
+// statfs's f_bsize, ...) are genuinely declared under the same name by
+// the host header too (member ACCESS already re-resolves correctly for
+// those, see type_def_is_from_include_suppressed()'s own comment), so a
+// plain member-path store to one of those is fine exactly as emitted --
+// see tools/comptime_native_smoke.py's own `struct timespec nap = {0,
+// 20000000}` case, which a broader "any member of a host-owned type"
+// check wrongly flagged as an unrepresentable non-zero store. `__opaque`
+// is CCCC's own invention and never exists on the host, so storing
+// through it is the only shape that's actually unrepresentable once the
+// real header is in scope.
+static bool expr_roots_at_opaque_member(Node *node, Obj *v) {
+    if (!node)
+        return false;
+    if (node->kind == ND_MEMBER)
+        return node->lhs && node->lhs->kind == ND_VAR && node->lhs->var == v &&
+               node->member && node->member->name &&
+               node->member->name->len == 8 &&
+               strncmp(node->member->name->loc, "__opaque", 8) == 0;
+    return expr_roots_at_opaque_member(node->lhs, v) ||
+           expr_roots_at_opaque_member(node->rhs, v);
+}
+
+// #1103: true if `node` is a compile-time-constant zero -- the only shape
+// a `{0}` (or any all-zero) initializer's per-member stores ever produce
+// (see ND_MEMZERO's own sibling stores in a lowered aggregate
+// initializer). Unwraps ND_CAST since every such store's rhs is
+// value-cast to the member's own type.
+static bool expr_is_zero_constant(Node *node) {
+    while (node && node->kind == ND_CAST)
+        node = node->lhs;
+    return node && node->kind == ND_NUM && node->val == 0;
+}
+
+// #1103: classifies one link (an ND_ASSIGN or the chain's own trailing
+// non-comma tail) of a `{0}`-initializer comma chain rooted at host-owned-
+// layout local `v` (see the ND_COMMA case's own comment). Returns:
+//   - DROP: an assignment through a synthetic `__opaque` reserved-storage
+//     member into `v` storing a constant zero -- redundant with the
+//     chain's own leading ND_MEMZERO, and printing it would walk a member
+//     name that doesn't exist on the host at all (see
+//     expr_roots_at_opaque_member()'s own comment).
+//   - ERROR: the same `__opaque` shape storing anything other than a
+//     constant zero -- genuinely unrepresentable, so this fails loudly
+//     rather than emit a store through a member the host header doesn't
+//     declare (matching serialize_init_bytes's own stated policy for the
+//     analogous unsupported-shape case).
+//   - KEEP: anything else -- a whole-object reference to `v`, a store
+//     through one of `v`'s ordinary (real, host-shared-name) members, or a
+//     node unrelated to `v` entirely.
+typedef enum {
+    HOST_OWNED_KEEP,
+    HOST_OWNED_DROP,
+    HOST_OWNED_ERROR
+} HostOwnedZeroInitAction;
+static HostOwnedZeroInitAction host_owned_zero_init_classify(Node *node,
+                                                             Obj  *v) {
+    if (!node || node->kind != ND_ASSIGN)
+        return HOST_OWNED_KEEP;
+    Node *target = node->lhs;
+    if (target->kind == ND_VAR && target->var == v)
+        return HOST_OWNED_KEEP; // whole-object reference, untouched
+    if (!expr_roots_at_opaque_member(target, v))
+        return HOST_OWNED_KEEP; // a real, host-shared member name -- fine as-is
+    return expr_is_zero_constant(node->rhs) ? HOST_OWNED_DROP
+                                            : HOST_OWNED_ERROR;
+}
+
+// #1103: walks the right-nested tail of a `{0}`-initializer comma chain
+// rooted at host-owned-layout local `v` (called from the ND_COMMA case
+// below, on node->rhs, right after that case has already printed the
+// chain's own leading ND_MEMZERO) -- drops each HOST_OWNED_DROP link,
+// errors loudly on a HOST_OWNED_ERROR link, and otherwise prints the link
+// (a HOST_OWNED_KEEP assign, or the chain's own non-comma trailing value)
+// with the right number of ` , ` separators regardless of how many
+// earlier links got dropped. `*printed` tracks whether anything has been
+// printed yet by the caller (the leading memzero counts).
+static void serialize_host_owned_zero_init_chain(FILE *f, VirtualMachine *vm,
+                                                 SerializeContext *ctx,
+                                                 Node *node, Obj *v,
+                                                 int node_prec, bool *printed) {
+    if (node->kind != ND_COMMA) {
+        HostOwnedZeroInitAction action = host_owned_zero_init_classify(node, v);
+        if (action == HOST_OWNED_ERROR)
+            error("cccc: cannot serialize a non-zero initializer store into "
+                  "'%s' in native mode: the member path is CCCC's own "
+                  "host-owned-layout projection, not necessarily the host's "
+                  "real layout (see #1103)",
+                  v->name);
+        if (action == HOST_OWNED_DROP)
+            return;
+        if (*printed)
+            fprintf(f, " , ");
+        serialize_expr(f, vm, ctx, node, node_prec + 1);
+        *printed = true;
+        return;
+    }
+    HostOwnedZeroInitAction action =
+        host_owned_zero_init_classify(node->lhs, v);
+    if (action == HOST_OWNED_ERROR)
+        error("cccc: cannot serialize a non-zero initializer store into "
+              "'%s' in native mode: the member path is CCCC's own "
+              "host-owned-layout projection, not necessarily the host's "
+              "real layout (see #1103)",
+              v->name);
+    if (action != HOST_OWNED_DROP) {
+        if (*printed)
+            fprintf(f, " , ");
+        serialize_expr(f, vm, ctx, node->lhs, node_prec);
+        *printed = true;
+    }
+    serialize_host_owned_zero_init_chain(f, vm, ctx, node->rhs, v, node_prec,
+                                         printed);
+}
 
 static bool same_type_or_origin(Type *a, Type *b) {
     for (Type *pa = a; pa; pa = pa->origin)
@@ -2852,6 +2983,20 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             break;
 
         case ND_COMMA:
+            // #1103: `T v = {0}` (or any all-zero initializer) on a
+            // host-owned-layout local lowers to
+            // ND_COMMA(ND_MEMZERO(v), <per-member zero stores...>) --
+            // print the memzero and drop every store in the chain that's
+            // provably redundant with it; see
+            // serialize_host_owned_zero_init_chain()'s own comment above.
+            if (node->lhs->kind == ND_MEMZERO && node->lhs->var &&
+                type_layout_is_host_owned(ctx, node->lhs->var->ty, 0)) {
+                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+                bool printed = true;
+                serialize_host_owned_zero_init_chain(
+                    f, vm, ctx, node->rhs, node->lhs->var, node_prec, &printed);
+                break;
+            }
             // Skip null sides — ND_NULL_EXPR , X is not valid C.
             if (is_noop_expr(node->lhs) && is_noop_expr(node->rhs))
                 break;
@@ -7722,6 +7867,21 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         bool is_defining =
             obj->is_function ? obj->body != NULL : obj->is_definition;
         if (!is_defining)
+            continue;
+
+        // #1103: a static whose *definition* is never re-emitted -- it
+        // reaches the output solely via a replayed `#include`, under its
+        // original name (function_is_header_supplied(), defined below) --
+        // must not be renamed by any tier past this point. Every call site
+        // resolves through this same Obj*, so renaming it renames every use
+        // too, while the header-supplied definition keeps printing under
+        // the old name: a call to an identifier that was never declared.
+        // include/ndbm.h's five `static inline dbm_*` shims hit exactly
+        // this via the dlsym tier just below (they really do exist in
+        // macOS/glibc's ndbm implementation) -- see files_are_same()'s own
+        // doc comment above for the general shape of this hazard, of which
+        // this is the "definition never re-emitted at all" half.
+        if (function_is_header_supplied(vm, ctx, obj))
             continue;
 
         if (libc_handle && strcmp(obj->name, "main") != 0 &&

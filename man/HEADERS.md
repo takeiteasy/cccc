@@ -1034,6 +1034,53 @@ for exactly this) — gated on `obj->is_used` so an unrelated, unused
 declaration from the same bundled header (`unistd.h` declares dozens of
 functions besides `close()`) isn't also dumped into the output.
 
+**A `static inline` function declared in a header, whose name happens to
+collide with a real host libc symbol, used to have its call sites renamed
+but not its definition (#1103)** — `rename_colliding_static_names()`'s
+host-libc-symbol probe (Tier A, #1042(c)'s `dlsym()` check) renames *any*
+static, defining `Obj` whose name resolves in the host's own libc, with no
+regard for whether that `Obj`'s definition is one `function_is_header_
+supplied()` will actually print. `include/ndbm.h`'s five `static inline
+dbm_*` shims (`dbm_fetch`/`dbm_firstkey`/`dbm_nextkey`/`dbm_delete`/
+`dbm_store`) hit this for real on macOS, where all five names really are
+libc exports: every call site got renamed to `dbm_store__cccc_dup4` etc.
+(every reference resolves through the same `Obj*`, so the rename is
+"free"), while the definition — reachable only via the replayed
+`#include <ndbm.h>`, under its *original* name — never got renamed at all,
+so the emitted C called an identifier nothing declared. This is the
+"definition never re-emitted at all" half of the hazard `files_are_same()`'s
+own doc comment (#1032) already described for the general cross-TU-collision
+case. Fixed by skipping the rename entirely once `function_is_header_
+supplied()` is true for that `Obj` — nothing is printed for it regardless of
+what tier fires, so it cannot collide with anything, and the header's own
+replayed `#include` already supplies both declaration and definition under
+the original name.
+
+**A `{0}` (or any all-zero) initializer for a host-owned-layout local used
+to store zero through a member name that only exists in CCCC's own
+projection, not the host's real type (#1103)** — `mbstate_t st = {0};`
+lowers to `ND_COMMA(ND_MEMZERO(st), st.__opaque[0] = 0)`; `__opaque` is
+`include/wchar.h`'s own reserved-storage member, invented to hide a
+platform-varying internal layout behind a fixed byte buffer with no
+counterpart in the real host struct (`fenv.h`'s `fenv_t`/`fexcept_t` use the
+same convention). Printed verbatim under `-c=native`, where the real host
+`<wchar.h>` is in scope once its `#include` replays, this was "no member
+named '__opaque' in '__mbstate_t'" (macOS spells the real union
+`__mbstate8`/`_mbstateL`). Fixed by dropping every zero-store into
+`__opaque` through a `{0}`-initialized host-owned-layout local's own
+leading `ND_MEMZERO` — already redundant with it — and erroring loudly on a
+*non*-zero store through `__opaque` (genuinely unrepresentable: the member
+doesn't exist on the host at all). Deliberately narrower than "any store
+into a host-owned-layout type's member": an ordinary `from_include`
+struct's real, POSIX-named members (`struct timespec`'s `tv_sec`/`tv_nsec`,
+`struct statfs`'s `f_bsize`, …) genuinely are declared under the same name
+by the host header too — member *access* already re-resolves correctly for
+those — so a plain member-path store to one of those is left exactly as
+emitted. `tools/comptime_native_smoke.py`'s own
+`struct timespec nap = {0, 20000000}` case is the regression a broader
+"any host-owned member" version of this fix introduced and this narrower
+scoping (`expr_roots_at_opaque_member()`, `src/serialize.c`) avoids.
+
 ## Private headers
 
 `include/cccc/reflection.h`, `testing.h`, and `building.h` are CCCC's own

@@ -7,6 +7,24 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`/`-m`: `rename_colliding_static_names()`'s host-libc-symbol
+  probe (Tier A, #1042(c)) renamed a `static inline` header function's call
+  sites without renaming its definition whenever that definition never
+  actually reaches the output (it's supplied by the header's own replayed
+  `#include` instead) — `include/ndbm.h`'s `static inline dbm_*` shims hit
+  this for real on macOS, producing calls to an undeclared
+  `dbm_store__cccc_dup4`-style identifier. Fixed by skipping the rename
+  once `function_is_header_supplied()` is true for that `Obj` (#1103).
+- `-c=native`/`-m`: a `{0}` initializer for a host-owned-layout local (e.g.
+  `mbstate_t st = {0};`) stored a redundant zero through `include/wchar.h`'s
+  own synthetic `__opaque` reserved-storage member, which doesn't exist on
+  the real host `__mbstate_t` once the host's own `<wchar.h>` is in scope —
+  "no member named '__opaque' in '__mbstate_t'". Fixed by dropping every
+  zero-store into `__opaque` that's already covered by the initializer's own
+  leading `memset`, and erroring loudly (rather than emitting a silently
+  wrong offset) on a non-zero store through it; an ordinary host-owned
+  type's real, POSIX-named members (`struct timespec`'s `tv_sec`/`tv_nsec`,
+  etc.) are untouched (#1103).
 - The data-segment/TLS-template allocator (`gen()`, `src/codegen_func.c`)
   placed every global and thread-local at a hardcoded 8-byte boundary,
   ignoring the object's own declared alignment — an explicit `_Alignas(N)`,
