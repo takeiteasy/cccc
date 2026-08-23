@@ -78,41 +78,75 @@
 #include <unistd.h>
 
 int main(void) {
-    // poll(): POLLWRBAND alone on a writable pipe fd. Verified empirically
-    // on real Apple Silicon hardware that this is the reliable
-    // discriminator, NOT plain POLLWRNORM: canonical POLLWRNORM (0x0100)
-    // happens to be exactly real host POLLWRBAND's own bit value, and
-    // macOS's poll() turns out to echo an unrecognized-but-plausible
-    // writable-class bit straight back for a pipe write end regardless of
-    // real semantics -- so an *untranslated* POLLWRNORM request coincidentally
-    // still sees its own bit echoed back, passing even when translation is
-    // completely missing. Canonical POLLWRBAND (0x0200) has no such
-    // coincidence: fed straight to the real host (untranslated) it isn't a
-    // recognized event bit at all and the real poll() answers POLLNVAL
-    // instead (confirmed directly: exit code 3, not 42, against the
-    // pre-#1146 serializer) -- translated correctly, it maps to real host
-    // POLLWRBAND (0x0100), which the pipe's write end does report.
+    // poll(): POLLIN portable sanity round-trip on both platforms first --
+    // canonical POLLIN shares the same bit value on both hosts, so this
+    // alone can't discriminate translated from untranslated, but proves
+    // poll()/ppoll() still work at all through the rename.
     int fds[2];
     if (pipe(fds) != 0)
         return 1;
-    struct pollfd pfd = {0};
-    pfd.fd            = fds[1]; // write end: always writable
-    pfd.events        = POLLWRBAND;
-    if (poll(&pfd, 1, 1000) != 1)
+    if (write(fds[1], "x", 1) != 1)
         return 2;
-    if (!(pfd.revents & POLLWRBAND))
+    struct pollfd pfd = {0};
+    pfd.fd            = fds[0];
+    pfd.events        = POLLIN;
+    if (poll(&pfd, 1, 1000) != 1)
         return 3;
+    if (!(pfd.revents & POLLIN))
+        return 4;
+    char c;
+    if (read(fds[0], &c, 1) != 1)
+        return 5;
+
+    struct pollfd pfd2 = {0};
+    pfd2.fd            = fds[0];
+    pfd2.events        = POLLIN;
+    struct timespec ts = {0, 50000000}; // 50ms, nothing to read
+    if (ppoll(&pfd2, 1, &ts, NULL) != 0)
+        return 6;
+
+#ifdef __APPLE__
+    // POLLWRBAND alone on a writable pipe fd -- the real discriminator,
+    // macOS-only. Verified empirically on real Apple Silicon hardware that
+    // this is reliable, NOT plain POLLWRNORM: canonical POLLWRNORM (0x0100)
+    // happens to be exactly real host POLLWRBAND's own bit value, and
+    // macOS's poll() turns out to echo an unrecognized-but-plausible
+    // writable-class bit straight back for a pipe write end regardless of
+    // real semantics -- so an *untranslated* POLLWRNORM request
+    // coincidentally still sees its own bit echoed back, passing even when
+    // translation is completely missing. Canonical POLLWRBAND (0x0200) has
+    // no such coincidence: fed straight to the real host (untranslated) it
+    // isn't a recognized event bit at all and the real poll() answers
+    // POLLNVAL instead (confirmed directly: exit code 8, not 42, against
+    // the pre-#1146 serializer) -- translated correctly, it maps to real
+    // host POLLWRBAND (0x0100), which the pipe's write end does report.
+    //
+    // macOS-only because this bit family is a no-op passthrough on
+    // Linux -- canonical numbering already copies glibc's values there, so
+    // there's nothing to discriminate, AND (confirmed the hard way: this
+    // exact assertion failed on real Linux/glibc, both amd64 and aarch64,
+    // in CI) glibc's poll() does not report POLLWRBAND for a plain pipe's
+    // write end the way macOS's poll() does -- a real semantic difference
+    // between the two hosts' poll() implementations, not a translation bug.
+    struct pollfd wpfd = {0};
+    wpfd.fd            = fds[1]; // write end: always writable
+    wpfd.events        = POLLWRBAND;
+    if (poll(&wpfd, 1, 1000) != 1)
+        return 7;
+    if (!(wpfd.revents & POLLWRBAND))
+        return 8;
 
     // ppoll(): same assertion, proving it agrees with plain poll() in the
     // same binary now that both translate.
-    struct pollfd pfd2 = {0};
-    pfd2.fd            = fds[1];
-    pfd2.events        = POLLWRBAND;
-    struct timespec ts = {1, 0};
-    if (ppoll(&pfd2, 1, &ts, NULL) != 1)
-        return 4;
-    if (!(pfd2.revents & POLLWRBAND))
-        return 5;
+    struct pollfd wpfd2 = {0};
+    wpfd2.fd            = fds[1];
+    wpfd2.events        = POLLWRBAND;
+    struct timespec wts = {1, 0};
+    if (ppoll(&wpfd2, 1, &wts, NULL) != 1)
+        return 9;
+    if (!(wpfd2.revents & POLLWRBAND))
+        return 10;
+#endif
     close(fds[0]);
     close(fds[1]);
 
@@ -126,44 +160,44 @@ int main(void) {
     // platform CCCC's canonical numbering already matches).
     setlocale(LC_ALL, "C");
     if (strcmp(nl_langinfo(CODESET), "") == 0)
-        return 6;
+        return 11;
     if (strcmp(nl_langinfo(RADIXCHAR), ".") != 0)
-        return 7;
+        return 12;
     if (strcmp(nl_langinfo(DAY_1), "Sunday") != 0)
-        return 8;
+        return 13;
 
     // nl_langinfo_l()/newlocale(): same assertion through the "_l" /
     // locale_t path and the LC_ALL_MASK special case.
     locale_t loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);
     if (!loc)
-        return 9;
+        return 14;
     if (strcmp(nl_langinfo_l(DAY_1, loc), "Sunday") != 0)
-        return 10;
+        return 15;
     freelocale(loc);
 
     // setlocale(): round-trip only (see the file comment above for why a
     // stronger discriminator needs a second installed locale).
     if (!setlocale(LC_ALL, "C"))
-        return 11;
+        return 16;
     if (!setlocale(LC_TIME, "C"))
-        return 12;
+        return 17;
 
     // sched_get_priority_min/max(): round-trip on every canonical policy
     // (see the file comment above for why macOS can't discriminate a
     // mis-mapped policy via these return values); a real discriminator
     // where glibc's ranges are stable and documented.
     if (sched_get_priority_min(SCHED_OTHER) < 0)
-        return 13;
+        return 18;
     if (sched_get_priority_min(SCHED_FIFO) < 0)
-        return 14;
+        return 19;
     if (sched_get_priority_max(SCHED_RR) < 0)
-        return 15;
+        return 20;
 #ifdef __linux__
     if (sched_get_priority_min(SCHED_OTHER) != 0 ||
         sched_get_priority_max(SCHED_OTHER) != 0)
-        return 16;
+        return 21;
     if (sched_get_priority_min(SCHED_FIFO) != 1)
-        return 17;
+        return 22;
 #endif
 
     return 42;
