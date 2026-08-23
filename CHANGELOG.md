@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-08-23
+
 ### Fixed
 
 - `-c=native`: `ppoll`, `sched_setparam`/`getparam`/`setscheduler`/
