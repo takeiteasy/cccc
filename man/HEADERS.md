@@ -171,7 +171,7 @@ by default). Two things follow from that:
   declaration of 'getmode' follows non-static declaration", a collision
   that isn't in the user's own program. Fixed defensively rather than by
   tracking per-directive source position: `rename_colliding_static_names()`
-  (`src/serialize.c`, #1002) now also probes the host libc's own symbol
+  (`src/serialize_program.c`, #1002) now also probes the host libc's own symbol
   namespace (`dlsym` on the same handle `cc_load_libc()`/`find_libc()`
   already use for the VM's own FFI path — deliberately never
   `RTLD_DEFAULT`/`dlopen(NULL)`, which would also see the compiler process
@@ -186,7 +186,7 @@ by default). Two things follow from that:
 - Because the real header is re-emitted via auto-capture, CCCC does **not**
   also re-emit type definitions it collected from that same header
   (`TypeNameRecord.from_include` in `src/cccc.h`, used by
-  `cc_serialize_program`'s `!generated_only` path in `src/serialize.c`) —
+  `cc_serialize_program`'s `!generated_only` path in `src/serialize_program.c`) —
   otherwise `typedef void FILE;` (from CCCC's own `stdio.h` polyfill) would
   collide with the real system stdio.h's `struct __sFILE`, and likewise for
   a header-defined aggregate like `struct tm` from `<time.h>`. Types
@@ -203,7 +203,7 @@ by default). Two things follow from that:
   a system compiler, which needs an explicit declaration for any call. A
   header-sourced bare declaration is left out, since the auto-captured
   `#include` already supplies it to the native compiler. This check
-  (`file_is_command_line_input()`, `src/serialize.c`) used to compare
+  (`file_is_command_line_input()`, `src/serialize_program.c`) used to compare
   against `vm->compiler.primary_file` alone — pinned to the *first* input
   file forever — so the identical shape written in a *second or later*
   input file was misidentified as header-supplied and silently dropped;
@@ -235,7 +235,7 @@ by default). Two things follow from that:
   enum { ... } Thing;` (or other scalar/enum typedef) written in more than
   one input file is legal, duplicate-definition C from C11 on (the default
   standard is C23) and is left as two identical typedefs in the output;
-  `same_type_or_origin` (`src/serialize.c`) gained a structural comparison
+  `same_type_or_origin` (`src/serialize_type.c`) gained a structural comparison
   arm for `TY_ENUM` (mirroring the existing `TY_STRUCT`/`TY_UNION` one) so
   two *structurally identical* enums declared in different input files
   collapse to a single emitted definition instead of a hard "redefinition
@@ -248,7 +248,7 @@ by default). Two things follow from that:
   deliberately never canonicalizes `static` symbols across TUs, #957), but
   `-c=native` used to merge both into one output file with two colliding
   definitions of the same identifier (#1002). `rename_colliding_static_names()`
-  (`src/serialize.c`) renames every same-named `static` Obj but the first,
+  (`src/serialize_program.c`) renames every same-named `static` Obj but the first,
   among Objs declared in more than one distinct file — a name with no
   collision is left exactly as written.
 - A header whose CCCC copy is the only implementation likely to exist on a
@@ -285,8 +285,9 @@ by default). Two things follow from that:
   processed — the auto-capture gate now also fires for those, not just
   command-line input files, so a plain (non-cccc-only) nested header gets
   replayed like any other captured include. The existing
-  `cc_file_is_cccc_only` suppression in `serialize.c`'s own replay loop is
-  unchanged, so a cccc-only header nested inside another cccc-only header
+  `cc_file_is_cccc_only` suppression in `cc_serialize_program`'s own
+  replay loop (`src/serialize_program.c`) is unchanged, so a cccc-only
+  header nested inside another cccc-only header
   is still correctly suppressed rather than replayed.
 - A cccc-only header's *functions* are a third case, distinct from both
   bullets above: `include/threads.h`'s own `thrd_*`/`mtx_*`/`cnd_*`/`tss_*`/
@@ -297,7 +298,7 @@ by default). Two things follow from that:
   missing) and not `decimal_math.h`'s hard-error case either (there *is* a
   host equivalent to build on: real pthreads, already replayed via #1022's
   own hand-off). Fixed (#1088) with `serialize_threads_shims`
-  (`src/serialize.c`): a synthesized *definition* for each function
+  (`src/serialize_shims.c`): a synthesized *definition* for each function
   actually used, written over the already-replayed real `<pthread.h>`,
   emitted after `serialize_type_defs_for_owner` (so the shim bodies can
   name `mtx_t`/`cnd_t`/`thrd_t`/`tss_t`) and gated off under `--emit-cccc`
@@ -328,7 +329,7 @@ by default). Two things follow from that:
   `__cccc_stdout()`) so they reflect the real host state instead of being
   inert guest globals. Since that expansion happens before this backend
   ever runs, the AST already contains the shim call with no record of the
-  original identifier. `cc_serialize_program` (`src/serialize.c`) defines
+  original identifier. `cc_serialize_program` (`src/serialize_program.c`) defines
   each shim actually used (`serialize_native_accessor_shims`) in terms of
   the real symbol immediately after the real header is re-emitted — e.g.
   `static FILE *__cccc_stdout(void) { return stdout; }` — rather than
@@ -347,7 +348,7 @@ by default). Two things follow from that:
   (`src/reflection.c`), reached centrally from `var_ref_lookup()` so both
   shapes are covered uniformly, records `{Obj, header}` into
   `vm->compiler.synth_libc_decls`; `serialize_synth_libc_includes()`
-  (`src/serialize.c`) emits the real header once for whichever entries a
+  (`src/serialize_program.c`) emits the real header once for whichever entries a
   program's emitted functions actually call (`node_calls_obj()`, an
   identity match), rather than a prototype — the synthesized signatures are
   deliberately loose and a printed prototype could conflict with the real
@@ -363,7 +364,7 @@ by default). Two things follow from that:
   suppressed()` correctly drops its alias line under the ordinary
   assumption that a user `#include` supplies it — except nothing here ever
   does, leaving a bare, undeclared name. `serialize_synth_typedef_includes()`
-  (`src/serialize.c`) emits the real `<stddef.h>` on demand, mirroring
+  (`src/serialize_program.c`) emits the real `<stddef.h>` on demand, mirroring
   `serialize_synth_libc_includes()`'s shape: a small `{name, header}` table
   scoped to exactly the trio verified to match the real host's own typedef
   on every supported combo (LP64 macOS/Linux × aarch64/x86_64), plus a
@@ -415,7 +416,7 @@ by default). Two things follow from that:
   clone/substitute/transform the three new `Node*` annotation fields too,
   so a macro or comptime clone of an annotated node can't silently
   degrade back to unannotated VM-ABI output). `serialize_expr`
-  (`src/serialize.c`) checks the annotation before dispatching on
+  (`src/serialize_expr.c`) checks the annotation before dispatching on
   `node->kind` at all, and when present prints the real host
   `va_start(ap, last)`/`va_arg(ap, type)`/`va_copy(dest, src)`/`va_end(ap)`
   form instead of walking the VM-internal subtree. No on-demand `#include`
@@ -428,14 +429,14 @@ by default). Two things follow from that:
 
 `-c=generated` (without `-c=native`) is a separate code path: its output is
 meant to be compiled *alongside* normal headers, so it has never re-emitted
-header-sourced typedefs (see `generated_only` in `serialize.c`). It has its
+header-sourced typedefs (see `generated_only` in `cc_serialize_program`, `src/serialize_program.c`). It has its
 own, narrower version of the same collision problem: a struct/enum reached
 through a `GetType()`/`Quote()` comptime macro is normally re-derived into
 the output (a `#include @comptime`-routed header's own `#include` is never
 replayed, so nothing else supplies the definition), but if the *same*
 header is also plainly `#include`d in the same TU, the plain include's
 `#include` line **is** replayed, and the definition must not also be
-re-derived on top of it. `path_is_captured()` in `src/serialize.c` (#953)
+re-derived on top of it. `path_is_captured()` in `src/serialize_type.c` (#953)
 resolves this by checking whether the type's declaring file is one of the
 paths auto-capture actually replayed for this program — including a
 standard header served from CCCC's embedded `src/std.c` table rather than
@@ -473,7 +474,7 @@ handling to come back out as valid, semantically faithful C:
   (`strip_casts`) and re-casting through `(char *)` instead, so the offset
   is applied exactly once: `(T *)((char *)ptr + offset)`, and
   `((char *)q - (char *)p)` for pointer subtraction.
-- **Global initializers.** `serialize_init_bytes` (`src/serialize.c`)
+- **Global initializers.** `serialize_init_bytes` (`src/serialize_decl.c`)
   reconstructs a global's initializer from its raw `init_data` bytes,
   recursing through arrays/vectors/structs/unions. A pointer-typed
   initializer slot backed by a `Relocation` (address of another global, a
@@ -491,10 +492,10 @@ handling to come back out as valid, semantically faithful C:
   emitting a guess that would silently change the program's data. There is
   no equivalent gap for non-global (local/stack) initializers — those are
   codegen'd directly, not reconstructed as source text.
-- **Anonymous globals.** `new_anon_gvar` (`src/parse.c`) hands out the same
+- **Anonymous globals.** `new_anon_gvar` (`src/parse_core.c`) hands out the same
   synthesized `.L..N` name to string literals, static locals, and compound
   literals (`(int[]){1,2,3}`, `&(struct S){...}`) alike — a dot isn't a
-  valid C identifier character. `rename_anon_globals` (`src/serialize.c`)
+  valid C identifier character. `rename_anon_globals` (`src/serialize_program.c`)
   runs once before any other emission pass: every such Obj that isn't a
   genuine string literal (`Obj.is_string_literal`, set only by
   `new_string_literal`) is given a real, `static`-qualified name and
@@ -514,7 +515,7 @@ handling to come back out as valid, semantically faithful C:
   this late would desync the signature from the body.
 - **`for`-loop declaration-form init.** A `for (int i = 0; ...)` init
   clause parses as an `ND_BLOCK` of per-declarator `ND_EXPR_STMT` nodes
-  (`declaration()`, `src/parse.c`), not a plain expression — the `ND_FOR`
+  (`declaration()`, `src/parse_init.c`), not a plain expression — the `ND_FOR`
   case in `serialize_stmt` emits each declarator's initializing assignment,
   comma-joined for a multi-declarator init (`for (int i = 0, j = 1; ...)`),
   and nothing for a declaration with no initializer (`for (int i; ...)`).
@@ -603,7 +604,7 @@ rest of the translation unit once it's seen — so once a real host header
 chain (`<stdio.h>` → `sys/cdefs.h` → this file, the common case) pulls this
 stub in, every later `__attribute__(...)` in the *user's own* source
 silently reduces to nothing, no error, no warning — including attributes
-`serialize.c` itself emits (constructor/destructor, #1020). Guarding the
+`cc_serialize_program` itself emits (constructor/destructor, #1020). Guarding the
 whole stub body on `__CCCC__` and handing off to the real host
 `Availability.h` (behind `#ifdef __has_include_next` / `#if
 __has_include_next(<Availability.h>)`, nested rather than a single `&&`
@@ -723,7 +724,7 @@ class can't reproduce at all on a clang-only host and a round-trip test would
 pass vacuously there.
 
 A narrower version of the same problem hits any bundled header that
-declares an `extern` prototype for a name `serialize.c`'s
+declares an `extern` prototype for a name `src/serialize_shims.c`'s
 `native_accessor_shims` table (see below) also gives a `static` definition
 to once it's used (`__cccc_errno_ptr`, `__cccc_isnan_f`/etc): the replayed
 extern and the emitted static definition disagree on linkage, and the host
@@ -856,7 +857,7 @@ node now carries the operand `Type` it was folded from
 sites in `src/parse_postfix.c`), and `serialize_expr`'s `ND_NUM` case
 re-materializes the operator textually — `sizeof(struct statfs)` rather
 than a bare `56ULL` — whenever `type_layout_is_host_owned()`
-(`src/serialize.c`) says the type's own definition is from_include-
+(`src/serialize_type.c`) says the type's own definition is from_include-
 suppressed (recursing through an array base or a struct/union's members,
 stopping at a pointer) **and** `type_has_printable_name()` confirms
 `serialize_type()` can spell it by a real tag/typedef rather than falling
@@ -894,7 +895,7 @@ the captured `#include <sys/mount.h>` line verbatim, resolved against the
 host compiler's *own* search path — not through `include/sys/mount.h` at
 all unless the caller happens to pass `-I <repo>/include` explicitly (the
 same distinction `#1096`'s `close()` fix, above, had to draw). Fixed at
-that replay site (`cc_serialize_program`, `src/serialize.c`): a replayed
+that replay site (`cc_serialize_program`, `src/serialize_program.c`): a replayed
 `#include <sys/mount.h>` line is immediately followed by
 `#include <sys/vfs.h>` when this cccc binary is itself running on Linux
 (`run_native_backend` never cross-compiles, so the host `cc` it spawns
@@ -915,7 +916,7 @@ real host's own (possibly smaller) size happens to be, defeating the
 padding #1054/#1059 built specifically to avoid depending on that.
 `type_layout_is_host_owned()` excludes any type whose owning header is on
 `is_compiler_owned_header()`'s fixed list (now shared between
-`src/preprocess.c` and `src/serialize.c` for exactly this reason) —
+`src/preprocess.c` and `src/serialize_type.c` for exactly this reason) —
 confirmed necessary the hard way: `tools/comptime_native_smoke.py`'s own
 case 97 (`sizeof(va_list)` folds to exactly 64) regressed without it.
 
@@ -928,7 +929,7 @@ stays folded. #1095 closed three of those: an array dimension
 below), a `case` label, and an enum value, sharing `const_expr_layout()`/
 `node_layout_const()` (`src/parse_analysis.c`) to carry the same
 `Type`/`is_align` provenance #1031's own `Node.layout_ty`/`layout_is_align`
-pair does, and `serialize_layout_const()` (`src/serialize.c`, factored out
+pair does, and `serialize_layout_const()` (`src/serialize_type.c`, factored out
 of #1031's own `ND_NUM` re-materialization arm) to emit it. An enum
 constant's provenance also has to reach every *use* of the enumerator, not
 just its own `NAME = ...` line in the body — `VarScope.enum_layout_ty`
@@ -986,7 +987,7 @@ the folded `int64_t`, threading it through a new `Node.static_assert_cond`/
 `static_assert_msg` pair for the block-scope form (stashed on the otherwise-
 empty `ND_BLOCK` `stmt()` already returns) and a new `Compiler.
 static_asserts` list for the file-scope form (which has no `Node` of its
-own to hang it off). `serialize_static_assert()` (`src/serialize.c`)
+own to hang it off). `serialize_static_assert()` (`src/serialize_type.c`)
 re-emits `_Static_assert(cond, "msg")` — always the two-arg spelling, even
 for a C23 single-arg `static_assert` source, since it needs no `<assert.h>`
 and is valid on every host this project supports — through
@@ -1026,7 +1027,7 @@ emitted too (#1096)** — found verifying #1031's own fix against
 `cccc -c=native foo.c -o foo` user (no `-I./include`) could hit: bundled
 `fcntl.h` itself `#include`s bundled `unistd.h`, which is what actually
 declares `close()`, so the `#901` bodiless-declaration gate (`src/
-serialize.c`) saw `close()`'s own token pointing at `unistd.h`, judged that
+serialize_program.c`) saw `close()`'s own token pointing at `unistd.h`, judged that
 "not the primary file", and — on the assumption that whichever header
 declared it must be the one the auto-captured `#include` replays — dropped
 the prototype. That assumption holds for a **real host** header reached
@@ -1100,7 +1101,7 @@ those — so a plain member-path store to one of those is left exactly as
 emitted. `tools/comptime_native_smoke.py`'s own
 `struct timespec nap = {0, 20000000}` case is the regression a broader
 "any host-owned member" version of this fix introduced and this narrower
-scoping (`expr_roots_at_opaque_member()`, `src/serialize.c`) avoids.
+scoping (`expr_roots_at_opaque_member()`, `src/serialize_expr.c`) avoids.
 
 **A bundled header's macros must never name a member of a host-owned
 type (#1138)** — `include/sys/select.h`'s `FD_ZERO`/`FD_SET`/`FD_CLR`/
@@ -1127,7 +1128,7 @@ undeclared call (#1139)** — `environ` is `#define environ
 (*__cccc_environ_ptr())`, an accessor for a VM-only cfunc
 (`src/stdlib/posix_io.c`). Every sibling accessor (`__cccc_stdin`,
 `__cccc_errno_ptr`, `__cccc_optarg_ptr`, …) already has an entry in
-`native_accessor_shims` (`src/serialize.c`) defining a real, `static`
+`native_accessor_shims` (`src/serialize_shims.c`) defining a real, `static`
 function over the host's own real global — `environ` didn't. Adding the
 missing entry surfaced a second bug once tested under the harness's own
 real invocation shape (`-I./include` forwarded, per `native.py`):
@@ -1160,7 +1161,7 @@ c16/c32 pair since 2.16 and the c8 pair since 2.36 — a host that new links
 against the real symbol using the re-derived `extern` alone, no help
 needed — but Darwin has never shipped any of the six
 ("Undefined symbols ... _c16rtomb"). Fixed with `serialize_uchar_shims()`
-(`src/serialize.c`), the same self-contained-shim shape `serialize_threads_
+(`src/serialize_shims.c`), the same self-contained-shim shape `serialize_threads_
 shims()` uses for `<threads.h>` (#1088): a fallback definition, a
 near-verbatim port of `src/stdlib/wide.c`'s own VM-side fallback, emitted
 only for the functions actually used and only under the identical
@@ -1170,7 +1171,7 @@ preprocessor macro-expands an entire `#if` line (including a short-
 circuited `&&` operand) before evaluating any of it, so `__GLIBC_PREREQ`
 must never appear in a condition that can be reached on a host with no
 `__GLIBC__` at all. The two shim copies (`src/stdlib/wide.c`,
-`src/serialize.c`) have no shared source and must be kept in sync by hand;
+`src/serialize_shims.c`) have no shared source and must be kept in sync by hand;
 folding them into one generated `.inc` (the `reflection_ffi_*.inc`
 precedent) is a real follow-up, not attempted here.
 
@@ -1189,7 +1190,7 @@ own bundled, non-hand-off `time.h` again via the same `-I./include`
 forwarding that found `wchar.h` in the first place — `struct tm`/
 `clock_t`/`time_t` redefinition, confirmed directly against both SDKs, the
 identical cascade `__cccc_mb_cur_max`'s own shim comment
-(`src/serialize.c`) documents for the same reason a `<stdlib.h>` hand-off
+(`src/serialize_shims.c`) documents for the same reason a `<stdlib.h>` hand-off
 was rejected. Landing the full split would trade #1103's already-fixed
 `mbstate_t`-layout mismatch for a strictly worse, unconditional compile
 failure on every host. Fell back instead to a narrow fix matching

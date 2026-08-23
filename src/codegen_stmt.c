@@ -300,7 +300,7 @@ static bool try_emit_restrict_memcpy(VirtualMachine *vm, Node *node) {
 // through a declaration()-built synthetic wrapper (Node.is_decl_group,
 // cccc.h) -- declaration() never nests one such wrapper inside another, so
 // one level is exhaustive. Deliberately distinct from block_defines_vla
-// (internal.h), which serialize.c applies directly to a CANDIDATE wrapper
+// (internal.h), which serialize_stmt.c applies directly to a CANDIDATE wrapper
 // itself (deciding whether that specific node needs unbracing); this one
 // is applied to the ENCLOSING real scope, which is where a VLA's storage
 // must actually stay reachable until, and is the only correct place for

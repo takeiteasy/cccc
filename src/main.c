@@ -359,10 +359,10 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
     // is simply a no-op.
     argv_push(&cc_args, "-lm");
     // #1088: pthread is never linked otherwise -- the <threads.h> shims
-    // (serialize_threads_shims, serialize.c) call real pthread_create/
-    // pthread_mutex_*/pthread_cond_*/pthread_key_* directly, same as any
-    // guest program using <pthread.h> itself. This stayed invisible for
-    // pthread until now for the same reason -lm did (#1051): glibc >= 2.34
+    // (serialize_threads_shims, src/serialize_shims.c) call real
+    // pthread_create/ pthread_mutex_*/pthread_cond_*/pthread_key_* directly,
+    // same as any guest program using <pthread.h> itself. This stayed invisible
+    // for pthread until now for the same reason -lm did (#1051): glibc >= 2.34
     // folds libpthread into libc.so.6 and macOS always had it in
     // libSystem, so every existing native pthread test linked fine with no
     // flag at all. An older glibc (< 2.34) needs it explicitly. Harmless
@@ -3049,8 +3049,8 @@ int main(int argc, const char *argv[]) {
     // written in a file the user asked to compile" for *any* input index,
     // not just the first (vm.compiler.primary_file, set by cc_preprocess/
     // linker.c, only ever names input_files[0] -- see
-    // file_is_command_line_input in serialize.c). Keys are borrowed: these
-    // strings are strdup'd once at argv-parsing time and outlive the vm.
+    // file_is_command_line_input in serialize_program.c). Keys are borrowed:
+    // these strings are strdup'd once at argv-parsing time and outlive the vm.
     for (int i = 0; i < input_files_count; i++)
         hashmap_put_borrowed(&vm.compiler.command_line_inputs, input_files[i],
                              (void *)(intptr_t)1);
@@ -3293,7 +3293,7 @@ int main(int argc, const char *argv[]) {
         // TU's own parse() call left it as (each TU's parse() resets it to
         // that TU's own list -- see the #957 comment in parse()), not the
         // full merged, multi-TU program. serialize_find_global()
-        // (src/serialize.c) scans this list to resolve a Relocation's
+        // (src/serialize_decl.c) scans this list to resolve a Relocation's
         // target (e.g. a function pointer in a static const vtable
         // initializer, `.open = none_open`), so a target defined in an
         // earlier TU than the one holding the initializer was reported as

@@ -43,7 +43,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         // subsequent `DyValue`-typed node's ->ty is pointer-identical to
         // every unrelated plain `unsigned long`-typed node's, so a
         // serializer pass matching a typedef alias by Type identity
-        // (find_typedef_name_exact, src/serialize.c) couldn't tell "spell
+        // (find_typedef_name_exact, src/serialize_type.c) couldn't tell "spell
         // this as DyValue" apart from "this was never typedef'd, spell it
         // as unsigned long" -- and would have to pick one spelling for
         // both, wrongly renaming every plain use of the underlying type.
@@ -1282,7 +1282,7 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // jmp_buf is an array type, but we'll treat it as a pointer for now.
     // The pointee type here (long) is just the VM-side parameter shape;
     // it does not need to (and, under -c=native, must not -- see #1054)
-    // agree with the real host jmp_buf ABI. serialize.c suppresses the
+    // agree with the real host jmp_buf ABI. serialize_type.c suppresses the
     // implicit cast to `long *` at each of these four call sites and
     // prints `(void *)` instead, so the emitted C never claims the arg is
     // a `long *` there. jmp_buf itself is include/setjmp.h's
@@ -1385,7 +1385,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             tok = static_assert_decl(vm, tok, &cond, &msg, &msg_len);
             // #1098: file scope leaves no Node to stash onto (unlike the
             // block-scope arm in stmt()), so keep it in its own list on
-            // Compiler for serialize.c to re-emit -- see
+            // Compiler for serialize_program.c to re-emit -- see
             // StaticAssertRecord's own comment.
             StaticAssertRecord *rec     = calloc(1, sizeof(StaticAssertRecord));
             rec->cond                   = cond;

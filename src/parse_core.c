@@ -562,7 +562,7 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
     rec->is_tag   = is_tag;
     // #896: a type declared in a file whose contents (directly or
     // transitively) use cccc-only routing syntax is never treated as
-    // from_include -- serialize.c's native-backend re-emission filter
+    // from_include -- serialize_program.c's native-backend re-emission filter
     // suppresses the raw #include of such a file, so its own definition
     // has to be serialized normally instead of relying on that #include
     // to supply it to the downstream compiler.
@@ -574,7 +574,7 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
     // -c=native/-m output, even though nothing actually supplies it (its
     // own TU's directives were never replayed either -- see the matching
     // preprocess.c fix). cc_file_is_command_line_input() is the same test
-    // #1002 already established for serialize.c's function passes.
+    // #1002 already established for serialize_program.c's function passes.
     // #1034: __builtin_quote's Quote() wrapper (reflection.c) tokenizes its
     // template string under the fixed pseudo-filename "<quote>" -- unlike
     // tokenize_private_header()'s "<implicit-reflection.h>"/"<building.h>"/

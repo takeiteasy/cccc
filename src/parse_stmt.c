@@ -128,7 +128,7 @@ static Node *stmt_or_decl(VirtualMachine *vm, Token **rest, Token *tok) {
 // #1098: out_cond/out_msg/out_msg_len (may be NULL, ignored) hand back the
 // parsed condition Node and its exact message text/length -- eval() folds
 // and discards val the same as before, but a caller that wants to
-// re-emit the assert for -c=native (serialize.c's serialize_static_assert)
+// re-emit the assert for -c=native (serialize_type.c's serialize_static_assert)
 // needs the Node itself, not just the folded int64_t. tok->str/tok->len is
 // the already-decoded string (escapes resolved), which is what a caller
 // re-emitting the message must reuse rather than the raw source spelling.
@@ -195,7 +195,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         char *msg     = NULL;
         int   msg_len = 0;
         *rest         = static_assert_decl(vm, tok, &cond, &msg, &msg_len);
-        // #1098: stash on the otherwise-empty ND_BLOCK -- serialize.c's
+        // #1098: stash on the otherwise-empty ND_BLOCK -- serialize_stmt.c's
         // ND_BLOCK case re-emits it for the host to re-check when the
         // condition folds a host-owned layout. See Node.static_assert_cond.
         Node *node                  = new_node(vm, ND_BLOCK, tok);

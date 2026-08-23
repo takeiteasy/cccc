@@ -472,11 +472,11 @@ bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm, const char *dir) {
 // #1006 (investigation, filed as part of #1005/#1006's fix): true when
 // `name` is the exact path of one of the files the user listed on the
 // command line, as opposed to a header any of them #included. This used to
-// be serialize.c's file-local file_is_command_line_input() (added by
+// be serialize_program.c's file_is_command_line_input() (added by
 // #1002's investigation); promoted to a shared, exported helper so
 // record_type_name() (parse.c) and the preprocessor's auto-capture gate
-// (below in this file) can use the exact same test serialize.c's function
-// passes already use, instead of each comparing against
+// (below in this file) can use the exact same test serialize_program.c's
+// function passes already use, instead of each comparing against
 // vm->compiler.primary_file (pinned to input_files[0] forever,
 // cc_preprocess/linker.c) the way they did before -- that mismatch is what
 // #1006 was about: a type or #include written in input_files[1..N] was
@@ -2199,7 +2199,7 @@ static char *format_relative_path(VirtualMachine *vm, char *base_file,
 //
 // These are never overridden even when --use-system-headers is active.
 //
-// #1031: not static -- src/serialize.c's type_layout_is_host_owned() also
+// #1031: not static -- src/serialize_type.c's type_layout_is_host_owned() also
 // needs this list, to exclude stdarg.h's va_list/setjmp.h's jmp_buf from
 // -c=native's general sizeof/_Alignof re-materialization. Those two
 // deliberately use the opposite strategy from an ordinary from_include
@@ -2235,13 +2235,13 @@ bool is_compiler_owned_header(const char *name) {
 // CCCC itself compiled the program fine. The PP_INCLUDE handler below marks
 // such a header cccc-only (mark_cccc_only_file) the moment it resolves,
 // reusing the #896/#999 machinery wholesale: the replay is suppressed
-// (cc_file_is_cccc_only, serialize.c's #include loop) and the header's own
-// content is re-derived into the output instead (record_type_name's
-// from_include check, parse.c; function_is_header_supplied, serialize.c) --
-// the same two mechanisms a @comptime-routed include already gets.
-// This is distinct from "owned": is_compiler_owned_header is neither
-// necessary nor sufficient here (stdckdint.h is owned and header-only, so
-// suppressing its replay alone is enough; stdbit.h is not owned but still
+// (cc_file_is_cccc_only, serialize_program.c's #include loop) and the header's
+// own content is re-derived into the output instead (record_type_name's
+// from_include check, parse.c; function_is_header_supplied,
+// serialize_program.c) -- the same two mechanisms a @comptime-routed include
+// already gets. This is distinct from "owned": is_compiler_owned_header is
+// neither necessary nor sufficient here (stdckdint.h is owned and header-only,
+// so suppressing its replay alone is enough; stdbit.h is not owned but still
 // needs this).
 static bool is_cccc_supplied_only_header(const char *name) {
     static const char *cccc_only[] = {
@@ -5338,16 +5338,16 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // replayed -- the host compiler then rejected size_t/malloc/free/
         // puts as undeclared even though tu2.c alone compiled fine. Widened
         // to cc_file_is_command_line_input() (preprocess.c), the same test
-        // #1002/#1006 already established for serialize.c's/parse.c's own
-        // primary_file-keyed drops. One residual: directives from more than
-        // one TU can now collide in the replayed output (e.g. two TUs each
-        // #define-ing the same macro to different values) -- harmless, since
-        // by the time this text is replayed every TU has already been fully
-        // parsed into AST using its own, now-per-TU (#1001) macro state; the
-        // replayed text exists only to bring types/library declarations into
-        // scope for the host compiler, so a colliding #define is at worst a
-        // host redefinition warning, not a semantic change. See
-        // man/HEADERS.md.
+        // #1002/#1006 already established for
+        // serialize_program.c's/parse_types.c's own primary_file-keyed drops.
+        // One residual: directives from more than one TU can now collide in the
+        // replayed output (e.g. two TUs each #define-ing the same macro to
+        // different values) -- harmless, since by the time this text is
+        // replayed every TU has already been fully parsed into AST using its
+        // own, now-per-TU (#1001) macro state; the replayed text exists only to
+        // bring types/library declarations into scope for the host compiler, so
+        // a colliding #define is at worst a host redefinition warning, not a
+        // semantic change. See man/HEADERS.md.
         char *ac_include_line = NULL; // #896: set below when this directive
                                       // is a captured #include that got
                                       // auto-captured, so the PP_INCLUDE
@@ -5358,7 +5358,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // #1022 (found closing #1022's own pthread.h work): a
             // cccc-only header's (is_cccc_supplied_only_header --
             // stdbit.h/uchar.h/threads.h/Availability.h/decimal_math.h)
-            // #include line is deliberately suppressed by serialize.c's
+            // #include line is deliberately suppressed by serialize_program.c's
             // replay loop (cc_file_is_cccc_only), and its own type/function
             // definitions are re-derived to compensate (#896) -- but a
             // *plain, non-cccc-only* header that IT #includes (threads.h's
@@ -5566,8 +5566,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // without reaching any registration of its own. The
                         // #include line is still replayed verbatim into
                         // -c=generated output regardless (emit_directives,
-                        // above), so path_is_captured() (serialize.c) needs to
-                        // know this key is supplied by it -- otherwise
+                        // above), so path_is_captured() (serialize_type.c)
+                        // needs to know this key is supplied by it -- otherwise
                         // serialize_type_defs_for_owner() re-derives the type's
                         // definition on top of the replayed #include, a
                         // redefinition the host compiler rejects (#998).
@@ -5591,9 +5591,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // compiler can't resolve -- reuse the #896/#999
                         // cccc-only machinery wholesale by marking this exact
                         // key (the same one just registered above) cccc-only,
-                        // so serialize.c's #include-replay loop suppresses it
-                        // and this header's own content is re-derived instead
-                        // of relied upon.
+                        // so serialize_program.c's #include-replay loop
+                        // suppresses it and this header's own content is
+                        // re-derived instead of relied upon.
                         if (is_cccc_supplied_only_header(filename))
                             mark_cccc_only_file(
                                 vm, embedded_header_key(vm, filename));
@@ -5604,7 +5604,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // fcntl.h's own `#include "unistd.h"` declaring
                         // close()) isn't mistaken for "supplied by the
                         // user's own replayed #include" by the #901
-                        // prototype-suppression gate in serialize.c.
+                        // prototype-suppression gate in serialize_program.c.
                         mark_cccc_bundled_file(
                             vm, embedded_header_key(vm, filename));
                         tok = include_embedded_header(

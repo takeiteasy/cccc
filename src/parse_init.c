@@ -321,7 +321,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // #973 follow-up: a pointer-to-VLA local's declarator reads a
             // runtime variable (`int (*p)[n]`), so it can't be hoisted to
             // the top of the function -- record this initializer as the
-            // in-place declaration site (serialize.c looks for it by
+            // in-place declaration site (serialize_decl.c looks for it by
             // pointer identity). `expr` is exactly the scalar
             // ND_ASSIGN(ND_VAR(var), ...) create_lvar_init/lvar_initializer
             // build for a non-aggregate initializer; var->ty is never itself

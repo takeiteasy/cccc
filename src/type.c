@@ -113,7 +113,7 @@ Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned) {
     //   x86_64 (any OS)   8                        16
     //   aarch64 (any OS)  16                       16
     // The rule adopted instead: match the layout of the C that cccc itself
-    // *emits*. serialize.c's TY_BITINT arm lowers every 16-byte container
+    // *emits*. serialize_type.c's TY_BITINT arm lowers every 16-byte container
     // (whether spelled _BitInt(65..128) or __int128) to host __int128 /
     // unsigned __int128 on every target -- the only size==16 emission path,
     // confirmed no native_resolve_std_ladder rung passes _BitInt(N) through

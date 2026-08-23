@@ -291,9 +291,10 @@ bool __builtin_ast_type_is_variadic(Type *ty) {
 // canonical, shared Type -- and declarator() then overwrites that shared
 // type's ->name with the declarator's own identifier (parameter/variable
 // name), not the tag. #892 added Type.struct_tag/Type.enum_tag to survive
-// that overwrite (see src/cccc.h); src/serialize.c already prefers them.
-// Prefer the same fields here so TypeName()/TypeCName() report the real
-// tag instead of whichever declarator last clobbered the shared Type.
+// that overwrite (see src/cccc.h); the serializer (src/serialize_type.c)
+// already prefers them. Prefer the same fields here so TypeName()/TypeCName()
+// report the real tag instead of whichever declarator last clobbered the shared
+// Type.
 static Token *type_name_token(Type *ty) {
     if (!ty)
         return NULL;
@@ -764,7 +765,7 @@ Node *__builtin_ast_string_literal(const char *str) {
 // (2), the __builtin_ast_find_global() branch for (1)), so registering
 // there covers both centrally instead of duplicating the check at every
 // call site. See vm->compiler.synth_libc_decls / serialize_synth_libc_
-// includes (serialize.c).
+// includes, src/serialize_program.c).
 static const struct {
     const char *name;
     const char *header;
@@ -2112,7 +2113,7 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
 // what WithFn(fn) would have produced -- this is what lets
 // belongs_to_outer_function()/calculate_chain_depth() (src/codegen.c) find a
 // captured outer variable through the static chain. Mirrors the traversal
-// shape of collect_node_types() (src/serialize.c).
+// shape of collect_node_types() (src/serialize_type.c).
 static void relink_orphan_block_parents(Node *node, Obj *fn) {
     if (!node)
         return;

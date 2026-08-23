@@ -852,23 +852,24 @@ typedef enum {
                    // deliberately outside CCCC_ALL_SAFETY -- no -S0..-S3
                    // tier enables it.
     CCCC_POSIX_EMULATION =
-        (1 << 26), // 0x04000000 - Enable lossy/approximate emulation of
-                   // POSIX functions the host doesn't natively support
-                   // (--posix-emulation). Off by default: such functions
-                   // are simply undeclared/unregistered, matching what a
-                   // native compiler on the same host would do. Also
-                   // restores raw ioctl() passthrough for request codes
-                   // outside wrap_ioctl's layout-verified allowlist (#795,
-                   // src/stdlib/posix_io.c) -- off by default there too, for
-                   // the same "don't risk an unverified host ABI without
-                   // being asked" reason. Honoured under -c=native too
-                   // (#1140): serialize_posix_compat_shims (src/serialize.c)
-                   // ports the same ppoll/sched_* emulation the VM uses
-                   // into the emitted C on a host lacking the real symbol.
-                   // The ioctl-passthrough use above stays VM-only -- the
-                   // host ioctl() -c=native calls directly has no
-                   // allowlist either way, so there is nothing for the
-                   // flag to restore there.
+        (1
+         << 26), // 0x04000000 - Enable lossy/approximate emulation of
+                 // POSIX functions the host doesn't natively support
+                 // (--posix-emulation). Off by default: such functions
+                 // are simply undeclared/unregistered, matching what a
+                 // native compiler on the same host would do. Also
+                 // restores raw ioctl() passthrough for request codes
+                 // outside wrap_ioctl's layout-verified allowlist (#795,
+                 // src/stdlib/posix_io.c) -- off by default there too, for
+                 // the same "don't risk an unverified host ABI without
+                 // being asked" reason. Honoured under -c=native too
+                 // (#1140): serialize_posix_compat_shims
+                 // (src/serialize_shims.c) ports the same ppoll/sched_*
+                 // emulation the VM uses into the emitted C on a host lacking
+                 // the real symbol. The ioctl-passthrough use above stays
+                 // VM-only -- the host ioctl() -c=native calls directly has no
+                 // allowlist either way, so there is nothing for the
+                 // flag to restore there.
     CCCC_CHECKED_BOUNDS =
         (1 << 27), // 0x08000000 - Enable runtime enforcement (CHKR) of
                    // Checked C-style checked-pointer declared bounds
@@ -1172,8 +1173,8 @@ typedef struct StringArray {
         captured user #include either way). Both shapes are registered
         centrally by register_synth_libc_call() (reflection.c), reached
         via var_ref_lookup(), so -c=native can emit the real header on
-        demand (serialize.c) instead of printing a prototype that could
-        collide with the real one. See vm->compiler.synth_libc_decls.
+        demand (src/serialize_program.c) instead of printing a prototype that
+ could collide with the real one. See vm->compiler.synth_libc_decls.
 */
 typedef struct SynthLibcDecl {
     struct Obj *obj;    /**< The Obj a call resolved to (identity match against
@@ -1741,19 +1742,20 @@ struct Node {
     // #1031: ND_NUM folded from sizeof/_Alignof of this type -- -c=native
     // re-materializes the operator textually (`sizeof(struct statfs)`
     // rather than the folded literal `56ULL`) when the type's layout is
-    // host-owned (a from_include struct whose body serialize.c suppresses
-    // in favor of the replayed #include), so the emitted value tracks
-    // whichever layout the host header actually supplies rather than
-    // CCCC's own possibly-smaller projection. NULL/unset for every other
-    // ND_NUM (ordinary literals, constant-folded arithmetic, etc). See
-    // serialize.c's ND_NUM integer arm and type_layout_is_host_owned().
+    // host-owned (a from_include struct whose body the serializer
+    // (src/serialize_type.c) suppresses in favor of the replayed #include), so
+    // the emitted value tracks whichever layout the host header actually
+    // supplies rather than CCCC's own possibly-smaller projection. NULL/unset
+    // for every other ND_NUM (ordinary literals, constant-folded arithmetic,
+    // etc). See serialize_expr.c's ND_NUM integer arm and serialize_type.c's
+    // type_layout_is_host_owned().
     Type *layout_ty;
     bool  layout_is_align; // layout_ty came from _Alignof, not sizeof
 
     // #1098: a block-scope `_Static_assert`/`static_assert` parses to an
     // otherwise-empty ND_BLOCK (see static_assert_decl(), src/parse_stmt.c) --
     // its condition Node and message are stashed here (rather than a new
-    // ND_ kind, keeping codegen/eval's switches untouched) so serialize.c
+    // ND_ kind, keeping codegen/eval's switches untouched) so the serializer
     // can re-emit the assert for the host compiler to re-check when the
     // condition folds a host-owned layout. NULL for every ordinary
     // ND_BLOCK. See serialize_static_assert()/expr_has_host_owned_layout().
@@ -1993,7 +1995,7 @@ struct Node {
     // *existing* VM-ABI impl expression, parsed and returned completely
     // unchanged (same lhs/rhs/args/etc as before this ticket) -- va_form
     // and the fields below are pure annotation, read only by the
-    // serializer (serialize_expr/serialize_stmt, src/serialize.c) to print
+    // serializer (src/serialize_expr.c/src/serialize_stmt.c) to print
     // the real host <stdarg.h> form (`va_start(ap, last)`, `va_arg(ap,
     // type)`, ...) instead of walking the VM-internal subtree. VM codegen,
     // comptime, reflection and inlining all see byte-identical AST to
@@ -2130,7 +2132,7 @@ struct Obj {
     // when one exists, and left NULL otherwise. NULL means: not deferred,
     // hoisted normally (matches today's behavior, including the still-open
     // gap for a no-initializer pointer-to-VLA declaration -- see the comment
-    // at its hoist-skip check in serialize.c).
+    // at its hoist-skip check (src/serialize_type.c)).
     Node *deferred_vla_ptr_init;
 
     // Global variable or function
@@ -2172,7 +2174,7 @@ struct Obj {
                               // (#925) -- this flag is the only reliable way
                               // to tell them apart; the serializer treats a
                               // dotted name as "opaque string literal" only
-                              // when this is set (see src/serialize.c).
+                              // when this is set (see src/serialize_decl.c).
     char       *init_data;
     Relocation *rel;
     Node       *init_expr;    // For constexpr: AST of initializer expression
@@ -2231,8 +2233,9 @@ struct Obj {
                             // serializer's benefit -- lets serialize_function's
                             // hoist loop find the paired env struct
                             // (serialize_block_preamble/find_block_env,
-                            // serialize.c) without a separate AST walk. No VM/
-                            // codegen consumer.
+    // find_block_env: src/serialize_expr.c; the preamble
+    // itself: src/serialize_program.c) without a separate
+    // AST walk. No VM/ codegen consumer.
     bool
         block_return_ty_pending; // #965: true while parsing a block literal's
                                  // body whose return type wasn't written
@@ -2627,7 +2630,7 @@ struct ComptimeDeclRecord {
 // block-scope one (Node.static_assert_cond), static_assert_decl() has no
 // Node of its own to stash onto at file scope (parse_file_scope_decls()
 // just skips its tokens), so this list is where it survives instead.
-// serialize.c re-emits it for the host compiler to re-check when the
+// The serializer re-emits it for the host compiler to re-check when the
 // condition folds a host-owned layout (type_layout_is_host_owned()) and
 // `tok` is from a command-line input file -- see
 // serialize_static_assert()/expr_has_host_owned_layout().
@@ -3120,9 +3123,9 @@ typedef struct TypeNameRecord {
     // per-TU preprocessor isolation) can end up ahead of the completing
     // record in scan order; same_type_or_origin() also deliberately treats
     // a tagged incomplete aggregate as equal to the tagged complete one
-    // (serialize.c), so a naive first-match scan could pick the
+    // (src/serialize_type.c), so a naive first-match scan could pick the
     // forward-declaration's from_include=true record and wrongly suppress
-    // the only definition available. serialize.c's
+    // the only definition available. serialize_type.c's
     // find_tag_name_for_provenance() prefers a defines_type record over a
     // merely-first one.
     bool                   defines_type;
@@ -3526,7 +3529,8 @@ typedef struct Compiler {
     // linker.c) -- this covers every command-line input, which is what
     // "was this Obj written in one of the files the user asked to compile,
     // as opposed to a header any of them #included" actually needs to ask
-    // (see file_is_command_line_input, serialize.c). Keys are borrowed --
+    // (see file_is_command_line_input,
+    // src/serialize_program.c). Keys are borrowed --
     // main.c's input_files[] strings outlive the VM, so no copy is taken and
     // no separate teardown beyond hashmap_deinit_borrowed is required.
     HashMap command_line_inputs;
@@ -3647,8 +3651,8 @@ typedef struct Compiler {
     // embedded fallback or an on-disk `-I./include` hit) -- as opposed to a
     // real host header reached transitively through a replayed #include.
     // The distinction matters for the bodiless-declaration prototype pass
-    // (serialize.c, #901): a declaration sourced from a *real* host header
-    // is genuinely supplied once that header's own #include is replayed,
+    // (serialize_program.c, #901): a declaration sourced from a *real* host
+    // header is genuinely supplied once that header's own #include is replayed,
     // but one sourced from CCCC's bundled chain (e.g. bundled fcntl.h's own
     // `#include "unistd.h"` declaring close()) is not -- the replayed
     // `#include <fcntl.h>` resolves to the *host's* fcntl.h under
@@ -3682,7 +3686,7 @@ typedef struct Compiler {
     // reflection-API builder called (e.g. memcpy()/strlen() via Serialize()
     // or the Memcpy()/Strlen()/Strcmp() macros) without the TU #include-ing
     // the declaring header itself. -c=native has no #include to auto-
-    // capture for these, so serialize.c emits the header on demand for
+    // capture for these, so serialize_program.c emits the header on demand for
     // whichever entries are actually called, keyed off this registry
     // rather than a prototype (which could conflict with the real
     // declaration the header would bring in elsewhere in the same TU).

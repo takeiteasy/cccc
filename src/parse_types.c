@@ -1182,7 +1182,7 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
         // reference (`struct Foo;`) never calls install_tag_definition at
         // all (see struct_union_decl/enum_specifier's own push_tag_scope
         // calls). Mark the record push_tag_scope just created as a real
-        // definition so serialize.c's find_tag_name_for_provenance() can
+        // definition so serialize_type.c's find_tag_name_for_provenance() can
         // prefer it over an unrelated forward declaration recorded later.
         mark_last_type_name_as_definition(vm, ty);
         return ty;
@@ -1200,7 +1200,7 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
         // file) must re-record the tag with the *definition's* declaration
         // token. The forward declaration's record -- created by
         // push_tag_scope with the header token -- has from_include true, so
-        // serialize.c's #891 filter (serialize_type_defs_for_owner) would
+        // serialize_type.c's #891 filter (serialize_type_defs_for_owner) would
         // suppress the standalone definition from -m/-c=native output on the
         // assumption the re-emitted #include supplies the header. Provenance
         // belongs to the definition, not the first mention (the same rule

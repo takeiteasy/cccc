@@ -675,7 +675,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     `LEA3` recording, but for the `ENT3`/`LEV3` push/pop itself. See
     [VM.md](VM.md)'s "Lazy per-function activation" note.
   - Recording is pruned to addresses that provably *escape* their creating
-    frame (#676) — a post-parse pass (`mark_addr_escapes` in `src/parse.c`)
+    frame (#676) — a post-parse pass (`mark_addr_escapes` in `src/parse_analysis.c`)
     marks a local's `Obj.addr_escapes` when its address (or an array/struct
     it owns, interior-aware through `&arr[i]`/`&s.field`, or pointer
     arithmetic on that base such as `arr + i`, #718) is observed as a call
@@ -1085,7 +1085,7 @@ same way it already does for `CHKRO` — `CHKNT` already declines whenever
 for any real element size, so no sentinel-aware variant of `CHKNT` was
 needed. Read-modify-write through a propagated pointer (`q[n] += 1`,
 `q[n]++`) and the `_Atomic` compare-exchange desugar are both covered too:
-`to_assign()` (src/parse.c) desugars an RMW at **parse time**, before this
+`to_assign()` (src/parse_expr.c) desugars an RMW at **parse time**, before this
 pass has resolved `q`'s bounds, so it leaves a back-link
 (`Node.checked_rmw_mirror`) from the original deref to the synthesized store
 node it built; the propagation pass's attach walk follows that link and
@@ -1259,7 +1259,7 @@ write.
 
 Read-modify-write on the terminator slot (#937) is covered as directly as
 plain assignment. `s[n] += 1` and `s[n]++` desugar (`to_assign()`,
-`src/parse.c`) to `tmp = &s[n]; *tmp = *tmp + 1` — the synthesized `*tmp`
+`src/parse_expr.c`) to `tmp = &s[n]; *tmp = *tmp + 1` — the synthesized `*tmp`
 store deref now carries the same `checked_bounds_lo/hi`/
 `checked_nt_terminator` as `s[n]` itself, so `CHKNT` traps it exactly like a
 direct `s[n] = 1` (this includes the float/double bit-pattern-transfer path,

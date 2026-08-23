@@ -483,8 +483,8 @@ static inline const char *cc_opcode_name(int op) {
 // #964: true for the `v = alloca(tmp)` assignment declaration() (parse.c)
 // builds for a VLA local -- new_vla_ptr() (parse.c) has exactly one
 // construction site, at that assignment's lhs, so this check is exhaustive.
-// Shared by serialize.c (deciding whether a block must stay unbraced when
-// translated to native C) and codegen.c (#981: deciding whether a block
+// Shared by serialize_stmt.c (deciding whether a block must stay unbraced when
+// translated to native C) and codegen_stmt.c (#981: deciding whether a block
 // needs an HMRK/HREL watermark pair for heap reclamation) -- both need the
 // identical "does this block's own declaration statement include a VLA"
 // shape check, applied directly to whichever specific ND_BLOCK node the
@@ -513,7 +513,8 @@ static inline bool node_is_deferred_vla_ptr_init(Node *n) {
 // bundles a statement's per-declarator initializers into one ND_BLOCK (e.g.
 // `int n = 4, v[n];` is a single ND_BLOCK holding both), so a block
 // containing such a declarator has to stay unbraced when serialized -- see
-// serialize_stmt_list_item() in serialize.c. #981 (codegen.c) reuses this
+// serialize_stmt_list_item() in serialize_stmt.c. #981
+// (codegen_stmt.c) reuses this
 // same check to decide whether a block needs an HMRK/HREL watermark pair: a
 // missed detection only forfeits reclamation for that block (its VLA
 // storage is still swept, just later, at frame exit), it never
@@ -1192,7 +1193,8 @@ int cc_is_valid_vm_address(
 void cc_host_backtrace_print(void);
 
 //
-// serialize.c
+// (the serializer's public entry point, cc_serialize_program, is declared
+// in cccc.h; the internal split lives in serialize_internal.h)
 //
 
 //
@@ -1203,8 +1205,9 @@ void cc_dump_node(FILE *f, Node *node,
                   int verbose);   // single-node dump (used by relfection.c)
 const char *
 cc_node_kind_name(NodeKind kind); // kind→string (used by relfection.c)
-const char *cc_type_kind_name(
-    TypeKind kind); // kind→string (used by serialize.c's #963c hard error)
+const char *
+cc_type_kind_name(TypeKind kind); // kind→string (used by the serializer's #963c
+                                  // hard-error arms)
 void cc_dump_type(FILE *f,
                   Type *ty); // C-ish type spelling (used by the REPL, #661)
 

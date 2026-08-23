@@ -5,6 +5,16 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- Split `src/serialize.c` (12,719 lines, ~200 static functions feeding a
+  single `cc_serialize_program` entry point) into six files by section
+  (`serialize_type.c`, `serialize_expr.c`, `serialize_stmt.c`,
+  `serialize_decl.c`, `serialize_shims.c`, `serialize_program.c`) plus
+  `serialize_internal.h` for the shared context structs and cross-file
+  prototypes, mirroring the earlier codegen/parse splits. Purely
+  mechanical — no behavioral changes.
+
 ### Fixed
 
 - `-c=native`/`-m`: a global initializer for a wide-`_BitInt`-typed

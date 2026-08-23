@@ -1,0 +1,2488 @@
+/*
+ CCCC: Comprehensiev C Compensation Compiler
+
+ Copyright (C) 2025 George Watson
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+// Serialization: type-name provenance/dedup machinery, type
+// collection + definition ordering, struct/enum definitions,
+// typedef aliases, tag forward declarations (#1150).
+#include "./serialize_internal.h"
+
+// Forward declaration
+// #1124: serialize_expr's actual switch-on-node->kind body, renamed so the
+// public serialize_expr can wrap it with the _BitInt width-mask check below
+// without recursing into itself.
+// #1062/#1085: matches CCCC's own struct va_list structurally (defined
+// further down, near its own long comment) -- forward-declared here so
+// ND_FUNCALL (inside serialize_expr's own switch, above the definition
+// textually) can call it too.
+// #1074/#1080: does `var` belong to `fn`'s own locals list? Defined near
+// serialize_nested_preamble() (with the rest of the nested-function-upvar
+// machinery); forward-declared here so ND_BLOCK_LITERAL's capture-copy
+// (serialize_expr, above that machinery in file order) can reuse it.
+// #1136: defined near serialize_global_var (with the rest of the
+// declaration-printing machinery); forward-declared here so the hoisted-local
+// declarator (serialize_function, above that machinery in file order) can
+// reuse it too.
+// #1103: defined near the other include-provenance predicates (with
+// global_is_header_supplied); forward-declared here so
+// rename_colliding_static_names() (above that machinery in file order) can
+// share the exact same "does this definition actually reach the output"
+// test the emitter itself uses, instead of a hand-rolled paraphrase that can
+// drift out of sync with it.
+// #964: mutually recursive with serialize_stmt -- see the comment on its
+// definition, near ND_BLOCK below.
+
+static bool same_type_or_origin(Type *a, Type *b) {
+    for (Type *pa = a; pa; pa = pa->origin)
+        for (Type *pb = b; pb; pb = pb->origin)
+            if (pa == pb)
+                return true;
+
+    if (a && b && a->kind == b->kind &&
+        (a->kind == TY_STRUCT || a->kind == TY_UNION)) {
+        // #892: distinguish tagged aggregates by tag name before falling
+        // back to structural (member-wise) comparison below. Without this,
+        // two unrelated opaque (incomplete) structs -- which have no
+        // members for the loop below to compare -- collapsed into "the
+        // same type" (the loop body never runs for either side, so the
+        // function fell through to `ma == NULL && mb == NULL` == true).
+        // That corrupted find_tag_name()'s linear scan into returning
+        // whichever opaque tag happens to appear first in scope (e.g.
+        // reflection.h's `AttrTarget`) for every opaque handle typedef'd
+        // in a comptime-using file. A tag mismatch is conclusive; a
+        // tagged-vs-anonymous pairing falls through to the structural
+        // comparison unchanged (an anonymous *incomplete* aggregate can't
+        // exist in valid C, so this only affects complete types, e.g.
+        // `typedef struct { int x; } Foo;`).
+        if (a->struct_tag && b->struct_tag) {
+            bool tag_match = a->struct_tag->len == b->struct_tag->len &&
+                             strncmp(a->struct_tag->loc, b->struct_tag->loc,
+                                     a->struct_tag->len) == 0;
+            if (!tag_match)
+                return false;
+        }
+
+        // Incomplete aggregates have no members to compare -- tag identity
+        // above is the only signal available (mutual anonymity can't occur
+        // for an incomplete type).
+        if (a->size < 0 || b->size < 0)
+            return a->struct_tag != NULL && b->struct_tag != NULL;
+
+        Member *ma = a->members;
+        Member *mb = b->members;
+        for (; ma && mb; ma = ma->next, mb = mb->next) {
+            if ((ma->name == NULL) != (mb->name == NULL))
+                return false;
+            if (ma->name &&
+                (ma->name->len != mb->name->len ||
+                 strncmp(ma->name->loc, mb->name->loc, ma->name->len) != 0))
+                return false;
+            if (!same_type_or_origin(ma->ty, mb->ty))
+                return false;
+        }
+        return ma == NULL && mb == NULL;
+    }
+
+    // #1006: two command-line input files can each independently declare an
+    // identical `typedef enum { ... } Thing;` at file scope (record_type_name
+    // no longer marks either from_include -- see the parse.c fix above), and
+    // unlike TY_STRUCT/TY_UNION just above, this branch previously had no
+    // structural fallback for TY_ENUM at all -- two origin-unrelated Type
+    // objects with the same tag/spelling always compared unequal, so
+    // type_vec_contains() (below) never deduped them and both got pushed
+    // into ctx->defs, producing a hard "redefinition of enumerator" error
+    // from the host compiler. Mirrors the TY_STRUCT/TY_UNION shape exactly:
+    // tag mismatch is conclusive when both are tagged; otherwise (or when
+    // tags match) fall back to comparing enumerators by name and value.
+    // #1046: an array member's element type (e.g. `char n[32]` inside a
+    // tagless struct) had no structural fallback at all -- only the
+    // pointer-identity origin-chain check above applied, which two
+    // independently-parsed occurrences of the same declaration (comptime's
+    // re-parse of a `[[cccc::comptime]] gen()`-visible file-scope
+    // declaration, same mechanism #1006's TY_ENUM case above was added for)
+    // never share. Without this, a duplicate anonymous struct/union whose
+    // difference is buried inside an array member's dimension+base (as
+    // opposed to a scalar member, which TY_ARRAY's own recursion into a
+    // non-array base already reaches once THIS TY_ARRAY case exists) always
+    // compared unequal, so callers relying on this function to dedup two
+    // structurally-identical re-parsed declarations (#1046's
+    // ctx->emitted_defs) printed the same aggregate body twice -- a hard
+    // "typedef redefinition with different types" from the host compiler
+    // even though the two types are, by every measure other than pointer
+    // identity, identical.
+    if (a && b && a->kind == TY_ARRAY && b->kind == TY_ARRAY)
+        return a->array_len == b->array_len &&
+               same_type_or_origin(a->base, b->base);
+
+    if (a && b && a->kind == TY_ENUM && b->kind == TY_ENUM) {
+        if (a->struct_tag && b->struct_tag) {
+            bool tag_match = a->struct_tag->len == b->struct_tag->len &&
+                             strncmp(a->struct_tag->loc, b->struct_tag->loc,
+                                     a->struct_tag->len) == 0;
+            if (!tag_match)
+                return false;
+        }
+        EnumConstant *ea = a->enum_constants;
+        EnumConstant *eb = b->enum_constants;
+        for (; ea && eb; ea = ea->next, eb = eb->next) {
+            if ((ea->name == NULL) != (eb->name == NULL))
+                return false;
+            if (ea->name && strcmp(ea->name, eb->name) != 0)
+                return false;
+            if (ea->value != eb->value)
+                return false;
+        }
+        return ea == NULL && eb == NULL;
+    }
+
+    return false;
+}
+
+bool type_vec_contains(TypeVec *vec, Type *ty) {
+    for (int i = 0; i < vec->len; i++)
+        if (same_type_or_origin(vec->data[i], ty))
+            return true;
+    return false;
+}
+
+// #1010 defect B: index-returning counterpart to type_vec_contains(), used
+// by collect_type()'s incomplete-vs-complete swap below.
+static int type_vec_find(TypeVec *vec, Type *ty) {
+    for (int i = 0; i < vec->len; i++)
+        if (same_type_or_origin(vec->data[i], ty))
+            return i;
+    return -1;
+}
+
+static void type_vec_remove_at(TypeVec *vec, int idx) {
+    if (idx < 0 || idx >= vec->len)
+        return;
+    for (int i = idx; i < vec->len - 1; i++)
+        vec->data[i] = vec->data[i + 1];
+    vec->len--;
+}
+
+void type_vec_push(TypeVec *vec, Type *ty) {
+    if (!ty || type_vec_contains(vec, ty))
+        return;
+
+    if (vec->len >= vec->cap) {
+        vec->cap  = vec->cap ? vec->cap * 2 : 16;
+        vec->data = realloc(vec->data, sizeof(Type *) * vec->cap);
+    }
+    vec->data[vec->len++] = ty;
+}
+
+static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
+                           char *name, int name_len, Obj *owner_fn,
+                           bool from_include, bool always_emit, char *file_path,
+                           bool defines_type) {
+    if (!ty || !name || name_len <= 0)
+        return;
+
+    if (*len >= *cap) {
+        *cap   = *cap ? *cap * 2 : 16;
+        *items = realloc(*items, sizeof(TypeName) * *cap);
+    }
+
+    (*items)[*len].ty           = ty;
+    (*items)[*len].name         = name;
+    (*items)[*len].name_len     = name_len;
+    (*items)[*len].owner_fn     = owner_fn;
+    (*items)[*len].from_include = from_include;
+    (*items)[*len].always_emit  = always_emit;
+    (*items)[*len].file_path    = file_path;
+    (*items)[*len].defines_type = defines_type;
+    (*len)++;
+}
+
+void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
+    for (TypeNameRecord *rec = vm->compiler.type_names; rec; rec = rec->next) {
+        if (rec->is_tag)
+            type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, rec->ty,
+                           rec->name, rec->name_len, rec->owner_fn,
+                           rec->from_include, rec->always_emit, rec->file_path,
+                           rec->defines_type);
+        else
+            type_name_push(&ctx->typedefs, &ctx->typedefs_len,
+                           &ctx->typedefs_cap, rec->ty, rec->name,
+                           rec->name_len, rec->owner_fn, rec->from_include,
+                           rec->always_emit, rec->file_path, rec->defines_type);
+    }
+}
+
+static bool name_visible(TypeName *name, Obj *fn) {
+    return name->owner_fn == NULL || name->owner_fn == fn;
+}
+
+// #1014: true when `ty` is a struct/union/enum with an actual body -- an
+// incomplete (forward-declared-only) tagged aggregate has no members/
+// enumerators for same_type_or_origin()'s structural fallback to compare, so
+// it deliberately compares equal to *any* complete aggregate sharing its tag
+// (#892, same_type_or_origin's `a->size < 0 || b->size < 0` branch above).
+// That's the right call for provenance/dedup, but fatal for
+// same_type_strong() below: without excluding incomplete types, a pure-use
+// TU's incomplete record would match -- and vote for -- every differently-
+// shaped complete group sharing the tag.
+bool type_is_complete_tagged(Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        return ty->size >= 0;
+    if (ty->kind == TY_ENUM)
+        return ty->enum_constants != NULL;
+    return false;
+}
+
+// #1014: same_type_or_origin(), but additionally requires both sides to
+// agree on completeness. Used only where distinguishing two differently-
+// shaped *complete* aggregates sharing one tag actually matters
+// (rename_colliding_type_tags() and find_tag_name()'s post-rename lookup
+// below) -- everywhere else same_type_or_origin()'s looser, deliberate
+// incomplete-matches-complete behavior is still correct and unchanged.
+bool same_type_strong(Type *a, Type *b) {
+    return type_is_complete_tagged(a) == type_is_complete_tagged(b) &&
+           same_type_or_origin(a, b);
+}
+
+// #1015: forward-declared here since serialize_enum_def() (below) needs it
+// but its definition, next to rename_colliding_enum_constants(), comes
+// much later in this file.
+
+// #1047: forward-declared here since serialize_global_var() (below) needs
+// it but its definition, next to function_is_header_supplied() (the
+// function-side counterpart it mirrors), comes much later in this file.
+
+// #1091: true when `ty` has no tag of its own but `cand` does -- spelling
+// `ty` with `cand`'s tag would be wrong (a tagless aggregate is a distinct
+// type from a same-shaped tagged one; C only lets same_type_or_origin's
+// structural fallback treat them as interchangeable because it also backs
+// the #1006/#1046 same-declaration-reparsed dedup, which never needs to
+// distinguish the two). This can never reject a genuine origin-identity
+// match: two Type objects sharing a pointer necessarily agree on
+// struct_tag, since it's the same object -- so this only ever fires against
+// a match same_type_or_origin() found through its structural fallback.
+static bool tag_spelling_mismatch(Type *ty, Type *cand) {
+    return ty && cand && !ty->struct_tag && cand->struct_tag;
+}
+
+static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+
+    // #1014: once a collision has actually been renamed, prefer a
+    // completeness-matched record first -- this is what routes a pure-use
+    // TU's incomplete Type (e.g. a bare `DyGC *` parameter) to the record
+    // that still carries the plain, header-exposed name, while each
+    // differently-shaped complete definition resolves to its own (possibly
+    // renamed) group. Skipped entirely when nothing was renamed, so a
+    // program with no tag collision serializes byte-identically to before.
+    if (ctx->tag_renamed)
+        for (int i = 0; i < ctx->tags_len; i++)
+            if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+                !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+                same_type_strong(ctx->tags[i].ty, ty))
+                return &ctx->tags[i];
+
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+            !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
+            return &ctx->tags[i];
+    return NULL;
+}
+
+// #1010: like find_tag_name(), but for deciding *provenance* (whether a
+// header supplies this type's definition) rather than spelling. ctx->tags
+// is in reverse record-creation order (collect_scope_names() walks
+// type_names head-first, and record_type_name() prepends), so
+// find_tag_name()'s first-match scan returns whichever record was created
+// *last* -- normally fine (a later declaration's provenance is the more
+// accurate one), but wrong when that later record is an unrelated forward
+// declaration of an already-completed tag: same_type_or_origin() treats a
+// tagged incomplete aggregate as equal to the tagged complete one
+// (deliberately -- see that function's #892 comment), so a from_include
+// forward declaration recorded after the real definition (e.g. a second
+// command-line input file re-parsing a shared header under #1001's per-TU
+// preprocessor isolation) would otherwise win and wrongly suppress the only
+// definition available. Prefers a defines_type record; falls back to the
+// first match (today's behavior) when no record actually defines the tag,
+// e.g. every command-line input file only ever forward-declares it.
+static TypeName *find_tag_name_for_provenance(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+
+    TypeName *first_match = NULL;
+    for (int i = 0; i < ctx->tags_len; i++) {
+        if (!name_visible(&ctx->tags[i], ctx->current_fn) ||
+            !same_type_or_origin(ctx->tags[i].ty, ty))
+            continue;
+        if (ctx->tags[i].defines_type)
+            return &ctx->tags[i];
+        if (!first_match)
+            first_match = &ctx->tags[i];
+    }
+    return first_match;
+}
+
+static TypeName *find_typedef_name_exact_vis(SerializeContext *ctx, Type *ty,
+                                             bool require_visible);
+
+// #1091: two tagless typedefs of structurally-identical aggregates (e.g.
+// `typedef struct { long quot, rem; } ldiv_t;` / `... lldiv_t;`, byte-
+// identical on any 64-bit target CCCC's `long`/`long long` share a
+// representation on) used to collapse into one spelling here, since the
+// loop below only ever compared members. Try exact (pointer-identity, via
+// the ->origin chain find_typedef_name_exact() already walks) first --
+// resolves every ordinary reference to the typedef that actually declared
+// it, including a return type's own Type -- and only fall back to the
+// structural scan when identity finds nothing, which keeps every existing
+// caller relying on the structural match (e.g. spelling a use-site copy
+// with no traceable origin) working exactly as before.
+TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+
+    TypeName *exact = find_typedef_name_exact(ctx, ty);
+    if (exact)
+        return exact;
+
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (name_visible(&ctx->typedefs[i], ctx->current_fn) &&
+            same_type_or_origin(ctx->typedefs[i].ty, ty))
+            return &ctx->typedefs[i];
+    return NULL;
+}
+
+// #999: pointer-identity counterpart to find_typedef_name's structural
+// same_type_or_origin match, used for a non-aggregate (scalar/pointer)
+// typedef -- struct/union/enum already spell by name via find_typedef_name
+// (structural matching there is required: a typedef and its tag are
+// different Type objects for the same aggregate). A scalar typedef has no
+// tag of its own to distinguish it from the bare builtin type it aliases,
+// so matching structurally here would rename every plain use of that
+// builtin too (e.g. every `unsigned long` in the program, once one
+// `typedef unsigned long DyValue;` exists) -- parse_typedef() now
+// copy_type()s a scalar typedef's Type specifically so this exact check
+// can tell "this node's type really is the DyValue typedef" apart from
+// "this node's type merely has the same underlying representation".
+static TypeName *find_typedef_name_exact_vis(SerializeContext *ctx, Type *ty,
+                                             bool require_visible) {
+    if (!ctx || !ty)
+        return NULL;
+    // Walk the ->origin chain copy_type() builds, not just `ty` itself: a
+    // parameter's Type is itself a copy_type() of whatever declarator()
+    // produced (func_params(), src/parse.c, always makes one more copy per
+    // parameter slot regardless of where the parameter's type came from),
+    // so a DyValue-typed parameter's own Type is one hop past the Type
+    // parse_typedef() actually recorded, not identical to it. Bounded to a
+    // handful of hops -- copy_type() chains built while parsing one
+    // declarator are short; this is a safety margin against an unforeseen
+    // cycle, not a realistic depth.
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].ty == ty &&
+                (!require_visible ||
+                 name_visible(&ctx->typedefs[i], ctx->current_fn)))
+                return &ctx->typedefs[i];
+    return NULL;
+}
+
+TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty) {
+    return find_typedef_name_exact_vis(ctx, ty, true);
+}
+
+// #1116: pointer-identity counterpart to find_tag_name()'s structural
+// match, resolving whichever tag record names `ty` itself (via the same
+// ->origin-chain walk find_typedef_name_exact_vis() uses). Deliberately
+// UNFILTERED by name_visible(): nominal identity -- "which declaration
+// owns this type" -- must not depend on which scope the pass asking
+// happens to be emitting or collecting under. The global collect_obj_types()
+// pre-pass runs with ctx->current_fn == NULL, so a visibility-filtered
+// lookup sees no function-local record at all there, and each function's
+// own emission pass sees only its own -- exactly the asymmetry that made
+// the structural dedup below merge distinct types. Returns false when no
+// record names `ty`; true otherwise, with *owner set to the record's
+// owner_fn -- which may legitimately be NULL (file scope), so callers must
+// branch on the return value, not the pointer.
+static bool tag_record_owner_exact(SerializeContext *ctx, Type *ty,
+                                   Obj **owner) {
+    if (owner)
+        *owner = NULL;
+    if (!ctx || !ty)
+        return false;
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
+        for (int i = 0; i < ctx->tags_len; i++)
+            if (ctx->tags[i].ty == ty) {
+                if (owner)
+                    *owner = ctx->tags[i].owner_fn;
+                return true;
+            }
+    return false;
+}
+
+// #1091: true when `a` and `b` are structurally identical (the caller has
+// already checked same_type_or_origin) but each is its OWN tagless
+// typedef -- e.g. `typedef struct { long quot, rem; } ldiv_t;` next to
+// `typedef struct { long long quot, rem; } lldiv_t;`, byte-identical on any
+// 64-bit target CCCC's `long`/`long long` share a representation on. Both
+// need their own printed definition, not just the first one collected.
+// A tagged struct/union is excluded: same_type_or_origin()'s own tag check
+// already keeps two differently-tagged complete aggregates apart, so this
+// only needs to cover the tagless case that check can't reach. Falls back
+// to "not distinct" (today's behavior) whenever identity can't resolve
+// BOTH sides to their own typedef record -- e.g. the #1006/#1046 same-
+// declaration-reparsed case, which must keep deduping exactly as before.
+static bool nominally_distinct_typedefs(SerializeContext *ctx, Type *a,
+                                        Type *b) {
+    if (!ctx || !a || !b || a == b)
+        return false;
+    // same_type_or_origin() may have matched `a` and `b` two different ways:
+    // a genuine origin-identity match (one is a copy_type() descendant of
+    // the other -- e.g. a per-declarator copy made while parsing a local
+    // variable's type, which keeps its own struct_tag field untouched even
+    // after rename_anon_globals() mutates the CANONICAL Type's struct_tag
+    // in place), or a purely structural coincidence between two otherwise
+    // unrelated Type objects. Only the latter is what this function needs
+    // to catch -- an origin-identical pair is the same type by construction
+    // and must never be treated as nominally distinct, regardless of which
+    // copy happens to carry the tag right now.
+    for (Type *pa = a; pa; pa = pa->origin)
+        for (Type *pb = b; pb; pb = pb->origin)
+            if (pa == pb)
+                return false;
+    // A tag identifies a type on its own; same_type_or_origin()'s own tag
+    // check (#892) already keeps two DIFFERENTLY-tagged complete aggregates
+    // from ever reaching here structurally-matched, so both sides tagged
+    // means either the same tag (a genuine re-parse, #1006/#1046 -- keep
+    // deduping) or this path wasn't reached at all. The combination that
+    // check can't see is one side tagged and the other not: a tagless
+    // aggregate is a distinct type from a same-shaped tagged one (#1091
+    // symptom 3) and must never share its printed definition.
+    //
+    // #1116: EXCEPT when the same-tag pair is genuinely two declarations --
+    // a function-local `struct Point { ...; };` shadows a same-shaped
+    // file-scope `struct Point` (C11 6.2.1p4), and two sibling functions'
+    // locals shadow each other just as well. Both sides complete and both
+    // resolvable to their own tag record but with different owner_fn means
+    // different declaration scopes, i.e. distinct types that must each get
+    // their own ctx->defs entry (the file-scope one emitted by the file-
+    // scope pass, each local inside its own function -- legal shadowed
+    // redefinition). Same owner on both sides covers every dedup contract
+    // this check exists to protect: the comptime re-parse (#1006/#1046)
+    // re-records at the same scope, header-supplied types record at file
+    // scope (owner NULL), and #989's hoist_local_type_to_file_scope()
+    // rewrites its capture type's records to owner NULL precisely so the
+    // file-scope pass owns them.
+    if (type_is_complete_tagged(a) && type_is_complete_tagged(b)) {
+        Obj *oa = NULL, *ob = NULL;
+        bool fa = tag_record_owner_exact(ctx, a, &oa);
+        bool fb = tag_record_owner_exact(ctx, b, &ob);
+        if (fa && fb && oa != ob)
+            return true;
+    }
+    if (a->struct_tag && b->struct_tag)
+        return false;
+    if (a->struct_tag || b->struct_tag)
+        return true;
+
+    // #1116: resolve both sides through the UNFILTERED exact lookup (not
+    // find_typedef_name_exact's name_visible gate). The global collection
+    // pass runs with current_fn == NULL, where NO function-local alias is
+    // visible, and each function's own emission pass sees only its own --
+    // under either of those, one side's record always came back NULL here,
+    // the `!na || !nb` fallback then declared the pair "not distinct", and
+    // the second function's anonymous-aggregate typedef silently merged
+    // into the first one's (TdSize vs TdComp_Rectangle in
+    // test_suite_typesystem.c): its body was never collected into
+    // ctx->defs, and emit_typedef_and_deps' emitted_defs nominal check
+    // suppressed the combined `typedef struct {...} Name;` line too.
+    TypeName *na = find_typedef_name_exact_vis(ctx, a, false);
+    TypeName *nb = find_typedef_name_exact_vis(ctx, b, false);
+    if (!na || !nb)
+        return false;
+    return na->name_len != nb->name_len ||
+           strncmp(na->name, nb->name, na->name_len) != 0;
+}
+
+// #1091: type_vec_contains()/type_vec_find()/type_vec_push(), but a
+// structural match against a nominally-distinct tagless typedef (see just
+// above) doesn't count as "already present" -- used only at the two sites
+// that decide whether a struct/union/enum DEFINITION gets printed
+// (collect_type()'s ctx->seen/ctx->defs, and emit_typedef_and_deps()'s
+// ctx->emitted_defs), never at the many other type_vec_* call sites, whose
+// looser structural dedup (#1006/#1046) must stay untouched.
+static bool type_vec_contains_nominal(SerializeContext *ctx, TypeVec *vec,
+                                      Type *ty) {
+    for (int i = 0; i < vec->len; i++) {
+        if (!same_type_or_origin(vec->data[i], ty))
+            continue;
+        if (nominally_distinct_typedefs(ctx, vec->data[i], ty))
+            continue;
+        return true;
+    }
+    return false;
+}
+
+static int type_vec_find_nominal(SerializeContext *ctx, TypeVec *vec,
+                                 Type *ty) {
+    for (int i = 0; i < vec->len; i++) {
+        if (!same_type_or_origin(vec->data[i], ty))
+            continue;
+        if (nominally_distinct_typedefs(ctx, vec->data[i], ty))
+            continue;
+        return i;
+    }
+    return -1;
+}
+
+static void type_vec_push_nominal(SerializeContext *ctx, TypeVec *vec,
+                                  Type *ty) {
+    if (!ty || type_vec_contains_nominal(ctx, vec, ty))
+        return;
+
+    if (vec->len >= vec->cap) {
+        vec->cap  = vec->cap ? vec->cap * 2 : 16;
+        vec->data = realloc(vec->data, sizeof(Type *) * vec->cap);
+    }
+    vec->data[vec->len++] = ty;
+}
+
+// #952: matches a typedef that actually names `ty` itself, not merely a
+// same-kind tagless typedef -- e.g. `typedef struct { char *reg_ptr; ...; }
+// va_list;` (include/stdarg.h) used to win this lookup for *every* anonymous
+// struct in scope, since the loop below only compared ty->kind before
+// checking type_has_tag_for_owner. The same_type_or_origin() check makes
+// this the "does an alias exist for this exact type" query its caller
+// (serialize_type) already assumes it is; unrelated tagless typedefs now
+// correctly fall through to serialize_anon_aggregate() instead.
+static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return NULL;
+
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        TypeName *name = &ctx->typedefs[i];
+        if (!name_visible(name, ctx->current_fn) || !name->ty ||
+            name->ty->kind != ty->kind)
+            continue;
+        if (!same_type_or_origin(name->ty, ty))
+            continue;
+        if (!type_has_tag_for_owner(ctx, name->ty, name->owner_fn))
+            return name;
+    }
+    return NULL;
+}
+
+static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
+    // #1116: resolve `ty`'s own record by pointer identity first. Once
+    // nominally_distinct_typedefs() splits two structurally identical
+    // aggregates into separate ctx->defs entries, the structural scan below
+    // can no longer tell them apart -- whichever record comes first in
+    // ctx->tags/ctx->typedefs order wins, returning the OTHER declaration's
+    // owner and making serialize_type_defs_for_owner() skip this entry in
+    // its own function's pass ("owner mismatch") even though it was just
+    // split out precisely so that pass could emit it. The identity match is
+    // strictly more precise; the structural fallback keeps every pre-#1116
+    // caller (use-site copies with no traceable record of their own)
+    // behaving exactly as before.
+    Type *orig = ty;
+    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++) {
+        for (int i = 0; i < ctx->tags_len; i++)
+            if (ctx->tags[i].ty == ty)
+                return ctx->tags[i].owner_fn;
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].ty == ty)
+                return ctx->typedefs[i].owner_fn;
+    }
+    ty = orig;
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty))
+            return ctx->tags[i].owner_fn;
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+            return ctx->typedefs[i].owner_fn;
+    return NULL;
+}
+
+static void collect_type(SerializeContext *ctx, Type *ty);
+
+static void collect_node_types(SerializeContext *ctx, Node *node) {
+    if (!node)
+        return;
+
+    collect_type(ctx, node->ty);
+    if (node->var)
+        collect_type(ctx, node->var->ty);
+    if (node->member)
+        collect_type(ctx, node->member->ty);
+    if (node->func_ty)
+        collect_type(ctx, node->func_ty);
+
+    // #1005: no ND_SWITCH/ND_CASE special case here (there used to be one,
+    // walking node->case_next/->default_case instead of node->then) -- that
+    // walked only each case's *first* statement, so a type used later in a
+    // case's body (after its first statement) was never collected, and its
+    // definition never emitted. ND_CASE nodes sit inline in the switch
+    // body's statement list (node->then's ND_BLOCK -> ->body -> ->next
+    // chain), so the generic traversal below already reaches every case via
+    // ->then, and each ND_CASE's own generic ->lhs/->next below reaches its
+    // target statement and the following statement in the block -- no
+    // special-casing needed, matching how the ND_SWITCH/ND_CASE serializer
+    // arms were rewritten to work.
+    collect_node_types(ctx, node->lhs);
+    collect_node_types(ctx, node->rhs);
+    collect_node_types(ctx, node->cond);
+    collect_node_types(ctx, node->then);
+    collect_node_types(ctx, node->els);
+    collect_node_types(ctx, node->init);
+    collect_node_types(ctx, node->inc);
+    collect_node_types(ctx, node->body);
+    collect_node_types(ctx, node->args);
+
+    collect_node_types(ctx, node->next);
+}
+
+static void collect_type(SerializeContext *ctx, Type *ty) {
+    if (!ty) {
+        return;
+    }
+
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        collect_type(ctx, ty->base);
+        return;
+    }
+
+    if (ty->kind == TY_FUNC) {
+        collect_type(ctx, ty->return_ty);
+        for (Type *p = ty->params; p; p = p->next)
+            collect_type(ctx, p);
+        return;
+    }
+
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return;
+
+    // #1091: type_vec_find_nominal() (not the plain, purely-structural
+    // type_vec_find()) so a tagless typedef that's structurally identical
+    // to -- but nominally distinct from -- an already-collected one (e.g.
+    // ldiv_t/lldiv_t) isn't treated as already seen here; it falls through
+    // to its own seen/defs entry below instead, exactly as if it were an
+    // unrelated shape.
+    int seen_idx = type_vec_find_nominal(ctx, &ctx->seen, ty);
+    if (seen_idx >= 0) {
+        // #1010 defect B: same_type_or_origin() deliberately treats a
+        // tagged *incomplete* struct/union as equal to the tagged
+        // *complete* one (#892) -- so a use-site TU that only ever sees a
+        // header's forward declaration can get here first (e.g. #1001's
+        // per-TU preprocessor isolation re-parsing a shared header from a
+        // second command-line input file) and claim ctx->seen/ctx->defs'
+        // slot for its member-less Type* before the completing TU's own
+        // Type* is ever collected. serialize_struct_def then has no
+        // members to print and emits a bare `struct Foo;`. Swap the
+        // complete Type* in when this happens: remove-then-recollect
+        // (rather than mutating the ctx->defs entry in place) so a member
+        // type the incomplete stub never referenced -- e.g. `struct Outer
+        // { struct Inner i; }` -- is still collected and, being freshly
+        // pushed, still emitted ahead of its own user. TY_ENUM is excluded
+        // deliberately: same_type_or_origin()'s enum arm compares
+        // enum_constants lists directly with no completeness shortcut, so
+        // an incomplete (constant-less) enum never structurally matches a
+        // complete one in the first place -- this branch is unreachable
+        // for enums.
+        Type *prior = ctx->seen.data[seen_idx];
+        if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+            prior->size < 0 && ty->size >= 0) {
+            ctx->seen.data[seen_idx] = ty;
+            type_vec_remove_at(&ctx->defs, type_vec_find(&ctx->defs, ty));
+            for (Member *m = ty->members; m; m = m->next)
+                collect_type(ctx, m->ty);
+            type_vec_push(&ctx->defs, ty);
+        }
+        return;
+    }
+    type_vec_push_nominal(ctx, &ctx->seen, ty);
+
+    for (Member *m = ty->members; m; m = m->next)
+        collect_type(ctx, m->ty);
+
+    type_vec_push_nominal(ctx, &ctx->defs, ty);
+}
+
+void collect_obj_types(SerializeContext *ctx, Obj *obj) {
+    collect_type(ctx, obj->ty);
+    collect_node_types(ctx, obj->init_expr);
+
+    for (Obj *param = obj->params; param; param = param->next)
+        collect_type(ctx, param->ty);
+    for (Obj *local = obj->locals; local; local = local->next)
+        collect_type(ctx, local->ty);
+    collect_node_types(ctx, obj->body);
+}
+
+// #1042(a): ctx->defs is populated in first-collected order -- a post-order
+// walk per collect_type()'s member recursion -- which is a legal declaration
+// order UNLESS a struct/union's own body is first reached only through an
+// early POINTER reference (e.g. a function-pointer typedef parameter, the
+// minilua repro's `lua_CFunction` == `int (*)(struct lua_State *)`), pushing
+// its (then-incomplete) Type into ctx->defs at that early position, and a
+// BY-VALUE member of some other struct collected in between then needs the
+// full body before it's available. The #1010 swap in collect_type() above
+// repromotes the incomplete entry to the complete Type once collection
+// reaches it, but re-pushes at the TAIL of ctx->defs, after every entry
+// collected since -- including a later by-value user of the same type, e.g.
+// minilua's `struct LX { ...; struct lua_State l; };`, which still lands
+// ahead of `struct lua_State`'s own body. serialize_type_defs_for_owner()
+// just walks ctx->defs in order, so the by-value user prints first and the
+// host compiler sees "field has incomplete type".
+//
+// Fixed with a stable topological reorder pass over ctx->defs, run once
+// after collection: an edge M -> E for every struct/union def E and every
+// by-value (non-pointer) member of E whose own type resolves to another
+// entry M. Kahn's algorithm, always picking the lowest-index ready node, so
+// an entry only moves when an edge actually forces it -- output stays
+// byte-identical wherever the existing order was already legal.
+static bool member_needs_own_def(Type *mty) {
+    while (mty && mty->kind == TY_ARRAY)
+        mty = mty->base;
+    return mty && (mty->kind == TY_STRUCT || mty->kind == TY_UNION);
+}
+
+// Resolve a by-value member's type to its ctx->defs index. same_type_or_
+// origin() deliberately treats an incomplete tagged aggregate as equal to
+// the complete one sharing its tag (#892/#1010) -- prefer a match passing
+// type_is_complete_tagged() (an incomplete entry prints a bare `struct X;`
+// and constrains nothing, so it's not a useful edge target); if only an
+// incomplete match exists, report no edge at all.
+static int find_complete_def_index(TypeVec *defs, Type *ty) {
+    for (int i = 0; i < defs->len; i++)
+        if (same_type_or_origin(defs->data[i], ty) &&
+            type_is_complete_tagged(defs->data[i]))
+            return i;
+    return -1;
+}
+
+// Records one M -> container_idx edge per by-value member, recursing through
+// a TAGLESS member's own members instead of stopping: a tagless aggregate
+// has no standalone ctx->defs entry serialize_type_defs_for_owner() ever
+// prints (it's inlined at its use site), so ITS by-value members are the
+// real ordering constraint on `container_idx`, not the tagless type itself.
+// A tagless struct can't legally embed itself by value (infinite size), so
+// this recursion can't cycle.
+static void collect_byval_edges(SerializeContext *ctx, Type *mty, TypeVec *defs,
+                                bool *depends, int n, int container_idx) {
+    while (mty && mty->kind == TY_ARRAY)
+        mty = mty->base;
+    if (!mty || (mty->kind != TY_STRUCT && mty->kind != TY_UNION))
+        return;
+
+    bool tagged = find_tag_name(ctx, mty) || find_typedef_name(ctx, mty) ||
+                  find_anonymous_typedef_name(ctx, mty);
+    if (!tagged) {
+        for (Member *mm = mty->members; mm; mm = mm->next)
+            collect_byval_edges(ctx, mm->ty, defs, depends, n, container_idx);
+        return;
+    }
+
+    int target = find_complete_def_index(defs, mty);
+    if (target < 0 || target == container_idx)
+        return;
+    depends[container_idx * n + target] = true;
+}
+
+void reorder_defs_by_byval_deps(SerializeContext *ctx) {
+    TypeVec *defs = &ctx->defs;
+    int      n    = defs->len;
+    if (n < 2)
+        return;
+
+    bool *depends = calloc((size_t)n * (size_t)n, sizeof(bool));
+    if (!depends)
+        return;
+
+    for (int i = 0; i < n; i++) {
+        Type *ty = defs->data[i];
+        if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+            continue; // enums have no by-value members to order against
+        for (Member *m = ty->members; m; m = m->next)
+            if (member_needs_own_def(m->ty))
+                collect_byval_edges(ctx, m->ty, defs, depends, n, i);
+    }
+
+    int   *indeg = calloc((size_t)n, sizeof(int));
+    bool  *done  = calloc((size_t)n, sizeof(bool));
+    Type **order = malloc(sizeof(Type *) * (size_t)n);
+    if (!indeg || !done || !order) {
+        free(depends);
+        free(indeg);
+        free(done);
+        free(order);
+        return;
+    }
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            if (depends[i * n + j])
+                indeg[i]++;
+
+    int placed = 0;
+    while (placed < n) {
+        int pick = -1;
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && indeg[i] == 0) {
+                pick = i;
+                break;
+            }
+        }
+        if (pick < 0) {
+            // By-value aggregate nesting can't legally cycle in valid C --
+            // fail-soft rather than lose a definition if it somehow does:
+            // append whatever remains in its existing relative order.
+            for (int i = 0; i < n; i++)
+                if (!done[i]) {
+                    order[placed++] = defs->data[i];
+                    done[i]         = true;
+                }
+            break;
+        }
+        order[placed++] = defs->data[pick];
+        done[pick]      = true;
+        for (int i = 0; i < n; i++)
+            if (!done[i] && depends[i * n + pick])
+                indeg[i]--;
+    }
+
+    memcpy(defs->data, order, sizeof(Type *) * (size_t)n);
+    free(order);
+    free(depends);
+    free(indeg);
+    free(done);
+}
+
+// #956: -c=generated support -- tracks which macro-generated functions
+// already have a prototype in the output (either from a preceding
+// forward-declare or their own definition), so a function body that
+// references another generated function whose own emit event hasn't been
+// reached yet can have that callee's prototype inserted just ahead of it.
+bool obj_vec_contains(ObjVec *vec, Obj *obj) {
+    for (int i = 0; i < vec->len; i++)
+        if (vec->data[i] == obj)
+            return true;
+    return false;
+}
+
+void obj_vec_push(ObjVec *vec, Obj *obj) {
+    if (!obj || obj_vec_contains(vec, obj))
+        return;
+    if (vec->len == vec->cap) {
+        vec->cap  = vec->cap ? vec->cap * 2 : 8;
+        vec->data = realloc(vec->data, sizeof(Obj *) * vec->cap);
+    }
+    vec->data[vec->len++] = obj;
+}
+
+// Walks a function body for any reference (ND_VAR) to another
+// macro-generated function -- both a direct call (ND_FUNCALL through a
+// plain ND_VAR callee) and a bare reference used as a function-pointer
+// value (e.g. a closure built from `(void (*)(...))some_generated_fn`)
+// need the same forward declaration. Mirrors collect_node_types's
+// traversal shape.
+void collect_generated_call_targets(Node *node, ObjVec *out) {
+    if (!node)
+        return;
+
+    if (node->kind == ND_VAR && node->var && node->var->is_function &&
+        node->var->is_macro_generated)
+        obj_vec_push(out, node->var);
+
+    // #995: a block literal's descriptor initializer references its lifted
+    // function through node->block_fn directly, not through an ND_VAR child
+    // -- this pass would otherwise miss it entirely, since block_fn's
+    // definition is emitted later in event order (the macro_globals drain
+    // in macros.c is newest-first, and the calling function's own
+    // PublishNode event precedes the block's) than the caller's body that
+    // references it.
+    if (node->kind == ND_BLOCK_LITERAL && node->block_fn &&
+        node->block_fn->is_macro_generated)
+        obj_vec_push(out, node->block_fn);
+
+    // #1005: see the matching comment in collect_node_types() -- no
+    // ND_SWITCH/ND_CASE special case needed; the generic traversal below
+    // already reaches every case via node->then and each ND_CASE's own
+    // ->lhs/->next.
+    collect_generated_call_targets(node->lhs, out);
+    collect_generated_call_targets(node->rhs, out);
+    collect_generated_call_targets(node->cond, out);
+    collect_generated_call_targets(node->then, out);
+    collect_generated_call_targets(node->els, out);
+    collect_generated_call_targets(node->init, out);
+    collect_generated_call_targets(node->inc, out);
+    collect_generated_call_targets(node->body, out);
+    collect_generated_call_targets(node->args, out);
+
+    collect_generated_call_targets(node->next, out);
+}
+
+// #1031: defined near serialize_type_defs_for_owner (which shares
+// type_layout_is_host_owned's own from_include-suppression logic via
+// type_def_is_from_include_suppressed), forward-declared here so
+// serialize_expr's ND_NUM case -- much earlier in this file -- can call
+// them.
+static bool type_has_printable_name(SerializeContext *ctx, Type *ty);
+// #1095: factored out of serialize_expr's own ND_NUM arm below so array
+// dimensions/case labels/enum values (none of which have a Node to walk by
+// the time serialization runs -- see const_expr_layout(), parse_analysis.c)
+// can share the exact same host-owned/printable-name gate rather than a
+// parallel copy. Prints "sizeof(T)"/"_Alignof(T)" and returns true when
+// `layout_ty` qualifies; otherwise prints nothing and returns false, so
+// every caller's own fallback (the plain folded literal) still applies.
+// #1098: forward-declared for the same reason as the two above -- defined
+// near type_layout_is_host_owned (which expr_has_host_owned_layout calls),
+// but serialize_stmt's ND_BLOCK case, much earlier in this file, needs to
+// call serialize_static_assert.
+static bool expr_has_host_owned_layout(SerializeContext *ctx, Node *node,
+                                       int depth);
+
+// Emit a float initializer value as a C `f`-suffixed floating constant.
+// `%.9g` of an integral value like 1.0f prints "1" with no '.'/'e' -- append
+// with the "f" suffix directly that reads as the invalid token `1f`
+// ("invalid digit 'f' in decimal constant" from the host compiler), not a
+// float literal. Force a decimal point when the %g text has none, so the
+// suffix always lands on a valid floating-constant. inf/nan text
+// ("inf"/"-inf"/"nan") is left alone -- neither is a valid C floating
+// constant with an "f" suffix at all; that's a separate, pre-existing gap.
+// #1021: neither plain %g/%Lg text ("inf"/"-inf"/"nan") nor
+// format_float_literal's own "always end in a valid float suffix" fixup
+// (immediately below -- its comment already flagged this exact gap) produce
+// a token real C accepts; a bare `nan`/`inf` identifier is undeclared and
+// the host build fails with "call to undeclared function"/"use of
+// undeclared identifier". __builtin_{inf,nan}[f|l] are portable clang/gcc
+// intrinsics that always parse, with no header dependency at all. `suf` is
+// "" for TY_DOUBLE, "f" for TY_FLOAT, "l" for TY_LDOUBLE, matching each
+// builtin family's own naming (__builtin_inf/inff/infl,
+// __builtin_nan/nanf/nanl). Returns true (having already printed) when `v`
+// was non-finite; the caller falls through to its normal finite-value
+// formatting otherwise.
+bool serialize_flonum_special(FILE *f, long double v, const char *suf) {
+    if (isnan(v)) {
+        fprintf(f, "__builtin_nan%s(\"\")", suf);
+        return true;
+    }
+    if (isinf(v)) {
+        fprintf(f, "%s__builtin_inf%s()", (v < 0) ? "-" : "", suf);
+        return true;
+    }
+    return false;
+}
+
+void format_float_literal(char *buf, size_t cap, double v) {
+    int n = snprintf(buf, cap, "%.9g", v);
+    if (n > 0 && (size_t)n < cap && !strpbrk(buf, ".eEnN")) {
+        snprintf(buf + n, cap - (size_t)n, ".0");
+    }
+}
+
+// #1038: long-double counterpart of format_float_literal, same "force a
+// decimal point before the suffix lands" reasoning -- %.21Lg of an
+// integral long double like 1.0L prints "1" with no '.'/'e', and "1"
+// followed directly by an "L" suffix is a valid (and wrong) *integer*
+// literal token, not the intended floating one. 21 significant digits is
+// enough to round-trip an 80-bit x86 extended-precision long double (64
+// bits of mantissa, ~19.2 decimal digits) with margin; a narrower
+// long double (e.g. aarch64, where long double == double) round-trips
+// exactly with fewer digits, %.21Lg just prints trailing zeros for it.
+void format_ldouble_literal(char *buf, size_t cap, long double v) {
+    int n = snprintf(buf, cap, "%.21Lg", v);
+    if (n > 0 && (size_t)n < cap && !strpbrk(buf, ".eEnN")) {
+        snprintf(buf + n, cap - (size_t)n, ".0");
+    }
+}
+
+// #1121: decode a wb/uwb literal's full-precision digit text (base 2/8/10/16,
+// tokenize.c) into a 128-bit value. Mirrors __cccc_bitint_from_str's
+// shift-and-add algorithm (wide_bitint.c, the VM's own runtime copy of this
+// same conversion) but stays host-side and width-capped at 128 bits, since
+// this compiler's own build is a real host toolchain with unsigned __int128
+// available -- serialize_type() (case TY_BITINT above) has already refused
+// any type wider than that before an expression of that type can reach here.
+unsigned __int128 decode_wide_digits(const char *digits, int base) {
+    unsigned __int128 v = 0;
+    for (const char *p = digits; *p; p++) {
+        if (*p == '\'')
+            continue; // digit separator
+        int  digit;
+        char c = *p;
+        if (c >= '0' && c <= '9')
+            digit = c - '0';
+        else if (c >= 'a' && c <= 'f')
+            digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F')
+            digit = c - 'A' + 10;
+        else
+            break;
+        if (digit >= base)
+            break;
+        v = v * (unsigned __int128)base + (unsigned __int128)digit;
+    }
+    return v;
+}
+
+// --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
+// (+ count()/byte_count()/bounds() bounds form, if any) qualifier for
+// re-emission in the post-'*' declarator position it was originally written
+// in. Returns "" for an unchecked pointer.
+static void format_checked_ptr_qualifier(char *buf, size_t cap, Type *ty) {
+    buf[0] = '\0';
+    if (!ty || ty->checked_kind == CHECKED_NONE)
+        return;
+    const char *kind_name = ty->checked_kind == CHECKED_SINGLE  ? "single"
+                            : ty->checked_kind == CHECKED_ARRAY ? "array"
+                                                                : "ntarray";
+    int         n         = snprintf(buf, cap, " [[cccc::%s]]", kind_name);
+    if (n < 0 || (size_t)n >= cap)
+        return;
+    switch (ty->checked_bounds_form) {
+        case CB_COUNT:
+        case CB_BYTE_COUNT:
+            if (ty->checked_bounds_arg1)
+                snprintf(buf + n, cap - (size_t)n, " [[cccc::%s(%.*s)]]",
+                         ty->checked_bounds_form == CB_COUNT ? "count"
+                                                             : "byte_count",
+                         ty->checked_bounds_arg1->len,
+                         ty->checked_bounds_arg1->loc);
+            break;
+        case CB_RANGE:
+            if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
+                snprintf(
+                    buf + n, cap - (size_t)n, " [[cccc::bounds(%.*s, %.*s)]]",
+                    ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
+                    ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
+            break;
+        case CB_UNKNOWN:
+            snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(unknown)]]");
+            break;
+        case CB_NONE:
+        default:
+            break;
+    }
+}
+
+void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
+                         const char *name) {
+    if (!ty) {
+        fprintf(f, "void");
+        if (name && *name)
+            fprintf(f, " %s", name);
+        return;
+    }
+
+    if (ty->kind == TY_ARRAY) {
+        char buf[1024];
+        // #1095: re-materialize the dimension as "sizeof(T)"/"_Alignof(T)"
+        // rather than the folded int, but only when the caller has opted
+        // in (ctx->allow_layout_dims -- see its own comment) and this
+        // dimension really was such a fold (array_len_layout_ty, set by
+        // array_dimensions(), parse_types.c). serialize_layout_const()
+        // itself still declines (returns false, prints nothing) when the
+        // type isn't actually from_include-suppressed or has no printable
+        // name, so this falls through to the plain folded literal exactly
+        // as before whenever re-materializing wouldn't be sound/possible.
+        char  *dimbuf       = NULL;
+        size_t dimsz        = 0;
+        bool   wrote_layout = false;
+        if (ty->array_len >= 0 && ctx->allow_layout_dims &&
+            ty->array_len_layout_ty) {
+            FILE *df = open_memstream(&dimbuf, &dimsz);
+            wrote_layout =
+                serialize_layout_const(df, ctx, ty->array_len_layout_ty,
+                                       ty->array_len_layout_is_align);
+            fclose(df);
+        }
+        if (ty->array_len < 0)
+            snprintf(buf, sizeof(buf), "%s[]", name ? name : "");
+        else if (wrote_layout)
+            snprintf(buf, sizeof(buf), "%s[%s]", name ? name : "", dimbuf);
+        else
+            snprintf(buf, sizeof(buf), "%s[%d]", name ? name : "",
+                     ty->array_len);
+        free(dimbuf);
+        serialize_type_decl(f, ctx, ty->base, buf);
+        return;
+    }
+
+    if (ty->kind == TY_VLA) {
+        // `int v[n]` -- the length is an expression, not a constant, so it
+        // has to go through serialize_expr rather than be printed straight
+        // into the declarator buffer like TY_ARRAY's constant length. #964:
+        // this used to emit the base type, then name, then `[len]` directly
+        // -- correct for a single-dimension VLA, but a nested VLA-of-VLA (or
+        // VLA-of-array) mis-spelled as `int[m] v[n]` instead of the correct
+        // `int v[n][m]`, since the outer dimension's base was printed before
+        // recursing into it rather than after. Route through the same
+        // buffer-recursion shape TY_ARRAY uses above -- capture the length
+        // expression into a string via open_memstream (this file's existing
+        // idiom, see serialize_function_signature()), fold `name[len]` into
+        // one declarator buffer, then recurse on ty->base so nested
+        // dimensions accumulate in the right order regardless of whether
+        // they are VLA or constant-length TY_ARRAY.
+        char  *lenbuf = NULL;
+        size_t lensz  = 0;
+        FILE  *lf     = open_memstream(&lenbuf, &lensz);
+        if (ty->vla_len && ctx->vm)
+            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 0);
+        fclose(lf);
+
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "%s[%s]", name ? name : "",
+                 lenbuf ? lenbuf : "");
+        free(lenbuf);
+        serialize_type_decl(f, ctx, ty->base, buf);
+        return;
+    }
+
+    if (ty->kind == TY_PTR) {
+        char buf[1024];
+        char qual[256] = "";
+        if (ctx->emit_cccc)
+            format_checked_ptr_qualifier(qual, sizeof(qual), ty);
+        const char *sep = qual[0] ? " " : "";
+        // #971: TY_VLA is an array type for declarator-parenthesization
+        // purposes, same as TY_ARRAY -- pointer-to-VLA (the row type of a
+        // multi-dimensional VLA, `int (*)[m]`) needs the same `(*name)`
+        // grouping a fixed-size array pointer gets, or the `*` binds to the
+        // element type and mis-spells it as `int *[m]` (array of pointers).
+        if (ty->base && (ty->base->kind == TY_ARRAY ||
+                         ty->base->kind == TY_VLA || ty->base->kind == TY_FUNC))
+            snprintf(buf, sizeof(buf), "(*%s%s%s)", qual, sep,
+                     name ? name : "");
+        else
+            snprintf(buf, sizeof(buf), "*%s%s%s", qual, sep, name ? name : "");
+        serialize_type_decl(f, ctx, ty->base, buf);
+        return;
+    }
+
+    if (ty->kind == TY_FUNC) {
+        serialize_type(f, ctx, ty->return_ty);
+        if (name && *name)
+            fprintf(f, " %s", name);
+        fprintf(f, "(");
+        bool first = true;
+        for (Type *p = ty->params; p; p = p->next) {
+            if (!first)
+                fprintf(f, ", ");
+            first = false;
+            serialize_type(f, ctx, p);
+        }
+        if (ty->is_variadic) {
+            if (!first)
+                fprintf(f, ", ");
+            fprintf(f, "...");
+        } else if (first) {
+            fprintf(f, "void");
+        }
+        fprintf(f, ")");
+        return;
+    }
+
+    serialize_type(f, ctx, ty);
+    if (name && *name)
+        fprintf(f, " %s", name);
+}
+
+// #1023: a global whose type is (or contains, through TY_ARRAY/TY_PTR)
+// an untagged, alias-less struct/union -- `static const struct { ... }
+// codes[74]` is exactly this -- has no name serialize_type_decl can spell
+// in a standalone forward declaration; each attempt instead falls through
+// to serialize_anon_aggregate (below) and re-derives the member list
+// verbatim, which the host compiler treats as a *structurally distinct*
+// anonymous type every time it's written out, even though the text is
+// identical (C has no notion of two anonymous struct spellings being "the
+// same" type). The #918/#928 forward-declaration pass emitting one before
+// the real definition therefore produces two non-identical types under one
+// name -- "redefinition of 'codes' with a different type". Such a global
+// is fundamentally unrepresentable as a forward declaration in C (there is
+// no name to forward-declare), so the caller skips the forward-decl line
+// for it entirely rather than emit invalid text; the real definition
+// (serialize_global_var) still carries the only copy of the type. Reuses
+// exactly the tag/typedef/anonymous-typedef lookup serialize_type's own
+// TY_STRUCT/TY_UNION cases use to decide whether to call
+// serialize_anon_aggregate in the first place, so this predicate is true
+// if and only if that call would be.
+bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
+    while (ty &&
+           (ty->kind == TY_ARRAY || ty->kind == TY_PTR || ty->kind == TY_VLA))
+        ty = ty->base;
+    if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
+        return false;
+    return !find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
+           !find_anonymous_typedef_name(ctx, ty);
+}
+
+// Serialize the body of a struct/union with no tag and no typedef alias
+// (e.g. `struct { int x; int y; } pt;`) inline at its point of use, since
+// there is no name to refer back to it by elsewhere.
+static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
+    fprintf(f, "%s {\n", ty->kind == TY_UNION ? "union" : "struct");
+    for (Member *m = ty->members; m; m = m->next) {
+        fprintf(f, "    ");
+        char name[256] = "";
+        if (m->name) {
+            int len = m->name->len;
+            if (len >= (int)sizeof(name))
+                len = sizeof(name) - 1;
+            memcpy(name, m->name->loc, len);
+            name[len] = '\0';
+        }
+        serialize_type_decl(f, ctx, m->ty, name);
+        if (m->is_bitfield)
+            fprintf(f, " : %d", m->bit_width);
+        fprintf(f, ";\n");
+    }
+    fprintf(f, "}");
+}
+
+// #1109: is this alias the one bundled-header scalar typedef whose host
+// meaning diverges structurally -- `atomic_flag`? CCCC's stdatomic.h spells
+// it as an integer-flavoured `typedef _Atomic _Bool atomic_flag;`, while a
+// real host <stdatomic.h> follows C11 7.17 and makes it a struct, so any
+// generated-C use resolved through the host header is a type error (see the
+// #1109 comment in serialize_type). Matched by name AND shape (kind +
+// is_atomic): a user's own unrelated typedef that happens to reuse the name,
+// or an alias to any other underlying type, keeps its normal spelling.
+static bool is_host_divergent_atomic_flag_alias(Type *ty, TypeName *alias) {
+    return ty && ty->kind == TY_BOOL && ty->is_atomic && alias &&
+           alias->name_len == 11 &&
+           strncmp(alias->name, "atomic_flag", 11) == 0;
+}
+
+// Serialize type to string
+void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
+    if (!ty) {
+        fprintf(f, "void");
+        return;
+    }
+
+    // #1045: a const-qualified *pointer* (`int *const p`, is_const lives on
+    // the TY_PTR Type itself, not its base) used to print this leading
+    // `const ` unconditionally, then fall through to the switch's TY_PTR
+    // case below, which recurses into serialize_type_decl() -- whose own
+    // TY_PTR branch has never emitted pointer-level const at all (it only
+    // ever prints `*name`, never `*const name`). The leading `const ` above
+    // therefore ended up qualifying the *pointee* instead: `const int *`
+    // (pointer to const int) rather than `int *const` (const pointer to
+    // int) -- a genuinely incompatible type the host compiler rejects
+    // ("incompatible function pointer types") wherever a const-pointer
+    // value is cast to or declared alongside its non-const-pointer
+    // counterpart. Same bug, latent: TY_FUNC's parameter list
+    // (serialize_type_decl below) prints each param through this same
+    // function, so a `void f(int *const p)` parameter's prototype and
+    // definition could disagree the same way. Fixed by normalizing rather
+    // than relocating the qualifier: a bare (non-typedef'd) pointer never
+    // gets pointer-level const printed here either, matching what
+    // declarator position already does -- dropping a top-level qualifier
+    // is always type-compatible C, and CCCC's own parser already enforced
+    // constness before this point. A *typedef'd* pointer (`const MyPtrT`,
+    // where MyPtrT's underlying type is itself a pointer) is a different
+    // case and untouched: `const MyPtrT` correctly spells "const-qualify
+    // the whole aliased type", i.e. exactly `T *const`, so that alias arm
+    // below still needs the leading `const` -- only the un-aliased,
+    // structurally-printed TY_PTR fallthrough drops it.
+    bool suppress_ptr_const =
+        ty->kind == TY_PTR && !find_typedef_name_exact(ctx, ty);
+    if (ty->is_const && !suppress_ptr_const)
+        fprintf(f, "const ");
+
+    // Deliberately no output for ty->checked_kind (#770/#482-484): a
+    // checked pointer's [[cccc::single/array/ntarray]] qualifier is a
+    // cccc-internal VM-side check, not a real C construct -- gcc/clang would
+    // reject the attribute names outright, and #488 requires -E/-c=generated
+    // native output to be unchanged for a checked declaration ("no change to
+    // ABI or to unchecked callers"). Falls out for free today since this
+    // function only ever emits is_const anyway (is_volatile/is_restrict are
+    // likewise never serialized), but noted explicitly so it isn't "fixed" by a
+    // future generalization of the qualifier-printing above.
+
+    // #999: a scalar (non-aggregate) typedef -- e.g. `typedef unsigned long
+    // DyValue;` -- previously always spelled as its canonical underlying
+    // type below, losing the typedef entirely. That's a cosmetic gap on a
+    // platform where the typedef and the canonical spelling denote the
+    // same real type, but a hard "conflicting types" error from the
+    // downstream compiler when they don't -- e.g. `uint64_t` is `unsigned
+    // long long` on LP64 Darwin, not `unsigned long`, so re-declaring a
+    // `uint64_t`-typed function parameter as `unsigned long` collides with
+    // that same function's real prototype in a header the output also
+    // includes. TY_STRUCT/TY_UNION/TY_ENUM already have their own alias
+    // lookup below (find_typedef_name, structural match -- needed there
+    // since a typedef and its tag are different Type objects); TY_FUNC
+    // recurses into serialize_type_decl and is left alone. Every other
+    // kind gets the same treatment here, via find_typedef_name_exact's
+    // pointer-identity match (see its own comment for why identity, not
+    // structural, matching is required for a scalar).
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM &&
+        ty->kind != TY_FUNC) {
+        TypeName *alias = find_typedef_name_exact(ctx, ty);
+        if (alias) {
+            // #1109: atomic_flag is the one bundled-header typedef whose
+            // host spelling diverges structurally -- C11 7.17 makes it a
+            // *struct* type (macOS SDK/glibc: `typedef struct atomic_flag
+            // atomic_flag;`) while CCCC's own stdatomic.h spells it as an
+            // integer-flavoured `_Atomic _Bool`. The generated C re-includes
+            // <stdatomic.h>, so whichever header the HOST compiler resolves
+            // decides: with CCCC's own (the -I./include the native harness
+            // always passes) everything compiles, but against a real host
+            // header every integer-style use dies ("used type 'atomic_flag'
+            // (aka 'struct atomic_flag') where arithmetic or pointer type is
+            // required"). Spell the canonical `_Atomic _Bool` instead --
+            // valid C11 on every host, needs no header at all, and denotes
+            // exactly the type the VM modelled, so output compiled through
+            // either header is unaffected. Scoped to this one name + shape:
+            // every other atomic_* typedef means the same _Atomic-qualified
+            // scalar on both sides, so their aliases keep printing (and
+            // `atomic_bool`, whose host spelling agrees with CCCC's, is
+            // deliberately left alone).
+            if (!is_host_divergent_atomic_flag_alias(ty, alias)) {
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+                return;
+            }
+            fprintf(f, "_Atomic ");
+        }
+    }
+
+    switch (ty->kind) {
+        case TY_VOID:
+            fprintf(f, "void");
+            break;
+        case TY_BOOL:
+            fprintf(f, "_Bool");
+            break;
+        case TY_CHAR:
+            fprintf(f, "%schar", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_SHORT:
+            fprintf(f, "%sshort", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_INT:
+            fprintf(f, "%sint", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_LONG:
+            fprintf(f, "%slong", ty->is_unsigned ? "unsigned " : "");
+            break;
+        case TY_FLOAT:
+            fprintf(f, "float");
+            break;
+        case TY_DOUBLE:
+            fprintf(f, "double");
+            break;
+        case TY_LDOUBLE:
+            fprintf(f, "long double");
+            break;
+        case TY_DECIMAL32:
+            fprintf(f, "_Decimal32");
+            break;
+        case TY_DECIMAL64:
+            fprintf(f, "_Decimal64");
+            break;
+        case TY_DECIMAL128:
+            fprintf(f, "_Decimal128");
+            break;
+        case TY_PTR:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_ARRAY:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_VLA:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_COMPLEX:
+            // `base` is the element float type (see ty_fcomplex/ty_dcomplex/
+            // ty_ldcomplex in type.c), so the spelling falls out of it
+            // directly.
+            fprintf(f, "_Complex ");
+            serialize_type(f, ctx, ty->base);
+            break;
+        case TY_VECTOR:
+            // GNU vector: element type + vector_size in *bytes* (ty->size is
+            // the total, which is what vector_size takes -- not vec_len). clang
+            // and gcc both accept the attribute in this position.
+            serialize_type(f, ctx, ty->base);
+            fprintf(f, " __attribute__((vector_size(%d)))", ty->size);
+            break;
+        case TY_STRUCT: {
+            TypeName *tag   = find_tag_name(ctx, ty);
+            TypeName *alias = find_typedef_name(ctx, ty);
+            if (tag)
+                fprintf(f, "struct %.*s", tag->name_len, tag->name);
+            else if (alias)
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else
+                serialize_anon_aggregate(f, ctx, ty);
+            break;
+        }
+        case TY_UNION: {
+            TypeName *tag   = find_tag_name(ctx, ty);
+            TypeName *alias = find_typedef_name(ctx, ty);
+            if (tag)
+                fprintf(f, "union %.*s", tag->name_len, tag->name);
+            else if (alias)
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else
+                serialize_anon_aggregate(f, ctx, ty);
+            break;
+        }
+        case TY_ENUM: {
+            TypeName *tag   = find_tag_name(ctx, ty);
+            TypeName *alias = find_typedef_name(ctx, ty);
+            if (tag)
+                fprintf(f, "enum %.*s", tag->name_len, tag->name);
+            else if (alias)
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if ((alias = find_anonymous_typedef_name(ctx, ty)))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else
+                fprintf(f, "int");
+            break;
+        }
+        case TY_FUNC:
+            serialize_type_decl(f, ctx, ty, "");
+            break;
+        case TY_NULLPTR_T:
+            // nullptr_t has the same size/representation as a pointer; emit a
+            // type that is valid without requiring <stddef.h> in the output.
+            fprintf(f, "void *");
+            break;
+        case TY_BITINT:
+            // Emit as the underlying container integer type. bitint_type()
+            // (type.c) rounds bit_width up to whole 8-byte words, so
+            // size==16 covers every width in (64, 128] -- __int128/unsigned
+            // __int128 is supported by clang and gcc on every host this
+            // project targets (macOS/Linux x aarch64/x86_64), including
+            // under the strict -std=cNN native_resolve_std_ladder passes,
+            // and round-trips back through this compiler's own parser
+            // (DK_INT128, parse_types.c) for -c=bytecode re-serialization.
+            // #1121: previously fell into the size==8 "long" arm below,
+            // silently truncating every 128-bit value/operation to 64 bits.
+            if (ty->size == 1)
+                fprintf(f, ty->is_unsigned ? "unsigned char" : "signed char");
+            else if (ty->size == 2)
+                fprintf(f, ty->is_unsigned ? "unsigned short" : "short");
+            else if (ty->size == 4)
+                fprintf(f, ty->is_unsigned ? "unsigned int" : "int");
+            else if (ty->size == 8)
+                fprintf(f, ty->is_unsigned ? "unsigned long" : "long");
+            else if (ty->size == 16)
+                fprintf(f, ty->is_unsigned ? "unsigned __int128" : "__int128");
+            else
+                // #1121: no multi-word lowering exists for _BitInt(N>128) in
+                // the native/-m serializer (only the VM's address-based
+                // wide_bitint.c path handles it) -- refuse loudly per the
+                // no-lossy-emulation policy (#824) rather than silently
+                // truncating to a container that cannot hold the value.
+                // Implementing a real lowering is deferred to #1123. No
+                // Token is available at a bare type-emission site (unlike
+                // error_tok's usual call sites), so this can't go through
+                // the batched cc_print_all_errors() summary path -- the
+                // trailer is appended by hand to match the "N error(s)
+                // generated." phrasing the test harness's compile-error
+                // heuristic (tools/testing/runner.py) already scans for.
+                error("cccc: _BitInt(%d) exceeds 128 bits, which has no "
+                      "native/-m lowering (VM and -c=bytecode only)\n\n1 "
+                      "error generated.",
+                      ty->bit_width);
+            break;
+        case TY_BLOCK:
+            // #965: on the default (non `-fblocks`) lowering path a block value
+            // is always a pointer to the common-initial-sequence descriptor
+            // struct emitted by serialize_block_preamble() -- see the "Blocks"
+            // entry in COVERAGE.md's serialized-output-divergences section.
+            // TY_BLOCK never needs a case in serialize_type_decl (unlike
+            // TY_PTR/TY_ARRAY/TY_VLA/TY_FUNC): it's already an atomic
+            // pointer-sized type here, not a container recursing into a base,
+            // so the declarator-building default branch's plain "<type> <name>"
+            // handles it correctly.
+            fprintf(f, "struct __cccc_block *");
+            break;
+        case TY_ERROR:
+        case TY_AUTO:
+            // #963c: both are internal sentinels that must never survive to
+            // serialization. TY_ERROR only exists after a compile error has
+            // already been recorded (which bails out before this function is
+            // ever reached); TY_AUTO (C23 `auto`) is resolved to the inferred
+            // concrete type at parse time, before -m/-c=native/-c=generated's
+            // serialization pass runs. Reaching either case here means an
+            // internal invariant was violated upstream, not that the user wrote
+            // something unsupported -- hence a hard error naming the kind
+            // rather than a silently emitted comment (see the default: arm
+            // below for the general case this guards against).
+            error(
+                "cccc: internal error: TypeKind '%s' reached the serializer "
+                "unresolved (should have been eliminated before serialization)",
+                cc_type_kind_name(ty->kind));
+            break;
+        default:
+            // #963c: every TypeKind is expected to have an explicit case above.
+            // This used to emit "/* unknown type */" and keep going, producing
+            // C the host compiler then rejected at the use site -- a delayed,
+            // confusing failure. Fail immediately and name the kind instead, so
+            // the next TypeKind added without a case here is caught at
+            // implementation/test time rather than silently miscompiling.
+            error("cccc: internal error: no serializer case for TypeKind '%s' "
+                  "(kind %d)",
+                  cc_type_kind_name(ty->kind), ty->kind);
+            break;
+    }
+}
+
+// Serialize struct/union type definition
+static const char *aggregate_keyword(Type *ty) {
+    return ty->kind == TY_UNION ? "union" : "struct";
+}
+
+static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
+    if (!ty)
+        return;
+
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return;
+
+    TypeName *tag   = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+
+    if (!tag && alias)
+        fprintf(f, "typedef %s", aggregate_keyword(ty));
+    else
+        fprintf(f, "%s", aggregate_keyword(ty));
+
+    if (tag)
+        fprintf(f, " %.*s", tag->name_len, tag->name);
+
+    if (!ty->members) {
+        if (tag)
+            fprintf(f, ";\n\n");
+        return;
+    }
+
+    fprintf(f, " {\n");
+    for (Member *m = ty->members; m; m = m->next) {
+        fprintf(f, "    ");
+        char name[256] = "";
+        if (m->name) {
+            int len = m->name->len;
+            if (len >= (int)sizeof(name))
+                len = sizeof(name) - 1;
+            memcpy(name, m->name->loc, len);
+            name[len] = '\0';
+        }
+        serialize_type_decl(f, ctx, m->ty, name);
+        if (m->is_bitfield)
+            fprintf(f, " : %d", m->bit_width);
+        fprintf(f, ";\n");
+    }
+    fprintf(f, "}");
+
+    if (!tag && alias)
+        fprintf(f, " %.*s", alias->name_len, alias->name);
+    fprintf(f, ";\n\n");
+}
+
+// Serialize enum type definition
+static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
+    if (!ty || ty->kind != TY_ENUM)
+        return;
+
+    TypeName *tag   = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+
+    if (!tag && alias)
+        fprintf(f, "typedef enum");
+    else
+        fprintf(f, "enum");
+
+    if (tag)
+        fprintf(f, " %.*s", tag->name_len, tag->name);
+
+    // C23 underlying type
+    if (ty->enum_base_type) {
+        fprintf(f, " : ");
+        serialize_type(f, ctx, ty->enum_base_type);
+    }
+
+    if (!ty->enum_constants) {
+        if (tag)
+            fprintf(f, ";\n\n");
+        return;
+    }
+
+    fprintf(f, " {\n");
+    for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
+        fprintf(f, "    %s = ", enum_const_spelling(ctx, ty, ec->name));
+        // #1095: re-materialize a host-owned sizeof/_Alignof enumerator
+        // value the same way #1031's ND_NUM arm does -- see
+        // serialize_layout_const()'s own comment. Every *use* of this
+        // enumerator elsewhere in the TU carries the same provenance (see
+        // parse_postfix.c's primary(), sc->enum_layout_ty), so the body and
+        // its uses can't disagree the way an array's declaration and
+        // initializer could -- no consistency hazard to guard here.
+        if (!serialize_layout_const(f, ctx, ec->layout_ty, ec->layout_is_align))
+            fprintf(f, "%lld", (long long)ec->value);
+        if (ec->next)
+            fprintf(f, ",");
+        fprintf(f, "\n");
+    }
+    fprintf(f, "}");
+
+    if (!tag && alias)
+        fprintf(f, " %.*s", alias->name_len, alias->name);
+    fprintf(f, ";\n\n");
+}
+
+bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn) {
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (ctx->tags[i].owner_fn == owner_fn &&
+            // #1091: same guard as find_tag_name() -- a tagless `ty`
+            // structurally matching a *differently*-tagged record (e.g. a
+            // tagless typedef next to a same-shaped tagged struct) does not
+            // mean `ty` itself "has" that tag; without this,
+            // aggregate_typedef_is_definition() wrongly concludes the
+            // tagless typedef isn't the definition, and its own standalone
+            // body (correctly printed elsewhere, via serialize_struct_def)
+            // gets a second, redundant copy from serialize_typedef_alias.
+            !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
+            return true;
+    return false;
+}
+
+// #989: true when `ty` already has a record (tag or typedef) with
+// owner_fn == NULL -- i.e. it's an ordinary file-scope type, not merely
+// unowned because it was never named at all (a tagless local aggregate has
+// no record either way, so type_decl_owner() alone can't tell the two
+// apart -- see hoist_local_type_to_file_scope()).
+static bool type_has_file_scope_name(SerializeContext *ctx, Type *ty) {
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (ctx->tags[i].owner_fn == NULL &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
+            return true;
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (ctx->typedefs[i].owner_fn == NULL &&
+            same_type_or_origin(ctx->typedefs[i].ty, ty))
+            return true;
+    return false;
+}
+
+// #989: promotes a function-local struct/union/enum type (or one reachable
+// through a pointer/array/VLA/function-type chain) to file scope, so a block
+// literal's environment struct -- itself emitted at file scope, ahead of
+// the function that would otherwise bring the type's tag into scope -- can
+// spell a capture's type. Mirrors collect_type()'s traversal shape so
+// dependencies are promoted (and defined) before dependents.
+//
+// A tagless local aggregate (`struct { int x; } p`) has no TypeName record
+// at all -- previously serialize_type fell through to
+// serialize_anon_aggregate() and inlined a *fresh* anonymous body at every
+// use site, producing two structurally-identical but nominally distinct
+// types and a hard clang error at the env-struct assignment. This
+// synthesizes a tag for that case too, not just hoisting an already-named
+// one.
+void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Type *ty) {
+    if (!ty)
+        return;
+
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        hoist_local_type_to_file_scope(f, vm, ctx, ty->base);
+        return;
+    }
+
+    if (ty->kind == TY_FUNC) {
+        hoist_local_type_to_file_scope(f, vm, ctx, ty->return_ty);
+        for (Type *p = ty->params; p; p = p->next)
+            hoist_local_type_to_file_scope(f, vm, ctx, p);
+        return;
+    }
+
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return;
+
+    if (type_vec_contains(&ctx->hoisted, ty))
+        return;
+
+    Obj *owner = type_decl_owner(ctx, ty);
+    if (owner == NULL && type_has_file_scope_name(ctx, ty))
+        return; // already an ordinary file-scope type -- nothing to hoist
+
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            hoist_local_type_to_file_scope(f, vm, ctx, m->ty);
+
+    type_vec_push(&ctx->hoisted, ty);
+
+    // Find the first existing tag record (if any) so a collision-free tag
+    // keeps its original spelling -- this leaves existing -m output and
+    // existing tests untouched in the common (no-collision) case.
+    TypeName *existing_tag = NULL;
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+            existing_tag = &ctx->tags[i];
+            break;
+        }
+
+    char *chosen_name;
+    int   chosen_len;
+    if (existing_tag) {
+        bool collides = false;
+        for (int i = 0; i < ctx->tags_len && !collides; i++) {
+            if (&ctx->tags[i] == existing_tag)
+                continue;
+            if (ctx->tags[i].owner_fn == NULL &&
+                ctx->tags[i].name_len == existing_tag->name_len &&
+                strncmp(ctx->tags[i].name, existing_tag->name,
+                        existing_tag->name_len) == 0 &&
+                !same_type_or_origin(ctx->tags[i].ty, ty))
+                collides = true;
+        }
+        if (!collides) {
+            chosen_name = existing_tag->name;
+            chosen_len  = existing_tag->name_len;
+        } else {
+            chosen_name =
+                arena_format(vm, "__cccc_local_%.*s_%d", existing_tag->name_len,
+                             existing_tag->name, ctx->hoisted_type_counter++);
+            chosen_len = (int)strlen(chosen_name);
+        }
+    } else {
+        chosen_name = arena_format(vm, "__cccc_local_anon_%d",
+                                   ctx->hoisted_type_counter++);
+        chosen_len  = (int)strlen(chosen_name);
+    }
+
+    // #989: two different functions each declaring an identical `struct P`
+    // compare equal under same_type_or_origin's structural fallback, so
+    // hoisting one makes the other resolve to this same file-scope name too
+    // -- harmless (identical layout, one definition, consistent spelling)
+    // but non-obvious, hence this comment. Mutate every matching record, not
+    // just the first: type_decl_owner() above only inspected the first hit,
+    // but find_tag_name()/find_typedef_name() may later return a different
+    // one depending on ctx->current_fn.
+    for (int i = 0; i < ctx->tags_len; i++)
+        if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+            ctx->tags[i].owner_fn = NULL;
+            ctx->tags[i].name     = chosen_name;
+            ctx->tags[i].name_len = chosen_len;
+        }
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+            ctx->typedefs[i].owner_fn = NULL;
+
+    if (!existing_tag)
+        // No tag record existed at all (a tagless local aggregate) --
+        // synthesize one so serialize_type prefers `struct <tag>` at every
+        // site, including inside the declaring function, which is exactly
+        // what gives the one-definition property.
+        type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty,
+                       chosen_name, chosen_len, NULL, false, true, NULL, true);
+
+    Obj *saved_fn   = ctx->current_fn;
+    ctx->current_fn = NULL;
+    if (ty->kind == TY_ENUM)
+        serialize_enum_def(f, ctx, ty);
+    else
+        serialize_struct_def(f, ctx, ty);
+    ctx->current_fn = saved_fn;
+}
+
+// #953: true when `path` (a type's declaring file, TypeName.file_path) is
+// one of the resolved include paths auto-capture actually re-emitted into
+// generated_only (-c=generated) output -- see the ctx->captured_paths
+// population in cc_serialize_program. A NULL path (no declaring token) or a
+// path not in the set means nothing else supplies this definition, so the
+// caller must still serialize it despite from_include being true.
+// #1003: true when `path`'s final path component is exactly `name` --
+// `path` may be a real filesystem path, a bare filename (no directory
+// found on disk), or a synthetic "<embedded>/name" key (embedded_header_key,
+// preprocess.c), so a suffix match on '/' is used rather than assuming any
+// particular shape.
+bool path_basename_is(const char *path, const char *name) {
+    if (!path)
+        return false;
+    size_t plen = strlen(path), nlen = strlen(name);
+    if (plen == nlen)
+        return strcmp(path, name) == 0;
+    return plen > nlen && path[plen - nlen - 1] == '/' &&
+           strcmp(path + plen - nlen, name) == 0;
+}
+
+bool path_is_captured(SerializeContext *ctx, const char *path) {
+    if (!path)
+        return false;
+    for (int i = 0; i < ctx->captured_paths_len; i++)
+        if (ctx->captured_paths[i] && strcmp(ctx->captured_paths[i], path) == 0)
+            return true;
+    return false;
+}
+
+// #1031: true when `ty`'s own standalone definition is suppressed because
+// a replayed `#include` (auto-capture) supplies it instead -- the single-
+// type predicate factored out of serialize_type_defs_for_owner's own
+// from_include check below, so that function and
+// type_layout_is_host_owned() (which recurses through it) can never
+// disagree by parallel edit -- same discipline
+// typedef_alias_header_suppressed() already applies for typedef aliases,
+// and the shape #892's AttrTarget regression showed a divergent copy here
+// can break.
+static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
+                                                Type             *ty) {
+    if (!ty || ctx->emit_strict)
+        return false;
+    TypeName *tag   = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+    TypeName *provenance_source =
+        tag ? find_tag_name_for_provenance(ctx, ty) : alias;
+    return provenance_source && provenance_source->from_include &&
+           !provenance_source->always_emit &&
+           (!ctx->generated_only ||
+            path_is_captured(ctx, provenance_source->file_path));
+}
+
+// #1031: true when `ty`'s from_include-suppressed definition is owned by
+// one of is_compiler_owned_header()'s fixed list (stdarg.h/setjmp.h/etc,
+// src/preprocess.c) -- excluded from type_layout_is_host_owned() below
+// even though its body IS suppressed the same way an ordinary from_include
+// type's is (confirmed: `struct va_list`'s body does not appear in -m
+// output either). stdarg.h's va_list and setjmp.h's jmp_buf specifically
+// use the *opposite* strategy from an ordinary from_include type: CCCC's
+// own layout is deliberately widened to cover every supported host's real
+// one (see their own man/COVERAGE.md entries), so the *guest-folded*
+// sizeof/_Alignof is already a safe, correct-by-construction upper bound
+// on purpose -- re-materializing the operator would replace that safe
+// padded literal with whatever the real host's own (possibly smaller, via
+// the header's own #include_next hand-off) va_list/jmp_buf size happens
+// to be, defeating the padding #1054/#1059 built specifically to avoid
+// depending on that. (Found via comptime_native_smoke.py's own case 97
+// regressing when this exclusion was missing -- its "-m folds
+// sizeof(va_list) to exactly 64" assertion is exactly this invariant.)
+static bool type_header_is_compiler_owned(SerializeContext *ctx, Type *ty) {
+    TypeName *tag   = find_tag_name(ctx, ty);
+    TypeName *alias = find_typedef_name(ctx, ty);
+    TypeName *provenance_source =
+        tag ? find_tag_name_for_provenance(ctx, ty) : alias;
+    if (!provenance_source || !provenance_source->file_path)
+        return false;
+    const char *path = provenance_source->file_path;
+    const char *base = strrchr(path, '/');
+    return is_compiler_owned_header(base ? base + 1 : path);
+}
+
+// #1031: true when a folded `sizeof`/`_Alignof` of `ty` can no longer be
+// trusted under -c=native -- either `ty` itself is a from_include struct/
+// union whose body serialize_type_defs_for_owner() suppresses (member
+// access re-resolves correctly against the replayed #include's real host
+// layout, but a value guest-side parsing already folded into a plain
+// integer literal does not), or `ty` transitively contains such a type
+// (an array of it, or a struct/union with it as a direct or nested
+// member) -- recursion stops at TY_PTR: a pointer's own size is uniform
+// across every supported platform x arch combination regardless of what
+// it points to, and following pointee types would risk a cycle through a
+// self-referential struct. depth guards against a pathological type
+// graph; the real-world nesting this addresses is at most a few levels.
+bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty, int depth) {
+    if (!ty || depth > 32)
+        return false;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_layout_is_host_owned(ctx, ty->base, depth + 1);
+    if (ty->kind == TY_PTR)
+        return false;
+    if (type_def_is_from_include_suppressed(ctx, ty) &&
+        !type_header_is_compiler_owned(ctx, ty))
+        return true;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            if (type_layout_is_host_owned(ctx, m->ty, depth + 1))
+                return true;
+    return false;
+}
+
+// #1031: true when serialize_type() can spell `ty` by a real name (tag,
+// typedef alias, or anonymous-typedef alias) rather than falling through
+// to serialize_anon_aggregate() and printing a re-derived *body* -- which
+// for a from_include type would reinstate CCCC's own (possibly wrong)
+// projection right where re-materializing `sizeof(ty)` is trying to avoid
+// exactly that. Recurses through TY_ARRAY the same way
+// type_layout_is_host_owned() does, since `sizeof(some_array_type)`
+// re-materializes as `sizeof(<element type name>) * N`-shaped only
+// indirectly -- serialize_type() on the array type itself already handles
+// element naming, so this only needs to confirm the base is nameable.
+static bool type_has_printable_name(SerializeContext *ctx, Type *ty) {
+    if (!ty)
+        return false;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_has_printable_name(ctx, ty->base);
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return true; // scalars, enums (fall back to "int"), etc. always print
+    return find_tag_name(ctx, ty) || find_typedef_name(ctx, ty) ||
+           find_anonymous_typedef_name(ctx, ty);
+}
+
+// #1095: the gate + emission serialize_expr's own ND_NUM arm used before
+// this was factored out (see #1031's own comment there, and this
+// function's callers for the three sites #1095 added: array dimensions,
+// case labels, enum values). Prints "sizeof(T)"/"_Alignof(T)" and returns
+// true when `layout_ty`'s own definition is from_include-suppressed
+// (type_layout_is_host_owned()) and nameable (type_has_printable_name());
+// prints nothing and returns false otherwise, so every call site's own
+// fallback -- the plain folded literal -- still applies unchanged.
+bool serialize_layout_const(FILE *f, SerializeContext *ctx, Type *layout_ty,
+                            bool is_align) {
+    if (!layout_ty || !type_layout_is_host_owned(ctx, layout_ty, 0) ||
+        !type_has_printable_name(ctx, layout_ty))
+        return false;
+    fprintf(f, "%s(", is_align ? "_Alignof" : "sizeof");
+    serialize_type(f, ctx, layout_ty);
+    fprintf(f, ")");
+    return true;
+}
+
+// #1098: true when `node` (a `_Static_assert` condition tree) contains, at
+// any depth, a bare sizeof/_Alignof-of-a-from_include-type leaf
+// (node_layout_const(), parse_analysis.c -- the same #1031/#1095 stash
+// used by serialize_expr's own ND_NUM arm) whose type is a from_include
+// struct/union (or an array thereof) that is host-owned
+// (type_layout_is_host_owned()) and nameable (type_has_printable_name()).
+// This is the "does this assert actually depend on a layout the VM might
+// have gotten wrong" gate -- an ordinary compile-time-only assert (no
+// from_include type involved anywhere in it) gets no redundant host-side
+// re-check. Deliberately narrower than type_layout_is_host_owned()'s own
+// implementation (which accepts any Type kind, not just struct/union,
+// despite its own doc comment saying "struct/union"): a bare scalar type
+// like plain `int` can spuriously same_type_or_origin()-match an unrelated
+// from_include *typedef* of `int` (e.g. sys/types.h's __int32_t, reached
+// merely by including <sys/mount.h>) via same_type_or_origin()'s pointer-
+// identity walk up the origin chain -- harmless for #1031's own
+// re-materialization (sizeof(int) prints identically either way) but would
+// make this gate fire on ordinary, fully portable asserts having nothing
+// to do with a host-divergent layout. Restricting to aggregates (matching
+// every real-world case in this batch's own tickets, e.g. struct statfs)
+// sidesteps that without touching the shared same_type_or_origin() itself.
+// Plain recursion over lhs/rhs/cond/then/els covers every shape a
+// constant-expression tree can take (unary: lhs only; binary: lhs+rhs;
+// ternary: cond/then/els; cast: lhs) -- this walks a single expression
+// tree, not a whole function body, so the explicit-stack/pointer-identity
+// discipline SCRATCH.md documents for AST-wide walkers doesn't apply here.
+// depth cap mirrors type_layout_is_host_owned()'s own guard.
+static bool expr_has_host_owned_layout(SerializeContext *ctx, Node *node,
+                                       int depth) {
+    if (!node || depth > 32)
+        return false;
+    Type *layout_ty    = NULL;
+    bool  layout_align = false;
+    if (node_layout_const(node, &layout_ty, &layout_align)) {
+        Type *base_ty = layout_ty;
+        while (base_ty &&
+               (base_ty->kind == TY_ARRAY || base_ty->kind == TY_VLA))
+            base_ty = base_ty->base;
+        if (base_ty &&
+            (base_ty->kind == TY_STRUCT || base_ty->kind == TY_UNION) &&
+            type_layout_is_host_owned(ctx, layout_ty, 0) &&
+            type_has_printable_name(ctx, layout_ty))
+            return true;
+    }
+    return expr_has_host_owned_layout(ctx, node->lhs, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->rhs, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->cond, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->then, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node->els, depth + 1);
+}
+
+// #1098: emits `_Static_assert(cond, "msg");` (always the two-arg
+// spelling, even for a C23 single-arg `static_assert` source -- valid
+// C11-and-later on any supported host, needs no <assert.h>) so the host
+// compiler re-checks an assertion whose condition depends on a
+// from_include type's real layout, which CCCC only ever checked against
+// its own (possibly wrong-for-this-host) projection at parse time. Two
+// gates, both required, mirroring the #901/#1096 bodiless-declaration
+// provenance gate (serialize_program.c's function-prototype loop) so this can
+// never fire on one of CCCC's own bundled headers' own layout asserts
+// (include/sys/stat.h, signal.h, fts.h, aio.h, mqueue.h, ndbm.h all carry
+// per-platform `_Static_assert(sizeof(struct X) == N)` on types that ARE
+// from_include and not compiler-owned -- re-emitting those against the
+// real host would fail for reasons the user never wrote):
+//   1. expr_has_host_owned_layout(cond) -- the condition actually depends
+//      on a host-owned layout, not just an ordinary compile-time fact.
+//   2. `tok` is from a command-line input file (the same
+//      file_is_command_line_input()/cc_file_is_cccc_only() test #901/#1096
+//      use) -- a header-sourced assert (bundled OR a real host header
+//      reached via a replayed #include) is left unemitted.
+// Prints nothing when either gate fails.
+void serialize_static_assert(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                             Node *cond, const char *msg, int msg_len,
+                             Token *tok, int indent) {
+    if (!cond || !tok || !tok->file)
+        return;
+    if (!cc_file_is_command_line_input(vm, tok->file->name) &&
+        !cc_file_is_cccc_only(vm, tok->file->name))
+        return;
+    if (!expr_has_host_owned_layout(ctx, cond, 0))
+        return;
+    print_indent_level(f, indent);
+    fprintf(f, "_Static_assert(");
+    serialize_expr(f, vm, ctx, cond, 0);
+    fprintf(f, ", ");
+    serialize_string_n(f, msg, msg_len);
+    fprintf(f, ");\n");
+}
+
+static bool aggregate_typedef_is_definition(SerializeContext *ctx,
+                                            TypeName         *alias) {
+    if (!alias->ty)
+        return false;
+    if (alias->ty->kind != TY_STRUCT && alias->ty->kind != TY_UNION &&
+        alias->ty->kind != TY_ENUM)
+        return false;
+    return !type_has_tag_for_owner(ctx, alias->ty, alias->owner_fn);
+}
+
+// #891: in !generated_only mode (-c=native, -m without -c=generated), a
+// header-sourced typedef would collide with the consumer's own #include of
+// the same header (auto-capture re-emits that #include verbatim) -- e.g.
+// `typedef void FILE;` from CCCC's own stdio.h polyfill alongside a real
+// `#include <stdio.h>`. Comptime/reflection-synthesized aliases
+// (always_emit) are exempt: they have no header of their own to collide
+// with, and dropping them would silently delete macro-generated typedefs
+// from the output. Shared by serialize_typedef_alias and (#1046)
+// emit_typedef_and_deps's own aggregate-body emission, so both places gate
+// on the exact same rule -- a divergent copy here is how #892's AttrTarget
+// regression happened.
+bool typedef_alias_header_suppressed(SerializeContext *ctx, TypeName *alias) {
+    return !ctx->generated_only && !ctx->emit_strict && alias->from_include &&
+           !alias->always_emit;
+}
+
+static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
+                                    TypeName *alias) {
+    if (!alias || aggregate_typedef_is_definition(ctx, alias))
+        return;
+    if (typedef_alias_header_suppressed(ctx, alias))
+        return;
+
+    char name[256];
+    int  len = alias->name_len;
+    if (len >= (int)sizeof(name))
+        len = sizeof(name) - 1;
+    memcpy(name, alias->name, len);
+    name[len] = '\0';
+
+    // #999: printing a typedef's own RHS must not resolve back to the
+    // typedef itself. find_typedef_name_exact() (used by serialize_type
+    // for a non-aggregate kind -- struct/union/enum avoid this because
+    // find_tag_name takes priority over find_typedef_name for them) would
+    // otherwise match `alias->ty` here against this exact `alias` record,
+    // since they're the same Type pointer -- e.g. `typedef int (^IntBlock)
+    // (int);` printed as `typedef IntBlock IntBlock;`. Temporarily hide
+    // this one record from that lookup for the duration of the call: the
+    // real Type is still passed through explicitly (serialize_type_decl's
+    // `ty` parameter), only the *lookup table entry* is blanked, so a
+    // different typedef further down the same origin chain (a real,
+    // distinct alias-of-an-alias) still resolves normally.
+    Type *real_ty = alias->ty;
+    alias->ty     = NULL;
+    fprintf(f, "typedef ");
+    serialize_type_decl(f, ctx, real_ty, name);
+    fprintf(f, ";\n\n");
+    alias->ty = real_ty;
+}
+
+static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
+                                  Obj *owner_fn, bool *typedef_done);
+
+// #1027: walks the same PTR/ARRAY/VLA/FUNC declarator shape collect_type()
+// peels, but instead of collecting aggregate completeness dependencies
+// (already correctly ordered by collect_type's own post-order into
+// ctx->defs), looks for a scalar typedef alias serialize_type() would
+// spell for whatever leaf type this one bottoms out at -- e.g. a struct
+// member declared `lu_byte tt;`. Nothing tracked this dependency before:
+// collect_type() only ever walks toward a TY_STRUCT/TY_UNION/TY_ENUM
+// member's own nested aggregate members, never toward a scalar typedef's
+// declaring record, so every struct/union/enum definition used to print
+// ahead of every typedef alias unconditionally (two independent loops
+// below, aggregates first) -- correct only when no aggregate's member
+// happened to spell a not-yet-emitted typedef name, which a large,
+// realistic third-party source (tests/test_minilua.c) hits within the
+// first handful of struct definitions.
+//
+// A tagged/aliased struct/union/enum member needs no typedef dependency
+// tracked here: a tagged aggregate's pointer/array member spells via
+// "struct Tag"/"union Tag", valid even before that tag's own definition (C
+// implicitly forward-declares a struct/union tag on first mention) or, by
+// value, is already correctly ordered by collect_type()'s own post-order;
+// an untagged, alias-only aggregate member is likewise already walked into
+// ctx->defs ahead of its container by that same existing recursion (see
+// aggregate_typedef_is_definition -- its own combined `typedef struct {...}
+// Name;` line is printed by serialize_struct_def itself, from ctx->defs,
+// not by the separate typedef loop at all).
+static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
+                                            Type *ty, Obj *owner_fn,
+                                            bool *typedef_done) {
+    if (!ty)
+        return;
+    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        ensure_typedef_for_type_emitted(f, ctx, ty->base, owner_fn,
+                                        typedef_done);
+        return;
+    }
+    if (ty->kind == TY_FUNC) {
+        ensure_typedef_for_type_emitted(f, ctx, ty->return_ty, owner_fn,
+                                        typedef_done);
+        for (Type *p = ty->params; p; p = p->next)
+            ensure_typedef_for_type_emitted(f, ctx, p, owner_fn, typedef_done);
+        return;
+    }
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
+        // #1046: `ty` may itself be an untagged aggregate whose only
+        // spelling is a typedef alias (e.g. `typedef struct { int a[2]; }
+        // P, *Pp;`, `ty` here being the anonymous struct behind `Pp`'s
+        // pointee) -- find_typedef_name() below would already match that
+        // alias, so the "chase into members" branch further down never
+        // runs for it, but nothing had ever chased forward to make sure the
+        // alias's own aggregate BODY (not just its name) gets emitted before
+        // this one. Do that explicitly: find_anonymous_typedef_name (#952,
+        // not the broader find_typedef_name, so an unrelated same-shape
+        // tagless typedef like va_list can't be matched instead) resolves
+        // the defining record, and emit_typedef_and_deps prints its
+        // `typedef struct {...} P;` line (idempotent via ctx->emitted_defs)
+        // ahead of whatever depends on it.
+        if (!find_tag_name(ctx, ty)) {
+            TypeName *anon = find_anonymous_typedef_name(ctx, ty);
+            if (anon) {
+                int idx = (int)(anon - ctx->typedefs);
+                emit_typedef_and_deps(f, ctx, idx, owner_fn, typedef_done);
+                return;
+            }
+        }
+        // An anonymous, alias-less aggregate (e.g. a `union { struct {
+        // ... } l; ... } u;` member) is inlined at its point of use
+        // (serialize_anon_aggregate) rather than getting its own standalone
+        // definition -- the caller's own top-level ctx->defs loop skips
+        // exactly this case (no tag, no alias, nothing to refer back to it
+        // by), so it never gets its own turn to pull its members' typedefs
+        // forward. Chase the dependency through here instead, into
+        // whichever member of THIS aggregate will actually need it.
+        if (!find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
+            !find_anonymous_typedef_name(ctx, ty))
+            for (Member *m = ty->members; m; m = m->next)
+                ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
+                                                typedef_done);
+        return;
+    }
+    if (ty->kind == TY_ENUM) {
+        // #1046: same reasoning as the TY_STRUCT/TY_UNION case just above --
+        // a tagless `typedef enum { ... } E;` reached only via some other
+        // typedef's dependency chase (an enum has no member types of its
+        // own to chase further, so this is the whole fix for TY_ENUM).
+        if (!find_tag_name(ctx, ty)) {
+            TypeName *anon = find_anonymous_typedef_name(ctx, ty);
+            if (anon) {
+                int idx = (int)(anon - ctx->typedefs);
+                emit_typedef_and_deps(f, ctx, idx, owner_fn, typedef_done);
+            }
+        }
+        return;
+    }
+
+    TypeName *alias = find_typedef_name_exact(ctx, ty);
+    if (!alias)
+        return;
+    int idx = (int)(alias - ctx->typedefs);
+    emit_typedef_and_deps(f, ctx, idx, owner_fn, typedef_done);
+}
+
+static void emit_typedef_and_deps(FILE *f, SerializeContext *ctx, int idx,
+                                  Obj *owner_fn, bool *typedef_done) {
+    if (typedef_done[idx])
+        return;
+    typedef_done[idx] = true;
+
+    TypeName *td      = &ctx->typedefs[idx];
+    // A typedef belonging to a different owner_fn scope than the one this
+    // pass is currently emitting isn't this call's job to print (mirrors
+    // the existing owner_fn filters on both loops below) -- structurally
+    // this shouldn't arise (a file-scope aggregate can't reference a
+    // function-local typedef), but matched defensively rather than assumed.
+    if (td->owner_fn != owner_fn)
+        return;
+
+    // #999-style self-hide (see serialize_typedef_alias's own matching
+    // comment): temporarily blank this record so a typedef-of-typedef's own
+    // right-hand-side lookup (below) can't match itself, then pull in
+    // whatever OTHER typedef this one's own spelling depends on (a chain
+    // like `typedef lu_byte TStatus;`) before this one.
+    Type *real_ty = td->ty;
+    td->ty        = NULL;
+    ensure_typedef_for_type_emitted(f, ctx, real_ty, owner_fn, typedef_done);
+    td->ty = real_ty;
+
+    // #1046: when `td` is itself the defining alias of an anonymous
+    // struct/union/enum (aggregate_typedef_is_definition -- the combined
+    // `typedef struct {...} P;` shape), serialize_typedef_alias() below
+    // deliberately does NOT print it, on the assumption that
+    // serialize_struct_def()/serialize_enum_def() already did while walking
+    // ctx->defs (that's the ordinary case: `P` used by value somewhere).
+    // But ctx->defs is usage-collected -- if `P` is never used by value,
+    // only ever reached through another typedef's pointer/array/function
+    // indirection (e.g. `Pp` here), nothing in that loop ever visits it, and
+    // this call -- reached via ensure_typedef_for_type_emitted's dependency
+    // chase -- is the only place that still knows the body needs printing.
+    // Emit it here, gated by the same emitted_defs dedup the ctx->defs loop
+    // uses (a real test file can produce two independent TypeName records
+    // for the same declaration -- comptime re-parse -- so this must be
+    // idempotent) and the same header-suppression rule
+    // serialize_typedef_alias applies to the alias line itself.
+    if (aggregate_typedef_is_definition(ctx, td) &&
+        !type_vec_contains_nominal(ctx, &ctx->emitted_defs, real_ty) &&
+        !typedef_alias_header_suppressed(ctx, td)) {
+        type_vec_push_nominal(ctx, &ctx->emitted_defs, real_ty);
+        if (real_ty->kind == TY_ENUM)
+            serialize_enum_def(f, ctx, real_ty);
+        else
+            serialize_struct_def(f, ctx, real_ty);
+    }
+
+    serialize_typedef_alias(f, ctx, td);
+}
+
+// Side discovery filing #1042(c)'s minilua audit: a struct/union member
+// declaring a function-pointer parameter of another tag (e.g.
+// `int (*f)(struct lua_State *);` inside `union Value`, minilua's own repro)
+// gives that parameter's `struct lua_State` PROTOTYPE SCOPE (C11 6.2.1p4) --
+// a distinct type from the file-scope `struct lua_State` its own later
+// definition introduces, even though both spell the same tag. No forward
+// declarations were ever emitted for file-scope tags (`grep
+// '^struct [A-Za-z_]*;'` on -m output returns nothing), so a real host
+// compiler reaching a later assignment between the two (minilua's own
+// `(*io).value_.f = (lua_CFunction)fn;`) sees two "different", identically-
+// spelled `struct lua_State *` function-pointer types and rejects it as
+// "incompatible function pointer types".
+//
+// Deliberately narrow, NOT "forward-declare every tagged struct/union" (the
+// first version of this fix, reverted): that blanket form regressed
+// test_serialize_opaque_handle_1010.c's own `CCCC_REJECT_STDOUT: struct
+// DyAtoms1010;\n` -- an ordinary pointer member (`DyAtoms1010 *`) does NOT
+// introduce prototype scope, it declares the tag at the SAME (enclosing,
+// typically file) scope as the containing struct itself (C11 6.7.2.3p11), so
+// a forward declaration ahead of it is pure unwanted noise that test's own
+// #1010 regression guard is right to reject. Only a struct/union pointer
+// reached through a nested FUNCTION TYPE's parameter-type-list or return
+// type is the actual C11 6.2.1p4 hazard -- so only those tags are collected.
+static void collect_proto_scope_targets(SerializeContext *ctx, Type *mty,
+                                        TypeVec *targets) {
+    if (!mty)
+        return;
+    while (mty->kind == TY_PTR || mty->kind == TY_ARRAY || mty->kind == TY_VLA)
+        mty = mty->base;
+
+    if (mty->kind == TY_FUNC) {
+        Type *ret = mty->return_ty;
+        while (ret && ret->kind == TY_PTR)
+            ret = ret->base;
+        if (ret && (ret->kind == TY_STRUCT || ret->kind == TY_UNION))
+            type_vec_push(targets, ret);
+        for (Type *p = mty->params; p; p = p->next) {
+            Type *pt = p;
+            while (pt && pt->kind == TY_PTR)
+                pt = pt->base;
+            if (pt && (pt->kind == TY_STRUCT || pt->kind == TY_UNION))
+                type_vec_push(targets, pt);
+        }
+        return;
+    }
+
+    // Not a function (pointer): if this member is itself a TAGLESS
+    // struct/union, its body is inlined at this same use site (per
+    // serialize_type_defs_for_owner's own "nothing to refer back to them
+    // by" skip), so its own function-pointer members are printed at this
+    // same textual position too -- recurse, mirroring collect_byval_edges'
+    // identical tagless handling above.
+    if ((mty->kind == TY_STRUCT || mty->kind == TY_UNION) &&
+        !find_tag_name(ctx, mty) && !find_typedef_name(ctx, mty) &&
+        !find_anonymous_typedef_name(ctx, mty))
+        for (Member *mm = mty->members; mm; mm = mm->next)
+            collect_proto_scope_targets(ctx, mm->ty, targets);
+}
+
+static void serialize_tag_forward_decls(FILE *f, SerializeContext *ctx) {
+    TypeVec targets = {0};
+    for (int i = 0; i < ctx->defs.len; i++) {
+        Type *ty = ctx->defs.data[i];
+        if ((ty->kind != TY_STRUCT && ty->kind != TY_UNION) ||
+            type_decl_owner(ctx, ty) != NULL)
+            continue; // file scope only -- prototype scope only bites here
+        for (Member *m = ty->members; m; m = m->next)
+            collect_proto_scope_targets(ctx, m->ty, &targets);
+    }
+
+    bool any = false;
+    for (int i = 0; i < targets.len; i++) {
+        int idx = find_complete_def_index(&ctx->defs, targets.data[i]);
+        if (idx < 0)
+            continue; // no real file-scope definition to disambiguate against
+        Type *def_ty = ctx->defs.data[idx];
+        if (type_decl_owner(ctx, def_ty) != NULL ||
+            type_vec_contains(&ctx->hoisted, def_ty)) // #989: printed elsewhere
+            continue;
+        TypeName *tag = find_tag_name(ctx, def_ty);
+        if (!tag)
+            continue; // tagless: nothing to forward-declare by
+        fprintf(f, "%s %.*s;\n", aggregate_keyword(def_ty), tag->name_len,
+                tag->name);
+        any = true;
+    }
+    if (any)
+        fprintf(f, "\n");
+    free(targets.data);
+}
+
+void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
+                                   Obj *owner_fn) {
+    Obj *saved_fn   = ctx->current_fn;
+    ctx->current_fn = owner_fn;
+
+    if (!owner_fn)
+        serialize_tag_forward_decls(f, ctx);
+
+    bool *typedef_done = ctx->typedefs_len > 0
+                             ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
+                             : NULL;
+
+    for (int i = 0; i < ctx->defs.len; i++) {
+        Type *ty = ctx->defs.data[i];
+        if (type_decl_owner(ctx, ty) != owner_fn)
+            continue;
+        // #989: hoist_local_type_to_file_scope() rewrites a hoisted type's
+        // tag/typedef record(s) to owner_fn = NULL, so on the file-scope
+        // pass (owner_fn == NULL here) the check above no longer excludes
+        // it -- without this, serialize_block_preamble's already-emitted
+        // definition would be re-derived here too, a hard "redefinition"
+        // error.
+        if (type_vec_contains(&ctx->hoisted, ty))
+            continue;
+        // Types with no tag and no typedef alias have nothing to refer back
+        // to them by, so they're serialized inline at their point of use
+        // (e.g. `struct { int x; } pt;`) instead of as a standalone def.
+        TypeName *tag   = find_tag_name(ctx, ty);
+        TypeName *alias = find_typedef_name(ctx, ty);
+        if (!tag && !alias && !find_anonymous_typedef_name(ctx, ty))
+            continue;
+        // #891: same reasoning as serialize_typedef_alias -- in
+        // !generated_only mode, a header-sourced struct/enum tag (e.g.
+        // `struct tm` from `#include <time.h>`) would collide with the
+        // consumer's own #include of that header, whether it's named by a
+        // tag (`struct tm`) or only by a typedef alias to an anonymous
+        // struct/union/enum. Usage sites still refer to it by name
+        // (find_tag_name/find_typedef_name above are unaffected); only the
+        // standalone definition is suppressed.
+        //
+        // #953: generated_only (-c=generated) output can ALSO already
+        // contain this definition via an auto-captured `#include` -- the
+        // capture (preprocess.c) records source text into emit_events_head
+        // regardless of generated_only, and cc_serialize_program's
+        // generated_only branch replays it verbatim -- so re-deriving the
+        // same struct/enum here produces a hard "redefinition" error. That
+        // only holds when the include was actually captured, though: a type
+        // reached solely via `#include @comptime "x.h"` (never captured --
+        // its whole point is to stay invisible to the runtime TU) has
+        // nothing else to supply the definition, so it must still be
+        // re-derived. path_is_captured() distinguishes the two by checking
+        // whether provenance_source's declaring file is one of the
+        // resolved paths auto-capture actually emitted for this program.
+        // #1010: use find_tag_name_for_provenance() rather than plain `tag`
+        // when a tag exists -- see that function's comment. A tagless
+        // typedef alias has exactly one record and no such ambiguity, so
+        // `alias` (from find_typedef_name() above) is used unchanged.
+        // type_def_is_from_include_suppressed() (factored out so this and
+        // the ND_NUM re-materialization it enables, in serialize_expr,
+        // can never disagree by parallel edit) folds in exactly this same
+        // tag/alias/provenance/generated_only logic.
+        //
+        // #1031: suppressing this body is correct for member *access* --
+        // the replayed `#include` (auto-capture, preprocess.c) hands
+        // member resolution to the host header's real layout, which is
+        // often more accurate than CCCC's own minimal projection (e.g.
+        // `struct statfs`, ~56 bytes here vs. ~2100 on real macOS). It does
+        // NOT retroactively fix a `sizeof`/`_Alignof` of `ty` that guest-
+        // side parsing already folded into a plain integer literal
+        // elsewhere in this TU (`offsetof` is unaffected -- it lowers to
+        // an address expression, stddef.h, which re-resolves against the
+        // replayed header like any other member access) -- that residual
+        // gap is closed by ND_NUM re-materializing the operator textually
+        // when type_layout_is_host_owned() says so, see that function and
+        // its own caller in serialize_expr. A folded layout constant
+        // reached through a context other than a bare `sizeof`/`_Alignof`
+        // expression node (array dimensions, `_Static_assert`, case
+        // labels, bitfield widths, enum values, global-initializer byte
+        // images -- anything that consumes const_expr()/eval() and
+        // discards the node) is still open; sibling to the FP_*
+        // constant-folding note in native_accessor_shims below.
+        if (type_def_is_from_include_suppressed(ctx, ty))
+            continue;
+        // #1027: pull forward any scalar typedef this type's own direct
+        // members (or, for an enum, its C23 underlying type) will spell by
+        // name, before printing the body that references it -- see
+        // ensure_typedef_for_type_emitted's comment. generated_only mode
+        // skips this (and the typedef loop below) for the same reason it
+        // skips typedefs entirely: the consumer's own headers already
+        // define them.
+        if (!ctx->generated_only && typedef_done) {
+            if (ty->kind == TY_ENUM)
+                ensure_typedef_for_type_emitted(f, ctx, ty->enum_base_type,
+                                                owner_fn, typedef_done);
+            else
+                for (Member *m = ty->members; m; m = m->next)
+                    ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
+                                                    typedef_done);
+        }
+        // #1046: the ensure_typedef_for_type_emitted() calls just above can,
+        // via emit_typedef_and_deps(), already have printed THIS type's own
+        // body -- e.g. `ty` is a tagless aggregate also reachable as some
+        // other member's typedef dependency, chased and printed ahead of
+        // this iteration reaching it directly. type_vec_push returns false
+        // (a no-op) when already present, so this is the same emitted_defs
+        // dedup emit_typedef_and_deps itself uses, just applied here too.
+        if (type_vec_contains_nominal(ctx, &ctx->emitted_defs, ty))
+            continue;
+        type_vec_push_nominal(ctx, &ctx->emitted_defs, ty);
+        if (ty->kind == TY_ENUM)
+            serialize_enum_def(f, ctx, ty);
+        else
+            serialize_struct_def(f, ctx, ty);
+    }
+
+    // In generated_only mode the output is consumed alongside normal headers,
+    // so typedefs are already defined by the consumer's includes.
+    if (!ctx->generated_only) {
+        for (int i = ctx->typedefs_len - 1; i >= 0; i--) {
+            if (ctx->typedefs[i].owner_fn == owner_fn)
+                emit_typedef_and_deps(f, ctx, i, owner_fn, typedef_done);
+        }
+    }
+
+    free(typedef_done);
+    ctx->current_fn = saved_fn;
+}

@@ -1444,7 +1444,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // ever walk). `ap`/`last`/`type`/`src` are parsed a second,
     // independent time here purely so the returned `impl` node can be
     // stamped with enough annotation (Node.va_form et al, src/cccc.h) for
-    // the serializer (serialize_stmt/serialize_expr, src/serialize.c) to
+    // the serializer (src/serialize_stmt.c/src/serialize_expr.c) to
     // print the real host <stdarg.h> form instead of walking `impl`'s
     // VM-internal subtree under -c=native. Never reached directly from
     // user source -- only from these four macros' own expansion -- so no

@@ -430,7 +430,7 @@ These opcodes implement the C standard library heap (the default; `-V`/`--no-vm-
 |--------|-----------|-------------|
 | `MALC` | `REG_A0` = size | Allocate; pointer returned in `REG_A0` |
 | `ALCA` | `REG_A0` = size | Allocate a bare `__builtin_alloca` call's storage (automatic, **frame**-scoped — lives until the function returns); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKBN`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.kind = ALLOC_KIND_ALLOCA` excludes it from leak-detection's `AllocRecord` list (#979) — it is never meant to be freed by the guest program. Reclaimed only at frame exit (`LEV3`, never `HREL`) — see the Heap Reclamation section below |
-| `ALCV` | `REG_A0` = size | Allocate a VLA's backing storage (automatic, **block**-scoped — lives until the end of the declaring block, C11 6.8.3); pointer returned in `REG_A0`. Identical shape to `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_FRAME` instead. Split from `ALCA` (#981) specifically because the two have different lifetimes: reusing one `AllocKind` for both would let a block-exit reclaim (`HREL`) sweep a still-live bare-`alloca`'d block declared in the same block, corrupting it the moment the address was reused. `Node.is_vla_alloca_call` (set only by `new_alloca()`, `src/parse.c` — reached only through a VLA declaration's lowering, `ND_ASSIGN(ND_VLA_PTR, alloca(...))`) is what tells codegen which of `ALCA`/`ALCV` to emit for a given `alloca(...)` call |
+| `ALCV` | `REG_A0` = size | Allocate a VLA's backing storage (automatic, **block**-scoped — lives until the end of the declaring block, C11 6.8.3); pointer returned in `REG_A0`. Identical shape to `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_FRAME` instead. Split from `ALCA` (#981) specifically because the two have different lifetimes: reusing one `AllocKind` for both would let a block-exit reclaim (`HREL`) sweep a still-live bare-`alloca`'d block declared in the same block, corrupting it the moment the address was reused. `Node.is_vla_alloca_call` (set only by `new_alloca()`, `src/parse_init.c` — reached only through a VLA declaration's lowering, `ND_ASSIGN(ND_VLA_PTR, alloca(...))`) is what tells codegen which of `ALCA`/`ALCV` to emit for a given `alloca(...)` call |
 | `ALCB` | `REG_A0` = size | Allocate a `__block` variable's heap box; pointer returned in `REG_A0`. Same shape as `ALCA`/`ALCV`, tagged `AllocHeader.kind = ALLOC_KIND_BLOCK_BOX` instead — split into its own opcode (#981's prerequisite) so heap reclamation targeting `ALLOC_KIND_FRAME`/`ALLOC_KIND_ALLOCA` storage can never sweep a `__block` box, which `Block_copy` is expected to let legitimately outlive its declaring frame. Before this split, `ALCA` alone backed both under a single `AllocHeader.is_internal` bool |
 | `HMRK` | `depth` (i32 immediate) | Heap-reclamation watermark (#981): push `{vm->bp, depth, vm->heap_ptr}` onto `vm->heap_marks`, truncating any stale entry for this `(bp, depth)` first (loop re-entry, backward `goto`). Emitted at the start of any block that declares a VLA, only when reclamation could apply (see the Heap Reclamation section below). Identical single-word-immediate shape to `SCOPEIN` |
 | `HREL` | `depth` (i32 immediate) | The matching block-exit release for `HMRK`: find this `(bp, depth)`'s mark and rewind `vm->heap_ptr` to it, sweeping only `ALLOC_KIND_FRAME` (VLA) storage — never a bare alloca or a `__block` box. Emitted at the natural (fall-through) exit of the same block `HMRK` was emitted for; a `break`/`continue`/`goto`/`return` out of the block skips it, which only forfeits that block's reclamation (never over-reclaims) |
@@ -585,7 +585,7 @@ and ignore `--checked-pointers` rather than emitting an inline check.
 correct for interior pointers.
 
 `CHKRO` (#942) is `CHKR`'s sibling for a checked-pointer-bounds-propagation
-candidate (`src/parse.c`'s `propagate_checked_bounds()`) that is only
+candidate (`src/parse_checked.c`'s `propagate_checked_bounds()`) that is only
 checked-rooted on *some* paths, not every path — "OPT" in
 [SAFETY.md](SAFETY.md#checked-pointers)'s propagation writeup, as opposed to
 a "FULL" candidate (every store checked-rooted), which still emits plain
@@ -611,7 +611,7 @@ there and silently destroying the invariant the widening exists to serve.
 `CHKNT` is emitted from the store path (`src/codegen_expr.c`'s `ND_ASSIGN` case),
 not from `gen_addr` alongside `CHKR`, because it needs the value being
 stored, which `gen_addr` never sees. A second emission site (#937) sits in
-the `ND_CAS` case: `to_assign()` (`src/parse.c`) desugars a read-modify-write
+the `ND_CAS` case: `to_assign()` (`src/parse_expr.c`) desugars a read-modify-write
 (`s[n] += 1`, `s[n]++`) into a synthesized store deref that now carries the
 same checked-pointer fields as the original access, so it reaches the
 `ND_ASSIGN` site like any other checked store; an `_Atomic`-qualified
@@ -627,7 +627,7 @@ feature exists to prevent. See [SAFETY.md](SAFETY.md#checked-pointers)'s
 "Terminator invariant" section for the full reasoning and its known gaps.
 
 `CHKNT` also propagates (#943) across a `CHKR`/`CHKRO` bounds-propagation
-candidate (`src/parse.c`'s `propagate_checked_bounds()`): `Obj.checked_prop_
+candidate (`src/parse_checked.c`'s `propagate_checked_bounds()`): `Obj.checked_prop_
 nt_elem` carries the terminator-slot fact (non-zero iff every checked-rooted
 store into the candidate was `ntarray`-rooted at the same pointee element
 size) alongside the already-propagated `[lo, hi)` snapshot, so a store
@@ -660,7 +660,7 @@ even though it compares equal to `0.0f`) correctly traps. `long double`
 pointees are excluded from both opcodes: its widened terminator slot is
 16 bytes but the actual store is an 8-byte flat-double `FSTR`, so no
 existing opcode inspects the full stored representation.
-`checked_nt_pointee_supported()` (`src/parse.c`) is the single gate deciding
+`checked_nt_pointee_supported()` (`src/parse_checked.c`) is the single gate deciding
 which pointee types set `checked_nt_terminator` at all — both the
 direct-access site (`compute_checked_bounds()`) and the propagation
 attach site (`checked_prop_attach_scan()`) call it, so `CHKNT`/`CHKNTZ`
@@ -672,7 +672,7 @@ copy-propagation and reordering-barrier treatment.
 `CHKAB` (#944) is `CHKR`'s counterpart for the *opposite* trust direction —
 Checked C's `_Assume_bounds_cast`. Where propagation only ever widens trust
 into a previously-unchecked target, `CHKAB` *verifies* trust when assigning
-into a target that is itself already declared checked: `src/parse.c`'s
+into a target that is itself already declared checked: `src/parse_checked.c`'s
 `verify_checked_assign_bounds()` rewrites `q = E;` (both `q` and `E`
 declared-checked, `E` a direct source, not a #941-propagated one) into
 `(temp = E's own bounds), (q = E)`, and codegen emits `CHKAB` twice after the
@@ -1178,7 +1178,7 @@ Every entry point that can round or raise takes a trailing `env` parameter
   flags raised). Used by every `src/ops.c` `D*` opcode handler and by the
   runtime `strtod32/64/128`/scanf paths.
 - **`CCCC_DEC_ENV_STATIC`** — always round-to-nearest, flags discarded. Used
-  only by the compile-time constant folder (`src/parse.c`'s `eval_decimal`,
+  only by the compile-time constant folder (`src/parse_expr.c`'s `eval_decimal`,
   see below), which runs inside the *compiler* process and must never
   observe or perturb the host FP environment it happens to be in.
 
@@ -1201,7 +1201,7 @@ state**, in either direction — the trap this design exists to close:
   expression-position macro-call site and the `__builtin_comptime_init`
   site) to avoid leaving the *compiler's* rounding mode or exception flags
   dirty after that macro runs.
-- `eval_decimal` (`src/parse.c`) — the folder used by `write_gvar_data` for
+- `eval_decimal` (`src/parse_expr.c`) — the folder used by `write_gvar_data` for
   a decimal-typed static/global initializer, and by `eval_double`/`eval2`'s
   `ND_CAST` arms for the reverse decimal→binary-float/decimal→int
   directions — wraps its own top-level entry the same way.
@@ -1231,7 +1231,7 @@ all.
 
 `static _Decimal64 x = 1.1dd + 2.2dd;` used to be a hard diagnostic — only a
 bare literal (or a cast of one) was accepted as a decimal static/global
-initializer. `eval_decimal` (`src/parse.c`) now folds `+ - * /`, unary `-`,
+initializer. `eval_decimal` (`src/parse_expr.c`) now folds `+ - * /`, unary `-`,
 `?:`, `,`, a decimal-to-decimal cast, and casts to/from integer and binary
 floating-point, mirroring the shape of the existing `eval_double`/`eval2`
 integer/binary-float constant folders. Each recursive call derives its
