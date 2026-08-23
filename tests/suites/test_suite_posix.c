@@ -630,8 +630,23 @@ int test_posix_gethostbyname_r(void) {
     if (gethostbyaddr_r(&a, sizeof(a), AF_INET, &aret, abuf, sizeof(abuf),
                         &aresult, &aherr) != 0)
         return 9;
-    if (!aresult)
+    if (!aresult || aresult != &aret)
         return 10;
+    /* Proves the deep copy here too, same as gethostbyname_r above. */
+    if ((char *)aret.h_name < abuf ||
+        (char *)aret.h_name >= abuf + sizeof(abuf))
+        return 14;
+
+    /* Short buffer -> ERANGE, *result cleared -- same contract as
+       gethostbyname_r's own short-buffer check above. */
+    char            atiny[4];
+    struct hostent  aret2;
+    struct hostent *aresult2 = (struct hostent *)1;
+    if (gethostbyaddr_r(&a, sizeof(a), AF_INET, &aret2, atiny, sizeof(atiny),
+                        &aresult2, &aherr) != ERANGE)
+        return 15;
+    if (aresult2 != 0)
+        return 16;
 
     /* getnetbyname_r: tolerate "not found" (the networks DB is often empty
        in containers), but the ERANGE/*result contract must still hold. */
@@ -647,6 +662,10 @@ int test_posix_gethostbyname_r(void) {
         return 12;
     if (!nresult && nherr != HOST_NOT_FOUND)
         return 13;
+    /* If found, the deep copy landed in this call's own buffer too. */
+    if (nresult && ((char *)nresult->n_name < nbuf ||
+                    (char *)nresult->n_name >= nbuf + sizeof(nbuf)))
+        return 17;
 
     return 42;
 }

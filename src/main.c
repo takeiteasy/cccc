@@ -1261,7 +1261,6 @@ static const struct {
     {CCCC_NO_DEBUG_ON_CRASH, "--no-debug-on-crash"},
     {CCCC_FMA, "--fma"},
     {CCCC_TRAP_FP_DIVZERO, "--trap-fp-divzero"},
-    {CCCC_POSIX_EMULATION, "--posix-emulation"},
 };
 
 // Prints "warning: <context> ignores VM runtime safety/debug options

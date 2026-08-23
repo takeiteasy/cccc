@@ -6877,6 +6877,33 @@ static bool shim_fn_is_used(VirtualMachine *vm, Obj *prog, const char *name,
     return false;
 }
 
+// #1140: sibling to shim_fn_is_used above for headers that are real host
+// headers CCCC merely bundles a copy of (poll.h/sched.h/netdb.h), not
+// cccc-only ones -- cc_file_is_cccc_only() is false for those (the host
+// genuinely has the file), so the declaration's provenance is checked via
+// cc_file_is_cccc_bundled() instead, the same "which of CCCC's headers did
+// this declaration come from" question serialize_posix_compat_shims' own
+// caller (the bodiless-prototype gate) already asks.
+static bool bundled_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
+                                    const char *name,
+                                    const char *header_basename) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->is_used || obj->body)
+            continue;
+        if (strcmp(obj->name, name) != 0)
+            continue;
+        Token *t = obj->tok;
+        if (!t || !t->file)
+            continue;
+        if (!cc_file_is_cccc_bundled(vm, t->file->name))
+            continue;
+        if (!path_basename_is(t->file->name, header_basename))
+            continue;
+        return true;
+    }
+    return false;
+}
+
 static void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // #1088's own --emit-cccc exemption: under --emit-cccc the cccc-only
     // suppression above is exempted (see the include-replay loop's own
@@ -7630,6 +7657,411 @@ static void serialize_uchar_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                     "    return wcrtomb(s, (wchar_t)cp, &wcs);\n"
                     "}\n");
         fprintf(f, "#endif\n");
+    }
+
+    fprintf(f, "\n");
+}
+
+// #1140: real native-mode definitions for the `--posix-emulation` symbols
+// that have no host primitive on some target (ppoll, the sched_*
+// process-scheduling family) and for the ungated gethostbyname_r/
+// gethostbyaddr_r/getnetbyname_r resolvers, which have no host primitive on
+// macOS at all regardless of --posix-emulation. Same shape/placement as
+// serialize_threads_shims/serialize_uchar_shims above: only emitted where
+// the VM's own equivalent (src/stdlib/posix_poll.c, posix_sched.c,
+// posix_net.c) isn't a passthrough to a real host symbol, gated to
+// !generated_only by the caller and !emit_cccc here, and each body wrapped
+// in `#if !defined(__linux__)` in the *emitted* output (not a host #ifdef
+// in this function) so a real host cc on Linux -- where every one of these
+// is a genuine libc symbol -- drops the shim entirely and keeps calling the
+// real thing. bundled_shim_fn_is_used() (above) requires the declaration to
+// come from CCCC's own bundled poll.h/sched.h/netdb.h copy, mirroring the
+// "did this bodiless prototype get dropped by the native serializer" test
+// the include-replay/prototype-emission gate already applies.
+//
+// The struct/type declarations these bodies need (struct pollfd, nfds_t,
+// pid_t, struct sched_param, struct hostent, struct netent, HOST_NOT_FOUND)
+// are already visible in the output: they only exist if the guest program
+// itself included <poll.h>/<sched.h>/<netdb.h>, which is replayed verbatim
+// ahead of this point in cc_serialize_program. Only <pthread.h>/<signal.h>/
+// <errno.h> are self-included here, matching serialize_threads_shims'
+// own #1054-class shadowing avoidance -- no <string.h>/<sched.h>, since
+// CCCC's bundled copies have no #include_next hand-off and would shadow the
+// real ones reached via <pthread.h>'s own hand-off (#1022).
+static void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm,
+                                         Obj *prog) {
+    if (vm->compiler.emit_cccc)
+        return;
+
+    bool use_ppoll = bundled_shim_fn_is_used(vm, prog, "ppoll", "poll.h");
+
+    bool use_sched_setparam =
+        bundled_shim_fn_is_used(vm, prog, "sched_setparam", "sched.h");
+    bool use_sched_getparam =
+        bundled_shim_fn_is_used(vm, prog, "sched_getparam", "sched.h");
+    bool use_sched_setscheduler =
+        bundled_shim_fn_is_used(vm, prog, "sched_setscheduler", "sched.h");
+    bool use_sched_getscheduler =
+        bundled_shim_fn_is_used(vm, prog, "sched_getscheduler", "sched.h");
+    bool use_sched_rr_get_interval =
+        bundled_shim_fn_is_used(vm, prog, "sched_rr_get_interval", "sched.h");
+    bool any_sched = use_sched_setparam || use_sched_getparam ||
+                     use_sched_setscheduler || use_sched_getscheduler ||
+                     use_sched_rr_get_interval;
+
+    bool use_gethostbyname_r =
+        bundled_shim_fn_is_used(vm, prog, "gethostbyname_r", "netdb.h");
+    bool use_gethostbyaddr_r =
+        bundled_shim_fn_is_used(vm, prog, "gethostbyaddr_r", "netdb.h");
+    bool use_getnetbyname_r =
+        bundled_shim_fn_is_used(vm, prog, "getnetbyname_r", "netdb.h");
+    bool any_resolver_r =
+        use_gethostbyname_r || use_gethostbyaddr_r || use_getnetbyname_r;
+
+    if (!use_ppoll && !any_sched && !any_resolver_r)
+        return;
+
+    fprintf(f, "#if !defined(__linux__)\n"
+               "#include <pthread.h>\n"
+               "#include <signal.h>\n"
+               "#include <errno.h>\n"
+               "#include <stdint.h>\n"
+               "#endif\n");
+
+    // ppoll() (#821/#1140) -- pthread_sigmask()+poll() emulation, ported
+    // from ppoll_emulate_macos/wrap_ppoll_gil (src/stdlib/posix_poll.c).
+    // Not atomic like the real syscall -- a signal delivered between the
+    // mask swap and poll()'s wait is not guaranteed to interrupt it --
+    // exactly the same accepted, documented limitation as the VM's own
+    // emulation (see man/COVERAGE.md's <poll.h> entry). Deliberately does
+    // NOT translate pollfd.events/revents through CCCC's canonical
+    // POLLWRNORM/POLLWRBAND numbering the way wrap_ppoll_gil does -- a
+    // plain native poll() call in the same program doesn't translate
+    // either (#1146), and translating only here would make ppoll() and
+    // poll() natively disagree with each other in the same binary, which
+    // is worse.
+    if (use_ppoll)
+        fprintf(f, "#if !defined(__linux__)\n"
+                   "static int ppoll(struct pollfd *fds, nfds_t nfds,\n"
+                   "                 const struct timespec *timeout,\n"
+                   "                 const sigset_t *sigmask) {\n"
+                   "    sigset_t old_set;\n"
+                   "    int have_old = 0;\n"
+                   "    if (sigmask) {\n"
+                   "        if (pthread_sigmask(SIG_SETMASK, sigmask, "
+                   "&old_set) == 0)\n"
+                   "            have_old = 1;\n"
+                   "    }\n"
+                   "    int ms = -1;\n"
+                   "    if (timeout)\n"
+                   "        ms = (int)(timeout->tv_sec * 1000 + "
+                   "timeout->tv_nsec / 1000000);\n"
+                   "    int r = poll(fds, nfds, ms);\n"
+                   "    int saved_errno = errno;\n"
+                   "    if (have_old)\n"
+                   "        pthread_sigmask(SIG_SETMASK, &old_set, NULL);\n"
+                   "    errno = saved_errno;\n"
+                   "    return r;\n"
+                   "}\n"
+                   "#endif\n");
+
+    // sched_setparam/getparam/setscheduler/getscheduler/rr_get_interval
+    // (#824/#1140) -- macOS has no process-scheduling API at all, so the
+    // VM's own non-Linux wrap_sched_* family (src/stdlib/posix_sched.c)
+    // always returns ENOSYS; ported verbatim.
+    if (any_sched) {
+        if (use_sched_setparam)
+            fprintf(f, "#if !defined(__linux__)\n"
+                       "static int sched_setparam(pid_t pid, const struct "
+                       "sched_param *param) {\n"
+                       "    (void)pid; (void)param;\n"
+                       "    errno = ENOSYS;\n"
+                       "    return -1;\n"
+                       "}\n"
+                       "#endif\n");
+        if (use_sched_getparam)
+            fprintf(f, "#if !defined(__linux__)\n"
+                       "static int sched_getparam(pid_t pid, struct "
+                       "sched_param *param) {\n"
+                       "    (void)pid; (void)param;\n"
+                       "    errno = ENOSYS;\n"
+                       "    return -1;\n"
+                       "}\n"
+                       "#endif\n");
+        if (use_sched_setscheduler)
+            fprintf(f, "#if !defined(__linux__)\n"
+                       "static int sched_setscheduler(pid_t pid, int "
+                       "policy, const struct sched_param *param) {\n"
+                       "    (void)pid; (void)policy; (void)param;\n"
+                       "    errno = ENOSYS;\n"
+                       "    return -1;\n"
+                       "}\n"
+                       "#endif\n");
+        if (use_sched_getscheduler)
+            fprintf(f, "#if !defined(__linux__)\n"
+                       "static int sched_getscheduler(pid_t pid) {\n"
+                       "    (void)pid;\n"
+                       "    errno = ENOSYS;\n"
+                       "    return -1;\n"
+                       "}\n"
+                       "#endif\n");
+        if (use_sched_rr_get_interval)
+            fprintf(f, "#if !defined(__linux__)\n"
+                       "static int sched_rr_get_interval(pid_t pid, struct "
+                       "timespec *interval) {\n"
+                       "    (void)pid; (void)interval;\n"
+                       "    errno = ENOSYS;\n"
+                       "    return -1;\n"
+                       "}\n"
+                       "#endif\n");
+    }
+
+    // gethostbyname_r/gethostbyaddr_r/getnetbyname_r (#785/#1140) -- macOS
+    // has no _r resolver family at all (glibc-only extensions), so this
+    // ports the VM's own portable shim (nss_*_r_shim family,
+    // src/stdlib/posix_net.c) rather than a host passthrough: the mutex
+    // serializes access to the underlying plain lookup's static buffer,
+    // and the result is deep-copied into the caller's own buffer before
+    // the mutex is released.
+    //
+    // Known residual, ported as-is rather than fixed here: on the VM,
+    // this same nss_static_mutex is ALSO taken by the plain
+    // gethostbyname()/gethostbyaddr()/getnetbyname() wrappers, making the
+    // two families mutually exclusive -- that mutual exclusion is what
+    // makes the deep copy race-free. Natively, the plain lookups are
+    // direct calls straight to the host's own gethostbyname() etc (no
+    // CCCC wrapper exists to add a mutex to, and the host already declares
+    // them, so shadowing with a same-named static definition is not legal
+    // C) -- so a concurrent plain lookup from another thread can still
+    // overwrite the same static internal buffer mid-copy here, a torn
+    // result rather than a crash. --posix-emulation guest code mixing the
+    // plain and _r families across threads under -c=native inherits this
+    // gap; see #1146 for closing it (e.g. a call-site rewrite to a
+    // mutex-taking wrapper for the plain family too).
+    if (any_resolver_r) {
+        fprintf(f, "#if !defined(__linux__)\n"
+                   "static pthread_mutex_t __cccc_nss_native_mutex = "
+                   "PTHREAD_MUTEX_INITIALIZER;\n"
+                   "static size_t __cccc_nss_r_layout_size(int count, "
+                   "size_t str_bytes) {\n"
+                   "    size_t ptrs = (size_t)(count + 1) * sizeof(char *);\n"
+                   "    return ptrs + sizeof(char *) + str_bytes;\n"
+                   "}\n"
+                   "static char **__cccc_nss_r_copy_ptr_array(char **list, "
+                   "int count, char **cursor, char *end) {\n"
+                   "    char *p = (char *)*cursor;\n"
+                   "    p = (char *)(((uintptr_t)p + sizeof(char *) - 1) &\n"
+                   "                 ~(uintptr_t)(sizeof(char *) - 1));\n"
+                   "    char **arr = (char **)(void *)p;\n"
+                   "    if ((char *)(arr + count + 1) > end)\n"
+                   "        return NULL;\n"
+                   "    char *strp = (char *)(arr + count + 1);\n"
+                   "    for (int i = 0; i < count; i++) {\n"
+                   "        size_t len = __builtin_strlen(list[i]) + 1;\n"
+                   "        if (strp + len > end)\n"
+                   "            return NULL;\n"
+                   "        __builtin_memcpy(strp, list[i], len);\n"
+                   "        arr[i] = strp;\n"
+                   "        strp += len;\n"
+                   "    }\n"
+                   "    arr[count] = 0;\n"
+                   "    *cursor = strp;\n"
+                   "    return arr;\n"
+                   "}\n"
+                   "static int __cccc_nss_count_list(char **list) {\n"
+                   "    int n = 0;\n"
+                   "    if (list) while (list[n]) n++;\n"
+                   "    return n;\n"
+                   "}\n"
+                   "#endif\n");
+
+        if (use_gethostbyname_r)
+            fprintf(f,
+                    "#if !defined(__linux__)\n"
+                    "static int gethostbyname_r(const char *name, struct "
+                    "hostent *ret, char *buf, size_t buflen,\n"
+                    "                           struct hostent **result, int "
+                    "*h_errnop) {\n"
+                    "    pthread_mutex_lock(&__cccc_nss_native_mutex);\n"
+                    "    struct hostent *src = gethostbyname(name);\n"
+                    "    int rc = 0;\n"
+                    "    if (!src) {\n"
+                    "        *result = 0;\n"
+                    "        if (h_errnop) *h_errnop = HOST_NOT_FOUND;\n"
+                    "        goto done;\n"
+                    "    }\n"
+                    "    {\n"
+                    "    int naliases = __cccc_nss_count_list(src->h_aliases);"
+                    "\n"
+                    "    int naddrs = __cccc_nss_count_list(src->h_addr_list);"
+                    "\n"
+                    "    size_t need = __builtin_strlen(src->h_name) + 1;\n"
+                    "    for (int i = 0; i < naliases; i++)\n"
+                    "        need += __builtin_strlen(src->h_aliases[i]) + "
+                    "1;\n"
+                    "    need = __cccc_nss_r_layout_size(naliases, need) +\n"
+                    "           __cccc_nss_r_layout_size(naddrs, (size_t)"
+                    "naddrs * (size_t)src->h_length);\n"
+                    "    if (need > buflen) { rc = ERANGE; *result = 0; goto "
+                    "done; }\n"
+                    "    char *cursor = buf;\n"
+                    "    char *end = buf + buflen;\n"
+                    "    size_t namelen = __builtin_strlen(src->h_name) + 1;\n"
+                    "    if (cursor + namelen > end) { rc = ERANGE; *result = "
+                    "0; goto done; }\n"
+                    "    __builtin_memcpy(cursor, src->h_name, namelen);\n"
+                    "    ret->h_name = cursor;\n"
+                    "    cursor += namelen;\n"
+                    "    char **aliases = __cccc_nss_r_copy_ptr_array(src->"
+                    "h_aliases, naliases, &cursor, end);\n"
+                    "    if (!aliases) { rc = ERANGE; *result = 0; goto "
+                    "done; }\n"
+                    "    ret->h_aliases = aliases;\n"
+                    "    ret->h_addrtype = src->h_addrtype;\n"
+                    "    ret->h_length = src->h_length;\n"
+                    "    char *p = cursor;\n"
+                    "    p = (char *)(((uintptr_t)p + sizeof(char *) - 1) &\n"
+                    "                 ~(uintptr_t)(sizeof(char *) - 1));\n"
+                    "    char **addrs = (char **)(void *)p;\n"
+                    "    if ((char *)(addrs + naddrs + 1) > end) { rc = "
+                    "ERANGE; *result = 0; goto done; }\n"
+                    "    char *ap = (char *)(addrs + naddrs + 1);\n"
+                    "    for (int i = 0; i < naddrs; i++) {\n"
+                    "        if (ap + src->h_length > end) { rc = ERANGE; "
+                    "*result = 0; goto done; }\n"
+                    "        __builtin_memcpy(ap, src->h_addr_list[i], "
+                    "(size_t)src->h_length);\n"
+                    "        addrs[i] = ap;\n"
+                    "        ap += src->h_length;\n"
+                    "    }\n"
+                    "    addrs[naddrs] = 0;\n"
+                    "    ret->h_addr_list = addrs;\n"
+                    "    *result = ret;\n"
+                    "    }\n"
+                    "done:\n"
+                    "    pthread_mutex_unlock(&__cccc_nss_native_mutex);\n"
+                    "    return rc;\n"
+                    "}\n"
+                    "#endif\n");
+
+        if (use_gethostbyaddr_r)
+            fprintf(f,
+                    "#if !defined(__linux__)\n"
+                    "static int gethostbyaddr_r(const void *addr, socklen_t "
+                    "len, int type, struct hostent *ret, char *buf,\n"
+                    "                           size_t buflen, struct "
+                    "hostent **result, int *h_errnop) {\n"
+                    "    pthread_mutex_lock(&__cccc_nss_native_mutex);\n"
+                    "    struct hostent *src = gethostbyaddr(addr, len, "
+                    "type);\n"
+                    "    int rc = 0;\n"
+                    "    if (!src) {\n"
+                    "        *result = 0;\n"
+                    "        if (h_errnop) *h_errnop = HOST_NOT_FOUND;\n"
+                    "        goto done;\n"
+                    "    }\n"
+                    "    {\n"
+                    "    int naliases = __cccc_nss_count_list(src->h_aliases);"
+                    "\n"
+                    "    int naddrs = __cccc_nss_count_list(src->h_addr_list);"
+                    "\n"
+                    "    size_t need = __builtin_strlen(src->h_name) + 1;\n"
+                    "    for (int i = 0; i < naliases; i++)\n"
+                    "        need += __builtin_strlen(src->h_aliases[i]) + "
+                    "1;\n"
+                    "    need = __cccc_nss_r_layout_size(naliases, need) +\n"
+                    "           __cccc_nss_r_layout_size(naddrs, (size_t)"
+                    "naddrs * (size_t)src->h_length);\n"
+                    "    if (need > buflen) { rc = ERANGE; *result = 0; goto "
+                    "done; }\n"
+                    "    char *cursor = buf;\n"
+                    "    char *end = buf + buflen;\n"
+                    "    size_t namelen = __builtin_strlen(src->h_name) + 1;\n"
+                    "    if (cursor + namelen > end) { rc = ERANGE; *result = "
+                    "0; goto done; }\n"
+                    "    __builtin_memcpy(cursor, src->h_name, namelen);\n"
+                    "    ret->h_name = cursor;\n"
+                    "    cursor += namelen;\n"
+                    "    char **aliases = __cccc_nss_r_copy_ptr_array(src->"
+                    "h_aliases, naliases, &cursor, end);\n"
+                    "    if (!aliases) { rc = ERANGE; *result = 0; goto "
+                    "done; }\n"
+                    "    ret->h_aliases = aliases;\n"
+                    "    ret->h_addrtype = src->h_addrtype;\n"
+                    "    ret->h_length = src->h_length;\n"
+                    "    char *p = cursor;\n"
+                    "    p = (char *)(((uintptr_t)p + sizeof(char *) - 1) &\n"
+                    "                 ~(uintptr_t)(sizeof(char *) - 1));\n"
+                    "    char **addrs = (char **)(void *)p;\n"
+                    "    if ((char *)(addrs + naddrs + 1) > end) { rc = "
+                    "ERANGE; *result = 0; goto done; }\n"
+                    "    char *ap = (char *)(addrs + naddrs + 1);\n"
+                    "    for (int i = 0; i < naddrs; i++) {\n"
+                    "        if (ap + src->h_length > end) { rc = ERANGE; "
+                    "*result = 0; goto done; }\n"
+                    "        __builtin_memcpy(ap, src->h_addr_list[i], "
+                    "(size_t)src->h_length);\n"
+                    "        addrs[i] = ap;\n"
+                    "        ap += src->h_length;\n"
+                    "    }\n"
+                    "    addrs[naddrs] = 0;\n"
+                    "    ret->h_addr_list = addrs;\n"
+                    "    *result = ret;\n"
+                    "    }\n"
+                    "done:\n"
+                    "    pthread_mutex_unlock(&__cccc_nss_native_mutex);\n"
+                    "    return rc;\n"
+                    "}\n"
+                    "#endif\n");
+
+        if (use_getnetbyname_r)
+            fprintf(f,
+                    "#if !defined(__linux__)\n"
+                    "static int getnetbyname_r(const char *name, struct "
+                    "netent *ret, char *buf, size_t buflen,\n"
+                    "                          struct netent **result, int "
+                    "*h_errnop) {\n"
+                    "    pthread_mutex_lock(&__cccc_nss_native_mutex);\n"
+                    "    struct netent *src = getnetbyname(name);\n"
+                    "    int rc = 0;\n"
+                    "    if (!src) {\n"
+                    "        *result = 0;\n"
+                    "        if (h_errnop) *h_errnop = HOST_NOT_FOUND;\n"
+                    "        goto done;\n"
+                    "    }\n"
+                    "    {\n"
+                    "    int naliases = __cccc_nss_count_list(src->"
+                    "n_aliases);\n"
+                    "    size_t need = __builtin_strlen(src->n_name) + 1;\n"
+                    "    for (int i = 0; i < naliases; i++)\n"
+                    "        need += __builtin_strlen(src->n_aliases[i]) + "
+                    "1;\n"
+                    "    need = __cccc_nss_r_layout_size(naliases, need);\n"
+                    "    if (need > buflen) { rc = ERANGE; *result = 0; goto "
+                    "done; }\n"
+                    "    char *cursor = buf;\n"
+                    "    char *end = buf + buflen;\n"
+                    "    size_t namelen = __builtin_strlen(src->n_name) + "
+                    "1;\n"
+                    "    if (cursor + namelen > end) { rc = ERANGE; *result "
+                    "= 0; goto done; }\n"
+                    "    __builtin_memcpy(cursor, src->n_name, namelen);\n"
+                    "    ret->n_name = cursor;\n"
+                    "    cursor += namelen;\n"
+                    "    char **aliases = __cccc_nss_r_copy_ptr_array(src->"
+                    "n_aliases, naliases, &cursor, end);\n"
+                    "    if (!aliases) { rc = ERANGE; *result = 0; goto "
+                    "done; }\n"
+                    "    ret->n_aliases = aliases;\n"
+                    "    ret->n_addrtype = src->n_addrtype;\n"
+                    "    ret->n_net = src->n_net;\n"
+                    "    *result = ret;\n"
+                    "    }\n"
+                    "done:\n"
+                    "    pthread_mutex_unlock(&__cccc_nss_native_mutex);\n"
+                    "    return rc;\n"
+                    "}\n"
+                    "#endif\n");
     }
 
     fprintf(f, "\n");
@@ -11261,6 +11693,19 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // serialize_typedef_alias / serialize_type_defs_for_owner compensate by no
     // longer treating that file's types as from_include, so their definitions
     // are still emitted below instead of being silently dropped.
+#ifdef __APPLE__
+    // #1140: isalpha_l/toupper_l/nl_langinfo_l/strfmon_l are real macOS
+    // symbols, but declared in xlocale/_ctype.h, xlocale/_langinfo.h,
+    // xlocale/_monetary.h -- not reachable through a plain #include
+    // <ctype.h>/<langinfo.h>/<monetary.h> the way they are registered here
+    // (src/stdlib/ctype.c's own #ifdef __APPLE__ / #include <xlocale.h>).
+    // A replayed `#include <ctype.h>` etc alone leaves them undeclared on
+    // the host cc even though CCCC's own FFI registration takes their
+    // address just fine (they're `static inline` in the SDK, legal from
+    // within any TU that includes them). One latched injection covers all
+    // three headers since a program can include more than one.
+    bool emitted_xlocale = false;
+#endif
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
@@ -11374,6 +11819,16 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             strstr(resolved, "sys/mount.h"))
             fprintf(f, "#include <sys/vfs.h>\n");
 #endif
+#ifdef __APPLE__
+        // #1140: see emitted_xlocale's own comment above.
+        if (!emitted_xlocale && resolved &&
+            (path_basename_is(resolved, "ctype.h") ||
+             path_basename_is(resolved, "langinfo.h") ||
+             path_basename_is(resolved, "monetary.h"))) {
+            fprintf(f, "#include <xlocale.h>\n");
+            emitted_xlocale = true;
+        }
+#endif
     }
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
@@ -11438,6 +11893,18 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // !generated_only gating) as serialize_threads_shims just above.
     if (!generated_only)
         serialize_uchar_shims(f, vm, prog);
+
+    // #1140: real definitions for ppoll/sched_*/gethostbyname_r/
+    // gethostbyaddr_r/getnetbyname_r where the VM's own equivalent isn't a
+    // passthrough to a real host symbol -- struct pollfd/sched_param/
+    // hostent/netent are only referenced if the guest itself included the
+    // corresponding header, which the replayed-include pass already put in
+    // scope, so this must run after that (like its neighbours above) but
+    // has no ordering dependency on serialize_type_defs_for_owner (poll.h/
+    // sched.h/netdb.h are real host headers, not cccc-only ones re-derived
+    // there). Same !generated_only gating as its neighbours.
+    if (!generated_only)
+        serialize_posix_compat_shims(f, vm, prog);
 
     // #965/#993: see the comment on the generated_only branch's own call
     // above -- must run after both the #include replay and the file-scope

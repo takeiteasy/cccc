@@ -326,23 +326,26 @@ NATIVE_SKIP_TESTS = {
     # __opaque layout mismatch), #1138 (fd_set's __fds_bits spelling),
     # #1139 (__cccc_environ_ptr) and #1144 (isalpha_l/toupper_l called
     # with no #include <ctype.h> in this file at all) are all fixed --
-    # compiles clean natively on Linux/glibc now. Stays skipped (both
-    # platforms, general table not macOS-only) for two separate,
-    # unresolved reasons: #1140, a still-open policy question about
-    # several --posix-emulation symbols with no macOS host primitive at
-    # all (ppoll/*_l locale family/*_r resolver family/
-    # sched_getscheduler -- macOS compile-time only, Linux/glibc has
-    # every one), and #1145, 14 of 84 subtests (mostly SIGSEGV, not
-    # merely a wrong exit code) failing at native RUNTIME on Linux/glibc
-    # once the file compiles at all -- a previously-invisible surface,
-    # never run until #1138/#1139/#1144 cleared the compile-time
-    # blockers, and its own investigation on the scale of #967's
-    # original native corpus sweep.
-    "test_suite_posix.c": "compiles clean on Linux/glibc now, but 14 "
-                 "subtests fail at native runtime there (#1145) and it "
-                 "still fails to compile on macOS for several "
-                 "--posix-emulation symbols with no host primitive "
-                 "(#1140)",
+    # compiles clean natively on Linux/glibc now. #1140 (ppoll/*_l locale
+    # family/*_r resolver family/sched_getscheduler undeclared on macOS)
+    # is also fixed -- serialize_posix_compat_shims (src/serialize.c) now
+    # ports the VM's own emulation into the emitted C, and a <xlocale.h>
+    # injection covers the "_l" family. Stays skipped (both platforms,
+    # general table not macOS-only) for two separate, unresolved reasons:
+    # #1145, 14 of 84 subtests (mostly SIGSEGV, not merely a wrong exit
+    # code) failing at native RUNTIME on Linux/glibc once the file
+    # compiles at all -- a previously-invisible surface, never run until
+    # #1138/#1139/#1144 cleared the compile-time blockers, and its own
+    # investigation on the scale of #967's original native corpus sweep;
+    # and, found while verifying #1140's own fix, a genuinely separate
+    # macOS LINK-time gap (#1147): -c=native never adds -liconv (only
+    # -lm gets that treatment, src/main.c), so test_posix_iconv's
+    # iconv_open/iconv/iconv_close fail at link, not compile -- itself
+    # previously invisible behind #1140's compile-time errors.
+    "test_suite_posix.c": "compiles clean on Linux/glibc now; on macOS, "
+                 "compiles clean too (#1140 fixed) but fails to LINK "
+                 "(missing -liconv, #1147) and 14 subtests fail at "
+                 "native runtime on Linux/glibc (#1145)",
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1113",
     # #1126: found while adding native coverage for #1125 (wide _BitInt
     # bitfield codegen, unaffected by this) -- test_wide_global_init's own
@@ -563,7 +566,6 @@ NATIVE_VM_ONLY_FLAGS = {
     "--memory-tagging",
     "--pointer-sanitizer", "-P",
     "--uninitialized-detection",
-    "--posix-emulation",
     "--stack-canaries",
     # #1022: `--thread-safety`'s double-lock (EDEADLK) diagnostic is a CCCC
     # VM enforcement layer -- a real default (non-recursive) pthread mutex

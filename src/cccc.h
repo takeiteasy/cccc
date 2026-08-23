@@ -861,7 +861,14 @@ typedef enum {
                    // outside wrap_ioctl's layout-verified allowlist (#795,
                    // src/stdlib/posix_io.c) -- off by default there too, for
                    // the same "don't risk an unverified host ABI without
-                   // being asked" reason. VM-only; rejected under -c=native.
+                   // being asked" reason. Honoured under -c=native too
+                   // (#1140): serialize_posix_compat_shims (src/serialize.c)
+                   // ports the same ppoll/sched_* emulation the VM uses
+                   // into the emitted C on a host lacking the real symbol.
+                   // The ioctl-passthrough use above stays VM-only -- the
+                   // host ioctl() -c=native calls directly has no
+                   // allowlist either way, so there is nothing for the
+                   // flag to restore there.
     CCCC_CHECKED_BOUNDS =
         (1 << 27), // 0x08000000 - Enable runtime enforcement (CHKR) of
                    // Checked C-style checked-pointer declared bounds
