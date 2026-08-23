@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-08-23
+
 ### Fixed
 
 - `-c=native`: `FD_ZERO`/`FD_SET`/`FD_CLR`/`FD_ISSET` (`include/sys/select.h`)
