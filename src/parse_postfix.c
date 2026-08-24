@@ -2474,6 +2474,37 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // #1144: __builtin_memset/memcpy/memmove/memcmp -> forward to libc, same
+    // pattern as __builtin_strlen/__builtin_strcmp above (a private stub Obj,
+    // not in global scope, so this doesn't need -- or conflict with -- the
+    // user's own <string.h> declaration on the VM path).
+    if (equal(tok, "__builtin_memset") || equal(tok, "__builtin_memcpy") ||
+        equal(tok, "__builtin_memmove") || equal(tok, "__builtin_memcmp")) {
+        Obj *fn = equal(tok, "__builtin_memset")   ? vm->compiler.builtin_memset
+                  : equal(tok, "__builtin_memcpy") ? vm->compiler.builtin_memcpy
+                  : equal(tok, "__builtin_memmove")
+                      ? vm->compiler.builtin_memmove
+                      : vm->compiler.builtin_memcmp;
+        tok     = skip(vm, tok->next, "(");
+        Node *a = assign(vm, &tok, tok);
+        tok     = skip(vm, tok, ",");
+        Node *b = assign(vm, &tok, tok);
+        tok     = skip(vm, tok, ",");
+        Node *c = assign(vm, &tok, tok);
+        *rest   = skip(vm, tok, ")");
+        Node *node =
+            new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, a->tok), a->tok);
+        node->func_ty = fn->ty;
+        node->ty      = fn->ty->return_ty;
+        node->args    = a;
+        a->next       = b;
+        b->next       = c;
+        add_type(vm, a);
+        add_type(vm, b);
+        add_type(vm, c);
+        return node;
+    }
+
     // __builtin_unreachable() / __builtin_trap() / __builtin_debugtrap() ->
     // BTRAP
     if (equal(tok, "__builtin_unreachable") || equal(tok, "__builtin_trap") ||
@@ -2881,6 +2912,58 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok->next, "(")) {
+            // #1144: implicit function declaration was removed from the
+            // language in C99 (ISO C99 6.5.2.2p1's constraint requires a
+            // visible declaration) and every real host compiler treats it as
+            // an error at C99 and later -- verified against both Apple
+            // clang and gcc-16, which additionally still tolerates it (as a
+            // warning) at -std=c89/gnu89. CCCC used to accept it silently at
+            // every standard, including its own C23 default: the call
+            // compiled fine on the VM (an implicit call resolves as an FFI
+            // symbol at codegen with no declaration needed at all -- see
+            // find_ffi_function()/ffi_index_for_callee(), src/codegen_
+            // regalloc.c), but -c=native intentionally never emits a
+            // prototype for the guessed `int f(...)` signature (see the
+            // obj->is_implicit skip in cc_serialize_program(), src/
+            // serialize_program.c) since it could conflict with a real one
+            // from a replayed header -- so the generated C referenced an
+            // undeclared function and the host compiler rejected it. Under
+            // -c=native the same divergence exists even at --std=c89: the
+            // synthesized signature is still never emitted, so the host
+            // compiler still fails, just with cccc's own message.
+            if (vm->compiler.c_std >= CCCC_STD_C99 ||
+                vm->compiler.native_mode) {
+                char *msg = arena_format(
+                    vm,
+                    "call to undeclared function '%.*s'; ISO C99 and later "
+                    "do not support implicit function declarations (add a "
+                    "declaration, #include the header that declares it, or "
+                    "compile with --std=c89)",
+                    tok->len, tok->loc);
+                if (vm->collect_errors &&
+                    error_tok_recover(vm, tok, "%s", msg)) {
+                    Node *node = new_var_node(vm, &vm->compiler.error_var, tok);
+                    node->ty   = ty_error;
+                    // Recovery: skip the whole call expression (balanced
+                    // parens), not just the identifier, so the caller's
+                    // token stream stays in sync with the source -- the
+                    // args were never parsed since we bailed out before
+                    // committing to a real call node.
+                    Token *p     = tok->next; // the '('
+                    int    depth = 0;
+                    do {
+                        if (equal(p, "("))
+                            depth++;
+                        else if (equal(p, ")"))
+                            depth--;
+                        p = p->next;
+                    } while (p->kind != TK_EOF && depth > 0);
+                    *rest = p;
+                    return node;
+                }
+                error_tok(vm, tok, "%s", msg);
+            }
+
             warn_tok(vm, tok, CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION,
                      "implicit declaration of function '%.*s'", tok->len,
                      tok->loc);

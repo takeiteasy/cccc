@@ -393,6 +393,14 @@ BuildTarget *libcccc(Builder *ctx) {
 // cccc-release (not cccc) so it never collides with a debug build sitting in
 // the same out_dir.
 
+// #1144: forward declaration -- release() below calls reflection_ffi_gen()
+// (defined further down, line ~678) before its own definition is in scope.
+// This used to compile via implicit function declaration, silently
+// tolerated at every standard; that leniency is now a hard error at C99+
+// (CCCC's own default), so an explicit prototype is required like any
+// other forward reference.
+BuildTarget *reflection_ffi_gen(Builder *ctx);
+
 [[cccc::build_target]]
 BuildTarget *release(Builder *ctx) {
     BuildTarget *bt             = make_libbacktrace(ctx);

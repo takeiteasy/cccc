@@ -8,6 +8,8 @@
 // test_struct_values, test_union_byval, test_union_byval_simple,
 // test_union_size
 
+#include <stdlib.h>
+
 // [from test_bitfields]
 // Comprehensive bitfield tests
 

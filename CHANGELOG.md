@@ -5,6 +5,42 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- `tests/test_implicit_function_error_1144.c`/`test_implicit_function_c89_
+  1144.c`: implicit function declaration is a hard error at the default
+  std, a warning at `--std=c89`.
+- `tests/test_stdio_posix_decls_1144.c`: the newly-declared `<stdio.h>`
+  POSIX functions, VM and `-c=native`.
+- `tests/test_builtin_mem_1144.c`: `__builtin_memset`/`memcpy`/`memmove`/
+  `memcmp`, VM and `-c=native`.
+
+### Changed
+
+- Implicit function declaration (a call to a function with no visible
+  declaration anywhere) is now a hard compile error at `--std=c99` and
+  later — CCCC's own C23 default — matching ISO C99 6.5.2.2p1 and every
+  real host C compiler. It stays a warning only at `--std=c89`/`gnu89`.
+  Under `-c=native` it is always a hard error regardless of `--std=`,
+  since the guessed implicit signature is never emitted into the
+  generated C. Previously CCCC accepted it silently at every standard
+  (the call resolves against the FFI registration table purely at VM
+  codegen, needing no declaration at all), which is what let
+  `tests/suites/test_suite_posix.c` compile on the VM while failing
+  outright under `-c=native` with "use of undeclared identifier
+  isalpha_l" — the root cause was implicit function declaration, not (as
+  first suspected) any FFI-table-based resolution in the parser itself.
+  An audit of every registered FFI cfunc against every bundled header's
+  own declarations found and fixed one real gap: `popen`/`pclose`,
+  `fseeko`/`ftello`, `flockfile`/`ftrylockfile`/`funlockfile`, and
+  `getc_unlocked`/`getchar_unlocked`/`putc_unlocked`/`putchar_unlocked`
+  now have real declarations in `<stdio.h>`.
+- `__builtin_memset`/`__builtin_memcpy`/`__builtin_memmove`/
+  `__builtin_memcmp` are now recognised, forwarding to the real libc
+  functions of the same name the same way `__builtin_strlen`/
+  `__builtin_strcmp` already did — needing no `#include <string.h>` on
+  the VM path, matching real GCC/clang.
+
 ### Fixed
 
 - `-c=native`: `sysconf`/`pathconf`/`fpathconf`/`confstr` passed CCCC's own

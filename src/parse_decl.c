@@ -1254,6 +1254,55 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     strcmp_ty->params->next     = pointer_to(vm, ty_char);
     vm->compiler.builtin_strcmp = new_private_func_obj(vm, "strcmp", strcmp_ty);
 
+    // #1144: __builtin_memset/memcpy/memmove/memcmp -- GCC/clang recognise
+    // these as ordinary aliases of the libc functions of the same name
+    // (minus the __builtin_ prefix), forwarded here the same way
+    // __builtin_strlen/__builtin_strcmp already are: a private stub Obj,
+    // not in global scope, so it doesn't conflict with (or require) the
+    // user's own <string.h> declaration for the VM path. Signatures mirror
+    // include/string.h's own memset/memcpy/memmove/memcmp exactly.
+    // Residual gap, shared with __builtin_strlen/__builtin_strcmp above and
+    // not fixed here (out of this ticket's scope, tracked as #1154):
+    // -c=native still emits a plain call to the real libc name with no
+    // prototype, which needs the user's own <string.h> to already be in
+    // scope, unlike real GCC/clang's __builtin_mem*/__builtin_str* forms,
+    // which need no declaration at all.
+    Type *memset_ty               = func_type(vm, pointer_to(vm, ty_void));
+    memset_ty->params             = pointer_to(vm, ty_void);
+    memset_ty->params->next       = copy_type(vm, ty_int);
+    memset_ty->params->next->next = copy_type(vm, ty_long);
+    vm->compiler.builtin_memset = new_private_func_obj(vm, "memset", memset_ty);
+
+    // Each `const void *` param below copies ty_void before marking it
+    // const (matching the const_char_p pattern just below, __cccc_pc_to_
+    // source's file_param) -- pointer_to()'s ->base is the shared ty_void
+    // singleton; setting is_const on it directly would corrupt every
+    // plain `void` in the rest of the compile (confirmed: without the
+    // copy, `void plain_ctor(void)` reserialized as `const void
+    // plain_ctor(void)` under -c=native's own ctor/dtor smoke test).
+    Type *memcpy_ty         = func_type(vm, pointer_to(vm, ty_void));
+    memcpy_ty->params       = pointer_to(vm, ty_void);
+    memcpy_ty->params->next = pointer_to(vm, copy_type(vm, ty_void));
+    memcpy_ty->params->next->base->is_const = true;
+    memcpy_ty->params->next->next           = copy_type(vm, ty_long);
+    vm->compiler.builtin_memcpy = new_private_func_obj(vm, "memcpy", memcpy_ty);
+
+    Type *memmove_ty            = func_type(vm, pointer_to(vm, ty_void));
+    memmove_ty->params          = pointer_to(vm, ty_void);
+    memmove_ty->params->next    = pointer_to(vm, copy_type(vm, ty_void));
+    memmove_ty->params->next->base->is_const = true;
+    memmove_ty->params->next->next           = copy_type(vm, ty_long);
+    vm->compiler.builtin_memmove =
+        new_private_func_obj(vm, "memmove", memmove_ty);
+
+    Type *memcmp_ty                   = func_type(vm, ty_int);
+    memcmp_ty->params                 = pointer_to(vm, copy_type(vm, ty_void));
+    memcmp_ty->params->base->is_const = true;
+    memcmp_ty->params->next           = pointer_to(vm, copy_type(vm, ty_void));
+    memcmp_ty->params->next->base->is_const = true;
+    memcmp_ty->params->next->next           = copy_type(vm, ty_long);
+    vm->compiler.builtin_memcmp = new_private_func_obj(vm, "memcmp", memcmp_ty);
+
     // __cccc_pc_to_name(void *pc) -> const char*
     // Private stub for __builtin_pc_function_name — maps a VM bytecode offset
     // (returned by __builtin_return_address) to the enclosing function name.

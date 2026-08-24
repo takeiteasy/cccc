@@ -3,6 +3,8 @@
 // test_host_signal_debugger.py to verify that test-mode exit codes don't
 // trigger the host-signal debugger.
 
+#include <stdlib.h>
+
 [[cccc::test(exit_code = 0)]]
 int test_normal_exit(void) {
     return 0;

@@ -433,10 +433,16 @@ under `-c=native` than in the VM — each entry names its tracking ticket, and
 is deleted once that ticket lands. A handful of entries are not bugs at all:
 some `CCCC_EXPECT_STDERR` tests are deliberately invalid C (a bad `main()`
 signature, a non-void function falling off its end, an unterminated
-`#pragma`) written to exercise a CCCC-specific warning the VM tolerates as
-non-fatal; the host compiler on the regenerated C correctly treats the same
-construct as a hard error. `tests/suites/test_suite_asm.c` is likewise a
-permanent, deliberate skip rather than a tracked gap: inline asm is a VM
+`#pragma`, an undeclared function call) written to exercise a CCCC-specific
+warning the VM tolerates as non-fatal; the host compiler on the regenerated C
+correctly treats the same construct as a hard error. Implicit function
+declaration (#1144) is a step further: `-c=native` rejects it outright
+itself, before the emitted C ever reaches the host compiler, and does so
+regardless of `--std=` — even the three tests pinned to `--std=c89` to keep
+it a warning under the VM still can't round-trip natively, since no
+prototype is ever synthesized for the guessed implicit signature.
+`tests/suites/test_suite_asm.c` is likewise a permanent, deliberate skip
+rather than a tracked gap: inline asm is a VM
 no-op but serializes verbatim into host-assembler input (#1119, see
 [COVERAGE.md](COVERAGE.md#serialized-output-divergences)), so its fake-
 mnemonic cases can only ever run through the VM. Those are recorded in

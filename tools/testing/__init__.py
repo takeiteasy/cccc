@@ -256,8 +256,34 @@ NATIVE_SKIP_TESTS = {
                  "warning, see COVERAGE.md",
     "test_warning_implicit_function_ffi.c": "source deliberately calls an "
                  "undeclared function to test "
-                 "-Wimplicit-function-declaration; the host compiler "
-                 "treats it as a hard error under C23, see COVERAGE.md",
+                 "-Wimplicit-function-declaration; -c=native is always a "
+                 "hard error for implicit function declaration regardless "
+                 "of --std= (#1144), see COVERAGE.md",
+    # --- #1144: implicit function declaration is a hard error at C99+ and
+    # always under -c=native (regardless of --std=), matching every real
+    # host C compiler at C99+. These three deliberately pin --std=c89 to
+    # keep it the warning it's testing -- --std=c89 keeps it a warning
+    # under the VM/-m/-c=generated, but -c=native still rejects the
+    # emitted C (no prototype is ever synthesized for the guessed
+    # implicit signature), so all three still can't round-trip natively.
+    "test_warning_implicit_function.c": "source deliberately calls an "
+                 "undeclared function (pinned to --std=c89) to test "
+                 "-Wimplicit-function-declaration as a warning; -c=native "
+                 "is always a hard error for implicit function "
+                 "declaration regardless of --std= (#1144), see "
+                 "COVERAGE.md",
+    "test_implicit_function_c89_1144.c": "source deliberately calls an "
+                 "undeclared FFI-registered function (pinned to "
+                 "--std=c89) to test implicit function declaration "
+                 "staying a warning at that standard; -c=native is "
+                 "always a hard error for implicit function declaration "
+                 "regardless of --std= (#1144), see COVERAGE.md",
+    "test_warning_declarations_suppressed.c": "source deliberately calls "
+                 "an undeclared function (pinned to --std=c89) to test "
+                 "-Wno-implicit-function-declaration suppression; "
+                 "-c=native is always a hard error for implicit function "
+                 "declaration regardless of --std= (#1144), see "
+                 "COVERAGE.md",
     "test_use_system_headers_pragma_suppress.c": "source deliberately "
                  "leaves an unterminated '#pragma clang assume_nonnull' "
                  "open across the file to test pragma-noise suppression; "

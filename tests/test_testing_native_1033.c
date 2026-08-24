@@ -5,6 +5,8 @@
 // through both --testing (VM) and, via tools/tests.py --native, through
 // --testing=native; both backends must agree.
 
+#include <stdlib.h>
+
 [[cccc::test(return = 42)]]
 int test_return_int(void) {
     return 42;

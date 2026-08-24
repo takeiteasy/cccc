@@ -3587,6 +3587,10 @@ typedef struct Compiler {
     Obj  *builtin_alloca;    // Builtin alloca function
     Obj  *builtin_strlen;    // Builtin strlen (forwarded to libc)
     Obj  *builtin_strcmp;    // Builtin strcmp (forwarded to libc)
+    Obj  *builtin_memset;    // Builtin memset (forwarded to libc, #1144)
+    Obj  *builtin_memcpy;    // Builtin memcpy (forwarded to libc, #1144)
+    Obj  *builtin_memmove;   // Builtin memmove (forwarded to libc, #1144)
+    Obj  *builtin_memcmp;    // Builtin memcmp (forwarded to libc, #1144)
     Obj  *builtin_setjmp;    // Builtin setjmp function
     Obj  *builtin_longjmp;   // Builtin longjmp function
     Obj  *builtin__setjmp;   // Builtin _setjmp (POSIX alias, same semantics as

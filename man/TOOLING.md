@@ -629,7 +629,9 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 ### Supported Warning Names
 
 - `unused`
-- `implicit-function-declaration`
+- `implicit-function-declaration` (warning-only at `--std=c89`/`gnu89`; a hard,
+  unsuppressible error at C99 and later — CCCC's own default — and always
+  under `-c=native` regardless of `--std=`; see below)
 - `implicit-int`
 - `return-type`
 - `shadow`
@@ -686,6 +688,18 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `designated-init` — warns on a positional member initializer (`{1, 2}`, or the positional tail of a mixed literal like `{.a=1, 2}`) targeting a struct type marked `__attribute__((designated_init))`/`[[gnu::designated_init]]`. Purely syntactic, parse-time-only; a brace-less copy-initializer (`struct S a = b;`) and C23 empty-init `{}` are never flagged. Unlike GCC, **standalone only — not part of `-Wall` or `-Wextra`**, since CCCC enables no warnings by default
 - `int-conversion` — warns on an implicit conversion between an integer and a pointer with no cast (e.g. `const char *p = 'a';` or `int n = some_ptr;`), covering assignment/scalar initialization, `return`, and prototyped call arguments. Suppressed when the source is the null pointer constant `0`, matching the standard exemption for `T *p = 0;`. Not checked for file-scope/global initializers (those take a separate constant-evaluation path). Part of `-Wall`
 - `native-name-collision` — `-m`/`-c=native`/`-c=generated` only: warns when the serializer's rename passes (see [COVERAGE.md § Serialized Output Divergences](COVERAGE.md#serialized-output-divergences) for the full #1014/#1015/#1016 background) find a colliding name it cannot rename apart, so the generated C is left with a genuine collision for the host compiler to report. Currently covers one case: a header-exposed `enum`'s enumerator colliding with a plain file-scope identifier (a `static`, an `extern` global, or a function) declared in a translation unit that does not include that header — neither the enumerator (the replayed `#include` binds it textually) nor the Obj (renaming it would change an emitted symbol, or widen an existing "only rename dups" rule) can safely be renamed. Points at the colliding declaration and names the enumerator and the header that exposes it, so the user isn't left with only the host compiler's own diagnostic — which under `-c=native` names a temporary file that is deleted before the invocation returns. Part of `-Wall`
+
+`implicit-function-declaration` is a hard error, not merely a warning, at
+`--std=c99`/`c11`/`c17`/`c23` (and their `gnu*` variants) — matching ISO C99
+6.5.2.2p1's constraint that a called function have a visible declaration, and
+what every real host C compiler does at those standards. `-Wno-implicit-
+function-declaration` has no effect there; it only silences the warning at
+`--std=c89`/`gnu89`, where the call still resolves (as a variadic
+`int f(...)`) exactly as it always has. Under `-c=native` it is always a hard
+error, even at `--std=c89`: the guessed implicit signature is deliberately
+never emitted into the generated C (it could collide with the real one from a
+replayed header), so a real host compiler would reject the reference anyway
+— CCCC now reports it as its own error up front instead (#1144).
 
 `conversion` is an umbrella name: `-Wconversion` enables `sign-conversion` and
 `float-conversion` as well as the integer-narrowing check.

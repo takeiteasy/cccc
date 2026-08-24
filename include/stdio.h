@@ -30,6 +30,7 @@
 
 #include <stdarg.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
 #include "stddef.h"
+#include "sys/types.h" // #1144: off_t for fseeko/ftello below
 
 // FILE type (opaque pointer to host FILE)
 typedef void FILE;
@@ -150,6 +151,24 @@ extern void clearerr(FILE *stream);
 extern int feof(FILE *stream);
 extern int ferror(FILE *stream);
 extern void perror(const char *s);
+
+// #1144: registered VM cfuncs (src/stdlib/stdio.c) with no bundled-header
+// declaration anywhere -- found auditing every cc_register_cfunc name
+// against every bundled header's own declarations (the "broader audit" the
+// ticket asks for) once implicit function declaration became a hard error
+// at C99+/-c=native. All eleven are ordinary POSIX <stdio.h> extensions
+// present on both macOS and glibc.
+extern FILE *popen(const char *command, const char *mode);
+extern int pclose(FILE *stream);
+extern int fseeko(FILE *stream, off_t offset, int whence);
+extern off_t ftello(FILE *stream);
+extern void flockfile(FILE *stream);
+extern int ftrylockfile(FILE *stream);
+extern void funlockfile(FILE *stream);
+extern int getc_unlocked(FILE *stream);
+extern int getchar_unlocked(void);
+extern int putc_unlocked(int c, FILE *stream);
+extern int putchar_unlocked(int c);
 
 #else
 #include_next <stdio.h>

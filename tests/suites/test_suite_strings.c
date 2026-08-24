@@ -6,6 +6,7 @@
 //   test_format_string_valid, test_format_string_complex,
 //   test_format_length_modifier_valid
 
+#include <stdio.h>
 #include <string.h>
 #include <uchar.h>
 #include <wchar.h>

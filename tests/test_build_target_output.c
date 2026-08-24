@@ -9,6 +9,8 @@
 // onto out_dir) -- a custom command can write anywhere, e.g. the two-pass
 // stdlib regen writes directly to src/std.c, not under build/.
 
+#include <stdio.h>
+
 [[cccc::build]]
 int build_main(Builder *ctx) {
     BuildTarget *gen = RunCustom(ctx, "gen", "true");

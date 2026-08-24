@@ -28,6 +28,7 @@
 // host's real bits by the VM (guest_to_host_pollev, src/stdlib/posix_poll.c)
 // but NOT by -c=native for plain poll() either, so exercising it here would
 // conflate this fix with that separate, filed follow-up.
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <langinfo.h>
