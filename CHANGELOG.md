@@ -21,6 +21,12 @@ All notable changes to CCCC are documented here. Format loosely follows
   on macOS; `RTLD_DEEPBIND`/`RTLD_BINDING_MASK` on Linux); a flag the host
   libdl doesn't have is simply undefined, so misuse is a compile error
   rather than a silently wrong integer (#1152).
+- `tests/suites/test_suite_printf_c23.c` fails `sscanf("0B1111", "%B", &c)`
+  under `-c=native` on Linux too, not just macOS — glibc's `scanf` has no
+  `%B` conversion specifier at all (only lowercase `%b`, carried since
+  2.38), unlike `printf` where `%b`/`%B` are interchangeable. Moved from
+  the macOS-only native skip table to the general one; documented as a
+  permanent platform gap alongside the existing macOS-only gap (#1162).
 - `VarScope` (`src/parse_internal.h`) and `VarScopeNode` (`src/cccc.h`) had
   silently diverged in layout — #1095 appended two fields to `VarScope` and
   never mirrored them onto `VarScopeNode`, though every scope-push

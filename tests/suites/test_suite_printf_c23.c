@@ -3,15 +3,19 @@
 // Source tests: test_printf_binary, test_scanf_binary, test_vprintf_binary
 //   (moved here from test_suite_misc.c, #1120)
 //
-// Skipped by the --native corpus on macOS (NATIVE_SKIP_TESTS_MACOS in
-// tools/testing/__init__.py): macOS 15 libc implements neither the C23 %b
-// nor %B conversion in printf or scanf -- printf emits a literal 'b' and
-// sscanf reports zero matches. CCCC's VM formats through its own C23
+// Skipped by the --native corpus on every platform (NATIVE_SKIP_TESTS in
+// tools/testing/__init__.py). CCCC's VM formats through its own C23
 // formatter (src/stdlib/format_printf.c/format_scanf.c), so these pass
-// there; -c=native output calls real host libc. glibc carries printf %b
-// since 2.35 and scanf %b since 2.38, so Linux keeps exercising this suite
-// natively. Permanent macOS platform gap, same disposition as reallocarray
-// (#1028) and the fmaximum family (#1037) -- see COVERAGE.md.
+// there; -c=native output calls real host libc. macOS 15 libc implements
+// neither the C23 %b nor %B conversion in printf or scanf -- printf emits
+// a literal 'b' and sscanf reports zero matches. glibc carries printf %b
+// since 2.35 and scanf %b since 2.38, but glibc's scanf has no %B
+// conversion specifier at all (printf's b/B are interchangeable there
+// since the case only selects the 0b/0B prefix spelling on output, a
+// distinction that doesn't exist for scanf input), so Linux fails only
+// the one %B-via-scanf case rather than the whole file the way macOS
+// does. Permanent platform gap, same disposition as reallocarray (#1028)
+// and the fmaximum family (#1037) -- see COVERAGE.md.
 
 #include <stdio.h>
 #include <stdarg.h>
