@@ -321,6 +321,36 @@ static bool shim_fn_is_used(VirtualMachine *vm, Obj *prog, const char *name,
     return false;
 }
 
+// #1145: sibling to bundled_shim_fn_is_used() below for a *tag* (struct/
+// union) rather than a function -- gates emission of the
+// struct-in6_pktinfo shim below on whether the guest program actually
+// parsed the tag from CCCC's bundled `header_basename` at all (so the
+// shim never references a type from a header the replayed #include never
+// pulled in). Deliberately does not require is_used: an unused struct
+// tag record still proves the header was captured, which is the only
+// question this gate needs answered.
+static bool bundled_tag_is_declared(VirtualMachine *vm, const char *tag_name,
+                                    const char *header_basename) {
+    size_t tag_name_len = strlen(tag_name);
+    for (TypeNameRecord *rec = vm->compiler.type_names; rec; rec = rec->next) {
+        if (!rec->is_tag || !rec->from_include || !rec->file_path)
+            continue;
+        // rec->name is a raw (name_len, loc) slice into the source buffer,
+        // not a null-terminated string (record_type_name(), src/
+        // parse_core.c) -- strcmp() here would read past it into whatever
+        // follows in that buffer.
+        if (!rec->name || (size_t)rec->name_len != tag_name_len ||
+            strncmp(rec->name, tag_name, tag_name_len) != 0)
+            continue;
+        if (!cc_file_is_cccc_bundled(vm, rec->file_path))
+            continue;
+        if (!path_basename_is(rec->file_path, header_basename))
+            continue;
+        return true;
+    }
+    return false;
+}
+
 // #1140: sibling to shim_fn_is_used above for headers that are real host
 // headers CCCC merely bundles a copy of (poll.h/sched.h/netdb.h), not
 // cccc-only ones -- cc_file_is_cccc_only() is false for those (the host
@@ -1187,6 +1217,52 @@ void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     bool use_ppoll = bundled_shim_fn_is_used(vm, prog, "ppoll", "poll.h");
     bool any_poll  = use_poll || use_ppoll;
 
+    // #1145: struct in6_pktinfo (include/netinet/in.h) -- CCCC's own
+    // definition is suppressed from native output the same way every
+    // from_include struct's body is (member access re-resolves against the
+    // replayed #include's real host layout). On Linux, though, glibc's real
+    // <netinet/in.h> only defines this one under _GNU_SOURCE/__USE_GNU
+    // (confirmed against a real glibc 2.39 header: sizeof/member access
+    // both work once -D_GNU_SOURCE is added, fail identically to this bug
+    // otherwise), which this generated TU never defines -- same policy as
+    // every other gap in this file, forward-supply the missing piece rather
+    // than flipping on _GNU_SOURCE for the whole TU. Layout ported verbatim
+    // from include/netinet/in.h's own struct (already verified there to be
+    // identical on macOS and Linux, sizeof == 20 on both), gated so this
+    // definition is a no-op wherever the host already provides one.
+    if (bundled_tag_is_declared(vm, "in6_pktinfo", "netinet/in.h"))
+        fprintf(f, "#if defined(__linux__) && !defined(_GNU_SOURCE) && "
+                   "!defined(__USE_GNU)\n"
+                   "struct in6_pktinfo {\n"
+                   "    struct in6_addr ipi6_addr;\n"
+                   "    int ipi6_ifindex;\n"
+                   "};\n"
+                   "#endif\n");
+
+    // #1145: aio_fsync()'s NULL-aiocbp guard -- wrap_aio_fsync
+    // (src/stdlib/posix_aio.c) rejects a NULL aiocbp with EINVAL/-1 before
+    // ever reaching the real host aio_fsync(); POSIX itself leaves a NULL
+    // aiocbp undefined, so this is deliberate CCCC-contract behavior (see
+    // the test's own comment, tests/suites/test_suite_posix.c), not a
+    // portability workaround -- worth reproducing here the same way any
+    // other wrap_* contract is. Confirmed without this guard, glibc's
+    // aio_fsync64 dereferences the NULL pointer directly (SIGSEGV) rather
+    // than validating it. Deliberately does NOT port
+    // cccc_posix_sigevent_prepare()'s SIGEV_THREAD cookie machinery --
+    // that bridges a guest function pointer into the VM's own callback
+    // dispatch, which doesn't exist under native (a guest sigev_notify_
+    // function is already a real, directly host-callable function
+    // pointer there).
+    if (bundled_shim_fn_is_used(vm, prog, "aio_fsync", "aio.h")) {
+        if (rename_bundled_extern_for_native_shim(vm, prog, "aio_fsync",
+                                                  "aio.h"))
+            fprintf(f, "static int __cccc_native_aio_fsync(int op, struct "
+                       "aiocb *aiocbp) {\n"
+                       "    if (!aiocbp) { errno = EINVAL; return -1; }\n"
+                       "    return aio_fsync(op, aiocbp);\n"
+                       "}\n");
+    }
+
     bool use_sched_setparam =
         bundled_shim_fn_is_used(vm, prog, "sched_setparam", "sched.h");
     bool use_sched_getparam =
@@ -1371,6 +1447,20 @@ void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                    "    errno = saved_errno;\n"
                    "    return r;\n"
                    "}\n"
+                   "#endif\n");
+    // #1145: on Linux, ppoll() genuinely is a host primitive (no emulation
+    // needed, matching the #if !defined(__linux__) branch above) -- but
+    // it's a glibc extension gated behind __USE_GNU, which the replayed
+    // `#include <poll.h>` above only exposes under _GNU_SOURCE, which this
+    // generated TU never defines. Forward-declared locally instead, ported
+    // verbatim from wrap_ppoll_gil's identical comment/declaration
+    // (src/stdlib/posix_poll.c) -- glibc still exports the real symbol
+    // regardless of the declaration being visible.
+    if (use_ppoll)
+        fprintf(f, "#if defined(__linux__)\n"
+                   "extern int ppoll(struct pollfd *fds, nfds_t nfds,\n"
+                   "                 const struct timespec *timeout,\n"
+                   "                 const sigset_t *sigmask);\n"
                    "#endif\n");
 
     // sched_setparam/getparam/setscheduler/getscheduler/rr_get_interval
@@ -1797,13 +1887,22 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
         bundled_shim_fn_is_used(vm, prog, "sched_get_priority_min", "sched.h");
     bool use_sched_get_priority_max =
         bundled_shim_fn_is_used(vm, prog, "sched_get_priority_max", "sched.h");
+    bool use_sysconf = bundled_shim_fn_is_used(vm, prog, "sysconf", "unistd.h");
+    bool use_pathconf =
+        bundled_shim_fn_is_used(vm, prog, "pathconf", "unistd.h");
+    bool use_fpathconf =
+        bundled_shim_fn_is_used(vm, prog, "fpathconf", "unistd.h");
+    bool use_confstr = bundled_shim_fn_is_used(vm, prog, "confstr", "unistd.h");
 
     bool any_nl_langinfo = use_nl_langinfo || use_nl_langinfo_l;
     bool any_locale      = use_setlocale || use_newlocale;
     bool any_sched_prio =
         use_sched_get_priority_min || use_sched_get_priority_max;
+    bool any_sysconf_family =
+        use_sysconf || use_pathconf || use_fpathconf || use_confstr;
 
-    if (!any_nl_langinfo && !any_locale && !any_sched_prio)
+    if (!any_nl_langinfo && !any_locale && !any_sched_prio &&
+        !any_sysconf_family)
         return;
 
     // nl_item (#807/#1146) -- macOS uses a flat 0-56 sequence, which
@@ -1962,6 +2061,22 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                 vm, prog, "sched_get_priority_max", "sched.h"))
             use_sched_get_priority_max = true;
 
+        // #1145: SCHED_BATCH/SCHED_IDLE are glibc extensions gated behind
+        // __USE_GNU, which the replayed `#include <sched.h>` above only
+        // exposes under _GNU_SOURCE -- this generated TU never defines that
+        // (same policy as every other native shim in this file: locally
+        // supply the missing macro rather than flipping on _GNU_SOURCE for
+        // the whole TU, which would change other symbols' behavior too).
+        // Ported verbatim from posix_util.h's own identical guard, which
+        // the VM-side wrap_sched_setscheduler() etc. rely on the same way.
+        fprintf(f, "#ifdef __linux__\n"
+                   "#ifndef SCHED_BATCH\n"
+                   "#define SCHED_BATCH 3\n"
+                   "#endif\n"
+                   "#ifndef SCHED_IDLE\n"
+                   "#define SCHED_IDLE 5\n"
+                   "#endif\n"
+                   "#endif\n");
         fprintf(f, "static int __cccc_native_guest_to_host_sched_policy(int "
                    "guest_policy) {\n"
                    "    switch (guest_policy) {\n"
@@ -1986,6 +2101,232 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                        "policy) {\n"
                        "    return sched_get_priority_max("
                        "__cccc_native_guest_to_host_sched_policy(policy));\n"
+                       "}\n");
+    }
+
+    // #1145: sysconf()/pathconf()/fpathconf()/confstr() -- ported from
+    // wrap_sysconf/wrap_pathconf/wrap_fpathconf/wrap_confstr
+    // (src/stdlib/posix_sched.c). include/unistd.h's own _SC_*/_PC_*/_CS_*
+    // macros are CCCC's own canonical numbering (kept deliberately
+    // independent of any host's, since macOS and glibc disagree on nearly
+    // all of them) -- guest code folds those to plain integers at parse
+    // time with no macro-name provenance, so passing them straight to the
+    // replayed #include <unistd.h>'s real host sysconf()/etc silently asks
+    // for the wrong thing (e.g. guest _SC_PAGESIZE, 11, is 29 on macOS and
+    // 30 on glibc). Same shape as guest_to_host_nl_item just above: switch
+    // labels are CCCC's bare canonical integers, case *bodies* name the
+    // host's real _SC_*/_PC_*/_CS_* macro (this file's own #include
+    // <unistd.h> replay reaches the host's real header, so the name
+    // resolves per-host) -- never the reverse, or the label would silently
+    // mean whatever the host happens to number it, defeating the whole
+    // point of canonical numbering.
+    if (any_sysconf_family) {
+        // errno.h for errno/EINVAL -- needed unconditionally by the
+        // unrecognized-name default arm of every wrapper below, even for a
+        // guest program that includes <unistd.h> but never separately
+        // includes <errno.h> itself (same self-include rationale as
+        // any_poll's own errno.h include above).
+        fprintf(f, "#include <errno.h>\n");
+        if (rename_bundled_extern_for_native_shim(vm, prog, "sysconf",
+                                                  "unistd.h"))
+            use_sysconf = true;
+        if (rename_bundled_extern_for_native_shim(vm, prog, "pathconf",
+                                                  "unistd.h"))
+            use_pathconf = true;
+        if (rename_bundled_extern_for_native_shim(vm, prog, "fpathconf",
+                                                  "unistd.h"))
+            use_fpathconf = true;
+        if (rename_bundled_extern_for_native_shim(vm, prog, "confstr",
+                                                  "unistd.h"))
+            use_confstr = true;
+
+        if (use_sysconf)
+            // _SC_VERSION/_SC_2_VERSION/_SC_XOPEN_VERSION deliberately do
+            // NOT forward to the host: wrap_sysconf answers these from
+            // CCCC's own VM-model constants (200809L/200809L/700), not
+            // whatever POSIX revision the host libc claims (macOS: 200112/
+            // 200112/600) -- forwarding would silently change what these
+            // three report. The unknown-name default is EINVAL/-1, not a
+            // guest-value passthrough (unlike guest_to_host_lc below):
+            // sysconf(<unrecognized>) must return -1, not misinterpret an
+            // arbitrary guest integer as some unrelated host _SC_ number.
+            fprintf(f,
+                    "static long __cccc_native_sysconf(int name) {\n"
+                    "    switch (name) {\n"
+                    "        case 10: return 200809L;\n"
+                    "        case 17: return 200809L;\n"
+                    "        case 18: return 700L;\n"
+                    "#ifdef _SC_ARG_MAX\n"
+                    "        case 1: return (long)sysconf(_SC_ARG_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_CHILD_MAX\n"
+                    "        case 2: return (long)sysconf(_SC_CHILD_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_CLK_TCK\n"
+                    "        case 3: return (long)sysconf(_SC_CLK_TCK);\n"
+                    "#endif\n"
+                    "#ifdef _SC_NGROUPS_MAX\n"
+                    "        case 4: return (long)sysconf(_SC_NGROUPS_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_OPEN_MAX\n"
+                    "        case 5: return (long)sysconf(_SC_OPEN_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_STREAM_MAX\n"
+                    "        case 6: return (long)sysconf(_SC_STREAM_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_TZNAME_MAX\n"
+                    "        case 7: return (long)sysconf(_SC_TZNAME_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_JOB_CONTROL\n"
+                    "        case 8: return (long)sysconf(_SC_JOB_CONTROL);\n"
+                    "#endif\n"
+                    "#ifdef _SC_SAVED_IDS\n"
+                    "        case 9: return (long)sysconf(_SC_SAVED_IDS);\n"
+                    "#endif\n"
+                    "#ifdef _SC_PAGESIZE\n"
+                    "        case 11: return (long)sysconf(_SC_PAGESIZE);\n"
+                    "#endif\n"
+                    "#ifdef _SC_NPROCESSORS_CONF\n"
+                    "        case 12: return "
+                    "(long)sysconf(_SC_NPROCESSORS_CONF);\n"
+                    "#endif\n"
+                    "#ifdef _SC_NPROCESSORS_ONLN\n"
+                    "        case 13: return "
+                    "(long)sysconf(_SC_NPROCESSORS_ONLN);\n"
+                    "#endif\n"
+                    "#ifdef _SC_PHYS_PAGES\n"
+                    "        case 14: return (long)sysconf(_SC_PHYS_PAGES);\n"
+                    "#endif\n"
+                    "#ifdef _SC_LINE_MAX\n"
+                    "        case 15: return (long)sysconf(_SC_LINE_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_RE_DUP_MAX\n"
+                    "        case 16: return (long)sysconf(_SC_RE_DUP_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_HOST_NAME_MAX\n"
+                    "        case 19: return "
+                    "(long)sysconf(_SC_HOST_NAME_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_LOGIN_NAME_MAX\n"
+                    "        case 20: return "
+                    "(long)sysconf(_SC_LOGIN_NAME_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_TTY_NAME_MAX\n"
+                    "        case 21: return "
+                    "(long)sysconf(_SC_TTY_NAME_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_SYMLOOP_MAX\n"
+                    "        case 22: return (long)sysconf(_SC_SYMLOOP_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_ATEXIT_MAX\n"
+                    "        case 23: return (long)sysconf(_SC_ATEXIT_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_IOV_MAX\n"
+                    "        case 24: return (long)sysconf(_SC_IOV_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_GETPW_R_SIZE_MAX\n"
+                    "        case 25: return "
+                    "(long)sysconf(_SC_GETPW_R_SIZE_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_GETGR_R_SIZE_MAX\n"
+                    "        case 26: return "
+                    "(long)sysconf(_SC_GETGR_R_SIZE_MAX);\n"
+                    "#endif\n"
+                    "#ifdef _SC_MONOTONIC_CLOCK\n"
+                    "        case 27: return "
+                    "(long)sysconf(_SC_MONOTONIC_CLOCK);\n"
+                    "#endif\n"
+                    "        default: errno = EINVAL; return -1;\n"
+                    "    }\n"
+                    "}\n");
+
+        // _PC_* -- pathconf()/fpathconf() share the same canonical->host
+        // switch body, parameterized only in how the host is asked
+        // (path vs. fd), so both wrappers below share one macro-driven
+        // list rather than duplicating the 9-way switch twice.
+#define CCCC_NATIVE_PATHCONF_CASES(call_expr)                                  \
+    "        case 1:\n"                                                        \
+    "#ifdef _PC_LINK_MAX\n"                                                    \
+    "            return (long)" call_expr ", _PC_LINK_MAX);\n"                 \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 2:\n"                                                        \
+    "#ifdef _PC_MAX_CANON\n"                                                   \
+    "            return (long)" call_expr ", _PC_MAX_CANON);\n"                \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 3:\n"                                                        \
+    "#ifdef _PC_MAX_INPUT\n"                                                   \
+    "            return (long)" call_expr ", _PC_MAX_INPUT);\n"                \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 4:\n"                                                        \
+    "#ifdef _PC_NAME_MAX\n"                                                    \
+    "            return (long)" call_expr ", _PC_NAME_MAX);\n"                 \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 5:\n"                                                        \
+    "#ifdef _PC_PATH_MAX\n"                                                    \
+    "            return (long)" call_expr ", _PC_PATH_MAX);\n"                 \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 6:\n"                                                        \
+    "#ifdef _PC_PIPE_BUF\n"                                                    \
+    "            return (long)" call_expr ", _PC_PIPE_BUF);\n"                 \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 7:\n"                                                        \
+    "#ifdef _PC_CHOWN_RESTRICTED\n"                                            \
+    "            return (long)" call_expr ", _PC_CHOWN_RESTRICTED);\n"         \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 8:\n"                                                        \
+    "#ifdef _PC_NO_TRUNC\n"                                                    \
+    "            return (long)" call_expr ", _PC_NO_TRUNC);\n"                 \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"                                                                 \
+    "        case 9:\n"                                                        \
+    "#ifdef _PC_VDISABLE\n"                                                    \
+    "            return (long)" call_expr ", _PC_VDISABLE);\n"                 \
+    "#else\n"                                                                  \
+    "            break;\n"                                                     \
+    "#endif\n"
+
+        if (use_pathconf)
+            fprintf(f, "static long __cccc_native_pathconf(const char *path, "
+                       "int name) {\n"
+                       "    switch (name) {\n" CCCC_NATIVE_PATHCONF_CASES(
+                           "pathconf(path") "    }\n"
+                                            "    errno = EINVAL;\n"
+                                            "    return -1;\n"
+                                            "}\n");
+        if (use_fpathconf)
+            fprintf(f, "static long __cccc_native_fpathconf(int fd, int name) "
+                       "{\n"
+                       "    switch (name) {\n" CCCC_NATIVE_PATHCONF_CASES(
+                           "fpathconf(fd") "    }\n"
+                                           "    errno = EINVAL;\n"
+                                           "    return -1;\n"
+                                           "}\n");
+#undef CCCC_NATIVE_PATHCONF_CASES
+
+        if (use_confstr)
+            fprintf(f, "static size_t __cccc_native_confstr(int name, char "
+                       "*buf, size_t len) {\n"
+                       "    switch (name) {\n"
+                       "#ifdef _CS_PATH\n"
+                       "        case 1: return confstr(_CS_PATH, buf, len);\n"
+                       "#endif\n"
+                       "        default: errno = EINVAL; return 0;\n"
+                       "    }\n"
                        "}\n");
     }
 

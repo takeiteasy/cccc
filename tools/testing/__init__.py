@@ -322,44 +322,65 @@ NATIVE_SKIP_TESTS = {
                  "silently truncates -- clearing #1113 alone will not be "
                  "enough to un-skip this file, see #1123 (deferred "
                  "multi-word native lowering)",
-    # #1103's own two bugs (rename-collision dbm_* dup names, mbstate_t's
-    # __opaque layout mismatch), #1138 (fd_set's __fds_bits spelling),
-    # #1139 (__cccc_environ_ptr) and #1144 (isalpha_l/toupper_l called
-    # with no #include <ctype.h> in this file at all) are all fixed --
-    # compiles clean natively on Linux/glibc now. #1140 (ppoll/*_l locale
-    # family/*_r resolver family/sched_getscheduler undeclared on macOS)
-    # is also fixed -- serialize_posix_compat_shims (src/serialize.c) now
-    # ports the VM's own emulation into the emitted C, and a <xlocale.h>
-    # injection covers the "_l" family. #1147 (-c=native never linked
-    # -liconv, so test_posix_iconv failed at LINK time on macOS) and
-    # #1146 (CCCC's own canonical constant numbering -- POLLWRNORM/
-    # POLLWRBAND, nl_item, LC_*, SCHED_* -- was never translated to the
-    # host's real values under -c=native at all, so test_posix_ppoll's
-    # own POLLWRNORM assertion and test_posix_langinfo/
-    # test_posix_locale_t's nl_langinfo(_l) assertions were silently
-    # wrong on whichever host CCCC's canonical numbering doesn't already
-    # copy) are also both fixed now. Stays skipped anyway (both
-    # platforms, general table not macOS-only) for the one remaining
-    # unresolved reason: #1145, 14 of 84 subtests (mostly SIGSEGV, not
-    # merely a wrong exit code) failing at native RUNTIME on Linux/glibc
-    # once the file compiles at all -- a previously-invisible surface,
-    # never run until #1138/#1139/#1144 cleared the compile-time
-    # blockers, and its own investigation on the scale of #967's
-    # original native corpus sweep. The separate, pre-existing -I./include
-    # + sched.h/locale.h host-header collision this file also used to hit
-    # (it #include's both <sched.h> and <pthread.h>-reaching headers) is
-    # now fixed too (#1143: CCCC's own bundled include dirs are demoted to
-    # `-idirafter` when forwarded to the host compiler, so the real host
-    # headers always win) -- confirmed directly, `--posix-emulation
-    # -I./include` compiles and runs this file clean under -c=native on
-    # macOS/arm64, with the same 3 subtest failures #1145 already covers
-    # (test_posix_sysconf_pathconf_confstr/test_posix_sigaction/
-    # test_posix_sigaction_siginfo -- present with or without -I./include,
-    # so not a header-search artifact; see #1145's own comment).
-    "test_suite_posix.c": "compiles clean on both platforms now "
-                 "(#1140/#1143/#1146/#1147 all fixed); still skipped for "
-                 "#1145 (14 subtests fail at native runtime on "
-                 "Linux/glibc, plus 3 more on macOS/arm64)",
+    # test_suite_posix.c: RESOLVED, back on the corpus (was skipped since
+    # #1103, most recently for #1145). #1103's own two bugs (rename-
+    # collision dbm_* dup names, mbstate_t's __opaque layout mismatch),
+    # #1138 (fd_set's __fds_bits spelling), #1139 (__cccc_environ_ptr) and
+    # #1144 (isalpha_l/toupper_l called with no #include <ctype.h> in this
+    # file at all) fixed compile-time. #1140 (ppoll/*_l locale family/*_r
+    # resolver family/sched_getscheduler undeclared on macOS) fixed via
+    # serialize_posix_compat_shims (src/serialize_shims.c), which ports the
+    # VM's own emulation into the emitted C. #1147 (-c=native never linked
+    # -liconv) and #1146 (CCCC's own canonical constant numbering --
+    # POLLWRNORM/POLLWRBAND, nl_item, LC_*, SCHED_* -- was never translated
+    # to the host's real values under -c=native) fixed the same way. #1143
+    # fixed a separate -I./include + sched.h/locale.h host-header collision
+    # (CCCC's own bundled include dirs are demoted to `-idirafter`).
+    #
+    # #1145 covered the remaining runtime-only surface this file exposed
+    # once it finally compiled and ran: 14 of 84 subtests failing on
+    # Linux/glibc (mostly SIGSEGV), 3 of 84 on macOS/arm64. Root causes,
+    # all fixed in src/serialize_shims.c/src/serialize_type.c:
+    #   - sysconf()/pathconf()/fpathconf()/confstr(): CCCC's own canonical
+    #     _SC_*/_PC_*/_CS_* numbering was passed straight through to the
+    #     host's real sysconf() etc under -c=native with no translation --
+    #     the same #1146 bug class, for a family #1146 didn't cover.
+    #   - SCHED_BATCH/SCHED_IDLE and ppoll(): glibc extensions gated
+    #     behind __USE_GNU/_GNU_SOURCE, which this generated TU never
+    #     defines -- the native shims assumed the replayed #include
+    #     exposed them unconditionally on Linux.
+    #   - struct in6_pktinfo: same _GNU_SOURCE gap, for a type rather than
+    #     a function.
+    #   - posix_spawnattr_t/posix_spawn_file_actions_t (opaque `typedef
+    #     void *` handles on the guest, real ~336/80-byte structs on
+    #     glibc): a local variable declared with one of these types lost
+    #     its typedef alias under -c=native and was emitted as a bare
+    #     `void *`, so the real host posix_spawnattr_init() etc wrote its
+    #     real-sized struct into an 8-byte stack slot -- silent stack
+    #     corruption (SIGSEGV). Fixed narrowly, at the local-variable
+    #     declaration call site only (serialize_local_var_type_decl) --
+    #     see that function's own comment for why a general fix regressed
+    #     test_threads_basic.c and friends instead.
+    #   - aio_fsync(NULL): wrap_aio_fsync's own NULL-aiocbp guard (a
+    #     deliberate CCCC contract, not a portability workaround -- POSIX
+    #     itself leaves this undefined) only existed on the VM path;
+    #     native called the real host aio_fsync() directly, which
+    #     dereferences the NULL pointer (SIGSEGV).
+    #   - test_posix_sigaction's oact round-trip and
+    #     test_posix_sigaction_siginfo's SI_USER assertion were asserting
+    #     VM-only semantics no real kernel provides (confirmed with
+    #     standalone, non-cccc probes): a real sigaction() masks unknown
+    #     sa_flags bits rather than storing them verbatim, and si_code for
+    #     a self-raised signal is platform/libc-defined (0 on macOS,
+    #     SI_TKILL on glibc), not POSIX's idealized SI_USER. Adjusted to
+    #     assert what the platform actually guarantees.
+    #   - test_posix_sigaction_flags's SA_RESETHAND query-after-delivery
+    #     assertion: confirmed via a standalone repro that glibc's
+    #     sigaction(sig, NULL, &q) reports the pre-reset handler pointer
+    #     even though the kernel's real disposition has already reset (a
+    #     glibc quirk, not a cccc bug, verified functionally via a second
+    #     raise() triggering the default action) -- dropped in favor of an
+    #     explicit unconditional restore.
     "test_suite_decimal.c": "_Decimal64 has no -c=native lowering, #1113",
     # --- #1116: RESOLVED for its own scope. Was: a function-local typedef
     # of an ANONYMOUS aggregate (`typedef struct { int width; int height; }

@@ -564,8 +564,12 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // arrays) -- see hoist_mutable_type(), which returns the type
             // untouched when there is nothing to strip. A pointer-level
             // const on a pointee (`const char *p`) is untouched by both.
-            serialize_type_decl(f, ctx, hoist_mutable_type(vm, var->ty),
-                                var->name);
+            // #1145: serialize_local_var_type_decl, not the plain
+            // serialize_type_decl every other declarator site in this file
+            // uses -- see its own comment for why the alias-preserving
+            // check it adds is confined to exactly this one call site.
+            serialize_local_var_type_decl(
+                f, ctx, hoist_mutable_type(vm, var->ty), var->name);
             ctx->allow_layout_dims = false;
             fprintf(f, ";\n");
         }

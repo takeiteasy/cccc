@@ -5,6 +5,45 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `-c=native`: `sysconf`/`pathconf`/`fpathconf`/`confstr` passed CCCC's own
+  canonical, host-independent `_SC_*`/`_PC_*`/`_CS_*` numbering straight
+  through to the host's real functions with no translation, silently
+  asking for the wrong thing on any host whose numbering doesn't already
+  match CCCC's (e.g. guest `_SC_PAGESIZE`, 11, reached the host as literal
+  `11`, not macOS's 29 or glibc's 30). Fixed with translating
+  `__cccc_native_sysconf`/`pathconf`/`fpathconf`/`confstr` wrappers
+  (`serialize_canonical_const_shims`) ported from the VM's own
+  `wrap_sysconf` family, including the `_SC_VERSION`/`_SC_2_VERSION`/
+  `_SC_XOPEN_VERSION` VM-model-constant special case.
+- `-c=native`: `SCHED_BATCH`/`SCHED_IDLE` and `ppoll()` are glibc
+  extensions gated behind `_GNU_SOURCE`/`__USE_GNU`, which the generated
+  translation unit never defines — both failed to compile at all on
+  Linux. Fixed by locally supplying the missing macro/declaration, the
+  same policy every other native POSIX shim already follows rather than
+  flipping on `_GNU_SOURCE` TU-wide.
+- `-c=native`: `struct in6_pktinfo` has the same `_GNU_SOURCE` gap on
+  Linux for a type rather than a function — fixed the same way, by
+  force-emitting the struct's definition under a guard that's a no-op
+  wherever the host already provides one.
+- `-c=native`: a local variable declared `posix_spawnattr_t`/
+  `posix_spawn_file_actions_t` (opaque pointer-width handles on the guest,
+  real ~336/80-byte structs on glibc) lost its typedef alias during
+  serialization and was emitted as a bare `void *`, so the real host
+  `posix_spawnattr_init()` etc wrote a real-sized struct into an 8-byte
+  stack slot — silent stack corruption. Fixed with
+  `serialize_local_var_type_decl`, narrowly scoped to local-variable
+  declarations only.
+- `-c=native`: `aio_fsync(op, NULL)` segfaulted instead of returning
+  `-1`/`EINVAL` — the VM's own NULL-`aiocbp` guard never had a native
+  counterpart. Fixed with a native wrapper reproducing just that guard.
+- `tests/suites/test_suite_posix.c` is back on the native test corpus —
+  all of the above, plus two test-side fixes for assertions that only
+  ever held under the VM's own model (an arbitrary `sa_flags` bit pattern
+  round-tripping through `sigaction()` verbatim; `SI_USER` for a
+  self-raised signal), not on a real kernel.
+
 ## [0.3.7] - 2026-08-23
 
 ### Changed

@@ -1082,6 +1082,12 @@ static void format_checked_ptr_qualifier(char *buf, size_t cap, Type *ty) {
     }
 }
 
+// Forward declaration -- defined below (near type_layout_is_host_owned,
+// which shares its logic); serialize_type_decl's TY_PTR case (#1145 fix
+// just below) needs it ahead of that definition.
+static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
+                                                Type             *ty);
+
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name) {
     if (!ty) {
@@ -1202,6 +1208,50 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
     serialize_type(f, ctx, ty);
     if (name && *name)
         fprintf(f, " %s", name);
+}
+
+// #1145: local-variable-declaration counterpart to serialize_type_decl,
+// used only at the handful of call sites that declare a function-local
+// variable (serialize_stmt.c/serialize_decl.c) -- NOT a general
+// replacement for serialize_type_decl itself, which is also used to print
+// typedef right-hand sides and function-parameter prototypes/definitions,
+// where the exact same alias-preserving check regressed
+// test_threads_basic.c and friends: `typedef pthread_t thrd_t;` printed
+// correctly by this check, while a *separate* prototype's `thrd_t thr`
+// parameter (a distinct Type copy without the same resolvable identity)
+// kept decomposing to `void *thr`, producing two disagreeing declarations
+// for the same function ("conflicting types for 'thrd_join'"). Confining
+// the check to local declarations avoids that inconsistency: a local
+// variable is declared exactly once, so there is no second, independently
+// serialized declaration site for it to disagree with.
+//
+// The bug this exists for: a from_include *pointer* typedef (e.g. glibc's
+// real posix_spawnattr_t/posix_spawn_file_actions_t, structs CCCC's own
+// bundled spawn.h models as an opaque `typedef void *` handle for
+// portability -- see that header's own comment) must be spelled by its
+// alias for a LOCAL variable, not decomposed structurally into "void
+// *name" like an ordinary pointer declarator -- decomposing throws the
+// alias away and always declares the variable at CCCC's own (possibly
+// undersized) pointee type instead of deferring to whichever real type the
+// replayed #include supplies. Confirmed as silent stack corruption: `void
+// *attr;` handed to glibc's posix_spawnattr_init(), which writes a
+// 336-byte struct, corrupts the 8-byte stack slot next to it. An ordinary
+// in-house pointer typedef (`typedef int *IntPtr;`) has no such divergence
+// and is unaffected -- decomposition already produces identical,
+// correctly-sized C for those, so this only changes behavior for exactly
+// the divergent, from_include case.
+void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
+                                   const char *name) {
+    if (ty && ty->kind == TY_PTR) {
+        TypeName *ptr_alias = find_typedef_name_exact(ctx, ty);
+        if (ptr_alias && type_def_is_from_include_suppressed(ctx, ty)) {
+            serialize_type(f, ctx, ty);
+            if (name && *name)
+                fprintf(f, " %s", name);
+            return;
+        }
+    }
+    serialize_type_decl(f, ctx, ty, name);
 }
 
 // #1023: a global whose type is (or contains, through TY_ARRAY/TY_PTR)
