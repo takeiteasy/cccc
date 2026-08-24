@@ -9,12 +9,13 @@
 // compile, caught by this suite's own comptime_native_smoke ctor/dtor case
 // turning `void plain_ctor` into `const void plain_ctor`).
 //
-// The VM path needs no #include <string.h> at all (test_serialize_uchar_
-// shims_1141.c exercises exactly that, VM-only via -m); this file adds it
-// so the same calls also round-trip through -c=native, which -- like
-// __builtin_strlen/__builtin_strcmp above it -- still needs a real
-// declaration in scope (residual gap, out of this ticket's scope).
-#include <string.h>
+// No #include <string.h> anywhere in this file, deliberately: the VM path
+// never needed one (test_serialize_uchar_shims_1141.c exercises that,
+// VM-only via -m), and since #1154, -c=native/-m/-c=generated don't either
+// -- serialize_expr.c's ND_VAR case now prints these calls (and
+// __builtin_strlen/__builtin_strcmp) using their literal __builtin_
+// spelling, the same way it already did for __builtin_alloca, so the host
+// compiler recognises them as builtins needing no prototype.
 
 int main(void) {
     char src[8] = {1, 2, 3, 4, 5, 6, 7, 8};

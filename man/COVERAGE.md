@@ -2476,12 +2476,16 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 
 #### String Builtins
 
-These are forwarded to libc via the FFI and require the matching libc function to be available. They do not require `#include <string.h>` but are compatible with it (the `extern` declaration in `<string.h>` merges cleanly with the builtin registration).
+These are forwarded to libc via a private stub bound to the real libc name, not FFI-registered under their own name, and require the matching libc function to be available. They do not require `#include <string.h>` on the VM path, and (#1154) not under `-c=native`/`-m`/`-c=generated` either: the serializer prints each of these six by its literal `__builtin_` spelling (the same way `__builtin_alloca` already prints unconditionally), which every supported host compiler recognises as a builtin needing no declaration — matching real GCC/clang, which reject an explicit prototype for one of these names outright ("conflicting types ... is a builtin"). A user-supplied `#include <string.h>` is still compatible; it declares the plain libc name, which the generated call never references.
 
 | Builtin | Return type | Description |
 |---------|-------------|-------------|
 | `__builtin_strlen(s)` | `long` | Equivalent to `strlen(s)` |
 | `__builtin_strcmp(a, b)` | `int` | Equivalent to `strcmp(a, b)` |
+| `__builtin_memset(s, c, n)` | `void *` | Equivalent to `memset(s, c, n)` |
+| `__builtin_memcpy(d, s, n)` | `void *` | Equivalent to `memcpy(d, s, n)` |
+| `__builtin_memmove(d, s, n)` | `void *` | Equivalent to `memmove(d, s, n)` |
+| `__builtin_memcmp(a, b, n)` | `int` | Equivalent to `memcmp(a, b, n)` |
 
 #### Variadic Argument Macros (`__builtin_va_*`)
 

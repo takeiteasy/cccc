@@ -1450,6 +1450,14 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_nanl",
         "__builtin_strlen",
         "__builtin_strcmp",
+        // #1154: __builtin_memset/memcpy/memmove/memcmp were added
+        // alongside strlen/strcmp above (#1144, parse_decl.c) but never
+        // added here, so __has_builtin(__builtin_memcpy) returned false
+        // while the builtin itself worked.
+        "__builtin_memset",
+        "__builtin_memcpy",
+        "__builtin_memmove",
+        "__builtin_memcmp",
         "__builtin_isnan",
         "__builtin_isinf",
         "__builtin_isfinite",

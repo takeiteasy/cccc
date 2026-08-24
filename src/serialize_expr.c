@@ -1104,6 +1104,33 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // that way here instead of trying to synthesize a
                     // <alloca.h>/<stdlib.h> declaration.
                     fprintf(f, "__builtin_alloca");
+                } else if (node->var == vm->compiler.builtin_strlen) {
+                    // #1154: same rationale as builtin_alloca just above --
+                    // declare_builtin_functions (parse_decl.c) forwards
+                    // __builtin_strlen/__builtin_strcmp/__builtin_mem{set,
+                    // cpy,move,cmp} to a private stub Obj literally named
+                    // "strlen"/"memcpy"/etc (new_private_func_obj), kept out
+                    // of global scope on purpose so it never conflicts with
+                    // a user's own <string.h> declaration. That also means
+                    // it is never on the `prog` list, so no declaration-
+                    // emission pass (cc_serialize_program's prototype walk,
+                    // serialize_synth_libc_includes, ...) can ever see it or
+                    // declare it -- printing the plain libc name here would
+                    // need the caller's own #include <string.h> in scope,
+                    // unlike real GCC/clang, which recognise every one of
+                    // these six spellings as a builtin needing no header at
+                    // all. Spell the call that way instead.
+                    fprintf(f, "__builtin_strlen");
+                } else if (node->var == vm->compiler.builtin_strcmp) {
+                    fprintf(f, "__builtin_strcmp");
+                } else if (node->var == vm->compiler.builtin_memset) {
+                    fprintf(f, "__builtin_memset");
+                } else if (node->var == vm->compiler.builtin_memcpy) {
+                    fprintf(f, "__builtin_memcpy");
+                } else if (node->var == vm->compiler.builtin_memmove) {
+                    fprintf(f, "__builtin_memmove");
+                } else if (node->var == vm->compiler.builtin_memcmp) {
+                    fprintf(f, "__builtin_memcmp");
                 } else {
                     fprintf(f, "%s", node->var->name);
                 }

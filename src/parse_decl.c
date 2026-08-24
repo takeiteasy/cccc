@@ -1260,13 +1260,11 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // __builtin_strlen/__builtin_strcmp already are: a private stub Obj,
     // not in global scope, so it doesn't conflict with (or require) the
     // user's own <string.h> declaration for the VM path. Signatures mirror
-    // include/string.h's own memset/memcpy/memmove/memcmp exactly.
-    // Residual gap, shared with __builtin_strlen/__builtin_strcmp above and
-    // not fixed here (out of this ticket's scope, tracked as #1154):
-    // -c=native still emits a plain call to the real libc name with no
-    // prototype, which needs the user's own <string.h> to already be in
-    // scope, unlike real GCC/clang's __builtin_mem*/__builtin_str* forms,
-    // which need no declaration at all.
+    // include/string.h's own memset/memcpy/memmove/memcmp exactly. #1154
+    // fixed the matching -c=native/-m/-c=generated gap: serialize_expr.c's
+    // ND_VAR case now prints these (and strlen/strcmp above) using their
+    // literal __builtin_ spelling, the same way it already did for
+    // builtin_alloca, so no native declaration is ever needed either.
     Type *memset_ty               = func_type(vm, pointer_to(vm, ty_void));
     memset_ty->params             = pointer_to(vm, ty_void);
     memset_ty->params->next       = copy_type(vm, ty_int);
