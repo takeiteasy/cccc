@@ -1,4 +1,3 @@
-#include <stdlib.h>
 // CCCC_FLAGS: -O0
 // #981: a genuine user allocation (malloc & co, ALLOC_KIND_USER) sitting
 // above a heap-reclamation watermark must pin the bump pointer at its own
@@ -13,6 +12,8 @@
 // overwrites them), so this deliberately reads m back only *after* the
 // subsequent churn, once anything reusing its bytes would already have
 // clobbered them.
+#include <stdlib.h>
+
 static void churn_vlas(void) {
     // Deliberately much larger than u+m's combined footprint below, so
     // that if the pin were broken and heap_ptr wrongly rewound under m,

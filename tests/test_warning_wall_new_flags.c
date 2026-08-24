@@ -1,5 +1,5 @@
-// CCCC_FLAGS: -Wall -Wno-unused -Wno-return-type -Wno-implicit-int -Wno-shadow
-// -Wno-discarded-qualifiers CCCC_EXPECT_STDERR: \[-Wmultichar\]
+// CCCC_FLAGS: -Wall -Wno-unused -Wno-return-type -Wno-implicit-int -Wno-shadow -Wno-discarded-qualifiers
+// CCCC_EXPECT_STDERR: \[-Wmultichar\]
 // CCCC_EXPECT_STDOUT: done
 
 #include <stdbool.h>

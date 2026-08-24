@@ -1,7 +1,6 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: __atomic_compare_exchange_n\(&x, &expected, 15, 0,
-// __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST\) CCCC_REJECT_STDOUT: unsupported expr
-// kind
+// CCCC_EXPECT_STDOUT: __atomic_compare_exchange_n\(&x, &expected, 15, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST\)
+// CCCC_REJECT_STDOUT: unsupported expr kind
 //
 // The four atomic node kinds map onto the host `__atomic_*` builtins with
 // the same contract the VM's opcodes have: compare-and-swap takes a

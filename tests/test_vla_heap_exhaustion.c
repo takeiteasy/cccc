@@ -4,9 +4,9 @@
 // cumulative, 4x the reservation) all within one loop in one frame. Without
 // reclamation this exhausts the heap and the program dies; with it, the
 // bump pointer rewinds every iteration and the cumulative allocation never
-// exceeds one VLA's worth. Deliberately no CCCC_FLAGS override (and no
-// CCCC_MATRIX_SKIP) -- unlike the address-identity tests, this is robust to
-// any amount of instruction reordering under any optimization level: either
+// exceeds one VLA's worth. Deliberately no per-test flags override (and no
+// matrix-skip annotation) -- unlike the address-identity tests, this is robust
+// to any amount of instruction reordering under any optimization level: either
 // the heap is reclaimed or the program dies, nothing in between.
 int main(void) {
     long long k = 1024 * 1024; // 4 MiB of int

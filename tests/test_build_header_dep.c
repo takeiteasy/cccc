@@ -1,5 +1,5 @@
-// CCCC_FLAGS: --build --build-cache=build/test_header_dep_cache
-// --build-out-dir=build/test_header_dep_out CCCC_EXPECT_STDOUT: header_dep_ok
+// CCCC_FLAGS: --build --build-cache=build/test_header_dep_cache --build-out-dir=build/test_header_dep_out
+// CCCC_EXPECT_STDOUT: header_dep_ok
 //
 // #851: header-dependency (-MMD) tracking, and the CAS soundness rule that
 // must accompany it. Runs three phases against the SAME target inside one

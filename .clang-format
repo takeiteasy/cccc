@@ -3,6 +3,11 @@ IndentWidth: 4
 UseTab: Never
 TabWidth: 4
 ColumnLimit: 80
+# #1153: never reflow/wrap a test-header directive comment onto a second
+# line -- tools/testing/header.py's parser only reads a directive's own
+# physical line, so a clang-format-introduced wrap silently truncates it
+# (e.g. CCCC_FLAGS's trailing flags just vanish with no error).
+CommentPragmas: '^\s*(CCCC_[A-Z0-9_]+|EXPECT_COMPILE_ERROR|EXPECT_RUNTIME_ERROR)'
 BreakBeforeBraces: Custom
 BraceWrapping:
   AfterFunction: false

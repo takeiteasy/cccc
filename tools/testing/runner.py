@@ -7,17 +7,13 @@ from pathlib import Path
 
 from . import LEAKS_SKIP_TESTS, leak_pass_wants_vm_heap, vm_profile_path
 from .c4 import run_c4_roundtrip
+from .header import parse_test_header
 from .native import run_native_roundtrip
 
 
 def has_matrix_skip(test_file):
     """Return True if test_file carries a CCCC_MATRIX_SKIP annotation in its header."""
-    try:
-        with open(test_file, "r") as f:
-            header_lines = [f.readline() for _ in range(5)]
-    except Exception:
-        return False
-    return any("CCCC_MATRIX_SKIP" in line for line in header_lines)
+    return parse_test_header(test_file).matrix_skip is not None
 
 
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
@@ -35,72 +31,26 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
-    is_negative_test = False
-    expects_runtime_error = False
-    is_testing_mode = False
-    is_build_mode = False
-    per_test_flags = []
-    per_test_run_args = []
-    expect_stderr = None
-    reject_stderr = None
-    expect_stdout = None
-    reject_stdout = None
-    expect_leak_reason = None
-    leak_suppressed = False
     stdout = ""
     stderr = ""
-    try:
-        with open(test_file, "r") as f:
-            header_lines = [f.readline() for _ in range(5)]
-            header = "".join(header_lines)
-            if "EXPECT_COMPILE_ERROR" in header:
-                is_negative_test = True
-            if "EXPECT_RUNTIME_ERROR" in header:
-                expects_runtime_error = True
-            c4_skip = False
-            native_skip = None
-            matrix_skip_reason = None
-            leaks_keep_vm_heap = False
-            for line in header_lines:
-                if "CCCC_C4_SKIP" in line:
-                    c4_skip = True
-                if "CCCC_NATIVE_SKIP" in line:
-                    if ":" in line:
-                        native_skip = line.split("CCCC_NATIVE_SKIP:", 1)[1].strip().rstrip("*/").strip()
-                    else:
-                        native_skip = "native-incompatible"
-                if "CCCC_LEAKS_KEEP_VM_HEAP" in line:
-                    leaks_keep_vm_heap = True
-                if "CCCC_EXPECT_LEAK" in line:
-                    if ":" in line:
-                        expect_leak_reason = line.split("CCCC_EXPECT_LEAK:", 1)[1].strip().rstrip("*/").strip()
-                    else:
-                        expect_leak_reason = "expected leak"
-                if "CCCC_MATRIX_SKIP" in line:
-                    if ":" in line:
-                        matrix_skip_reason = line.split("CCCC_MATRIX_SKIP:", 1)[1].strip().rstrip("*/").strip()
-                    else:
-                        matrix_skip_reason = "matrix-incompatible"
-                if "CCCC_FLAGS:" in line:
-                    flags_str = line.split("CCCC_FLAGS:", 1)[1].strip().rstrip("*/").strip()
-                    per_test_flags = flags_str.split()
-                    if "--testing" in per_test_flags:
-                        is_testing_mode = True
-                    if "--build" in per_test_flags:
-                        is_build_mode = True
-                if "CCCC_RUN_ARGS:" in line:
-                    args_str = line.split("CCCC_RUN_ARGS:", 1)[1].strip().rstrip("*/").strip()
-                    per_test_run_args = args_str.split()
-                if "CCCC_EXPECT_STDERR:" in line:
-                    expect_stderr = line.split("CCCC_EXPECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
-                if "CCCC_REJECT_STDERR:" in line:
-                    reject_stderr = line.split("CCCC_REJECT_STDERR:", 1)[1].strip().rstrip("*/").strip()
-                if "CCCC_EXPECT_STDOUT:" in line:
-                    expect_stdout = line.split("CCCC_EXPECT_STDOUT:", 1)[1].strip().rstrip("*/").strip()
-                if "CCCC_REJECT_STDOUT:" in line:
-                    reject_stdout = line.split("CCCC_REJECT_STDOUT:", 1)[1].strip().rstrip("*/").strip()
-    except Exception:
-        pass
+
+    header = parse_test_header(test_file)
+    is_negative_test = header.is_negative_test
+    expects_runtime_error = header.expects_runtime_error
+    is_testing_mode = header.is_testing_mode
+    is_build_mode = header.is_build_mode
+    per_test_flags = header.flags
+    per_test_run_args = header.run_args
+    expect_stderr = header.expect_stderr
+    reject_stderr = header.reject_stderr
+    expect_stdout = header.expect_stdout
+    reject_stdout = header.reject_stdout
+    expect_leak_reason = header.expect_leak
+    leak_suppressed = False
+    c4_skip = header.c4_skip
+    native_skip = header.native_skip
+    matrix_skip_reason = header.matrix_skip
+    leaks_keep_vm_heap = header.leaks_keep_vm_heap
 
     # In matrix mode, strip any -On from per-test flags so they cannot
     # override the matrix sweep flags injected via cccc_args.

@@ -1,6 +1,5 @@
-// CCCC_FLAGS: --build --build-cache=build/test_link_staleness_cache
-// --build-out-dir=build/test_link_staleness_out CCCC_EXPECT_STDOUT: \(up to
-// date\) linkstale_app CCCC_EXPECT_STDOUT: link_staleness_ok
+// CCCC_FLAGS: --build --build-cache=build/test_link_staleness_cache --build-out-dir=build/test_link_staleness_out
+// CCCC_EXPECT_STDOUT: (?=[\s\S]*\(up to date\) linkstale_app)(?=[\s\S]*link_staleness_ok)
 //
 // #851: link-step staleness. Only kind=bytecode targets had any incremental
 // check at the link/archive step before this; a native EXE relinked

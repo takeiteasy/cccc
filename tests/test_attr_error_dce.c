@@ -26,7 +26,7 @@
 // length, making the branch statically dead.
 //
 // Live calls in a live branch still error; that is covered by the existing
-// test_attr_error.c and test_attr_error_live*.c (EXPECT_COMPILE_ERROR).
+// test_attr_error.c and test_attr_error_live*.c (compile-error tests).
 
 #include <stddef.h>
 

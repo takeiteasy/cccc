@@ -1,7 +1,6 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: ,
-// &__cccc_tmp[0-9]+(\.x|\.y)?\).*&\(\*__cccc_tmp[0-9]+\)\.y CCCC_REJECT_STDOUT:
-// &\(__builtin_memset|&\(__cccc_tmp[0-9]+ =|\)\.x;|\*__cccc_tmp[0-9]+\.y
+// CCCC_EXPECT_STDOUT: , &__cccc_tmp[0-9]+(\.x|\.y)?\).*&\(\*__cccc_tmp[0-9]+\)\.y
+// CCCC_REJECT_STDOUT: &\(__builtin_memset|&\(__cccc_tmp[0-9]+ =|\)\.x;|\*__cccc_tmp[0-9]+\.y
 //
 // #1102: taking the address of a block-scope compound literal lowers to
 // ND_ADDR over ND_COMMA(memzero+assignments..., hidden temp var), and the

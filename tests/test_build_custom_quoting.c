@@ -1,10 +1,5 @@
 // CCCC_FLAGS: --build
-// CCCC_EXPECT_STDOUT: premidpost
-// CCCC_EXPECT_STDOUT: -DX="s"
-// CCCC_EXPECT_STDOUT: a"b
-// CCCC_EXPECT_STDOUT: a;b
-// CCCC_EXPECT_STDOUT: hello world
-// CCCC_EXPECT_STDOUT: a\|\|b\|
+// CCCC_EXPECT_STDOUT: (?=[\s\S]*premidpost)(?=[\s\S]*-DX="s")(?=[\s\S]*a"b)(?=[\s\S]*a;b)(?=[\s\S]*hello world)(?=[\s\S]*a\|\|b\|)
 //
 // RunCustom's vendored shell used to do no POSIX quote removal at all: a
 // quote only mattered as the very first character of a word, and even then

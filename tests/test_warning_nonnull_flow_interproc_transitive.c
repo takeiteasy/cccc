@@ -1,6 +1,7 @@
 // CCCC_FLAGS: -Wmaybe-nonnull
-// CCCC_EXPECT_STDERR: argument may be null when passed to a parameter marked
-// nonnull \(parameter 1\) Follow-up to #690 (#693): relay() has no literal null
+// CCCC_EXPECT_STDERR: argument may be null when passed to a parameter marked nonnull \(parameter 1\)
+//
+// Follow-up to #690 (#693): relay() has no literal null
 // return itself -- its only return path is a call to maybe_null(), which is
 // flagged. The fixpoint loop in check_may_return_null_summaries() now
 // propagates may_return_null through relay() transitively.

@@ -15,6 +15,8 @@ Sub-suites:
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
+  audit_test_headers  — tests/**/*.c CCCC_*/EXPECT_* header directive damage audit (ticket #1153)
+  test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
@@ -337,6 +339,54 @@ def _run_audit_ffi_suite():
         return f"FAILED ({e})", False
 
 
+def _run_audit_test_headers_suite():
+    """Run the tests/**/*.c header-directive damage audit (#1153).
+
+    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "audit_test_headers.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("audit_test_headers", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # argv=[] (not None, which would fall through to run_tests.py's own
+        # sys.argv) -- default testdir "tests", hard-fail mode.
+        rc = mod.main([])
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_header_parse_unit_tests():
+    """Run tools/testing/test_header_parse.py's parse_test_header() unit
+    tests (#1153). Pure in-memory tests -- no cccc binary needed. Returns
+    (status_str, ok).
+    """
+    script = _TOOLS_DIR / "testing" / "test_header_parse.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_header_parse", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_audit_reflection_enums_suite():
     """Run reflection.h TypeKind/NodeKind/AttrTargetKind vs internal enum
     value audit (#860).
@@ -605,6 +655,20 @@ def main():
     audit_status, ok_audit = _run_audit_ffi_suite()
     print(f"  {audit_status}")
     suite_results["audit_ffi"] = ok_audit
+
+    # --- Test-header directive damage audit (#1153) ---
+    print()
+    print("[ audit_test_headers ]")
+    hdr_audit_status, ok_hdr_audit = _run_audit_test_headers_suite()
+    print(f"  {hdr_audit_status}")
+    suite_results["audit_test_headers"] = ok_hdr_audit
+
+    # --- Test-header parser unit tests (#1153) ---
+    print()
+    print("[ test_header_parse ]")
+    hdr_unit_status, ok_hdr_unit = _run_header_parse_unit_tests()
+    print(f"  {hdr_unit_status}")
+    suite_results["test_header_parse"] = ok_hdr_unit
 
     # --- Reflection FFI generation check (#859) ---
     print()

@@ -5,6 +5,46 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- `tools/testing/header.py`: shared, anchored, whole-header-block parser for
+  `tests/**/*.c` `CCCC_*`/`EXPECT_*` directive comments, replacing three
+  independent 5-line-window substring scans (#1153). A directive on line 6+
+  (pushed past the old fixed window by longer prose above it) used to be
+  silently never read — the assertion it named became vacuously true.
+- `tools/audit_test_headers.py`: hard-fails the `test` build target if a
+  known directive appears unanchored (wrapped or merged into prose), after
+  the header block ends, misspelled, or with an empty/non-regex value — the
+  recurrence guard for #1153.
+- `.clang-format`'s `CommentPragmas` excludes every directive comment from
+  line-wrap reflow, so a future `clang-format` pass can no longer silently
+  truncate a `CCCC_FLAGS`/`CCCC_EXPECT_STDERR`/etc value onto an unread
+  continuation line (#1153).
+- `tools/testing/test_header_parse.py`: unit tests for the new parser.
+- `tests/test_builtin_str_mem_no_include_1154.c`: asserts
+  `__builtin_strlen`/`strcmp`/`memset`/`memcpy`/`memmove`/`memcmp` serialize
+  with their literal `__builtin_` spelling and never the bare libc name,
+  with no `#include` at all.
+
+### Fixed
+
+- ~30 `tests/**/*.c` files whose header directives were silently damaged by
+  the #1153 parser gap (a directive past line 5 never read, a directive
+  wrapped or merged into prose by a stale `clang-format` pass, or a repeated
+  `CCCC_EXPECT_STDOUT:` silently discarding all but the last occurrence) —
+  every affected assertion, flag, or skip annotation is now actually
+  enforced.
+- `__builtin_strlen`/`__builtin_strcmp`/`__builtin_memset`/`memcpy`/
+  `memmove`/`memcmp` used to serialize under `-c=native`/`-m`/`-c=generated`
+  as a plain call to the bare libc name with no declaration, needing the
+  caller's own `#include <string.h>` even though the VM path and real
+  GCC/clang both need none. `serialize_expr.c`'s `ND_VAR` case now prints
+  all six using their literal `__builtin_` spelling, the same way it
+  already did for `__builtin_alloca` (#1154).
+- `__has_builtin(__builtin_memcpy)`/`memset`/`memmove`/`memcmp` returned
+  false while the builtins themselves worked — `#1144` added the parse arms
+  but never added them to `is_has_builtin_supported()`'s table.
+
 ## [0.3.8] - 2026-08-24
 
 ### Added

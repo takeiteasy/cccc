@@ -559,8 +559,9 @@ int test_vla_2d_brace_init_short(void) {
 // #982: the six cases above all passed at the default safety level but
 // failed under -2/-3's CCCC_BOUNDS_CHECKS/CCCC_MEMORY_POISONING -- that gap
 // is exactly why they went unnoticed until #979/#980's verification pass.
-// Re-run each at -2 here (pinned via flags = "-2", not CCCC_FLAGS:, so only
-// these duplicates get bounds checks, not the whole suite) so a regression
+// Re-run each at -2 here (pinned via the per-test flags = "-2" attribute,
+// not a header CCCC_FLAGS directive, so only these duplicates get bounds
+// checks, not the whole suite) so a regression
 // in the CHKB/CHKBN split or the VLA memzero fix is caught at the safety
 // level it actually broke at.
 [[cccc::test(return = 42, flags = "-2")]]

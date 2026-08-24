@@ -15,16 +15,9 @@ import re
 import sys
 from pathlib import Path
 
-# ── annotation regexes (checked in first 5 lines, matching tests.py behaviour)
-RE_COMPILE_ERROR  = re.compile(r'\bEXPECT_COMPILE_ERROR\b')
-RE_RUNTIME_ERROR  = re.compile(r'\bEXPECT_RUNTIME_ERROR\b')
-RE_EXPECT_STDERR  = re.compile(r'\bCCCC_EXPECT_STDERR\s*:')
-RE_EXPECT_STDOUT  = re.compile(r'\bCCCC_EXPECT_STDOUT\s*:')
-RE_REJECT_STDERR  = re.compile(r'\bCCCC_REJECT_STDERR\s*:')
-RE_REJECT_STDOUT  = re.compile(r'\bCCCC_REJECT_STDOUT\s*:')
-RE_FLAGS          = re.compile(r'\bCCCC_FLAGS\s*:\s*(.+)')
-RE_TESTING_FLAG   = re.compile(r'--testing\b')
-RE_BUILD_FLAG     = re.compile(r'--build\b')
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from testing.header import parse_test_header
+
 # -M (--memory-leak-detection) and -m (--dump-expanded) were previously
 # conflated here; -M is a safety flag, not an output mode, so it's dropped.
 # -G folded into -c=generated/-c=gen/-c=g (#936) -- only the generated
@@ -47,17 +40,6 @@ RE_RETURN_42      = re.compile(r'\breturn\s+42\s*;')
 RE_PRINTF_VALUE   = re.compile(r'\bprintf\s*\([^)]*%[diouxXeEfgGcs]')
 
 
-def read_header(path, n=5):
-    """Return first n lines of file as a single string."""
-    lines = []
-    with open(path, encoding='utf-8', errors='replace') as f:
-        for i, line in enumerate(f):
-            if i >= n:
-                break
-            lines.append(line)
-    return ''.join(lines)
-
-
 def read_all(path):
     with open(path, encoding='utf-8', errors='replace') as f:
         return f.read()
@@ -65,20 +47,19 @@ def read_all(path):
 
 def classify(path):
     """Return (category, notes) for a single test file."""
-    hdr  = read_header(path)
+    header = parse_test_header(path)
     body = read_all(path)
 
-    has_compile_error  = bool(RE_COMPILE_ERROR.search(hdr))
-    has_runtime_error  = bool(RE_RUNTIME_ERROR.search(hdr))
-    has_expect_stderr  = bool(RE_EXPECT_STDERR.search(hdr))
-    has_expect_stdout  = bool(RE_EXPECT_STDOUT.search(hdr))
-    has_reject_stderr  = bool(RE_REJECT_STDERR.search(hdr))
-    has_reject_stdout  = bool(RE_REJECT_STDOUT.search(hdr))
+    has_compile_error  = header.is_negative_test
+    has_runtime_error  = header.expects_runtime_error
+    has_expect_stderr  = header.expect_stderr is not None
+    has_expect_stdout  = header.expect_stdout is not None
+    has_reject_stderr  = header.reject_stderr is not None
+    has_reject_stdout  = header.reject_stdout is not None
 
-    flags_match = RE_FLAGS.search(hdr)
-    flags_str   = flags_match.group(1).strip() if flags_match else ''
-    has_testing  = bool(RE_TESTING_FLAG.search(flags_str))
-    has_build    = bool(RE_BUILD_FLAG.search(flags_str))
+    flags_str    = ' '.join(header.flags)
+    has_testing  = header.is_testing_mode
+    has_build    = header.is_build_mode
     has_output   = bool(RE_OUTPUT_FLAG.search(flags_str))
 
     notes = []

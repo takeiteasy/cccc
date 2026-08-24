@@ -1016,6 +1016,61 @@ Use `--test-suite=NAME` to run only tests whose suite matches `NAME`:
 > A hook scoped to `math` does **not** automatically run for `math/trig` tests
 > unless the hook is declared with the `inherit` keyword (see [Setup and Teardown](#setup-and-teardown)).
 
+## Test-File Header Directives
+
+Legacy single-file tests (`tests/test_*.c` and `tests/suites/test_suite_*.c`,
+as opposed to the `[[cccc::test]]` per-function attribute API above) are
+driven by `CCCC_*`/`EXPECT_*` directive comments in the file's leading
+header comment block, parsed by `tools/testing/header.py`'s
+`parse_test_header()` and consumed by `tools/testing/runner.py`,
+`tools/triage_tests.py`, and `tools/audit_test_headers.py`.
+
+| Directive | Value | Meaning |
+|---|---|---|
+| `EXPECT_COMPILE_ERROR` | bare | The file must fail to compile (see [Negative Tests](#negative-tests) below). |
+| `EXPECT_RUNTIME_ERROR` | bare | The compiled program must exit via the runtime-safety-violation trap (see [Runtime Safety Violations](#runtime-safety-violations)). |
+| `CCCC_FLAGS:` | flags | Extra command-line flags passed to `cccc` for this test only. |
+| `CCCC_RUN_ARGS:` | args | Arguments passed to the compiled/run program after `--`, not to `cccc` itself. |
+| `CCCC_EXPECT_STDOUT:` | regex | stdout must match this regex. |
+| `CCCC_REJECT_STDOUT:` | regex | stdout must **not** match this regex. |
+| `CCCC_EXPECT_STDERR:` | regex | stderr must match this regex. |
+| `CCCC_REJECT_STDERR:` | regex | stderr must **not** match this regex. |
+| `CCCC_C4_SKIP[: reason]` | bare or reason | Skip this test under `--c4` (bytecode round-trip). |
+| `CCCC_NATIVE_SKIP[: reason]` | bare or reason | Skip this test under `--native` (see [Native round-trip mode](#native-round-trip-mode---native)). |
+| `CCCC_MATRIX_SKIP[: reason]` | bare or reason | Skip this test under `--matrix` (per-optimization-pass sweep). |
+| `CCCC_EXPECT_LEAK[: reason]` | bare or reason | This test is expected to leak under `--leaks`; the reason is informational only (see [Memory leak detection](#memory-leak-detection---leaks)). |
+| `CCCC_LEAKS_KEEP_VM_HEAP` | bare | Force the VM-heap-backed allocator under `--leaks` (see [Memory leak detection](#memory-leak-detection---leaks)). |
+
+Only one instance of a given directive is honored per file (repeating it
+overwrites the earlier value, it does not accumulate) — combine multiple
+required substrings into one regex with lookaheads,
+`(?=[\s\S]*first)(?=[\s\S]*second)`, the pattern already used throughout the
+corpus, rather than repeating `CCCC_EXPECT_STDOUT:` more than once.
+
+**Anchoring rule (#1153).** A directive is only recognised when it is
+*anchored*: the first token of its comment line (after stripping a leading
+`//`, `/*`, or ` * ` continuation marker), each directive on its own single
+physical line. `EXPECT_COMPILE_ERROR`/`EXPECT_RUNTIME_ERROR` may share a
+line with one immediately-following directive (the widely-used
+`// EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2` idiom); no other directive
+combination does. The parser reads the whole leading comment block (blank
+lines don't end it — an explanatory paragraph, a blank line, then the
+directive block is a common and supported layout — but the first genuine
+code line does), not a fixed line-count window, so a directive is never
+silently dropped just because prose above it pushed it past some line
+number. `.clang-format`'s `CommentPragmas` setting excludes every directive
+comment from line-wrap reflow, so a `clang-format` pass can never wrap one
+onto a continuation line the parser would then fail to see — a directive
+must still fit its own single line, since the parser deliberately does not
+join continuation lines (a wrapped regex's tail and any following prose are
+indistinguishable once split across lines).
+
+`tools/audit_test_headers.py` (wired into the `test` build target as the
+`audit_test_headers` sub-suite) hard-fails CI if a known directive name
+appears unanchored (wrapped or merged into prose), appears after the header
+block ends, is spelled with a typo, or has an empty/non-regex value — the
+recurrence guard for the whole class of bug #1153 fixed.
+
 ## Negative Tests
 
 Mark a test with `error = "pattern"` to assert that the function body fails to compile with a diagnostic matching the given substring:

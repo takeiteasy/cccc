@@ -1,8 +1,10 @@
-// Ticket #344: verify --test-suite= hierarchical filtering for nested
-// sub-suites. Runs with --list-tests so no tests actually execute; stdout is
-// the test list. CCCC_FLAGS: --testing --list-tests --test-suite=outer
+// CCCC_FLAGS: --testing --list-tests --test-suite=outer
 // CCCC_EXPECT_STDOUT: (?s)suite: outer.*suite: outer/inner
 // CCCC_REJECT_STDOUT: suite: unrelated
+//
+// Ticket #344: verify --test-suite= hierarchical filtering for nested
+// sub-suites. Runs with --list-tests so no tests actually execute; stdout is
+// the test list.
 
 // Three suites: "outer", "outer/inner", and "unrelated".
 // With --test-suite=outer the filter should include "outer" and "outer/inner"

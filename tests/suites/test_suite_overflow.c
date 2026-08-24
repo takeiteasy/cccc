@@ -6,8 +6,8 @@
 //  - test_ffi_fatal_error and test_ffi_type_check_arity use --ffi-deny= /
 //    --ffi-type-checking which cannot be per-test flags; those stay external.
 //  - test_stack_overflow_large_frame exits 42 (VM heap holds the 4 MB array);
-//    it was passing via exit 42, not the EXPECT_RUNTIME_ERROR path — migrate
-//    it as a normal behavioral test instead.
+//    it was passing via exit 42, not via a runtime-error expectation —
+//    migrate it as a normal behavioral test instead.
 
 #include "limits.h"
 #include <stdint.h>
