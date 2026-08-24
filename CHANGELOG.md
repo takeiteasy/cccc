@@ -7,6 +7,20 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `include/dlfcn.h`'s `RTLD_LAZY`/`RTLD_NOW`/`RTLD_LOCAL`/`RTLD_GLOBAL` were
+  hardcoded at glibc's numeric encoding on every platform. macOS uses
+  different values, and glibc's `RTLD_GLOBAL` (`0x100`) collides with
+  macOS's own `RTLD_FIRST` — a guest asking for `RTLD_GLOBAL` on macOS
+  actually passed `RTLD_FIRST` to the real host `dlopen()`, on both the VM
+  and `-c=native` (`mode` is forwarded to the host `dlopen()` unchanged on
+  both backends). Fixed by deriving every `RTLD_*` value from the real
+  host `<dlfcn.h>` this `cccc` binary was built against
+  (`init_dlfcn_macros()`, `src/preprocess.c`), the same pattern
+  `init_errno_macros()` uses for `errno.h`, rather than hand-transcribing
+  them. The full family is now available, gated per-platform (`RTLD_FIRST`
+  on macOS; `RTLD_DEEPBIND`/`RTLD_BINDING_MASK` on Linux); a flag the host
+  libdl doesn't have is simply undefined, so misuse is a compile error
+  rather than a silently wrong integer (#1152).
 - `VarScope` (`src/parse_internal.h`) and `VarScopeNode` (`src/cccc.h`) had
   silently diverged in layout — #1095 appended two fields to `VarScope` and
   never mirrored them onto `VarScopeNode`, though every scope-push

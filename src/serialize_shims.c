@@ -2419,9 +2419,11 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 // cccc_clear_dyn_error's own call sites.
 //
 // `mode` is passed through to the real dlopen() unchanged, matching the
-// VM's own behaviour byte-for-byte -- including its documented, unrelated
-// bug of assuming glibc's RTLD_LOCAL/RTLD_GLOBAL encoding even on macOS,
-// where the real values differ (tracked separately, not fixed here).
+// VM's own behaviour byte-for-byte. This is correct on every platform:
+// the guest's RTLD_* macros (include/dlfcn.h) are derived from the real
+// host <dlfcn.h> this cccc binary was built against (init_dlfcn_macros(),
+// src/preprocess.c), not hand-transcribed, so `mode` already carries
+// values the host's own dlopen() understands (#1152).
 void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // #1088-style --emit-cccc exemption: a consumer cccc already has the
     // real DLOPEN/DLSYM/DLCLOSE/DLERROR opcodes, so emitting shim

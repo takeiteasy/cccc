@@ -588,16 +588,17 @@ path). When that happens, a replayed `#include <foo.h>` in the generated TU
 resolves back to CCCC's own copy of `foo.h` instead of the host's — fine for
 most headers, which are self-contained, but wrong for the handful that need
 macros only CCCC's own preprocessor injects (`fenv.h`'s
-`__CCCC_SIZEOF_FENV_T__`/`__CCCC_FE_*`, `errno.h`'s `__CCCC_E*__` — see
-`init_fenv_macros()`/`init_errno_macros()` in `src/preprocess.c`): a real
-host compiler reprocessing that text from scratch has never heard of them
-and fails outright (#1021).
+`__CCCC_SIZEOF_FENV_T__`/`__CCCC_FE_*`, `errno.h`'s `__CCCC_E*__`, `dlfcn.h`'s
+`__CCCC_RTLD_*__` — see `init_fenv_macros()`/`init_errno_macros()`/
+`init_dlfcn_macros()` in `src/preprocess.c`): a real host compiler
+reprocessing that text from scratch has never heard of them and fails
+outright (#1021).
 
-`include/fenv.h`, `include/errno.h`, `include/stdio.h`, `include/getopt.h`,
-`include/stdint.h`, `include/Availability.h`, and `include/sys/cdefs.h`
-handle this by guarding their whole CCCC-flavored body behind `#ifdef
-__CCCC__` (a macro CCCC's own preprocessor always defines before parsing
-any header, guest-side) and `#include_next`ing the host's own,
+`include/fenv.h`, `include/errno.h`, `include/dlfcn.h`, `include/stdio.h`,
+`include/getopt.h`, `include/stdint.h`, `include/Availability.h`, and
+`include/sys/cdefs.h` handle this by guarding their whole CCCC-flavored body
+behind `#ifdef __CCCC__` (a macro CCCC's own preprocessor always defines
+before parsing any header, guest-side) and `#include_next`ing the host's own,
 self-contained header in the `#else` branch — taken only when a genuine,
 non-CCCC compiler reprocesses this exact physical file, which only happens
 during `-c=native`/`-c=generated` serializer replay with `-I` pointed at

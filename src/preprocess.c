@@ -47,6 +47,9 @@
 #include "./internal.h"
 #include <fenv.h>  // host <fenv.h>, for init_fenv_macros() (#771)
 #include <errno.h> // host <errno.h>, for init_errno_macros() (#813)
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <dlfcn.h> // host <dlfcn.h>, for init_dlfcn_macros() (#1152)
+#endif
 
 #define MAX_PP_NESTING 1000
 
@@ -6120,10 +6123,61 @@ static void init_errno_macros(VirtualMachine *vm) {
 #undef E
 }
 
+// Inject the real host <dlfcn.h> RTLD_* values, so include/dlfcn.h (which
+// guest programs see) can define these in terms of __CCCC_RTLD_*__ instead
+// of a hand-maintained #ifdef __APPLE__ / #else table. #1152 was exactly
+// this failure mode: RTLD_LOCAL/RTLD_GLOBAL were hardcoded at glibc's values
+// unconditionally, so on macOS a guest asking for RTLD_GLOBAL (glibc 0x100)
+// actually passed RTLD_FIRST (Darwin's own 0x100) to the real host
+// dlopen() -- a different flag entirely, not just a different number for
+// the same flag. Same reasoning as init_errno_macros/init_fenv_macros
+// above (#779/#813/#771): deriving every value from this binary's own
+// compile-time <dlfcn.h> makes hand-transcription errors structurally
+// impossible.
+//
+// Flags with no equivalent on the host libdl (RTLD_FIRST on Linux,
+// RTLD_DEEPBIND/RTLD_BINDING_MASK on macOS) are simply never injected, so
+// the guest macro stays undefined and using it is a compile error -- the
+// #824 no-lossy-emulation policy, not a silently wrong integer.
+//
+// Deliberately NOT injected: the dlsym() pseudo-handles (RTLD_NEXT,
+// RTLD_DEFAULT, RTLD_SELF, RTLD_MAIN_ONLY). cccc_rt_dlsym (src/vm.c)
+// resolves its first argument through the VM's own dynamic-library
+// registry token table, not a raw host handle, so a pseudo-handle would
+// fail there ("invalid dynamic library handle") while working natively --
+// a new VM/native divergence, exactly what #1105 removed for dlclose.
+static void init_dlfcn_macros(VirtualMachine *vm) {
+#if !defined(_WIN32) && !defined(_WIN64)
+#define D(name)                                                                \
+    define_macro(vm, "__CCCC_" #name "__", arena_format(vm, "%d", name))
+    D(RTLD_LAZY);
+    D(RTLD_NOW);
+    D(RTLD_LOCAL);
+    D(RTLD_GLOBAL);
+#ifdef RTLD_NOLOAD
+    D(RTLD_NOLOAD);
+#endif
+#ifdef RTLD_NODELETE
+    D(RTLD_NODELETE);
+#endif
+#ifdef RTLD_FIRST        /* macOS only */
+    D(RTLD_FIRST);
+#endif
+#ifdef RTLD_DEEPBIND     /* glibc only */
+    D(RTLD_DEEPBIND);
+#endif
+#ifdef RTLD_BINDING_MASK /* glibc only */
+    D(RTLD_BINDING_MASK);
+#endif
+#undef D
+#endif
+}
+
 void init_macros(VirtualMachine *vm) {
     // Define predefined macros
     init_fenv_macros(vm);
     init_errno_macros(vm);
+    init_dlfcn_macros(vm);
     define_macro(vm, "__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_FLOAT__", "4");
