@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-08-24
+
 ### Added
 
 - `tests/test_implicit_function_error_1144.c`/`test_implicit_function_c89_
