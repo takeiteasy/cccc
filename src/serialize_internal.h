@@ -306,6 +306,7 @@ void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                           Obj *var);
 void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_native_accessor_shims(FILE *f, Obj *prog);
+void serialize_reallocarray_shim(FILE *f, Obj *prog);
 void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_static_assert(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                              Node *cond, const char *msg, int msg_len,

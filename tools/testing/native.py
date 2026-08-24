@@ -154,15 +154,24 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
     if reason:
         return _skip_result(idx, test_name, reason, is_negative_test, expects_runtime_error)
 
-    # A negative/EXPECT_RUNTIME_ERROR/diagnostic-only test that also
-    # happens to carry --testing in its CCCC_FLAGS (a handful of legacy
-    # single-file tests exercising the --testing frontend itself, not a
-    # [[cccc::test]] suite corpus file) already has correct handling
-    # further below -- generic compile-fail/stderr-match, same as any
-    # other negative test. Only a genuinely positive testing-mode file
-    # routes to the generated suite harness.
-    if is_testing_mode and not (is_negative_test or expects_runtime_error
-                                or is_diagnostic_test):
+    # A negative/EXPECT_RUNTIME_ERROR test that also happens to carry
+    # --testing in its CCCC_FLAGS (a handful of legacy single-file tests
+    # exercising the --testing frontend itself, not a [[cccc::test]] suite
+    # corpus file) already has correct handling further below -- generic
+    # compile-fail/stderr-match, same as any other negative test.
+    #
+    # #1155: a diagnostic-only (CCCC_EXPECT_STDERR/CCCC_REJECT_STDERR) file
+    # used to be excluded here too, on the assumption it was one of those
+    # legacy single-file tests -- false in general: a [[cccc::test]] suite
+    # file can itself carry CCCC_EXPECT_STDERR (e.g.
+    # test_warning_return_unrecognized_operand.c, whose [[cccc::test]]
+    # function has no main()). Excluding it sent that file down the
+    # single-file path below, which still compiles *and links* (-c=native
+    # has no object-only mode) -- "undefined symbol: _main". A genuinely
+    # negative diagnostic test (EXPECT_COMPILE_ERROR + CCCC_EXPECT_STDERR,
+    # e.g. test_nested_suite_errors.c) is unaffected: is_negative_test
+    # already excludes it from this branch.
+    if is_testing_mode and not (is_negative_test or expects_runtime_error):
         return _run_testing_suite(idx, test_file, test_name, cccc, script_dir,
                                   cccc_args, per_test_flags, bench, process_timeout)
 
@@ -214,13 +223,19 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                 "elapsed": None, "vm_profile": None,
             }
 
-        # #1033: a diagnostic-only test that also carries bare --testing in
-        # its CCCC_FLAGS (VM backend, the default) never reaches -c=native
-        # at all -- cc_run_tests runs the [[cccc::test]] suite in-VM and
-        # bails before the native dispatch, by design, so no artifact is
-        # ever written even on a fully successful compile+test run. Only
-        # require the artifact to exist for the ordinary (non-testing-mode)
-        # diagnostic path, where -c=native genuinely does produce one.
+        # #1033/#1106/#1155: is_testing_mode can still reach this point --
+        # not diagnostic-only ones any more (those route to
+        # _run_testing_suite above, #1155), but an EXPECT_RUNTIME_ERROR
+        # testing-mode file still lands here with compile_only=True. Unlike
+        # #1033's original claim, main.c:3547-3559 (#1106) DOES fall through
+        # to the native dispatch once cc_run_tests's own VM pre-pass
+        # succeeds -- but an EXPECT_RUNTIME_ERROR file's own [[cccc::test]]
+        # is expected to trap, so the VM pre-pass itself reports failure and
+        # main.c's own gate bails before ever reaching -c=native, so no
+        # artifact is written here either, just for a different reason than
+        # #1033 originally described. Only require the artifact to exist for
+        # the ordinary (non-testing-mode) diagnostic/runtime-error path,
+        # where -c=native genuinely does produce one.
         artifact_ok = compiled.returncode == 0 and (
             out_path.exists() or (compile_only and is_testing_mode))
         if not artifact_ok:

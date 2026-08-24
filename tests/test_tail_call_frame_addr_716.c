@@ -2,6 +2,11 @@
 // CCCC_MATRIX_SKIP: exercises CALLT tail-call codegen, which requires -O1;
 // the per-pass matrix forces -O0 and would trivially pass without exercising
 // the bug this test guards against.
+// CCCC_NATIVE_SKIP: test_716_pure_recursion_still_correct asserts CCCC's own
+// tail-call elimination via 500k-deep recursion; the native build passes no
+// -O flag to the host cc (run_native_backend), so at the host's own -O0 the
+// same recursion is not TCO'd and overflows the stack (verified directly:
+// the identical C via host clang -O0 segfaults, -O2 returns correctly)
 //
 // #716: CALLT reuses the caller's frame (op_CALLT_fn does `sp = bp`), so a
 // tail call that hands the callee a pointer into the caller's own frame

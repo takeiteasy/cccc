@@ -1,6 +1,12 @@
 // CCCC_FLAGS: --testing
 // CCCC_LEAKS_KEEP_VM_HEAP: DYNOBJSZ needs AllocHeader; degrades to (size_t)-1
-// without it Tests for __builtin_dynamic_object_size(ptr, type).
+// without it
+// CCCC_NATIVE_SKIP: __builtin_dynamic_object_size lowers to clang's own
+// builtin natively, which lacks CCCC's VM-level frame-epoch/AllocHeader
+// tracking (escaping-aggregate-param and cross-longjmp liveness); found
+// while fixing #1155, tracked separately, not fixable by that ticket's
+// serializer changes
+// Tests for __builtin_dynamic_object_size(ptr, type).
 //
 // type bits (same encoding as __builtin_object_size):
 //   bit 0 = 0 → whole base object; bit 0 = 1 → nearest subobject

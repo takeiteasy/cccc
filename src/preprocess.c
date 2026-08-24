@@ -212,13 +212,60 @@ static Token *skip_line(VirtualMachine *vm, Token *tok) {
     return tok;
 }
 
+// #1155: a captured `#include` line's operand can carry incidental internal
+// whitespace CCCC's own tokenizer tolerates (`#include < glob.h>` compiles
+// fine under CCCC -- read_include_filename()/join_tokens() skip the
+// separator before the *first* filename token, so the resolved path is
+// still exactly "glob.h") but a real host cc's preprocessor does not: it
+// treats the `<...>`/`"..."` span as one opaque header-name token, so a
+// leading space makes it look for a file literally named " glob.h" and
+// fail ("' glob.h' file not found, did you mean 'glob.h'?"). Strip
+// whitespace immediately inside the two delimiters, in place -- a header
+// name can never legally contain a space itself (POSIX/C), so this can't
+// be over-eager. Applied to the fully-assembled line so it covers both
+// copiers below (a routed line's route-qualifier tokens, e.g. `@shared`,
+// never themselves contain `<`/`"`, so the first delimiter found here is
+// always the operand's own).
+static void normalize_include_operand_spacing(char *line) {
+    if (!line || line[0] != '#')
+        return;
+    char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (strncmp(p, "include", 7) != 0)
+        return;
+    p          += 7;
+    char *open  = strpbrk(p, "<\"");
+    if (!open)
+        return;
+    char  close_ch = (*open == '<') ? '>' : '"';
+    char *start    = open + 1;
+    char *end      = strchr(start, close_ch);
+    if (!end)
+        return;
+    char *content = start;
+    while (content < end && (*content == ' ' || *content == '\t'))
+        content++;
+    char *content_end = end;
+    while (content_end > content &&
+           (content_end[-1] == ' ' || content_end[-1] == '\t'))
+        content_end--;
+    if (content == start && content_end == end)
+        return;                                         // nothing to strip
+    size_t content_len = (size_t)(content_end - content);
+    memmove(start, content, content_len);
+    memmove(start + content_len, end, strlen(end) + 1); // +1 for NUL
+}
+
 static char *copy_raw_directive_line(VirtualMachine *vm, Token *start) {
     char *end = start->loc;
     while (*end && *end != '\n')
         end++;
     if (end > start->loc && end[-1] == '\r')
         end--;
-    return arena_strndup(vm, start->loc, end - start->loc);
+    char *line = arena_strndup(vm, start->loc, end - start->loc);
+    normalize_include_operand_spacing(line);
+    return line;
 }
 
 static char *copy_routed_directive_line(VirtualMachine *vm, Token *hash,
@@ -252,6 +299,7 @@ static char *copy_routed_directive_line(VirtualMachine *vm, Token *hash,
         wrote_space = true;
     }
 #undef APPEND_BYTES
+    normalize_include_operand_spacing(line);
     return line;
 }
 

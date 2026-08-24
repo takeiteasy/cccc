@@ -5,6 +5,35 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `VarScope` (`src/parse_internal.h`) and `VarScopeNode` (`src/cccc.h`) had
+  silently diverged in layout — #1095 appended two fields to `VarScope` and
+  never mirrored them onto `VarScopeNode`, though every scope-push
+  allocation casts a `VarScopeNode*` to `VarScope*`. The two fields aliased
+  `VarScopeNode`'s own `name`/`name_len`, so two or more `EnumAddConstant`
+  calls on a comptime-generated enum corrupted an earlier constant's own
+  name — silently on the VM path, a segfault under `-c=native` (the
+  corrupted `char*` was read back as a `Type*` by the serializer). Fixed by
+  restoring the full field-prefix match and adding a `static_assert` so the
+  two structs can't drift apart again unnoticed (#1155).
+- A captured `#include`'s operand tolerated incidental internal whitespace
+  under CCCC's own tokenizer (`#include @shared < glob.h>`) but replayed
+  that whitespace verbatim into `-c=native`/`-m`/`-c=generated` output,
+  where a real host cc's preprocessor treats the whole `<...>`/`"..."` span
+  as one opaque token and fails to find a file literally named `" glob.h"`.
+  Now normalized at capture time (#1155).
+- `reallocarray()` calls now round-trip through `-c=native` on hosts whose
+  libc doesn't provide the symbol (macOS) via an inline serializer shim,
+  rather than failing to link — see `man/COVERAGE.md`'s reallocarray entry
+  for how this differs from #1028's earlier decision not to fix it (#1155).
+- `tools/testing/native.py --native`: a `--testing` `[[cccc::test]]` suite
+  file that also carries `CCCC_EXPECT_STDERR`/`CCCC_REJECT_STDERR` (a
+  compile-time warning that doesn't fail any assertion) used to be routed
+  to the single-file compile-and-link path instead of the
+  `--testing=native` suite harness, failing at the linker for lack of
+  `main()` even though the suite itself passes cleanly (#1155).
+
 ## [0.3.9] - 2026-08-24
 
 ### Added

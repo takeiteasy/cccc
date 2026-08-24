@@ -21,6 +21,7 @@
 // serialize_expr_raw's statement-expression bridge helpers, string
 // literal escaping, block-capture/nested-env references, atomics,
 // comma chains, _BitInt masking (#1150).
+#include "./codegen_internal.h" // is_extern_func_name (#1155)
 #include "./serialize_internal.h"
 
 // Operator precedence (higher = binds tighter)
@@ -1695,8 +1696,24 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     fprintf(f, "); ");
                 }
             }
-            serialize_expr(f, vm, ctx, node->lhs, node_prec);
-            fprintf(f, "(");
+            // #1155: reallocarray is declared by CCCC's own bundled
+            // include/stdlib.h (routed through the VM heap's overflow-
+            // checked REALCA opcode, see codegen_expr.c) but has no
+            // definition on a host libc that lacks it (e.g. this SDK's
+            // macOS) -- and since the guest's own `#include <stdlib.h>`
+            // was captured and replayed, #901's bodiless-prototype pass
+            // correctly declines to re-derive a declaration for it (that
+            // header genuinely is in scope), leaving the emitted call
+            // entirely undeclared. Route through the __cccc_reallocarray
+            // accessor shim (serialize_native_accessor_shims,
+            // serialize_shims.c) instead of the real name, same shape as
+            // setjmp/longjmp's remap just above.
+            if (is_extern_func_name(node->lhs, "reallocarray")) {
+                fprintf(f, "__cccc_reallocarray(");
+            } else {
+                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+                fprintf(f, "(");
+            }
             // #1074: a direct call to a nested function needs its hidden
             // __static_link argument supplied explicitly -- the parser already
             // gave the callee's own signature a leading `void *__static_link`

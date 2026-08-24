@@ -2,6 +2,12 @@
 // CCCC_MATRIX_SKIP: exercises CALLT tail-call codegen, which requires -O1;
 // the per-pass matrix forces -O0 and would trivially pass without exercising
 // the bug this test guards against.
+// CCCC_NATIVE_SKIP: test_762_identity_cast_tail_recursion_still_tco asserts
+// CCCC's own tail-call elimination via 1M-deep recursion; the native build
+// passes no -O flag to the host cc (run_native_backend), so at the host's
+// own -O0 the same recursion is not TCO'd and overflows the stack (verified
+// directly: the identical C via host clang -O0 segfaults, -O2 returns
+// correctly)
 //
 // #762: the parser always wraps a `return` expression in ND_CAST, even for
 // identity conversions. To reach the underlying ND_FUNCALL for

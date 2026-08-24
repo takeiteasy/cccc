@@ -531,6 +531,15 @@ Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     return node;
 }
 
+// #1155: VarScope (parse_internal.h) is a prefix-layout view of
+// VarScopeNode (cccc.h) -- every allocation below allocates a VarScopeNode
+// and hands back a VarScope* cast of it. This pins that invariant at
+// compile time so the two can never drift again the way #1095 let them
+// (see VarScopeNode's own doc comment for what that corrupted).
+static_assert(offsetof(VarScopeNode, name) == sizeof(VarScope),
+              "VarScope must be a layout prefix of VarScopeNode (they are "
+              "cast between; see VarScopeNode's doc comment in cccc.h)");
+
 VarScope *push_scope(VirtualMachine *vm, char *name, int name_len) {
     VarScopeNode *node =
         arena_alloc(&vm->compiler.parser_arena, sizeof(VarScopeNode));

@@ -74,6 +74,10 @@ typedef struct {
     // between a declaration and its initializer.
     Type *enum_layout_ty;
     bool  enum_layout_is_align;
+    // #1155: every field above must appear in VarScopeNode (cccc.h), same
+    // order, as a leading prefix -- push_scope() (parse_core.c) allocates a
+    // VarScopeNode and callers cast it to VarScope*. See VarScopeNode's own
+    // doc comment for the corruption this drifted into once before.
 } VarScope;
 
 // Variable attributes such as typedef or extern.

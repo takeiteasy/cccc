@@ -3901,8 +3901,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // etc) -- only meaningful once the real headers above are visible, and
     // only outside generated_only (-c=generated), matching the from_include
     // filter's gating for the same reason (see the comment on this function).
-    if (!generated_only)
+    if (!generated_only) {
         serialize_native_accessor_shims(f, prog);
+        serialize_reallocarray_shim(f, prog); // #1155
+    }
     serialize_asm_prefix_preamble(f, prog);
 
     // Serialize file-scope type definitions before declarations that reference

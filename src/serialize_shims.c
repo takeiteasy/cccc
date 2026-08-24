@@ -262,6 +262,48 @@ void serialize_native_accessor_shims(FILE *f, Obj *prog) {
         fprintf(f, "\n");
 }
 
+// #1155: not part of native_accessor_shims above because that table's own
+// matching loop looks for a used Obj sharing the *shim's* name -- every
+// other entry there is reached through a macro expansion that makes that
+// true (e.g. `stdout` expands to a call to `__cccc_stdout`), but a guest
+// call to `reallocarray` reaches this shim through serialize_expr.c's
+// ND_FUNCALL remap (mirroring the setjmp/longjmp remap immediately above
+// it) instead, so the Obj that shows up as used is still named
+// "reallocarray", not "__cccc_reallocarray". reallocarray is declared by
+// CCCC's own bundled include/stdlib.h (routed through the VM heap's
+// overflow-checked REALCA opcode -- see codegen_expr.c/ops.c) but has no
+// definition on a host libc that lacks it (this SDK's macOS does not), and
+// since the guest's own `#include <stdlib.h>` is captured and replayed,
+// #901's bodiless-prototype pass correctly declines to re-derive a
+// declaration for it (that header genuinely is in scope) -- leaving the
+// emitted call entirely undeclared without this shim. The overflow check
+// mirrors the VM-side cccc_reallocarray polyfill (src/stdlib/stdlib.c) so
+// both backends agree on the ENOMEM-without-touching-ptr contract real
+// reallocarray(3) guarantees.
+void serialize_reallocarray_shim(FILE *f, Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->is_used)
+            continue;
+        if (strcmp(obj->name, "reallocarray") != 0)
+            continue;
+        // #include <errno.h> here rather than relying on the guest's own
+        // #include being replayed: reallocarray's failure contract
+        // (ENOMEM, ptr untouched) is part of *this shim's* semantics, not
+        // the guest source's, so it must hold regardless of what the guest
+        // itself included.
+        fprintf(f, "#include <errno.h>\n"
+                   "static void *__cccc_reallocarray(void *__cccc_p, "
+                   "size_t __cccc_n, size_t __cccc_s) {\n"
+                   "    if (__cccc_n && __cccc_s > (size_t)-1 / __cccc_n) {\n"
+                   "        errno = ENOMEM;\n"
+                   "        return 0;\n"
+                   "    }\n"
+                   "    return realloc(__cccc_p, __cccc_n * __cccc_s);\n"
+                   "}\n\n");
+        return;
+    }
+}
+
 // #1088: real definitions for the C11 <threads.h> family (thrd_*/mtx_*/
 // cnd_*/tss_*/call_once) under -c=native. <threads.h> is on
 // is_cccc_supplied_only_header() (preprocess.c) -- its own #include is

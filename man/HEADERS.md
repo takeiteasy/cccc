@@ -133,6 +133,17 @@ by default). Two things follow from that:
   otherwise be unresolvable to the native compiler, since the generated
   `.c` lives in a temp directory — so `run_native_backend` also forwards
   `-I<the primary file's own directory>` automatically.
+- The captured line's operand is normalized before replay
+  (`normalize_include_operand_spacing`, `preprocess.c`, #1155): incidental
+  whitespace immediately inside the `<...>`/`"..."` delimiters (e.g.
+  `#include @shared < glob.h>`, note the space) is tolerated by CCCC's own
+  tokenizer — `read_include_filename`/`join_tokens` skip the separator
+  before the first filename token, so the resolved path is still exactly
+  `glob.h` — but a real host cc's preprocessor treats the whole span as one
+  opaque header-name token and fails to find a file literally named
+  `" glob.h"`. Stripped in place on the fully-assembled captured line, so
+  `emit_include_paths`'s exact-text hashmap key stays in sync with what
+  gets replayed.
 - A captured conditional-group directive (`#if`/`#ifdef`/`#ifndef`/`#elif`/
   `#else`/`#endif`) is captured verbatim like any other top-level directive,
   but is **not** replayed into `-m`/`-c=native`/`-c=generated` output — it

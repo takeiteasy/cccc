@@ -2694,10 +2694,23 @@ typedef struct ComptimeVar {
 */
 /*!
  @brief Linked list node for variable/typedef scope entries.
- @details The first 4 fields match VarScope layout for safe casting.
+ @details EVERY field of VarScope (parse_internal.h) must appear here, in the
+          same order, as a leading prefix -- push_scope() (parse_core.c)
+          allocates a VarScopeNode and every caller (parse_types.c,
+          reflection.c) casts the returned pointer to VarScope* and writes
+          through it. #1095 (found while investigating #1155) added
+          enum_layout_ty/enum_layout_is_align to the end of VarScope without
+          adding them here, so they silently aliased this struct's own
+          name/name_len fields -- writing an enumerator's layout provenance
+          clobbered the *next* enumerator's own name pointer/length (or, from
+          the other direction, EnumAddConstant's name/name_len writes were
+          read back as a bogus Type* and bool), corrupting scope lookups on
+          the VM path and segfaulting the -c=native serializer when it
+          dereferenced the forged Type*. A `static_assert` in parse_core.c
+          pins this invariant so it can't drift again silently.
 */
 typedef struct VarScopeNode {
-    // VarScope fields (must come first for casting)
+    // VarScope fields (must come first for casting; keep in exact sync)
     Obj    *var;      /**< Pointer to variable object (if variable). */
     Type   *type_def; /**< Pointer to typedef type (if typedef). */
     Type   *enum_ty;  /**< Pointer to enum type (if enum constant). */
@@ -2705,6 +2718,10 @@ typedef struct VarScopeNode {
                          underlying types). */
     bool  is_deprecated;
     char *deprecated_msg;
+    // #1095/#1155: mirrors VarScope.enum_layout_ty/enum_layout_is_align
+    // exactly -- see this struct's own doc comment above.
+    Type *enum_layout_ty;
+    bool  enum_layout_is_align;
     // Additional fields for linked list
     char                *name;     /**< Variable or typedef name. */
     int                  name_len; /**< Length of name. */

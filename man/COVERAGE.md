@@ -1299,6 +1299,7 @@ they are listed here rather than left to be discovered:
 | `__builtin_alloca(n)` in a loop body that shares its block with a genuine VLA | each call gets its own address, live until the *frame* returns (`ALLOC_KIND_ALLOCA`), distinct from the VLA's own per-block storage (#981) | the host compiler's own stack-allocation lifetime, which is implementation-defined for multiple calls before the enclosing function returns — confirmed on clang -O0: a VLA sharing the block inserts a stacksave/stack-restore pair scoped to that block, so a bare `__builtin_alloca` call inside it gets the *same* address every iteration instead of a fresh one |
 | a `void`-returning entry function that falls off its end | codegen unconditionally loads 0 into the return register at the end of the entry function, regardless of its declared return type, so the process always exits 0 (#1031) | no equivalent injection — the host compiler leaves a `void main`'s exit status undefined, so it is whatever the ABI happened to leave in the return register (observed values are not stable across hosts/compilers) |
 | `argv[0]` in `cccc file.c` (bytecode-mode invocation, no `-c=native`) | synthesizes an `argv[0]` ending in `.c4`, mimicking the bytecode file the VM would have produced from `file.c` | the real host `execve()`-supplied `argv[0]` (the compiled binary's own path) — no bytecode file is ever produced, so there is nothing to translate the convention to (#1060) |
+| Tail-call elimination (`-O1`+, `CALLT`) | guaranteed: the VM reuses the caller's frame, so an arbitrarily deep tail-recursive call runs in constant stack space | not guaranteed. `run_native_backend` (`src/main.c`) passes no `-O` flag to the host cc, and `tools/testing/native.py` strips any the test itself requested (`-c=native` hard-errors on VM bytecode-pipeline flags) — the host therefore always builds at its own default optimization level (`-O0` for both clang and gcc), which does not itself perform TCO, so deep tail recursion overflows the host stack. Confirmed directly: the identical tail-recursive C compiled by host clang segfaults at `-O0` and returns correctly at `-O2`. Found while fixing #1155; `tests/test_tail_call_frame_addr_716.c`/`test_tail_call_narrowing_cast_762.c`'s TCO-depth assertions are `CCCC_NATIVE_SKIP`'d as a result, not fixed — forwarding an optimization level to the native `cc` invocation is tracked as a follow-up |
 | `sizeof`/`_Alignof` of a `from_include` type, reached through a bitfield width (`int x : sizeof(struct statfs);`) or a global initializer's byte image (`serialize_init_bytes`) — including an array dimension on a struct/union *member*, or on an *initialized* global | folds against CCCC's own (correct-for-the-VM) type projection | stays folded. A bitfield width determines the *containing struct's own layout*, which CCCC also emits — re-materializing the width would make the host compute different member offsets than CCCC folded for the rest of that struct, actively unsound rather than merely incomplete, so this is not attempted (#1099, `WONT_FIX`). An initialized global's byte image is sized off the folded value by `serialize_init_bytes`; re-materializing only its declared dimension would desync the two (same reasoning, member arrays inherit it via the enclosing aggregate; also `WONT_FIX`). A bare `sizeof(T)`/`_Alignof(T)` *expression* (#1031), a *local or uninitialized-global* array dimension, a `case` label, and an enum value (#1095) all re-materialize the operator textually against the real host layout instead — see `man/HEADERS.md`. A `_Static_assert(sizeof(struct statfs) == N, "...")` condition depending on one of these types is a distinct case, not merely a re-materialization gap: CCCC's parser evaluates it against its own projection, so only a passing assertion ever reaches the serializer, which used to emit no `_Static_assert` construct at all — a host whose real layout would fail the same check compiled anyway. `-c=native` now re-emits the assert (both file- and block-scope forms) for the host to genuinely re-check it, gated on the condition actually depending on a host-owned `from_include` struct/union layout *and* the assert being written in a command-line input file — so one of CCCC's own bundled headers' own per-platform layout asserts (`include/sys/stat.h`, `signal.h`, `fts.h`, `aio.h`, etc.) is never re-emitted against the wrong host (#1098) |
 
 `_Decimal` is a hard error rather than a divergence: `__builtin_decimal_to_chars`
@@ -2027,16 +2028,25 @@ It survives only at `--std=c89`/`gnu89` under the VM/`-m`/`-c=generated`
 paths (never `-c=native`), where it remains the warning it always was — see
 [TOOLING.md § Supported Warning Names](TOOLING.md#supported-warning-names).
 
-`reallocarray()` is a platform gap, not a serializer bug: CCCC's VM
+`reallocarray()` was a platform gap, not a serializer bug: CCCC's VM
 implements it directly (registered in the stdlib), so the VM run always
 succeeds; the native link depends on the host libc actually shipping the
 symbol, which glibc/BSD libc does and Apple's libc (as of macOS 15/Sequoia)
-does not. `-c=native` on macOS therefore fails to *link* a program that
-calls `reallocarray()`. Decided (#1028): left as a documented platform gap,
-not fixed — `-c=native` links directly against the host's own libc with no
-CCCC-owned runtime shipped alongside the binary, so there is nowhere to
-place an inline polyfill without adding exactly the kind of runtime
-dependency `-c=native` exists to avoid.
+does not. `-c=native` on macOS therefore used to fail to *link* a program
+that calls `reallocarray()`. #1028 originally decided against fixing this,
+reasoning there was "nowhere to place an inline polyfill without adding
+exactly the kind of runtime dependency `-c=native` exists to avoid" — that
+reasoning assumed the only options were linking against a CCCC-owned runtime
+or nothing. #1155 found a third option consistent with #1028's own
+constraint: an inline, header-free, `static`-scoped function
+(`__cccc_reallocarray`, `serialize_reallocarray_shim`,
+`src/serialize_shims.c`) emitted directly into the generated C alongside
+every other native-accessor shim (`stdout`/`errno`/`FLT_ROUNDS`/etc, same
+file) — this is source text baked into the single translation unit the host
+compiler already builds, not a separate link dependency, so it adds nothing
+`-c=native` doesn't already emit for those other shims. The overflow check
+mirrors the VM-side `cccc_reallocarray` polyfill (`src/stdlib/stdlib.c`) so
+both backends agree on the `ENOMEM`/ptr-untouched contract.
 
 The C23 `fmaximum`/`fminimum`/`fmaximum_num`/`fminimum_num`/`fmaximum_mag`/
 `fminimum_mag`/`fmaximumf`/`totalorder`/`totalorderf`/`totalordermag`/

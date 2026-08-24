@@ -1,4 +1,7 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: asserts cc_run_at's sentinel-0 outermost-frame value and
+// a level-9999 walk returning NULL -- both are VM frame semantics; natively
+// these are real host frame addresses and an unbounded walk segfaults
 // Tests for __builtin_return_address(n)
 // Level 0 reads bp[+1] (the return address pushed by CALL before ENT3).
 // The returned value is a VM bytecode offset (Pc/uint32_t), not a host address.

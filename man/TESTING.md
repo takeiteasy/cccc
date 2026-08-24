@@ -363,22 +363,34 @@ Three tiers, chosen per test from its header annotations:
   instead.
 - **Compile-only**: `EXPECT_COMPILE_ERROR` tests assert the compile *fails*
   (mirroring `--c4`'s negative-test handling); `EXPECT_RUNTIME_ERROR` tests
-  and tests with `CCCC_EXPECT_STDERR`/`CCCC_REJECT_STDERR` assert the compile
-  *succeeds*, but are not run — the exit-255 runtime-safety-violation trap is
-  a VM-only convention (`-c=native` warns and drops the safety flags that
-  produce it, see `#935` in COVERAGE.md's Serialized-output divergences),
-  and a diagnostic test's `CCCC_EXPECT_STDERR` assertion is already covered
-  by the normal (VM) test run — this tier only guards against a serializer
-  regression turning a previously-clean compile into a build failure.
+  and non-`--testing` tests with `CCCC_EXPECT_STDERR`/`CCCC_REJECT_STDERR`
+  assert the compile *succeeds*, but are not run — the exit-255
+  runtime-safety-violation trap is a VM-only convention (`-c=native` warns
+  and drops the safety flags that produce it, see `#935` in COVERAGE.md's
+  Serialized-output divergences), and a diagnostic test's
+  `CCCC_EXPECT_STDERR` assertion is already covered by the normal (VM) test
+  run — this tier only guards against a serializer regression turning a
+  previously-clean compile into a build failure. A `--testing`
+  `[[cccc::test]]` suite file that also carries `CCCC_EXPECT_STDERR` (its
+  compile emits a warning but every test still passes, e.g. an unrecognized
+  `[[cccc::test(return = ...)]]` operand) is NOT in this tier — it routes to
+  the full `--testing=native` suite harness below like any other positive
+  suite file (#1155; a fully positive `--testing` file has a real artifact
+  to run, unlike this tier's premise).
 - **Skipped**: `--build` tests (no bytecode/native artifact to compile at
-  all), `--testing` suite files (see the coverage gap below), tests whose
-  `CCCC_FLAGS` drive their own `-c`/`-o`/frontend-output mode, and tests
-  using a VM-only safety flag `-c=native` drops with a warning rather than
-  enforcing (`--checked-pointers`, `--bounds-checks`, `--type-checks`,
-  `--memory-leak-detection`, `-1`/`-2`/`-3`, the FFI policy flags, …) —
-  exercising those natively would silently test nothing. A test can also
-  force a skip itself with a `CCCC_NATIVE_SKIP[: reason]` header annotation,
-  mirroring `CCCC_C4_SKIP`.
+  all), `--testing` suite files whose own `[[cccc::test]]` is expected to
+  fail (`EXPECT_COMPILE_ERROR`/`EXPECT_RUNTIME_ERROR`, see the coverage gap
+  below), tests whose `CCCC_FLAGS` drive their own `-c`/`-o`/frontend-output
+  mode, and tests using a VM-only safety flag `-c=native` drops with a
+  warning rather than enforcing (`--checked-pointers`, `--bounds-checks`,
+  `--type-checks`, `--memory-leak-detection`, `-1`/`-2`/`-3`, the FFI policy
+  flags, …) — exercising those natively would silently test nothing. A test
+  can also force a skip itself with a `CCCC_NATIVE_SKIP[: reason]` header
+  annotation, mirroring `CCCC_C4_SKIP`, for behavior that is genuinely
+  VM-only rather than a serializer bug (e.g. `cc_run_at`'s sentinel
+  outermost-frame return address, or a tail-call-elimination assertion that
+  can't hold once the native build runs at the host compiler's own `-O0` —
+  `-c=native` passes no optimization flag at all).
 
 **Structural difference from `--c4`:** under `--c4`, `cccc` itself executes
 the bytecode and returns 42. Under `--native`, `cccc`'s own exit code only
@@ -450,10 +462,13 @@ mnemonic cases can only ever run through the VM. Those are recorded in
 serializer bugs.
 
 **CI status:** opt-in only, run by hand like `--matrix` — not wired into the
-`test` build target or `.builds/linux-amd64.yml`. The skip table is large
-enough, and some entries platform-specific enough (e.g. `reallocarray` not
-existing in macOS's libc), that gating ordinary pushes on it isn't safe yet;
-revisit once the tracked follow-up tickets close.
+`test` build target or `.builds/linux-amd64.yml`. This is exactly how the 16
+failures found and fixed in #1155 (struct-layout drift corrupting enum
+constants under `-c=native`, a stray space in a captured `#include` operand,
+an undeclared `reallocarray` on macOS, and a `--testing` diagnostic-test
+routing gap) went unnoticed for as long as they did — nothing ran `--native`
+on an ordinary push. Revisit wiring it in once a follow-up ticket assesses
+CI runtime cost and remaining skip-table size.
 
 ## Architecture build and test workflows
 
