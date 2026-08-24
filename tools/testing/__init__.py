@@ -526,6 +526,21 @@ NATIVE_SKIP_TESTS = {
     # COVERAGE.md Serialized-output divergences.
     "test_suite_empty_union.c": "zero-sized union through varargs is a "
                  "documented VM-vs-host divergence (#1120), not a bug",
+    # test_suite_printf_c23.c: printf's %b/%B round-trip fine on Linux
+    # (glibc has carried printf %b since 2.35, and %B is free there since
+    # printf only uses the case to pick the 0b/0B prefix spelling) and
+    # scanf's lowercase %b since 2.38 -- but real glibc's scanf has NO %B
+    # conversion specifier at all (confirmed directly: clang's own format
+    # checker flags it "invalid conversion specifier 'B'" on Ubuntu 24.04/
+    # glibc 2.39), unlike printf where b/B are interchangeable. CCCC's own
+    # VM scanf formatter (src/stdlib/format_scanf.c) deliberately supports
+    # both, so the VM passes; -c=native calls real glibc's scanf, which
+    # doesn't (#1162). Previously thought Linux-clean and only macOS-skipped
+    # (#1120's own note) -- that was never actually re-verified against a
+    # real Linux run until #1162's investigation. Was in
+    # NATIVE_SKIP_TESTS_MACOS; moved here since it's not macOS-specific.
+    "test_suite_printf_c23.c": "glibc scanf has no %B conversion specifier, "
+                 "only %b -- printf's %b/%B round-trip fine (#1162)",
 }
 
 # Platform-specific -c=native skips, checked only when the running host
@@ -603,18 +618,6 @@ NATIVE_SKIP_TESTS_MACOS = {
                                     "and the VM heap both implement C17/C23 "
                                     "(#1061, WONT_FIX, permanent platform "
                                     "gap)",
-    # test_suite_printf_c23.c: macOS 15 libc implements neither the C23 %b
-    # nor %B conversion in printf or scanf (printf emits a literal 'b',
-    # sscanf reports zero matches). CCCC's VM formats through its own C23
-    # formatter, so the VM passes; -c=native output calls real host libc.
-    # glibc has printf %b since 2.35 and scanf %b since 2.38, so Linux keeps
-    # exercising this suite natively -- same disposition as
-    # reallocarray/#1028 and the fmaximum family/#1037 (#1120, unmasked by
-    # #1118).
-    "test_suite_printf_c23.c": "macOS libc lacks C23 %b/%B conversions in "
-                                "printf and scanf (#1120, WONT_FIX, "
-                                "permanent platform gap), still exercised on "
-                                "Linux",
 }
 
 # CLI flags that -c=native drops with a warning rather than enforcing

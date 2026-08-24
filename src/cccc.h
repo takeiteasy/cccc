@@ -4830,9 +4830,11 @@ bool cc_file_is_cccc_bundled(VirtualMachine *vm,
                              const char     *filename);              // #1096
 bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm,
                                     const char     *dir);            // #1143
+char *find_cccc_bundled_header_path(VirtualMachine *vm,
+                                    const char *basename); // #1143 regression
 bool cc_file_is_command_line_input(VirtualMachine *vm,
-                                   const char     *name);            // #1006
-void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm);    // #1001
+                                   const char     *name);  // #1006
+void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
 

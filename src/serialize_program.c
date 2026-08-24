@@ -3714,6 +3714,39 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     bool emitted_sys_stat_h   = false;
     bool emitted_sys_uio_h    = false;
     bool emitted_sys_socket_h = false;
+    // #1143 regression: CCCC's own bundled unistd.h also declares mkstemp
+    // (include/unistd.h:114) as a same-directory convenience -- real BSD/
+    // macOS headers do too (declared in both unistd.h and stdlib.h there),
+    // but real glibc puts it in <stdlib.h> only. Before #1143's directory
+    // demotion, a replayed `#include <unistd.h>` resolved to CCCC's own
+    // copy and mkstemp rode along the same way fts.h/unistd.h/sys/un.h's
+    // own companion pull-ins above did; now that it resolves to the real,
+    // minimal glibc header on Linux, mkstemp needs the same "emit a
+    // companion #include" treatment they already got. Unconditional (not
+    // __linux__-gated) like sys_stat_h/sys_uio_h/sys_socket_h above --
+    // an extra `#include <stdlib.h>` is harmless on macOS/BSD, where
+    // mkstemp is already visible through unistd.h alone.
+    bool emitted_stdlib_h_for_mkstemp = false;
+    // #1143 regression: the real host's <tgmath.h> (never intercepted --
+    // only math.h/float.h are, see the math.h/float.h substitution below)
+    // includes the real host's own <math.h> internally to build its
+    // type-generic macros (remquo, etc), sharing that real header's own
+    // include guard. CCCC's bundled math.h has a *different* guard macro
+    // name, so once tgmath.h's macros are live, a later captured `#include
+    // <math.h>` forced to CCCC's own copy is NOT skipped as the natural
+    // no-op a real header's matching guard would produce -- its plain
+    // `double remquo(double, double, int *);` declaration gets corrupted
+    // by tgmath.h's own already-active `remquo` macro mid-declaration
+    // ("a type specifier is required for all declarations", confirmed:
+    // tests/suites/test_suite_floats.c, which includes tgmath.h before
+    // math.h). Track whether tgmath.h was already replayed; only force
+    // CCCC's own copy when it wasn't (or hasn't been reached yet in source
+    // order) -- source order after tgmath.h falls back to the ordinary
+    // replay, matching the safe pre-#1143 behaviour for that ordering
+    // (this file's own real declarations were always sufficient there,
+    // since it doesn't call the C23 IEEE family this substitution exists
+    // for).
+    bool seen_tgmath_h = false;
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
@@ -3806,6 +3839,32 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // a cccc-aware reader.
         if (!vm->compiler.emit_cccc && line_macro_name_is_non_ascii(line))
             continue;
+        // #1143 regression: math.h/float.h are complete, self-contained
+        // polyfills with no #include_next hand-off of their own (unlike
+        // pthread.h/errno.h/etc, or sched.h/locale.h -- see
+        // find_cccc_bundled_header_path's own comment, src/preprocess.c),
+        // so a replayed bare `#include <math.h>`/`<float.h>` must never be
+        // allowed to resolve to the real host's copy the way #1143's
+        // directory-wide -idirafter demotion otherwise lets it -- the real
+        // host doesn't declare the C23 IEEE family (fmaximum/setpayload/
+        // etc) the way CCCC's bundled copy unconditionally does. Substitute
+        // an absolute-path include to CCCC's own copy instead of the bare
+        // replay when a bundled dir was actually marked (the only scenario
+        // the demotion, and therefore this hazard, can fire); otherwise
+        // fall through to the ordinary replay below, unchanged.
+        if (!vm->compiler.emit_cccc && !seen_tgmath_h && resolved &&
+            (path_basename_is(resolved, "math.h") ||
+             path_basename_is(resolved, "float.h"))) {
+            char *bundled_path = find_cccc_bundled_header_path(
+                vm,
+                path_basename_is(resolved, "math.h") ? "math.h" : "float.h");
+            if (bundled_path) {
+                fprintf(f, "#include \"%s\"\n", bundled_path);
+                continue;
+            }
+        }
+        if (resolved && path_basename_is(resolved, "tgmath.h"))
+            seen_tgmath_h = true;
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
         // `struct statfs` into scope the way it does on macOS/BSD -- real
@@ -3852,6 +3911,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             path_basename_is(resolved, "unistd.h")) {
             fprintf(f, "#include <sys/uio.h>\n");
             emitted_sys_uio_h = true;
+        }
+        if (!emitted_stdlib_h_for_mkstemp && resolved &&
+            path_basename_is(resolved, "unistd.h")) {
+            fprintf(f, "#include <stdlib.h>\n");
+            emitted_stdlib_h_for_mkstemp = true;
         }
         if (!emitted_sys_socket_h && resolved &&
             path_basename_is(resolved, "un.h") &&

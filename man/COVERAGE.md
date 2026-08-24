@@ -2126,10 +2126,17 @@ conversions work everywhere in VM mode; `-c=native` output calls real host
 libc, and macOS 15 libc implements neither conversion — `printf("%b", …)`
 emits a literal `b` and `sscanf("101010", "%b", &a)` reports zero matches
 (measured directly). glibc has carried printf `%b` since 2.35 and scanf
-`%b` since 2.38, so Linux round-trips cleanly and keeps exercising the
-coverage: the three format-specifier tests live in
-`tests/suites/test_suite_printf_c23.c`, skipped by the native corpus only
-via `NATIVE_SKIP_TESTS_MACOS`. Decided: same reasoning as #1028/#1037 — no
+`%b` since 2.38, but glibc's scanf has no `%B` conversion specifier at all
+(confirmed on Ubuntu 24.04/glibc 2.39: clang's own format checker flags
+`sscanf(..., "%B", ...)` as "invalid conversion specifier 'B'") — printf's
+`b`/`B` are interchangeable there since the case only selects the `0b`/`0B`
+prefix spelling on output, a distinction that doesn't exist for scanf
+input, so Linux fails only the one `%B`-via-scanf case (#1162) rather than
+the whole file the way macOS does. All three format-specifier tests live in
+`tests/suites/test_suite_printf_c23.c`, skipped by the native corpus on
+every platform via the general `NATIVE_SKIP_TESTS` table (moved there from
+the macOS-specific `NATIVE_SKIP_TESTS_MACOS` one once the Linux-side gap
+was confirmed, #1162). Decided: same reasoning as #1028/#1037 — no
 CCCC-owned runtime ships alongside a `-c=native` binary, so libc lag is not
 CCCC's to polyfill.
 

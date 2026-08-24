@@ -517,6 +517,71 @@ bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm, const char *dir) {
            hashmap_get(&vm->compiler.cccc_bundled_include_dirs, dir) != NULL;
 }
 
+// #1143 regression: run_native_backend()'s directory-wide -idirafter
+// demotion (main.c) is correct for the hand-off headers #1143 was fixing
+// (pthread.h/errno.h/fenv.h/etc, each with its own #ifdef __CCCC__ / #else
+// #include_next body) and for sched.h/locale.h (deliberately no body of
+// their own, relying entirely on directory order to reach the real host
+// copy) -- but it demotes the *whole* -I/-isystem entry the instant it
+// resolves ANY std header from it, sweeping in headers that were never
+// meant to hand off at all (math.h/float.h: zero #include_next in either
+// file, documented in man/HEADERS.md as complete, self-contained
+// polyfills). Once demoted, a replayed `#include <math.h>` reaches the
+// real host's math.h instead, which doesn't declare the C23 IEEE family
+// (fmaximum/setpayload/etc) the way CCCC's bundled copy unconditionally
+// does -- "undeclared identifier" on both platforms (a regression from the
+// documented pre-#1143 behaviour of failing only at *link* time on macOS,
+// per #1037).
+//
+// Fix: for a header that must never be handed off, find the specific
+// bundled directory (there's normally exactly one; cc_include_dir_is_cccc_
+// bundled() already tracks which -I/-isystem entries qualify) and hand
+// back its on-disk path to `basename` so serialize_program.c's
+// include-replay loop can substitute an absolute-path #include, bypassing
+// directory-search order entirely -- no new flag, no directory-layout
+// change, same "force CCCC's own copy" outcome #1143 relied on setjmp.h's
+// own dedicated suppression for (serialize_synth_setjmp_decls). Returns
+// NULL when no directory was ever marked bundled (the demotion never fired
+// in the first place, so the bare replay already resolves correctly) or
+// `basename` isn't actually present there.
+// A relative -I entry (e.g. the test harness's `-I./include`) resolves
+// against *this process's* CWD, but the host cc compiling the generated C
+// runs from a different directory (run_native_backend's own temp file) --
+// canonicalize to an absolute path so the emitted #include stays valid
+// there too. `path` is always freed; returns a freshly strdup'd absolute
+// path on success, or NULL if realpath() itself fails (a dangling/
+// unreadable entry, treated as "not found" by the caller).
+static char *canonicalize_and_free(char *path) {
+    char  resolved[PATH_MAX];
+    char *abs = realpath(path, resolved);
+    free(path);
+    return abs ? strdup(abs) : NULL;
+}
+
+char *find_cccc_bundled_header_path(VirtualMachine *vm, const char *basename) {
+    if (!basename)
+        return NULL;
+    for (int i = 0; i < vm->compiler.include_paths.len; i++) {
+        char *dir = vm->compiler.include_paths.data[i];
+        if (!cc_include_dir_is_cccc_bundled(vm, dir))
+            continue;
+        char *path = format("%s/%s", dir, basename);
+        if (file_exists(path))
+            return canonicalize_and_free(path);
+        free(path);
+    }
+    for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
+        char *dir = vm->compiler.system_include_paths.data[i];
+        if (!cc_include_dir_is_cccc_bundled(vm, dir))
+            continue;
+        char *path = format("%s/%s", dir, basename);
+        if (file_exists(path))
+            return canonicalize_and_free(path);
+        free(path);
+    }
+    return NULL;
+}
+
 // #1006 (investigation, filed as part of #1005/#1006's fix): true when
 // `name` is the exact path of one of the files the user listed on the
 // command line, as opposed to a header any of them #included. This used to

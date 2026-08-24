@@ -54,6 +54,21 @@ All notable changes to CCCC are documented here. Format loosely follows
   or keyword spelling — the label is now only emitted on the standalone
   declaration the "prototypes before bodies" pass already produces ahead
   of every definition.
+- `-c=native`'s #1143 fix (directory-wide `-idirafter` demotion of a `-I`
+  entry that resolved any of CCCC's bundled std headers) swept in two
+  headers that were never meant to hand off to the real host at all —
+  `math.h`/`float.h` (no `#include_next` of their own; the real host's
+  copy doesn't declare the C23 IEEE family `fmaximum`/`setpayload`/etc the
+  way CCCC's bundled copy unconditionally does) and `unistd.h` (real glibc
+  puts `mkstemp` in `<stdlib.h>` instead). Both regressed from a compile
+  that worked (or failed only at documented link time on macOS, #1037) to
+  "undeclared identifier". Fixed by forcing CCCC's own `math.h`/`float.h`
+  via an absolute-path `#include` substitution when a bundled directory
+  was actually demoted, and adding `unistd.h` → `stdlib.h` as a fourth
+  companion-include entry alongside #1143's existing three — except when
+  the real host's `<tgmath.h>` was already replayed earlier in the same
+  file, where forcing CCCC's copy corrupts its type-generic macros instead
+  (regression from this same fix, caught before landing).
 
 ## [0.3.9] - 2026-08-24
 

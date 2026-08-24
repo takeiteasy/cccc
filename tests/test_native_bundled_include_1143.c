@@ -30,8 +30,57 @@
 #include <locale.h>
 #include <pthread.h>
 #include <sched.h>
+#include <math.h>
+#include <unistd.h>
+
+// #1143 regression, found while adding native-corpus coverage for #1129/
+// #1130: this fix's own -idirafter demotion swept in two headers that were
+// never meant to hand off at all -- math.h/float.h (zero #include_next in
+// either, documented in man/HEADERS.md as complete, self-contained
+// polyfills) and unistd.h (also zero #include_next; its own bundled copy
+// declares mkstemp as a same-directory convenience, matching macOS/BSD,
+// but real glibc puts mkstemp in <stdlib.h> instead). Both regressed to
+// "undeclared identifier" under -c=native with -I./include once demoted --
+// re-fixed by forcing CCCC's own math.h/float.h via an absolute-path
+// #include substitution (find_cccc_bundled_header_path(), preprocess.c)
+// and adding a fourth companion-include entry (unistd.h -> stdlib.h,
+// serialize_program.c) alongside #1143's existing three.
+// setpayload/getpayload: the C23 IEEE family real macOS libm lacks
+// entirely (#1037, permanent -- calling them would fail at *link* time
+// there, a different, already-documented gap this test isn't about) and
+// real glibc only declares behind feature-test macros CCCC's own bundled
+// math.h doesn't gate on -- exactly the family this regression made
+// "undeclared identifier" (a *compile*-time failure) rather than #1037's
+// link-time one. Linux-only check; macOS's own gap is covered separately
+// by tests/test_setpayload_zero_1079.c (NATIVE_SKIP_TESTS_MACOS).
+#ifdef __linux__
+static int check_c23_ieee_math(void) {
+    double nan_val = NAN;
+    if (setpayload(&nan_val, 42.0) != 0)
+        return 1;
+    if (getpayload(&nan_val) != 42.0)
+        return 2;
+    return 0;
+}
+#endif
+
+static int check_mkstemp(void) {
+    char tmpl[] = "/tmp/cccc_1143_XXXXXX";
+    int  fd     = mkstemp(tmpl);
+    if (fd < 0)
+        return 1;
+    close(fd);
+    unlink(tmpl);
+    return 0;
+}
 
 int main(void) {
+#ifdef __linux__
+    if (check_c23_ieee_math())
+        return 7;
+#endif
+    if (check_mkstemp())
+        return 8;
     // struct sched_param -- CCCC's own bundled 4-byte guest-visible copy
     // vs. the host's own (differently-sized on macOS) real one, reached
     // transitively via <pthread.h>'s #include_next hand-off.
