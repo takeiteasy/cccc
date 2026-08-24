@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-08-24
+
 ### Added
 
 - `tools/testing/header.py`: shared, anchored, whole-header-block parser for
