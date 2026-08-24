@@ -301,7 +301,8 @@ void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     Node *node, int parent_prec);
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         Obj *fn);
-void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn);
+void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
+                                  bool with_asm_label);
 void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                           Obj *var);
 void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog);

@@ -142,7 +142,8 @@ static const char *va_list_shim_param_name(char *buf, size_t bufsz,
 // #include/@comptime handling (reproduces in a single file with no
 // #include at all). Not fixed here -- see #897 for the repro and a
 // (unverified) hypothesis about the root cause.
-void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn) {
+void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
+                                  bool with_asm_label) {
     // #1025/#1039: an asm("symbol")-labeled block-scope declaration (`Put
     // local_puts asm("puts");`) aliases an *external* symbol -- internal
     // linkage on the declaration is meaningless for it and, since the
@@ -243,13 +244,30 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn) {
     }
     fprintf(df, ")");
 
-    if (fn->asm_label)
+    if (fn->asm_label && with_asm_label)
         // __CCCC_ASM_PREFIX__ (see serialize_asm_prefix_preamble) supplies
         // the platform's real symbol prefix; adjacent string literals
         // concatenate at translation time, so this reads as e.g.
-        // asm("_puts") on Darwin and asm("puts") on Linux from one
-        // platform-independent emission.
-        fprintf(df, " asm(__CCCC_ASM_PREFIX__ \"%s\")", fn->asm_label);
+        // __asm__("_puts") on Darwin and __asm__("puts") on Linux from one
+        // platform-independent emission. #1130: __asm__, not bare asm --
+        // asm is a GNU alternate keyword GCC disables under a strict ISO
+        // -std=cNN.
+        //
+        // with_asm_label is false only for the signature immediately
+        // followed by a function BODY (serialize_function, just below):
+        // GCC/clang both reject an asm-label attached directly to a
+        // definition ("expected ';' after top level declarator") -- it is
+        // only valid on a standalone declaration. The unconditional
+        // "prototypes before bodies" pass (serialize_program.c) already
+        // emits a labeled, bodyless prototype for every function ahead of
+        // its definition, which is what actually binds the real symbol
+        // name; repeating the label here would be both redundant and a
+        // syntax error. Pre-existing bug independent of the __asm__
+        // spelling above -- reproduced identically with the old bare
+        // `asm(...)` on both clang and a real gcc-16, found while adding
+        // #1130 test coverage for a self-defined (not merely aliased)
+        // asm-labeled function.
+        fprintf(df, " __asm__(__CCCC_ASM_PREFIX__ \"%s\")", fn->asm_label);
 
     fclose(df);
     serialize_type_decl(
@@ -346,7 +364,11 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     if (!fn->is_definition && !fn->body)
         return;
 
-    serialize_function_signature(f, ctx, fn);
+    // #1130: suppress the asm-label on a body-having signature -- see
+    // serialize_function_signature's own comment. The "prototypes before
+    // bodies" pass (serialize_program.c) already emitted a labeled,
+    // bodyless declaration for this function ahead of here.
+    serialize_function_signature(f, ctx, fn, /*with_asm_label=*/!fn->body);
 
     if (fn->body) {
         fprintf(f, " {\n");

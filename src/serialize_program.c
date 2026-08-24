@@ -3637,7 +3637,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                         Obj *callee = needed.data[i];
                         if (obj_vec_contains(&declared, callee))
                             continue;
-                        serialize_function_signature(f, &ctx, callee);
+                        serialize_function_signature(f, &ctx, callee, true);
                         fprintf(f, ";\n");
                         obj_vec_push(&declared, callee);
                     }
@@ -3648,7 +3648,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 // dropped entirely by this loop's `!is_definition &&
                 // !body` skip.
                 if (!obj_vec_contains(&declared, obj)) {
-                    serialize_function_signature(f, &ctx, obj);
+                    serialize_function_signature(f, &ctx, obj, true);
                     fprintf(f, ";\n\n");
                     obj_vec_push(&declared, obj);
                 }
@@ -4066,7 +4066,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                      !bodyless_decl_from_input_or_bundled(vm, &ctx, target)))
                     continue;
                 obj_vec_push(&reloc_fns, target);
-                serialize_function_signature(f, &ctx, target);
+                serialize_function_signature(f, &ctx, target, true);
                 fprintf(f, ";\n");
             }
         }
@@ -4176,7 +4176,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 !bodyless_decl_from_input_or_bundled(vm, &ctx, obj))
                 continue;
         }
-        serialize_function_signature(f, &ctx, obj);
+        serialize_function_signature(f, &ctx, obj, true);
         fprintf(f, ";\n\n");
     }
 

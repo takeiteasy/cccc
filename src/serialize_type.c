@@ -1283,11 +1283,21 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
            !find_anonymous_typedef_name(ctx, ty);
 }
 
-// Serialize the body of a struct/union with no tag and no typedef alias
-// (e.g. `struct { int x; int y; } pt;`) inline at its point of use, since
-// there is no name to refer back to it by elsewhere.
-static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
-    fprintf(f, "%s {\n", ty->kind == TY_UNION ? "union" : "struct");
+// #1129: packed/aligned(N) were retained on Type (is_packed, align) but
+// never re-emitted, so a struct's native layout silently diverged from the
+// VM's -- see the admissibility-rule discussion in COVERAGE.md. Shared by
+// both aggregate-body emitters below (tagged/typedef'd and anonymous)
+// since the two loops were otherwise identical.
+//
+// Member _Alignas(N): mem->align is set (parse_types.c) to either an
+// explicit _Alignas/aligned request or, absent one, the member type's own
+// natural alignment -- so mem->align > mem->ty->align isolates exactly an
+// explicit request. Suppressed inside a packed struct: cccc's own layout
+// (struct_decl/union_decl, parse_types.c) ignores mem->align entirely once
+// is_packed is set, so emitting it there would tell the host compiler
+// something the VM itself did not honour.
+static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
+                                        Type *ty) {
     for (Member *m = ty->members; m; m = m->next) {
         fprintf(f, "    ");
         char name[256] = "";
@@ -1298,12 +1308,60 @@ static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
             memcpy(name, m->name->loc, len);
             name[len] = '\0';
         }
+        if (!ty->is_packed && m->align > m->ty->align)
+            fprintf(f, "_Alignas(%d) ", m->align);
         serialize_type_decl(f, ctx, m->ty, name);
         if (m->is_bitfield)
             fprintf(f, " : %d", m->bit_width);
         fprintf(f, ";\n");
     }
+}
+
+// #1129: the type-level counterpart of serialize_aggregate_members --
+// __attribute__((packed)) and __attribute__((aligned(N))) applied to the
+// aggregate itself rather than to one member.
+//
+// ty->align starts at 1 (new_type's default for TY_STRUCT/TY_UNION,
+// type.c) and is set directly by an aligned(N) attribute
+// (parse_types.c); struct_decl/union_decl then raises it to
+// max(member aligns) as members are laid out, but only when the
+// aggregate is *not* packed -- a packed aggregate skips that step
+// entirely (parse_types.c), so ty->align there is exactly 1 unless an
+// aligned(N) attribute set it. That gives a precise "did an attribute
+// have an observable effect" test without duplicating struct_decl's own
+// member-alignment computation:
+//   - packed:    emit aligned(N) iff ty->align > 1 (nothing else could
+//                have raised it).
+//   - unpacked:  recompute the same max(member aligns) struct_decl used
+//                and emit aligned(N) iff ty->align exceeds it.
+static void serialize_aggregate_attrs(FILE *f, Type *ty) {
+    int natural = 1;
+    if (!ty->is_packed)
+        for (Member *m = ty->members; m; m = m->next)
+            if (m->align > natural)
+                natural = m->align;
+
+    bool has_align = ty->align > natural;
+
+    if (!ty->is_packed && !has_align)
+        return;
+
+    fprintf(f, " __attribute__((");
+    if (ty->is_packed)
+        fprintf(f, "packed");
+    if (has_align)
+        fprintf(f, "%saligned(%d)", ty->is_packed ? ", " : "", ty->align);
+    fprintf(f, "))");
+}
+
+// Serialize the body of a struct/union with no tag and no typedef alias
+// (e.g. `struct { int x; int y; } pt;`) inline at its point of use, since
+// there is no name to refer back to it by elsewhere.
+static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
+    fprintf(f, "%s {\n", ty->kind == TY_UNION ? "union" : "struct");
+    serialize_aggregate_members(f, ctx, ty);
     fprintf(f, "}");
+    serialize_aggregate_attrs(f, ty);
 }
 
 // #1109: is this alias the one bundled-header scalar typedef whose host
@@ -1632,22 +1690,9 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     }
 
     fprintf(f, " {\n");
-    for (Member *m = ty->members; m; m = m->next) {
-        fprintf(f, "    ");
-        char name[256] = "";
-        if (m->name) {
-            int len = m->name->len;
-            if (len >= (int)sizeof(name))
-                len = sizeof(name) - 1;
-            memcpy(name, m->name->loc, len);
-            name[len] = '\0';
-        }
-        serialize_type_decl(f, ctx, m->ty, name);
-        if (m->is_bitfield)
-            fprintf(f, " : %d", m->bit_width);
-        fprintf(f, ";\n");
-    }
+    serialize_aggregate_members(f, ctx, ty);
     fprintf(f, "}");
+    serialize_aggregate_attrs(f, ty);
 
     if (!tag && alias)
         fprintf(f, " %.*s", alias->name_len, alias->name);

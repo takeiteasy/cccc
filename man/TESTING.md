@@ -459,7 +459,10 @@ no-op but serializes verbatim into host-assembler input (#1119, see
 [COVERAGE.md](COVERAGE.md#serialized-output-divergences)), so its fake-
 mnemonic cases can only ever run through the VM. Those are recorded in
 [COVERAGE.md](COVERAGE.md#serialized-output-divergences), not tracked as
-serializer bugs.
+serializer bugs. `tests/suites/test_suite_asm_std_c11.c` (#1130) is a
+separate, natively-compilable file covering the same statement (and
+declarator-label) spellings with real (empty) assembly the host accepts —
+not skipped, and not to be confused with the permanent skip above.
 
 **CI status:** opt-in only, run by hand like `--matrix` — not wired into the
 `test` build target or `.builds/linux-amd64.yml`. This is exactly how the 16

@@ -392,8 +392,15 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // into VM execution): there is no way to evaluate host assembly in
             // the VM, so native output hands it to the host compiler. See
             // COVERAGE.md.
+            //
+            // #1130: emit the __-wrapped __asm__ spelling, not bare asm --
+            // asm is a GNU alternate keyword that GCC disables under a
+            // strict ISO -std=cNN, turning this into a syntax error on a
+            // real host compiler. __asm__ is accepted in every dialect,
+            // matching the __typeof__/__extension__ spellings used
+            // elsewhere in this file.
             print_indent_level(f, indent);
-            fprintf(f, "asm(");
+            fprintf(f, "__asm__(");
             if (node->asm_str)
                 serialize_string_n(f, node->asm_str,
                                    (int)strlen(node->asm_str));

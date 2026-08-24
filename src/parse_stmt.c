@@ -51,7 +51,8 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
            (equal(tok, "bool") || equal(tok, "thread_local"));
 }
 
-// asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
+// asm-stmt = ("asm" | "__asm__" | "__asm") ("volatile" | "inline")* "("
+//            string-literal ")"
 static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_ASM, tok);
     tok        = tok->next;
@@ -182,7 +183,7 @@ static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw);
 //      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
 //      | "while" "(" expr ")" stmt
 //      | "do" stmt "while" "(" expr ")" ";"
-//      | "asm" asm-stmt
+//      | ("asm" | "__asm__" | "__asm") asm-stmt
 //      | "goto" (ident | "*" expr) ";"
 //      | "break" ";"
 //      | "continue" ";"
@@ -616,7 +617,11 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    if (equal(tok, "asm"))
+    // #1130/COVERAGE.md "asm(...) statement spelling is pending": accept
+    // the __-wrapped alternate-keyword spellings too, not just bare "asm"
+    // -- matches is_asm_label_tok's acceptance of all three for asm("sym")
+    // declarator labels (parse_types.c).
+    if (equal(tok, "asm") || equal(tok, "__asm__") || equal(tok, "__asm"))
         return asm_stmt(vm, rest, tok);
 
     if (equal(tok, "goto")) {

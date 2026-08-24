@@ -220,7 +220,7 @@ language coverage figures apply.
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
 | `__inline` / `__inline__` | ✓ | Spelling aliases for `inline`; recognized as GCC keyword aliases (GCC compatibility) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
-| `asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`; `__asm__` statement spelling is pending. **`-c=native`/`-m`/`-c=generated` always emit the `asm(...)` verbatim**, regardless of `--asm-passthru` — the one construct where serialized output deliberately does not mirror default VM behaviour, since there is no way to evaluate host assembly inside the VM at all. Executing it is the host compiler's job, and `--asm-passthru` governs VM execution only. See [Serialized-output divergences](#serialized-output-divergences) and the #1119 note there (dedicated asm suite, skipped natively) |
+| `asm(...)`/`__asm__(...)`/`__asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`. All three alternate-keyword spellings are accepted in statement position, matching `is_asm_label_tok`'s existing acceptance of all three for `asm("symbol")` declarator labels (#1130). **`-c=native`/`-m`/`-c=generated` always emit `__asm__(...)` verbatim** (never bare `asm`, which GCC/clang both disable as a keyword under a strict ISO `-std=cNN` — confirmed on real GCC and on the `cccc-linux-amd64` container's clang, which reproduce the failure Apple clang's leniency does not), regardless of `--asm-passthru` — the one construct where serialized output deliberately does not mirror default VM behaviour, since there is no way to evaluate host assembly inside the VM at all. Executing it is the host compiler's job, and `--asm-passthru` governs VM execution only. See [Serialized-output divergences](#serialized-output-divergences) and the #1119 note there (dedicated asm suite, skipped natively) |
 | GNU `asm("symbol")` declaration labels | ~ | Supported on function declarations, including typedef-based and multi-declarator declarations; the label is used as the external FFI symbol name |
 | `__attribute__((vector_size(N)))` generic vectors | ~ | 128-, 256-, and 512-bit vectors (16/32/64-byte total size) — e.g. `v4f32`/`v8f32`/`v16f32`, `v2f64`/`v4f64`/`v8f64`, `v4i32`/`v8i32`/`v16i32`, and the corresponding `i64`/`i16`/`i8` lane layouts at each width; any other width (non-power-of-two byte counts, or wider than 64 bytes) is rejected with a diagnostic. Element-wise `+ - * /` and unary `-`/`~` on all lane types; integer lanes additionally support `% & \| ^` and integer `/`/`%`, each trapping per-lane on a zero divisor or `MIN/-1` overflow (stricter than default scalar `/`, which does not trap — matches scalar `DIVC`'s policy); `&`/`\|`/`^`/`~` are rejected on float lanes. Comparisons `== != < <= > >=` produce a per-lane all-ones(`-1`)/all-zero mask in a same-width **signed** integer vector (GCC semantics); ordered `< <=` on unsigned-int lanes compare the unsigned view. GNU vector `?:` select is supported (nonzero-per-lane condition, matching lane count/width). Scalar operands broadcast through arithmetic (`v + 5.0f`), matching GCC/clang — a bare scalar cannot initialize or be assigned to a whole vector. `v[i]` subscript supports a runtime-variable index. Brace-initializer syntax (`v4sf a = {1,2,3,4};`, including partial and nested forms) is supported, as are compound literals (`(v4sf){1,2,3,4}`) used as expressions, with a `static` storage-class specifier, or as the entire initializer of another global/static variable (`v4sf g = (v4sf){1,2,3,4};`). Designated lane initializers (`{[2]=3.0f}`) are rejected with a diagnostic, matching GCC/clang — vector types are non-aggregate in their model, and designated initializers only apply to aggregates. `__builtin_convertvector(expr, type)` converts between vectors with the same lane count; only `int32<->float32` and `int64<->float64` lane pairs are representable (matching lane counts forces matching element byte sizes), so same-domain conversions (e.g. changing signedness/width without crossing int/float) are rejected. `__builtin_shuffle` supports both a **compile-time-constant, brace-enclosed** index mask (`__builtin_shuffle(v, {3,2,1,0})`, 1- or 2-vector form — CCCC's own constant-mask form, closer to clang's `__builtin_shufflevector` than upstream GCC's syntax) and a **runtime or named integer vector mask** (`__builtin_shuffle(v, mask)` / `__builtin_shuffle(v1, v2, mask)`, matching upstream GCC's general form) — the mask must be an integer vector with the same lane count and element byte width as the vector being shuffled. Both forms lower via the same vector-subscript machinery with no dedicated opcode; the constant form range-checks each index at compile time (an out-of-range index is a compile error), while the runtime form takes each index modulo the lane count (1-vector) or twice the lane count (2-vector), matching GCC's documented wraparound semantics — a runtime index can't be rejected at compile time. Vectors can be passed as function parameters and returned by value: passed by memory (a caller-side scratch copy sized to the argument's own width, address handed to the callee, like a struct-by-value arg), returned via the RETBUF rotating pool (like a struct-by-value return) — see [VM.md](VM.md#simd--vector-operations). This includes a variadic `...` parameter: the by-memory scratch-pointer convention means a variadic vector arg always occupies exactly one 8-byte slot regardless of the vector's width, and `<stdarg.h>`'s `va_arg` detects a vector `type` via `__builtin_classify_type` and dereferences the slot instead of reading it directly — matches gcc/clang, which also accept a vector through `...` (verified). Not supported through the native FFI marshalling path (extern/`dlopen`ed functions — libffi has no portable vector type, and there's no struct-by-value FFI path to build on either) or a GNU/Apple block invocation — each rejected with a diagnostic. See [VM.md](VM.md#simd--vector-operations) for the opcode set |
 
@@ -357,7 +357,7 @@ above), matching real GCC/Clang.
 
 #### `__attribute__((aligned(N)))`
 
-Sets minimum alignment for a type or variable. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment.
+Sets minimum alignment for a type or variable. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment. A type-level `aligned(N)` (on the struct/union itself) and a member's own `_Alignas(N)` both survive `-c=native`/`-m`/`-c=generated` (#1129) — re-emitted only when they actually widen the layout beyond what the members alone would produce, so ordinary structs carry no extra attribute noise. An object's own `_Alignas(N)` (`Obj.align`) was already covered separately (#1136).
 
 ```c
 struct __attribute__((aligned(16))) vec4 { float x, y, z, w; };
@@ -366,7 +366,7 @@ int __attribute__((aligned(64))) cache_line;
 
 #### `__attribute__((packed))`
 
-Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct.
+Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct. Survives `-c=native`/`-m`/`-c=generated` (#1129) — previously dropped silently, producing a native binary whose struct layout diverged from the VM's.
 
 ```c
 struct __attribute__((packed)) {
@@ -1221,20 +1221,43 @@ null statement (`src/serialize_expr.c` / `src/serialize_type.c`, #963c) — a
 construct that reaches the serializer either has an explicit case or the
 compile fails loudly, on the spot, naming the kind.
 
-That guarantee does **not** yet extend to type *attributes and qualifiers* —
-`packed`, `aligned(N)`, `_Alignas`, `section`, `weak`, `visibility` are fields
-on a `Type`/`Obj`, not `NodeKind`s or `TypeKind`s, so no `default:` arm can
-ever catch a dropped one. This is a real, confirmed gap (silently dropped
-attributes producing self-inconsistent native output — see the divergence
-table below) rather than a theoretical hole, and closing it is v0.4.0 scope.
-
-The rule to apply when auditing an attribute: is it a **hint** (no observable
+That guarantee does not extend mechanically to type *attributes and
+qualifiers* — they are fields on a `Type`/`Obj`, not `NodeKind`s or
+`TypeKind`s, so no `default:` arm can ever catch a dropped one; each has to
+be audited by hand instead. The rule applied: is it a **hint** (no observable
 effect if ignored — `always_inline`, `unused`, `deprecated`, `hot`/`cold`,
 `noinline`), safe to drop silently; or a **contract** (changes layout,
-linkage, placement, or semantics — `packed`, `aligned`, `_Alignas`, `section`,
-`weak`, `visibility`, `constructor`/`destructor`, `vector_size`, `noreturn`),
-which must be emitted, or refused where no emission is possible, but never
-silently dropped.
+linkage, placement, or semantics), which must be emitted, refused where no
+emission is possible, or — for the narrow case below — documented as
+unobservable, but never silently dropped without a reason on record.
+
+`packed`, type-level `aligned(N)`, and a member's own `_Alignas(N)` are
+contracts that change layout and are now emitted (#1129) — `is_packed`/
+`align` were retained on `Type`/`Member` but never re-emitted, so a native
+binary silently laid such a struct out as if the attribute were absent; the
+emitted C was even self-inconsistent (a `sizeof` folded against the VM's
+packed layout sitting next to an unpacked struct definition). Fixed in
+`serialize_aggregate_members`/`serialize_aggregate_attrs`
+(`src/serialize_type.c`), shared by both aggregate-body emitters
+(`serialize_struct_def` for tagged/typedef'd, `serialize_anon_aggregate` for
+tagless). An object's own `_Alignas(N)` (`Obj.align`) was already covered by
+`serialize_alignas_if_needed` (#1136).
+
+`section`, `weak`, `visibility` are contracts CCCC's parser does not retain
+at all — they hit the generic unknown-attribute path (`src/parse_types.c`)
+and are dropped with a diagnostic (`warning: unknown attribute '...' ignored
+[-Wattributes]`, included in `-Wall`), not silently. Deliberately left there
+rather than retained-and-emitted: cccc is single-translation-unit with no
+`dlopen`, so none of the three has an observable effect in either the VM or
+a native binary compiled from one cccc invocation — a `weak` symbol has
+nothing to be overridden by, `section` has no second linker input to place
+relative to, and `visibility` has no shared-library boundary to control.
+Emitting them anyway would manufacture a divergence in the *opposite*
+direction — native honouring a weak override or section placement the VM
+can never model — which is worse than the status quo. `#657`'s existing
+`__has_attribute(visibility|section|weak)` == 1 pins the same "recognized,
+architecturally inert" classification the format/alloc_size/etc. attributes
+already get.
 
 ### Output dialect: GNU C11 required
 

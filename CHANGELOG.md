@@ -1,4 +1,4 @@
-# Changelog
+#Changelog
 
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -33,6 +33,27 @@ All notable changes to CCCC are documented here. Format loosely follows
   to the single-file compile-and-link path instead of the
   `--testing=native` suite harness, failing at the linker for lack of
   `main()` even though the suite itself passes cleanly (#1155).
+- `__attribute__((packed))`, a type-level `__attribute__((aligned(N)))`,
+  and a member's own `_Alignas(N)` were retained on `Type`/`Member` but
+  never re-emitted by `-c=native`/`-m`/`-c=generated`, so a native binary
+  silently laid such a struct out as if the attribute were absent — the
+  emitted C was even self-inconsistent (a `sizeof` folded against the VM's
+  packed layout next to an unpacked struct definition). Now emitted,
+  precisely when they change the layout beyond what the members alone
+  produce (#1129).
+- `-c=native`/`-m`/`-c=generated` emitted the bare `asm` keyword at both of
+  its two emission sites (statement form and a declarator's `asm("symbol")`
+  label) — a GNU alternate keyword GCC/clang both disable under a strict
+  ISO `-std=cNN`, turning it into a syntax error on a real host compiler.
+  Now emits `__asm__` at both sites; the parser also accepts `__asm__`/
+  `__asm` in statement position, not just `asm` (#1130). Fixing this
+  surfaced a second, independent pre-existing bug it depended on to
+  verify: an `asm("symbol")`-labeled function *definition* (not a
+  standalone declaration) always re-emitted the label directly on the
+  definition line too, which GCC/clang both reject regardless of `-std=`
+  or keyword spelling — the label is now only emitted on the standalone
+  declaration the "prototypes before bodies" pass already produces ahead
+  of every definition.
 
 ## [0.3.9] - 2026-08-24
 
@@ -249,18 +270,21 @@ All notable changes to CCCC are documented here. Format loosely follows
   declared-only reference to `__cccc_native_<name>` and supplying a
   translating wrapper under the new name
   (`rename_bundled_extern_for_native_shim`/
-  `serialize_canonical_const_shims`, `src/serialize.c`); `ppoll`'s existing
-  shim now translates too, so it stays consistent with plain `poll()` in
-  the same binary. The emitted `gethostbyname_r`/`gethostbyaddr_r`/
+  `serialize_canonical_const_shims`, `src/serialize.c`);
+`ppoll`'s existing shim now translates too,
+    so it stays consistent with        plain `poll()` in the same binary
+            .The emitted `gethostbyname_r`/`gethostbyaddr_r`/
   `getnetbyname_r` mutex now also covers the plain `gethostbyname()`/
-  `gethostbyaddr()`/`getnetbyname()` family (only when a program uses both),
-  matching the VM's own single shared mutex (#1146).
-- `-c=native` never linked `-liconv`, so a program calling
-  `iconv_open()`/`iconv()`/`iconv_close()` failed at link time on macOS
-  ("Undefined symbols ... _iconv") — invisible until #1140 cleared the
-  compile-time errors ahead of it. Fixed by appending `-liconv` to the
-  native `cc` invocation on Darwin only, alongside the existing
-  unconditional `-lm`/`-pthread`; glibc bundles `iconv` in libc itself, so
+  `gethostbyaddr()`/`getnetbyname()` family(only when a program uses both),
+    matching the VM's own single shared mutex (#1146). - `-
+        c = native` never linked `- liconv`,
+        so a program calling
+  `iconv_open()`/`iconv()`/`iconv_close()` failed at link time on
+                macOS("Undefined symbols ... _iconv") — invisible until
+                #1140 cleared the compile
+            - time errors ahead of it.Fixed by appending `-
+            liconv` to the native `cc` invocation on Darwin only,
+        alongside the existing unconditional `- lm`/`- pthread`; glibc bundles `iconv` in libc itself, so
   Linux is unaffected either way (#1147).
 
 ## [0.3.4] - 2026-08-23
@@ -342,7 +366,9 @@ All notable changes to CCCC are documented here. Format loosely follows
   `_BitInt` container to (`bitint_type()` previously capped every
   `_BitInt` alignment at 8 regardless of container width). This closes a
   parse-time `sizeof`/`_Alignof`-fold divergence from the layout of the C
-  cccc itself emits — `struct { char c; __int128 x; }` is now `sizeof 32`
+  cccc itself emits — `struct {
+    char     c;
+    __int128 x; }` is now `sizeof 32`
   / `_Alignof 16`, not `24`/`8` — the same class of bug as #1127. Note
   this is a deliberate divergence from clang's/gcc's own *native*
   `_BitInt(65..128)` spelling on x86_64, which is align 8 there (though
@@ -352,7 +378,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   (#1135).
 - A struct containing a bitfield now reserves each *named* bitfield member's
   full declared-type storage unit in the struct's own size/alignment,
-  matching clang/gcc (`struct A { int f : 5; }` is now `sizeof 4` /
+  matching clang/gcc (`struct A {
+    int f : 5; }` is now `sizeof 4` /
   `_Alignof 4`, not `1`/`1`) — an unnamed member (including width-0) stays
   pure padding and does not affect alignment, and `packed` structs are
   unaffected (#1127). Member offsets and bit-packing within the container
@@ -414,7 +441,9 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 - `-c=native`/`-m` keeps function-local typedefs of anonymous aggregates
   distinct across scopes (#1116): a function-local
-  `typedef struct { int width; int height; } TdSize;` serialized neither its
+  `typedef struct {
+    int width;
+    int height; } TdSize;` serialized neither its
   struct body nor its alias whenever a structurally identical anonymous
   aggregate typedef existed in a sibling function (or the type otherwise
   merged with a same-shaped one collected earlier) — the global collection
@@ -446,8 +475,10 @@ All notable changes to CCCC are documented here. Format loosely follows
   tgmath's long-double-complex arms, and likewise every double/float arm),
   so the host compile died on "use of undeclared identifier '__cccc_creall'".
   A new demand-gated synth pass emits static inline definitions of the whole
-  family — the nine `__cccc_creal/cimag/conj {,f,l}` accessors plus the three
-  `__cccc_cmplx {,f,l}` constructors the replayed `CMPLX()`/`I` macros reach
+  family — the nine `__cccc_creal/cimag/conj {
+    , f, l}` accessors plus the three
+  `__cccc_cmplx {
+    , f, l}` constructors the replayed `CMPLX()`/`I` macros reach
   — mapped onto the host's own `__builtin_creal*`/`cimag*`/`conj*`/
   `complex`, whenever a captured include resolves to bundled complex.h or
   tgmath.h, any complex-typed object is reachable, or any helper name itself
@@ -517,7 +548,7 @@ All notable changes to CCCC are documented here. Format loosely follows
   - A const-element aggregate local (`const int a[3] = {1,2,3}`) hoists to
     a declaration plus per-element assignment statements (#1029's scheme),
     but C spells the qualifier on the element type one level below where
-    #1029 stripped it, leaving a genuinely-const object that the
+# 1029 stripped it, leaving a genuinely - const object that the
     assignments stored into ("read-only variable is not assignable" from
     clang, which rejects any statically-const store). The hoisted
     declarator and the byte-offset cast-back both drop the element
@@ -953,7 +984,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 - **`--uninitialized-detection`/`--safety=max` falsely reported
   `UNINITIALIZED VARIABLE READ` for a scalar local written through its
   address rather than a direct assignment** (#1008), most commonly the
-  ordinary C out-parameter idiom (`void fill(int *out){ *out = 42; }`).
+  ordinary C out-parameter idiom (`void fill(int *out){
+    *out = 42; }`).
   The same gap also covered a `__block` local written from inside a
   block literal and a plain local written from inside a nested
   function. Fixed by exempting a local from the read-side check once
@@ -1070,7 +1102,7 @@ All notable changes to CCCC are documented here. Format loosely follows
   left at 0 regardless — silent success dressed up as a bogus error.
 - **A `static` function defined in a *non-first* command-line input file
   was silently dropped from `-m`/`-c=native` output** (found investigating
-  #1002). The "was this supplied by a replayed header" check compared
+# 1002).The "was this supplied by a replayed header" check compared
   against the *primary* input file only, so the identical shape in a
   second or later input file was misidentified as header-supplied.
 - **Two different `.c` inputs each defining a same-named `static` function
@@ -1125,7 +1157,7 @@ All notable changes to CCCC are documented here. Format loosely follows
   aggregate case that silently emitted broken, duplicated struct bodies
   even before this fix.
 - **`Block_release`'s fallback `free()` + block preamble ordering** (#990,
-  #993). `Block_release(b)` falling back to a synthesized `free` prototype
+# 993). `Block_release(b)` falling back to a synthesized `free` prototype
   (no user `free` in scope) generated a call to an undeclared `free` under
   `-c=native`; a by-value capture of a header-declared type (e.g.
   `struct tm`) could be serialized before that header's own definition was
@@ -1173,7 +1205,7 @@ All notable changes to CCCC are documented here. Format loosely follows
   turning that comment into a syntactically valid null statement: the
   construct silently vanished from the native binary while the VM still
   ran it correctly. This was the root cause behind #925, #926, #927, #930,
-  #897, #906, and #952, all discovered independently within a single week.
+# 897, #906, and #952, all discovered independently within a single week.
   Gated on #964 (VLAs, `__builtin_*_overflow`) and #965 (blocks) landing
   first, since flipping the arm earlier would have turned "emits broken C"
   into "cccc internal error" for constructs with no serializer case at all
@@ -1289,7 +1321,7 @@ All notable changes to CCCC are documented here. Format loosely follows
   produces. Covered by `tests/test_addr_of_array_type.c`.
 
 - **Pointer-to-VLA-row subtraction produced garbage** (#976, follow-up to
-  #973). `&v[1] - &v[0]` on a 2-D VLA (`int v[n][m]`) did not return `1`.
+# 973). `& v[1] - & v[0]` on a 2 - D VLA(`int v[n][m]`) did not return `1`.
   Two compounding bugs: `new_sub()`'s "VLA - num" arm (`src/parse.c`) fired
   unconditionally whenever the left operand was VLA-row-pointer-typed, with
   no check that the right operand wasn't itself a pointer -- so a genuine
@@ -1307,7 +1339,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   case 51.
 
 - **Multi-dimensional VLA brace initializer silently dropped every
-  element** (#977, follow-up to #973). `int v[n][m] = {{1,2},{3,4}}` left
+  element** (#977, follow-up to #973). `int v[n][m] = {
+    {1, 2}, {3, 4}}` left
   every element 0. `create_lvar_init` (`src/parse.c`) had no `TY_VLA` case,
   so a nested row's brace group -- itself `TY_VLA`-typed, not a
   scalar/aggregate type the function already handled -- fell through to a
@@ -1318,7 +1351,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   `array_initializer2`'s VLA branches never actually allocated (both now
   allocate one extra, zeroed slot). VLA brace initialization of any
   dimension is a deliberate CCCC extension -- GCC/clang both reject
-  `int v[n] = {...}` outright -- now documented in
+  `int v[n] = {
+    ...}` outright -- now documented in
   [COVERAGE.md](man/COVERAGE.md); its long-term status is tracked as an
   open design question in #978. Covered by new cases in
   `tests/suites/test_suite_vla.c` and `tools/comptime_native_smoke.py`
@@ -1428,7 +1462,12 @@ All notable changes to CCCC are documented here. Format loosely follows
   crashed the parser** (#960, follow-up to #489). `struct_designator()`
   (`src/parse.c`) special-cased anonymous *struct* members when resolving
   a `.name` designator but not anonymous unions, so `.i` in
-  `struct S { union { int i; float f; }; int tag; } r = {.i = 7, .tag = 1};`
+  `struct S {
+    union {
+        int   i;
+        float f;
+    };
+    int tag; } r = {.i = 7, .tag = 1};`
   fell through to a NULL `mem->name` dereference — reachable from a plain
   brace initializer, a compound literal, or a global, not just the
   compound-literal shape the ticket was found through. Fixed by matching
@@ -1478,7 +1517,7 @@ All notable changes to CCCC are documented here. Format loosely follows
   `aio_write_retry`/`aio_read_retry`/`aio_fsync_retry` in
   `tests/suites/test_suite_posix.c` to ~1s (40 attempts × 25ms) and bumped
   `test_aio_sigev_signal`'s timeout from 5000ms to 10000ms to match; see
-  #929 (reopened with this evidence).
+# 929(reopened with this evidence).
 
 ## [0.2.6] - 2026-08-12
 
@@ -1487,8 +1526,10 @@ All notable changes to CCCC are documented here. Format loosely follows
 - **`return=` compound-literal test assertions now support nested
   struct/union/array fields and anonymous struct/union members** (#489,
   follow-up to #353). A field that is itself a struct or union can be
-  asserted with a nested compound literal (typed `(struct T){...}` or a
-  bare `{...}` whose type is inferred from the field), recursing to a
+  asserted with a nested compound literal (typed `(struct T){
+    ...}` or a
+  bare `{
+    ...}` whose type is inferred from the field), recursing to a
   maximum of 8 levels; an array field takes a positional element list, or a
   `char[]` field can be compared against a string literal with C
   zero-initialisation semantics. An anonymous struct/union member's fields
@@ -1665,7 +1706,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   `cc_link_progs` (`src/linker.c`) canonicalized definitions across
   translation units by name but never propagated the resulting offset onto
   the declaration-only `Obj`s it dropped from the merged list. Concretely,
-  before this fix: `extern int g; int f(void){return g;} int g=42;` read 0
+  before this fix: `extern int g; int f(void){
+    return g;} int g=42;` read 0
   instead of 42 from `f()`; `int g=42; extern int g;` likewise read 0; and
   linking two files where one declared `extern int g;` and the other
   defined `int g=42; int pad=7;` silently read `pad`'s value (7) instead of
@@ -1748,7 +1790,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   template) is now a compile error instead of a silent drop. (#955)
 
 - **`RunCustom`'s vendored shell now performs POSIX-correct quote removal,
-  backslash escaping, and `$VAR`/`${VAR}` expansion** — the lexer
+  backslash escaping, and `$VAR`/`${
+    VAR}` expansion** — the lexer
   (`src/build_shell.c`) previously only recognized a quote as the very
   first character of a word, and even then returned its interior
   unprocessed: an embedded quote (`pre'mid'post`), a backslash escape, or a
@@ -1760,7 +1803,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   converted to a pointer and dereferenced (SIGSEGV in the *child* process,
   not the outer `--build` process, which correctly reported the step's
   failure and non-zero exit). The word reader now performs real quote
-  removal and backslash escaping per POSIX, plus `$VAR`/`${VAR}` expansion
+  removal and backslash escaping per POSIX, plus `$VAR`/`${
+    VAR}` expansion
   from the process environment as a single non-re-split, non-globbed
   literal chunk. (#954)
 
@@ -1771,7 +1815,8 @@ All notable changes to CCCC are documented here. Format loosely follows
   depth-0 `[` array-dimension group, but tracked `[`/`]` depth without
   tracking brace depth. A member array inside an anonymous struct/union body
   declared in the same statement as its own declarator (e.g. `typedef struct
-  { char n[32]; } A;`) put that member's `[` at apparent depth 0, so the
+  {
+    char n[32]; } A;`) put that member's `[` at apparent depth 0, so the
   declaration was indexed under the member's name (`n`) instead of its own
   (`A`); a leading attribute (`[[deprecated]] int dx;`) hit the same `[` path
   with no preceding token, so the declaration was never indexed at all.
@@ -1928,8 +1973,9 @@ All notable changes to CCCC are documented here. Format loosely follows
   struct-member bounds below. See [SAFETY.md § Checked
   Pointers](man/SAFETY.md#checked-pointers) (#919)
 - **Checked-pointer bounds on struct/union members** — a member's `count()`/
-  `byte_count()`/`bounds()` may now name a sibling member (`struct S { int
-  n; int * [[cccc::array, cccc::count(n)]] p; };`), resolved relative to
+  `byte_count()`/`bounds()` may now name a sibling member (`struct S {
+    int  n;
+    int *[[cccc::array, cccc::count(n)]] p; };`), resolved relative to
   whichever instance is actually accessed (`s.p[i]`, `sp->p[i]`, `(&s)->p[i]`,
   `(*sp).p[i]` all reach the same member-relative base). Previously a
   compile error. See [SAFETY.md § Checked
@@ -2032,7 +2078,9 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 - `-c=native`/`-m` serializer: anonymous globals (`new_anon_gvar`'s `.L..N`
   name) are no longer treated as opaque string literals across the board —
-  static locals and compound literals (`(int[]){...}`, `&(struct S){...}`)
+  static locals and compound literals (`(int[]){
+    ...}`, `&(struct S){
+    ...}`)
   now get a real, valid-C identifier and a proper `static` definition
   instead of an unreferenceable dotted name. Previously such a reference
   either emitted invalid C (a dotted identifier the host compiler rejects)
