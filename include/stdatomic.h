@@ -24,49 +24,84 @@ typedef enum {
 #define ATOMIC_FLAG_INIT(x)    (x)
 #define atomic_init(addr, val) (*(addr) = (val))
 #define kill_dependency(x)     (x)
+// KNOWN GAP, tracked separately (not #1184): both fences expand to nothing.
+// Harmless under the VM's GIL (which already serializes everything) but a
+// real reordering hazard under -c=native's genuine parallelism -- there is
+// no __builtin_atomic_thread_fence to lower to yet, so fixing this needs new
+// compiler surface (node kind + parser + codegen + serializer case), unlike
+// #1184's fetch_* fix which only needed a header-level CAS-loop rewrite.
 #define atomic_thread_fence(order)
 #define atomic_signal_fence(order)
-#define atomic_is_lock_free(x)            1
+#define atomic_is_lock_free(x)  1
 
-#define atomic_load(addr)                 __builtin_atomic_load(addr)
-#define atomic_store(addr, val)           __builtin_atomic_store((addr), (val))
+#define atomic_load(addr)       __builtin_atomic_load(addr)
+#define atomic_store(addr, val) __builtin_atomic_store((addr), (val))
 
+// #1184: every operation on this page is __ATOMIC_SEQ_CST regardless of the
+// `order` argument -- the argument is accepted (as C11 requires it must be a
+// constant expression) but otherwise discarded. This is conforming: seq_cst
+// is stronger than any order a caller can request, never weaker, so nothing
+// observable is lost by ignoring it. The only cost is performance (relaxed/
+// acquire-release ops pay a full seq_cst fence they didn't ask for) -- see
+// the fence follow-up below for the related, currently-unaddressed gap.
 #define atomic_load_explicit(addr, order) __builtin_atomic_load(addr)
 #define atomic_store_explicit(addr, val, order)                                \
     __builtin_atomic_store((addr), (val))
 
-// Under the GIL the two-step ALDR+ASTR is uninterruptible and tags
-// atomic_shadow for mixed-access detection (see #447).
-#define atomic_fetch_add(obj, val)                                             \
+// #1184: a genuine CAS retry loop, not a load-then-store. The old two-step
+// ALDR+ASTR form ("_old = load(obj); store(obj, _old + val)") was atomic
+// only under the VM's GIL -- a plain pthread_mutex held for the whole
+// vm_eval and released only at explicit blocking cfunc points
+// (save_and_release_gil, src/stdlib/pthread.c), never between bytecode
+// instructions, so the two-step form was uninterruptible there. Under
+// -c=native there is no GIL: real thread parallelism made this a genuine
+// data race with silently lost updates (confirmed via stress testing,
+// #1184). ND_CAS already lowers to a real atomic op on both backends --
+// ACAS in the VM (op_ACAS_fn, src/ops.c, which still calls
+// check_atomic_access() to tag atomic_shadow for #447 mixed-access
+// detection, exactly as the old ALDR/ASTR did) and
+// __atomic_compare_exchange_n natively (serialize_expr.c) -- because
+// to_assign()'s `_Atomic x op= y` desugar (src/parse_expr.c) already builds
+// exactly this shape. The only difference from that desugar is that this
+// yields the OLD value, as C11 7.17.7.5 requires (to_assign() yields new).
+//
+// obj/val are hoisted into __cccc_fetch_p/__cccc_fetch_v *before* the loop,
+// exactly like to_assign()'s own addr/val lvars -- the retry body/condition
+// touch only those temps. Do not inline (obj)/(val) directly into the loop:
+// a CAS retry would then re-evaluate them on every failed attempt (e.g.
+// atomic_fetch_add(&x, f()) would call f() once per retry, a regression
+// from single evaluation). No test can catch a regression here -- under the
+// VM's GIL the CAS always succeeds on the first try, so re-evaluation is
+// invisible there too -- so this hoist has to stay as a documented
+// invariant, not something a future "simplification" undoes.
+//
+// __typeof__(*(obj)) yields _Atomic T, so &__cccc_fetch_old is _Atomic T *,
+// matching what to_assign()'s own `old` lvar is; serialize_atomic_addr()
+// (src/serialize_expr.c, #1101) strips the qualifier for the native
+// builtin, so no cast is needed here.
+//
+// Note: ND_CAS codegen hard-errors on a float/non-{1,2,4,8}-byte pointee,
+// where the old ALDR-based form silently fell back to a plain load.
+// Neither was ever valid C for atomic_fetch_* (C11 7.17.7.5 requires an
+// atomic *integer* type), so this turns silent nonsense into a diagnostic.
+#define __cccc_atomic_fetch_op(obj, val, op)                                   \
     ({                                                                         \
-        __typeof__(*(obj)) _old = __builtin_atomic_load(obj);                  \
-        __builtin_atomic_store((obj), _old + (val));                           \
-        _old;                                                                  \
+        __typeof__(obj)    __cccc_fetch_p = (obj);                             \
+        __typeof__(val)    __cccc_fetch_v = (val);                             \
+        __typeof__(*(obj)) __cccc_fetch_old =                                  \
+            __builtin_atomic_load(__cccc_fetch_p);                             \
+        __typeof__(*(obj)) __cccc_fetch_new;                                   \
+        do {                                                                   \
+            __cccc_fetch_new = __cccc_fetch_old op __cccc_fetch_v;             \
+        } while (!__builtin_compare_and_swap(                                  \
+            __cccc_fetch_p, &__cccc_fetch_old, __cccc_fetch_new));             \
+        __cccc_fetch_old;                                                      \
     })
-#define atomic_fetch_sub(obj, val)                                             \
-    ({                                                                         \
-        __typeof__(*(obj)) _old = __builtin_atomic_load(obj);                  \
-        __builtin_atomic_store((obj), _old - (val));                           \
-        _old;                                                                  \
-    })
-#define atomic_fetch_or(obj, val)                                              \
-    ({                                                                         \
-        __typeof__(*(obj)) _old = __builtin_atomic_load(obj);                  \
-        __builtin_atomic_store((obj), _old | (val));                           \
-        _old;                                                                  \
-    })
-#define atomic_fetch_xor(obj, val)                                             \
-    ({                                                                         \
-        __typeof__(*(obj)) _old = __builtin_atomic_load(obj);                  \
-        __builtin_atomic_store((obj), _old ^ (val));                           \
-        _old;                                                                  \
-    })
-#define atomic_fetch_and(obj, val)                                             \
-    ({                                                                         \
-        __typeof__(*(obj)) _old = __builtin_atomic_load(obj);                  \
-        __builtin_atomic_store((obj), _old & (val));                           \
-        _old;                                                                  \
-    })
+#define atomic_fetch_add(obj, val) __cccc_atomic_fetch_op((obj), (val), +)
+#define atomic_fetch_sub(obj, val) __cccc_atomic_fetch_op((obj), (val), -)
+#define atomic_fetch_or(obj, val)  __cccc_atomic_fetch_op((obj), (val), |)
+#define atomic_fetch_xor(obj, val) __cccc_atomic_fetch_op((obj), (val), ^)
+#define atomic_fetch_and(obj, val) __cccc_atomic_fetch_op((obj), (val), &)
 
 #define atomic_fetch_add_explicit(obj, val, order) atomic_fetch_add(obj, val)
 #define atomic_fetch_sub_explicit(obj, val, order) atomic_fetch_sub(obj, val)
@@ -74,6 +109,11 @@ typedef enum {
 #define atomic_fetch_xor_explicit(obj, val, order) atomic_fetch_xor(obj, val)
 #define atomic_fetch_and_explicit(obj, val, order) atomic_fetch_and(obj, val)
 
+// weak and strong are the same expansion (__builtin_compare_and_swap is a
+// single-attempt CAS with no spurious-failure path), so "weak" is really
+// strong here -- conforming (C11 permits an implementation of the weak form
+// that never spuriously fails), left this way deliberately: do not "fix"
+// weak to loop internally, that would just be strong with extra steps.
 #define atomic_compare_exchange_weak(p, old, new)                              \
     __builtin_compare_and_swap((p), (old), (new))
 
@@ -86,8 +126,13 @@ typedef enum {
 
 #define atomic_flag_test_and_set(obj)                 atomic_exchange((obj), 1)
 #define atomic_flag_test_and_set_explicit(obj, order) atomic_exchange((obj), 1)
-#define atomic_flag_clear(obj)                        (*(obj) = 0)
-#define atomic_flag_clear_explicit(obj, order)        (*(obj) = 0)
+// #1184: was a plain, non-atomic `*(obj) = 0` -- not even ALDR/ASTR-tagged,
+// so unlike every other operation on this page it was never atomic on
+// EITHER backend, and invisible to #447 mixed-access detection. Route
+// through the same tagged atomic store atomic_flag_test_and_set already
+// uses via atomic_exchange, above.
+#define atomic_flag_clear(obj)                 __builtin_atomic_store((obj), 0)
+#define atomic_flag_clear_explicit(obj, order) __builtin_atomic_store((obj), 0)
 
 typedef _Atomic _Bool              atomic_flag;
 typedef _Atomic _Bool              atomic_bool;

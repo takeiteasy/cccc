@@ -547,23 +547,6 @@ NATIVE_SKIP_TESTS = {
     # NATIVE_SKIP_TESTS_MACOS; moved here since it's not macOS-specific.
     "test_suite_printf_c23.c": "glibc scanf has no %B conversion specifier, "
                  "only %b -- printf's %b/%B round-trip fine (#1162)",
-    # test_threads_call_once_1088.c: NOT a call_once bug -- that shim
-    # (serialize_shims.c) is correct, confirmed by inspecting its -m output
-    # directly and by reimplementing its exact algorithm in a hand-written
-    # pthreads program (0/300 failures under stress). The real bug is
-    # include/stdatomic.h's atomic_fetch_add(), which this test also calls:
-    # it desugars to a plain, non-atomic load-then-store ("_old = load(obj);
-    # store(obj, _old + val)"), correct only under the VM's own GIL, a real
-    # data race under -c=native's real parallelism -- the same bug class
-    # #1088 already fixed for call_once specifically, just never applied to
-    # the fetch_add/sub/or/xor/and family. Confirmed by patching the
-    # generated .c to use a real __atomic_fetch_add builtin and re-running
-    # clean. Intermittent (~7-13% of runs failed under stress, found while
-    # verifying #1157) -- excluded from --native-audit-skips staleness
-    # concerns for exactly that reason: a flaky failure isn't a stale skip.
-    "test_threads_call_once_1088.c": "atomic_fetch_add() is a non-atomic "
-                 "load-then-store, a real data race under -c=native "
-                 "(#1184)",
 }
 
 # Platform-specific -c=native skips, checked only when the running host

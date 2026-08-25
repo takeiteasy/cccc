@@ -5,6 +5,27 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `include/stdatomic.h`'s `atomic_fetch_add/sub/or/xor/and` expanded to a
+  plain, non-atomic load-then-store — correct only under the VM's GIL
+  (never released between bytecode instructions), but a genuine data race
+  with silently lost updates once `-c=native` gives real thread
+  parallelism (confirmed via stress testing: 7-13% failure rate). Fixed by
+  rewriting the macros as a CAS retry loop, reusing the same shape
+  `_Atomic x += y` already builds. `atomic_flag_clear`/`_explicit` had the
+  same problem more severely — a plain, untagged store that was never
+  atomic on either backend — and is now routed through the same tagged
+  atomic store `atomic_flag_test_and_set` already uses (#1184).
+
+### Known limitations
+
+- `atomic_thread_fence`/`atomic_signal_fence` (`<stdatomic.h>`) are still
+  no-ops — harmless under the VM's GIL, but a real reordering hazard under
+  `-c=native`'s genuine parallelism. `ATOMIC_FLAG_INIT` is also spelled as
+  a function-like macro, non-conforming per C11 7.17.1 (tracked
+  separately).
+
 ## [0.3.12] - 2026-08-25
 
 ### Fixed

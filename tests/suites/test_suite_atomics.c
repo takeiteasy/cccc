@@ -99,7 +99,10 @@ int test_atomic_ops_functional(void) {
     if (atomic_load(&x) != 12)
         return 8;
 
-    // atomic_flag
+    // atomic_flag -- atomic_flag_clear used to expand to a plain, untagged
+    // `*(obj) = 0` (non-atomic on both backends, invisible to #447 mixed-
+    // access detection); now routes through __builtin_atomic_store like
+    // atomic_flag_test_and_set already does (#1184).
     atomic_flag f = ATOMIC_FLAG_INIT(0);
     if (atomic_flag_test_and_set(&f))
         return 9;  // first set should return 0 (was clear)

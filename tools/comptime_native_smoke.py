@@ -6327,11 +6327,51 @@ def case_native_emoji_macro_define_not_replayed(cccc: Path, tmp: str) -> bool:
                                     EMOJI_MACRO_PROGRAM)
 
 
+ATOMIC_FETCH_PROGRAM = (
+    "#include <stdatomic.h>\n"
+    "int main(void) {\n"
+    "    _Atomic int x = 10;\n"
+    "    int old = atomic_fetch_add(&x, 5);\n"
+    "    if (old != 10 || atomic_load(&x) != 15) return 1;\n"
+    "    old = atomic_fetch_sub(&x, 3);\n"
+    "    if (old != 15 || atomic_load(&x) != 12) return 2;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_atomic_fetch_cas_loop_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  137: atomic_fetch_add/sub/or/xor/and (stdatomic.h) used to "
+          "expand to a plain, non-atomic load-then-store -- correct only "
+          "under the VM's GIL (never released between bytecode "
+          "instructions), a genuine data race with silently lost updates "
+          "under -c=native's real thread parallelism (#1184). Fixed by "
+          "rewriting the macros as a CAS retry loop, the same shape "
+          "to_assign() already builds for `_Atomic x += y`. Asserts -m "
+          "output lowers atomic_fetch_add/sub to a real "
+          "__atomic_compare_exchange_n retry loop rather than a bare "
+          "__atomic_load_n/__atomic_store_n pair, and VM 42 -> native 42.")
+    src = Path(tmp) / "atomic_fetch_cas_1184.c"
+    write(src, ATOMIC_FETCH_PROGRAM)
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "__atomic_compare_exchange_n" not in m_result.stdout:
+        print(f"    FAIL: -m output does not lower atomic_fetch_* to a CAS "
+              f"loop\n    {m_result.stdout}")
+        return False
+    if "__atomic_store_n" in m_result.stdout:
+        print(f"    FAIL: -m output still contains a bare __atomic_store_n "
+              f"-- atomic_fetch_* regressed to load-then-store\n"
+              f"    {m_result.stdout}")
+        return False
+    return _vm_and_native_run_case(cccc, tmp, "atomic_fetch_cas_1184",
+                                    ATOMIC_FETCH_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -6477,6 +6517,7 @@ def main() -> int:
             case_typedef_identity_native_round_trip,
             case_threads_native_round_trip,
             case_native_emoji_macro_define_not_replayed,
+            case_atomic_fetch_cas_loop_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 
