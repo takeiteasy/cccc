@@ -6412,11 +6412,54 @@ def case_atomic_fence_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     ATOMIC_FENCE_PROGRAM)
 
 
+ATOMIC_VAR_INIT_PROGRAM = (
+    "#include <stdatomic.h>\n"
+    "int main(void) {\n"
+    "    atomic_int x = ATOMIC_VAR_INIT(5);\n"
+    "    if (atomic_load(&x) != 5) return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_atomic_var_init_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  139: ATOMIC_VAR_INIT was missing from include/stdatomic.h "
+          "entirely -- a C11/C17 program using it (C11 7.17.2p1, deprecated "
+          "in C17, removed in C23) got an undefined-macro error instead of "
+          "the working expansion a real C11/C17 compiler gives (#1190). "
+          "Fixed with a `(value)` expansion gated to "
+          "__STDC_VERSION__ <= 201710L, matching how glibc/clang gate it -- "
+          "left undefined under cccc's default C23, same as a real C23 "
+          "compiler. Asserts --std=c11 VM 42 -> --std=c11 native 42.")
+    src = Path(tmp) / "atomic_var_init_1190.c"
+    write(src, ATOMIC_VAR_INIT_PROGRAM)
+    vm_result = run([str(cccc), "--std=c11", src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: --std=c11 VM exit {vm_result.returncode}\n"
+              f"    {vm_result.stderr}")
+        return False
+    out = Path(tmp) / "atomic_var_init_1190_out"
+    compile_result = run(
+        [str(cccc), "--std=c11", "-c=native", "-o", out.name, src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: --std=c11 native compile exited "
+              f"{compile_result.returncode}\n    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: --std=c11 native exit {run_result.returncode}\n"
+              f"    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -6564,6 +6607,7 @@ def main() -> int:
             case_native_emoji_macro_define_not_replayed,
             case_atomic_fetch_cas_loop_native_round_trip,
             case_atomic_fence_native_round_trip,
+            case_atomic_var_init_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

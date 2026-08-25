@@ -31,6 +31,14 @@ All notable changes to CCCC are documented here. Format loosely follows
   function-like macro (`#define ATOMIC_FLAG_INIT(x) (x)`), non-conforming
   per C11 7.17.1 — now a plain object-like `0` (#1188).
 
+- `include/stdatomic.h` was missing `ATOMIC_VAR_INIT` entirely — a valid
+  C11/C17 program using it (`atomic_int x = ATOMIC_VAR_INIT(5);`, C11
+  7.17.2p1) got an undefined-macro error rather than a working expansion.
+  Fixed with a `(value)` expansion gated to `__STDC_VERSION__ <= 201710L`,
+  matching how glibc's and clang's own `<stdatomic.h>` gate it — left
+  undefined under cccc's default C23, matching a real C23 compiler, since
+  the macro is deprecated in C17 and removed entirely in C23 (#1190).
+
 ## [0.3.12] - 2026-08-25
 
 ### Fixed

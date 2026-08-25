@@ -2693,7 +2693,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Change | Status | Notes |
 |---|---|---|
 | Removes `gets` | ✓ | `gets` is not registered in CCCC's stdlib |
-| Deprecates `ATOMIC_VAR_INIT` | N/A | Atomics not supported |
+| Deprecates `ATOMIC_VAR_INIT` | ✓ | `ATOMIC_VAR_INIT(value)` expands to `(value)`, gated to `__STDC_VERSION__ <= 201710L` (#1190) — undefined under cccc's default C23, matching how glibc/clang gate it and how a real C23 compiler behaves |
 | Clarifies undefined behaviour | N/A | Semantic, not syntactic |
 
 #### C23

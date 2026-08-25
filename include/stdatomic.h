@@ -28,6 +28,16 @@ typedef enum {
 #define ATOMIC_FLAG_INIT       0
 #define atomic_init(addr, val) (*(addr) = (val))
 #define kill_dependency(x)     (x)
+// C11 7.17.2p1: ATOMIC_VAR_INIT(value) initializes an _Atomic-qualified
+// object at declaration, e.g. `atomic_int x = ATOMIC_VAR_INIT(5);` --
+// equivalent to a plain `= value` for any type this page supports (#1190).
+// Deprecated in C17 (Annex 4), removed entirely in C23; gated the same way
+// glibc's and clang's own <stdatomic.h> gate it, so a C23 program using it
+// gets the same undefined-macro error a real C23 compiler gives, while a
+// C11/C17 program (--std=c11/--std=c17) still gets a working expansion.
+#if __STDC_VERSION__ <= 201710L
+#define ATOMIC_VAR_INIT(value) (value)
+#endif
 // #1188: real fences, lowered via the new ND_FENCE node (parse_postfix.c,
 // type.c, codegen_expr.c, serialize_expr.c). Under -c=native this emits a
 // genuine __atomic_thread_fence/__atomic_signal_fence with the requested
@@ -45,8 +55,8 @@ typedef enum {
 #define atomic_signal_fence(order) __builtin_atomic_signal_fence(order)
 #define atomic_is_lock_free(x)     1
 
-#define atomic_load(addr)       __builtin_atomic_load(addr)
-#define atomic_store(addr, val) __builtin_atomic_store((addr), (val))
+#define atomic_load(addr)          __builtin_atomic_load(addr)
+#define atomic_store(addr, val)    __builtin_atomic_store((addr), (val))
 
 // #1184: every operation on this page is __ATOMIC_SEQ_CST regardless of the
 // `order` argument -- the argument is accepted (as C11 requires it must be a
