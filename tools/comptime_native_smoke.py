@@ -6367,11 +6367,56 @@ def case_atomic_fetch_cas_loop_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     ATOMIC_FETCH_PROGRAM)
 
 
+ATOMIC_FENCE_PROGRAM = (
+    "#include <stdatomic.h>\n"
+    "int main(void) {\n"
+    "    _Atomic int x = 0;\n"
+    "    atomic_thread_fence(memory_order_seq_cst);\n"
+    "    int order = memory_order_acquire;\n"
+    "    atomic_signal_fence(order);\n"
+    "    atomic_store(&x, 7);\n"
+    "    if (atomic_load(&x) != 7) return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_atomic_fence_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  138: atomic_thread_fence/atomic_signal_fence (stdatomic.h) "
+          "used to expand to nothing -- harmless under the VM's GIL, but a "
+          "real reordering hazard under -c=native's genuine thread "
+          "parallelism (#1188, found while fixing #1184). Fixed by lowering "
+          "to a real __atomic_thread_fence/__atomic_signal_fence via a new "
+          "ND_FENCE node. Asserts -m output emits the symbolic "
+          "__ATOMIC_SEQ_CST for a constant order and passes a non-constant "
+          "order through verbatim rather than dropping it, and VM 42 -> "
+          "native 42.")
+    src = Path(tmp) / "atomic_fence_1188.c"
+    write(src, ATOMIC_FENCE_PROGRAM)
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "__atomic_thread_fence(__ATOMIC_SEQ_CST)" not in m_result.stdout:
+        print(f"    FAIL: -m output does not emit a constant-folded "
+              f"__atomic_thread_fence(__ATOMIC_SEQ_CST)\n    {m_result.stdout}")
+        return False
+    if "__atomic_signal_fence(order)" not in m_result.stdout:
+        print(f"    FAIL: -m output does not pass a non-constant order "
+              f"through to __atomic_signal_fence verbatim\n"
+              f"    {m_result.stdout}")
+        return False
+    if "atomic_thread_fence(" in m_result.stdout.replace(
+            "__atomic_thread_fence(", ""):
+        print(f"    FAIL: -m output still contains an unlowered "
+              f"atomic_thread_fence call\n    {m_result.stdout}")
+        return False
+    return _vm_and_native_run_case(cccc, tmp, "atomic_fence_1188",
+                                    ATOMIC_FENCE_PROGRAM)
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -6518,6 +6563,7 @@ def main() -> int:
             case_threads_native_round_trip,
             case_native_emoji_macro_define_not_replayed,
             case_atomic_fetch_cas_loop_native_round_trip,
+            case_atomic_fence_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

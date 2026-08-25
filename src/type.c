@@ -1142,6 +1142,15 @@ void add_type(VirtualMachine *vm, Node *node) {
                           "__builtin_atomic_store: pointer expected");
             node->ty = node->lhs->ty->base;
             return;
+        case ND_FENCE:
+            add_type(vm, node->lhs);
+            if (!is_integer(node->lhs->ty))
+                error_tok(vm, node->lhs->tok,
+                          "%s: memory order must be an integer expression",
+                          node->val ? "__builtin_atomic_signal_fence"
+                                    : "__builtin_atomic_thread_fence");
+            node->ty = ty_void;
+            return;
         case ND_BLOCK_LITERAL:
             // Block literal type is already set during parsing (TY_BLOCK)
             // If not set, infer from block_fn

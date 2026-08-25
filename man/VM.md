@@ -324,6 +324,8 @@ Atomic load, store, and read-modify-write opcodes for concurrency. The access wi
 | `AXCHG` | 2 | Atomic exchange: `old = *(T*)REG_A0; *(T*)REG_A0 = (T)REG_A1; REG_A0 = old`; `width_enc` in i64 |
 | `ACAS` | 2 | Atomic compare-and-swap: if `*(T*)REG_A0 == *(T*)REG_A1` then `*(T*)REG_A0 = (T)REG_A2; REG_A0 = 1` else `*(T*)REG_A1 = *(T*)REG_A0; REG_A0 = 0`; `width_enc` in i64 |
 
+`atomic_thread_fence`/`atomic_signal_fence` (#1188) get no opcode at all — they lower to `ND_FENCE`, which just evaluates the `order` argument (for its side effects) and emits nothing. The GIL is held for the whole `vm_eval` and released only at explicit blocking cfunc points, never between bytecode instructions, so no cross-thread reordering of guest memory accesses is ever observable under the VM; guest signal handlers dispatch at safe points (`cccc_call_guest_callback`) rather than asynchronously, so `atomic_signal_fence` needs no barrier here either. `-c=native` has no GIL and gets a real `__atomic_thread_fence`/`__atomic_signal_fence` instead.
+
 ### Floating-Point Operations
 
 All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an integer register.

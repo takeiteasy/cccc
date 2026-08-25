@@ -778,6 +778,7 @@ bool node_has_side_effects(Node *n) {
         case ND_EXCH:
         case ND_ALOAD:
         case ND_ASTORE:
+        case ND_FENCE:
         case ND_STMT_EXPR: // GNU statement expression; may contain anything
             return true;
         default:

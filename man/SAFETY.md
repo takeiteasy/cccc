@@ -529,7 +529,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   ====== MIXED ATOMIC/NON-ATOMIC ACCESS DETECTED ======
   Address 0x... was accessed atomically by thread 0x... and is now read non-atomically by thread 0x... without a mutex
   ```
-  **Known limitation:** `atomic_fetch_add`, `atomic_fetch_sub`, and similar read-modify-write operations still expand to plain load/store opcodes — they do not set the atomic tag and may be incorrectly flagged as non-atomic on an address that was previously `atomic_store`d. Avoid mixing `atomic_fetch_*` with `atomic_store`/`atomic_load` on the same address across threads when using `--thread-safety`.
+  `atomic_fetch_add`/`sub`/`or`/`xor`/`and` (#1184) route through a CAS retry loop over the same `ACAS` opcode `atomic_compare_exchange_*` uses, so they set the atomic tag exactly as `atomic_load`/`atomic_store` do — mixing `atomic_fetch_*` with `atomic_store`/`atomic_load` on the same address across threads is correctly tracked, not a known limitation.
 
 - **`atomic_exchange` and `atomic_compare_exchange`**: These operations compile to dedicated `AXCHG`/`ACAS` opcodes and are correctly handled as atomic accesses in the shadow map. The VM GIL ensures atomicity with respect to other VM threads.
 

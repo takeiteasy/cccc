@@ -23,7 +23,7 @@ int main(void) {
     atomic_long l = 0;
     __builtin_atomic_store(&l, 100LL);
     long ly     = __builtin_atomic_load(&l);
-    atomic_flag f = ATOMIC_FLAG_INIT(0);
+    atomic_flag f = ATOMIC_FLAG_INIT;
     __builtin_atomic_exchange(&f, 1);
     return y + r + (int)ly + f ^ x ^ 41;
 }

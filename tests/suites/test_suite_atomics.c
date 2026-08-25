@@ -103,7 +103,7 @@ int test_atomic_ops_functional(void) {
     // `*(obj) = 0` (non-atomic on both backends, invisible to #447 mixed-
     // access detection); now routes through __builtin_atomic_store like
     // atomic_flag_test_and_set already does (#1184).
-    atomic_flag f = ATOMIC_FLAG_INIT(0);
+    atomic_flag f = ATOMIC_FLAG_INIT;
     if (atomic_flag_test_and_set(&f))
         return 9;  // first set should return 0 (was clear)
     if (!atomic_flag_test_and_set(&f))
@@ -113,6 +113,46 @@ int test_atomic_ops_functional(void) {
         return 11; // after clear, should return 0 again
 
     return 42;     // CCCC test convention: 42 = pass
+}
+
+// #1188: atomic_thread_fence/atomic_signal_fence. This is an *exercise*
+// test, not a proof of correctness -- on x86-64's TSO memory model, and
+// under the VM's GIL, this would compile and return 42 even with the old
+// no-op fence macros. The actual proof that a real __atomic_*_fence is
+// emitted lives in tools/comptime_native_smoke.py, which greps the -m
+// output. This test only confirms every memory_order value, plus a
+// non-constant order (C11 does not require order to be a constant
+// expression), compiles and runs on both backends.
+[[cccc::test(return = 42)]]
+int test_atomic_fence(void) {
+    _Atomic int x = 0;
+
+    atomic_thread_fence(memory_order_relaxed);
+    atomic_thread_fence(memory_order_consume);
+    atomic_thread_fence(memory_order_acquire);
+    atomic_thread_fence(memory_order_release);
+    atomic_thread_fence(memory_order_acq_rel);
+    atomic_thread_fence(memory_order_seq_cst);
+
+    atomic_signal_fence(memory_order_relaxed);
+    atomic_signal_fence(memory_order_consume);
+    atomic_signal_fence(memory_order_acquire);
+    atomic_signal_fence(memory_order_release);
+    atomic_signal_fence(memory_order_acq_rel);
+    atomic_signal_fence(memory_order_seq_cst);
+
+    // Non-constant order: exercises the pass-through (not const-folded)
+    // serializer arm.
+    volatile int order = memory_order_seq_cst;
+    atomic_thread_fence(order);
+    atomic_signal_fence(order);
+
+    atomic_store(&x, 7);
+    atomic_thread_fence(memory_order_release);
+    if (atomic_load(&x) != 7)
+        return 1;
+
+    return 42;
 }
 
 // #985: re-run the two functional cases above at -2 here (pinned via the

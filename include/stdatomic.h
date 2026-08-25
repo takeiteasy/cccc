@@ -21,18 +21,29 @@ typedef enum {
     memory_order_seq_cst,
 } memory_order;
 
-#define ATOMIC_FLAG_INIT(x)    (x)
+// C11 7.17.1: ATOMIC_FLAG_INIT is an object-like initializer macro, used as
+// `atomic_flag f = ATOMIC_FLAG_INIT;` -- no parentheses/argument. (#1188:
+// was previously defined function-like, `#define ATOMIC_FLAG_INIT(x) (x)`,
+// which is non-conforming; atomic_flag is _Atomic _Bool, so 0 is "clear".)
+#define ATOMIC_FLAG_INIT       0
 #define atomic_init(addr, val) (*(addr) = (val))
 #define kill_dependency(x)     (x)
-// KNOWN GAP, tracked separately (not #1184): both fences expand to nothing.
-// Harmless under the VM's GIL (which already serializes everything) but a
-// real reordering hazard under -c=native's genuine parallelism -- there is
-// no __builtin_atomic_thread_fence to lower to yet, so fixing this needs new
-// compiler surface (node kind + parser + codegen + serializer case), unlike
-// #1184's fetch_* fix which only needed a header-level CAS-loop rewrite.
-#define atomic_thread_fence(order)
-#define atomic_signal_fence(order)
-#define atomic_is_lock_free(x)  1
+// #1188: real fences, lowered via the new ND_FENCE node (parse_postfix.c,
+// type.c, codegen_expr.c, serialize_expr.c). Under -c=native this emits a
+// genuine __atomic_thread_fence/__atomic_signal_fence with the requested
+// order (not a fixed __ATOMIC_SEQ_CST like every other operation on this
+// page -- a fence with no order does nothing at all, unlike seq_cst being
+// merely stronger than requested elsewhere here). Under the VM these are
+// no-ops: the GIL is held for the whole vm_eval and released only at
+// explicit blocking cfunc points (save_and_release_gil,
+// src/stdlib/pthread.c), never between bytecode instructions, so no
+// cross-thread reordering of guest memory accesses is ever observable
+// there, and guest signal handlers dispatch at safe points
+// (cccc_call_guest_callback) rather than asynchronously -- see
+// codegen_expr.c's ND_FENCE case for the full reasoning.
+#define atomic_thread_fence(order) __builtin_atomic_thread_fence(order)
+#define atomic_signal_fence(order) __builtin_atomic_signal_fence(order)
+#define atomic_is_lock_free(x)     1
 
 #define atomic_load(addr)       __builtin_atomic_load(addr)
 #define atomic_store(addr, val) __builtin_atomic_store((addr), (val))

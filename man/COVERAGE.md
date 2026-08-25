@@ -147,7 +147,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | |
 | `_Noreturn` | ✓ | Accepted via keyword, `__attribute__((noreturn))`, and `[[noreturn]]`; emits BTRAP after calls; warns on returns |
 | `_Thread_local` | ✓ | TLS segment; each thread receives a private copy from the template |
-| `_Atomic` types | ~ | Parser emits `-Wignored-features`; direct access to `_Atomic`-qualified variables uses plain load/store. `<stdatomic.h>` macros (`atomic_load/store/exchange/compare_exchange`) emit ALDR/ASTR/AXCHG/ACAS opcodes with runtime shadow-tracking and mixed-access detection; `atomic_fetch_add/sub/or/xor/and` expand to a real CAS retry loop over the same opcodes (#1184), genuinely atomic on both the VM and `-c=native` — no GIL dependency. `atomic_thread_fence`/`atomic_signal_fence` are still no-ops, a real reordering hazard under `-c=native` (tracked separately) |
+| `_Atomic` types | ~ | Parser emits `-Wignored-features`; direct access to `_Atomic`-qualified variables uses plain load/store. `<stdatomic.h>` macros (`atomic_load/store/exchange/compare_exchange`) emit ALDR/ASTR/AXCHG/ACAS opcodes with runtime shadow-tracking and mixed-access detection; `atomic_fetch_add/sub/or/xor/and` expand to a real CAS retry loop over the same opcodes (#1184), genuinely atomic on both the VM and `-c=native` — no GIL dependency. `atomic_thread_fence`/`atomic_signal_fence` lower to a real `__atomic_thread_fence`/`__atomic_signal_fence` under `-c=native` (#1188, a new `ND_FENCE` node); under the VM they carry no opcode at all, since the GIL already makes every guest memory access sequentially ordered |
 | Anonymous structs and unions | ✓ | |
 | `char16_t` / `char32_t` types | ✓ | Provided by `<uchar.h>` |
 | `u8`, `u`, `U` string and character literal prefixes | ✓ | See C99 row; support predates formal C11 adoption |
@@ -2566,6 +2566,8 @@ These require `ap` to be of type `va_list` (the struct defined in `<stdarg.h>`).
 |---------|-------------|
 | `__builtin_compare_and_swap(addr, old, new)` | CAS; returns bool |
 | `__builtin_atomic_exchange(addr, val)` | Atomic exchange; returns old value |
+| `__builtin_atomic_thread_fence(order)` | Cross-thread memory fence (#1188); no VM opcode, lowers to `__atomic_thread_fence(order)` under `-c=native` |
+| `__builtin_atomic_signal_fence(order)` | Compiler-only (signal-handler) fence (#1188); no VM opcode, lowers to `__atomic_signal_fence(order)` under `-c=native` |
 
 #### Bit-Manipulation Builtins
 
@@ -2675,7 +2677,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | Header | Status | Notes |
 |---|---|---|
 | `<stdalign.h>` | ✓ | |
-| `<stdatomic.h>` | ~ | Header present; `atomic_fetch_add/sub/or/xor/and` (a CAS retry loop, #1184) and `atomic_load/store/exchange/compare_exchange` are genuinely atomic cross-thread on both the VM and `-c=native`, no GIL/mutex needed; every operation runs at `__ATOMIC_SEQ_CST` regardless of the `order` argument passed to an `_explicit` variant (conforming — stronger than requested, never weaker — at a performance cost); `atomic_thread_fence`/`atomic_signal_fence` are no-ops (a real reordering hazard under `-c=native`, tracked separately) |
+| `<stdatomic.h>` | ~ | Header present; `atomic_fetch_add/sub/or/xor/and` (a CAS retry loop, #1184) and `atomic_load/store/exchange/compare_exchange` are genuinely atomic cross-thread on both the VM and `-c=native`, no GIL/mutex needed; every operation runs at `__ATOMIC_SEQ_CST` regardless of the `order` argument passed to an `_explicit` variant (conforming — stronger than requested, never weaker — at a performance cost). `atomic_thread_fence`/`atomic_signal_fence` are the one exception to that rule: `order` is honoured, not discarded (#1188) — a constant order serializes as its symbolic `__ATOMIC_*` name under `-c=native`, a non-constant one passes through verbatim (C11 specifies these as ordinary functions, so a runtime `order` is conforming). Under the VM both are no-ops with no opcode at all, since the GIL already serializes every guest memory access |
 | `<stdnoreturn.h>` | ✓ | |
 | `<threads.h>` | ✓ | Thread lifecycle (`thrd_create/join/exit/detach/yield/sleep/current/equal`), mutex (`mtx_init/lock/trylock/timedlock/unlock/destroy`), condition variables (`cnd_init/wait/signal/broadcast/timedwait/destroy`), thread-specific storage (`tss_create/get/set/delete`), and `call_once`; backed by host pthreads via POSIX `<pthread.h>`. `tss_create` destructors run when the owning thread exits (up to `TSS_DTOR_ITERATIONS` re-checks per C11 7.26.1p7), matching `pthread_key_create`; a plain `return` from `main()` does not run them (matching glibc), but an explicit `pthread_exit()`/`thrd_exit()` call on the main thread does. Round-trips under `-c=native`/`-m`/`-c=generated` too (#1088) — see [Serialized-output divergences](#serialized-output-divergences) for the shim's shape |
 | `<uchar.h>` | ✓ | `char8_t`, `char16_t`, `char32_t` defined; `mbrtoc16`/`c16rtomb`/`mbrtoc32`/`c32rtomb`/`mbrtoc8`/`c8rtomb` registered (native on glibc where available, shimmed via `mbrtowc`/`wcrtomb` elsewhere). Round-trips under `-c=native` too, including on a host with no real symbols at all (Darwin) — see [Serialized-output divergences](#serialized-output-divergences) for the shim's shape (#1141) |

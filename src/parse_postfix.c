@@ -1860,6 +1860,21 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_atomic_thread_fence(order) / __builtin_atomic_signal_fence
+    // (#1188) — order is not required to be a constant expression (C11
+    // specifies these as functions), so it's parsed as a full assignment
+    // expression like every other atomic builtin's operands, not const_expr.
+    if (equal(tok, "__builtin_atomic_thread_fence") ||
+        equal(tok, "__builtin_atomic_signal_fence")) {
+        bool  is_signal = equal(tok, "__builtin_atomic_signal_fence");
+        Node *node      = new_node(vm, ND_FENCE, tok);
+        node->val       = is_signal ? 1 : 0;
+        tok             = skip(vm, tok->next, "(");
+        node->lhs       = assign(vm, &tok, tok);
+        *rest           = skip(vm, tok, ")");
+        return node;
+    }
+
     // __builtin_frame_address(0) - returns the current frame's base pointer
     if (equal(tok, "__builtin_frame_address")) {
         tok = skip(vm, tok->next, "(");

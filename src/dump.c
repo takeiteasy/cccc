@@ -123,6 +123,8 @@ static const char *node_kind_name(NodeKind kind) {
             return "ALOAD";
         case ND_ASTORE:
             return "ASTORE";
+        case ND_FENCE:
+            return "FENCE";
         case ND_FRAME_ADDR:
             return "FRAME_ADDR";
         case ND_RETURN_ADDR:
@@ -498,6 +500,10 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
         case ND_ASTORE:
             dump_node(f, node->lhs, depth + 1, verbose);
             dump_node(f, node->rhs, depth + 1, verbose);
+            break;
+
+        case ND_FENCE:
+            dump_node(f, node->lhs, depth + 1, verbose);
             break;
 
         case ND_VLA_PTR:

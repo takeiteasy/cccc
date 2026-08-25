@@ -3749,6 +3749,25 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         }
 
+        case ND_FENCE:
+            // atomic_thread_fence/atomic_signal_fence (#1188): no barrier
+            // opcode is emitted, deliberately. The VM's GIL is a plain
+            // pthread_mutex held for the *entire* vm_eval and released only
+            // at explicit blocking cfunc points (save_and_release_gil,
+            // src/stdlib/pthread.c) -- never between bytecode instructions --
+            // so no cross-thread reordering of guest memory accesses is ever
+            // observable under the VM, real or apparent. Guest signal
+            // handlers don't break this either: they dispatch at safe points
+            // via cccc_call_guest_callback (nested vm_eval reentry) rather
+            // than asynchronously preempting bytecode, so atomic_signal_fence
+            // needs no barrier here either. -c=native has no GIL and gets a
+            // real __atomic_thread_fence/__atomic_signal_fence instead (see
+            // serialize_expr.c's ND_FENCE case) -- that backend is where this
+            // matters. The order expression is still evaluated, since C
+            // permits it to have side effects (e.g. atomic_thread_fence(f())).
+            gen_expr(vm, node->lhs, dest_reg);
+            return;
+
         case ND_EXCH: {
             // atomic_exchange(obj_ptr, new_val) → old_val
             // Operands in REG_A0 (addr), REG_A1 (new value); result in REG_A0.

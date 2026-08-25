@@ -17,7 +17,7 @@
 #include <stdatomic.h>
 
 int main(void) {
-    atomic_flag f = ATOMIC_FLAG_INIT(0);
+    atomic_flag f = ATOMIC_FLAG_INIT;
     if (__builtin_atomic_exchange(&f, 1))
         return 1;
     __builtin_atomic_store(&f, 0);

@@ -595,6 +595,31 @@ bool atomic_serializable_pointee(Node *addr) {
            base->size == 8;
 }
 
+// #1188: cccc's memory_order enum (include/stdatomic.h) is declared in the
+// same relaxed/consume/acquire/release/acq_rel/seq_cst order as glibc's, so
+// its values already coincide with GCC/Clang's __ATOMIC_* numbering -- but
+// that coincidence is only used here to pick a *name* for readability, never
+// relied on to skip emitting the value: an out-of-range constant falls
+// through to the raw-integer arm below rather than being clamped or asserted.
+static const char *atomic_order_name(long long order) {
+    switch (order) {
+        case 0:
+            return "__ATOMIC_RELAXED";
+        case 1:
+            return "__ATOMIC_CONSUME";
+        case 2:
+            return "__ATOMIC_ACQUIRE";
+        case 3:
+            return "__ATOMIC_RELEASE";
+        case 4:
+            return "__ATOMIC_ACQ_REL";
+        case 5:
+            return "__ATOMIC_SEQ_CST";
+        default:
+            return NULL;
+    }
+}
+
 // #1101: an address operand handed to a __atomic_* builtin must not carry
 // the _Atomic qualifier in its static type -- clang rejects
 // `__atomic_store_n(&x, ...)` outright when x is spelled through a host
@@ -1939,6 +1964,30 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             serialize_expr(f, vm, ctx, node->lhs, 2);
             fprintf(f, ", %lld)", (long long)node->val);
             break;
+
+        case ND_FENCE: {
+            // atomic_thread_fence/atomic_signal_fence (#1188). Unlike every
+            // other atomic operation in this file, `order` is NOT discarded
+            // in favour of a fixed __ATOMIC_SEQ_CST: a fence with no order
+            // does nothing at all, where seq_cst elsewhere is merely
+            // stronger than whatever was requested. A constant order prints
+            // as its symbolic __ATOMIC_* name for readable output; anything
+            // else (order is a function parameter, computed value, etc. --
+            // C11 specifies these as ordinary functions, so a non-constant
+            // order is conforming) is serialized verbatim, since GCC/Clang's
+            // __atomic_*_fence builtins accept a runtime int just as readily.
+            fprintf(f, node->val ? "__atomic_signal_fence("
+                                 : "__atomic_thread_fence(");
+            const char *name = node->lhs->kind == ND_NUM
+                                   ? atomic_order_name(node->lhs->val)
+                                   : NULL;
+            if (name)
+                fprintf(f, "%s", name);
+            else
+                serialize_expr(f, vm, ctx, node->lhs, 2);
+            fprintf(f, ")");
+            break;
+        }
 
         case ND_ALOAD:
             // codegen only takes the atomic path for 1/2/4/8-byte non-float

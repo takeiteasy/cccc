@@ -1688,6 +1688,12 @@ typedef enum {
                               // (#402): lhs=buf, rhs=n, cond=the decimal-typed
                               // value expr; ty=int (bytes-written result,
                               // snprintf contract). Lowers to DFMT.
+    ND_FENCE = 63,            // __builtin_atomic_thread_fence(order) /
+                   // __builtin_atomic_signal_fence(order) (#1188). lhs = the
+                   // memory-order expr (evaluated for side effects only,
+                   // never read by the VM); val = 1 for the signal fence, 0
+                   // for the thread fence; ty = void. No opcode -- see
+                   // codegen_expr.c's ND_FENCE case for why.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
