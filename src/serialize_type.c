@@ -1315,6 +1315,13 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
 // explicit_decl_align's own C17 6.7.5p4 check) the only value guaranteed
 // never to lower alignment below the packed default, so it's always safe
 // to omit.
+//
+// #1165: a bit-field member never re-emits via the _Alignas(N) prefix
+// above, packed or not -- gcc rejects _Alignas on a bit-field outright, and
+// cccc's own parser (struct_members(), parse_types.c) already rejects it
+// at parse time too, so a bit-field's m->explicit_align (when set) can only
+// have come from a legal suffix __attribute__((aligned(N))), which is
+// re-emitted the same way, after the `: width` instead of before the type.
 static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
                                         Type *ty) {
     for (Member *m = ty->members; m; m = m->next) {
@@ -1330,11 +1337,24 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         int emit_align = ty->is_packed
                              ? (m->explicit_align > 1 ? m->explicit_align : 0)
                              : (m->align > m->ty->align ? m->align : 0);
-        if (emit_align)
-            fprintf(f, "_Alignas(%d) ", emit_align);
-        serialize_type_decl(f, ctx, m->ty, name);
-        if (m->is_bitfield)
+        // #1165: gcc rejects _Alignas(N)/alignas(N) on a bit-field outright
+        // ("alignment specified for bit-field") -- struct_members()
+        // (parse_types.c) already enforces that at parse time, so a
+        // bit-field here only ever carries alignment via m->explicit_align
+        // (a suffix __attribute__((aligned(N))), which *is* legal on a
+        // bit-field and applies packed or not, verified against gcc-16).
+        // Re-emit it the same way, as a trailing GNU attribute after the
+        // width instead of a declspec prefix.
+        if (m->is_bitfield) {
+            serialize_type_decl(f, ctx, m->ty, name);
             fprintf(f, " : %d", m->bit_width);
+            if (m->explicit_align > 1)
+                fprintf(f, " __attribute__((aligned(%d)))", m->explicit_align);
+        } else {
+            if (emit_align)
+                fprintf(f, "_Alignas(%d) ", emit_align);
+            serialize_type_decl(f, ctx, m->ty, name);
+        }
         fprintf(f, ";\n");
     }
 }

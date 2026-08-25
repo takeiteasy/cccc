@@ -434,3 +434,130 @@ int test_packed_union_alignment_1163(void) {
         return 4;
     return 42;
 }
+
+// #1164: a non-bit-field member directly following a bit-field run under
+// `packed` used to have its byte offset computed as `bits / 8`, which
+// truncates instead of rounding up when `bits` isn't a whole byte --
+// overlapping the member with the bit-field run's own storage. The same
+// missing align_to() call also under-placed a flexible array member, even
+// with no bit-field involved at all. Verified against gcc-16: all three
+// `offsetof`s below.
+struct PackedBitfieldThenMember1164 {
+    char a;
+    int  b : 5;
+    int  c;
+} __attribute__((packed));
+
+struct BitfieldThenFlexibleArray1164 {
+    char a;
+    int  b : 5;
+    char c[];
+};
+
+struct PlainFlexibleArray1164 {
+    char a;
+    long c[];
+};
+
+[[cccc::test(return = 42)]]
+int test_packed_bitfield_run_byte_offset_1164(void) {
+    if (offsetof(struct PackedBitfieldThenMember1164, c) != 2)
+        return 1;
+    if (sizeof(struct PackedBitfieldThenMember1164) != 6)
+        return 2;
+    if (offsetof(struct BitfieldThenFlexibleArray1164, c) != 2)
+        return 3;
+    if (offsetof(struct PlainFlexibleArray1164, c) != 8)
+        return 4;
+    if (sizeof(struct PlainFlexibleArray1164) != 8)
+        return 5;
+    return 42;
+}
+
+// #1165: a trailing __attribute__((aligned(N))) after a bit-field's width
+// (`int b : 5 __attribute__((aligned(16)));`) used to fail to parse at all
+// ("expected ','"). gcc-16/clang both parse it and *honor* it: it aligns
+// the bit-field's storage unit and raises the aggregate's own alignment,
+// surviving `packed` exactly like #1163's non-bit-field case. Only the
+// NAMED-bit-field cases are asserted for size/_Alignof here (gcc and clang
+// agree on all of them) -- the unnamed-bit-field case, where gcc and clang
+// disagree, is pinned separately in a non-native test (see
+// tests/test_bitfield_unnamed_aligned_1165.c).
+struct SuffixAlignedBitfield1165 {
+    char a;
+    int  b : 5 __attribute__((aligned(16)));
+    int  c;
+};
+
+struct DeclspecAlignedBitfield1165 {
+    char                             a;
+    __attribute__((aligned(16))) int b : 5;
+    int                              c;
+};
+
+struct __attribute__((packed)) PackedSuffixAlignedBitfield1165 {
+    char a;
+    int  b : 5 __attribute__((aligned(16)));
+    int  c;
+};
+
+// A trailing aligned(N) on one bit-field in a comma-separated declarator
+// list must not leak onto a sibling sharing the same basety (mirrors
+// declarator()'s own copy_type() rule, #1160).
+struct SiblingBitfieldNoLeak1165 {
+    char a;
+    int  b : 5 __attribute__((aligned(16))), d : 3;
+    int  c;
+};
+
+[[cccc::test(return = 42)]]
+int test_bitfield_suffix_aligned_1165(void) {
+    if (offsetof(struct SuffixAlignedBitfield1165, c) != 20)
+        return 1;
+    if (sizeof(struct SuffixAlignedBitfield1165) != 32)
+        return 2;
+    if (_Alignof(struct SuffixAlignedBitfield1165) != 16)
+        return 3;
+
+    if (offsetof(struct DeclspecAlignedBitfield1165, c) != 20)
+        return 4;
+    if (sizeof(struct DeclspecAlignedBitfield1165) != 32)
+        return 5;
+    if (_Alignof(struct DeclspecAlignedBitfield1165) != 16)
+        return 6;
+
+    if (offsetof(struct PackedSuffixAlignedBitfield1165, c) != 17)
+        return 7;
+    if (sizeof(struct PackedSuffixAlignedBitfield1165) != 32)
+        return 8;
+    if (_Alignof(struct PackedSuffixAlignedBitfield1165) != 16)
+        return 9;
+
+    if (offsetof(struct SiblingBitfieldNoLeak1165, c) != 20)
+        return 10;
+    if (sizeof(struct SiblingBitfieldNoLeak1165) != 32)
+        return 11;
+    if (_Alignof(struct SiblingBitfieldNoLeak1165) != 16)
+        return 12;
+
+    return 42;
+}
+
+// gcc and clang disagree on struct-level alignment for an UNNAMED
+// bit-field's explicit aligned(N) (see test_bitfield_unnamed_aligned_1165
+// in tests/ for the sizeof/_Alignof pin, gcc's numbers) -- only the
+// portable offsetof (both compilers agree) is asserted here, so this file
+// stays green under `tools/tests.py --native` regardless of which host
+// compiler `-c=native` shells out to.
+struct UnnamedSuffixAlignedBitfield1165 {
+    char a;
+    int : 5 __attribute__((aligned(16)));
+    int c;
+};
+
+[[cccc::test(return = 42)]]
+int test_bitfield_unnamed_suffix_aligned_offset_1165(void) {
+    if (offsetof(struct UnnamedSuffixAlignedBitfield1165, c) != 20)
+        return 1;
+    return 42;
+}

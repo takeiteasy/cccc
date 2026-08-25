@@ -1584,14 +1584,59 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                     error_tok(vm, tok, "negative bit-field width");
                 if (mem->bit_width > mem->ty->size * CHAR_BIT)
                     error_tok(vm, tok, "bit-field width exceeds its type");
-                // FIXME (pre-existing, found while fixing #1163, filed as
-                // #1165): a trailing attribute after the bit-width
-                // (`int b : 5 __attribute__((aligned(16)));`) fails to
-                // parse here ("expected ','") -- gcc/clang both parse it
-                // (gcc then itself rejects alignment on a bit-field with
-                // its own diagnostic; cccc never reaches that point).
-                // No attribute_list()/c23_attribute_list() call exists at
-                // this position at all.
+
+                // #1165: a trailing __attribute__(...) after the bit-width
+                // (`int b : 5 __attribute__((aligned(16)));`) -- gcc/clang
+                // both parse this and *honor* aligned(N) on a bit-field
+                // (verified against gcc-16/clang: it aligns the bit-field's
+                // storage unit and raises the aggregate's own alignment,
+                // surviving `packed` exactly like #1163's non-bit-field
+                // case). Only [[...]] (C23 attribute syntax) is left
+                // unparsed here -- gcc's own constant-expression parser
+                // grabs the leading `[` at this position too, so cccc's
+                // pre-existing syntax error there matches gcc's rejection
+                // and is deliberately not "fixed".
+                Token  *bf_tok  = tok;
+                VarAttr bf_attr = {};
+                tok             = attribute_list(vm, tok, NULL, &bf_attr);
+                if (has_custom_attrs(NULL, &bf_attr))
+                    error_tok(vm, mem->name ? mem->name : bf_tok,
+                              "custom attributes are only supported on "
+                              "file-scope declarations");
+
+                // _Alignas/alignas on a bit-field is rejected outright by
+                // gcc ("alignment specified for bit-field") -- cccc must
+                // reject it too, whether it came from the declspec (before
+                // the ':') or, in principle, from this suffix position.
+                if (attr.align || bf_attr.align) {
+                    if (mem->name)
+                        error_tok(vm, mem->name,
+                                  "alignment specified for bit-field '%.*s'",
+                                  mem->name->len, mem->name->loc);
+                    else
+                        error_tok(vm, bf_tok,
+                                  "alignment specified for bit-field");
+                }
+
+                if (bf_attr.gnu_align) {
+                    // Same reason as declarator()'s suffix-attribute
+                    // handling above: copy_type() stops the alignment
+                    // leaking onto a sibling bit-field sharing this
+                    // declarator's basety (`int b : 5
+                    // __attribute__((aligned(16))), d : 3;`).
+                    mem->ty = copy_type(vm, mem->ty);
+                    if (bf_attr.gnu_align > mem->ty->decl_align)
+                        mem->ty->decl_align = bf_attr.gnu_align;
+                    mem->explicit_align = explicit_decl_align(
+                        vm, mem->name ? mem->name : bf_tok, mem->ty, &attr);
+                    mem->align = mem->explicit_align > mem->ty->align
+                                     ? mem->explicit_align
+                                     : mem->ty->align;
+                }
+
+                append_custom_attr_list(&mem->ty->custom_attrs,
+                                        bf_attr.custom_attrs);
+                mem->ty = apply_var_attrs_to_type(vm, mem->ty, &bf_attr);
             }
 
             cur = cur->next = mem;
@@ -2819,6 +2864,19 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             bits = align_to(bits, mem->ty->size * 8);
         } else if (mem->is_bitfield) {
             int sz = mem->ty->size;
+
+            // #1165: an explicit aligned(N) (struct_members(),
+            // parse_types.c) on a bit-field aligns its *storage unit* --
+            // verified against gcc-16/clang: `int b : 5
+            // __attribute__((aligned(16)))` starts b's unit at the next
+            // 16-byte boundary, same as an ordinary member's explicit
+            // alignment (#1163). mem->explicit_align is 0 for every
+            // ordinary bit-field (struct_members() rejects _Alignas on a
+            // bit-field outright, and only a suffix aligned(N) sets it), so
+            // this is a no-op for the common case.
+            if (mem->explicit_align)
+                bits = align_to(bits, mem->explicit_align * 8);
+
             if (bits / (sz * 8) != (bits + mem->bit_width - 1) / (sz * 8))
                 bits = align_to(bits, sz * 8);
 
@@ -2840,23 +2898,23 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // cosmetic-only mismatch). Only a *named* member counts -- an
             // unnamed bitfield (including width-0, handled above) is pure
             // padding and does not, matching clang/gcc exactly.
-            // #1163 scope note: unlike the normal-member branch below, this
-            // guard is deliberately left as-is. GCC rejects an explicit
-            // aligned(N)/_Alignas(N) on a bit-field outright ("alignment
-            // specified for bit-field"), and cccc's own parser can't even
-            // reach that state (`int b : 5 __attribute__((aligned(16)))`
-            // fails to parse, tracked as #1165) -- so no explicit request
-            // can ever reach this branch for either compiler to disagree
-            // over.
-            if (!ty->is_packed && mem->name && ty->align < mem->align)
-                ty->align = mem->align;
+            //
+            // #1165 update: that named-only rule is for the *implicit*
+            // natural-alignment case only. An *explicit* aligned(N) on a
+            // bit-field always raises ty->align, survives `packed` (like
+            // #1163's non-bit-field case), and applies even on an *unnamed*
+            // bit-field -- verified against gcc-16, e.g. `struct { char a;
+            // int : 5 __attribute__((aligned(16))); int c; }` has align 16.
+            // clang instead never raises alignment for an unnamed
+            // bit-field's explicit align (its ty->align there stays 4 for
+            // that same example); cccc follows gcc, matching this project's
+            // reference compiler elsewhere in this file.
+            int contributed = mem->explicit_align ? mem->explicit_align
+                              : (!ty->is_packed && mem->name) ? mem->align
+                                                              : 0;
+            if (ty->align < contributed)
+                ty->align = contributed;
         } else {
-            // Flexible array members (array with size 0) should not add padding
-            // before them, but they DO affect struct alignment (for final size
-            // calculation)
-            bool is_flexible_array =
-                (mem->ty->kind == TY_ARRAY && mem->ty->array_len == 0);
-
             // #1163: `packed` only suppresses a member's *implicit* (natural)
             // alignment -- an *explicit* aligned(N)/_Alignas(N) request on
             // the member's own declarator still applies (verified against
@@ -2870,17 +2928,30 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
                 ty->is_packed ? (mem->explicit_align ? mem->explicit_align : 1)
                               : mem->align;
 
-            if (!is_flexible_array)
-                bits = align_to(bits, mem_align * 8);
-            // FIXME (pre-existing, found while fixing #1163, filed as
-            // #1164): under `packed`, `align_to(bits, mem_align * 8)`
-            // above is a no-op when this member directly follows a
-            // bitfield run (mem_align == 1), so `bits` can still sit mid-
-            // byte here -- `bits / 8` then truncates instead of rounding
-            // up to the next whole byte, overlapping this member's offset
-            // with the bitfield run's own storage. Verified against
+            // #1164: this align_to() must run even for a flexible array
+            // member. It used to be skipped for one ("FAMs don't get
+            // padding *before* them"), but that conflated two different
+            // things: a FAM's *implicit* natural-alignment padding (which
+            // real structs do skip, since a FAM never has storage of its
+            // own to pad up to) versus simply rounding `bits` up to a whole
+            // byte when it's sitting mid-byte after a bit-field run --
+            // which every member, FAM or not, still needs. Skipping the
+            // whole call left a mid-byte `bits` for align_down()/`/ 8`
+            // below to truncate instead of round up, overlapping the FAM
+            // with the bit-field run's own storage. Verified against
             // gcc-16: `struct __attribute__((packed)) { char a; int b : 5;
-            // int c; }` places `c` at offset 2, cccc currently computes 1.
+            // int c; }` (not even a FAM) places `c` at offset 2, and
+            // `struct { char a; int b : 5; long c[]; }` places its FAM `c`
+            // at offset 8 -- cccc previously computed 1 for both. Since a
+            // FAM's mem_align already always feeds ty->align below
+            // regardless of this branch, rounding `bits` up here for a FAM
+            // is exactly "round to a whole byte" (mem_align 1 under
+            // packed) or "round to natural alignment" (unpacked) -- not new
+            // padding *before* the FAM's declared position, just correcting
+            // the byte truncation. sizeof is unaffected either way: it was
+            // already computed from ty->align, not from this align_to()
+            // call.
+            bits         = align_to(bits, mem_align * 8);
             mem->offset  = bits / 8;
             bits        += mem->ty->size * 8;
 
@@ -2939,6 +3010,16 @@ Member *get_struct_member(Type *ty, Token *tok) {
                 return mem;
             continue;
         }
+
+        // Pre-existing bug (unrelated to #1164/#1165, found and fixed while
+        // testing them): an unnamed bit-field (`int : 5;`) is neither named
+        // nor an anonymous struct/union, so it fell through to the "regular
+        // struct member" branch below and dereferenced a NULL mem->name --
+        // a crash on *any* member lookup that had to scan past it, not just
+        // one that (mis)matched it. Skip it like the width-0 case already
+        // implicitly is (it's pure padding, never a lookup target).
+        if (!mem->name)
+            continue;
 
         // Regular struct member
         if (mem->name->len == tok->len &&
