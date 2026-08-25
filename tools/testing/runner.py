@@ -5,7 +5,12 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import LEAKS_SKIP_TESTS, leak_pass_wants_vm_heap, vm_profile_path
+from . import (
+    LEAKS_SKIP_TESTS,
+    leak_pass_wants_vm_heap,
+    native_audit_skips_enabled,
+    vm_profile_path,
+)
 from .c4 import run_c4_roundtrip
 from .header import parse_test_header
 from .native import run_native_roundtrip
@@ -127,7 +132,14 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
             process_timeout=process_timeout,
         )
 
-    if native_mode and native_skip:
+    # #1182: --native-audit-skips bypasses CCCC_NATIVE_SKIP the same way it
+    # bypasses NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS (native_skip_reason,
+    # tools/testing/__init__.py) -- this header directive is the third skip
+    # surface that can go stale the same way, and the audit corpus (built
+    # from those two tables) doesn't include CCCC_NATIVE_SKIP files anyway,
+    # so this only matters if someone runs a full --native-audit-skips
+    # sweep over the whole tests/ tree rather than the restricted corpus.
+    if native_mode and native_skip and not native_audit_skips_enabled():
         return {
             "idx": idx,
             "test_name": test_name,

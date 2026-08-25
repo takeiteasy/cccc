@@ -7,6 +7,9 @@ Exit code is non-zero if any sub-suite fails.
 Sub-suites:
   source              — main test suite (tools/testing/ package)
   c4                  — .c4 bytecode round-trip (compile → save → reload → run)
+  native              — -c=native serializer round-trip (ticket #1157; on by
+                        default, --no-native opts out -- see man/TESTING.md's
+                        "Native round-trip mode" section)
   debugger            — macOS host-signal crash-debugger integration (macOS only)
   repl                — interactive REPL PTY integration (POSIX only, ticket #661)
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
@@ -53,12 +56,7 @@ from testing.report import print_summary
 
 def _make_suite_args(quiet=True, bench=False, c4=False, native=False,
                      vm_profile=False, process_timeout=None):
-    """Return a SimpleNamespace compatible with _run_test_suite's args parameter.
-
-    native defaults False and there is no --native sub-suite here (#967):
-    the mode is opt-in only (man/TESTING.md), run by hand like --matrix, not
-    wired into this orchestrator or the `test` build target.
-    """
+    """Return a SimpleNamespace compatible with _run_test_suite's args parameter."""
     return types.SimpleNamespace(
         quiet=quiet,
         bench=bench,
@@ -93,6 +91,54 @@ def _run_c4_suite(cccc, n_jobs, quiet, process_timeout):
     r = run_test_suite_with_isolation(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
     ok = r["failed"] == 0 and r["crashed"] == 0
     return r, ok
+
+
+def _run_native_suite(cccc, n_jobs, quiet, process_timeout):
+    """Run the -c=native serializer round-trip suite (#1157). Returns
+    (r_dict, ok). detect_platform() is threaded through native_skip_reason
+    (via run_single_test's own platform-detection call) exactly as it is
+    for a plain `tools/tests.py --native` invocation -- see man/TESTING.md's
+    "Native round-trip mode" section for the three tiers this drives and
+    NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS (tools/testing/__init__.py)
+    for the known, tracked divergences it skips.
+    """
+    platform = detect_platform()
+    tests_dir = REPO_ROOT / "tests"
+    test_files = discover_tests(tests_dir)
+    args = _make_suite_args(quiet=quiet, native=True, process_timeout=process_timeout)
+    if not quiet:
+        print(f"Running native round-trip suite ({len(test_files)} tests)…")
+    r = run_test_suite_with_isolation(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
+    ok = r["failed"] == 0 and r["crashed"] == 0
+    return r, ok
+
+
+def _run_native_skip_audit_suite(cccc, n_jobs):
+    """Run the #1182 behavioural skip-table audit (--native-audit-skips) and
+    hard-fail if it reports a stale entry. A subprocess (not an in-process
+    call like the other pure-Python audits below) because
+    --native-audit-skips sets CCCC_AUDIT_NATIVE_SKIPS in its own process
+    environment (tools/testing/cli.py) -- isolating that avoids leaking it
+    into any sub-suite that runs after this one in the same process.
+    Returns (status_str, ok).
+    """
+    result = subprocess.run(
+        [sys.executable, str(_TOOLS_DIR / "tests.py"), "--native-audit-skips",
+         "--binary", str(cccc), "-j", str(n_jobs), "--quiet"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return "no stale NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX entries", True
+    if "STALE (" in result.stdout:
+        # A real staleness finding from _print_native_skip_audit -- the
+        # expected failure mode this sub-suite exists to catch.
+        tail = "\n".join(result.stdout.splitlines()[-40:])
+        return f"stale skip entries found (see man/TESTING.md):\n{tail}", False
+    # Any other nonzero exit (binary missing, harness crash, import error,
+    # incompatible flags) is NOT a staleness finding -- report it as such so
+    # a future maintainer doesn't go hunting a skip table that's fine.
+    tail = "\n".join((result.stdout + result.stderr).splitlines()[-40:])
+    return f"audit subprocess failed unexpectedly (exit {result.returncode}), not a staleness finding:\n{tail}", False
 
 
 def _run_host_signal_suite(cccc):
@@ -558,6 +604,11 @@ def main():
         help="Per-subprocess wall-clock timeout (passed to source and c4 suites)"
     )
     parser.add_argument(
+        "--no-native", action="store_true",
+        help="Skip the -c=native serializer round-trip suite (#1157; on by default -- "
+             "see man/TESTING.md's 'Native round-trip mode' section)"
+    )
+    parser.add_argument(
         "--bench", action="store_true",
         help="Run the cross-compiler benchmark after the test suites"
     )
@@ -599,6 +650,21 @@ def main():
     r_c4, ok_c4 = _run_c4_suite(cccc, n_jobs, quiet, timeout)
     print_summary(r_c4, _make_suite_args(quiet=quiet, c4=True))
     suite_results["c4"] = ok_c4
+
+    # --- Native round-trip suite (#1157) ---
+    if not args.no_native:
+        print()
+        print("[ native round-trip suite ]")
+        r_native, ok_native = _run_native_suite(cccc, n_jobs, quiet, timeout)
+        print_summary(r_native, _make_suite_args(quiet=quiet, native=True))
+        suite_results["native"] = ok_native
+
+        # --- Native skip-table staleness audit (#1182) ---
+        print()
+        print("[ native_skip_audit ]")
+        skip_audit_status, ok_skip_audit = _run_native_skip_audit_suite(cccc, n_jobs)
+        print(f"  {skip_audit_status}")
+        suite_results["native_skip_audit"] = ok_skip_audit
 
     # --- macOS host-signal debugger ---
     print()

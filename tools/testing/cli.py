@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import REPO_ROOT
+from . import NATIVE_SKIP_TESTS, NATIVE_SKIP_TESTS_LINUX, NATIVE_SKIP_TESTS_MACOS, REPO_ROOT
 from .platform import detect_platform
 from .discovery import discover_tests
 from .suite import run_test_suite_with_isolation
@@ -84,6 +84,16 @@ def build_parser():
              "man/TESTING.md's 'Native round-trip mode' section."
     )
     parser.add_argument(
+        "--native-audit-skips", action="store_true",
+        help="#1182: behavioural audit of NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS/ "
+             "NATIVE_SKIP_TESTS_LINUX (tools/testing/__init__.py) -- implies --native, "
+             "bypasses all three tables (the --build/-c/-o/frontend-mode/VM-only-flag "
+             "skip checks still apply), and restricts the corpus to just the files "
+             "those tables name. A file that now passes has a stale skip entry to "
+             "delete; man/TESTING.md's 'Native round-trip mode' section has the full "
+             "writeup."
+    )
+    parser.add_argument(
         "--process-timeout", type=int, default=None, metavar="SECONDS",
         help="Wall-clock timeout in seconds for each test subprocess. Timed-out tests are "
              "reported as TIMEOUT failures. Useful for slow environments "
@@ -92,9 +102,14 @@ def build_parser():
     return parser
 
 
-def main():
+def main(argv=None):
+    # argv defaults to sys.argv[1:] for the ordinary CLI entry point
+    # (tools/tests.py); an explicit list lets a caller in-process (e.g.
+    # run_tests.py's native-skip-audit sub-suite, #1182) invoke this with
+    # its own arguments without spawning a subprocess.
+    if argv is None:
+        argv = sys.argv[1:]
     # Split argv at '--': everything after is forwarded verbatim to cccc.
-    argv = sys.argv[1:]
     try:
         sep = argv.index("--")
         cccc_args = argv[sep + 1:]
@@ -104,6 +119,17 @@ def main():
 
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.native_audit_skips:
+        # Set before any worker process (multiprocessing pool) spawns, so
+        # every one inherits it -- native_skip_reason() (tools/testing/
+        # __init__.py) reads this at import time in each worker, since it's
+        # called from deep inside per-test subprocess isolation, not
+        # threaded, and can't be threaded a plain function parameter
+        # through the whole run_test_suite_with_isolation call chain for a
+        # flag that's off in every ordinary run.
+        os.environ["CCCC_AUDIT_NATIVE_SKIPS"] = "1"
+        args.native = True
 
     script_dir = REPO_ROOT
 
@@ -144,6 +170,21 @@ def main():
         suites=args.suites,
         legacy=args.legacy,
     )
+
+    if args.native_audit_skips:
+        # Restrict the corpus to exactly the files the three hardcoded tables
+        # name -- the audit's whole point is "does the skip for THIS file
+        # still hold", not a full native corpus run (seconds instead of
+        # minutes). NATIVE_SKIP_TESTS_MACOS/_LINUX are included even off
+        # their platform: a stale platform-only entry is still worth
+        # reporting (it just can't be deleted here without also confirming
+        # the other platform, see man/TESTING.md).
+        audited_names = (
+            set(NATIVE_SKIP_TESTS)
+            | set(NATIVE_SKIP_TESTS_MACOS)
+            | set(NATIVE_SKIP_TESTS_LINUX)
+        )
+        test_files = [t for t in test_files if t.name in audited_names]
 
     if not test_files:
         print(f"No test files found in {tests_dir}")
@@ -227,4 +268,88 @@ def main():
     )
 
     ok = print_summary(r, args)
+
+    if args.native_audit_skips:
+        # The audit's own pass/fail contract is narrower than print_summary's:
+        # this restricted 38-file corpus is EXPECTED to be mostly skips/
+        # failures (a "still failing" or "refused by design" entry is
+        # pre-existing, known state, not a new regression) -- only a STALE
+        # entry (passes with its skip bypassed) is something this mode
+        # should ever fail CI over, so it overrides ok rather than ANDing
+        # with it.
+        ok = _print_native_skip_audit(r, test_files, platform)
+
     sys.exit(0 if ok else 1)
+
+
+# #1182: the v1 --testing exclusions (test_setup/teardown hooks, negative
+# error=/expect_compile_error= tests -- man/TESTING.md's "Native round-trip
+# mode" section) are enforced only by their NATIVE_SKIP_TESTS entry, so
+# bypassing the table under --native-audit-skips routes them into an actual
+# -c=native compile, which the compiler itself refuses with a clear
+# diagnostic (by design, not a bug the audit should ever ask to "fix"). Kept
+# as an explicit list rather than pattern-matching the refusal diagnostic
+# text, since that text is an implementation detail this list doesn't need
+# to track.
+_NATIVE_AUDIT_REFUSED_BY_DESIGN = frozenset({
+    "test_hook_inherit_per_test.c", "test_hook_inherit_stacked_once.c",
+    "test_hook_inherit_reentry.c", "test_hook_inherit_prefix_guard.c",
+    "test_hook_inherit_once.c", "test_suite_attributes.c",
+    "test_suite_testing_framework.c", "test_suite_compile_errors.c",
+    "test_suite_stack_safety.c", "test_suite_std_c17.c",
+})
+
+
+def _print_native_skip_audit(r, test_files, platform):
+    """Classify every file in the --native-audit-skips corpus as STALE
+    (passed with the table bypassed -- delete its skip entry), KEPT
+    (still skips/fails for a reason independent of the table -- a
+    --build/-c/-o/frontend-mode/VM-only-flag check, or a v1 --testing
+    exclusion refused by the compiler itself), or a genuine native failure
+    worth investigating before deciding. Returns False if anything looks
+    like a real (non-refused-by-design) failure, so CI can hard-fail on it.
+    """
+    def basename_of(entry):
+        # native_skipped_tests are already skip_reason dicts with a real
+        # name; failed_tests are "{name} (REASON)" strings (suite.py).
+        name = entry["test_name"] if isinstance(entry, dict) else entry.split(" (", 1)[0]
+        return Path(name).name
+
+    skipped_names = {basename_of(e) for e in r.get("native_skipped_tests", [])}
+    failed_names = {basename_of(e) for e in r.get("failed_tests", [])}
+    crashed_names = {basename_of(e) for e in r.get("crashed_tests", [])}
+
+    audited = sorted({t.name for t in test_files})
+    stale, kept_skip, refused_by_design, real_failures = [], [], [], []
+    for name in audited:
+        if name in failed_names or name in crashed_names:
+            (refused_by_design if name in _NATIVE_AUDIT_REFUSED_BY_DESIGN
+             else real_failures).append(name)
+        elif name in skipped_names:
+            kept_skip.append(name)
+        else:
+            stale.append(name)
+
+    print()
+    print("=== --native-audit-skips report (#1182) ===")
+    if stale:
+        print(f"STALE ({len(stale)}) -- now pass; delete the skip entry:")
+        for name in stale:
+            print(f"  {name}")
+    if kept_skip:
+        print(f"KEPT, still hits an independent skip check ({len(kept_skip)}):")
+        for name in kept_skip:
+            print(f"  {name}")
+    if refused_by_design:
+        print(f"KEPT, refused by the compiler by design, not a bug ({len(refused_by_design)}):")
+        for name in refused_by_design:
+            print(f"  {name}")
+    if real_failures:
+        print(f"STILL FAILING, not yet resolved ({len(real_failures)}):")
+        for name in real_failures:
+            print(f"  {name}")
+    if not any((stale, kept_skip, refused_by_design, real_failures)):
+        print("(no audited files matched the discovered corpus)")
+    print("============================================")
+
+    return not stale

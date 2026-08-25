@@ -130,7 +130,10 @@ NATIVE_SKIP_TESTS = {
 
     # --- #1018: variadic-function serialization gives wrong runtime
     # results (see the block at the top of this dict for the rest) ---
-    "test_attr_vector_size_variadic.c": "variadic serialization gives wrong result (#1018)",
+    # test_attr_vector_size_variadic.c: dropped (#1182) -- confirmed passing
+    # under -c=native on both macOS and Linux (cccc-linux-amd64 container)
+    # via --native-audit-skips. #1018 landed the fix; this entry just never
+    # got deleted along with it.
 
     # --- #1020's 7th file (test_constructor_c23.c) and #1083 itself, both
     # RESOLVED: CCCC's own Availability.h stub's `#define __attribute__(x)`
@@ -211,7 +214,10 @@ NATIVE_SKIP_TESTS = {
     # separately under #1047, and test_comptime_include_boundary_890.c fixed
     # separately under #1048 -- see #1034's own close comment for what
     # landed and where) ---
-    "test_macros_quote_args_splice.c": "CCCC's internal va_list layout leaks into native output via __builtin_quote arg-splicing -- same class as #1018, different repro path (#1018)",
+    # test_macros_quote_args_splice.c: dropped (#1182) -- confirmed passing
+    # under -c=native on both macOS and Linux via --native-audit-skips,
+    # same #1018 fix as test_attr_vector_size_variadic.c above. #1034's
+    # last survivor is now gone too.
 
     # --- by-design divergence, not a bug: see COVERAGE.md ---
     "test_c4.c": "old-style implicit-int main() -- VM leniency the host "
@@ -545,14 +551,15 @@ NATIVE_SKIP_TESTS = {
 
 # Platform-specific -c=native skips, checked only when the running host
 # matches -- unlike NATIVE_SKIP_TESTS these are not bugs to fix, so they
-# aren't tied to a follow-up ticket that ever closes. reallocarray() is a
-# permanent macOS platform gap (#1028, decided: documented in COVERAGE.md,
-# no polyfill), not a bug -- it still runs (and should keep running) through
-# --native on Linux/glibc, the platform --native is meant to land in once
-# wired into CI.
+# aren't tied to a follow-up ticket that ever closes.
 NATIVE_SKIP_TESTS_MACOS = {
-    "test_reallocarray.c": "reallocarray undefined on macOS libc, permanent "
-                            "platform gap (#1028), still exercised on Linux",
+    # test_reallocarray.c: dropped (#1182) -- #1028 (permanent macOS libc
+    # gap, no polyfill) is stale: #1155 gave reallocarray its own
+    # serializer shim (serialize_reallocarray_shim, src/serialize_shims.c)
+    # regardless of host libc support, so the guest call never reaches the
+    # host's own (possibly-missing) symbol at all. Confirmed passing under
+    # -c=native on both macOS and Linux via --native-audit-skips.
+
     # test_math_c23_ieee.c: three distinct blockers, all confirmed through
     # the real -I./include native.py-shaped compile in the cccc-linux-amd64
     # container -- not a single macOS-only gap as first thought. (1) macOS's
@@ -620,6 +627,18 @@ NATIVE_SKIP_TESTS_MACOS = {
                                     "gap)",
 }
 
+# Mirror of NATIVE_SKIP_TESTS_MACOS for the opposite direction: entries that
+# are genuinely Linux/glibc-only, not exercised on macOS at all. Empty today
+# (#1182's audit found every candidate -- test_suite_printf_c23.c included --
+# actually failed on both platforms and belongs in the shared NATIVE_SKIP_
+# TESTS table instead), but kept as a real, wired-in table rather than
+# omitted: #1182's own root cause for one of the two stale entries it found
+# was exactly this shape of asymmetry (a Linux-only reason with nowhere but
+# the shared or macOS-only table to live), so removing the structural home
+# again would let the same rot recur the next time a genuinely Linux-only
+# divergence shows up.
+NATIVE_SKIP_TESTS_LINUX = {}
+
 # CLI flags that -c=native drops with a warning rather than enforcing
 # (#935's VM-only-enforcement decision) -- exercising them natively would
 # silently test nothing, so they're skipped rather than run with the safety
@@ -665,15 +684,41 @@ _NATIVE_FRONTEND_PREFIXES = (
 )
 
 
+# #1182: behavioural audit mode for the two hardcoded skip tables above.
+# Set by tools/testing/cli.py's --native-audit-skips (which also restricts
+# the corpus to just the files named in NATIVE_SKIP_TESTS/
+# NATIVE_SKIP_TESTS_MACOS) rather than passed as a function parameter,
+# since native_skip_reason is called from deep inside run_single_test
+# (runner.py), itself called from a ThreadPoolExecutor worker
+# (run_test_suite_with_isolation, suite.py) -- threading a flag that's off
+# in every ordinary run through that whole call chain as a parameter would
+# touch every layer for no benefit over a single shared read. Read live via
+# a function, not a module-level constant frozen at import time: cli.py's
+# own `from . import ...` at module load runs (and would freeze a constant)
+# before main() parses --native-audit-skips and sets the env var, and since
+# execution here is threaded (not multiprocessing), every thread shares this
+# process's environ regardless of when it's read. Bypasses ONLY the two
+# table lookups below, falling through to the same --build/-c=-o/frontend-
+# mode/VM-only-flag checks every other test still gets -- this is
+# deliberately the same shape as the ticket's own hand-verified method
+# (temporarily emptying the tables and restoring after the run completes),
+# not a second, divergent skip-detection path.
+def native_audit_skips_enabled():
+    return os.environ.get("CCCC_AUDIT_NATIVE_SKIPS") == "1"
+
+
 def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
     """Return a skip_reason string if this test cannot go through the
     -c=native round-trip, else None. Called by native.py before the compile
     step; the per-test CCCC_FLAGS scan mirrors runner.py's own header parse.
     """
-    if filename in NATIVE_SKIP_TESTS:
-        return NATIVE_SKIP_TESTS[filename]
-    if platform == "macos" and filename in NATIVE_SKIP_TESTS_MACOS:
-        return NATIVE_SKIP_TESTS_MACOS[filename]
+    if not native_audit_skips_enabled():
+        if filename in NATIVE_SKIP_TESTS:
+            return NATIVE_SKIP_TESTS[filename]
+        if platform == "macos" and filename in NATIVE_SKIP_TESTS_MACOS:
+            return NATIVE_SKIP_TESTS_MACOS[filename]
+        if platform == "linux" and filename in NATIVE_SKIP_TESTS_LINUX:
+            return NATIVE_SKIP_TESTS_LINUX[filename]
     all_flags = list(cccc_args) + list(per_test_flags)
     for f in all_flags:
         if f == "--build" or f.startswith("--build="):
