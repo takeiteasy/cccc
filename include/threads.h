@@ -74,8 +74,24 @@ enum {
    observe the flag unset and both run func(). Made a real function instead,
    backed by an atomic CAS on the flag on both backends (VM: wrap_call_once,
    src/stdlib/pthread.c; -c=native: the threads_native_shims entry,
-   src/serialize.c) -- so it's race-free everywhere, not just under the GIL. */
-typedef _Atomic int once_flag;
+   src/serialize.c) -- so it's race-free everywhere, not just under the GIL.
+
+   #1183: the type itself is named __cccc_once_flag, with `once_flag`
+   aliased onto it via #define rather than spelled directly, because glibc's
+   own <stdlib.h> (pulled in unconditionally by serialize_threads_shims for
+   the call_once shim below) declares its own `once_flag` under any C11/GNU
+   dialect (bits/types/once_flag.h, gated on __USE_ISOC11, which a plain
+   `-c=native` compile enables by default) -- a real `typedef struct
+   __once_flag {...} once_flag;` that collides outright with a same-named
+   typedef of a different underlying type ("conflicting types for
+   'once_flag'"). This #define is guest-side only: it's expanded away by
+   CCCC's own preprocessor before the AST is built, so every guest spelling
+   of `once_flag` already resolves to __cccc_once_flag on both backends with
+   no user-visible change -- see serialize_threads_shims's own call_once
+   shim text (src/serialize_shims.c), which spells the type
+   __cccc_once_flag directly for the same reason. */
+typedef _Atomic int __cccc_once_flag;
+#define once_flag      __cccc_once_flag
 #define ONCE_FLAG_INIT 0
 
 void call_once(once_flag *flag, void (*func)(void));

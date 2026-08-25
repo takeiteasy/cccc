@@ -915,7 +915,16 @@ void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // literal text only promises a happens-before ordering.
     if (use_call_once)
         fprintf(f,
-                "void call_once(once_flag *flag, void (*func)(void)) {\n"
+                // #1183: the parameter spells __cccc_once_flag, not
+                // once_flag -- see include/threads.h's own comment on the
+                // rename (once_flag is a guest-side-only #define alias,
+                // expanded away before this shim's own type derivation, so
+                // the AST's real type name -- and the bodiless-prototype
+                // re-derivation for threads.h's own call_once declaration --
+                // is already __cccc_once_flag; spelling the bare host name
+                // here would collide with glibc's own once_flag typedef,
+                // pulled in by the #include <stdlib.h> above.
+                "void call_once(__cccc_once_flag *flag, void (*func)(void)) {\n"
                 "    int *raw = (int *)flag;\n"
                 "    int expected = 0;\n"
                 "    if (__atomic_compare_exchange_n(raw, &expected, 1, 0,\n"
