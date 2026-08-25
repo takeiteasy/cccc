@@ -5,6 +5,32 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `-c=native`: `include/threads.h`'s `once_flag` re-materialized as
+  `typedef int once_flag;`, which collides on Linux with glibc's own
+  `once_flag` typedef (pulled in unconditionally by the `<threads.h>`
+  serializer shim's own `#include <stdlib.h>`) — "conflicting types for
+  'once_flag'" on every native compile touching `<threads.h>`. Fixed by
+  renaming the type to `__cccc_once_flag`, with `once_flag` aliased onto it
+  via a guest-side-only `#define` that CCCC's own preprocessor expands away
+  before the AST is built, so every guest spelling of `once_flag` already
+  resolves to the private name on both backends with no user-visible change
+  (#1183).
+
+### Added
+
+- `tools/tests.py --native` (the `-c=native` serializer round-trip corpus)
+  is now wired into `tools/run_tests.py` as an on-by-default sub-suite
+  (`--no-native` opts out), so a serializer regression is caught on every
+  ordinary push instead of accumulating unnoticed (#1157).
+- `tools/tests.py --native-audit-skips`: a behavioural audit mode that
+  bypasses the `NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/
+  `NATIVE_SKIP_TESTS_LINUX` skip tables for just the files they name, runs
+  them for real, and reports any entry that now passes as stale. Wired into
+  `run_tests.py` as its own hard-failing sub-suite. Found and removed three
+  stale entries in this pass (#1182).
+
 ## [0.3.11] - 2026-08-25
 
 ### Fixed

@@ -10,6 +10,9 @@ Sub-suites:
   native              — -c=native serializer round-trip (ticket #1157; on by
                         default, --no-native opts out -- see man/TESTING.md's
                         "Native round-trip mode" section)
+  native_skip_audit   — behavioural staleness audit of NATIVE_SKIP_TESTS/
+                        NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX,
+                        hard-fails on any stale entry (ticket #1182)
   debugger            — macOS host-signal crash-debugger integration (macOS only)
   repl                — interactive REPL PTY integration (POSIX only, ticket #661)
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
@@ -20,6 +23,7 @@ Sub-suites:
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   audit_test_headers  — tests/**/*.c CCCC_*/EXPECT_* header directive damage audit (ticket #1153)
   test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
+  test_native_skip_audit — native_skip_reason() fall-through-invariant unit tests (ticket #1182)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
@@ -433,6 +437,30 @@ def _run_header_parse_unit_tests():
         return f"FAILED ({e})", False
 
 
+def _run_native_skip_audit_unit_tests():
+    """Run tools/testing/test_native_skip_audit.py's fall-through-invariant
+    unit tests (#1182). Pure in-process tests against native_skip_reason()/
+    native_audit_skips_enabled() -- no cccc binary needed. Returns
+    (status_str, ok).
+    """
+    script = _TOOLS_DIR / "testing" / "test_native_skip_audit.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_native_skip_audit", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_audit_reflection_enums_suite():
     """Run reflection.h TypeKind/NodeKind/AttrTargetKind vs internal enum
     value audit (#860).
@@ -735,6 +763,13 @@ def main():
     hdr_unit_status, ok_hdr_unit = _run_header_parse_unit_tests()
     print(f"  {hdr_unit_status}")
     suite_results["test_header_parse"] = ok_hdr_unit
+
+    # --- Native skip-audit fall-through invariant unit tests (#1182) ---
+    print()
+    print("[ test_native_skip_audit ]")
+    nsa_unit_status, ok_nsa_unit = _run_native_skip_audit_unit_tests()
+    print(f"  {nsa_unit_status}")
+    suite_results["test_native_skip_audit"] = ok_nsa_unit
 
     # --- Reflection FFI generation check (#859) ---
     print()

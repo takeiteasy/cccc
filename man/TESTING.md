@@ -446,11 +446,23 @@ skipped in v1 — the VM's field-by-field comparison walks `Type` metadata
 that would need type-directed comparison codegen; narrow enough in
 practice (a handful of tests) that it's deferred.
 
-**Known divergences:** the mode ships with a populated skip table
-(`NATIVE_SKIP_TESTS` in `tools/testing/__init__.py`) recording every test
-found, during #967's initial corpus sweep, to compile/link/run differently
-under `-c=native` than in the VM — each entry names its tracking ticket, and
-is deleted once that ticket lands. A handful of entries are not bugs at all:
+**Known divergences:** the mode ships with populated skip tables
+(`NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX` in
+`tools/testing/__init__.py`) recording every test found to compile/link/run
+differently under `-c=native` than in the VM — most entries name a tracking
+ticket and are deleted once the fix lands, but several are permanent,
+`WONT_FIX` platform divergences (macOS libm lacking a C23 math family, macOS
+`aligned_alloc`'s pre-DR-460 size rule, etc.) that will never close, so
+"cited ticket is closed" is not a valid staleness check — see
+`--native-audit-skips` below for the actual guard. `NATIVE_SKIP_TESTS_MACOS`/
+`NATIVE_SKIP_TESTS_LINUX` hold entries specific to one platform, checked only
+when the running host matches; `NATIVE_SKIP_TESTS_LINUX` is currently empty
+(#1182's audit found every candidate for it — `test_suite_printf_c23.c`
+included — actually fails on both platforms and belongs in the shared table)
+but stays wired in as a real table rather than omitted, so a genuinely
+Linux-only divergence has a structural home instead of drifting into the
+shared or macOS-only table the way one already had to be corrected out of.
+A handful of entries are not bugs at all:
 some `CCCC_EXPECT_STDERR` tests are deliberately invalid C (a bad `main()`
 signature, a non-void function falling off its end, an unterminated
 `#pragma`, an undeclared function call) written to exercise a CCCC-specific
@@ -472,14 +484,36 @@ separate, natively-compilable file covering the same statement (and
 declarator-label) spellings with real (empty) assembly the host accepts —
 not skipped, and not to be confused with the permanent skip above.
 
-**CI status:** opt-in only, run by hand like `--matrix` — not wired into the
-`test` build target or `.builds/linux-amd64.yml`. This is exactly how the 16
-failures found and fixed in #1155 (struct-layout drift corrupting enum
-constants under `-c=native`, a stray space in a captured `#include` operand,
-an undeclared `reallocarray` on macOS, and a `--testing` diagnostic-test
-routing gap) went unnoticed for as long as they did — nothing ran `--native`
-on an ordinary push. Revisit wiring it in once a follow-up ticket assesses
-CI runtime cost and remaining skip-table size.
+**CI status (#1157):** on by default. `tools/run_tests.py` (the entry point
+both `--build-target=test` and `.builds/linux-amd64.yml` call) runs
+`--native` as its own `[ native round-trip suite ]` sub-suite on every
+ordinary push, immediately after the c4 sub-suite; pass `--no-native` to
+`run_tests.py` to opt back out for a local iteration loop. Measured cost:
+~60s on macOS/arm64 at `-j8` (768 passed, 365 skipped, no failures), ~211s in
+the `cccc-linux-amd64` container at `-j8` (Rosetta-emulated, so slower than
+real sr.ht hardware) — against a pre-existing baseline suite of roughly
+274s, both comfortably inside CI budget.
+
+Before this landed, the mode was opt-in only, run by hand like `--matrix`.
+That is exactly how the 16 failures found and fixed in #1155 (struct-layout
+drift corrupting enum constants under `-c=native`, a stray space in a
+captured `#include` operand, an undeclared `reallocarray` on macOS, and a
+`--testing` diagnostic-test routing gap) went unnoticed for as long as they
+did — nothing ran `--native` on an ordinary push.
+
+**Skip-table staleness guard (#1182):** a stale skip table is invisible for
+the same reason a native regression was — nothing runs the skipped test for
+real. `python3 tools/tests.py --native-audit-skips` bypasses the three skip
+tables above (only for the ~38 files they name — a full audit is seconds,
+not minutes) and behaviourally re-checks each one, reporting it as `STALE`
+(now passes — delete the entry), `KEPT` (still hits an independent
+`--build`/`-c`/`-o`/frontend-mode/VM-only-safety-flag skip, or is one of the
+`--testing` v1 exclusions the compiler itself refuses by design — see above),
+or `STILL FAILING` (a genuine, not-yet-fixed divergence). `run_tests.py` runs
+this as its own `[ native_skip_audit ]` sub-suite right after the native
+suite and hard-fails the whole run on any `STALE` finding, so an entry can't
+sit un-deleted the way `test_attr_vector_size_variadic.c` and
+`test_macros_quote_args_splice.c` did after #1018 landed.
 
 ## Architecture build and test workflows
 

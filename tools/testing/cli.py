@@ -299,6 +299,18 @@ _NATIVE_AUDIT_REFUSED_BY_DESIGN = frozenset({
     "test_suite_stack_safety.c", "test_suite_std_c17.c",
 })
 
+# #1182/#1184: a skip entry whose underlying bug is a genuine data race
+# (atomic_fetch_add()'s non-atomic load-then-store, #1184) intermittently
+# PASSES on any given run -- confirmed ~87-93% pass rate under stress. A
+# plain pass/fail classification would call that STALE most of the time,
+# hard-failing run_tests.py's audit sub-suite on a bogus finding rather than
+# the real, still-open bug. Named here rather than silently excluded so the
+# report says why; delete a name from here only once its ticket actually
+# lands and NATIVE_SKIP_TESTS' own entry is removed in the same change.
+_NATIVE_AUDIT_KNOWN_FLAKY = frozenset({
+    "test_threads_call_once_1088.c",
+})
+
 
 def _print_native_skip_audit(r, test_files, platform):
     """Classify every file in the --native-audit-skips corpus as STALE
@@ -320,9 +332,11 @@ def _print_native_skip_audit(r, test_files, platform):
     crashed_names = {basename_of(e) for e in r.get("crashed_tests", [])}
 
     audited = sorted({t.name for t in test_files})
-    stale, kept_skip, refused_by_design, real_failures = [], [], [], []
+    stale, kept_skip, refused_by_design, known_flaky, real_failures = [], [], [], [], []
     for name in audited:
-        if name in failed_names or name in crashed_names:
+        if name in _NATIVE_AUDIT_KNOWN_FLAKY:
+            known_flaky.append(name)
+        elif name in failed_names or name in crashed_names:
             (refused_by_design if name in _NATIVE_AUDIT_REFUSED_BY_DESIGN
              else real_failures).append(name)
         elif name in skipped_names:
@@ -344,11 +358,16 @@ def _print_native_skip_audit(r, test_files, platform):
         print(f"KEPT, refused by the compiler by design, not a bug ({len(refused_by_design)}):")
         for name in refused_by_design:
             print(f"  {name}")
+    if known_flaky:
+        print(f"KEPT, known-flaky (intermittent, tracked by its own ticket, "
+              f"not a staleness signal either way) ({len(known_flaky)}):")
+        for name in known_flaky:
+            print(f"  {name}")
     if real_failures:
         print(f"STILL FAILING, not yet resolved ({len(real_failures)}):")
         for name in real_failures:
             print(f"  {name}")
-    if not any((stale, kept_skip, refused_by_design, real_failures)):
+    if not any((stale, kept_skip, refused_by_design, known_flaky, real_failures)):
         print("(no audited files matched the discovered corpus)")
     print("============================================")
 
