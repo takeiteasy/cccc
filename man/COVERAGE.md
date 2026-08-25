@@ -266,7 +266,7 @@ groups from that ticket.
 | `#pragma once` | ✓ | |
 | `#pragma comment(lib, "x")` | ✗ (output only) | Emitted as the portable spelling of a library queued via `#pragma cccc link("x")` (`src/serialize_program.c`/`src/tokenize.c`), for a downstream host `cc` to see; not parsed on input (`handle_pragma_body`, `src/preprocess.c`, has no `comment` branch) — written in guest source it is silently ignored, it does not queue a library the way `#pragma cccc link("x")` does (#1149) |
 | `#pragma warning(push/pop/disable/default)` / `suppress:` | ✗ | Maps to CCCC's `-W` system — pending |
-| `#pragma pack(...)` | ✓ | |
+| `#pragma pack(...)` | ✗ | Parsed and accepted, but **never honoured** — struct layout is computed as though it were absent, while the pragma is re-emitted verbatim into `-c=native`/`-m` output, where the host compiler *does* honour it. The folded `sizeof`/offsets and the host's layout therefore disagree: `#pragma pack(1)` + `struct{char c; int a;}` is 5 bytes under GCC/clang and 8 under CCCC, and the emitted C writes out of bounds (confirmed under AddressSanitizer on both host compilers). Use `__attribute__((packed))` instead until this is resolved (see the `packed` row). macOS's `struct ipc_perm` already needs a workaround for this — see the `<sys/ipc.h>` row |
 | `#pragma message("...")` | ✓ | |
 | `#pragma region` / `#pragma endregion` | ✗ | IDE-only, no-op — pending |
 | `#pragma intrinsic(...)` / `#pragma function(...)` | ✗ | Intrinsic toggle, no-op — pending |
