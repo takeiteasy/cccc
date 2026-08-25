@@ -484,15 +484,16 @@ separate, natively-compilable file covering the same statement (and
 declarator-label) spellings with real (empty) assembly the host accepts —
 not skipped, and not to be confused with the permanent skip above.
 
-**CI status (#1157):** on by default. `tools/run_tests.py` (the entry point
-both `--build-target=test` and `.builds/linux-amd64.yml` call) runs
-`--native` as its own `[ native round-trip suite ]` sub-suite on every
-ordinary push, immediately after the c4 sub-suite; pass `--no-native` to
-`run_tests.py` to opt back out for a local iteration loop. Measured cost:
-~60s on macOS/arm64 at `-j8` (768 passed, 365 skipped, no failures), ~211s in
-the `cccc-linux-amd64` container at `-j8` (Rosetta-emulated, so slower than
-real sr.ht hardware) — against a pre-existing baseline suite of roughly
-274s, both comfortably inside CI budget.
+**CI status (#1157, downgraded to advisory by #1186):** on by default.
+`tools/run_tests.py` (the entry point both `--build-target=test` and
+`.builds/linux-amd64.yml` call) runs `--native` as its own
+`[ native round-trip suite ]` sub-suite on every ordinary push, immediately
+after the c4 sub-suite; pass `--no-native` to `run_tests.py` to opt back out
+for a local iteration loop. Measured cost: ~60s on macOS/arm64 at `-j8` (768
+passed, 365 skipped, no failures), ~211s in the `cccc-linux-amd64` container
+at `-j8` (Rosetta-emulated, so slower than real sr.ht hardware) — against a
+pre-existing baseline suite of roughly 274s, both comfortably inside CI
+budget.
 
 Before this landed, the mode was opt-in only, run by hand like `--matrix`.
 That is exactly how the 16 failures found and fixed in #1155 (struct-layout
@@ -500,6 +501,20 @@ drift corrupting enum constants under `-c=native`, a stray space in a
 captured `#include` operand, an undeclared `reallocarray` on macOS, and a
 `--testing` diagnostic-test routing gap) went unnoticed for as long as they
 did — nothing ran `--native` on an ordinary push.
+
+**#1186 (advisory downgrade):** the very first real sr.ht push after this
+landed surfaced five compile/runtime failures and six false-positive
+skip-audit findings that neither macOS nor the `cccc-linux-amd64`
+verification container reproduced — a GCC-version sensitivity (sr.ht's own
+build image vs. the container's) this project hadn't been exercised against
+before, since nothing hard-blocked on `--native` output until now. Both
+`native` and `native_skip_audit` are listed in `run_tests.py`'s
+`_ADVISORY_SUITES`: they still run and their failures still print (a
+`⚠ FAIL (advisory)` line and a trailing `ADVISORY (not blocking): ...`
+summary line), but neither one flips the overall exit code, so this class of
+environment-specific divergence can't red out a push while #1186
+investigates. This is a deliberate, temporary weakening of the gate — flip
+the two names back out of `_ADVISORY_SUITES` once #1186 closes.
 
 **Skip-table staleness guard (#1182):** a stale skip table is invisible for
 the same reason a native regression was — nothing runs the skipped test for
@@ -511,9 +526,14 @@ not minutes) and behaviourally re-checks each one, reporting it as `STALE`
 `--testing` v1 exclusions the compiler itself refuses by design — see above),
 or `STILL FAILING` (a genuine, not-yet-fixed divergence). `run_tests.py` runs
 this as its own `[ native_skip_audit ]` sub-suite right after the native
-suite and hard-fails the whole run on any `STALE` finding, so an entry can't
-sit un-deleted the way `test_attr_vector_size_variadic.c` and
-`test_macros_quote_args_splice.c` did after #1018 landed.
+suite — advisory-only per #1186 above, for the same reason: a skip entry can
+be legitimately needed on one GCC version and stale on another, which the
+binary macos/linux split this table's platform argument represents can't
+express, so a `STALE` finding needs a human to look at it right now rather
+than hard-failing on sight. The recurrence this guard exists for —
+`test_attr_vector_size_variadic.c`/`test_macros_quote_args_splice.c` sitting
+un-deleted after #1018 landed — is still caught and printed, just not
+gated on.
 
 ## Architecture build and test workflows
 
