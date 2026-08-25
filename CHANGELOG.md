@@ -13,10 +13,15 @@ All notable changes to CCCC are documented here. Format loosely follows
   serializer shim's own `#include <stdlib.h>`) — "conflicting types for
   'once_flag'" on every native compile touching `<threads.h>`. Fixed by
   renaming the type to `__cccc_once_flag`, with `once_flag` aliased onto it
-  via a guest-side-only `#define` that CCCC's own preprocessor expands away
-  before the AST is built, so every guest spelling of `once_flag` already
-  resolves to the private name on both backends with no user-visible change
-  (#1183).
+  via a guest-side-only `#define`/`#undef` pair. The rename alone wasn't
+  sufficient: the pair was still auto-captured and replayed verbatim into
+  native output, staying live long enough to also rename glibc's OWN
+  `once_flag` typedef via macro substitution and reopen the exact same
+  collision one identifier over (confirmed on real Linux hardware, not
+  reproduced in local container verification). Fixed by dropping the
+  `#define`/`#undef` pair from native output's own directive replay
+  entirely — every re-derived declaration already spells the real name
+  directly, never through the macro (#1183).
 
 ### Added
 
@@ -30,6 +35,15 @@ All notable changes to CCCC are documented here. Format loosely follows
   them for real, and reports any entry that now passes as stale. Wired into
   `run_tests.py` as its own hard-failing sub-suite. Found and removed three
   stale entries in this pass (#1182).
+
+### Known issues
+
+- `stdatomic.h`'s `atomic_fetch_add`/`_sub`/`_or`/`_xor`/`_and` (and their
+  `_explicit` spellings) desugar to a non-atomic load-then-store, safe only
+  under the VM's own GIL — a real, intermittent (~7-13%) data race under
+  `-c=native`'s real parallelism. Found stress-testing the new native CI
+  suite; `tests/test_threads_call_once_1088.c` is skipped citing this rather
+  than a regression in its own `call_once` shim, which is correct (#1184).
 
 ## [0.3.11] - 2026-08-25
 

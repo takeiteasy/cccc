@@ -608,6 +608,20 @@ against a real header) that just `colima ssh` into this profile are silently
 checking aarch64 twice, not x86_64 (#796) — run them inside the
 amd64-platform container instead.
 
+**Not a perfect proxy for sr.ht:** a Rosetta-emulated x86_64 container is
+the only *local* way to reproduce Linux-specific behavior, but it is not
+guaranteed to match sr.ht's own build environment's glibc exactly. Directly
+observed during #1183's follow-up fix: `comptime_native_smoke` case 130
+passed inside this container, then failed on the very next real sr.ht push
+with a distinct (if related) glibc symbol collision the container's own
+glibc version apparently didn't trigger. Treat a container-green result as
+"passes on at least one Linux/glibc combination," not "passes on sr.ht" —
+the real push is still the acceptance test, not a substitute for it. Also
+see #1185: `tools/run_tests.py` hung once inside this same container under
+`-j8` (a thread deadlock, not reproduced natively on macOS or confirmed on
+sr.ht's own hardware) — a second, independent reason a container run isn't
+interchangeable with a real push.
+
 #### MemorySanitizer (MSan)
 
 MSan is Linux-only (clang, not available on macOS). This target builds
