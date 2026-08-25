@@ -24,6 +24,22 @@ All notable changes to CCCC are documented here. Format loosely follows
   an earlier unconditional version of this fix regressed
   `tests/suites/test_suite_structs.c`'s own `tc_bi1135_wide`, a struct with
   a `_BitInt(129)` member that has no native/-m lowering at all) (#1167).
+- `-c=native`/`-m`: `type_layout_is_host_owned()` (`src/serialize_type.c`)
+  accepted any `Type` kind, not just struct/union/enum, so a plain scalar
+  member or operand (e.g. `long`) could spuriously match an unrelated
+  `from_include` typedef of the same builtin (e.g. `sys/types.h`'s
+  `__int32_t`, reached merely by including some header) via the
+  origin-chain pointer-identity walk `find_typedef_name()` falls back to —
+  judging a wholly user-defined aggregate host-owned and re-materializing
+  its `sizeof`/`_Alignof` textually instead of folding it to a plain
+  literal, even though the type has nothing to do with any header. Fixed
+  by restricting `type_layout_is_host_owned()` to `TY_STRUCT`/`TY_UNION`/
+  `TY_ENUM`, mirroring the narrowing #1098's `expr_has_host_owned_layout()`
+  already applied to itself for the same reason. Residual, not fixed here:
+  a `from_include` typedef of a non-aggregate whose real host size
+  genuinely differs (e.g. `sigset_t`) no longer re-materializes either —
+  see `man/HEADERS.md`/`man/COVERAGE.md`, tracked as a follow-up (#1169)
+  (#1168).
 
 ## [0.3.10] - 2026-08-25
 

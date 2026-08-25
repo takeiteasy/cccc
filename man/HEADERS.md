@@ -1068,6 +1068,50 @@ emission pass uses — `cc_serialize_program()`'s own `collect_obj_types()`
 loop (`src/serialize_program.c`) now sets it for the duration of each
 `Obj`'s own collection call.
 
+**`type_layout_is_host_owned()` spuriously matched an ordinary scalar
+member/operand against an unrelated `from_include` typedef of the same
+builtin, judging a wholly user-defined aggregate host-owned (#1168)** —
+`type_layout_is_host_owned()` (`src/serialize_type.c`) recurses into every
+by-value member of a struct/union and calls
+`type_def_is_from_include_suppressed()` on each member's own type; that
+falls through to `find_typedef_name()`'s `same_type_or_origin()` fallback,
+which is a pointer-identity walk up the `origin` chain (`same_type_or_
+origin()`'s first loop, fed by `copy_type()`'s `ret->origin = ty`), not a
+structural comparison — `same_type_or_origin()` has no structural arm for
+scalars at all. A plain scalar member (e.g. `long`) shares that chain with
+any `from_include` typedef of the same underlying builtin reached merely by
+including some unrelated header (`sys/types.h`'s `__int32_t` via
+`<stdio.h>`, say), so an entirely ordinary struct like
+`struct Loc { long a; double b; };` — nothing in it `from_include` — got
+judged host-owned, and `sizeof(struct Loc)` re-materialized textually under
+`-c=native`/`-m` instead of folding to a plain literal the way it should.
+Cosmetic by the time this was found (#1167 above already ensures the
+definition gets emitted either way, so the output still compiled) but
+needlessly verbose/fragile-looking, and the one *unguarded* consumer of
+`type_layout_is_host_owned()` — `serialize_expr.c`'s `ND_COMMA` arm
+handling a `{0}`-initialized host-owned-layout local's zero-init chain
+(#1103) — could hard-error on a store it can't classify as redundant once
+an ordinary struct was wrongly judged host-owned. #1098's own
+`expr_has_host_owned_layout()` had already worked around this exact hazard
+for `_Static_assert` re-emission by narrowing itself to `TY_STRUCT`/
+`TY_UNION` rather than fixing the shared helper (see that function's own
+comment); fixed here at the source instead — `type_layout_is_host_owned()`
+now returns `false` immediately for anything other than `TY_STRUCT`/
+`TY_UNION`/`TY_ENUM` (`TY_ENUM` kept, unlike #1098's own narrower gate:
+this function already accepted enums before this change, and an enum has
+no spurious-scalar path — `same_type_or_origin()`'s `TY_ENUM` arm matches
+by tag + enumerator list, not by an origin-chain walk through some
+unrelated scalar). **Residual, not fixed by this change**: a `from_include`
+typedef of a *non-aggregate* whose real host layout genuinely differs from
+CCCC's own (`sigset_t`: `unsigned int`/4 bytes here, 128 bytes on glibc) no
+longer re-materializes either — not fixable by tightening the lookup
+instead, since a scalar typedef's `Type` is origin-identical to its
+underlying builtin, so no identity check can distinguish `sizeof(sigset_t)`
+from `sizeof(unsigned int)` once parsing has folded either down to a bare
+`Type`. `time_t`/`size_t`/`off_t`/`pid_t` are unaffected (uniform on every
+supported target). See `man/COVERAGE.md`'s Serialized-output divergences
+table; tracked as a follow-up (#1169).
+
 **A bodiless declaration (`extern int close(int fd);`) sourced from one of
 CCCC's own bundled headers, rather than the primary source file, is now
 emitted too (#1096)** — found verifying #1031's own fix against

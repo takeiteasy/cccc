@@ -5676,6 +5676,83 @@ def case_sizeof_only_aggregate_native_round_trip(cccc: Path, tmp: str) -> bool:
                                     SIZEOF_ONLY_AGGREGATE_1167_PROGRAM)
 
 
+SCALAR_NOT_HOST_OWNED_1168_PROGRAM = """
+#include <sys/mount.h>
+
+// #1168: type_layout_is_host_owned() used to accept any Type kind, not
+// just struct/union/enum -- a bare scalar member/operand (e.g. plain
+// `long`) could spuriously same_type_or_origin()-match an unrelated
+// from_include *typedef* of the same builtin (reached merely by including
+// some header) via the origin-chain pointer-identity walk, judging an
+// entirely ordinary, non-host-owned aggregate "host-owned" and
+// re-materializing its sizeof textually instead of folding it.
+
+// The ticket's own minimal repro shape: an ordinary user struct with only
+// scalar members, nothing from_include anywhere in it.
+struct Loc1168 { long a; double b; };
+
+// A genuinely host-owned wrapper (contains a from_include struct member)
+// must still re-materialize -- this case must not overcorrect.
+struct Wrap1168 { struct statfs s; };
+
+int main(void) {
+    unsigned long loc_sz  = sizeof(struct Loc1168);
+    unsigned long int_sz  = sizeof(int);
+    unsigned long wrap_sz = sizeof(struct Wrap1168);
+
+    if (loc_sz != sizeof(long) + sizeof(double) &&
+        loc_sz != sizeof(double) + sizeof(long))
+        return 1;
+    if (int_sz != sizeof(int))
+        return 2;
+    if (wrap_sz == 0)
+        return 3;
+
+    return 42;
+}
+"""
+
+
+def case_scalar_member_not_host_owned_native_round_trip(cccc: Path,
+                                                          tmp: str) -> bool:
+    print("  135: #1168 -- type_layout_is_host_owned() accepted any Type "
+          "kind (its own doc comment always said 'struct/union', but the "
+          "code didn't enforce it), so a plain scalar member/operand (e.g. "
+          "`long`) could spuriously same_type_or_origin()-match an "
+          "unrelated from_include typedef of the same builtin (e.g. "
+          "sys/types.h's __int32_t, reached merely by including a header) "
+          "via the origin-chain pointer-identity walk -- judging an "
+          "ordinary, entirely user-defined aggregate host-owned and "
+          "re-materializing `sizeof(struct Loc1168)` textually instead of "
+          "folding it to a literal, even though the struct has nothing to "
+          "do with any header. Fixed by restricting "
+          "type_layout_is_host_owned() to TY_STRUCT/TY_UNION/TY_ENUM, "
+          "mirroring the narrowing #1098's expr_has_host_owned_layout() "
+          "already applied to itself for the same reason. Asserts -m "
+          "output folds `sizeof(struct Loc1168)`/`sizeof(int)` to plain "
+          "literals (does NOT contain 'sizeof(struct Loc1168)'), while a "
+          "genuinely host-owned wrapper (Wrap1168, containing a "
+          "from_include struct member) still re-materializes as "
+          "`sizeof(struct Wrap1168)` -- plus VM 42 -> native 42.")
+    src = Path(tmp) / "scalar_not_host_owned_1168.c"
+    write(src, SCALAR_NOT_HOST_OWNED_1168_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "sizeof(struct Loc1168)" in m_result.stdout:
+        print(f"    FAIL: -m output re-materializes non-host-owned "
+              f"'sizeof(struct Loc1168)' instead of folding it\n"
+              f"    {m_result.stdout}")
+        return False
+    if "sizeof(struct Wrap1168)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing re-materialized "
+              f"'sizeof(struct Wrap1168)' (genuinely host-owned)\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "scalar_not_host_owned_1168",
+                                    SCALAR_NOT_HOST_OWNED_1168_PROGRAM)
+
+
 BLOCK_IN_NESTED_1080_PROGRAM = (
     "int ticket_repro(void) {\n"
     "    int g = 7;\n"
@@ -6254,6 +6331,7 @@ def main() -> int:
             case_layout_const_sites_native_round_trip,
             case_static_assert_native_round_trip,
             case_sizeof_only_aggregate_native_round_trip,
+            case_scalar_member_not_host_owned_native_round_trip,
             case_block_in_nested_native_round_trip,
             case_nested_fn_in_block_native_round_trip,
             case_typedef_identity_native_round_trip,
