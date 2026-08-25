@@ -6218,21 +6218,35 @@ def case_threads_native_round_trip(cccc: Path, tmp: str) -> bool:
     if "int thrd_create(thrd_t *thr, thrd_start_t func, void *arg) {" not in out:
         print(f"    FAIL: -m output missing a real thrd_create definition\n    {out}")
         return False
-    # #1183: the parameter spells __cccc_once_flag, not once_flag -- see
-    # include/threads.h's own comment on the rename (once_flag is a
-    # guest-side-only #define alias to avoid colliding with glibc's own
-    # once_flag, pulled in unconditionally by this shim's own
-    # `#include <stdlib.h>` under any C11/GNU dialect).
-    if "void call_once(__cccc_once_flag *flag, void (*func)(void)) {" not in out:
+    # #1183/#1184: both the parameter type and the function name itself
+    # spell their private forms -- see include/threads.h's own comment on
+    # the rename (once_flag/call_once are guest-side-only #define aliases,
+    # to avoid colliding with a real glibc declaration of either name,
+    # pulled in unconditionally by this shim's own `#include <stdlib.h>`
+    # under any C11/GNU dialect -- once_flag's own typedef, and on a new
+    # enough glibc, a real ISO C11 call_once declaration too).
+    if "void __cccc_call_once(__cccc_once_flag *flag, void (*func)(void)) {" not in out:
         print(f"    FAIL: -m output missing a real call_once definition\n    {out}")
         return False
-    # Regression guard for #1183 itself: the bare host-visible spelling must
-    # never appear as a *typedef target* ahead of the shim's own #include
-    # <stdlib.h> -- that's the literal shape of the bug (a plain `typedef
-    # ... once_flag;` colliding with glibc's own once_flag typedef).
+    # Regression guard for #1183/#1184: neither alias's #define may reach
+    # native output at all (they'd stay live for the rest of the
+    # generated translation unit, corrupting a later-replayed real host
+    # declaration of the same name), and the bare host-visible spellings
+    # must never appear as a *typedef target*/*function definition* ahead
+    # of the shim's own #include <stdlib.h> -- that's the literal shape of
+    # both bugs (a plain `typedef ... once_flag;`/`... call_once(...) {`
+    # colliding with glibc's own declaration of the same name).
+    if "#define once_flag" in out or "#define call_once" in out:
+        print(f"    FAIL: -m output replays the once_flag/call_once "
+              f"private-name alias #define (#1184)\n    {out}")
+        return False
     if "typedef int once_flag;" in out or "typedef _Atomic int once_flag;" in out:
         print(f"    FAIL: -m output re-materializes a host-colliding "
               f"'once_flag' typedef (#1183)\n    {out}")
+        return False
+    if "void call_once(" in out:
+        print(f"    FAIL: -m output re-materializes a host-colliding "
+              f"'call_once' definition (#1184)\n    {out}")
         return False
 
     out_bin = Path(tmp) / "threads_native_1088_out"

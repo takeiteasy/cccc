@@ -1256,7 +1256,12 @@ void register_threads_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "tss_get", (void *)wrap_tss_get, 1, 0);
     cc_register_cfunc(vm, "tss_set", (void *)wrap_tss_set, 2, 0);
     cc_register_cfunc(vm, "tss_delete", (void *)wrap_tss_delete, 1, 0);
-    cc_register_cfunc(vm, "call_once", (void *)wrap_call_once, 2, 0);
+    // #1184-adjacent: registered under the private name -- CCCC's own
+    // preprocessor already rewrites every guest `call_once` spelling to
+    // `__cccc_call_once` via include/threads.h's own #define, so that's
+    // the identifier this cfunc actually needs to match at dispatch time
+    // (see that header's own comment for why the public name had to move).
+    cc_register_cfunc(vm, "__cccc_call_once", (void *)wrap_call_once, 2, 0);
 }
 
 void cccc_pthread_cleanup(VirtualMachine *vm) {

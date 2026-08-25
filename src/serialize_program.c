@@ -2687,30 +2687,38 @@ static bool line_macro_name_is_non_ascii(const char *line) {
 }
 
 // #1184-adjacent (found verifying #1157 on real sr.ht Linux hardware): a
-// captured `#define once_flag ...`/`#define ONCE_FLAG_INIT ...` line from
-// include/threads.h's own #1183 fix must never be replayed into
-// -c=native/-m output. Unlike every other captured macro, this alias is
-// guest-side only by construction -- every guest use of `once_flag`/
-// `ONCE_FLAG_INIT` is already resolved by CCCC's own preprocessor before
-// the AST is built (see threads.h's own comment), and the shim/re-derived
-// declarations that DO reach native output already spell the real name
-// (__cccc_once_flag) directly, never through this macro. Left live, the
-// #define stays in scope for the rest of the generated translation unit --
-// including the real host <stdlib.h> serialize_threads_shims replays right
-// after it -- and the host preprocessor substitutes the bare identifier
-// `once_flag` inside GLIBC's OWN typedef line too, renaming it to
-// `__cccc_once_flag` and colliding with this header's own typedef of that
-// name on their differing underlying types. A matching #undef right after
-// call_once's prototype in threads.h looks like the obvious fix and was
-// tried first -- it also un-defines the alias for CCCC's OWN preprocessing,
-// which breaks a GUEST source's own subsequent `once_flag`/`ONCE_FLAG_INIT`
-// use (both macros live in the same preprocessor, not a native-output-only
-// one), so the alias has to be dropped from replay instead, the same way
-// #1118 dropped non-ASCII macro names above. Matches by exact macro name
-// after `#define`/`#undef`, not by originating file, since the guest never
-// legitimately defines/undefs these two names itself (both are reserved,
-// ONCE_FLAG_INIT by C11 7.26.1, once_flag as a C11 typedef name).
-static bool line_is_once_flag_alias_directive(const char *line) {
+// captured `#define once_flag ...`/`#define ONCE_FLAG_INIT ...`/
+// `#define call_once ...` line from include/threads.h's own #1183/#1184
+// private-name aliases must never be replayed into -c=native/-m output.
+// Unlike every other captured macro, these aliases are guest-side only by
+// construction -- every guest use of `once_flag`/`ONCE_FLAG_INIT`/
+// `call_once` is already resolved by CCCC's own preprocessor before the
+// AST is built (see threads.h's own comment), and the shim/re-derived
+// declarations that DO reach native output already spell the private name
+// (__cccc_once_flag/__cccc_call_once) directly, never through the alias.
+// Left live, a #define stays in scope for the rest of the generated
+// translation unit -- including the real host <stdlib.h>
+// serialize_threads_shims replays right after it -- and the host
+// preprocessor substitutes the bare identifier inside GLIBC's OWN
+// declarations too: first found for `once_flag`'s typedef (renamed to
+// `__cccc_once_flag`, colliding with this header's own typedef of that
+// name on their differing underlying types), then for `call_once` itself
+// once that leak was plugged (a new-enough glibc's own real ISO C11
+// `call_once` declaration -- reachable via <stdlib.h> alone, no
+// <threads.h> needed -- renamed the same way, colliding on a genuinely
+// different signature). A matching #undef right after the declaration in
+// threads.h looks like the obvious fix and was tried first -- it also
+// un-defines the alias for CCCC's OWN preprocessing, which breaks a
+// GUEST source's own subsequent use of any of these three names (the
+// alias and the guest's own preprocessing share one preprocessor, not a
+// native-output-only one), so the alias has to be dropped from replay
+// instead, the same way #1118 dropped non-ASCII macro names above.
+// Matches by exact macro name after `#define`/`#undef`, not by
+// originating file, since the guest never legitimately defines/undefs
+// any of these three names itself (all reserved: ONCE_FLAG_INIT by C11
+// 7.26.1, once_flag as a C11 typedef name, call_once as a C11 function
+// name).
+static bool line_is_threads_h_private_alias_directive(const char *line) {
     if (!line || line[0] != '#')
         return false;
     const char *p = line + 1;
@@ -2727,7 +2735,8 @@ static bool line_is_once_flag_alias_directive(const char *line) {
         const char *name = p + len;
         while (*name == ' ' || *name == '\t')
             name++;
-        static const char *const names[] = {"once_flag", "ONCE_FLAG_INIT"};
+        static const char *const names[] = {"once_flag", "ONCE_FLAG_INIT",
+                                            "call_once"};
         for (size_t j = 0; j < sizeof(names) / sizeof(names[0]); j++) {
             size_t nlen = strlen(names[j]);
             if (strncmp(name, names[j], nlen) == 0) {
@@ -3906,8 +3915,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // --emit-cccc like the filters around it -- this isn't a
         // dialect-fidelity concern, the collision this prevents is real
         // regardless of whether the reader understands CCCC's own dialect
-        // (see line_is_once_flag_alias_directive()'s own comment above).
-        if (line_is_once_flag_alias_directive(line))
+        // (see line_is_threads_h_private_alias_directive()'s own comment
+        // above).
+        if (line_is_threads_h_private_alias_directive(line))
             continue;
         // #1118: a captured #define/#undef whose macro NAME contains
         // non-ASCII bytes (emoji identifiers -- an accepted CCCC extension,

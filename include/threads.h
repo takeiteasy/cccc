@@ -92,19 +92,35 @@ enum {
    __cccc_once_flag directly for the same reason.
 
    NOTE: this #define/#undef pair is dropped from -c=native/-m's own
-   auto-captured directive replay entirely (line_is_once_flag_alias_directive(),
+   auto-captured directive replay entirely (line_is_threads_h_private_alias_directive(),
    src/serialize_program.c) -- do not "fix" a leaked-macro collision here by
    adding a matching #undef right after call_once's prototype below. An
    #undef living in this header affects CCCC's OWN preprocessing too (it
    isn't a native-output-only construct), which un-defines the alias before
    the GUEST's own subsequent `once_flag`/`ONCE_FLAG_INIT` uses ever get
    preprocessed -- confirmed the hard way, see that function's own comment
-   for the regression this caused when tried. */
+   for the regression this caused when tried.
+
+   #1184-adjacent (found on real sr.ht Linux hardware, once the once_flag/
+   ONCE_FLAG_INIT leak above was plugged): the FUNCTION name `call_once`
+   collides too, on a glibc new enough to expose real ISO C11 threads
+   support through <stdlib.h> alone (no <threads.h> needed) -- its own
+   `extern void call_once(once_flag *, void (*)(void));` (real once_flag:
+   a struct) directly conflicts with this shim's `call_once` definition
+   (parameter type __cccc_once_flag: a plain int), a genuine two-different-
+   signatures-same-name collision no macro trick fixes, since the SYMBOL
+   itself -- not just a type spelling -- already exists in glibc's own
+   declared namespace on this host. Fixed the same way as the type: the
+   function is privately named __cccc_call_once, with `call_once` aliased
+   onto it -- see the VM-side registration (wrap_call_once,
+   src/stdlib/pthread.c, registered under "__cccc_call_once") and the
+   -c=native shim (src/serialize_shims.c) for the matching rename. */
 typedef _Atomic int __cccc_once_flag;
 #define once_flag      __cccc_once_flag
 #define ONCE_FLAG_INIT 0
+#define call_once      __cccc_call_once
 
-void call_once(once_flag *flag, void (*func)(void));
+void __cccc_call_once(once_flag *flag, void (*func)(void));
 
 /* ---- Thread lifecycle ---- */
 int thrd_create(thrd_t *thr, thrd_start_t func, void *arg);

@@ -511,7 +511,12 @@ void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     bool any_tss =
         use_tss_create || use_tss_get || use_tss_set || use_tss_delete;
 
-    bool use_call_once = shim_fn_is_used(vm, prog, "call_once", "threads.h");
+    // #1184-adjacent: the guest-visible name "call_once" is macro-aliased
+    // to "__cccc_call_once" by include/threads.h, expanded away before the
+    // AST is built -- the Obj this program actually parsed is already
+    // named __cccc_call_once, so that's what shim_fn_is_used must match.
+    bool use_call_once =
+        shim_fn_is_used(vm, prog, "__cccc_call_once", "threads.h");
 
     if (!any_thrd && !any_mtx && !any_cnd && !any_tss && !use_call_once)
         return;
@@ -915,16 +920,21 @@ void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // literal text only promises a happens-before ordering.
     if (use_call_once)
         fprintf(f,
-                // #1183: the parameter spells __cccc_once_flag, not
-                // once_flag -- see include/threads.h's own comment on the
-                // rename (once_flag is a guest-side-only #define alias,
-                // expanded away before this shim's own type derivation, so
-                // the AST's real type name -- and the bodiless-prototype
-                // re-derivation for threads.h's own call_once declaration --
-                // is already __cccc_once_flag; spelling the bare host name
-                // here would collide with glibc's own once_flag typedef,
-                // pulled in by the #include <stdlib.h> above.
-                "void call_once(__cccc_once_flag *flag, void (*func)(void)) {\n"
+                // #1183/#1184: both the parameter type and the function
+                // name itself spell their private forms, not once_flag/
+                // call_once -- see include/threads.h's own comment on the
+                // rename. once_flag/call_once are guest-side-only #define
+                // aliases, expanded away before this shim's own derivation,
+                // so the AST's real names -- and the bodiless-prototype
+                // re-derivation for threads.h's own declaration -- are
+                // already __cccc_once_flag/__cccc_call_once; spelling
+                // either bare host name here would collide with a real
+                // glibc declaration of the same name pulled in by the
+                // #include <stdlib.h> above (once_flag's own typedef, and
+                // on a new enough glibc, a real ISO C11 call_once
+                // declaration too).
+                "void __cccc_call_once(__cccc_once_flag *flag, void "
+                "(*func)(void)) {\n"
                 "    int *raw = (int *)flag;\n"
                 "    int expected = 0;\n"
                 "    if (__atomic_compare_exchange_n(raw, &expected, 1, 0,\n"
