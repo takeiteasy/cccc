@@ -1101,16 +1101,49 @@ now returns `false` immediately for anything other than `TY_STRUCT`/
 this function already accepted enums before this change, and an enum has
 no spurious-scalar path — `same_type_or_origin()`'s `TY_ENUM` arm matches
 by tag + enumerator list, not by an origin-chain walk through some
-unrelated scalar). **Residual, not fixed by this change**: a `from_include`
-typedef of a *non-aggregate* whose real host layout genuinely differs from
-CCCC's own (`sigset_t`: `unsigned int`/4 bytes here, 128 bytes on glibc) no
-longer re-materializes either — not fixable by tightening the lookup
-instead, since a scalar typedef's `Type` is origin-identical to its
-underlying builtin, so no identity check can distinguish `sizeof(sigset_t)`
-from `sizeof(unsigned int)` once parsing has folded either down to a bare
-`Type`. `time_t`/`size_t`/`off_t`/`pid_t` are unaffected (uniform on every
-supported target). See `man/COVERAGE.md`'s Serialized-output divergences
-table; tracked as a follow-up (#1169).
+unrelated scalar). This collaterally stopped a `from_include` typedef of a
+*non-aggregate* whose real host layout genuinely differs from CCCC's own
+(`sigset_t`: `unsigned int`/4 bytes here, 128 bytes on glibc) from ever
+re-materializing either — filed as #1169, fixed below.
+
+**A genuinely `from_include` scalar typedef stopped re-materializing too,
+alongside the fix above (#1169)** — #1168's restriction to `TY_STRUCT`/
+`TY_UNION`/`TY_ENUM` fixed the spurious-scalar-member match, but its own
+comment claimed the fix couldn't be any narrower: that a scalar typedef's
+`Type` is "origin-identical to its underlying builtin", so no identity
+check could tell `sizeof(sigset_t)` apart from `sizeof(unsigned int)` once
+parsing had folded either down to a bare `Type`. That claim doesn't hold —
+`parse_typedef()` (`src/parse_decl.c`) deliberately `copy_type()`s every
+**non-aggregate** typedef specifically so it gets a `Type` object of its
+own, not shared with the builtin it aliases (structural typedefs are
+excluded from this copy; see that function's own comment for why an
+opaque-handle forward declaration needs the aggregate case to keep mutating
+one shared `Type` in place instead). `find_typedef_name_exact()`
+(`src/serialize_type.c`) walks `ty->origin` **upward from `ty`**, so
+`sigset_t`'s own copy resolves to `sigset_t`'s `TypeName` record while the
+bare `unsigned int` singleton (`origin == NULL`) resolves to nothing — the
+walk is directional and a bare builtin can never match a typedef through
+it. `serialize_type()`'s own scalar-alias arm already depends on exactly
+this identity to spell e.g. `uint64_t` by name rather than decomposing it
+to `unsigned long`, and the fold site itself (`unary()`, `src/
+parse_postfix.c`) already stashes that same identity on `Node.layout_ty`.
+
+Fixed by giving `type_layout_is_host_owned()` a non-aggregate arm keyed on
+`find_typedef_name_exact(ctx, ty) != NULL` before consulting the shared
+`type_def_is_from_include_suppressed()`/`type_header_is_compiler_owned()`
+predicates every kind already used — since identity resolves the record,
+`same_type_or_origin()`'s structural fallback is never reached for a
+scalar, so #1168's spurious-match bug cannot reopen. The existing
+struct-member recursion picks this up unchanged, so a `sigset_t` member
+also makes its *enclosing* struct host-owned (e.g. `struct sigaction`'s own
+`sa_mask`), the same as any other `from_include` member type. The
+`va_list`/`jmp_buf` compiler-owned carve-out (`type_header_is_compiler_
+owned()`) is untouched — both are non-aggregates too, but resolve through
+the same identity lookup and stay excluded by header ownership rather than
+by kind. See `man/COVERAGE.md`'s `<signal.h>` entry and Serialized-output
+divergences table; `time_t`/`size_t`/`off_t`/`pid_t` were never affected by
+either #1168 or #1169 (uniform layout on every supported target, and
+`size_t`/friends are already compiler-owned via `stddef.h`/`stdint.h`).
 
 **A bodiless declaration (`extern int close(int fd);`) sourced from one of
 CCCC's own bundled headers, rather than the primary source file, is now

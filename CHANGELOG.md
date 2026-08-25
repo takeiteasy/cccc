@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-08-25
+
 ### Fixed
 
 - `-c=native`/`-m`: a struct/union/enum referenced ONLY inside a
@@ -35,11 +37,30 @@ All notable changes to CCCC are documented here. Format loosely follows
   literal, even though the type has nothing to do with any header. Fixed
   by restricting `type_layout_is_host_owned()` to `TY_STRUCT`/`TY_UNION`/
   `TY_ENUM`, mirroring the narrowing #1098's `expr_has_host_owned_layout()`
-  already applied to itself for the same reason. Residual, not fixed here:
-  a `from_include` typedef of a non-aggregate whose real host size
-  genuinely differs (e.g. `sigset_t`) no longer re-materializes either —
-  see `man/HEADERS.md`/`man/COVERAGE.md`, tracked as a follow-up (#1169)
-  (#1168).
+  already applied to itself for the same reason (#1168).
+- `-c=native`/`-m`: follow-up to #1168 — restricting
+  `type_layout_is_host_owned()` to `TY_STRUCT`/`TY_UNION`/`TY_ENUM`
+  collaterally stopped a genuinely `from_include` **scalar** typedef whose
+  real host layout differs from CCCC's own from ever re-materializing
+  either (`sigset_t`: `unsigned int`/4 bytes in `include/signal.h`, 128
+  bytes on glibc) — a native buffer sized off the guest-folded
+  `sizeof(sigset_t)` under-allocated once handed to the real host
+  `sig*set()` functions, reintroducing the #1031 hazard for it. #1168's own
+  reasoning for not fixing this ("a scalar typedef's `Type` is
+  origin-identical to its underlying builtin, so no identity check can
+  distinguish `sizeof(sigset_t)` from `sizeof(unsigned int)`") turned out
+  to be wrong: `parse_typedef()` already gives every non-aggregate typedef
+  its own `Type` identity (`copy_type()`), and `find_typedef_name_exact()`'s
+  directional `->origin` walk can already tell them apart — the same
+  identity `serialize_type()`'s scalar-alias arm already relies on to spell
+  e.g. `uint64_t` by name. Fixed with a non-aggregate arm in
+  `type_layout_is_host_owned()` keyed on that identity lookup instead of
+  `same_type_or_origin()`'s structural fallback, so #1168's spurious-match
+  bug (a bare `long` matching an unrelated typedef of `long`) cannot
+  reopen. Reached through a struct member too (e.g. `struct sigaction`'s
+  own `sa_mask`), matching the existing aggregate behavior; `va_list`/
+  `jmp_buf`'s compiler-owned safe-upper-bound carve-out is unaffected
+  (#1169).
 
 ## [0.3.10] - 2026-08-25
 

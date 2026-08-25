@@ -2130,11 +2130,9 @@ static bool type_header_is_compiler_owned(SerializeContext *ctx, Type *ty) {
 // self-referential struct. depth guards against a pathological type
 // graph; the real-world nesting this addresses is at most a few levels.
 //
-// #1168: restricted to TY_STRUCT/TY_UNION/TY_ENUM (formerly accepted any
-// `Type` kind despite this comment always having said "struct/union") --
-// a bare scalar member/operand, e.g. plain `long`, can spuriously match an
-// unrelated from_include *typedef* of the same builtin (e.g. sys/types.h's
-// __int32_t, reached merely by including <stdio.h>) via
+// #1168: a bare scalar member/operand, e.g. plain `long`, can spuriously
+// match an unrelated from_include *typedef* of the same builtin (e.g.
+// sys/types.h's __int32_t, reached merely by including <stdio.h>) via
 // type_def_is_from_include_suppressed()'s find_typedef_name() fallback,
 // which is ultimately same_type_or_origin()'s pointer-identity walk up the
 // `origin` chain (serialize_type.c's own same_type_or_origin(), fed by
@@ -2147,27 +2145,31 @@ static bool type_header_is_compiler_owned(SerializeContext *ctx, Type *ty) {
 // either way), but needlessly verbose/fragile-looking output, and the one
 // *unguarded* consumer of this function (serialize_expr.c's ND_COMMA #1103
 // zero-init-chain arm) could hard-error on a store it can't classify as
-// redundant once an ordinary struct was wrongly judged host-owned. Mirrors
-// the narrowing #1098's expr_has_host_owned_layout() already applied to
-// itself for the exact same reason, rather than fixing this shared helper
-// -- now fixed at the source instead. TY_ENUM is kept (unlike #1098's own
-// struct/union-only gate): this function already accepted enums before
-// this change, and an enum has no spurious-scalar path -- same_type_or_
-// origin()'s TY_ENUM arm matches by tag + enumerator list, not by a
-// pointer-identity walk through some unrelated scalar's origin chain.
+// redundant once an ordinary struct was wrongly judged host-owned. #1168's
+// own fix restricted this whole function to TY_STRUCT/TY_UNION/TY_ENUM,
+// which sidestepped the spurious match but also stopped a *genuinely*
+// from_include scalar typedef -- e.g. sigset_t, `unsigned int`/4 bytes in
+// include/signal.h but 128 bytes in glibc -- from ever re-materializing,
+// reintroducing the #1031 hazard for it (filed as #1169).
 //
-// Residual: this also stops re-materializing sizeof/_Alignof of a
-// from_include typedef of a *non-aggregate* whose real host layout
-// genuinely differs from CCCC's own (e.g. sigset_t: unsigned int/4 bytes
-// here, a 128-byte glibc type on Linux) -- not fixable by tightening the
-// lookup instead, since a scalar typedef's Type is origin-identical to its
-// underlying builtin (`typedef unsigned int sigset_t;` stores the same
-// Type object copy_type() derives ret->origin from), so no identity check
-// can distinguish "sizeof(sigset_t)" from "sizeof(unsigned int)" once
-// parsing has folded either down to a bare Type. time_t/size_t/off_t/pid_t
-// are unaffected (uniform layout on every supported target). Tracked as a
-// known, documented residual (see man/HEADERS.md and man/COVERAGE.md);
-// filed as a follow-up (#1169) rather than fixed here.
+// #1169: the structural fallback was never actually necessary for a
+// scalar. parse_typedef() (parse_decl.c) copy_type()s every non-aggregate
+// typedef specifically so it gets a Type object of its own -- `typedef
+// unsigned int sigset_t;` does NOT share the plain `unsigned int`
+// singleton's Type, it holds a copy whose ->origin points back to it.
+// find_typedef_name_exact() (this file) walks ->origin upward FROM `ty`,
+// so it resolves sigset_t's own copy to sigset_t's TypeName record, while
+// the bare `unsigned int` Type (origin == NULL) resolves to nothing --
+// the walk is directional and cannot go the other way. serialize_type()'s
+// own scalar-alias arm already relies on exactly this identity to spell
+// e.g. `uint64_t` rather than decomposing it. So a scalar arm keyed on
+// find_typedef_name_exact() (below) distinguishes "this operand really is
+// the sigset_t typedef" from "this operand merely has the same underlying
+// representation" without reinstating same_type_or_origin()'s structural
+// fallback at all -- TY_ENUM was never affected by any of this (kept
+// throughout): same_type_or_origin()'s TY_ENUM arm matches by tag +
+// enumerator list, not by a pointer-identity walk through some unrelated
+// scalar's origin chain.
 bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty, int depth) {
     if (!ty || depth > 32)
         return false;
@@ -2175,7 +2177,14 @@ bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty, int depth) {
         return type_layout_is_host_owned(ctx, ty->base, depth + 1);
     if (ty->kind == TY_PTR)
         return false;
-    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+    bool is_aggregate =
+        ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM;
+    // #1169: a non-aggregate only ever gets here as a *named* from_include
+    // typedef -- find_typedef_name_exact()'s identity walk (see the block
+    // comment above) can't match a bare builtin, only the typedef that
+    // really was declared from_include, so this can't reopen #1168's
+    // spurious-scalar-member bug.
+    if (!is_aggregate && !find_typedef_name_exact(ctx, ty))
         return false;
     if (type_def_is_from_include_suppressed(ctx, ty) &&
         !type_header_is_compiler_owned(ctx, ty))
@@ -2236,17 +2245,15 @@ bool serialize_layout_const(FILE *f, SerializeContext *ctx, Type *layout_ty,
 // This is the "does this assert actually depend on a layout the VM might
 // have gotten wrong" gate -- an ordinary compile-time-only assert (no
 // from_include type involved anywhere in it) gets no redundant host-side
-// re-check. As of #1168, type_layout_is_host_owned() itself is already
-// restricted to TY_STRUCT/TY_UNION/TY_ENUM (see its own comment for why: a
-// bare scalar type like plain `int` could otherwise spuriously match an
-// unrelated from_include *typedef* of `int`, e.g. sys/types.h's __int32_t,
-// via same_type_or_origin()'s pointer-identity walk up the origin chain).
-// This function's own TY_STRUCT/TY_UNION check below is narrower still
-// (excludes TY_ENUM, which type_layout_is_host_owned() allows) -- kept for
-// #1098's original reason, matching every real-world case in that batch's
-// own tickets (e.g. struct statfs); an enum-typed _Static_assert condition
-// gets no redundant host-side re-check either, since #1098's own tickets
-// never needed one. Plain recursion over lhs/rhs/cond/then/els covers every
+// re-check. This function's own TY_STRUCT/TY_UNION check below (base_ty's
+// kind, just above the type_layout_is_host_owned() call) is narrower than
+// that shared helper -- it excludes both TY_ENUM and any from_include
+// *scalar* typedef type_layout_is_host_owned() recognizes as of #1169 (see
+// its own comment) -- kept for #1098's original reason, matching every
+// real-world case in that batch's own tickets (e.g. struct statfs); an
+// enum-typed or scalar-typedef-typed _Static_assert condition gets no
+// redundant host-side re-check either, since #1098's own tickets never
+// needed one. Plain recursion over lhs/rhs/cond/then/els covers every
 // shape a constant-expression tree can take (unary: lhs only; binary: lhs+rhs;
 // ternary: cond/then/els; cast: lhs) -- this walks a single expression
 // tree, not a whole function body, so the explicit-stack/pointer-identity

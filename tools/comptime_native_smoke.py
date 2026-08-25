@@ -5753,6 +5753,118 @@ def case_scalar_member_not_host_owned_native_round_trip(cccc: Path,
                                     SCALAR_NOT_HOST_OWNED_1168_PROGRAM)
 
 
+SCALAR_HOST_DIVERGENT_1169_PROGRAM = """
+#include <signal.h>
+#include <stdarg.h>
+
+// #1169, follow-up to #1168: type_layout_is_host_owned() restricted itself
+// to TY_STRUCT/TY_UNION/TY_ENUM to fix #1168's spurious-scalar-member false
+// positive, but that also stopped a from_include *scalar* typedef whose
+// real host layout genuinely differs (sigset_t: unsigned int/4 bytes in
+// CCCC's own include/signal.h, 128 bytes on glibc) from ever
+// re-materializing -- reintroducing the #1031 hazard for it. Fixed via
+// find_typedef_name_exact()'s pointer-identity lookup: parse_typedef()
+// already copy_type()s every non-aggregate typedef, so sigset_t has its own
+// Type identity distinct from the bare `unsigned int` it aliases -- no
+// structural (same_type_or_origin()) match needed, so #1168's bug can't
+// reopen.
+
+// Reached through an aggregate member too (this ticket's chosen scope).
+struct Wrap1169 { sigset_t s; };
+
+int main(void) {
+    unsigned long sigset_sz = sizeof(sigset_t);
+    unsigned long wrap_sz   = sizeof(struct Wrap1169);
+    unsigned long long_sz   = sizeof(long);
+    unsigned long uint_sz   = sizeof(unsigned int);
+    unsigned long va_sz     = sizeof(va_list);
+
+    if (sigset_sz == 0)
+        return 1;
+    if (wrap_sz < sigset_sz)
+        return 2;
+    if (long_sz != sizeof(long))
+        return 3;
+    if (uint_sz != sizeof(unsigned int))
+        return 4;
+    if (va_sz != sizeof(va_list))
+        return 5;
+
+    return 42;
+}
+"""
+
+
+def case_scalar_host_divergent_native_round_trip(cccc: Path,
+                                                   tmp: str) -> bool:
+    print("  136: #1169, follow-up to #1168 -- type_layout_is_host_owned() "
+          "restricting itself to TY_STRUCT/TY_UNION/TY_ENUM fixed #1168's "
+          "spurious-scalar-member false positive, but collaterally stopped "
+          "a from_include *scalar* typedef whose real host layout genuinely "
+          "differs (sigset_t: unsigned int/4 bytes in CCCC's own "
+          "include/signal.h, 128 bytes on glibc) from ever "
+          "re-materializing, reintroducing the #1031 hazard for it. Fixed "
+          "by keying a scalar arm on find_typedef_name_exact()'s "
+          "pointer-identity lookup instead of same_type_or_origin()'s "
+          "structural fallback -- parse_typedef() already copy_type()s "
+          "every non-aggregate typedef, giving sigset_t its own Type "
+          "identity distinct from the bare `unsigned int` it aliases, so "
+          "#1168's spurious-match bug can't reopen. Asserts -m output "
+          "re-materializes `sizeof(sigset_t)` (both as a direct operand and "
+          "reached through struct Wrap1169's own member), a bare "
+          "`sizeof(long)`/`sizeof(unsigned int)` stays folded (#1168 must "
+          "not regress), and `sizeof(va_list)` still folds to its "
+          "compiler-owned safe-upper-bound literal (the va_list/jmp_buf "
+          "carve-out, type_header_is_compiler_owned(), is unaffected) -- "
+          "plus VM 42 -> native 42. `sizeof(struct Wrap1169)` (containing a "
+          "sigset_t member) re-materializes too -- as its own type name, "
+          "not textually as `sizeof(sigset_t)` -- proving the member "
+          "recursion half of the fix. The exit code itself can't assert a "
+          "specific byte count for sizeof(sigset_t), since it legitimately "
+          "differs between the VM and a native host's own libc -- the -m "
+          "text assertions below are the real regression guard.")
+    src = Path(tmp) / "scalar_host_divergent_1169.c"
+    write(src, SCALAR_HOST_DIVERGENT_1169_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "sizeof(sigset_t)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing re-materialized "
+              f"'sizeof(sigset_t)'\n"
+              f"    {m_result.stdout}")
+        return False
+    # struct Wrap1169's own sizeof re-materializes as its OWN type name
+    # (`sizeof(struct Wrap1169)`), not textually as `sizeof(sigset_t)` --
+    # the member-recursion half of type_layout_is_host_owned() only decides
+    # WHETHER Wrap1169 counts as host-owned, not what name gets printed.
+    if "sizeof(struct Wrap1169)" not in m_result.stdout:
+        print(f"    FAIL: -m output should re-materialize "
+              f"'sizeof(struct Wrap1169)' too -- its sigset_t member should "
+              f"make the enclosing struct host-owned (the member-recursion "
+              f"half of #1169's chosen scope)\n"
+              f"    {m_result.stdout}")
+        return False
+    if "sizeof(long)" in m_result.stdout:
+        print(f"    FAIL: -m output re-materializes a bare 'sizeof(long)' "
+              f"instead of folding it (#1168 regression)\n"
+              f"    {m_result.stdout}")
+        return False
+    if "sizeof(unsigned int)" in m_result.stdout:
+        print(f"    FAIL: -m output re-materializes a bare "
+              f"'sizeof(unsigned int)' instead of folding it (#1168 "
+              f"regression)\n"
+              f"    {m_result.stdout}")
+        return False
+    if "sizeof(va_list)" in m_result.stdout:
+        print(f"    FAIL: -m output re-materializes 'sizeof(va_list)' "
+              f"instead of folding it to its compiler-owned safe upper "
+              f"bound\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp, "scalar_host_divergent_1169",
+                                    SCALAR_HOST_DIVERGENT_1169_PROGRAM)
+
+
 BLOCK_IN_NESTED_1080_PROGRAM = (
     "int ticket_repro(void) {\n"
     "    int g = 7;\n"
@@ -6332,6 +6444,7 @@ def main() -> int:
             case_static_assert_native_round_trip,
             case_sizeof_only_aggregate_native_round_trip,
             case_scalar_member_not_host_owned_native_round_trip,
+            case_scalar_host_divergent_native_round_trip,
             case_block_in_nested_native_round_trip,
             case_nested_fn_in_block_native_round_trip,
             case_typedef_identity_native_round_trip,
