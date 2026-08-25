@@ -3514,8 +3514,35 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             continue;
         if (!obj->is_function && obj->name[0] == '.')
             continue;
+        // #1167: layout_type_needs_collecting() (serialize_type.c) gates a
+        // folded sizeof/_Alignof's operand type on the same scope-visible
+        // type_has_printable_name() check serialize_layout_const() itself
+        // uses at emission time -- and that check is scope-sensitive
+        // (name_visible(), gated on ctx->current_fn). Emission later runs
+        // this exact obj as ctx->current_fn (serialize_type_defs_for_owner()
+        // below), so a LOCAL tagged aggregate (a function-local `struct Foo
+        // { ... };`, TypeNameRecord.owner_fn == this obj) only has a
+        // printable name once ctx->current_fn matches -- collection must set
+        // it the same way, or a struct referenced only via sizeof and
+        // declared local to a function is wrongly judged unprintable here
+        // and silently dropped again (the very regression #1167 exists to
+        // fix), even though its own emission pass would have printed it
+        // fine.
+        ctx.current_fn = obj->is_function ? obj : NULL;
         collect_obj_types(&ctx, obj);
+        ctx.current_fn = NULL;
     }
+    // #1167: file-scope _Static_assert conditions (StaticAssertRecord,
+    // #1098) live on their own standalone list, not on any Obj -- the
+    // collect_obj_types() loop above never reaches them. Collect
+    // unconditionally, matching the same-ticket fix to collect_node_types()/
+    // collect_type() for a folded sizeof/_Alignof re-materialized elsewhere
+    // (serialize_expr.c, serialize_type.c) -- otherwise a re-materialized
+    // `sizeof(T)`/`_Alignof(T)` inside the assert can be the only reference
+    // to T left in the AST, and no definition is emitted for it.
+    for (StaticAssertRecord *sa = vm->compiler.static_asserts; sa;
+         sa                     = sa->next)
+        collect_static_assert_types(&ctx, sa->cond);
     reorder_defs_by_byval_deps(&ctx); // #1042(a)
 
     // Header comment

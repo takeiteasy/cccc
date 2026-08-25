@@ -3,6 +3,28 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `-c=native`/`-m`: a struct/union/enum referenced ONLY inside a
+  `sizeof`/`_Alignof` expression, an array dimension, a `case` label, an
+  enum value, or a `_Static_assert` (file- or block-scope) — const-folded
+  to a plain integer literal at parse time, but sometimes re-materialized
+  textually (`sizeof(T)` rather than the folded literal) when the type is
+  host-owned — never got its own definition emitted: the type-collection
+  traversal (`collect_node_types()`/`collect_type()`, `src/serialize_type.c`)
+  never walked the five layout-provenance stashes those sites leave behind
+  (`Node.layout_ty` and friends), so a re-materialized `sizeof(T)` could be
+  the only surviving reference to `T` anywhere in the AST, and the host
+  compiler rejected the output ("invalid application of 'sizeof' to an
+  incomplete type"). Fixed by walking each stash, gated by the same
+  host-owned/printable-name check `serialize_layout_const()` itself uses
+  (so a type that stays folded, the common case, is never force-emitted —
+  an earlier unconditional version of this fix regressed
+  `tests/suites/test_suite_structs.c`'s own `tc_bi1135_wide`, a struct with
+  a `_BitInt(129)` member that has no native/-m lowering at all) (#1167).
+
 ## [0.3.10] - 2026-08-25
 
 ### Fixed

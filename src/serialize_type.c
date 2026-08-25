@@ -622,18 +622,54 @@ static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
 }
 
 static void collect_type(SerializeContext *ctx, Type *ty);
+// #1167: forward-declared so collect_node_types()/collect_type() (both
+// defined here, well above their own definitions further down this file)
+// can share the exact same "will this layout constant actually be
+// re-materialized" gate serialize_layout_const() itself uses, rather than
+// a parallel copy that could drift out of sync with it.
+static bool type_has_printable_name(SerializeContext *ctx, Type *ty);
 
-// FIXME (pre-existing, found while investigating #1163's test coverage,
-// filed as #1167): a struct/union referenced ONLY inside
-// sizeof/_Alignof is const-folded to a plain integer literal at parse
-// time -- by the time this traversal runs, no AST node anywhere still
-// references that Type, so collect_type() never visits it and the
-// aggregate is emitted only as a forward declaration under -c=native.
-// Minimal repro: `union W { char a; int b; }; ... printf("%zu",
-// sizeof(union W));` -- clang then rejects the emitted C ("invalid
-// application of 'sizeof' to an incomplete type 'union W'"). Declaring an
-// actual object of the type elsewhere in the same TU works around it by
-// giving collect_node_types() a real reference to walk.
+// #1167: true when a folded sizeof/_Alignof of `ty` is a candidate for
+// collect_node_types()/collect_type() to feed into ctx->defs -- mirrors
+// serialize_layout_const()'s own gate exactly (type_layout_is_host_owned()
+// + type_has_printable_name()), not a broader "collect it just in case"
+// test. Collecting unconditionally regressed test_suite_structs.c's own
+// `_Static_assert(sizeof(struct tc_bi1135_wide) == 32, ...)`: that struct
+// has a `_BitInt(129)` member with no native/-m lowering at all
+// (serialize_type.c's own TY_BITINT case hard-errors on it) -- it compiled
+// fine before #1167 because the struct was never collected (the assert
+// stays folded; type_layout_is_host_owned() is false for a plain
+// non-from_include struct) and so its body was never emitted. Collecting
+// it anyway, only to have serialize_layout_const() decline to re-
+// materialize the operator for the exact same reason, forced that
+// otherwise-never-emitted body into the output and hit the hard error. A
+// type ctx->defs contains gets its FULL body printed by
+// serialize_type_defs_for_owner() (unless from_include-suppressed) -- this
+// is a much stronger action than "available for re-materialization", so
+// collection must apply the identical gate emission does, not a superset.
+static bool layout_type_needs_collecting(SerializeContext *ctx, Type *ty) {
+    return ty && type_layout_is_host_owned(ctx, ty, 0) &&
+           type_has_printable_name(ctx, ty);
+}
+
+// #1167: a struct/union/enum referenced ONLY inside sizeof/_Alignof/a
+// case label/an enum value/a _Static_assert is const-folded to a plain
+// integer literal at parse time, but the operand Type IS retained on the
+// fold site (Node.layout_ty/case_begin_layout_ty/case_end_layout_ty,
+// EnumConstant.layout_ty, Type.array_len_layout_ty -- see #1031/#1095/
+// #1098's own comments) so serialize_layout_const() can re-materialize the
+// operator textually when the type is host-owned (#1031). Without walking
+// those stashes here too, that re-materialized `sizeof(T)`/`_Alignof(T)`
+// text is the only reference to T anywhere in the AST -- collect_type()
+// never visits it, no definition (not even a forward declaration) is
+// emitted, and the host compiler rejects the emitted C ("invalid
+// application of 'sizeof' to an incomplete type"). Minimal repro: `union
+// W { char a; int b; }; ... printf("%zu", sizeof(union W));`. Declaring an
+// actual object of the type elsewhere in the same TU worked around it by
+// giving collect_node_types() a real node->ty/var->ty reference to walk;
+// the fix below gives it the layout-provenance references directly,
+// gated by layout_type_needs_collecting() so a type that stays folded
+// (the common case) is never force-emitted.
 static void collect_node_types(SerializeContext *ctx, Node *node) {
     if (!node)
         return;
@@ -645,6 +681,24 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
         collect_type(ctx, node->member->ty);
     if (node->func_ty)
         collect_type(ctx, node->func_ty);
+    // #1167: see this function's own comment above -- these are the
+    // layout-provenance stashes a folded sizeof/_Alignof/case-label/
+    // _Static_assert leaves behind; without collecting them, a
+    // re-materialized `sizeof(T)`/`_Alignof(T)` (serialize_layout_const())
+    // can be the only surviving reference to T in the whole AST.
+    if (layout_type_needs_collecting(ctx, node->layout_ty))
+        collect_type(ctx, node->layout_ty);
+    if (layout_type_needs_collecting(ctx, node->case_begin_layout_ty))
+        collect_type(ctx, node->case_begin_layout_ty);
+    if (layout_type_needs_collecting(ctx, node->case_end_layout_ty))
+        collect_type(ctx, node->case_end_layout_ty);
+    // #1098: a block-scope _Static_assert's condition tree (stashed on an
+    // otherwise-empty ND_BLOCK, see Node.static_assert_cond's own comment)
+    // isn't reached by the generic ->lhs/->rhs/... walk below at all --
+    // recurse into it explicitly so any layout_ty leaves inside it (an
+    // arbitrarily nested sizeof/_Alignof, not just a bare top-level one)
+    // are collected too.
+    collect_node_types(ctx, node->static_assert_cond);
 
     // #1005: no ND_SWITCH/ND_CASE special case here (there used to be one,
     // walking node->case_next/->default_case instead of node->then) -- that
@@ -676,6 +730,17 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
     }
 
     if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
+        // #1167: an array dimension folded from a bare sizeof/_Alignof
+        // (Type.array_len_layout_ty, #1095) can be re-materialized by
+        // serialize_type() the same way node->layout_ty is -- collect its
+        // operand type too (gated identically to serialize_layout_const()'s
+        // own check, see layout_type_needs_collecting()'s comment), or that
+        // re-materialized text can be the only reference to it left in the
+        // AST. Must run before this arm's own `return` below (TY_PTR has no
+        // array_len_layout_ty, but sharing the arm costs nothing and keeps
+        // this next to ty->base).
+        if (layout_type_needs_collecting(ctx, ty->array_len_layout_ty))
+            collect_type(ctx, ty->array_len_layout_ty);
         collect_type(ctx, ty->base);
         return;
     }
@@ -732,6 +797,16 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
 
     for (Member *m = ty->members; m; m = m->next)
         collect_type(ctx, m->ty);
+    // #1167: TY_ENUM has no ty->members (the loop above is a no-op for it),
+    // so an enumerator's own folded sizeof/_Alignof (EnumConstant.layout_ty,
+    // #1095), gated identically to serialize_layout_const()'s own check
+    // (layout_type_needs_collecting()), needs its own walk here -- otherwise
+    // a re-materialized `sizeof(T)`/`_Alignof(T)` enum value
+    // (serialize_enum_def()) can be the only reference to T left in the AST.
+    if (ty->kind == TY_ENUM)
+        for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next)
+            if (layout_type_needs_collecting(ctx, ec->layout_ty))
+                collect_type(ctx, ec->layout_ty);
 
     type_vec_push_nominal(ctx, &ctx->defs, ty);
 }
@@ -745,6 +820,22 @@ void collect_obj_types(SerializeContext *ctx, Obj *obj) {
     for (Obj *local = obj->locals; local; local = local->next)
         collect_type(ctx, local->ty);
     collect_node_types(ctx, obj->body);
+}
+
+// #1167: a file-scope `_Static_assert`/`static_assert` (StaticAssertRecord,
+// #1098) has no Node of its own attached to any Obj -- static_asserts is a
+// standalone list on the compiler (cccc.h) -- so collect_obj_types()'s walk
+// never reaches its condition tree. Exposed so serialize_program.c's own
+// cc_serialize_program() can collect it explicitly alongside the
+// collect_obj_types() loop, or a re-materialized `sizeof(T)`/`_Alignof(T)`
+// inside the assert (serialize_static_assert()) can be the only reference
+// to T left in the AST. Collected unconditionally, regardless of whether
+// the emitter will actually re-emit this particular assert -- under-
+// collecting is exactly the bug this ticket fixes, and
+// type_def_is_from_include_suppressed() already drops any definition the
+// emitter itself won't print.
+void collect_static_assert_types(SerializeContext *ctx, Node *cond) {
+    collect_node_types(ctx, cond);
 }
 
 // #1042(a): ctx->defs is populated in first-collected order -- a post-order

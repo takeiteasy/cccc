@@ -1032,6 +1032,42 @@ round-trips). Gated on two conditions, both required:
 
 Documented in `man/COVERAGE.md`'s Serialized-output divergences table.
 
+**A struct/union/enum referenced ONLY through one of these re-materialized
+sites had no definition emitted at all — fixed, not merely deferred
+(#1167):** re-materializing the operator textually (`sizeof(T)` rather than
+a folded literal) only helps if `T`'s own definition actually reaches the
+output. `collect_node_types()`/`collect_type()` (`src/serialize_type.c`),
+the traversal that decides which type definitions land in `ctx->defs` (and
+therefore get emitted), walked `node->ty`/`node->var->ty`/`node->member->
+ty`/`node->func_ty` and the ordinary AST child links — but never the five
+layout-provenance stashes above (`Node.layout_ty`, `Node.
+case_begin_layout_ty`/`case_end_layout_ty`, `Type.array_len_layout_ty`,
+`EnumConstant.layout_ty`, and file-scope `Compiler.static_asserts`' own
+`StaticAssertRecord.cond`). A type reached *only* through one of those —
+`union W { char a; int b; }; ... sizeof(union W)` and nothing else in the
+whole translation unit — left the re-materialized `sizeof(union W)` text as
+the sole surviving reference: `collect_type()` never visited it, no
+definition (not even a forward declaration) was emitted, and the host
+compiler rejected the output ("invalid application of 'sizeof' to an
+incomplete type"). Fixed by walking each stash too, gated by a shared
+`layout_type_needs_collecting()` predicate that mirrors
+`serialize_layout_const()`'s own re-materialization check exactly (host-
+owned + printable name) — collecting unconditionally regressed
+`tests/suites/test_suite_structs.c`'s own `tc_bi1135_wide` (a struct with a
+`_BitInt(129)` member, which has no native/-m lowering at all): that
+struct is referenced only via a non-host-owned `_Static_assert`'s `sizeof`,
+stays folded today, and must keep staying folded — collecting it
+regardless of whether it would ever actually be re-materialized forced its
+body (and that unlowerable member) into the output. The gate is
+scope-sensitive (`name_visible()`, keyed on `SerializeContext.current_fn`)
+the same way `serialize_layout_const()`'s own check is, so a *local*
+tagged aggregate (declared inside a function, referenced only via
+`sizeof`) needs `ctx->current_fn` set to that function during collection
+too, matching what `serialize_type_defs_for_owner()`'s own later per-owner
+emission pass uses — `cc_serialize_program()`'s own `collect_obj_types()`
+loop (`src/serialize_program.c`) now sets it for the duration of each
+`Obj`'s own collection call.
+
 **A bodiless declaration (`extern int close(int fd);`) sourced from one of
 CCCC's own bundled headers, rather than the primary source file, is now
 emitted too (#1096)** — found verifying #1031's own fix against

@@ -334,6 +334,14 @@ serializer bugs in general. Cases covered:
   member access through an anonymous struct/union member (e.g. `s.i` where
   `i` belongs to an unnamed nested struct) must not emit the invalid
   `s./* unknown */.i` placeholder that used to sit there.
+- #1167: a struct/union/enum referenced ONLY via `sizeof`/`_Alignof`, a
+  `case` label, an enum value, or a `_Static_assert` (both file- and
+  block-scope) — and nowhere else in the translation unit — must still get
+  a real definition emitted under `-c=native`, covering both a genuinely
+  host-owned aggregate (must re-materialize and be defined) and an
+  otherwise-unlowerable member type that must stay folded (a regression
+  guard against over-collecting; see [HEADERS.md](HEADERS.md) for the
+  full writeup).
 
 ### Native round-trip mode (`--native`)
 
