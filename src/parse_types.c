@@ -1472,22 +1472,50 @@ int get_vm_size(Type *ty) {
     return ty->size;
 }
 
-// #1160: resolve the alignment a single declarator actually requests, once
-// _Alignas (declspec, `attr->align`, an *assignment* -- can lower, e.g.
-// `_Alignas(1) int x` is legal and does lower) and GNU aligned(N) (declspec
-// `attr->gnu_align`, or declarator-suffix `ty->decl_align` -- both floors,
-// can only raise) have all been parsed. `ty->align` itself -- the type's own
-// natural alignment -- is deliberately left out of this max() by name only
-// to make the base term explicit; it's exactly what `attr->align ? ... :
-// mem->ty->align` already fell back to before #1160, so behavior for a
-// declarator carrying no attribute at all is unchanged.
-int effective_decl_align(Type *ty, VarAttr *attr) {
-    int align = attr && attr->align ? attr->align : ty->align;
+// #1163: the *explicit* alignment a single declarator requests, or 0 if it
+// carries no alignment attribute at all. This is effective_decl_align()
+// below minus the "fall back to the type's own natural alignment" step --
+// splitting it out lets callers (struct/union layout, under `packed`) tell
+// an explicit request apart from a member's ordinary natural alignment,
+// which `effective_decl_align()` alone can't do: an explicit `aligned(4)`
+// on an `int` resolves to the same value (4) as no request at all, but GCC
+// still honors the explicit one under `packed` (verified against gcc-16)
+// while the implicit one is exactly what `packed` suppresses.
+//
+// `attr->align` (an _Alignas *assignment*) can request less than the type's
+// natural alignment; C17 6.7.5p4 forbids that outright ("cannot reduce
+// alignment"), matching gcc/clang, so it's rejected here via error_tok
+// rather than silently accepted the way #1160 originally left it.
+int explicit_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
+                        VarAttr *attr) {
+    int align = 0;
+    if (attr && attr->align) {
+        if (attr->align < ty->align)
+            error_tok(vm, tok,
+                      "requested alignment is less than minimum alignment "
+                      "of %d for type",
+                      ty->align);
+        align = attr->align;
+    }
     if (attr && attr->gnu_align > align)
         align = attr->gnu_align;
     if (ty->decl_align > align)
         align = ty->decl_align;
     return align;
+}
+
+// #1160: resolve the alignment a single declarator actually requests, once
+// _Alignas (declspec, `attr->align`), GNU aligned(N) (declspec
+// `attr->gnu_align`, or declarator-suffix `ty->decl_align`) have all been
+// parsed. `ty->align` itself -- the type's own natural alignment -- is
+// deliberately left out of explicit_decl_align()'s max() by name only to
+// make the base term explicit; it's exactly what `attr->align ? ... :
+// mem->ty->align` already fell back to before #1160, so behavior for a
+// declarator carrying no attribute at all is unchanged.
+int effective_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
+                         VarAttr *attr) {
+    int explicit_align = explicit_decl_align(vm, tok, ty, attr);
+    return explicit_align > ty->align ? explicit_align : ty->align;
 }
 
 // struct-members = (declspec declarator (","  declarator)* ";")*
@@ -1516,9 +1544,13 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             Member *mem =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
             memset(mem, 0, sizeof(Member));
-            mem->ty    = basety;
-            mem->idx   = idx++;
-            mem->align = effective_decl_align(mem->ty, &attr);
+            mem->ty  = basety;
+            mem->idx = idx++;
+            mem->explicit_align =
+                explicit_decl_align(vm, anon_tok, mem->ty, &attr);
+            mem->align = mem->explicit_align > mem->ty->align
+                             ? mem->explicit_align
+                             : mem->ty->align;
             cur = cur->next = mem;
             continue;
         }
@@ -1537,9 +1569,13 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                 error_tok(vm, mem->name ? mem->name : tok,
                           "custom attributes are only supported on file-scope "
                           "declarations");
-            mem->name  = mem->ty->name;
-            mem->idx   = idx++;
-            mem->align = effective_decl_align(mem->ty, &attr);
+            mem->name           = mem->ty->name;
+            mem->idx            = idx++;
+            mem->explicit_align = explicit_decl_align(
+                vm, mem->name ? mem->name : tok, mem->ty, &attr);
+            mem->align = mem->explicit_align > mem->ty->align
+                             ? mem->explicit_align
+                             : mem->ty->align;
 
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
@@ -1548,6 +1584,14 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                     error_tok(vm, tok, "negative bit-field width");
                 if (mem->bit_width > mem->ty->size * CHAR_BIT)
                     error_tok(vm, tok, "bit-field width exceeds its type");
+                // FIXME (pre-existing, found while fixing #1163, filed as
+                // #1165): a trailing attribute after the bit-width
+                // (`int b : 5 __attribute__((aligned(16)));`) fails to
+                // parse here ("expected ','") -- gcc/clang both parse it
+                // (gcc then itself rejects alignment on a bit-field with
+                // its own diagnostic; cccc never reaches that point).
+                // No attribute_list()/c23_attribute_list() call exists at
+                // this position at all.
             }
 
             cur = cur->next = mem;
@@ -2796,6 +2840,14 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // cosmetic-only mismatch). Only a *named* member counts -- an
             // unnamed bitfield (including width-0, handled above) is pure
             // padding and does not, matching clang/gcc exactly.
+            // #1163 scope note: unlike the normal-member branch below, this
+            // guard is deliberately left as-is. GCC rejects an explicit
+            // aligned(N)/_Alignas(N) on a bit-field outright ("alignment
+            // specified for bit-field"), and cccc's own parser can't even
+            // reach that state (`int b : 5 __attribute__((aligned(16)))`
+            // fails to parse, tracked as #1165) -- so no explicit request
+            // can ever reach this branch for either compiler to disagree
+            // over.
             if (!ty->is_packed && mem->name && ty->align < mem->align)
                 ty->align = mem->align;
         } else {
@@ -2804,15 +2856,38 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // calculation)
             bool is_flexible_array =
                 (mem->ty->kind == TY_ARRAY && mem->ty->array_len == 0);
-            if (!ty->is_packed && !is_flexible_array)
-                bits = align_to(bits, mem->align * 8);
+
+            // #1163: `packed` only suppresses a member's *implicit* (natural)
+            // alignment -- an *explicit* aligned(N)/_Alignas(N) request on
+            // the member's own declarator still applies (verified against
+            // gcc-16/clang: __attribute__((packed)) struct { char a; int b
+            // __attribute__((aligned(16))); } places b at offset 16, not 1).
+            // mem->align alone can't distinguish the two cases (an explicit
+            // request equal to the member's natural alignment looks
+            // identical to no request at all), so use mem->explicit_align
+            // under packed instead.
+            int mem_align =
+                ty->is_packed ? (mem->explicit_align ? mem->explicit_align : 1)
+                              : mem->align;
+
+            if (!is_flexible_array)
+                bits = align_to(bits, mem_align * 8);
+            // FIXME (pre-existing, found while fixing #1163, filed as
+            // #1164): under `packed`, `align_to(bits, mem_align * 8)`
+            // above is a no-op when this member directly follows a
+            // bitfield run (mem_align == 1), so `bits` can still sit mid-
+            // byte here -- `bits / 8` then truncates instead of rounding
+            // up to the next whole byte, overlapping this member's offset
+            // with the bitfield run's own storage. Verified against
+            // gcc-16: `struct __attribute__((packed)) { char a; int b : 5;
+            // int c; }` places `c` at offset 2, cccc currently computes 1.
             mem->offset  = bits / 8;
             bits        += mem->ty->size * 8;
 
             // Update struct alignment (including for flexible arrays, for final
             // size padding)
-            if (!ty->is_packed && ty->align < mem->align)
-                ty->align = mem->align;
+            if (ty->align < mem_align)
+                ty->align = mem_align;
         }
     }
 
@@ -2835,9 +2910,18 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     // If union, we don't have to assign offsets because they
     // are already initialized to zero. We need to compute the
     // alignment and the size though.
+    //
+    // #1163: unlike struct_decl above, this loop previously had no
+    // is_packed check at all, so `packed` had no effect on a union's own
+    // alignment. Match struct_decl's rule: a member's *implicit* alignment
+    // is suppressed under packed, but an *explicit* aligned(N)/_Alignas(N)
+    // request still applies (verified against gcc-16/clang).
     for (Member *mem = ty->members; mem; mem = mem->next) {
-        if (ty->align < mem->align)
-            ty->align = mem->align;
+        int mem_align = ty->is_packed
+                            ? (mem->explicit_align ? mem->explicit_align : 1)
+                            : mem->align;
+        if (ty->align < mem_align)
+            ty->align = mem_align;
         if (ty->size < mem->ty->size)
             ty->size = mem->ty->size;
     }

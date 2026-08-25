@@ -1589,6 +1589,16 @@ typedef struct Member {
     // checked_bounds_form live on mem->ty, not duplicated here.
     Node *checked_bounds_lo;
     Node *checked_bounds_hi;
+
+    // #1163: an *explicit* aligned(N)/_Alignas(N) request on this member's
+    // own declarator (0 if none). `align` above already folds this in for
+    // the common (non-packed) case, but under a packed aggregate an
+    // explicit request must still survive while every *implicit* (natural)
+    // alignment is suppressed -- `align` alone can't tell those apart (an
+    // explicit aligned(N) equal to the member's natural alignment looks
+    // identical to no request at all). See explicit_decl_align()
+    // (parse_types.c) and struct_decl()/union_decl()'s mem_align locals.
+    int explicit_align;
 } Member;
 
 /*!

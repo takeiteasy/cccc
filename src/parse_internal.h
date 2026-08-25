@@ -284,7 +284,10 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
                           Type *ty);
 int align_down(int n, int align);
 int align_to(int n, int align);
-int effective_decl_align(Type *ty, VarAttr *attr);
+int effective_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
+                         VarAttr *attr);
+int explicit_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
+                        VarAttr *attr);
 void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list,
                         Token *name_tok, Node *args, int arg_count);
 void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);

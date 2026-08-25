@@ -60,7 +60,7 @@ shim's shape and its residual gaps.
 | Structs — declaration, member access, nested | ✓ | |
 | Unions | ✓ | |
 | Enums — explicit values, use in expressions and switch | ✓ | |
-| Bitfields — signed/unsigned, read-modify-write | ✓ | Bit packing within a struct is always compact (a member starts at the next free bit, crossing into a new storage unit only when it wouldn't fit in the current one). A struct's own overall size/alignment additionally rounds up to cover each *named* bitfield member's full declared-type storage unit, matching clang/gcc (`int f : 5;` reserves a whole 4-byte `int` slot, not just 5 bits) — an *unnamed* member (including width-0, which affects only the next member's starting bit) is pure padding and does not affect the struct's alignment, and a `packed` struct keeps the fully compact layout regardless (#1127) |
+| Bitfields — signed/unsigned, read-modify-write | ✓ | Bit packing within a struct is always compact (a member starts at the next free bit, crossing into a new storage unit only when it wouldn't fit in the current one). A struct's own overall size/alignment additionally rounds up to cover each *named* bitfield member's full declared-type storage unit, matching clang/gcc (`int f : 5;` reserves a whole 4-byte `int` slot, not just 5 bits) — an *unnamed* member (including width-0, which affects only the next member's starting bit) is pure padding and does not affect the struct's alignment, and a `packed` struct keeps the fully compact layout regardless (#1127); this rounding applies only to a bit-field member's own *implicit* alignment, since neither GCC/clang nor CCCC accept an explicit `aligned(N)`/`_Alignas(N)` on a bit-field at all (#1163) |
 | `typedef` — including function pointer typedefs | ✓ | |
 | All arithmetic, bitwise, comparison, logical operators | ✓ | |
 | Assignment operators (`+=`, `<<=`, etc.) | ✓ | |
@@ -143,7 +143,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 |---|---|---|
 | `_Generic` type-generic expressions | ✓ | |
 | `_Alignof` | ✓ | |
-| `_Alignas` | ✓ | |
+| `_Alignas` | ✓ | Can request more or less alignment than a declaration's own type, but never less than the type's own alignment — a request below that is a C17 6.7.5p4 constraint violation and a compile error, matching GCC/clang (#1163) |
 | `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | |
 | `_Noreturn` | ✓ | Accepted via keyword, `__attribute__((noreturn))`, and `[[noreturn]]`; emits BTRAP after calls; warns on returns |
 | `_Thread_local` | ✓ | TLS segment; each thread receives a private copy from the template |
@@ -320,7 +320,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | Attribute | Syntax | Status | Semantics |
 |-----------|--------|--------|-----------|
 | `aligned(N)` | GNU | ✓ | Sets minimum alignment on types, variables, and struct/union members (also `[[gnu::aligned(N)]]`) |
-| `packed` | GNU | ✓ | Suppresses struct member padding (also `[[gnu::packed]]`) |
+| `packed` | GNU | ✓ | Suppresses *implicit* struct member padding — an explicit member `aligned(N)`/`_Alignas(N)` still applies (#1163) (also `[[gnu::packed]]`) |
 | `unused` / `__unused__` | GNU | ✓ | Suppresses `-Wunused` warnings |
 | `deprecated` / `__deprecated__` | GNU | ✓ | Emits `-Wdeprecated` warnings |
 | `deprecated("msg")` | GNU | ✓ | Emits `-Wdeprecated` with custom message |
@@ -357,7 +357,7 @@ above), matching real GCC/Clang.
 
 #### `__attribute__((aligned(N)))`
 
-Sets minimum alignment for a type, variable, or struct/union member. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment (16 on every target this project supports). Honored in every position GCC/clang accept it: on the struct/union body itself, on a global or local variable, and — declspec-prefix or declarator-suffix — on an individual struct/union member (`int b __attribute__((aligned(16)));`, #1160). It only ever *raises* alignment relative to a member's own natural alignment (only `packed` lowers it); `_Alignas(N)`, by contrast, is a genuine assignment and can request less than a type's natural alignment. **Known divergence**: on a `packed` struct, GCC/clang still honor an explicit member `aligned(N)`/`_Alignas(N)` (it can only remove *implicit* padding); CCCC's `packed` currently suppresses member alignment unconditionally — tracked as a follow-up (#1163). The C23 spelling `[[gnu::aligned(N)]]` is equivalent in every position except directly after a struct/union definition's closing `}`, where GCC itself silently ignores it (unlike the GNU `__attribute__((aligned(N)))` spelling in that same trailing position, which GCC does honor — CCCC matches GCC in both spellings).
+Sets minimum alignment for a type, variable, or struct/union member. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment (16 on every target this project supports). Honored in every position GCC/clang accept it: on the struct/union body itself, on a global or local variable, and — declspec-prefix or declarator-suffix — on an individual struct/union member (`int b __attribute__((aligned(16)));`, #1160). It only ever *raises* alignment relative to a member's own natural alignment (only `packed` lowers it); `_Alignas(N)`, by contrast, is a genuine assignment rather than a floor, and can raise a type's own natural alignment the same way `aligned(N)` does (e.g. `_Alignas(16) int b`) — but naming an `N` *smaller* than the declared type's own alignment (e.g. `_Alignas(1) long b`) is a C17 6.7.5p4 constraint violation and a compile error, matching GCC/clang exactly (`'_Alignas' specifiers cannot reduce alignment`, #1163). On a `packed` struct or union, an explicit member `aligned(N)`/`_Alignas(N)` still applies and still widens that member's offset and the aggregate's own alignment — `packed` only suppresses a member's *implicit* (natural) alignment, matching GCC/clang exactly (#1163); a `packed` union's own alignment (unlike a struct's) previously ignored `packed` altogether and is now also suppressed to 1 absent an explicit member request. The C23 spelling `[[gnu::aligned(N)]]` is equivalent in every position except directly after a struct/union definition's closing `}`, where GCC itself silently ignores it (unlike the GNU `__attribute__((aligned(N)))` spelling in that same trailing position, which GCC does honor — CCCC matches GCC in both spellings).
 
 A type-level `aligned(N)` (on the struct/union itself) and a member's own explicit alignment (`_Alignas(N)` or `aligned(N)`) both survive `-c=native`/`-m`/`-c=generated` (#1129/#1160) — re-emitted only when they actually widen the layout beyond what the members alone would produce, so ordinary structs carry no extra attribute noise. An object's own `_Alignas(N)` (`Obj.align`) was already covered separately (#1136).
 
@@ -373,7 +373,7 @@ struct Header {
 
 #### `__attribute__((packed))`
 
-Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct. Also accepts the C23 spelling `[[gnu::packed]]`, in the same struct/union-body position — but, like `[[gnu::aligned(N)]]` above, not directly after the closing `}` of a definition, where GCC ignores it (and warns). Survives `-c=native`/`-m`/`-c=generated` (#1129) — previously dropped silently, producing a native binary whose struct layout diverged from the VM's.
+Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct. Only *implicit* (natural) member alignment is suppressed — an explicit `aligned(N)`/`_Alignas(N)` on a member's own declarator still applies and still widens that member's offset and the aggregate's own alignment, matching GCC/clang exactly (#1163); a member whose *type* is independently `aligned(N)` does not count as explicit and stays suppressed. A packed union's own alignment is suppressed the same way a packed struct's is (also #1163 — previously `union_decl()` had no `packed` check at all, so a packed union kept its natural alignment). Also accepts the C23 spelling `[[gnu::packed]]`, in the same struct/union-body position — but, like `[[gnu::aligned(N)]]` above, not directly after the closing `}` of a definition, where GCC ignores it (and warns). Survives `-c=native`/`-m`/`-c=generated` (#1129) — previously dropped silently, producing a native binary whose struct layout diverged from the VM's.
 
 ```c
 struct __attribute__((packed)) {
@@ -1250,6 +1250,16 @@ next to an unpacked struct definition). Fixed in
 (`serialize_struct_def` for tagged/typedef'd, `serialize_anon_aggregate` for
 tagless). An object's own `_Alignas(N)` (`Obj.align`) was already covered by
 `serialize_alignas_if_needed` (#1136).
+
+`#1163` extended this to a packed aggregate's member alignment: outside
+`packed`, `mem->align > mem->ty->align` is enough to tell an explicit
+request apart from a member's own natural alignment, but under `packed`
+that heuristic breaks (an explicit `aligned(4)` on an `int` resolves to the
+same value as no request at all), so `Member.explicit_align` — 0 unless the
+declarator carried its own alignment attribute — is used instead, and only
+emitted when it exceeds 1 (an explicit request of 1 under `packed` is
+already the layout default, and is also the only value guaranteed never to
+violate C17 6.7.5p4's "never lowers alignment" rule for `_Alignas`).
 
 `section`, `weak`, `visibility` are contracts CCCC's parser does not retain
 at all — they hit the generic unknown-attribute path (`src/parse_types.c`)

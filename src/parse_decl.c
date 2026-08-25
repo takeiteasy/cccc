@@ -928,7 +928,7 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
     }
 
     // #1160: also honor GNU aligned(N), not just _Alignas.
-    int decl_align = effective_decl_align(ty, attr);
+    int decl_align = effective_decl_align(vm, name_tok, ty, attr);
     if (decl_align > prev->align)
         prev->align = decl_align;
 
@@ -1047,7 +1047,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                 var            = new_gvar(vm, var_name, var_name_len, deduced);
                 var->is_static = attr->is_static;
                 // #1160: also honor GNU aligned(N), not just _Alignas.
-                var->align = effective_decl_align(deduced, attr);
+                var->align = effective_decl_align(vm, ty->name, deduced, attr);
                 if (var->checked_kind != CHECKED_NONE)
                     resolve_checked_bounds(vm, var);
                 hashmap_put(&vm->compiler.global_decl_map, var_name, var);
@@ -1122,7 +1122,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             var->is_tls        = attr->is_tls;
             var->is_constexpr  = attr->is_constexpr;
             // #1160: also honor GNU aligned(N), not just _Alignas.
-            var->align = effective_decl_align(ty, attr);
+            var->align = effective_decl_align(vm, ty->name, ty, attr);
             if (var->checked_kind != CHECKED_NONE)
                 resolve_checked_bounds(vm, var);
 

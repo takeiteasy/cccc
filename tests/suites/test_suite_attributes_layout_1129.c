@@ -267,3 +267,170 @@ int test_c23_pretag_packed_aligned_layout(void) {
         return 2;
     return 42;
 }
+
+// #1163: `packed` must suppress only a member's IMPLICIT (natural)
+// alignment -- an EXPLICIT aligned(N)/_Alignas(N) request on a member's own
+// declarator still applies, and still widens the aggregate's own alignment,
+// exactly as it would outside a packed struct. Verified directly against
+// gcc-16 and clang (identical results on both): `struct __attribute__
+// ((packed)) { char a; int b __attribute__((aligned(16))); }` places `b` at
+// offset 16, not 1.
+struct PackedExplicitAligned1163 {
+    char a;
+    int  b __attribute__((aligned(16)));
+};
+
+struct PackedExplicitAlignedPrefix1163 {
+    char                             a;
+    __attribute__((aligned(16))) int b;
+};
+
+struct PackedExplicitAlignasMember1163 {
+    char a;
+    _Alignas(16) int b;
+};
+
+struct PackedExplicitC23Aligned1163 {
+    char a;
+    int  b [[gnu::aligned(16)]];
+};
+
+[[cccc::test(return = 42)]]
+int test_packed_explicit_member_align_survives_1163(void) {
+    if (offsetof(struct PackedExplicitAligned1163, b) != 16)
+        return 1;
+    if (sizeof(struct PackedExplicitAligned1163) != 32)
+        return 2;
+    if (_Alignof(struct PackedExplicitAligned1163) != 16)
+        return 3;
+    if (offsetof(struct PackedExplicitAlignedPrefix1163, b) != 16)
+        return 4;
+    if (offsetof(struct PackedExplicitAlignasMember1163, b) != 16)
+        return 5;
+    if (offsetof(struct PackedExplicitC23Aligned1163, b) != 16)
+        return 6;
+    return 42;
+}
+
+// The decisive case: an explicit aligned(N) that happens to equal the
+// member's own NATURAL alignment must still survive `packed` -- a
+// "was this explicit?" test built on `mem->align > mem->ty->align` alone
+// can't tell this apart from no request at all (both resolve to the same
+// align value), which is exactly why #1163 needed a separate
+// Member.explicit_align field. Verified against gcc-16: b@4, not b@1.
+struct PackedExplicitEqualsNatural1163 {
+    char a;
+    int  b __attribute__((aligned(4)));
+};
+
+[[cccc::test(return = 42)]]
+int test_packed_explicit_align_equals_natural_1163(void) {
+    if (offsetof(struct PackedExplicitEqualsNatural1163, b) != 4)
+        return 1;
+    if (sizeof(struct PackedExplicitEqualsNatural1163) != 8)
+        return 2;
+    if (_Alignof(struct PackedExplicitEqualsNatural1163) != 4)
+        return 3;
+    return 42;
+}
+
+// An explicit member alignment followed by another, ordinary member: the
+// explicit request must not leak onto its sibling (mirrors
+// test_member_aligned_isolation_layout above, but under `packed`).
+// Verified against gcc-16: c@20, not c@5.
+struct PackedExplicitAlignedIsolation1163 {
+    char a;
+    int  b __attribute__((aligned(16)));
+    char c;
+};
+
+[[cccc::test(return = 42)]]
+int test_packed_explicit_aligned_isolation_1163(void) {
+    if (offsetof(struct PackedExplicitAlignedIsolation1163, b) != 16)
+        return 1;
+    if (offsetof(struct PackedExplicitAlignedIsolation1163, c) != 20)
+        return 2;
+    if (sizeof(struct PackedExplicitAlignedIsolation1163) != 32)
+        return 3;
+    return 42;
+}
+
+// Regression anchor: a packed struct with NO explicit member alignment
+// keeps the fully compact layout #1129 already established -- a naive
+// "always use mem->align under packed" fix would break this by reviving
+// every member's IMPLICIT alignment too.
+struct PackedNoExplicitAlign1163 {
+    char a;
+    int  b;
+} __attribute__((packed));
+
+[[cccc::test(return = 42)]]
+int test_packed_no_explicit_align_unaffected_1163(void) {
+    if (offsetof(struct PackedNoExplicitAlign1163, b) != 1)
+        return 1;
+    if (sizeof(struct PackedNoExplicitAlign1163) != 5)
+        return 2;
+    if (_Alignof(struct PackedNoExplicitAlign1163) != 1)
+        return 3;
+    return 42;
+}
+
+// Regression anchor: a packed struct/union containing a member whose TYPE
+// (not the member's own declarator) is independently `aligned(16)` must
+// NOT inherit that alignment -- only a member's own EXPLICIT declarator
+// attribute survives packing, not its type's natural alignment (which is
+// exactly the IMPLICIT case packed suppresses). Verified against gcc-16:
+// align stays 1 for both the struct and the union.
+struct PackedInnerTypeAligned1163 {
+    char                    a;
+    struct Aligned1129Inner i;
+} __attribute__((packed));
+
+union PackedInnerTypeAlignedUnion1163 {
+    char                    a;
+    struct Aligned1129Inner i;
+} __attribute__((packed));
+
+[[cccc::test(return = 42)]]
+int test_packed_inner_type_align_not_inherited_1163(void) {
+    if (offsetof(struct PackedInnerTypeAligned1163, i) != 1)
+        return 1;
+    if (sizeof(struct PackedInnerTypeAligned1163) != 17)
+        return 2;
+    if (_Alignof(struct PackedInnerTypeAligned1163) != 1)
+        return 3;
+    if (_Alignof(union PackedInnerTypeAlignedUnion1163) != 1)
+        return 4;
+    if (sizeof(union PackedInnerTypeAlignedUnion1163) != 16)
+        return 5;
+    return 42;
+}
+
+// #1163: union_decl() previously had NO is_packed check at all, so
+// `packed` had no effect on a union's own alignment either way. Verified
+// against gcc-16: a plain packed union's alignment drops to 1 (its size is
+// already max(member sizes) with no interior padding to remove, matching
+// test_packed_union_layout above), while an EXPLICIT member alignment
+// still raises it, same as the struct case.
+union PackedUnionNoExplicit1163 {
+    char a;
+    int  b;
+} __attribute__((packed));
+
+union PackedUnionExplicitAligned1163 {
+    char a;
+    int  b __attribute__((aligned(16)));
+} __attribute__((packed));
+
+[[cccc::test(return = 42)]]
+int test_packed_union_alignment_1163(void) {
+    if (_Alignof(union PackedUnionNoExplicit1163) != 1)
+        return 1;
+    if (sizeof(union PackedUnionNoExplicit1163) != 4)
+        return 2;
+    if (sizeof(union PackedUnionExplicitAligned1163) != 16)
+        return 3;
+    if (_Alignof(union PackedUnionExplicitAligned1163) != 16)
+        return 4;
+    return 42;
+}

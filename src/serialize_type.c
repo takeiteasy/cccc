@@ -623,6 +623,17 @@ static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
 
 static void collect_type(SerializeContext *ctx, Type *ty);
 
+// FIXME (pre-existing, found while investigating #1163's test coverage,
+// filed as #1167): a struct/union referenced ONLY inside
+// sizeof/_Alignof is const-folded to a plain integer literal at parse
+// time -- by the time this traversal runs, no AST node anywhere still
+// references that Type, so collect_type() never visits it and the
+// aggregate is emitted only as a forward declaration under -c=native.
+// Minimal repro: `union W { char a; int b; }; ... printf("%zu",
+// sizeof(union W));` -- clang then rejects the emitted C ("invalid
+// application of 'sizeof' to an incomplete type 'union W'"). Declaring an
+// actual object of the type elsewhere in the same TU works around it by
+// giving collect_node_types() a real reference to walk.
 static void collect_node_types(SerializeContext *ctx, Node *node) {
     if (!node)
         return;
@@ -1283,19 +1294,27 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
            !find_anonymous_typedef_name(ctx, ty);
 }
 
-// #1129: packed/aligned(N) were retained on Type (is_packed, align) but
-// never re-emitted, so a struct's native layout silently diverged from the
-// VM's -- see the admissibility-rule discussion in COVERAGE.md. Shared by
-// both aggregate-body emitters below (tagged/typedef'd and anonymous)
+// #1129/#1163: packed/aligned(N) were retained on Type (is_packed, align)
+// but never re-emitted, so a struct's native layout silently diverged from
+// the VM's -- see the admissibility-rule discussion in COVERAGE.md. Shared
+// by both aggregate-body emitters below (tagged/typedef'd and anonymous)
 // since the two loops were otherwise identical.
 //
-// Member _Alignas(N): mem->align is set (parse_types.c) to either an
-// explicit _Alignas/aligned request or, absent one, the member type's own
-// natural alignment -- so mem->align > mem->ty->align isolates exactly an
-// explicit request. Suppressed inside a packed struct: cccc's own layout
-// (struct_decl/union_decl, parse_types.c) ignores mem->align entirely once
-// is_packed is set, so emitting it there would tell the host compiler
-// something the VM itself did not honour.
+// Member _Alignas(N): outside a packed aggregate, mem->align is set
+// (parse_types.c) to either an explicit _Alignas/aligned request or,
+// absent one, the member type's own natural alignment -- so
+// mem->align > mem->ty->align isolates exactly an explicit request.
+// Inside a packed aggregate that heuristic breaks (an explicit request
+// equal to the member's natural alignment, e.g. aligned(4) on an int,
+// looks identical to no request at all), so mem->explicit_align --
+// 0 unless the declarator carried its own alignment attribute -- is used
+// instead; struct_decl/union_decl (parse_types.c) apply exactly this same
+// value under packed, so re-emitting it here keeps native layout in sync
+// with the VM's. `> 1` rather than `!= 0`: an explicit request of 1 under
+// packed is already the default, so it's both unnecessary and (per
+// explicit_decl_align's own C17 6.7.5p4 check) the only value guaranteed
+// never to lower alignment below the packed default, so it's always safe
+// to omit.
 static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
                                         Type *ty) {
     for (Member *m = ty->members; m; m = m->next) {
@@ -1308,8 +1327,11 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
             memcpy(name, m->name->loc, len);
             name[len] = '\0';
         }
-        if (!ty->is_packed && m->align > m->ty->align)
-            fprintf(f, "_Alignas(%d) ", m->align);
+        int emit_align = ty->is_packed
+                             ? (m->explicit_align > 1 ? m->explicit_align : 0)
+                             : (m->align > m->ty->align ? m->align : 0);
+        if (emit_align)
+            fprintf(f, "_Alignas(%d) ", emit_align);
         serialize_type_decl(f, ctx, m->ty, name);
         if (m->is_bitfield)
             fprintf(f, " : %d", m->bit_width);
@@ -1317,29 +1339,26 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
     }
 }
 
-// #1129: the type-level counterpart of serialize_aggregate_members --
+// #1129/#1163: the type-level counterpart of serialize_aggregate_members --
 // __attribute__((packed)) and __attribute__((aligned(N))) applied to the
 // aggregate itself rather than to one member.
 //
 // ty->align starts at 1 (new_type's default for TY_STRUCT/TY_UNION,
-// type.c) and is set directly by an aligned(N) attribute
-// (parse_types.c); struct_decl/union_decl then raises it to
-// max(member aligns) as members are laid out, but only when the
-// aggregate is *not* packed -- a packed aggregate skips that step
-// entirely (parse_types.c), so ty->align there is exactly 1 unless an
-// aligned(N) attribute set it. That gives a precise "did an attribute
-// have an observable effect" test without duplicating struct_decl's own
-// member-alignment computation:
-//   - packed:    emit aligned(N) iff ty->align > 1 (nothing else could
-//                have raised it).
-//   - unpacked:  recompute the same max(member aligns) struct_decl used
-//                and emit aligned(N) iff ty->align exceeds it.
+// type.c) and is set directly by an aligned(N) attribute (parse_types.c);
+// struct_decl/union_decl then raise it to max(mem_align) as members are
+// laid out, where mem_align is mem->align normally but mem->explicit_align
+// (or 1) under packed -- see those functions' own comments. `natural`
+// below recomputes that same max() so this stays a precise "did the
+// aggregate-level attribute have any effect beyond what its members
+// already contributed" test, without duplicating struct_decl's offset
+// bookkeeping: emit aligned(N) iff ty->align exceeds it, packed or not.
 static void serialize_aggregate_attrs(FILE *f, Type *ty) {
     int natural = 1;
-    if (!ty->is_packed)
-        for (Member *m = ty->members; m; m = m->next)
-            if (m->align > natural)
-                natural = m->align;
+    for (Member *m = ty->members; m; m = m->next) {
+        int contributed = ty->is_packed ? m->explicit_align : m->align;
+        if (contributed > natural)
+            natural = contributed;
+    }
 
     bool has_align = ty->align > natural;
 
