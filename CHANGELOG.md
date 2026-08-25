@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-08-25
+
 ### Fixed
 
 - `-c=native`: `include/threads.h`'s `once_flag` re-materialized as
@@ -43,13 +45,15 @@ All notable changes to CCCC are documented here. Format loosely follows
 - `tools/tests.py --native` (the `-c=native` serializer round-trip corpus)
   is now wired into `tools/run_tests.py` as an on-by-default sub-suite
   (`--no-native` opts out), so a serializer regression is caught on every
-  ordinary push instead of accumulating unnoticed (#1157).
+  ordinary push instead of accumulating unnoticed (#1157; advisory as of
+  #1186, see Known issues below).
 - `tools/tests.py --native-audit-skips`: a behavioural audit mode that
   bypasses the `NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/
   `NATIVE_SKIP_TESTS_LINUX` skip tables for just the files they name, runs
   them for real, and reports any entry that now passes as stale. Wired into
-  `run_tests.py` as its own hard-failing sub-suite. Found and removed three
-  stale entries in this pass (#1182).
+  `run_tests.py` as its own sub-suite (advisory as of #1186, see Known
+  issues below). Found and removed three stale entries in this pass
+  (#1182).
 
 ### Known issues
 
