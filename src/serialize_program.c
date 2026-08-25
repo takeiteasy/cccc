@@ -2686,6 +2686,62 @@ static bool line_macro_name_is_non_ascii(const char *line) {
     return false;
 }
 
+// #1184-adjacent (found verifying #1157 on real sr.ht Linux hardware): a
+// captured `#define once_flag ...`/`#define ONCE_FLAG_INIT ...` line from
+// include/threads.h's own #1183 fix must never be replayed into
+// -c=native/-m output. Unlike every other captured macro, this alias is
+// guest-side only by construction -- every guest use of `once_flag`/
+// `ONCE_FLAG_INIT` is already resolved by CCCC's own preprocessor before
+// the AST is built (see threads.h's own comment), and the shim/re-derived
+// declarations that DO reach native output already spell the real name
+// (__cccc_once_flag) directly, never through this macro. Left live, the
+// #define stays in scope for the rest of the generated translation unit --
+// including the real host <stdlib.h> serialize_threads_shims replays right
+// after it -- and the host preprocessor substitutes the bare identifier
+// `once_flag` inside GLIBC's OWN typedef line too, renaming it to
+// `__cccc_once_flag` and colliding with this header's own typedef of that
+// name on their differing underlying types. A matching #undef right after
+// call_once's prototype in threads.h looks like the obvious fix and was
+// tried first -- it also un-defines the alias for CCCC's OWN preprocessing,
+// which breaks a GUEST source's own subsequent `once_flag`/`ONCE_FLAG_INIT`
+// use (both macros live in the same preprocessor, not a native-output-only
+// one), so the alias has to be dropped from replay instead, the same way
+// #1118 dropped non-ASCII macro names above. Matches by exact macro name
+// after `#define`/`#undef`, not by originating file, since the guest never
+// legitimately defines/undefs these two names itself (both are reserved,
+// ONCE_FLAG_INIT by C11 7.26.1, once_flag as a C11 typedef name).
+static bool line_is_once_flag_alias_directive(const char *line) {
+    if (!line || line[0] != '#')
+        return false;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    static const char *const kw[] = {"define", "undef"};
+    for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
+        size_t len = strlen(kw[i]);
+        if (strncmp(p, kw[i], len) != 0)
+            continue;
+        char c = p[len];
+        if (c != '\0' && c != ' ' && c != '\t')
+            continue;
+        const char *name = p + len;
+        while (*name == ' ' || *name == '\t')
+            name++;
+        static const char *const names[] = {"once_flag", "ONCE_FLAG_INIT"};
+        for (size_t j = 0; j < sizeof(names) / sizeof(names[0]); j++) {
+            size_t nlen = strlen(names[j]);
+            if (strncmp(name, names[j], nlen) == 0) {
+                char after = name[nlen];
+                if (after == '\0' || after == ' ' || after == '\t' ||
+                    after == '(')
+                    return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
+
 // #1033: real C operator text for a CmpOp, so a return= comparison can be
 // baked directly into the generated C as `if (!(__ret <op> <expect>))`
 // instead of a runtime dispatch -- the operator is already known at
@@ -3845,6 +3901,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // filters above -- dialect-fidelity output expects a cccc-aware
         // reader.
         if (!vm->compiler.emit_cccc && !strncmp(line, "#embed", 6))
+            continue;
+        // #1184-adjacent: drop unconditionally, not exempted under
+        // --emit-cccc like the filters around it -- this isn't a
+        // dialect-fidelity concern, the collision this prevents is real
+        // regardless of whether the reader understands CCCC's own dialect
+        // (see line_is_once_flag_alias_directive()'s own comment above).
+        if (line_is_once_flag_alias_directive(line))
             continue;
         // #1118: a captured #define/#undef whose macro NAME contains
         // non-ASCII bytes (emoji identifiers -- an accepted CCCC extension,

@@ -89,7 +89,17 @@ enum {
    of `once_flag` already resolves to __cccc_once_flag on both backends with
    no user-visible change -- see serialize_threads_shims's own call_once
    shim text (src/serialize_shims.c), which spells the type
-   __cccc_once_flag directly for the same reason. */
+   __cccc_once_flag directly for the same reason.
+
+   NOTE: this #define/#undef pair is dropped from -c=native/-m's own
+   auto-captured directive replay entirely (line_is_once_flag_alias_directive(),
+   src/serialize_program.c) -- do not "fix" a leaked-macro collision here by
+   adding a matching #undef right after call_once's prototype below. An
+   #undef living in this header affects CCCC's OWN preprocessing too (it
+   isn't a native-output-only construct), which un-defines the alias before
+   the GUEST's own subsequent `once_flag`/`ONCE_FLAG_INIT` uses ever get
+   preprocessed -- confirmed the hard way, see that function's own comment
+   for the regression this caused when tried. */
 typedef _Atomic int __cccc_once_flag;
 #define once_flag      __cccc_once_flag
 #define ONCE_FLAG_INIT 0
