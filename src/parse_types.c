@@ -974,7 +974,21 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     tok                 = attribute_list(vm, *rest, NULL, &suffix_attr);
     tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
     append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
-    ty           = apply_var_attrs_to_type(vm, ty, &suffix_attr);
+    ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
+
+    // #1160: __attribute__((aligned(N))) / [[gnu::aligned(N)]] in
+    // declarator-suffix position (`int b __attribute__((aligned(16)));`) --
+    // apply_var_attrs_to_type() above doesn't know about gnu_align, so
+    // apply it here. copy_type() is what stops it from leaking onto a
+    // sibling declarator sharing this basety (`int b
+    // __attribute__((aligned(16))), c;` -- gcc-16 verified `c` stays at its
+    // natural offset).
+    if (suffix_attr.gnu_align) {
+        ty = copy_type(vm, ty);
+        if (suffix_attr.gnu_align > ty->decl_align)
+            ty->decl_align = suffix_attr.gnu_align;
+    }
+
     tok          = asm_label(vm, tok, &ty->asm_label);
 
     ty->name     = name;
@@ -1458,6 +1472,24 @@ int get_vm_size(Type *ty) {
     return ty->size;
 }
 
+// #1160: resolve the alignment a single declarator actually requests, once
+// _Alignas (declspec, `attr->align`, an *assignment* -- can lower, e.g.
+// `_Alignas(1) int x` is legal and does lower) and GNU aligned(N) (declspec
+// `attr->gnu_align`, or declarator-suffix `ty->decl_align` -- both floors,
+// can only raise) have all been parsed. `ty->align` itself -- the type's own
+// natural alignment -- is deliberately left out of this max() by name only
+// to make the base term explicit; it's exactly what `attr->align ? ... :
+// mem->ty->align` already fell back to before #1160, so behavior for a
+// declarator carrying no attribute at all is unchanged.
+int effective_decl_align(Type *ty, VarAttr *attr) {
+    int align = attr && attr->align ? attr->align : ty->align;
+    if (attr && attr->gnu_align > align)
+        align = attr->gnu_align;
+    if (ty->decl_align > align)
+        align = ty->decl_align;
+    return align;
+}
+
 // struct-members = (declspec declarator (","  declarator)* ";")*
 static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                            Type *ty) {
@@ -1486,7 +1518,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             memset(mem, 0, sizeof(Member));
             mem->ty    = basety;
             mem->idx   = idx++;
-            mem->align = attr.align ? attr.align : mem->ty->align;
+            mem->align = effective_decl_align(mem->ty, &attr);
             cur = cur->next = mem;
             continue;
         }
@@ -1507,7 +1539,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                           "declarations");
             mem->name  = mem->ty->name;
             mem->idx   = idx++;
-            mem->align = attr.align ? attr.align : mem->ty->align;
+            mem->align = effective_decl_align(mem->ty, &attr);
 
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
@@ -1842,15 +1874,27 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 continue;
             }
 
-            // Handle aligned attribute
+            // Handle aligned attribute. Two independent write targets:
+            // `ty` for the pre-tag/pointer-suffix position (aligns the type
+            // itself, unchanged since before #1160), and `attr->gnu_align`
+            // for declspec position (#1160) -- a GNU aligned(N) can only
+            // ever *raise* alignment (only `packed` lowers it), so this is a
+            // floor via max(), never an assignment; see
+            // effective_decl_align().
             if (consume(vm, &tok, tok, "aligned")) {
+                // Bare `aligned` (no argument) requests the target's
+                // maximum useful/natural alignment, which is 16 on every
+                // ABI this compiler targets (macOS/Linux, aarch64/x86_64).
+                int align = 16;
                 if (equal(tok, "(")) {
-                    tok       = skip(vm, tok, "(");
-                    int align = const_expr(vm, &tok, tok);
-                    if (ty)
-                        ty->align = align;
-                    tok = skip(vm, tok, ")");
+                    tok   = skip(vm, tok, "(");
+                    align = const_expr(vm, &tok, tok);
+                    tok   = skip(vm, tok, ")");
                 }
+                if (ty)
+                    ty->align = align;
+                if (attr && align > attr->gnu_align)
+                    attr->gnu_align = align;
                 continue;
             }
 
@@ -2245,8 +2289,18 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
 }
 
 // c23-attribute = ("[[" attribute-list "]]")*
-Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
-                          VarAttr *attr) {
+// #1160: `allow_ty_align` distinguishes the two struct_union_decl call
+// sites that pass a real `ty` -- verified against gcc-16: GNU-syntax
+// `struct S { ... } __attribute__((aligned(16)));` after the closing brace
+// *does* raise the struct's alignment, but the C23 spelling
+// `struct S { ... } [[gnu::aligned(16)]];` in that same trailing position
+// does not (silently ignored; `[[gnu::packed]]` there gets an actual
+// -Wattributes warning from gcc). Every other call site either passes
+// ty==NULL (declspec/declarator/label position, where `attr` is the real
+// target) or is the struct/union pre-tag position and pointer-suffix
+// position, both of which gcc *does* honor -- so those pass true.
+Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
+                             VarAttr *attr, bool allow_ty_align) {
     while (equal(tok, "[") && equal(tok->next, "[")) {
         if (vm->compiler.c_std < CCCC_STD_C23 &&
             !vm->compiler.in_type_lookahead)
@@ -2348,6 +2402,34 @@ Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                     attr->cleanup_fn  = sc->var;
                     attr->cleanup_tok = fn_tok;
                 }
+                continue;
+            }
+
+            // [[gnu::packed]] (#1160) -- C23 spelling of
+            // __attribute__((packed)); see attribute_list()'s "packed" case
+            // for the ty->is_packed semantics this mirrors.
+            if (gnu_scoped && equal(name_tok, "packed")) {
+                if (ty && allow_ty_align)
+                    ty->is_packed = true;
+                continue;
+            }
+
+            // [[gnu::aligned]] / [[gnu::aligned(N)]] (#1160) -- C23 spelling
+            // of __attribute__((aligned(N))); see attribute_list()'s
+            // "aligned" case for the ty/attr->gnu_align split this mirrors,
+            // and c23_attribute_list_ex()'s own comment for why
+            // `allow_ty_align` exists.
+            if (gnu_scoped && equal(name_tok, "aligned")) {
+                int align = 16; // bare form: maximum useful alignment
+                if (equal(tok, "(")) {
+                    tok   = skip(vm, tok, "(");
+                    align = const_expr(vm, &tok, tok);
+                    tok   = skip(vm, tok, ")");
+                }
+                if (ty && allow_ty_align)
+                    ty->align = align;
+                if (attr && align > attr->gnu_align)
+                    attr->gnu_align = align;
                 continue;
             }
 
@@ -2592,6 +2674,11 @@ Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
     return tok;
 }
 
+Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
+                          VarAttr *attr) {
+    return c23_attribute_list_ex(vm, tok, ty, attr, /*allow_ty_align=*/true);
+}
+
 // struct-union-decl = attribute? ident? ("{" struct-members)?
 //
 // is_definition reports whether this call parsed a `{ ... }` member-list
@@ -2651,8 +2738,12 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
 
     // Construct a struct object.
     struct_members(vm, &tok, tok, ty);
-    tok            = attribute_list(vm, tok, ty, NULL);
-    *rest          = c23_attribute_list(vm, tok, ty, NULL);
+    tok = attribute_list(vm, tok, ty, NULL);
+    // #1160: unlike the GNU spelling (still handled above), gcc does not
+    // apply a trailing [[gnu::aligned(N)]]/[[gnu::packed]] here -- see
+    // c23_attribute_list_ex()'s comment.
+    *rest          = c23_attribute_list_ex(vm, tok, ty, NULL,
+                                           /*allow_ty_align=*/false);
     *is_definition = true;
     return ty;
 }

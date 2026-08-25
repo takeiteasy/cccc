@@ -1529,6 +1529,23 @@ struct Type {
     CheckedBoundsForm checked_bounds_form;
     Token *checked_bounds_arg1; // count(n) / byte_count(n) / bounds(lo, .)
     Token *checked_bounds_arg2; // bounds(., hi) only; NULL otherwise
+
+    // #1160: __attribute__((aligned(N))) seen in declarator-suffix position
+    // on this specific declarator (e.g. `int b
+    // __attribute__((aligned(16)))`). Kept separate from `align` above --
+    // which stays the type's own natural alignment -- so the -c=native
+    // serializer's `member->align > member->ty->align` re-emission check
+    // (#1129) still sees a real gap to re-emit; a floor, never lowers.
+    // Deliberately appended at the very end of the struct, not inserted
+    // next to `align`: several singleton Type objects in src/type.c
+    // (ty_uint et al.) are positionally initialized (`&(Type){TY_INT, 4, 4,
+    // true}`), so inserting a field anywhere before the last positional
+    // initializer silently shifts every field after it -- caught the hard
+    // way when adding this field between `align` and `is_unsigned` flipped
+    // is_unsigned itself to false, turning an unrelated -Wsign-compare test
+    // in the main VM suite from `x < y` (unsigned comparison rules) into a
+    // silent signed comparison.
+    int decl_align;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such

@@ -103,7 +103,10 @@ typedef struct {
     char          *attr_warning_msg; // __attribute__((warning("msg")))
     Token         *attribute_tok;
     CustomAttrUse *custom_attrs;
-    int            align;
+    int            align;            // _Alignas(N): an assignment, can lower
+    int gnu_align; // __attribute__((aligned(N))) / [[gnu::aligned(N)]]
+                   // seen in declspec position: a floor, never lowers
+                   // (#1160)
 
     // Per-function optimization level
     int  fn_optimize_level;
@@ -281,6 +284,7 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
                           Type *ty);
 int align_down(int n, int align);
 int align_to(int n, int align);
+int effective_decl_align(Type *ty, VarAttr *attr);
 void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list,
                         Token *name_tok, Node *args, int arg_count);
 void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);
@@ -294,6 +298,8 @@ Type *auto_deduced_type(VirtualMachine *vm, Type *ty);
 Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok);
 Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                           VarAttr *attr);
+Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
+                             VarAttr *attr, bool allow_ty_align);
 Node *cast(VirtualMachine *vm, Token **rest, Token *tok);
 void check_may_return_null_summaries(VirtualMachine *vm);
 void check_nonnull_flow(VirtualMachine *vm, Obj *fn);

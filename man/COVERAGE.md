@@ -319,8 +319,8 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 
 | Attribute | Syntax | Status | Semantics |
 |-----------|--------|--------|-----------|
-| `aligned(N)` | GNU | ✓ | Sets minimum alignment on types and variables |
-| `packed` | GNU | ✓ | Suppresses struct member padding |
+| `aligned(N)` | GNU | ✓ | Sets minimum alignment on types, variables, and struct/union members (also `[[gnu::aligned(N)]]`) |
+| `packed` | GNU | ✓ | Suppresses struct member padding (also `[[gnu::packed]]`) |
 | `unused` / `__unused__` | GNU | ✓ | Suppresses `-Wunused` warnings |
 | `deprecated` / `__deprecated__` | GNU | ✓ | Emits `-Wdeprecated` warnings |
 | `deprecated("msg")` | GNU | ✓ | Emits `-Wdeprecated` with custom message |
@@ -357,16 +357,23 @@ above), matching real GCC/Clang.
 
 #### `__attribute__((aligned(N)))`
 
-Sets minimum alignment for a type or variable. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment. A type-level `aligned(N)` (on the struct/union itself) and a member's own `_Alignas(N)` both survive `-c=native`/`-m`/`-c=generated` (#1129) — re-emitted only when they actually widen the layout beyond what the members alone would produce, so ordinary structs carry no extra attribute noise. An object's own `_Alignas(N)` (`Obj.align`) was already covered separately (#1136).
+Sets minimum alignment for a type, variable, or struct/union member. The argument is a constant expression specifying the alignment in bytes. Can also be used without an argument (`__attribute__((aligned))`) to request maximum useful alignment (16 on every target this project supports). Honored in every position GCC/clang accept it: on the struct/union body itself, on a global or local variable, and — declspec-prefix or declarator-suffix — on an individual struct/union member (`int b __attribute__((aligned(16)));`, #1160). It only ever *raises* alignment relative to a member's own natural alignment (only `packed` lowers it); `_Alignas(N)`, by contrast, is a genuine assignment and can request less than a type's natural alignment. **Known divergence**: on a `packed` struct, GCC/clang still honor an explicit member `aligned(N)`/`_Alignas(N)` (it can only remove *implicit* padding); CCCC's `packed` currently suppresses member alignment unconditionally — tracked as a follow-up (#1163). The C23 spelling `[[gnu::aligned(N)]]` is equivalent in every position except directly after a struct/union definition's closing `}`, where GCC itself silently ignores it (unlike the GNU `__attribute__((aligned(N)))` spelling in that same trailing position, which GCC does honor — CCCC matches GCC in both spellings).
+
+A type-level `aligned(N)` (on the struct/union itself) and a member's own explicit alignment (`_Alignas(N)` or `aligned(N)`) both survive `-c=native`/`-m`/`-c=generated` (#1129/#1160) — re-emitted only when they actually widen the layout beyond what the members alone would produce, so ordinary structs carry no extra attribute noise. An object's own `_Alignas(N)` (`Obj.align`) was already covered separately (#1136).
 
 ```c
 struct __attribute__((aligned(16))) vec4 { float x, y, z, w; };
 int __attribute__((aligned(64))) cache_line;
+
+struct Header {
+    char a;
+    int  b __attribute__((aligned(16))); // offsetof(Header, b) == 16
+};
 ```
 
 #### `__attribute__((packed))`
 
-Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct. Survives `-c=native`/`-m`/`-c=generated` (#1129) — previously dropped silently, producing a native binary whose struct layout diverged from the VM's.
+Prevents the compiler from inserting padding between struct/union members, and can also prevent alignment-based padding at the end of a struct. Also accepts the C23 spelling `[[gnu::packed]]`, in the same struct/union-body position — but, like `[[gnu::aligned(N)]]` above, not directly after the closing `}` of a definition, where GCC ignores it (and warns). Survives `-c=native`/`-m`/`-c=generated` (#1129) — previously dropped silently, producing a native binary whose struct layout diverged from the VM's.
 
 ```c
 struct __attribute__((packed)) {
@@ -1231,12 +1238,13 @@ linkage, placement, or semantics), which must be emitted, refused where no
 emission is possible, or — for the narrow case below — documented as
 unobservable, but never silently dropped without a reason on record.
 
-`packed`, type-level `aligned(N)`, and a member's own `_Alignas(N)` are
-contracts that change layout and are now emitted (#1129) — `is_packed`/
-`align` were retained on `Type`/`Member` but never re-emitted, so a native
-binary silently laid such a struct out as if the attribute were absent; the
-emitted C was even self-inconsistent (a `sizeof` folded against the VM's
-packed layout sitting next to an unpacked struct definition). Fixed in
+`packed`, type-level `aligned(N)`, and a member's own explicit alignment
+(`_Alignas(N)` or declarator-position `aligned(N)`, #1160) are contracts that
+change layout and are now emitted (#1129) — `is_packed`/`align` were retained
+on `Type`/`Member` but never re-emitted, so a native binary silently laid
+such a struct out as if the attribute were absent; the emitted C was even
+self-inconsistent (a `sizeof` folded against the VM's packed layout sitting
+next to an unpacked struct definition). Fixed in
 `serialize_aggregate_members`/`serialize_aggregate_attrs`
 (`src/serialize_type.c`), shared by both aggregate-body emitters
 (`serialize_struct_def` for tagged/typedef'd, `serialize_anon_aggregate` for

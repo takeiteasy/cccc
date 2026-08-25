@@ -176,8 +176,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
             Obj *var =
                 new_lvar(vm, get_ident(vm, name_tok), name_tok->len, deduced);
-            if (attr->align)
-                var->align = attr->align;
+            // #1160: also honor GNU aligned(N), not just _Alignas.
+            var->align = effective_decl_align(deduced, attr);
             if (attr->is_block_var)
                 var->is_block_var = true;
 
@@ -278,8 +278,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         if (attr && attr->is_constexpr) {
             var->is_constexpr = true;
         }
-        if (attr && attr->align)
-            var->align = attr->align;
+        // #1160: also honor GNU aligned(N), not just _Alignas. attr can be
+        // NULL at this call site; effective_decl_align() tolerates that.
+        var->align = effective_decl_align(ty, attr);
         if (attr && attr->is_block_var)
             var->is_block_var = true;
         // Note: cleanup_fn is transferred from attr → Type → Obj via
