@@ -237,6 +237,16 @@ typedef struct {
     // disagree), and a typedef/cast/type-name spelling must stay folded
     // (reused across every context, including the two excluded above).
     bool allow_layout_dims;
+    // #1113(a): set by collect_type() the moment any TY_DECIMAL32/64/128
+    // is reached during the pre-emission collection walk (cc_serialize_
+    // program's collect_obj_types()/collect_static_assert_types() loop) --
+    // a global/local declaration, a struct member, or a decimal literal's
+    // own node->ty all funnel through collect_type() before any real
+    // output is written, so this is known before the preamble is printed.
+    // Read once by serialize_decimal_native_guard() (serialize_program.c)
+    // to decide whether to emit the guarded #error preamble; see that
+    // function's own comment for why gcc must not be affected.
+    bool saw_decimal;
 } SerializeContext;
 
 typedef struct {
@@ -310,6 +320,8 @@ void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_native_accessor_shims(FILE *f, Obj *prog);
 void serialize_reallocarray_shim(FILE *f, Obj *prog);
 void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog);
+void serialize_c23_fromfp_shims(FILE *f, VirtualMachine *vm,
+                                Obj *prog); // #1195
 void serialize_static_assert(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                              Node *cond, const char *msg, int msg_len,
                              Token *tok, int indent);

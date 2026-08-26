@@ -633,22 +633,22 @@ NATIVE_SKIP_TESTS_MACOS = {
 # again would let the same rot recur the next time a genuinely Linux-only
 # divergence shows up.
 NATIVE_SKIP_TESTS_LINUX = {
-    # #1193: -c=native's C23 IEC 60559 output (fromfp/ufromfp/fromfpx/
-    # fmaximum/fminimum/*_num/*_mag) relies on the replayed host <math.h>
-    # declaring the family, but never emits the __STDC_WANT_IEC_60559_
-    # BFP_EXT__/__STDC_WANT_IEC_60559_EXT__ feature macros glibc gates them
-    # behind, nor a <stdint.h> for intmax_t -- confirmed in the cccc-linux-
-    # amd64 container: the emitted C doesn't even compile under glibc
-    # 2.39/clang-18 (undeclared-function errors), and sr.ht's own gcc build
-    # hardware failed it at runtime (exit 32) rather than at compile time.
-    # Not yet fixed -- follow-up ticket filed; passes under the VM. Distinct
-    # from this file's pre-existing NATIVE_SKIP_TESTS_MACOS entry below,
-    # which is the unrelated #1037 Darwin libm gap.
-    "test_math_c23_ieee.c": "-c=native output for the C23 IEC 60559 family "
-                 "(fromfp/ufromfp/fmaximum/fminimum/etc.) doesn't emit the "
-                 "glibc feature macros or <stdint.h> it needs; NATIVE "
-                 "RUNTIME FAILED exit 32 on sr.ht's gcc, doesn't compile "
-                 "at all under Linux clang. Not yet fixed -- #1195",
+    # #1195 (RESOLVED): test_math_c23_ieee.c briefly lived here -- the
+    # original filing blamed a missing __STDC_WANT_IEC_60559_BFP_EXT__/
+    # <stdint.h> emission, but that repro (`./cccc -m` with no `-I./include`)
+    # didn't match how the native runner actually invokes cccc (tools/
+    # testing/native.py always passes -I./include); with it, #1143's
+    # math.h substitution already declares the whole family and pulls in
+    # <stdint.h>. The real bug, found by re-running the exact `ubuntu/lts`
+    # image sr.ht's own manifest resolves to (Ubuntu 26.04, not the repo's
+    # own Dockerfile's 24.04): glibc 2.43 changed the DEFAULT `fromfp`/
+    # `ufromfp`/`fromfpx`/`ufromfpx` symbol version to a NEW signature that
+    # returns double instead of intmax_t/uintmax_t (`fromfp@GLIBC_2.25` vs
+    # `fromfp@@GLIBC_2.43`, both still present -- confirmed via `nm -D
+    # libm.so.6`) -- a call against CCCC's bundled math.h's own (old-ABI)
+    # declaration silently read the wrong return register. Fixed with a
+    # self-contained shim that never calls the host's own fromfp* at all
+    # (serialize_c23_fromfp_shims, src/serialize_shims.c).
 }
 
 # #1186: entries specific to one -c=native host compiler *family* (clang or

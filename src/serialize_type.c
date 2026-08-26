@@ -729,6 +729,17 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
         return;
     }
 
+    // #1113(a): every type reachable from the program funnels through here
+    // before any real output is written (collect_obj_types()'s obj->ty/
+    // param->ty/local->ty walk, collect_node_types()'s node->ty walk for
+    // every literal/expression, and this function's own member recursion
+    // for a decimal struct member) -- the single choke point to notice a
+    // _Decimal32/64/128 use anywhere in the program ahead of time, so the
+    // guard preamble (serialize_decimal_native_guard(), serialize_
+    // program.c) can be written before the definitions that use it.
+    if (is_decimal(ty))
+        ctx->saw_decimal = true;
+
     if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA) {
         // #1167: an array dimension folded from a bare sizeof/_Alignof
         // (Type.array_len_layout_ty, #1095) can be re-materialized by
