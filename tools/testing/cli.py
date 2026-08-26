@@ -10,6 +10,7 @@ from . import (
     NATIVE_SKIP_TESTS,
     NATIVE_SKIP_TESTS_CLANG,
     NATIVE_SKIP_TESTS_GCC,
+    NATIVE_SKIP_TESTS_GCC_MACOS,
     NATIVE_SKIP_TESTS_LINUX,
     NATIVE_SKIP_TESTS_MACOS,
     REPO_ROOT,
@@ -179,22 +180,23 @@ def main(argv=None):
     )
 
     if args.native_audit_skips:
-        # Restrict the corpus to exactly the files the five hardcoded tables
+        # Restrict the corpus to exactly the files the six hardcoded tables
         # name -- the audit's whole point is "does the skip for THIS file
         # still hold", not a full native corpus run (seconds instead of
-        # minutes). NATIVE_SKIP_TESTS_MACOS/_LINUX/_CLANG/_GCC are included
-        # even off their platform/family: a stale platform- or family-only
-        # entry is still worth reporting (it just can't be deleted here
-        # without also confirming the other platform/family, see
-        # man/TESTING.md) -- and #1186 needs the *other* direction here too:
-        # a foreign-axis entry that passes here is expected, not stale (see
-        # _print_native_skip_audit's off_axis bucket below).
+        # minutes). NATIVE_SKIP_TESTS_MACOS/_LINUX/_CLANG/_GCC/_GCC_MACOS are
+        # included even off their platform/family: a stale platform- or
+        # family-only entry is still worth reporting (it just can't be
+        # deleted here without also confirming the other platform/family,
+        # see man/TESTING.md) -- and #1186 needs the *other* direction here
+        # too: a foreign-axis entry that passes here is expected, not stale
+        # (see _print_native_skip_audit's off_axis bucket below).
         audited_names = (
             set(NATIVE_SKIP_TESTS)
             | set(NATIVE_SKIP_TESTS_MACOS)
             | set(NATIVE_SKIP_TESTS_LINUX)
             | set(NATIVE_SKIP_TESTS_CLANG)
             | set(NATIVE_SKIP_TESTS_GCC)
+            | set(NATIVE_SKIP_TESTS_GCC_MACOS)
         )
         test_files = [t for t in test_files if t.name in audited_names]
 
@@ -343,6 +345,9 @@ def _entry_applies_here(name, platform, family):
     if family == "clang" and name in NATIVE_SKIP_TESTS_CLANG:
         return True
     if family == "gcc" and name in NATIVE_SKIP_TESTS_GCC:
+        return True
+    if (platform == "macos" and family == "gcc"
+            and name in NATIVE_SKIP_TESTS_GCC_MACOS):
         return True
     return False
 

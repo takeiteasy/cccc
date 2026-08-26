@@ -12,9 +12,6 @@
    this file itself -- and silently no-ops (include-guard self-reference)
    instead of reaching the real top-level time.h. Use "../time.h" like
    sys/times.h already does. */
-/* #1194: this relative quoted include fails to resolve when cccc is
- * invoked with no -I flag from a CWD outside the repo -- see the same
- * comment on include/sys/stat.h. */
 #include "../time.h"
 
 /* tv_usec is `__darwin_suseconds_t` (a 4-byte int32) on macOS but a plain

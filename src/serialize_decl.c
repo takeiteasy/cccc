@@ -1131,14 +1131,34 @@ static const char *pthread_initializer_macro(SerializeContext *ctx, Obj *var) {
 // output as a plain `int g;`, silently losing the requested alignment (the
 // same "stated vs actual" bug class as the VM-side data-segment allocator
 // this ticket also fixes). Natural (<=type-align) cases need nothing here:
-// the host compiler derives those from the emitted type on its own.
+// the host compiler derives those from the emitted type on its own -- EXCEPT
+// a vector global's own over-8 natural alignment (#1191): it rides solely on
+// __attribute__((vector_size(N))) (serialize_type.c), which gcc on
+// Darwin/arm64 does not honour for a global object the way clang does
+// (confirmed: `float __attribute__((vector_size(32))) g;` lands 16-aligned
+// under gcc-16, 32-aligned under clang, on the same host). State it
+// explicitly for that one case rather than widening the general predicate --
+// a blanket "any type align > 8" rule would also fire for e.g. long double
+// and 16-byte structs, churning the 142-case native serializer smoke
+// suite's own text assertions for no gain (those already round-trip fine
+// under both compiler families).
 // Called at every declaration site for one Obj (definition and forward
 // declarations alike) -- C11 6.7.5p7 requires every declaration of an
 // object to carry equivalent alignment, so they must all agree, not just
 // the definition.
 void serialize_alignas_if_needed(FILE *f, Obj *var) {
+    // The gcc/Darwin gap is specifically the data-segment/TLS allocator
+    // (#1136's own scope) -- a *local* vector's alignment is the stack
+    // allocator's concern, unaffected by this, and both compilers already
+    // honour it there, so restrict the explicit-vector-alignment carve-out
+    // to non-local objects to avoid needlessly widening every local vector
+    // declaration's own serialized form.
+    bool vector_needs_explicit =
+        !var->is_local && var->ty->kind == TY_VECTOR && var->ty->align > 8;
     if (var->align > var->ty->align)
         fprintf(f, "_Alignas(%d) ", var->align);
+    else if (vector_needs_explicit)
+        fprintf(f, "_Alignas(%d) ", var->ty->align);
 }
 
 void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,

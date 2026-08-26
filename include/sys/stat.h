@@ -10,12 +10,6 @@
 #include "sys/types.h"
 
 /* Pull in struct timespec and time_t */
-/* #1194: this relative quoted include fails to resolve when cccc is
- * invoked with no -I flag from a CWD outside the repo (the class
- * header_resolution_smoke.py, #891, exists to catch -- not yet extended to
- * cover this header). Works when run from the repo root or with an
- * explicit -I<repo>/include, which is why the ordinary test corpus
- * (always cwd=REPO_ROOT) never hit it. */
 #include "../time.h"
 
 #ifdef __APPLE__

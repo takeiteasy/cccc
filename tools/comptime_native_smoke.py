@@ -6493,12 +6493,14 @@ def case_opaque_handle_native_round_trip(cccc: Path, tmp: str) -> bool:
           "fts_close chain) is the runtime-behavior half of this "
           "regression, wired into the ordinary --native corpus.")
     # fts.h transitively #include "../time.h"s off sys/stat.h -- a relative
-    # quoted include that only resolves against the embedded header table
-    # when cccc's own CWD is the repo root; an explicit -I<repo>/include
-    # (same pattern several cases above use, e.g. #1088's threads.h case)
-    # makes this independent of tmp's own working directory, matching how
-    # a real invocation with this repo's own bundled headers on the search
-    # path would resolve it.
+    # quoted include from inside an embedded header, which cccc's own
+    # preprocessor now resolves against the embedded table regardless of
+    # tmp's working directory (#1194). The explicit -I<repo>/include here is
+    # for a different, still-real reason: -c=native's replayed #include
+    # lines are read by the real HOST compiler, which needs the bundled
+    # headers on an actual search path on disk (same pattern several cases
+    # above use, e.g. #1088's threads.h case) -- unrelated to cccc's own
+    # resolution of the file it's compiling.
     include_dir = cccc.parent / "include"
     src = Path(tmp) / "opaque_handle_1186.c"
     write(src, FTS_OPAQUE_HANDLE_PROGRAM)

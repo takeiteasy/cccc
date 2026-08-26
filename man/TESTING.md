@@ -258,10 +258,17 @@ regression in resolving CCCC's own bundled headers from a foreign CWD
 (ticket #891). Cases covered: `<stdbool.h>` and `<stdio.h>` with zero flags;
 a `[[cccc::comptime]]` program (exercising `<implicit-reflection.h>`'s own
 `#include <stdbool.h>`); an owned header under `--no-builtin-includes
---use-system-headers`; and two `-c=native` cases (a real `#include
+--use-system-headers`; two `-c=native` cases (a real `#include
 <stdio.h>` that must compile *and* run without a `typedef` collision, and a
-primary file with a sibling quoted project header). See
-[HEADERS.md](HEADERS.md) for the header search order these exercise.
+primary file with a sibling quoted project header); a static audit that no
+bundled header quote-includes an `#include_next` header (#1070); and, for
+#1194, `<sys/stat.h>`/`<sys/time.h>`/`<sys/times.h>` with zero flags — each of
+these quote-includes `"../time.h"` from within its own embedded (on-disk-less)
+header, which only resolves through lexical `../` normalisation relative to
+the embedded header's own virtual path, not a literal table-key lookup — plus
+a `-c=native` round-trip of the `sys/stat.h` case confirming the fix reaches
+the native compile step too. See [HEADERS.md](HEADERS.md) for the header
+search order these exercise.
 
 ### Native-backend serializer smoke-test
 
@@ -448,11 +455,11 @@ practice (a handful of tests) that it's deferred.
 
 **Known divergences:** the mode ships with populated skip tables
 (`NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX`/
-`NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC` in `tools/testing/
-__init__.py`) recording every test found to compile/link/run differently
-under `-c=native` than in the VM — most entries name a tracking ticket and
-are deleted once the fix lands, but several are permanent, `WONT_FIX`
-platform divergences (macOS libm lacking a C23 math family, macOS
+`NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC`/`NATIVE_SKIP_TESTS_GCC_MACOS`
+in `tools/testing/__init__.py`) recording every test found to compile/link/run
+differently under `-c=native` than in the VM — most entries name a tracking
+ticket and are deleted once the fix lands, but several are permanent,
+`WONT_FIX` platform divergences (macOS libm lacking a C23 math family, macOS
 `aligned_alloc`'s pre-DR-460 size rule, Darwin gcc rejecting
 `__attribute__((constructor(N)))`'s priority argument outright, etc.) that
 will never close, so "cited ticket is closed" is not a valid staleness
@@ -473,10 +480,15 @@ search for `cc`/`clang`/`gcc` in that order), checked via
 `detect_native_cc_family()` (`tools/testing/platform.py`, a `cc -dM -E -`
 predefined-macro probe). This axis is what actually explained a batch of
 sr.ht failures originally guessed to be GCC-*version*-sensitive — see
-**#1186** below. To reproduce any native divergence locally against a
-specific compiler, set `CCCC_NATIVE_CC` (a real gcc, not Apple's
-gcc-is-actually-clang symlink, needs installing separately — e.g. Homebrew's
-`gcc@N` on macOS):
+**#1186** below. `NATIVE_SKIP_TESTS_GCC_MACOS` (#1193) crosses both axes at
+once — checked only when platform AND family both match — for a divergence
+that is gcc-*on-Darwin*-specific rather than a universal gcc limitation; a
+family-only table has no way to express that, and wrongly applying such an
+entry on Linux gcc (where the test actually passes) is exactly what tripped
+`native_skip_audit`'s STALE check on real sr.ht hardware (see **#1193**
+below). To reproduce any native divergence locally against a specific
+compiler, set `CCCC_NATIVE_CC` (a real gcc, not Apple's gcc-is-actually-clang
+symlink, needs installing separately — e.g. Homebrew's `gcc@N` on macOS):
 
 ```bash
 CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 python3 tools/tests.py --binary ./cccc --native
@@ -576,11 +588,48 @@ confirmed locally (`CCCC_NATIVE_CC=clang`/`=gcc-16 python3 tools/tests.py
 own acceptance clause additionally asks for two consecutive green sr.ht
 pushes before trusting this — a single local session can't provide that;
 see #1193 for the watch. Re-add a name to `_ADVISORY_SUITES` immediately if
-either push goes red.
+either push goes red for a reason not already covered by one of the skip
+tables above.
+
+**#1193 (the first watched push, red — investigated and fixed, not
+re-downgraded):** the very next ordinary push after #1186 landed (the first
+candidate toward the two-green-pushes acceptance clause) went red on both
+`native` and `native_skip_audit`. Two independent causes, both real:
+
+  - `native_skip_audit`: all seven then-live `NATIVE_SKIP_TESTS_GCC` entries
+    reported `STALE` on sr.ht's Linux gcc. Five of them (the
+    constructor/destructor-priority group) were documented "gcc **on
+    Darwin**" but lived in a table with no platform axis, so they wrongly
+    applied on Linux too, where the test actually passes — split into the
+    new `NATIVE_SKIP_TESTS_GCC_MACOS` table above. The other two were real,
+    now-fixed bugs (below), not audit artifacts.
+  - `native`: `test_align_declared_over8.c` and
+    `tests/suites/test_suite_varargs.c` — the same two entries the audit
+    just flagged. The first was a genuine serializer gap: a global vector's
+    own natural alignment rides solely on
+    `__attribute__((vector_size(N)))`, which gcc on Darwin/arm64 does not
+    honour for a global object past 8 bytes the way clang does (`serialize_
+    alignas_if_needed`, `src/serialize_decl.c`, now states it explicitly for
+    that one case). The second was genuine undefined behavior in the test
+    itself, not a compiler or serializer bug: a variadic call passed an
+    `int` where the callee's own `va_arg(args, long)` expected a `long` —
+    harmless under the VM's uniform 8-byte slots, but Apple's arm64 variadic
+    ABI packs each slot to its argument's natural size, so gcc read back 4
+    bytes of the passed `int` plus 4 bytes of the following `double`'s
+    representation. One further failure, `test_math_c23_ieee.c`, was a
+    distinct, pre-existing gap in `-c=native`'s own C23 IEC 60559 output
+    (missing glibc feature-test macros and a `<stdint.h>` — #1195) rather
+    than anything from this batch; quarantined via a new
+    `NATIVE_SKIP_TESTS_LINUX` entry so `native` could stay blocking without
+    it.
+
+Both suites stayed blocking throughout — none of this was re-downgraded to
+`_ADVISORY_SUITES`. The two-consecutive-green-pushes clock is still at zero;
+see #1193 for the ongoing watch.
 
 **Skip-table staleness guard (#1182):** a stale skip table is invisible for
 the same reason a native regression was — nothing runs the skipped test for
-real. `python3 tools/tests.py --native-audit-skips` bypasses the five skip
+real. `python3 tools/tests.py --native-audit-skips` bypasses the six skip
 tables above (only for the files they name — a full audit is seconds, not
 minutes) and behaviourally re-checks each one, reporting it as `STALE` (now
 passes, and an entry that applies on this platform+compiler-family actually

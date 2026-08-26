@@ -632,7 +632,24 @@ NATIVE_SKIP_TESTS_MACOS = {
 # the shared or macOS-only table to live), so removing the structural home
 # again would let the same rot recur the next time a genuinely Linux-only
 # divergence shows up.
-NATIVE_SKIP_TESTS_LINUX = {}
+NATIVE_SKIP_TESTS_LINUX = {
+    # #1193: -c=native's C23 IEC 60559 output (fromfp/ufromfp/fromfpx/
+    # fmaximum/fminimum/*_num/*_mag) relies on the replayed host <math.h>
+    # declaring the family, but never emits the __STDC_WANT_IEC_60559_
+    # BFP_EXT__/__STDC_WANT_IEC_60559_EXT__ feature macros glibc gates them
+    # behind, nor a <stdint.h> for intmax_t -- confirmed in the cccc-linux-
+    # amd64 container: the emitted C doesn't even compile under glibc
+    # 2.39/clang-18 (undeclared-function errors), and sr.ht's own gcc build
+    # hardware failed it at runtime (exit 32) rather than at compile time.
+    # Not yet fixed -- follow-up ticket filed; passes under the VM. Distinct
+    # from this file's pre-existing NATIVE_SKIP_TESTS_MACOS entry below,
+    # which is the unrelated #1037 Darwin libm gap.
+    "test_math_c23_ieee.c": "-c=native output for the C23 IEC 60559 family "
+                 "(fromfp/ufromfp/fmaximum/fminimum/etc.) doesn't emit the "
+                 "glibc feature macros or <stdint.h> it needs; NATIVE "
+                 "RUNTIME FAILED exit 32 on sr.ht's gcc, doesn't compile "
+                 "at all under Linux clang. Not yet fixed -- #1195",
+}
 
 # #1186: entries specific to one -c=native host compiler *family* (clang or
 # gcc), checked only when detect_native_cc_family() (tools/testing/
@@ -678,7 +695,29 @@ NATIVE_SKIP_TESTS_CLANG = {
                  "(confirmed: passes under CCCC_NATIVE_CC=gcc), so #1113's "
                  "gap is clang-specific, not universal",
 }
-NATIVE_SKIP_TESTS_GCC = {
+# #1193: the five ctor/dtor-priority entries this table used to hold were
+# gcc-on-*Darwin* specific, but this table has no platform axis of its own --
+# checked purely on compiler family, regardless of host OS -- so they wrongly
+# applied on Linux gcc too, where they actually pass (confirmed on real sr.ht
+# Linux hardware: build 1872614's own --native-audit-skips run reported all
+# seven then-live entries here as STALE). #1191/#1192 real-fixed the other
+# two entries this table used to carry (a vector global's own natural
+# alignment dropped under gcc/Darwin's -c=native output, and a genuine UB
+# varargs bug in the test itself); the ctor/dtor five moved to
+# NATIVE_SKIP_TESTS_GCC_MACOS below instead of being deleted. Left as a real,
+# always-wired-in empty table (matching NATIVE_SKIP_TESTS_LINUX's own
+# rationale above) rather than removed, so a genuinely family-*and*-platform-
+# universal gcc divergence still has a structural home.
+NATIVE_SKIP_TESTS_GCC = {}
+
+# Entries specific to gcc on Darwin specifically (Homebrew gcc, not Apple's
+# gcc-is-actually-clang symlink) -- checked only when both platform == macos
+# AND family == gcc match, unlike NATIVE_SKIP_TESTS_GCC above which (by
+# design) has no platform axis. Split out by #1193 after NATIVE_SKIP_TESTS_
+# GCC's own five constructor/destructor-priority entries turned out to be
+# Darwin-specific, not a universal gcc limitation -- they pass cleanly under
+# gcc on Linux (confirmed via sr.ht's own Linux build hardware).
+NATIVE_SKIP_TESTS_GCC_MACOS = {
     # Darwin gcc (Homebrew, not Apple's gcc-is-actually-clang symlink)
     # rejects __attribute__((constructor(N)))'s priority argument outright
     # ("constructor priorities are not supported") -- a real gcc limitation
@@ -707,17 +746,6 @@ NATIVE_SKIP_TESTS_GCC = {
                  "__attribute__((destructor(N))) priorities outright; "
                  "clang supports them and this passes there, WONT_FIX -- "
                  "permanent gcc/Darwin gap",
-    # Not yet root-caused -- filed as follow-up tickets; skipped rather than
-    # left to fail the (advisory, pending #1186's own two-green-pushes
-    # acceptance clause) native suite under CCCC_NATIVE_CC=gcc in the
-    # meantime. Both pass under clang.
-    "test_align_declared_over8.c": "NATIVE RUNTIME FAILED (exit 4) under "
-                 "gcc specifically; passes under clang. Not yet "
-                 "root-caused -- follow-up ticket filed",
-    "test_suite_varargs.c": "one of 24 [[cccc::test]] sub-tests fails "
-                 "(NATIVE RUNTIME FAILED, exit 1) under gcc specifically; "
-                 "the whole file passes under clang. Not yet root-caused "
-                 "-- follow-up ticket filed",
 }
 
 # CLI flags that -c=native drops with a warning rather than enforcing
@@ -778,7 +806,7 @@ _NATIVE_FRONTEND_PREFIXES = (
 # own `from . import ...` at module load runs (and would freeze a constant)
 # before main() parses --native-audit-skips and sets the env var, and since
 # execution here is threaded (not multiprocessing), every thread shares this
-# process's environ regardless of when it's read. Bypasses ONLY the two
+# process's environ regardless of when it's read. Bypasses ONLY the
 # table lookups below, falling through to the same --build/-c=-o/frontend-
 # mode/VM-only-flag checks every other test still gets -- this is
 # deliberately the same shape as the ticket's own hand-verified method
@@ -812,6 +840,12 @@ def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
             return NATIVE_SKIP_TESTS_CLANG[filename]
         if family == "gcc" and filename in NATIVE_SKIP_TESTS_GCC:
             return NATIVE_SKIP_TESTS_GCC[filename]
+        # #1193: split out of NATIVE_SKIP_TESTS_GCC above -- these five are
+        # gcc-on-Darwin specific, not a universal gcc limitation, so they
+        # need both axes to match, unlike the family-only tables above.
+        if (platform == "macos" and family == "gcc"
+                and filename in NATIVE_SKIP_TESTS_GCC_MACOS):
+            return NATIVE_SKIP_TESTS_GCC_MACOS[filename]
     all_flags = list(cccc_args) + list(per_test_flags)
     for f in all_flags:
         if f == "--build" or f.startswith("--build="):

@@ -11,8 +11,10 @@ Sub-suites:
                         default, --no-native opts out -- see man/TESTING.md's
                         "Native round-trip mode" section)
   native_skip_audit   — behavioural staleness audit of NATIVE_SKIP_TESTS/
-                        NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX,
-                        hard-fails on any stale entry (ticket #1182)
+                        NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX/
+                        NATIVE_SKIP_TESTS_CLANG/NATIVE_SKIP_TESTS_GCC/
+                        NATIVE_SKIP_TESTS_GCC_MACOS, hard-fails on any
+                        stale entry (ticket #1182)
   debugger            — macOS host-signal crash-debugger integration (macOS only)
   repl                — interactive REPL PTY integration (POSIX only, ticket #661)
   debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
@@ -79,11 +81,25 @@ from testing.proc import run_capture
 # throw six false positives in the first place. Both empty locally now
 # (`CCCC_NATIVE_CC=clang`/`=gcc-16 python3 tools/tests.py
 # --native-audit-skips` both report zero actionable STALE) -- flipped back
-# to blocking here on that basis. #1186's own acceptance clause additionally
-# asks for confirmation on sr.ht itself across two consecutive pushes before
-# trusting this, which a single local session can't provide -- see #1193 for
-# that watch. Re-add a name here immediately (not in a follow-up ticket) if
-# either push goes red.
+# to blocking here on that basis.
+#
+# #1193: the very next sr.ht push (build 1872614, this same #1186 commit)
+# DID go red on both suites -- exactly the risk the acceptance clause above
+# was hedging against. Investigated rather than reflexively re-downgraded:
+# native_skip_audit's red was NATIVE_SKIP_TESTS_GCC's five constructor/
+# destructor-priority entries lacking a platform axis (they're gcc-on-
+# *Darwin* specific, not universal gcc, so they wrongly "applied" on sr.ht's
+# Linux gcc where they actually pass) -- split into NATIVE_SKIP_TESTS_GCC_
+# MACOS. native's red was two real, now-fixed bugs (a vector global losing
+# its natural alignment under gcc/Darwin's own -c=native output, and a
+# genuine UB varargs bug in the test itself) plus one pre-existing, distinct
+# gap (test_math_c23_ieee.c's C23 IEC 60559 output, #1195) quarantined via a
+# new NATIVE_SKIP_TESTS_LINUX entry. Both suites deliberately stay blocking
+# here rather than being re-downgraded -- see #1193 for the still-open,
+# two-consecutive-green-pushes watch this fix is waiting to satisfy (the
+# clock is back at zero: this same push is the first candidate). Re-add a
+# name here immediately (not in a follow-up ticket) if a push goes red for a
+# reason NOT already covered by one of the skip tables above.
 _ADVISORY_SUITES = frozenset()
 
 
@@ -174,12 +190,38 @@ def _run_native_skip_audit_suite(cccc, n_jobs, process_timeout=None):
     except subprocess.TimeoutExpired:
         return "audit subprocess timed out (wedged) -- see #1185", False
     if result.returncode == 0:
-        return "no stale NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX entries", True
+        return ("no stale NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS/"
+                "NATIVE_SKIP_TESTS_LINUX/NATIVE_SKIP_TESTS_CLANG/"
+                "NATIVE_SKIP_TESTS_GCC/NATIVE_SKIP_TESTS_GCC_MACOS entries",
+                True)
     if "STALE (" in result.stdout:
         # A real staleness finding from _print_native_skip_audit -- the
-        # expected failure mode this sub-suite exists to catch.
-        tail = "\n".join(result.stdout.splitlines()[-40:])
-        return f"stale skip entries found (see man/TESTING.md):\n{tail}", False
+        # expected failure mode this sub-suite exists to catch. #1193: a
+        # blind splitlines()[-40:] tail used to be reported here -- on a
+        # real run the STALE section prints FIRST (_print_native_skip_
+        # audit's bucket order), so a run with enough off_axis/kept/
+        # refused-by-design/still-failing output below it silently pushed
+        # the actual STALE names out of the tail. Extract the STALE
+        # section specifically (from its own header to the next bucket
+        # header or the report's closing rule) instead of guessing at a
+        # line count. The `"STALE (" in result.stdout` check above doesn't
+        # guarantee the match starts a LINE (a bucket name could in theory
+        # appear inside an entry's own free-text reason) -- next(..., None)
+        # degrades to the old blind tail instead of a StopIteration crash
+        # if that ever happens.
+        lines = result.stdout.splitlines()
+        start = next((i for i, l in enumerate(lines) if l.startswith("STALE (")),
+                     None)
+        if start is None:
+            tail = "\n".join(lines[-40:])
+            return f"stale skip entries found (see man/TESTING.md):\n{tail}", False
+        end = start + 1
+        while end < len(lines) and not (
+                lines[end].startswith(("PASSES here", "KEPT,", "STILL FAILING"))
+                or lines[end].startswith("====")):
+            end += 1
+        stale_section = "\n".join(lines[start:end])
+        return f"stale skip entries found (see man/TESTING.md):\n{stale_section}", False
     # Any other nonzero exit (binary missing, harness crash, import error,
     # incompatible flags) is NOT a staleness finding -- report it as such so
     # a future maintainer doesn't go hunting a skip table that's fine.

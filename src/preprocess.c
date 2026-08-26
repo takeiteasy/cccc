@@ -89,6 +89,8 @@ static bool probe_function_definition(Token *tok);
 static bool file_exists(char *path);
 static char *format_relative_path(VirtualMachine *vm, char *base_file,
                                   char *filename);
+static char *resolve_embedded_relative_header(VirtualMachine *vm,
+                                              char *base_file, char *filename);
 static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
@@ -1411,7 +1413,20 @@ static int eval_has_include(VirtualMachine *vm, Token **rest, Token *tok) {
 
     char *path =
         resolve_include_probe(vm, start, filename, filename_len, is_dquote);
-    return path && file_exists(path);
+    if (path && file_exists(path))
+        return 1;
+    // #1194: resolve_include_probe's own current-file-relative branch never
+    // resolves a quoted include written inside an embedded header (its
+    // base path is the synthetic "<embedded>/..." key, never real on
+    // disk) -- without this, __has_include("../time.h") from inside
+    // sys/stat.h silently answers false instead of true.
+    if (is_dquote) {
+        char *embedded = resolve_embedded_relative_header(
+            vm, start->file ? start->file->name : NULL, filename);
+        if (embedded)
+            return 1;
+    }
+    return 0;
 }
 
 static bool is_has_feature_supported(VirtualMachine *vm, char *name) {
@@ -2304,6 +2319,71 @@ static char *format_relative_path(VirtualMachine *vm, char *base_file,
         return arena_format(vm, "./%s", filename);
     return arena_format(vm, "%.*s/%s", (int)(slash - base_file), base_file,
                         filename);
+}
+
+// #1194: lexically join `dir` with `filename`, collapsing "." and ".."
+// components as plain string operations -- no filesystem access, since an
+// embedded header's synthetic "<embedded>/..." path never exists on disk
+// for realpath()/stat() to resolve. Used only to chase a quoted #include's
+// "../" spelling written inside an embedded header back down to the
+// embedded-table key it should resolve to.
+static char *lexical_path_join(VirtualMachine *vm, const char *dir,
+                               const char *filename) {
+    char *joined  = arena_format(vm, "%s/%s", dir, filename);
+    char *scratch = arena_strdup(vm, joined);
+    char *parts[64];
+    int   n    = 0;
+    char *save = NULL;
+    for (char *part = strtok_r(scratch, "/", &save); part;
+         part       = strtok_r(NULL, "/", &save)) {
+        if (part[0] == '\0' || strcmp(part, ".") == 0)
+            continue;
+        if (strcmp(part, "..") == 0) {
+            if (n > 0 && strcmp(parts[n - 1], "..") != 0)
+                n--;               // pop a real component
+            else if (n < 64)
+                parts[n++] = part; // leading ".." (out of the joined root)
+            continue;
+        }
+        if (n < 64)
+            parts[n++] = part;
+    }
+    if (n == 0)
+        return arena_strdup(vm, ".");
+    char *out = arena_strdup(vm, parts[0]);
+    for (int i = 1; i < n; i++)
+        out = arena_format(vm, "%s/%s", out, parts[i]);
+    return out;
+}
+
+// #1194: resolve a quoted #include written inside an EMBEDDED header
+// (base_file spelled "<embedded>/some/path.h", the synthetic key
+// embedded_header_key() gives such a header -- never a real path on disk).
+// The ordinary current-file-relative branch always misses for these (the
+// "<embedded>/..." prefix never exists as a real directory), which
+// degrades every such include to a literal embedded-table lookup by its
+// own spelling -- fine for "sys/types.h" (a table key as written), but
+// "../time.h" can never be one. Lexically resolve the include against the
+// embedded header's own virtual directory instead, strip the "<embedded>/"
+// prefix back off, and hand the remainder to get_std_header() the same way
+// try_embedded_std_header() does. Returns NULL if base_file isn't an
+// embedded header, or the normalized spelling isn't a known embedded
+// header.
+static char *resolve_embedded_relative_header(VirtualMachine *vm,
+                                              char *base_file, char *filename) {
+    static const char PREFIX[]   = "<embedded>/";
+    size_t            prefix_len = sizeof(PREFIX) - 1;
+    if (!base_file || strncmp(base_file, PREFIX, prefix_len) != 0)
+        return NULL;
+    char *embedded_path = base_file + prefix_len;
+    char *slash         = strrchr(embedded_path, '/');
+    char *dir =
+        slash ? arena_strndup(vm, embedded_path, (int)(slash - embedded_path))
+              : arena_strdup(vm, "");
+    char *joined = lexical_path_join(vm, dir, filename);
+    if (get_std_header(joined))
+        return joined;
+    return NULL;
 }
 
 // Headers that must always resolve to CCCC's own copies because they are
@@ -5144,6 +5224,19 @@ static char *resolve_comptime_include_path(VirtualMachine *vm, Token *start_tok,
         char *rel = format_relative_path(vm, start_tok->file->name, filename);
         if (file_exists(rel))
             resolved = rel;
+        // #1194: same embedded-header gap as the other two resolution
+        // sites -- a quoted include written inside an embedded header
+        // never matches the on-disk relative branch above. Returning the
+        // normalized short name here (not the "<embedded>/..." key) is
+        // enough: queue_comptime_include below requeues it as a fresh
+        // `#include <name>` line, which the ordinary PP_INCLUDE handling
+        // already resolves through try_embedded_std_header().
+        if (!resolved) {
+            char *embedded = resolve_embedded_relative_header(
+                vm, start_tok->file ? start_tok->file->name : NULL, filename);
+            if (embedded)
+                resolved = embedded;
+        }
     }
     if (!resolved)
         resolved = search_include_paths(vm, filename, filename_len, !is_dquote);
@@ -5652,6 +5745,39 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                            filename,
                                            start->file->is_system_header);
                         break;
+                    }
+                }
+
+                // #1194: a quoted include written INSIDE an embedded header
+                // (e.g. bundled sys/stat.h's own `#include "../time.h"`) --
+                // the on-disk relative branch just above always misses (the
+                // synthetic "<embedded>/..." base path never exists on
+                // disk), so without this it degrades straight to
+                // search_include_paths()/try_embedded_std_header() below,
+                // both of which key on the include's own literal spelling --
+                // "../time.h" can never be a table key. Resolve it against
+                // the embedded header's own virtual directory instead.
+                if (is_dquote) {
+                    char *resolved = resolve_embedded_relative_header(
+                        vm, start->file ? start->file->name : NULL, filename);
+                    if (resolved) {
+                        char *embedded_src =
+                            try_embedded_std_header(vm, resolved);
+                        if (embedded_src) {
+                            if (ac_include_line)
+                                hashmap_put(&vm->compiler.emit_include_paths,
+                                            ac_include_line,
+                                            embedded_header_key(vm, resolved));
+                            if (is_cccc_supplied_only_header(resolved))
+                                mark_cccc_only_file(
+                                    vm, embedded_header_key(vm, resolved));
+                            mark_cccc_bundled_file(
+                                vm, embedded_header_key(vm, resolved));
+                            tok = include_embedded_header(vm, tok, resolved,
+                                                          embedded_src,
+                                                          start->next->next);
+                            break;
+                        }
                     }
                 }
 

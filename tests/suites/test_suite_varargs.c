@@ -1079,7 +1079,15 @@ int test_varargs_struct(void) {
 
     // sum_all_types(4, 10, 100, 5.5, &a) - max 8 args for register-based
     // calling
-    AllTypesSums sums = sum_all_types(4, 10, 100, 5.5, &a);
+    // #1192: the 2nd vararg (type index 1) is read back with
+    // va_arg(args, long) in sum_all_types below -- it must be passed as a
+    // long, not an int. Apple's arm64 variadic ABI packs each slot to its
+    // argument's own natural size rather than the VM's uniform 8-byte
+    // slots, so passing a bare `100` (int, 4 bytes) here and reading it
+    // back as long silently picks up 4 bytes of the following double's
+    // representation under a real native compiler (confirmed: gcc-16
+    // reads back 4294967396 instead of 100; clang happens to survive it).
+    AllTypesSums sums = sum_all_types(4, 10, 100L, 5.5, &a);
 
     if (sums.int_sum != 10)
         return 1;

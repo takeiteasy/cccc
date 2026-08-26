@@ -8,7 +8,7 @@ convention), and can also be run standalone:
 `python3 tools/testing/test_native_skip_audit.py`.
 
 The property under test is the fall-through, not early-return, invariant:
-CCCC_AUDIT_NATIVE_SKIPS=1 must bypass ONLY the three hardcoded skip-table
+CCCC_AUDIT_NATIVE_SKIPS=1 must bypass ONLY the hardcoded skip-table
 lookups in native_skip_reason(), still falling through to the same
 --build/-c/-o/frontend-mode/VM-only-safety-flag checks every other test
 gets. A prior draft of this bypass early-returned None instead, which would
@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from testing import (
     NATIVE_SKIP_TESTS,
     NATIVE_SKIP_TESTS_CLANG,
-    NATIVE_SKIP_TESTS_GCC,
+    NATIVE_SKIP_TESTS_GCC_MACOS,
     NATIVE_SKIP_TESTS_LINUX,
     NATIVE_SKIP_TESTS_MACOS,
     native_audit_skips_enabled,
@@ -147,18 +147,28 @@ def _(fail):
         fail(f"{name!r} is clang-only -- must not apply under family='gcc'")
 
 
-@case("a gcc-only entry is skipped when the family matches, not otherwise")
+@case("a gcc-on-macOS-only entry is skipped only when BOTH axes match")
 def _(fail):
-    if not NATIVE_SKIP_TESTS_GCC:
-        fail("NATIVE_SKIP_TESTS_GCC should not be empty -- #1186 moved the "
-             "Darwin-gcc constructor-priority WONT_FIX group into it")
+    # #1193: NATIVE_SKIP_TESTS_GCC itself has no platform axis and is empty
+    # today (see its own docstring in tools/testing/__init__.py) -- the
+    # Darwin-gcc constructor-priority WONT_FIX group lives in
+    # NATIVE_SKIP_TESTS_GCC_MACOS instead, which needs platform AND family
+    # to match (it wrongly applied on Linux gcc, where it passes, until this
+    # split).
+    if not NATIVE_SKIP_TESTS_GCC_MACOS:
+        fail("NATIVE_SKIP_TESTS_GCC_MACOS should not be empty -- #1193 "
+             "moved the Darwin-gcc constructor-priority WONT_FIX group "
+             "into it")
         return
-    name = next(iter(NATIVE_SKIP_TESTS_GCC))
+    name = next(iter(NATIVE_SKIP_TESTS_GCC_MACOS))
     if not _entry_applies_here(name, platform="macos", family="gcc"):
-        fail(f"{name!r} is in NATIVE_SKIP_TESTS_GCC -- should apply under "
-             f"family='gcc'")
+        fail(f"{name!r} is in NATIVE_SKIP_TESTS_GCC_MACOS -- should apply "
+             f"under platform='macos', family='gcc'")
     if _entry_applies_here(name, platform="macos", family="clang"):
         fail(f"{name!r} is gcc-only -- must not apply under family='clang'")
+    if _entry_applies_here(name, platform="linux", family="gcc"):
+        fail(f"{name!r} is Darwin-only -- must not apply under "
+             f"platform='linux'")
 
 
 @case("a macOS-only entry does not apply when audited off-platform")

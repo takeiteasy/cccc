@@ -37,6 +37,16 @@ Cases:
      entirely; this case can't reproduce on a clang-only host (clang
      resolves it correctly), so it has to be a static check, not a
      round-trip.
+  8-10. `<sys/stat.h>`/`<sys/time.h>`/`<sys/times.h>` with zero flags (#1194):
+     each of these bundled headers itself quote-includes "../time.h" --
+     a spelling that can only resolve relative to the embedded header's own
+     virtual "<embedded>/..." path, not by literal table-key lookup, so this
+     is a distinct failure mode from cases 1/3 above (which never nest a
+     relative include at all).
+  11. `-c=native` with `<sys/stat.h>`, zero flags: the same #1194 class, but
+     through the native round-trip -- cccc's own resolution of the nested
+     "../time.h" happens the same way regardless of backend, but this
+     confirms the fix reaches -c=native's compile step too, not just the VM.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -90,6 +100,43 @@ def case_stdio(cccc: Path, tmp: str) -> bool:
     result = run([str(cccc), src.name], cwd=tmp)
     if result.returncode != 42 or "hi" not in result.stdout:
         print(f"    FAIL: exit {result.returncode}, stdout={result.stdout!r}\n    {result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def _case_relative_include_header(number: int, header: str):
+    def case(cccc: Path, tmp: str) -> bool:
+        print(f"  {number}: #include <{header}>, zero flags "
+              f"(own \"../time.h\" quote-include, #1194)")
+        src = Path(tmp) / (header.replace("/", "_").replace(".", "_") + "_case.c")
+        write(src, f"#include <{header}>\nint main(void){{return 42;}}\n")
+        result = run([str(cccc), src.name], cwd=tmp)
+        if result.returncode != 42:
+            print(f"    FAIL: exit {result.returncode}\n    {result.stderr}")
+            return False
+        print("    ok")
+        return True
+    return case
+
+
+case_sys_stat = _case_relative_include_header(8, "sys/stat.h")
+case_sys_time = _case_relative_include_header(9, "sys/time.h")
+case_sys_times = _case_relative_include_header(10, "sys/times.h")
+
+
+def case_native_sys_stat(cccc: Path, tmp: str) -> bool:
+    print("  11: -c=native with #include <sys/stat.h>, zero flags (#1194)")
+    src = Path(tmp) / "native_sys_stat.c"
+    out = Path(tmp) / "native_sys_stat_out"
+    write(src, "#include <sys/stat.h>\nint main(void){return 42;}\n")
+    result = run([str(cccc), "-c=native", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}")
         return False
     print("    ok")
     return True
@@ -218,6 +265,10 @@ def main() -> int:
             case_native_stdio,
             case_native_quoted_include,
             case_owned_header_include_form,
+            case_sys_stat,
+            case_sys_time,
+            case_sys_times,
+            case_native_sys_stat,
         ]
         results = [case(cccc, tmp) for case in cases]
 
