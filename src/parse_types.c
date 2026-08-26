@@ -1526,6 +1526,16 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
     int     idx  = 0;
 
     while (!equal(tok, "}")) {
+        // #1173: a `#pragma pack` between two members of one struct changes
+        // GCC's per-member alignment mid-declaration, a form this
+        // implementation doesn't support -- reject it explicitly rather than
+        // silently applying the struct's opening pack value to every member
+        // (or vice versa), which would just be a narrower reincarnation of
+        // the original "accepted, not honoured" bug.
+        if (tok->pack_align != ty->pack_align)
+            error_tok(vm, tok,
+                      "#pragma pack changed inside a struct/union body is "
+                      "not supported -- move it outside the declaration");
         VarAttr attr   = {};
         Type   *basety = declspec(vm, &tok, tok, &attr);
         if (has_custom_attrs(basety, &attr))
@@ -2791,6 +2801,12 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     *is_definition = false;
     Type *ty       = struct_type(vm);
     ty->kind       = kind;
+    // #1173: the #pragma pack(N) alignment cap in effect at the
+    // struct/union keyword, stamped by the preprocessor onto every token
+    // (src/preprocess.c). `tok` here is the token immediately after that
+    // keyword; no pragma can appear between the keyword and this token, so
+    // its stamp is identical to the keyword's own.
+    ty->pack_align = tok->pack_align;
     tok            = attribute_list(vm, tok, ty, NULL);
     tok            = c23_attribute_list(vm, tok, ty, NULL);
 
@@ -2912,6 +2928,16 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             int contributed = mem->explicit_align ? mem->explicit_align
                               : (!ty->is_packed && mem->name) ? mem->align
                                                               : 0;
+            // #1173: unlike `packed` (which an explicit aligned(N) always
+            // overrides, #1165 above), #pragma pack(N) caps EVERY
+            // contribution -- explicit or implicit -- at N. Verified
+            // directly against gcc-16/clang: `#pragma pack(2) struct { char
+            // a; int b : 5 __attribute__((aligned(16))); int c; }` has
+            // align 2, not 16; the same member under plain
+            // __attribute__((packed)) instead raises align to 16.
+            if (!ty->is_packed && ty->pack_align &&
+                ty->pack_align < contributed)
+                contributed = ty->pack_align;
             if (ty->align < contributed)
                 ty->align = contributed;
         } else {
@@ -2924,9 +2950,21 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // request equal to the member's natural alignment looks
             // identical to no request at all), so use mem->explicit_align
             // under packed instead.
-            int mem_align =
-                ty->is_packed ? (mem->explicit_align ? mem->explicit_align : 1)
-                              : mem->align;
+            int mem_align;
+            if (ty->is_packed) {
+                mem_align = mem->explicit_align ? mem->explicit_align : 1;
+            } else {
+                mem_align = mem->align;
+                // #1173: unlike `packed` just above (which an explicit
+                // aligned(N)/_Alignas(N) always overrides), #pragma
+                // pack(N) caps EVERY contribution at N, explicit included
+                // -- verified directly against gcc-16/clang: `#pragma
+                // pack(2) struct { char c; int a __attribute__((aligned(
+                // 16))); }` places `a` at offset 2 and has align 2, not
+                // 16/16 the way plain __attribute__((packed)) would.
+                if (ty->pack_align && ty->pack_align < mem_align)
+                    mem_align = ty->pack_align;
+            }
 
             // #1164: this align_to() must run even for a flexible array
             // member. It used to be skipped for one ("FAMs don't get
@@ -2988,9 +3026,17 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     // is suppressed under packed, but an *explicit* aligned(N)/_Alignas(N)
     // request still applies (verified against gcc-16/clang).
     for (Member *mem = ty->members; mem; mem = mem->next) {
-        int mem_align = ty->is_packed
-                            ? (mem->explicit_align ? mem->explicit_align : 1)
-                            : mem->align;
+        int mem_align;
+        if (ty->is_packed) {
+            mem_align = mem->explicit_align ? mem->explicit_align : 1;
+        } else {
+            mem_align = mem->align;
+            // #1173: unlike `packed` above, #pragma pack(N) caps every
+            // contribution -- explicit included -- at N (verified against
+            // gcc-16/clang; see the matching comment in struct_decl).
+            if (ty->pack_align && ty->pack_align < mem_align)
+                mem_align = ty->pack_align;
+        }
         if (ty->align < mem_align)
             ty->align = mem_align;
         if (ty->size < mem->ty->size)

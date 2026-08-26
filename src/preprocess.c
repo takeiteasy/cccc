@@ -684,6 +684,16 @@ static bool is_pragma_cccc(Token *hash) {
     return tok && equal(tok, "pragma") && equal(tok->next, "cccc");
 }
 
+// Returns true for `#pragma pack(...)`. Used to exclude it from the
+// auto-capture-and-replay path (#1173) once CCCC honours it directly --
+// replaying the raw line would apply it a second time on top of an already
+// pack(N)-correct emitted layout, and the auto-capture hoists directives to
+// the top of the file, ahead of the structs they were meant to scope.
+static bool is_pragma_pack(Token *hash) {
+    Token *tok = hash->next;
+    return tok && equal(tok, "pragma") && equal(tok->next, "pack");
+}
+
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     *t       = *tok;
@@ -5070,6 +5080,132 @@ static Token *handle_pragma_link(VirtualMachine *vm, Token *sub) {
     return skip_line(vm, p);
 }
 
+// Copies a token's raw text into a malloc'd, NUL-terminated buffer -- unlike
+// arena_strndup, this is individually freeable, matching pack_stack_names'
+// own malloc/free lifetime (freed alongside pack_stack in src/vm.c, or
+// individually on pack(pop, ident)/pack(pop)).
+static char *dup_tok_text(Token *tok) {
+    char *s = malloc(tok->len + 1);
+    memcpy(s, tok->loc, tok->len);
+    s[tok->len] = '\0';
+    return s;
+}
+
+// Reads and validates a `#pragma pack` alignment argument: an integer power
+// of two in [1,16], matching GCC/MSVC's own accepted range. error_tok's on
+// anything else -- silently clamping or ignoring an out-of-range value would
+// recreate the exact "accepted, not honoured" bug class #1173 exists to fix.
+static int read_pack_align(VirtualMachine *vm, Token *tok) {
+    long v;
+    if (!pragma_config_read_int(tok, &v) || v <= 0 || v > 16 ||
+        (v & (v - 1)) != 0)
+        error_tok(vm, tok,
+                  "#pragma pack: alignment must be a power of two between 1 "
+                  "and 16");
+    return (int)v;
+}
+
+// Parses `pack(N)`, `pack()`, `pack(push[, ident][, N])`, and
+// `pack(pop[, ident])` -- the GCC/MSVC-compatible subset (#1173). `tok` is
+// the "pack" token itself. Unlike the previous behavior (accepted, parsed,
+// silently never honoured -- COVERAGE.md's own prior claim), any other form
+// is a hard error rather than a silent fallthrough to "unknown pragma
+// ignored", which would just recreate the same bug under a narrower name.
+static Token *handle_pragma_pack(VirtualMachine *vm, Token *tok) {
+    Token *p = tok->next;
+    if (!p || p->at_bol || !equal(p, "("))
+        error_tok(vm, p && !p->at_bol && p->kind != TK_EOF ? p : tok,
+                  "expected '(' after '#pragma pack'");
+    p = p->next;
+
+    if (equal(p, ")")) {
+        vm->compiler.pack_cur = 0;
+        return skip_line(vm, p->next);
+    }
+
+    if (equal(p, "push") || equal(p, "pop")) {
+        bool is_push     = equal(p, "push");
+        p                = p->next;
+        Token *name_tok  = NULL;
+        Token *align_tok = NULL;
+        if (equal(p, ",")) {
+            p = p->next;
+            if (p && p->kind == TK_IDENT) {
+                name_tok = p;
+                p        = p->next;
+                if (is_push && equal(p, ",")) {
+                    align_tok = p->next;
+                    p         = align_tok ? align_tok->next : NULL;
+                }
+            } else if (is_push) {
+                align_tok = p;
+                p         = p ? p->next : NULL;
+            } else {
+                error_tok(vm, p && p->kind != TK_EOF ? p : tok,
+                          "expected an identifier after '#pragma pack(pop,'");
+            }
+        }
+        if (!equal(p, ")"))
+            error_tok(vm, p && p->kind != TK_EOF ? p : tok,
+                      "expected ')' in '#pragma pack'");
+
+        if (is_push) {
+            if (vm->compiler.pack_stack_depth >= vm->compiler.pack_stack_cap) {
+                int new_cap = vm->compiler.pack_stack_cap
+                                  ? vm->compiler.pack_stack_cap * 2
+                                  : 4;
+                vm->compiler.pack_stack =
+                    realloc(vm->compiler.pack_stack, sizeof(int) * new_cap);
+                vm->compiler.pack_stack_names = realloc(
+                    vm->compiler.pack_stack_names, sizeof(char *) * new_cap);
+                vm->compiler.pack_stack_cap = new_cap;
+            }
+            int d                      = vm->compiler.pack_stack_depth++;
+            vm->compiler.pack_stack[d] = vm->compiler.pack_cur;
+            vm->compiler.pack_stack_names[d] =
+                name_tok ? dup_tok_text(name_tok) : NULL;
+            if (align_tok)
+                vm->compiler.pack_cur = read_pack_align(vm, align_tok);
+        } else { // pop
+            if (vm->compiler.pack_stack_depth <= 0) {
+                error_tok(vm, tok, "#pragma pack(pop) with no matching push");
+            } else if (name_tok) {
+                int idx = -1;
+                for (int i = vm->compiler.pack_stack_depth - 1; i >= 0; i--) {
+                    char *n = vm->compiler.pack_stack_names[i];
+                    if (n && (int)strlen(n) == name_tok->len &&
+                        strncmp(n, name_tok->loc, name_tok->len) == 0) {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx < 0)
+                    error_tok(vm, name_tok,
+                              "#pragma pack(pop, ...): no matching "
+                              "'#pragma pack(push, ...)' with this name");
+                vm->compiler.pack_cur = vm->compiler.pack_stack[idx];
+                for (int i = vm->compiler.pack_stack_depth - 1; i >= idx; i--)
+                    free(vm->compiler.pack_stack_names[i]);
+                vm->compiler.pack_stack_depth = idx;
+            } else {
+                int d                 = --vm->compiler.pack_stack_depth;
+                vm->compiler.pack_cur = vm->compiler.pack_stack[d];
+                free(vm->compiler.pack_stack_names[d]);
+            }
+        }
+        return skip_line(vm, p->next);
+    }
+
+    // pack(N)
+    int n = read_pack_align(vm, p);
+    p     = p->next;
+    if (!equal(p, ")"))
+        error_tok(vm, p && p->kind != TK_EOF ? p : tok,
+                  "expected ')' in '#pragma pack'");
+    vm->compiler.pack_cur = n;
+    return skip_line(vm, p->next);
+}
+
 // Dispatch the body of a #pragma directive or a _Pragma() operator.
 // tok is the first content token (after "#pragma" / after the destringized
 // string).
@@ -5183,6 +5319,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     } else if ((equal(tok, "GCC") || equal(tok, "clang")) &&
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
+    } else if (equal(tok, "pack")) {
+        return handle_pragma_pack(vm, tok);
     } else {
         // Suppress "unknown pragma" noise from system headers. Real SDK
         // headers use #pragma GCC system_header, #pragma clang
@@ -5311,6 +5449,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok->filename      = tok->file->display_name;
                 tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
                 tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
+                tok->pack_align    = vm->compiler.pack_cur;
                 cur = cur->next = tok;
                 tok             = tok->next;
             }
@@ -5398,6 +5537,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                 (1ULL << 63) | vm->compiler.warnings;
                             tok->diag_werror =
                                 (1ULL << 63) | vm->compiler.warning_errors;
+                            tok->pack_align = vm->compiler.pack_cur;
                             cur = cur->next = tok;
                             tok             = tok->next;
                         }
@@ -5413,6 +5553,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // Stamp the effective diagnostic state so warn_tok can use it.
             tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
             tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
+            // Stamp the effective #pragma pack(N) alignment cap so
+            // struct_union_decl can read it off the struct/union keyword
+            // token later, at parse time (#1173).
+            tok->pack_align = vm->compiler.pack_cur;
             cur = cur->next = tok;
             tok             = tok->next;
             continue;
@@ -5595,7 +5739,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 start->file &&
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
-                !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start)) {
+                !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start) &&
+                !is_pragma_pack(start)) {
                 char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED ||
                                   directive_route == INCLUDE_ROUTE_BUILD ||
                                   directive_route == INCLUDE_ROUTE_TEST)

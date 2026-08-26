@@ -1535,6 +1535,15 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->compiler.diag_stack_werror)
         free(vm->compiler.diag_stack_werror);
 
+    // Free #pragma pack stack (#1173)
+    if (vm->compiler.pack_stack_names) {
+        for (int i = 0; i < vm->compiler.pack_stack_depth; i++)
+            free(vm->compiler.pack_stack_names[i]);
+        free(vm->compiler.pack_stack_names);
+    }
+    if (vm->compiler.pack_stack)
+        free(vm->compiler.pack_stack);
+
     // Free comptime/emit context stack
     if (vm->compiler.ctx_stack)
         free(vm->compiler.ctx_stack);

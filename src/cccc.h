@@ -1279,6 +1279,14 @@ typedef struct Token {
     // at the point this token was emitted (overrides vm->compiler.warnings).
     uint64_t diag_warnings; // effective CCCCWarning mask (bit63 = stamped)
     uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
+
+    // Effective #pragma pack(N) alignment cap stamped by the preprocessor,
+    // mirroring diag_warnings/diag_werror above (#1173). 0 means "no pack in
+    // effect" -- unambiguous, unlike the diagnostic masks, since pack(N)
+    // never legitimately caps at 0 and pack()/an unset pragma mean the same
+    // thing to struct_union_decl. Read off the `struct`/`union` keyword
+    // token by struct_union_decl (src/parse_types.c).
+    int pack_align;
 } Token;
 
 /*!
@@ -1546,6 +1554,19 @@ struct Type {
     // in the main VM suite from `x < y` (unsigned comparison rules) into a
     // silent signed comparison.
     int decl_align;
+
+    // #1173: `#pragma pack(N)` alignment cap in effect when this
+    // struct/union was defined (0 = no pack in effect). Unlike `is_packed`
+    // (__attribute__((packed)), which forces alignment to 1), this CAPS a
+    // member's implicit alignment at N -- an explicit aligned(N)/_Alignas(N)
+    // request still wins outright, same as under `packed` (#1163). Read by
+    // struct_decl/union_decl's layout loops (src/parse_types.c) and by the
+    // -c=native/-m/-c=generated emitter (src/serialize_type.c), which wraps
+    // the aggregate's definition in `#pragma pack(push, N)` / `pack(pop)` so
+    // the host reproduces the same layout. Also appended at the very end of
+    // the struct for the same positional-initializer reason as decl_align
+    // above.
+    int pack_align;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
@@ -3553,6 +3574,17 @@ typedef struct Compiler {
     uint64_t *diag_stack_werror;   // saved warning_errors bitmasks
     int       diag_stack_depth;    // current stack depth
     int       diag_stack_cap;      // allocated capacity
+
+    // #pragma pack(N)/push/pop stack (#1173). pack_cur is the alignment cap
+    // in effect right now (0 = none); pack_stack/pack_stack_names hold saved
+    // values for pack(push[, N])/pack(pop), mirroring diag_stack_* above.
+    // pack_stack_names[i] is strdup'd (or NULL for an unnamed push) so
+    // pack(pop, ident) can find the matching frame by name, as GCC/MSVC do.
+    int    pack_cur;
+    int   *pack_stack;
+    char **pack_stack_names;
+    int    pack_stack_depth;
+    int    pack_stack_cap;
 
     // Diagnostic output format
     bool diagnostic_json; // --json (general JSON output flag)

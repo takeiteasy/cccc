@@ -1499,6 +1499,22 @@ static void serialize_aggregate_attrs(FILE *f, Type *ty) {
 // (e.g. `struct { int x; int y; } pt;`) inline at its point of use, since
 // there is no name to refer back to it by elsewhere.
 static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty) {
+    // #1173: unlike __attribute__((packed))/aligned(N) (serialize_aggregate_
+    // attrs, embeddable anywhere a type can appear), #pragma pack(push, N)/
+    // pop is a preprocessing directive -- it must sit on its own line, so it
+    // cannot wrap an anonymous aggregate serialized inline in the middle of
+    // some other declaration (a variable, parameter, or member type). Refuse
+    // rather than silently drop the pack requirement -- exactly the
+    // "accepted, not honoured" bug class this ticket exists to close.
+    // serialize_struct_def (the tagged/typedef'd path) does not have this
+    // problem: it always emits its own top-level, one-definition-per-line
+    // statement.
+    if (ty->pack_align)
+        error("cccc: an anonymous struct/union under #pragma pack(%d) has "
+              "no tag or typedef name -- give it one so its definition can "
+              "be emitted at file scope, wrapped in "
+              "#pragma pack(push, %d)/pop",
+              ty->pack_align, ty->pack_align);
     fprintf(f, "%s {\n", ty->kind == TY_UNION ? "union" : "struct");
     serialize_aggregate_members(f, ctx, ty);
     fprintf(f, "}");
@@ -1836,6 +1852,36 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     TypeName *tag   = find_tag_name(ctx, ty);
     TypeName *alias = find_typedef_name(ctx, ty);
 
+    if (!ty->members) {
+        if (!tag && alias)
+            fprintf(f, "typedef %s", aggregate_keyword(ty));
+        else
+            fprintf(f, "%s", aggregate_keyword(ty));
+        if (tag)
+            fprintf(f, " %.*s", tag->name_len, tag->name);
+        if (tag)
+            fprintf(f, ";\n\n");
+        return;
+    }
+
+    // #1173: re-wrap the definition in the same #pragma pack(push, N)/pop
+    // CCCC's own parser honoured (src/parse_types.c) so the host compiler
+    // reproduces CCCC's layout exactly, rather than the struct's own
+    // members/attrs alone -- push/pop is supported by gcc, clang, and MSVC
+    // alike, so this is always the same directive CCCC itself parsed, not a
+    // reconstruction. Must come before the "struct"/"typedef struct" keyword
+    // line entirely -- a #pragma directive splitting the tag from its own
+    // opening brace is a syntax error on both gcc and clang (confirmed:
+    // "expected identifier or '(' before '#pragma'"), so it cannot be
+    // interleaved with the declaration the way an ordinary attribute can.
+    // Members may still carry a per-member _Alignas(N)/aligned(N) reflecting
+    // an uncapped source request (serialize_aggregate_members, unchanged) --
+    // confirmed directly against gcc-16/clang that #pragma pack(N) caps that
+    // too, exactly like every other implicit or explicit contribution, so it
+    // re-derives to the same capped layout either way.
+    if (ty->pack_align)
+        fprintf(f, "#pragma pack(push, %d)\n", ty->pack_align);
+
     if (!tag && alias)
         fprintf(f, "typedef %s", aggregate_keyword(ty));
     else
@@ -1844,12 +1890,6 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (tag)
         fprintf(f, " %.*s", tag->name_len, tag->name);
 
-    if (!ty->members) {
-        if (tag)
-            fprintf(f, ";\n\n");
-        return;
-    }
-
     fprintf(f, " {\n");
     serialize_aggregate_members(f, ctx, ty);
     fprintf(f, "}");
@@ -1857,7 +1897,11 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     if (!tag && alias)
         fprintf(f, " %.*s", alias->name_len, alias->name);
-    fprintf(f, ";\n\n");
+    fprintf(f, ";\n");
+
+    if (ty->pack_align)
+        fprintf(f, "#pragma pack(pop)\n");
+    fprintf(f, "\n");
 }
 
 // Serialize enum type definition

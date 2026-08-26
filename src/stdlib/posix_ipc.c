@@ -6,9 +6,11 @@
 
 // sys/ipc.h, sys/shm.h, sys/sem.h, sys/msg.h (#812) -- ipc_perm/shmid_ds/
 // semid_ds/msqid_ds diverge hard between hosts: macOS wraps all four in
-// #pragma pack(4) (which CCCC's parser doesn't support -- only fully-packed
-// __attribute__((packed)) is), and glibc's field order differs and adds
-// reserved padding on top. Rather than mirror either host layout, the guest
+// #pragma pack(4), and glibc's field order differs and adds reserved
+// padding on top. #pragma pack(N) is fully supported by CCCC's parser now
+// (#1173); these CCCC-canonical structs are kept regardless, since glibc's
+// differing field order was always the larger half of the divergence, not
+// the pack pragma alone. Rather than mirror either host layout, the guest
 // sees a CCCC-canonical struct in POSIX field order (include/sys/ipc.h,
 // sys/shm.h, sys/sem.h, sys/msg.h) and these wrappers marshal field-by-field
 // through a host-local struct -- the same shape as wrap_statvfs above. Field

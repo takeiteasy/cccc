@@ -1,10 +1,11 @@
 /* sys/ipc.h - SysV IPC common definitions (POSIX XSI) for CCCC
  *
  * struct ipc_perm diverges between macOS and glibc (macOS wraps it in
- * #pragma pack(4), which CCCC's parser doesn't support -- only fully-packed
- * __attribute__((packed)) is; glibc's field order also differs and adds
- * reserved padding). Rather than mirror either host layout, this declares a
- * CCCC-canonical struct in POSIX field order with natural alignment;
+ * #pragma pack(4); glibc's field order also differs and adds reserved
+ * padding). #pragma pack(N) is fully supported (#1173); the CCCC-canonical
+ * struct below is kept regardless, since glibc's differing field order was
+ * always the larger half of the divergence. Declared in POSIX field order
+ * with natural alignment;
  * wrap_shmctl/wrap_semctl/wrap_msgctl (src/stdlib/posix.c) populate a
  * host-local struct via the real *ctl(IPC_STAT) and copy field-by-field --
  * the same shape as sys/statvfs.h's struct statvfs.

@@ -5,8 +5,26 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- `#pragma pack(N)` / `pack()` / `pack(push[, ident][, N])` / `pack(pop[,
+  ident])` is now fully honoured instead of silently accepted-and-ignored.
+  It caps (rather than forces, like `__attribute__((packed))` does) a
+  subsequent struct/union's implicit member alignment at `N` -- and, unlike
+  `packed`, caps an explicit member `aligned(N)`/`_Alignas(N)` request too,
+  confirmed directly against gcc-16/clang. Parsed into a push/pop stack
+  mirroring `#pragma GCC diagnostic push/pop`'s own mechanism, and re-emitted
+  for `-c=native`/`-m`/`-c=generated` as `#pragma pack(push, N)`/`pack(pop)`
+  wrapped tightly around just the affected definition (#1173).
+
 ### Fixed
 
+- `#pragma pack(N)` was accepted, auto-captured, and re-emitted VERBATIM --
+  and hoisted to the top of the file, ahead of every struct -- while struct
+  layout was computed as though the pragma were absent. The folded
+  `sizeof`/offsets disagreed with the host compiler's real (pragma-honouring)
+  layout, and the emitted C wrote out of bounds (confirmed under
+  AddressSanitizer on both gcc-16 and clang). See "Added" above (#1173).
 - `#pragma cccc link("name")` queued a library and CCCC re-emitted it into
   `-E`/`-m`/`-c=generated` output as `#pragma comment(lib, "name")` — a
   spelling that looked portable but wasn't an alternate input syntax CCCC
