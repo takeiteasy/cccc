@@ -31,6 +31,7 @@ from testing import (
     native_audit_skips_enabled,
     native_skip_reason,
     smoke_case_skip_reason,
+    smoke_entry_applies_here,
 )
 from testing.cli import _entry_applies_here
 
@@ -254,6 +255,53 @@ def _(fail):
         )
         if got is not None:
             fail(f"expected the entry to be bypassed (None), got {got!r}")
+    finally:
+        os.environ.pop("CCCC_AUDIT_NATIVE_SKIPS", None)
+
+
+# --- #1197: smoke_entry_applies_here(), the audit-side counterpart of
+# smoke_case_skip_reason() -- used by comptime_native_smoke.py's own
+# --audit-skips mode (audit_skips()) to decide which cases are actually
+# governed by SMOKE_CASE_SKIPS_GCC_MACOS on this platform+family, the same
+# job _entry_applies_here() does for the filename-keyed tables above. ---
+
+
+@case("smoke_entry_applies_here matches only macos+gcc for a live entry")
+def _(fail):
+    if "case_ctor_dtor_native_round_trip" not in SMOKE_CASE_SKIPS_GCC_MACOS:
+        return
+    if not smoke_entry_applies_here(
+        "case_ctor_dtor_native_round_trip", platform="macos", family="gcc"
+    ):
+        fail("should apply under macos+gcc, the entry's own axis")
+    for platform, family in (("macos", "clang"), ("linux", "gcc"),
+                              ("linux", "clang")):
+        if smoke_entry_applies_here(
+            "case_ctor_dtor_native_round_trip", platform=platform, family=family
+        ):
+            fail(f"must not apply under platform={platform!r} family={family!r}")
+
+
+@case("smoke_entry_applies_here never matches an unknown case key")
+def _(fail):
+    if smoke_entry_applies_here("case_not_a_real_case", platform="macos", family="gcc"):
+        fail("an unknown case key must never be reported as governed")
+
+
+@case("smoke_entry_applies_here ignores the audit bypass, unlike smoke_case_skip_reason")
+def _(fail):
+    # The whole point of this helper (#1197): the audit needs to know which
+    # entries govern this run precisely *while* CCCC_AUDIT_NATIVE_SKIPS=1 is
+    # set, so unlike smoke_case_skip_reason() it must never itself return
+    # "doesn't apply" just because the bypass is active.
+    if "case_ctor_dtor_native_round_trip" not in SMOKE_CASE_SKIPS_GCC_MACOS:
+        return
+    os.environ["CCCC_AUDIT_NATIVE_SKIPS"] = "1"
+    try:
+        if not smoke_entry_applies_here(
+            "case_ctor_dtor_native_round_trip", platform="macos", family="gcc"
+        ):
+            fail("must still report as governed under the audit bypass")
     finally:
         os.environ.pop("CCCC_AUDIT_NATIVE_SKIPS", None)
 

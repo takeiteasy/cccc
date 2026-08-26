@@ -2732,14 +2732,17 @@ char *cccc_path_find_executable(const char *name) {
     return NULL;
 }
 
-char *cccc_find_native_cc(void) {
-    const char *env_cc = getenv("CCCC_NATIVE_CC");
-    if (env_cc && *env_cc) {
-        char *found = cccc_path_find_executable(env_cc);
+// Shared {cc, clang, gcc} PATH-search body for both cccc_find_native_cc()
+// and cccc_find_build_cc() below -- the two only differ in which env var
+// (if any) overrides the search, and the diagnostic naming that var.
+static char *find_cc_via_env_or_path(const char *env_name,
+                                     const char *env_val) {
+    if (env_val && *env_val) {
+        char *found = cccc_path_find_executable(env_val);
         if (found)
             return found;
-        fprintf(stderr, "error: CCCC_NATIVE_CC compiler '%s' not found\n",
-                env_cc);
+        fprintf(stderr, "error: %s compiler '%s' not found\n", env_name,
+                env_val);
         return NULL;
     }
 
@@ -2755,12 +2758,35 @@ char *cccc_find_native_cc(void) {
     return NULL;
 }
 
-// Locate a toolchain tool (e.g. "ar", "ld") for --build mode.  An uppercased
-// CCCC_NATIVE_<TOOL> env var overrides the PATH lookup.
+// Selects the host compiler -c=native hands its serialized C to. Reads
+// CCCC_NATIVE_CC only -- unrelated to which compiler builds cccc ITSELF
+// (see cccc_find_build_cc() below, #1198).
+char *cccc_find_native_cc(void) {
+    return find_cc_via_env_or_path("CCCC_NATIVE_CC", getenv("CCCC_NATIVE_CC"));
+}
+
+// Selects the host compiler `--build` uses to compile/link cccc's own (or
+// any build.c target's) object files. A separate env var from
+// CCCC_NATIVE_CC (#1198): the two used to be conflated via a shared
+// cccc_find_native_cc() call, so pointing CCCC_NATIVE_CC at a different
+// compiler family to exercise -c=native (e.g. Homebrew gcc-16 on macOS)
+// silently retargeted the bootstrap build too, which then failed to link
+// (extern-inline/linkage divergence the untouched compiler was never built
+// against -- tracked as its own follow-up, not fixed here). Terminal
+// fallback of effective_cc_for_target() (src/build.c) below
+// t->cc_override/ctx->cross_cc (--build-cc=).
+char *cccc_find_build_cc(void) {
+    return find_cc_via_env_or_path("CCCC_BUILD_CC", getenv("CCCC_BUILD_CC"));
+}
+
+// Locate a toolchain tool (e.g. "ar") for --build mode. An uppercased
+// CCCC_BUILD_<TOOL> env var overrides the PATH lookup (#1198: renamed from
+// CCCC_NATIVE_<TOOL> -- this is already build-mode-only, so it belongs in
+// the CCCC_BUILD_* family alongside CCCC_BUILD_CC, not CCCC_NATIVE_*).
 char *cccc_find_native_tool(const char *tool) {
     char envname[64];
-    snprintf(envname, sizeof(envname), "CCCC_NATIVE_%s", tool);
-    for (char *p = envname + strlen("CCCC_NATIVE_"); *p; p++)
+    snprintf(envname, sizeof(envname), "CCCC_BUILD_%s", tool);
+    for (char *p = envname + strlen("CCCC_BUILD_"); *p; p++)
         if (*p >= 'a' && *p <= 'z')
             *p = (char)(*p - 'a' + 'A');
     const char *override = getenv(envname);

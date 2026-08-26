@@ -367,12 +367,27 @@ silently masquerade as green. `CCCC_AUDIT_NATIVE_SKIPS=1` bypasses the
 table (same env var and fall-through shape as `native_skip_reason()`
 below), forcing the case to run — useful for manually confirming an entry
 isn't stale, the way `--native-audit-skips` does for the main corpus.
-Unlike that corpus, nothing wires this audit into `run_tests.py`'s
-`native_skip_audit` sub-suite automatically yet; run it by hand:
+
+**Staleness audit (#1197):** `smoke_case_skip_reason()`'s
+`CCCC_AUDIT_NATIVE_SKIPS=1` bypass alone doesn't give a verdict — it just
+un-skips the case and inverts main()'s ordinary pass/fail report, so a
+stale entry surfaces as the whole script exiting 0 and a still-valid entry
+as it exiting 1. `comptime_native_smoke.py --audit-skips` (`audit_skips()`,
+alongside `smoke_entry_applies_here()` in `tools/testing/__init__.py`) gives
+this the same STALE/KEPT verdict `--native-audit-skips` gives the
+filename-keyed tables: it runs only the cases an entry actually governs on
+this platform+compiler-family, and exits 1 iff any of them now passes with
+the table bypassed (STALE — delete the entry). `run_tests.py` wires this in
+as its own `[ smoke_skip_audit ]` sub-suite, right after
+`comptime_native_smoke`, gated on `--no-native` like the native round-trip
+suite below. **Coverage caveat:** `SMOKE_CASE_SKIPS_GCC_MACOS` only applies
+on macOS+gcc — sr.ht is Linux gcc and GitHub's macOS runners are clang, so
+on every CI machine that exists today this sub-suite reports "nothing to
+audit on this platform/family" and passes trivially. The coverage it
+actually delivers is on a local macOS run under Homebrew gcc:
 
 ```
-CCCC_AUDIT_NATIVE_SKIPS=1 CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 \
-    python3 tools/comptime_native_smoke.py
+CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 python3 tools/comptime_native_smoke.py --audit-skips
 ```
 
 ### Native round-trip mode (`--native`)
@@ -674,6 +689,9 @@ divergence). `run_tests.py` runs this as its own `[ native_skip_audit ]`
 sub-suite right after the native suite. The recurrence this guard exists
 for — `test_attr_vector_size_variadic.c`/`test_macros_quote_args_splice.c`
 sitting un-deleted after #1018 landed — is still caught and printed.
+`comptime_native_smoke.py`'s own, separate skip table gets the equivalent
+`[ smoke_skip_audit ]` sub-suite right after `comptime_native_smoke` — see
+"Staleness audit (#1197)" above, including its coverage caveat.
 
 ## Architecture build and test workflows
 
@@ -942,21 +960,30 @@ directory). GitHub's build+test jobs (`release.yml`) use `-j 4` rather than
 sr.ht's `-j 8` — hosted runners have fewer cores than the sr.ht builder, and
 parallel-load timing sensitivity is exactly what surfaced #853.
 
-`CC=clang` and `CCCC_NATIVE_CC=clang` must both be set explicitly for the
-`linux-aarch64` job (and are, in `.github/workflows/release.yml`'s `env:`):
-Ubuntu's plain `cc` resolves to gcc, which rejects `-std=c23` (though a
-`-c=native` compile — with no explicit `--std=`, or with one, as of #1073
-— no longer *fails* outright on such a host, since #1053's `-std` ladder
-now probes both the implicit-default and explicit-`--std=` cases; see
-COVERAGE.md's "Serialized-output divergences" section for the ladder it
-falls back through). These are two
-separate compiler-selection mechanisms — `CC` for `make bootstrap`'s
-recursive `make cccc` steps (plain `CC ?= cc` in the Makefile), `CCCC_NATIVE_CC` for `./cccc
---build build.c`'s own internal compiler probe (`cccc_find_native_cc()` in
-`src/vm.c`), which ignores `CC` entirely and otherwise tries `{cc, clang,
-gcc}` on `PATH` in that order. GitHub's `ubuntu-24.04-arm` runner ships a
-pre-installed `cc` (→ gcc), which wins that fallback unless overridden.
-macOS runners don't need either — Apple Clang is already the default `cc`.
+`CC=clang`, `CCCC_BUILD_CC=clang`, and `CCCC_NATIVE_CC=clang` must all be set
+explicitly for the `linux-aarch64` job (and are, in
+`.github/workflows/release.yml`'s `env:`): Ubuntu's plain `cc` resolves to
+gcc, which rejects `-std=c23` (though a `-c=native` compile — with no
+explicit `--std=`, or with one, as of #1073 — no longer *fails* outright on
+such a host, since #1053's `-std` ladder now probes both the
+implicit-default and explicit-`--std=` cases; see COVERAGE.md's
+"Serialized-output divergences" section for the ladder it falls back
+through). These are three separate compiler-selection mechanisms — `CC` for
+`make bootstrap`'s recursive `make cccc` steps (plain `CC ?= cc` in the
+Makefile); `CCCC_BUILD_CC` for `./cccc --build build.c`'s own internal
+compiler probe (`cccc_find_build_cc()` in `src/vm.c`), which compiles/links
+`--build` targets including cccc's own release build; and `CCCC_NATIVE_CC`
+for the *separate* probe (`cccc_find_native_cc()`) `-c=native` hands its
+generated C to, exercised here by `run_tests.py`'s native round-trip suite.
+All three ignore `CC` (and each other) entirely and otherwise try `{cc,
+clang, gcc}` on `PATH` in that order. `CCCC_BUILD_CC` and `CCCC_NATIVE_CC`
+used to be one conflated env var (`CCCC_NATIVE_CC` alone drove both) until
+#1198 split them — pointing `CCCC_NATIVE_CC` at a different compiler family
+to exercise `-c=native` used to silently retarget the compiler that builds
+cccc itself too, which could then fail to link. GitHub's
+`ubuntu-24.04-arm` runner ships a pre-installed `cc` (→ gcc), which wins
+that fallback unless overridden. macOS runners don't need any of the
+three — Apple Clang is already the default `cc`.
 
 ### Known intermittent failures under heavy parallel load
 

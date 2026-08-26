@@ -142,6 +142,14 @@ Cases:
       `@comptime`-routed `#include` itself is never leaked into the output.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
+
+Pass --audit-skips (#1197) to run the SMOKE_CASE_SKIPS_GCC_MACOS staleness
+audit instead of the normal suite: forces every case actually governed by an
+entry on this platform+compiler-family to run with its skip bypassed, and
+exits 1 iff any of them now passes (a stale entry). See audit_skips() below
+and man/TESTING.md's "Skips" section. Unknown args (including this one, when
+absent) are otherwise ignored -- this script always targets the repo-root
+./cccc.
 """
 
 import os
@@ -161,7 +169,8 @@ from pathlib import Path
 # dependent ImportError here would otherwise surface as an opaque suite
 # failure instead of a normal skip.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from testing import smoke_case_skip_reason
+from testing import smoke_case_skip_reason, smoke_entry_applies_here
+from testing.platform import detect_platform, detect_native_cc_family
 
 SHARED_HEADER = (
     "typedef struct Alpha Alpha;\n"
@@ -6551,6 +6560,157 @@ def case_opaque_handle_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# Every case this script runs, in a fixed order matching each case's own
+# hand-maintained case number (see each function's own print()). Hoisted to
+# module scope (#1197) so both main() and audit_skips() below share one
+# source of truth -- previously this was a local inside main()'s
+# `with tempfile.TemporaryDirectory()` block.
+CASES = [
+    case_native_end_to_end,
+    case_dump_expanded_no_attrtarget,
+    case_primary_file_typedefs_stay_distinct,
+    case_no_stderr_noise,
+    case_native_include_of_comptime_routed_file,
+    case_struct_byval_param,
+    case_union_byval_param,
+    case_struct_multi_use_and_byval,
+    case_struct_byval_m_output,
+    case_bodiless_decl_end_to_end,
+    case_bodiless_decl_m_output,
+    case_header_decl_not_reemitted,
+    case_extern_global_m_output,
+    case_accessor_shim_end_to_end,
+    case_accessor_shim_m_output,
+    case_ptr_arith_and_init_end_to_end,
+    case_ptr_arith_and_init_m_output,
+    case_union_largest_member,
+    case_union_largest_member_m_output,
+    case_unserializable_union_hard_errors,
+    case_anon_locals_end_to_end,
+    case_anon_locals_m_output,
+    case_arrays_suite_no_serializer_gaps,
+    case_gvar_builders_generated_output,
+    case_bare_c_defaults_to_native_a_out,
+    case_bare_c_bytecode_defaults_to_a_c4,
+    case_emit_cccc_native_requires_explicit_cc,
+    case_emit_cccc_native_with_explicit_cc,
+    case_emit_cccc_m_output_round_trips,
+    case_test_run_clean_program_compiles,
+    case_test_run_oob_write_refused,
+    case_test_run_basic_level_compiles,
+    case_test_run_bytecode_no_global_contamination,
+    case_testing_bytecode_prepass_compiles,
+    case_testing_native_prepass_compiles,
+    case_testing_failing_suite_refuses_compile,
+    case_testing_build_blocked_by_failing_suite,
+    case_c_generated_defaults_and_aliases,
+    case_anon_union_member_not_va_list,
+    case_generated_no_duplicate_captured_include,
+    case_generated_comptime_include_still_derives,
+    case_generated_forward_decls_hoisted,
+    case_bitops_native_round_trip,
+    case_atomics_native_round_trip,
+    case_computed_goto_native_round_trip,
+    case_complex_native_round_trip,
+    case_convertvector_native_round_trip,
+    case_addr_builtins_native_round_trip,
+    case_asm_native_round_trip,
+    case_complex_nesting_native_round_trip,
+    case_vla_native_round_trip,
+    case_overflow_native_round_trip,
+    case_vla_multidim_native_round_trip,
+    case_vla_addr_native_round_trip,
+    case_vla_row_sub_and_init_native_round_trip,
+    case_vla_partial_init_native_round_trip,
+    case_block_capture_native_round_trip,
+    case_block_mutable_native_round_trip,
+    case_block_nested_copy_native_round_trip,
+    case_block_partial_init_native_round_trip,
+    case_block_local_type_hoist_native_round_trip,
+    case_block_release_no_stdlib_native_round_trip,
+    case_block_release_with_stdlib_native_round_trip,
+    case_block_header_type_capture_native_round_trip,
+    case_block_routed_include_type_capture_native_round_trip,
+    case_block_no_literal_preamble_m_output,
+    case_block_large_struct_capture_round_trip,
+    case_macro_generated_block_locals_round_trip,
+    case_macro_generated_block_generated_output_links,
+    case_generated_embedded_header_no_duplicate,
+    case_generated_embedded_header_comptime_only_still_derives,
+    case_native_embedded_header_include_not_suppressed,
+    case_dandy_vtable_pattern_multi_tu,
+    case_polyfill_header_embedded_round_trip,
+    case_static_name_collision_multi_tu,
+    case_header_static_fn_mixed_path_spelling_1032,
+    case_switch_break_continue_native_round_trip,
+    case_multi_tu_typedef_and_includes_native_round_trip,
+    case_opaque_handle_multi_tu_native_round_trip,
+    case_dup_tag_1014_native_round_trip,
+    case_dup_enum_1015_native_round_trip,
+    case_dup_enum_obj_1016_native_round_trip,
+    case_float_global_init_native_round_trip,
+    case_anon_member_access_native_round_trip,
+    case_typedef_order_native_round_trip,
+    case_unsigned_int64_literal_native_round_trip,
+    case_vector_splat_and_select_native_round_trip,
+    case_comma_arg_native_round_trip,
+    case_dotted_local_native_round_trip,
+    case_global_block_splice_native_round_trip,
+    case_anon_aggregate_typedef_native_round_trip,
+    case_native_always_links_lm,
+    case_const_ptr_native_round_trip,
+    case_comptime_ptr_shadow_native_round_trip,
+    case_header_global_native_round_trip,
+    case_synth_libc_include_native_round_trip,
+    case_comptime_header_not_replayed_native_round_trip,
+    case_synth_typedef_include_native_round_trip,
+    case_setjmp_native_round_trip,
+    case_double_literal_native_round_trip,
+    case_va_list_size_native_round_trip,
+    case_va_list_translation_native_round_trip,
+    case_va_arg_promotion_native_round_trip,
+    case_stdarg_guard_native_round_trip,
+    case_issignaling_native_round_trip,
+    case_native_std_ladder,
+    case_native_defines_survive_argv,
+    case_native_signed_char_argv,
+    case_native_cond_directive_not_replayed,
+    case_flt_rounds_native_round_trip,
+    case_native_explicit_std_probed,
+    case_nested_decl_binding_native_round_trip,
+    case_mb_cur_max_native_round_trip,
+    case_nested_fn_native_round_trip,
+    case_struct_byval_param_copy,
+    case_nested_fn_shadow_native_round_trip,
+    case_f2i_native_round_trip,
+    case_ctor_dtor_native_round_trip,
+    case_attribute_survives_after_stdio_include,
+    case_va_list_param_native_round_trip,
+    case_va_list_libc_call_native_round_trip,
+    case_pthread_native_round_trip,
+    case_byval_member_order_native_round_trip,
+    case_offsetof_array_len_native_round_trip,
+    case_static_libc_collision_native_round_trip,
+    case_layout_const_native_round_trip,
+    case_static_label_table_native_round_trip,
+    case_bundled_header_bodiless_decl_no_include_dir,
+    case_layout_const_sites_native_round_trip,
+    case_static_assert_native_round_trip,
+    case_sizeof_only_aggregate_native_round_trip,
+    case_scalar_member_not_host_owned_native_round_trip,
+    case_scalar_host_divergent_native_round_trip,
+    case_block_in_nested_native_round_trip,
+    case_nested_fn_in_block_native_round_trip,
+    case_typedef_identity_native_round_trip,
+    case_threads_native_round_trip,
+    case_native_emoji_macro_define_not_replayed,
+    case_atomic_fetch_cas_loop_native_round_trip,
+    case_atomic_fence_native_round_trip,
+    case_atomic_var_init_native_round_trip,
+    case_opaque_handle_native_round_trip,
+]
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -6562,150 +6722,7 @@ def main() -> int:
         return 1
 
     with tempfile.TemporaryDirectory() as tmp:
-        cases = [
-            case_native_end_to_end,
-            case_dump_expanded_no_attrtarget,
-            case_primary_file_typedefs_stay_distinct,
-            case_no_stderr_noise,
-            case_native_include_of_comptime_routed_file,
-            case_struct_byval_param,
-            case_union_byval_param,
-            case_struct_multi_use_and_byval,
-            case_struct_byval_m_output,
-            case_bodiless_decl_end_to_end,
-            case_bodiless_decl_m_output,
-            case_header_decl_not_reemitted,
-            case_extern_global_m_output,
-            case_accessor_shim_end_to_end,
-            case_accessor_shim_m_output,
-            case_ptr_arith_and_init_end_to_end,
-            case_ptr_arith_and_init_m_output,
-            case_union_largest_member,
-            case_union_largest_member_m_output,
-            case_unserializable_union_hard_errors,
-            case_anon_locals_end_to_end,
-            case_anon_locals_m_output,
-            case_arrays_suite_no_serializer_gaps,
-            case_gvar_builders_generated_output,
-            case_bare_c_defaults_to_native_a_out,
-            case_bare_c_bytecode_defaults_to_a_c4,
-            case_emit_cccc_native_requires_explicit_cc,
-            case_emit_cccc_native_with_explicit_cc,
-            case_emit_cccc_m_output_round_trips,
-            case_test_run_clean_program_compiles,
-            case_test_run_oob_write_refused,
-            case_test_run_basic_level_compiles,
-            case_test_run_bytecode_no_global_contamination,
-            case_testing_bytecode_prepass_compiles,
-            case_testing_native_prepass_compiles,
-            case_testing_failing_suite_refuses_compile,
-            case_testing_build_blocked_by_failing_suite,
-            case_c_generated_defaults_and_aliases,
-            case_anon_union_member_not_va_list,
-            case_generated_no_duplicate_captured_include,
-            case_generated_comptime_include_still_derives,
-            case_generated_forward_decls_hoisted,
-            case_bitops_native_round_trip,
-            case_atomics_native_round_trip,
-            case_computed_goto_native_round_trip,
-            case_complex_native_round_trip,
-            case_convertvector_native_round_trip,
-            case_addr_builtins_native_round_trip,
-            case_asm_native_round_trip,
-            case_complex_nesting_native_round_trip,
-            case_vla_native_round_trip,
-            case_overflow_native_round_trip,
-            case_vla_multidim_native_round_trip,
-            case_vla_addr_native_round_trip,
-            case_vla_row_sub_and_init_native_round_trip,
-            case_vla_partial_init_native_round_trip,
-            case_block_capture_native_round_trip,
-            case_block_mutable_native_round_trip,
-            case_block_nested_copy_native_round_trip,
-            case_block_partial_init_native_round_trip,
-            case_block_local_type_hoist_native_round_trip,
-            case_block_release_no_stdlib_native_round_trip,
-            case_block_release_with_stdlib_native_round_trip,
-            case_block_header_type_capture_native_round_trip,
-            case_block_routed_include_type_capture_native_round_trip,
-            case_block_no_literal_preamble_m_output,
-            case_block_large_struct_capture_round_trip,
-            case_macro_generated_block_locals_round_trip,
-            case_macro_generated_block_generated_output_links,
-            case_generated_embedded_header_no_duplicate,
-            case_generated_embedded_header_comptime_only_still_derives,
-            case_native_embedded_header_include_not_suppressed,
-            case_dandy_vtable_pattern_multi_tu,
-            case_polyfill_header_embedded_round_trip,
-            case_static_name_collision_multi_tu,
-            case_header_static_fn_mixed_path_spelling_1032,
-            case_switch_break_continue_native_round_trip,
-            case_multi_tu_typedef_and_includes_native_round_trip,
-            case_opaque_handle_multi_tu_native_round_trip,
-            case_dup_tag_1014_native_round_trip,
-            case_dup_enum_1015_native_round_trip,
-            case_dup_enum_obj_1016_native_round_trip,
-            case_float_global_init_native_round_trip,
-            case_anon_member_access_native_round_trip,
-            case_typedef_order_native_round_trip,
-            case_unsigned_int64_literal_native_round_trip,
-            case_vector_splat_and_select_native_round_trip,
-            case_comma_arg_native_round_trip,
-            case_dotted_local_native_round_trip,
-            case_global_block_splice_native_round_trip,
-            case_anon_aggregate_typedef_native_round_trip,
-            case_native_always_links_lm,
-            case_const_ptr_native_round_trip,
-            case_comptime_ptr_shadow_native_round_trip,
-            case_header_global_native_round_trip,
-            case_synth_libc_include_native_round_trip,
-            case_comptime_header_not_replayed_native_round_trip,
-            case_synth_typedef_include_native_round_trip,
-            case_setjmp_native_round_trip,
-            case_double_literal_native_round_trip,
-            case_va_list_size_native_round_trip,
-            case_va_list_translation_native_round_trip,
-            case_va_arg_promotion_native_round_trip,
-            case_stdarg_guard_native_round_trip,
-            case_issignaling_native_round_trip,
-            case_native_std_ladder,
-            case_native_defines_survive_argv,
-            case_native_signed_char_argv,
-            case_native_cond_directive_not_replayed,
-            case_flt_rounds_native_round_trip,
-            case_native_explicit_std_probed,
-            case_nested_decl_binding_native_round_trip,
-            case_mb_cur_max_native_round_trip,
-            case_nested_fn_native_round_trip,
-            case_struct_byval_param_copy,
-            case_nested_fn_shadow_native_round_trip,
-            case_f2i_native_round_trip,
-            case_ctor_dtor_native_round_trip,
-            case_attribute_survives_after_stdio_include,
-            case_va_list_param_native_round_trip,
-            case_va_list_libc_call_native_round_trip,
-            case_pthread_native_round_trip,
-            case_byval_member_order_native_round_trip,
-            case_offsetof_array_len_native_round_trip,
-            case_static_libc_collision_native_round_trip,
-            case_layout_const_native_round_trip,
-            case_static_label_table_native_round_trip,
-            case_bundled_header_bodiless_decl_no_include_dir,
-            case_layout_const_sites_native_round_trip,
-            case_static_assert_native_round_trip,
-            case_sizeof_only_aggregate_native_round_trip,
-            case_scalar_member_not_host_owned_native_round_trip,
-            case_scalar_host_divergent_native_round_trip,
-            case_block_in_nested_native_round_trip,
-            case_nested_fn_in_block_native_round_trip,
-            case_typedef_identity_native_round_trip,
-            case_threads_native_round_trip,
-            case_native_emoji_macro_define_not_replayed,
-            case_atomic_fetch_cas_loop_native_round_trip,
-            case_atomic_fence_native_round_trip,
-            case_atomic_var_init_native_round_trip,
-            case_opaque_handle_native_round_trip,
-        ]
+        cases = CASES
         results = []
         for case in cases:
             reason = smoke_case_skip_reason(case.__name__)
@@ -6730,5 +6747,62 @@ def main() -> int:
     return 0
 
 
+def audit_skips() -> int:
+    """Behavioural staleness audit for SMOKE_CASE_SKIPS_GCC_MACOS (#1197),
+    mirroring _print_native_skip_audit()'s STALE/KEPT contract
+    (tools/testing/cli.py) for the NATIVE_SKIP_TESTS* filename-keyed tables.
+
+    Unlike a plain CCCC_AUDIT_NATIVE_SKIPS=1 run of main() -- which just
+    un-skips every applicable case and inverts pass/fail into the ordinary
+    "N passed"/"FAILED" report -- this classifies each case actually
+    governed by an entry on this platform+family as STALE (it now passes
+    with the table bypassed; delete the entry) or justified (still fails;
+    the entry is earning its keep), and exits nonzero only for the former.
+    That's the verdict tools/run_tests.py's smoke_skip_audit sub-suite
+    needs to hard-fail on real staleness the way native_skip_audit already
+    does for the other tables.
+
+    Restricts itself to cases smoke_entry_applies_here() says are actually
+    governed here -- on any platform/family other than macOS+gcc that's
+    every case, so this reports "nothing to audit" rather than a false
+    all-clear.
+    """
+    root = Path(__file__).parent.parent.resolve()
+    cccc = root / "cccc"
+    if not cccc.exists():
+        print(f"  FAIL: {cccc.name} not found — run 'make' first.")
+        return 1
+
+    platform = detect_platform()
+    family = detect_native_cc_family()
+    audited = [c for c in CASES if smoke_entry_applies_here(c.__name__, platform, family)]
+
+    print()
+    print("=== comptime_native_smoke.py --audit-skips report (#1197) ===")
+    if not audited:
+        print(f"nothing to audit on this platform/family ({platform}/{family}) -- "
+              f"SMOKE_CASE_SKIPS_GCC_MACOS only applies on macos/gcc")
+        return 0
+
+    os.environ["CCCC_AUDIT_NATIVE_SKIPS"] = "1"
+    stale, justified = [], []
+    with tempfile.TemporaryDirectory() as tmp:
+        for case in audited:
+            ok = case(cccc, tmp)
+            (stale if ok else justified).append(case.__name__)
+
+    if stale:
+        print(f"STALE ({len(stale)}) -- now pass; delete the skip entry:")
+        for name in stale:
+            print(f"  {name}")
+    if justified:
+        print(f"KEPT, still fails with the table bypassed ({len(justified)}) -- "
+              f"entry is not stale:")
+        for name in justified:
+            print(f"  {name}")
+    print("=" * 44)
+    return 1 if stale else 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(audit_skips() if "--audit-skips" in sys.argv else main())

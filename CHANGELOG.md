@@ -5,6 +5,39 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `CCCC_NATIVE_CC` used to select both `-c=native`'s guest host compiler AND
+  the compiler `--build` uses to compile/link cccc's own object files, via a
+  shared `cccc_find_native_cc()` resolver. Setting it to exercise `-c=native`
+  under a different compiler family (e.g. Homebrew gcc-16 on macOS) silently
+  retargeted the bootstrap build too, which then failed to link with 53
+  duplicate symbol errors (`___toupper_l` etc., every `posix_*.o`). Split
+  into a separate `CCCC_BUILD_CC` env var (`cccc_find_build_cc()`,
+  `src/vm.c`) that `effective_cc_for_target()` (`src/build.c`) now falls
+  through to; `CCCC_NATIVE_AR`/`CCCC_NATIVE_LD` renamed to
+  `CCCC_BUILD_AR`/`CCCC_BUILD_LD` to match (already build-mode-only). The
+  `--build-cache` Level 1 mtime fast path's per-target stamp
+  (`<objdir>/.cccc-arch`, #730) is now `<objdir>/.cccc-toolchain` and folds
+  in the resolved compiler path alongside the host-arch tag, so a build dir
+  reused across compiler families invalidates the same way it already did
+  across architectures. The gcc-on-macOS duplicate-symbol link failure
+  itself (reachable via an explicit `--build-cc=`/`CCCC_BUILD_CC=` pointed at
+  gcc) is a separate, still-open follow-up.
+- `tools/comptime_native_smoke.py`'s own skip table
+  (`SMOKE_CASE_SKIPS_GCC_MACOS`, #1196) had a `CCCC_AUDIT_NATIVE_SKIPS=1`
+  bypass but no staleness *verdict* — a stale entry surfaced as the whole
+  script passing, a still-valid one as it failing, inverted from what
+  `--native-audit-skips` reports for the filename-keyed tables. Added
+  `comptime_native_smoke.py --audit-skips` (`smoke_entry_applies_here()`,
+  `tools/testing/__init__.py`), which runs only the cases an entry actually
+  governs on this platform+compiler-family and reports STALE/KEPT the same
+  way; wired into `run_tests.py` as a new `[ smoke_skip_audit ]` sub-suite
+  right after `comptime_native_smoke`. `SMOKE_CASE_SKIPS_GCC_MACOS` only
+  applies on macOS+gcc, so on sr.ht (Linux gcc) and GitHub's macOS (clang)
+  runners this sub-suite reports "nothing to audit" — the coverage it
+  delivers is on a local macOS+gcc-16 run.
+
 ## [0.3.13] - 2026-08-26
 
 ### Fixed

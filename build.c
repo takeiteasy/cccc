@@ -30,7 +30,10 @@
 //   needed to run it) macos_x86_64_smoke       + Rosetta smoke test + the
 //   build_cache_arch_smoke guard macos_x86_64_test        + full test suite
 //   (source, --c4, host-signal debugger) build_cache_arch_smoke   #730
-//   regression guard (native vs. cross --build-cache reuse) linux_amd64_build /
+//   regression guard (native vs. cross --build-cache reuse)
+//   build_cache_toolchain_smoke   #1198 regression guard (same-arch,
+//   different-compiler-family --build-cache reuse; skips if only one
+//   compiler family is on PATH) linux_amd64_build /
 //   linux_aarch64_build    build the Colima container image linux_amd64_smoke /
 //   linux_aarch64_smoke    + container arch/exit-42 sanity check
 //   linux_amd64_test / linux_aarch64_test      + full test suite (amd64 is
@@ -992,6 +995,58 @@ BuildTarget *build_cache_arch_smoke(Builder *ctx) {
         return RunCustom(ctx, "build-cache-arch-smoke", "false");
     }
     return make_build_cache_arch_smoke(ctx, NULL);
+}
+
+// #1198 regression guard, platform-agnostic sibling to build_cache_arch_
+// smoke above: reusing the same --build-cache across two DIFFERENT
+// COMPILER FAMILIES (not architectures) must not serve the wrong family's
+// objects to the link step off the Level 1 mtime fast path. Builds
+// tests/test_build_cache.c into a shared --build-cache dir three times --
+// default compiler, same compiler again (must cache-hit), then
+// --build-cc=<other family> (must NOT cache-hit, i.e. must actually
+// recompile) -- via a single freshly-built "cccc" so the smoke isn't at the
+// mercy of a possibly-stale repo-root ./cccc. Skips cleanly (not a failure)
+// if only one compiler family is reachable on PATH.
+[[cccc::build_target]]
+BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
+    const char *other_cc = CaptureCommand(
+        ctx, "sh -c 'if cc --version 2>/dev/null | grep -qi clang; then "
+             "command -v gcc-16 || command -v gcc-15 || command -v gcc-14 "
+             "|| command -v gcc-13 || command -v gcc; "
+             "else command -v clang; fi'");
+    if (!other_cc || !*other_cc) {
+        fprintf(stderr, "build: build_cache_toolchain_smoke skipped (only "
+                        "one compiler family on PATH)\n");
+        return RunCustom(ctx, "build-cache-toolchain-smoke", "true");
+    }
+
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+
+    // The vendored RunCustom shell (build_shell.c) has no `!`/`$?` -- so
+    // "did NOT cache-hit" is checked positively instead: a real recompile
+    // under the other compiler prints that compiler's own path in its
+    // command line (the vendored shell's "(cached)"/"(up to date)" lines
+    // never do), so grep FOR other_cc rather than grep -v/! for "(cached)".
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
+             "rm -rf build/build_cache_toolchain_smoke && "
+             "%s -I./include --build "
+             "--build-out-dir=build/build_cache_toolchain_smoke --build-cache "
+             "tests/test_build_cache.c >/dev/null && "
+             "%s -I./include --build "
+             "--build-out-dir=build/build_cache_toolchain_smoke --build-cache "
+             "tests/test_build_cache.c | grep -q '(cached)' && "
+             "%s -I./include --build "
+             "--build-out-dir=build/build_cache_toolchain_smoke --build-cache "
+             "--build-cc=%s tests/test_build_cache.c | grep -q -- '%s' && "
+             "rm -rf build/build_cache_toolchain_smoke && "
+             "echo 'build-cache-toolchain-smoke: OK'",
+             TargetOutput(cccc), TargetOutput(cccc), TargetOutput(cccc),
+             other_cc, other_cc);
+    BuildTarget *step = RunCustom(ctx, "build-cache-toolchain-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]

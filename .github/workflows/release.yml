@@ -35,13 +35,19 @@ jobs:
       # the tag being (re)released.
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       # ubuntu-24.04's preinstalled `cc` is gcc, which rejects -std=c23
-      # ("did you mean -std=c2x?"). Two separate compiler-selection
+      # ("did you mean -std=c2x?"). Three separate compiler-selection
       # mechanisms need overriding, not one: CC for the stage0 Makefile's
       # `CC ?= cc` (exported job env propagates through recursive $(MAKE)),
-      # and CCCC_NATIVE_CC for build.c's own internal compiler probe
-      # (cccc_find_native_cc(), src/vm.c), which ignores CC entirely and
-      # otherwise tries {cc, clang, gcc} on PATH in that order.
+      # CCCC_BUILD_CC for build.c's own internal compiler probe
+      # (cccc_find_build_cc(), src/vm.c) that compiles/links --build targets
+      # (including cccc's own release build below), and CCCC_NATIVE_CC for
+      # the SEPARATE probe (cccc_find_native_cc()) -c=native hands its
+      # generated C to, which run_tests.py's native round-trip suite
+      # exercises. All three ignore each other entirely and otherwise try
+      # {cc, clang, gcc} on PATH in that order (#1198 split CCCC_BUILD_CC
+      # out of what CCCC_NATIVE_CC used to also cover).
       CC: clang
+      CCCC_BUILD_CC: clang
       CCCC_NATIVE_CC: clang
     steps:
       - uses: actions/checkout@v4
@@ -73,9 +79,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      # See linux-amd64's comment above for why both CC and CCCC_NATIVE_CC
-      # need overriding on this runner image too.
+      # See linux-amd64's comment above for why CC, CCCC_BUILD_CC, and
+      # CCCC_NATIVE_CC all need overriding on this runner image too.
       CC: clang
+      CCCC_BUILD_CC: clang
       CCCC_NATIVE_CC: clang
     steps:
       - uses: actions/checkout@v4

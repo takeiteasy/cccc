@@ -577,6 +577,8 @@ unsigned char *read_binary_file(VirtualMachine *vm, char *path,
 
 char *cccc_path_find_executable(const char *name);
 char *cccc_find_native_cc(void);
+char *cccc_find_build_cc(
+    void); // #1198: --build's own compiler, separate from -c=native's
 void define_std_macros(VirtualMachine *vm);
 char *get_std_header(char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);

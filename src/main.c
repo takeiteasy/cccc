@@ -635,6 +635,10 @@ static void usage(const char *argv0, int exit_code) {
            "aarch64-linux-gnu; clang only)\n");
     printf("\t   --build-cc=COMPILER   Override CC binary for all targets "
            "(e.g. aarch64-linux-gnu-gcc)\n");
+    printf("\t                         Env equivalent: CCCC_BUILD_CC (else "
+           "cc/clang/gcc PATH search --\n");
+    printf("\t                         separate from -c=native's own "
+           "CCCC_NATIVE_CC)\n");
     printf("\t   --build-cache[=PATH]  Enable incremental builds: "
            "mtime+content-hash cache.\n");
     printf("\t                         Default cache dir: "

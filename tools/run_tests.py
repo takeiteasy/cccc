@@ -22,6 +22,10 @@ Sub-suites:
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
+  smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
+                        own SMOKE_CASE_SKIPS_GCC_MACOS (ticket #1197); reports
+                        "nothing to audit" on any platform/family other than
+                        macOS+gcc, since that's the only axis the table covers
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   audit_test_headers  — tests/**/*.c CCCC_*/EXPECT_* header directive damage audit (ticket #1153)
   test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
@@ -450,6 +454,55 @@ def _run_comptime_native_suite():
         return f"FAILED ({e})", False
 
 
+def _run_smoke_skip_audit_suite(process_timeout=None):
+    """Run comptime_native_smoke.py's own #1197 staleness audit
+    (--audit-skips) and hard-fail if it reports a stale
+    SMOKE_CASE_SKIPS_GCC_MACOS entry. A subprocess, not an in-process
+    importlib call like _run_comptime_native_suite() above, for the exact
+    same reason _run_native_skip_audit_suite() is a subprocess: --audit-skips
+    sets CCCC_AUDIT_NATIVE_SKIPS in its own process environment, and
+    isolating that avoids leaking it into any suite that runs after this one
+    in the same process (comptime_native_smoke's own ordinary run included,
+    since run_tests.py loads that one in-process). Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "comptime_native_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    cmd = [sys.executable, str(script), "--audit-skips"]
+    try:
+        result = run_capture(cmd, timeout=(process_timeout + 120) if process_timeout else None)
+    except subprocess.TimeoutExpired:
+        return "audit subprocess timed out (wedged)", False
+    if result.returncode == 0:
+        # Either every SMOKE_CASE_SKIPS_GCC_MACOS entry still fails with the
+        # table bypassed (justified), or nothing here applies to this
+        # platform/family at all (true on every CI machine that exists
+        # today -- the table only covers macOS+gcc). Report the "nothing to
+        # audit"/"KEPT, ..." summary line, not audit_skips()'s closing
+        # "====" rule -- the last non-empty line when a case actually ran
+        # (and printed its own multi-line FAIL detail first) is that rule,
+        # not the verdict.
+        lines = result.stdout.splitlines()
+        summary = next((l for l in lines
+                         if l.startswith("nothing to audit")
+                         or l.startswith("KEPT,")), None)
+        return summary or "no stale SMOKE_CASE_SKIPS_GCC_MACOS entries", True
+    if "STALE (" in result.stdout:
+        lines = result.stdout.splitlines()
+        start = next((i for i, l in enumerate(lines) if l.startswith("STALE (")), None)
+        if start is None:
+            tail = "\n".join(lines[-40:])
+            return f"stale skip entries found (see man/TESTING.md):\n{tail}", False
+        end = start + 1
+        while end < len(lines) and not lines[end].startswith(("KEPT,", "====")):
+            end += 1
+        stale_section = "\n".join(lines[start:end])
+        return f"stale skip entries found (see man/TESTING.md):\n{stale_section}", False
+    tail = "\n".join((result.stdout + result.stderr).splitlines()[-40:])
+    return f"audit subprocess failed unexpectedly (exit {result.returncode}), not a staleness finding:\n{tail}", False
+
+
 def _run_audit_ffi_suite():
     """Run the src/stdlib FFI registration audit (#784).
 
@@ -855,6 +908,18 @@ def main():
     ctn_status, ok_ctn = _run_comptime_native_suite()
     print(f"  {ctn_status}")
     suite_results["comptime_native_smoke"] = ok_ctn
+
+    # --- Smoke-case skip-table staleness audit (#1197) ---
+    # Gated on --no-native, unlike comptime_native_smoke above: this sub-
+    # suite's whole job is re-running skipped cases with CCCC_AUDIT_NATIVE_
+    # SKIPS=1, i.e. exercising -c=native a second time, so it makes no sense
+    # to run when --no-native says not to.
+    if not args.no_native:
+        print()
+        print("[ smoke_skip_audit ]")
+        smoke_audit_status, ok_smoke_audit = _run_smoke_skip_audit_suite(timeout)
+        print(f"  {smoke_audit_status}")
+        suite_results["smoke_skip_audit"] = ok_smoke_audit
 
     # --- FFI registration audit ---
     print()

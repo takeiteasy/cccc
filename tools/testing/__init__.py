@@ -788,6 +788,23 @@ def smoke_case_skip_reason(case_key, platform=None, family=None):
     return None
 
 
+def smoke_entry_applies_here(case_key, platform=None, family=None):
+    """True if `case_key` has a SMOKE_CASE_SKIPS_GCC_MACOS entry that actually
+    governs it on THIS run's platform+compiler-family combination -- i.e. the
+    entry is the reason this case would otherwise be skipped here, so running
+    it with the table bypassed is a meaningful staleness check. Mirrors
+    _entry_applies_here() (tools/testing/cli.py) for the filename-keyed
+    tables, but deliberately does NOT consult native_audit_skips_enabled()
+    (#1197): the audit needs to know which entries govern this run precisely
+    *while* the CCCC_AUDIT_NATIVE_SKIPS=1 bypass is active, unlike
+    smoke_case_skip_reason() which must stop applying the table under audit.
+    """
+    platform = platform if platform is not None else detect_platform()
+    family = family if family is not None else detect_native_cc_family()
+    return (platform == "macos" and family == "gcc"
+            and case_key in SMOKE_CASE_SKIPS_GCC_MACOS)
+
+
 # CLI flags that -c=native drops with a warning rather than enforcing
 # (#935's VM-only-enforcement decision) -- exercising them natively would
 # silently test nothing, so they're skipped rather than run with the safety

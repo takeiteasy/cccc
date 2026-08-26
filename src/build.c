@@ -1416,14 +1416,22 @@ Token *cc_inject_build_header(VirtualMachine *vm) {
 // Determine the effective compiler binary for a target:
 //   1. t->cc_override (per-target SetToolchain)
 //   2. ctx->cross_cc  (global --build-cc)
-//   3. cccc_find_native_cc() (system default)
+//   3. cccc_find_build_cc() (CCCC_BUILD_CC env var, else system default)
 // Returns a newly-allocated string; caller must free.
+//
+// #1198: this used to fall through to cccc_find_native_cc() (CCCC_NATIVE_CC)
+// -- the same resolver -c=native uses for the GUEST host compiler -- so
+// setting CCCC_NATIVE_CC to exercise -c=native under a different compiler
+// family (e.g. Homebrew gcc-16 on macOS) silently retargeted the compiler
+// that builds cccc's OWN object files too, which then failed to link.
+// cccc_find_build_cc() is a separate resolver reading its own CCCC_BUILD_CC
+// env var, so the two are independent again.
 static char *effective_cc_for_target(const Builder *ctx, const BuildTarget *t) {
     if (t->cc_override && *t->cc_override)
         return xstrdup(t->cc_override);
     if (ctx->cross_cc && *ctx->cross_cc)
         return xstrdup(ctx->cross_cc);
-    return cccc_find_native_cc();
+    return cccc_find_build_cc();
 }
 
 // Push --target=<triple> to args when a cross-compilation triple is in effect.
@@ -1877,32 +1885,43 @@ static int custom_target_is_current(const BuildTarget *t) {
     return 1;
 }
 
-// Per-target arch stamp (<objdir>/.cccc-arch): guards the Level 1 mtime fast
-// path against serving objects that a different-arch cccc binary compiled
-// into the same reused build/cache directory (#730). The mtime check alone
-// never consults the cache key, so without this stamp it would happily
-// "cache hit" a wrong-arch .o that is merely newer than its source.
-static int arch_stamp_matches(const char *objdir) {
+// Per-target toolchain stamp (<objdir>/.cccc-toolchain): guards the Level 1
+// mtime fast path against serving objects that a different-arch OR
+// different-compiler cccc build produced into the same reused build/cache
+// directory (#730, widened by #1198). The mtime check alone never consults
+// the cache key, so without this stamp it would happily "cache hit" a
+// wrong-arch/wrong-toolchain .o that is merely newer than its source. Level
+// 2 (the CAS) already discriminates by compiler, since build_compile_argv()
+// puts the resolved `cc` path in argv[0] and source_cache_key() hashes argv
+// -- this stamp only needed to grow because Level 1 never looks at argv at
+// all. Content is two lines: CCCC_HOST_ARCH_TAG, then the resolved compiler
+// path. Compiler *version* drift on an unchanged path (e.g. `brew upgrade
+// gcc`) still isn't caught -- same gap as before #1198, out of scope here.
+static int toolchain_stamp_matches(const char *objdir, const char *cc) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/.cccc-arch", objdir);
+    snprintf(path, sizeof(path), "%s/.cccc-toolchain", objdir);
     FILE *f = fopen(path, "rb");
     if (!f)
         return 0;
-    char   buf[64] = {0};
-    size_t n       = fread(buf, 1, sizeof(buf) - 1, f);
+    char   buf[1024] = {0};
+    size_t n         = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
     while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
         buf[--n] = '\0';
-    return strcmp(buf, CCCC_HOST_ARCH_TAG) == 0;
+    size_t arch_len = strlen(CCCC_HOST_ARCH_TAG);
+    if (strncmp(buf, CCCC_HOST_ARCH_TAG, arch_len) != 0 ||
+        buf[arch_len] != '\n')
+        return 0;
+    return strcmp(buf + arch_len + 1, cc) == 0;
 }
 
-static void arch_stamp_write(const char *objdir) {
+static void toolchain_stamp_write(const char *objdir, const char *cc) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/.cccc-arch", objdir);
+    snprintf(path, sizeof(path), "%s/.cccc-toolchain", objdir);
     FILE *f = fopen(path, "wb");
     if (!f)
         return;
-    fputs(CCCC_HOST_ARCH_TAG, f);
+    fprintf(f, "%s\n%s", CCCC_HOST_ARCH_TAG, cc);
     fclose(f);
 }
 
@@ -2215,14 +2234,17 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
                            int total) {
     StringArray owned = {0};
 
-    // Level 1 (mtime fast path) is only trusted when this objdir's arch
-    // stamp matches the arch cccc itself is running as; otherwise a reused
-    // build dir from a different-arch cccc binary would look "up to date"
-    // by mtime alone (#730). On mismatch/first-use, (re)write the stamp so
-    // subsequent builds in this objdir can use the fast path again.
-    int arch_ok = ctx->cache_dir && arch_stamp_matches(objdir);
-    if (ctx->cache_dir && !arch_ok && !ctx->dry_run)
-        arch_stamp_write(objdir);
+    // Level 1 (mtime fast path) is only trusted when this objdir's toolchain
+    // stamp matches both the arch cccc itself is running as AND the
+    // compiler resolved for this build; otherwise a reused build dir from a
+    // different-arch cccc binary, or the same arch under a different
+    // compiler (#1198: e.g. clang then gcc-16 into the same --build-cache),
+    // would look "up to date" by mtime alone (#730). On mismatch/first-use,
+    // (re)write the stamp so subsequent builds in this objdir can use the
+    // fast path again.
+    int toolchain_ok = ctx->cache_dir && toolchain_stamp_matches(objdir, cc);
+    if (ctx->cache_dir && !toolchain_ok && !ctx->dry_run)
+        toolchain_stamp_write(objdir, cc);
 
 #ifdef _POSIX_VERSION
     int jobs = ctx->jobs > 1 ? ctx->jobs : 1;
@@ -2314,7 +2336,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
 
             // Level 1: mtime check — skip recompile when ofile (and every
             // header prerequisite recorded in dfile) is up to date.
-            if (ctx->cache_dir && arch_ok &&
+            if (ctx->cache_dir && toolchain_ok &&
                 ofile_is_current(ofile, src, dfile)) {
                 if (!ctx->quiet || ctx->verbose)
                     printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
@@ -2408,7 +2430,7 @@ serial_fallback:;
 
         // Level 1: mtime check — skip recompile when ofile (and every header
         // prerequisite recorded in dfile) is up to date.
-        if (ctx->cache_dir && !ctx->dry_run && arch_ok &&
+        if (ctx->cache_dir && !ctx->dry_run && toolchain_ok &&
             ofile_is_current(ofile, src, dfile)) {
             if (!ctx->quiet || ctx->verbose)
                 printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
@@ -3174,7 +3196,15 @@ static int run_graph(Builder *ctx, BuildTarget *only) {
         return 1;
     }
 
-    char *cc = cccc_find_native_cc();
+    // #1198: was cccc_find_native_cc() -- the -c=native guest-compiler
+    // resolver, unrelated to --build. cccc_find_build_cc() reads its own
+    // CCCC_BUILD_CC instead. This still resolves (and hard-fails on) a
+    // global default even when every target already has its own
+    // cc_override or ctx->cross_cc (--build-cc=) covers it -- a real gap
+    // (a bogus/missing CCCC_BUILD_CC can abort a build that never needed
+    // it), but narrower and pre-existing; left as-is rather than growing
+    // this change, see the CCCC_BUILD_CC follow-up ticket.
+    char *cc = cccc_find_build_cc();
     if (!cc) {
         free(order);
         ctx->failed = 1;

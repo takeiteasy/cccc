@@ -10,19 +10,22 @@ packages:
 sources:
   - https://git.sr.ht/~takeiteasy/cccc
 environment:
-  # #1186: CC only selects the compiler that builds cccc ITSELF (clang,
-  # here). It has no bearing on -c=native's own host-compiler choice --
-  # that's a separate, unpinned lookup (cccc_find_native_cc(), src/vm.c:
-  # $CCCC_NATIVE_CC, else PATH search for cc/clang/gcc in that order) run
-  # fresh for every native compile, and this image's `cc` resolves to
-  # distro gcc. Deliberately left unpinned rather than set to match CC:
-  # gcc's own presence in `packages` above (added by #1186) is only to
-  # make its version legible in the job log, not to force it -- an
-  # unpinned gcc alongside clang is exactly what caught the FTS/DIR/DBM
-  # opaque-handle bug (#1186) in the first place, and the native suite's
-  # skip tables are now keyed by compiler family (NATIVE_SKIP_TESTS_CLANG/
-  # _GCC, tools/testing/__init__.py) specifically so both sides of this
-  # split stay covered instead of being flattened to one.
+  # #1186: CC only selects the compiler for the stage0 Makefile's `make
+  # bootstrap`/`make cccc` (clang, here). It has no bearing on either of
+  # `./cccc --build`'s own two internal compiler probes -- CCCC_BUILD_CC
+  # (compiles/links --build targets, i.e. this job's own `./cccc --build
+  # build.c` below) and CCCC_NATIVE_CC (the SEPARATE probe -c=native hands
+  # its generated C to, exercised by run_tests.py's native round-trip
+  # suite) -- split into two env vars by #1198, previously one conflated
+  # CCCC_NATIVE_CC. Both are deliberately left unpinned here rather than
+  # set to match CC: this image's `cc` resolves to distro gcc, and gcc's
+  # own presence in `packages` above (added by #1186) is only to make its
+  # version legible in the job log, not to force it -- an unpinned gcc
+  # alongside clang is exactly what caught the FTS/DIR/DBM opaque-handle
+  # bug (#1186) in the first place, and the native suite's skip tables are
+  # now keyed by compiler family (NATIVE_SKIP_TESTS_CLANG/_GCC,
+  # tools/testing/__init__.py) specifically so both sides of this split
+  # stay covered instead of being flattened to one.
   CC: clang
 tasks:
   - bootstrap: |

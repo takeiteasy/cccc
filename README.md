@@ -158,6 +158,8 @@ Build Options:
 	   --build-profile=NAME  Set build profile: debug | release | relwithdebinfo | minsizerel
 	   --build-triple=TRIPLE Cross-compile target triple (e.g. aarch64-linux-gnu; clang only)
 	   --build-cc=COMPILER   Override CC binary for all targets (e.g. aarch64-linux-gnu-gcc)
+	                         Env equivalent: CCCC_BUILD_CC (else cc/clang/gcc PATH search --
+	                         separate from -c=native's own CCCC_NATIVE_CC)
 	   --build-cache[=PATH]  Enable incremental builds: mtime+content-hash cache.
 	                         Default cache dir: <out-dir>/.cccc-cache
 	   --build-option=K=V    Pass a typed build option to the build script (GetBuildOption/HaveBuildOption).
