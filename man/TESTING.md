@@ -18,7 +18,7 @@ Run each group independently:
 python3 tools/tests.py --suites     # framework suites only (tests/suites/)
 python3 tools/tests.py --legacy     # legacy single-file tests only (tests/)
 python3 tools/tests.py              # all tests in both directories
-python3 tools/run_tests.py          # unified orchestrator (source + c4 + debugger + repl + debugger_condition + debugger_print + sqlite + header_resolution_smoke + comptime_native_smoke + audit_ffi + reflection_ffi_check + audit_reflection_enums)
+python3 tools/run_tests.py          # unified orchestrator (22 sub-suites -- source, c4, native, audits, PTY/smoke integrations, unit tests; see below)
 
 ./cccc --build build.c --build-target=test_suites   # build + run framework suites
 ./cccc --build build.c --build-target=test_legacy   # build + run legacy tests
@@ -41,25 +41,57 @@ that cannot yet be expressed in the framework (e.g. those combining warning
 flags with `--std=` at file scope) remain as standalone files in `tests/`.
 
 `./cccc --build build.c --build-target=test` calls `tools/run_tests.py`,
-which is the unified orchestrator. It
-runs 13 sub-suites in sequence: source mode, `.c4` round-trip, the macOS
-host-signal debugger integration (skipped on other platforms), the interactive
-REPL PTY integration (`tools/test_repl.py`, POSIX-only -- skipped on Windows),
-the conditional-breakpoint PTY integration (`tools/test_debugger_condition.py`,
-same POSIX-only gating), the debugger `print` command PTY integration
-(`tools/test_debugger_print.py`, same POSIX-only gating, #958), the SQLite
-amalgamation smoke test (skips cleanly
-when the zip is absent), the header resolution smoke test
-(`tools/header_resolution_smoke.py`, CCCC header resolution from a foreign
-CWD, #891), the comptime/native serializer smoke test
-(`tools/comptime_native_smoke.py`, `-m`/`-c=generated`/`-c=native`
-regressions), the `src/stdlib` FFI registration audit
-(`tools/audit_ffi.py`, see below), the `reflection_ffi_gen` freshness check
-(`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)), the
-reflection.h enum-parity audit (`tools/audit_reflection_enums.py`, see
-below), and the fuzz regression corpus replay (`tools/fuzz_replay.py`,
-compile-only against `tests/fuzz/corpus/`, #625). A non-zero exit is
-produced if any sub-suite fails.
+which is the unified orchestrator. It runs 22 sub-suites in sequence (a
+non-zero exit is produced if any fails):
+
+1. **source** — the main `tests/`/`tests/suites/` suite, VM mode.
+2. **c4** — `.c4` bytecode round-trip (compile → save → reload → run).
+3. **native** — `-c=native` serializer round-trip (#1157; on by default,
+   `--no-native` opts out — see "Native round-trip mode" below).
+4. **native_skip_audit** — behavioural staleness audit of
+   `NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX`/
+   `NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC`/
+   `NATIVE_SKIP_TESTS_GCC_MACOS`, hard-fails on any stale entry (#1182).
+5. **debugger** — macOS host-signal crash-debugger integration (macOS only).
+6. **repl** — interactive REPL PTY integration (`tools/test_repl.py`,
+   POSIX-only, #661).
+7. **debugger_condition** — conditional breakpoint PTY integration
+   (`tools/test_debugger_condition.py`, POSIX-only, ticket 113).
+8. **debugger_print** — debugger `print`/`p` command PTY integration
+   (`tools/test_debugger_print.py`, POSIX-only, #958).
+9. **sqlite** — SQLite amalgamation smoke test (skips cleanly when the zip
+   is absent).
+10. **header_resolution_smoke** — CCCC header resolution from a foreign CWD
+    (`tools/header_resolution_smoke.py`, #891).
+11. **host_attribute_link_smoke** — host `__attribute__`-stripping
+    duplicate-symbol link regression under a real gcc (#1199; skips when no
+    real, non-clang gcc is on `PATH`).
+12. **comptime_native_smoke** — `-m`/`-c=generated`/`-c=native` serializer
+    regressions (`tools/comptime_native_smoke.py`, #892/#897/#901/#904/#918).
+13. **smoke_skip_audit** — behavioural staleness audit of
+    `comptime_native_smoke.py`'s own `SMOKE_CASE_SKIPS_GCC_MACOS` (#1197);
+    gated on `--no-native` alongside sub-suite 3.
+14. **audit_ffi** — `src/stdlib` FFI registration audit (`tools/audit_ffi.py`,
+    see below).
+15. **audit_test_headers** — `tests/**/*.c` `CCCC_*`/`EXPECT_*` header
+    directive damage audit (#1153).
+16. **test_header_parse** — `tools/testing/header.py`'s
+    `parse_test_header()` unit tests (#1153).
+17. **test_native_skip_audit** — `native_skip_reason()`
+    fall-through-invariant unit tests (#1182).
+18. **test_proc_wedge** — `run_capture()` timeout/group-kill/stdin-closing
+    unit tests (#1185).
+19. **test_wedge** — deadline-watchdog/`SIGUSR1`-dump/progress-log unit
+    tests (#1202; see "Diagnosing a live wedge" below).
+20. **reflection_ffi_check** — `reflection_ffi_gen` freshness check
+    (`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)).
+21. **audit_reflection_enums** — `reflection.h` enum-parity audit
+    (`tools/audit_reflection_enums.py`, see below).
+22. **fuzz** — fuzz regression corpus replay, compile-only against
+    `tests/fuzz/corpus/` (#625).
+
+`--bench` (cross-compiler benchmark) and `--perf` (instrumented VM-opcode
+pass over `tests/benchmarks/`) add two more, optional sub-suites at the end.
 
 ### FFI registration audit
 
