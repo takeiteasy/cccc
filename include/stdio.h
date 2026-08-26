@@ -5,37 +5,37 @@
 #ifndef __STDIO_H
 #define __STDIO_H
 
-// #1040: this exact file is also what a native/generated re-emission's
-// replayed `#include <stdio.h>` resolves to (run_native_backend forwards
-// -I./include straight through to the host cc, and -I paths are searched
-// ahead of system directories). Guarding only the __cccc_stdin/stdout/
-// stderr `extern`s below (the fix direction the ticket originally
-// proposed) is not enough: the #define stdout __cccc_stdout() macros stay
-// live either way, so a real host compiler re-lexing this same physical
-// text would still expand `stdout` inside the shim body
-// serialize.c's native_accessor_shims later emits
-// (`static FILE *__cccc_stdout(void) { return stdout; }`) right back into
-// a call to itself -- the identical infinite-recursion trap
-// include/float.h's FLT_ROUNDS shim comment documents, and confirmed with
-// a minimal `fprintf(stdout, ...)` repro. Guarding the whole CCCC-flavored
-// body instead (same shape as include/fenv.h/include/errno.h/
-// include/math.h/include/float.h, #1021) and handing off to the host's own
-// <stdio.h> via #include_next avoids the self-reference entirely, since
-// the host's real `stdout` is a plain object/macro with no such loop.
-// __CCCC__ is defined unconditionally by CCCC's own preprocessor before any
-// header is read, so its absence here means a genuine host compiler is
-// reprocessing this file -- only possible during -c=native/-c=generated
-// serializer replay.
+/* #1040: this exact file is also what a native/generated re-emission's */
+/* replayed `#include <stdio.h>` resolves to (run_native_backend forwards */
+/* -I./include straight through to the host cc, and -I paths are searched */
+/* ahead of system directories). Guarding only the __cccc_stdin/stdout/ */
+/* stderr `extern`s below (the fix direction the ticket originally */
+/* proposed) is not enough: the #define stdout __cccc_stdout() macros stay */
+/* live either way, so a real host compiler re-lexing this same physical */
+/* text would still expand `stdout` inside the shim body */
+/* serialize.c's native_accessor_shims later emits */
+/* (`static FILE *__cccc_stdout(void) { return stdout; }`) right back into */
+/* a call to itself -- the identical infinite-recursion trap */
+/* include/float.h's FLT_ROUNDS shim comment documents, and confirmed with */
+/* a minimal `fprintf(stdout, ...)` repro. Guarding the whole CCCC-flavored */
+/* body instead (same shape as include/fenv.h/include/errno.h/ */
+/* include/math.h/include/float.h, #1021) and handing off to the host's own */
+/* <stdio.h> via #include_next avoids the self-reference entirely, since */
+/* the host's real `stdout` is a plain object/macro with no such loop. */
+/* __CCCC__ is defined unconditionally by CCCC's own preprocessor before any */
+/* header is read, so its absence here means a genuine host compiler is */
+/* reprocessing this file -- only possible during -c=native/-c=generated */
+/* serializer replay. */
 #ifdef __CCCC__
 
-#include <stdarg.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
+#include <stdarg.h> /* #1070: angle-bracket for a correct #include_next hand-off under real GCC */
 #include "stddef.h"
-#include "sys/types.h" // #1144: off_t for fseeko/ftello below
+#include "sys/types.h" /* #1144: off_t for fseeko/ftello below */
 
-// FILE type (opaque pointer to host FILE)
+/* FILE type (opaque pointer to host FILE) */
 typedef void FILE;
 
-// Standard streams (accessed via getter functions)
+/* Standard streams (accessed via getter functions) */
 extern FILE *__cccc_stdin(void);
 extern FILE *__cccc_stdout(void);
 extern FILE *__cccc_stderr(void);
@@ -85,12 +85,12 @@ typedef long fpos_t;
 #define _IONBF 2
 #endif
 
-// ==================================================
-// Variadic function declarations
-// ==================================================
-// Supported via platform inline assembly
+/* ================================================== */
+/* Variadic function declarations */
+/* ================================================== */
+/* Supported via platform inline assembly */
 
-// Printf family
+/* Printf family */
 extern int printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 extern int fprintf(FILE *stream, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
@@ -99,15 +99,15 @@ extern int sprintf(char *str, const char *fmt, ...)
 extern int snprintf(char *str, size_t size, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
 
-// Scanf family
+/* Scanf family */
 extern int scanf(const char *fmt, ...) __attribute__((format(scanf, 1, 2)));
 extern int sscanf(const char *str, const char *fmt, ...)
     __attribute__((format(scanf, 2, 3)));
 extern int fscanf(FILE *stream, const char *fmt, ...)
     __attribute__((format(scanf, 2, 3)));
 
-// V* variants (take va_list) - Note: va_list manipulation not fully supported
-// in VM These are provided for completeness but may not work as expected
+/* V* variants (take va_list) - Note: va_list manipulation not fully supported */
+/* in VM These are provided for completeness but may not work as expected */
 extern int vprintf(char *fmt, va_list ap);
 extern int vsprintf(char *str, char *fmt, va_list ap);
 extern int vsnprintf(char *str, long size, char *fmt, va_list ap);
@@ -116,9 +116,9 @@ extern int vscanf(char *fmt, va_list ap);
 extern int vsscanf(char *str, char *fmt, va_list ap);
 extern int vfscanf(FILE *stream, char *fmt, va_list ap);
 
-// ==================================================
-// Common non-variadic stdio functions (both modes)
-// ==================================================
+/* ================================================== */
+/* Common non-variadic stdio functions (both modes) */
+/* ================================================== */
 
 extern int remove(const char *filename);
 extern int rename(const char *old, const char *new);
@@ -152,12 +152,12 @@ extern int feof(FILE *stream);
 extern int ferror(FILE *stream);
 extern void perror(const char *s);
 
-// #1144: registered VM cfuncs (src/stdlib/stdio.c) with no bundled-header
-// declaration anywhere -- found auditing every cc_register_cfunc name
-// against every bundled header's own declarations (the "broader audit" the
-// ticket asks for) once implicit function declaration became a hard error
-// at C99+/-c=native. All eleven are ordinary POSIX <stdio.h> extensions
-// present on both macOS and glibc.
+/* #1144: registered VM cfuncs (src/stdlib/stdio.c) with no bundled-header */
+/* declaration anywhere -- found auditing every cc_register_cfunc name */
+/* against every bundled header's own declarations (the "broader audit" the */
+/* ticket asks for) once implicit function declaration became a hard error */
+/* at C99+/-c=native. All eleven are ordinary POSIX <stdio.h> extensions */
+/* present on both macOS and glibc. */
 extern FILE *popen(const char *command, const char *mode);
 extern int pclose(FILE *stream);
 extern int fseeko(FILE *stream, off_t offset, int whence);
@@ -174,4 +174,4 @@ extern int putchar_unlocked(int c);
 #include_next <stdio.h>
 #endif /* __CCCC__ */
 
-#endif // __STDIO_H
+#endif /* __STDIO_H */

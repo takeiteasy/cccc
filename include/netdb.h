@@ -8,7 +8,7 @@
 #endif
 
 #include "stddef.h"
-#include <stdint.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
+#include <stdint.h> /* #1070: angle-bracket for a correct #include_next hand-off under real GCC */
 #include "sys/socket.h"
 
 struct hostent {

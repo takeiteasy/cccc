@@ -6455,11 +6455,89 @@ def case_atomic_var_init_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+FTS_OPAQUE_HANDLE_PROGRAM = (
+    "#include <fts.h>\n"
+    "#include <stddef.h>\n"
+    "int main(void) {\n"
+    "    char *paths[2] = {\".\", NULL};\n"
+    "    FTS *fts = fts_open(paths, 16 | 4, NULL);\n"
+    "    if (!fts) return 1;\n"
+    "    FTSENT *e;\n"
+    "    while ((e = fts_read(fts)) != NULL) { (void)e; }\n"
+    "    fts_close(fts);\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_opaque_handle_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  140: FTS (include/fts.h, and the same shape for DIR/DBM) is a "
+          "deliberately never-completed opaque handle typedef -- "
+          "`typedef struct __cccc_FTS FTS;`. serialize_type() used to "
+          "spell it by its tag at declaration sites (`struct __cccc_FTS "
+          "*fts;`) but by its alias at #1107's from_include cast sites "
+          "(`(FTS *)fts_open(...)`) -- the two disagree once the replayed "
+          "#include hands the real host FTS to the compiled output (the "
+          "#1143 -idirafter demotion), 'assignment to struct __cccc_FTS * "
+          "from incompatible pointer type FTS *' on a host compiler that "
+          "promotes -Wincompatible-pointer-types to an error (GCC 14+; not "
+          "clang, and not the older GCC in local container verification -- "
+          "which is why sr.ht's own build hardware caught this first, "
+          "#1186). Fixed by preferring the alias whenever the tag is an "
+          "opaque, never-completed struct with a from_include typedef "
+          "(serialize_type.c's TY_STRUCT case), so every site -- "
+          "declaration, argument, assignment -- agrees. Asserts -m output "
+          "never spells the internal tag at all (only the real FTS alias), "
+          "plus VM 42 -> native 42; tests/test_fts_standalone.c (a fuller, "
+          "real-filesystem exercise of the same fts_open/fts_read/"
+          "fts_close chain) is the runtime-behavior half of this "
+          "regression, wired into the ordinary --native corpus.")
+    # fts.h transitively #include "../time.h"s off sys/stat.h -- a relative
+    # quoted include that only resolves against the embedded header table
+    # when cccc's own CWD is the repo root; an explicit -I<repo>/include
+    # (same pattern several cases above use, e.g. #1088's threads.h case)
+    # makes this independent of tmp's own working directory, matching how
+    # a real invocation with this repo's own bundled headers on the search
+    # path would resolve it.
+    include_dir = cccc.parent / "include"
+    src = Path(tmp) / "opaque_handle_1186.c"
+    write(src, FTS_OPAQUE_HANDLE_PROGRAM)
+    m_result = run([str(cccc), "-I", str(include_dir), "-m", src.name], cwd=tmp)
+    if "struct __cccc_" in m_result.stdout:
+        print(f"    FAIL: -m output still spells the internal opaque tag "
+              f"(struct __cccc_...) rather than the real FTS alias\n"
+              f"    {m_result.stdout}")
+        return False
+    if "FTS *fts" not in m_result.stdout and "FTS*fts" not in m_result.stdout:
+        print(f"    FAIL: -m output does not declare `fts` at the real FTS "
+              f"alias type\n    {m_result.stdout}")
+        return False
+    vm_result = run([str(cccc), "-I", str(include_dir), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+    out = Path(tmp) / "opaque_handle_1186_out"
+    compile_result = run(
+        [str(cccc), "-I", str(include_dir), "-c=native", "-o", out.name, src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: native compile exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n"
+              f"    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
@@ -6608,6 +6686,7 @@ def main() -> int:
             case_atomic_fetch_cas_loop_native_round_trip,
             case_atomic_fence_native_round_trip,
             case_atomic_var_init_native_round_trip,
+            case_opaque_handle_native_round_trip,
         ]
         results = [case(cccc, tmp) for case in cases]
 

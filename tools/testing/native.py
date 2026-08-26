@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from . import native_skip_reason
+from .proc import run_capture
 
 
 def _skip_result(idx, test_name, reason, is_negative_test, expects_runtime_error):
@@ -73,9 +74,8 @@ def _run_testing_suite(idx, test_file, test_name, cccc, script_dir, cccc_args,
         ]
         start = time.perf_counter() if bench else None
         try:
-            compiled = subprocess.run(
-                compile_cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
+            compiled = run_capture(
+                compile_cmd, cwd=script_dir, timeout=process_timeout,
             )
         except subprocess.TimeoutExpired:
             return {
@@ -99,10 +99,7 @@ def _run_testing_suite(idx, test_file, test_name, cccc, script_dir, cccc_args,
             }
 
         try:
-            run = subprocess.run(
-                [str(out_path)], capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
-            )
+            run = run_capture([str(out_path)], cwd=script_dir, timeout=process_timeout)
         except subprocess.TimeoutExpired:
             return {
                 "idx": idx, "test_name": test_name, "exit_code": -1,
@@ -198,9 +195,8 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         ]
         start = time.perf_counter() if bench else None
         try:
-            compiled = subprocess.run(
-                compile_cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
+            compiled = run_capture(
+                compile_cmd, cwd=script_dir, timeout=process_timeout,
             )
         except subprocess.TimeoutExpired:
             return {
@@ -259,10 +255,7 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
 
         run_cmd = [str(out_path), *per_test_run_args]
         try:
-            run = subprocess.run(
-                run_cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
-            )
+            run = run_capture(run_cmd, cwd=script_dir, timeout=process_timeout)
         except subprocess.TimeoutExpired:
             return {
                 "idx": idx, "test_name": test_name, "exit_code": -1,

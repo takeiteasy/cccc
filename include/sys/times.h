@@ -7,6 +7,9 @@
 #error "<sys/times.h> is only available on POSIX targets in CCCC"
 #endif
 
+/* #1194: this relative quoted include fails to resolve when cccc is
+ * invoked with no -I flag from a CWD outside the repo -- see the same
+ * comment on include/sys/stat.h. */
 #include "../time.h" /* for clock_t */
 
 /* struct tms (#733/#737). Layout is identical on macOS and Linux -- verified

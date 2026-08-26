@@ -3,7 +3,7 @@
 #ifndef __ASSERT_H
 #define __ASSERT_H
 
-#include <stdio.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
+#include <stdio.h> /* #1070: angle-bracket for a correct #include_next hand-off under real GCC */
 #include "stdlib.h"
 
 #ifdef NDEBUG

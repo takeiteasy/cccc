@@ -1664,7 +1664,27 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         case TY_STRUCT: {
             TypeName *tag   = find_tag_name(ctx, ty);
             TypeName *alias = find_typedef_name(ctx, ty);
-            if (tag)
+            // #1186: an opaque handle typedef -- `typedef struct __cccc_FTS
+            // FTS;` (include/fts.h), and the same shape for DIR (dirent.h)
+            // and DBM (ndbm.h) -- deliberately never completes its tag
+            // (ty->members stays NULL forever; the guest only ever passes
+            // the pointer back to host-backed functions, never dereferences
+            // it). Under -c=native the replayed #include hands the real
+            // host header's own FTS/DIR/DBM to the compiled output (the
+            // #1143 -idirafter demotion lets the host header win the
+            // search), so `struct __cccc_FTS` and the host's `FTS` are two
+            // distinct, incompatible types by the time gcc/clang see them --
+            // a declaration spelled by the tag (`struct __cccc_FTS *fts;`)
+            // disagrees with a cast spelled by the alias (`(FTS *)fts_open
+            // (...)`, #1107's from_include cast re-spelling below) at every
+            // assignment and call site, which newer GCC promotes from a
+            // warning to a hard error. Prefer the alias here so every site
+            // -- declaration, argument, assignment -- agrees and binds to
+            // the same (host-supplied) type throughout.
+            if (tag && alias && !ty->members &&
+                type_def_is_from_include_suppressed(ctx, ty))
+                fprintf(f, "%.*s", alias->name_len, alias->name);
+            else if (tag)
                 fprintf(f, "struct %.*s", tag->name_len, tag->name);
             else if (alias)
                 fprintf(f, "%.*s", alias->name_len, alias->name);

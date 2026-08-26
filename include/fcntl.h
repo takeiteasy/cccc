@@ -120,10 +120,10 @@ extern int creat(const char *path, unsigned int mode);
 extern int fcntl(int fd, int cmd, ...);
 
 #ifdef __linux__
-// fallocate: Linux-only glibc/syscall extension for preallocating file space.
-// SQLite's unix VFS references it (behind HAVE_FALLOCATE config) -- declared
-// here so a build that enables that config can link (#731, same class as the
-// #729 mremap gap).
+/* fallocate: Linux-only glibc/syscall extension for preallocating file space. */
+/* SQLite's unix VFS references it (behind HAVE_FALLOCATE config) -- declared */
+/* here so a build that enables that config can link (#731, same class as the */
+/* #729 mremap gap). */
 extern int fallocate(int fd, int mode, off_t offset, off_t len);
 #endif
 

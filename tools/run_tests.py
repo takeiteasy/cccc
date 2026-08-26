@@ -24,6 +24,7 @@ Sub-suites:
   audit_test_headers  — tests/**/*.c CCCC_*/EXPECT_* header directive damage audit (ticket #1153)
   test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
   test_native_skip_audit — native_skip_reason() fall-through-invariant unit tests (ticket #1182)
+  test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
@@ -56,22 +57,34 @@ from testing.platform import detect_platform
 from testing.discovery import discover_tests
 from testing.suite import run_test_suite_with_isolation
 from testing.report import print_summary
+from testing.proc import run_capture
 
 # #1186: the native round-trip suite and its skip-table staleness audit
-# (#1157/#1182) were wired in as hard-blocking, but real sr.ht Linux
-# hardware surfaced failures neither macOS nor the cccc-linux-amd64
-# verification container reproduced -- a GCC-version-sensitive mix of (1)
-# genuine host-compiler-strictness divergences (e.g. -Wincompatible-
-# pointer-types promoted to a hard error on a newer GCC than the
-# container's own) and (2) skip-table entries that are legitimately stale
-# on sr.ht's specific GCC but still needed on the container's/macOS's,
-# which the audit's binary macos/linux platform split can't represent.
-# Downgraded to advisory (reported, never blocks the exit code) until
-# #1186 either fixes the underlying divergences or the audit gains a way
-# to express "stale on THIS glibc/GCC combination, not universally." A
-# report-only failure is still real signal -- CI output still shows it --
-# just not one that reds out a push.
-_ADVISORY_SUITES = frozenset({"native", "native_skip_audit"})
+# (#1157/#1182) were originally wired in as hard-blocking; the first real
+# sr.ht Linux push surfaced failures neither macOS nor the cccc-linux-amd64
+# verification container reproduced, and both were downgraded to advisory as
+# a stopgap. Root cause turned out to be compiler *family* (clang vs. gcc),
+# not GCC version as first hypothesized -- the verification container's gcc
+# simply predates GCC 14's promotion of -Wincompatible-pointer-types to a
+# hard error, so it never exercised that half of the split at all. Fixed:
+# the genuine divergences (FTS/DIR/DBM opaque-handle spelling disagreeing
+# with the replayed host header, two bundled headers/the generated test
+# harness illegal under strict C89, a genuine anonymous-struct duplicate-
+# emission bug in the serializer) got real fixes; the legitimately
+# compiler-family-specific ones got moved into NATIVE_SKIP_TESTS_CLANG/_GCC
+# (tools/testing/__init__.py) alongside the existing _MACOS/_LINUX tables,
+# and _print_native_skip_audit (tools/testing/cli.py) learned a fourth
+# bucket -- an entry scoped to a different platform/family that happens to
+# pass here is "off_axis", not STALE, which is what made #1182's own audit
+# throw six false positives in the first place. Both empty locally now
+# (`CCCC_NATIVE_CC=clang`/`=gcc-16 python3 tools/tests.py
+# --native-audit-skips` both report zero actionable STALE) -- flipped back
+# to blocking here on that basis. #1186's own acceptance clause additionally
+# asks for confirmation on sr.ht itself across two consecutive pushes before
+# trusting this, which a single local session can't provide -- see #1193 for
+# that watch. Re-add a name here immediately (not in a follow-up ticket) if
+# either push goes red.
+_ADVISORY_SUITES = frozenset()
 
 
 def _make_suite_args(quiet=True, bench=False, c4=False, native=False,
@@ -133,7 +146,7 @@ def _run_native_suite(cccc, n_jobs, quiet, process_timeout):
     return r, ok
 
 
-def _run_native_skip_audit_suite(cccc, n_jobs):
+def _run_native_skip_audit_suite(cccc, n_jobs, process_timeout=None):
     """Run the #1182 behavioural skip-table audit (--native-audit-skips) and
     hard-fail if it reports a stale entry. A subprocess (not an in-process
     call like the other pure-Python audits below) because
@@ -141,12 +154,25 @@ def _run_native_skip_audit_suite(cccc, n_jobs):
     environment (tools/testing/cli.py) -- isolating that avoids leaking it
     into any sub-suite that runs after this one in the same process.
     Returns (status_str, ok).
+
+    #1185: this used to be an unbounded subprocess.run with no --process-
+    timeout forwarded to the inner tests.py invocation -- an unbounded wait
+    stacked on an unbounded wait, immune to the caller's own timeout. Both
+    ends now go through run_capture (tools/testing/proc.py), which kills the
+    whole process group -- the inner tests.py AND its own -j-wide worker
+    pool -- rather than leaving grandchildren to hold the pipe open.
     """
-    result = subprocess.run(
-        [sys.executable, str(_TOOLS_DIR / "tests.py"), "--native-audit-skips",
-         "--binary", str(cccc), "-j", str(n_jobs), "--quiet"],
-        capture_output=True, text=True,
-    )
+    cmd = [sys.executable, str(_TOOLS_DIR / "tests.py"), "--native-audit-skips",
+           "--binary", str(cccc), "-j", str(n_jobs), "--quiet"]
+    if process_timeout:
+        cmd += ["--process-timeout", str(process_timeout)]
+    try:
+        # A little slack over the inner --process-timeout: that bounds one
+        # test subprocess, not the whole -j-wide audit run.
+        outer_timeout = (process_timeout + 120) if process_timeout else None
+        result = run_capture(cmd, timeout=outer_timeout)
+    except subprocess.TimeoutExpired:
+        return "audit subprocess timed out (wedged) -- see #1185", False
     if result.returncode == 0:
         return "no stale NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX entries", True
     if "STALE (" in result.stdout:
@@ -477,6 +503,30 @@ def _run_native_skip_audit_unit_tests():
         return f"FAILED ({e})", False
 
 
+def _run_proc_wedge_unit_tests():
+    """Run tools/testing/test_proc_wedge.py's run_capture() unit tests
+    (#1185). Spawns real (but short-lived, deterministic) subprocesses to
+    exercise the timeout/group-kill/stdin-closing behavior -- no cccc
+    binary needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "testing" / "test_proc_wedge.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_proc_wedge", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_audit_reflection_enums_suite():
     """Run reflection.h TypeKind/NodeKind/AttrTargetKind vs internal enum
     value audit (#860).
@@ -644,8 +694,13 @@ def main():
         help="Suppress per-test output; only show sub-suite summaries"
     )
     parser.add_argument(
-        "--process-timeout", type=int, default=None, metavar="SECONDS",
-        help="Per-subprocess wall-clock timeout (passed to source and c4 suites)"
+        "--process-timeout", type=int, default=600, metavar="SECONDS",
+        help="Per-subprocess wall-clock timeout, forwarded to every sub-suite "
+             "including the native_skip_audit shell-out (#1185: without a "
+             "default, a single wedged test hangs the whole CI job until the "
+             "build service's own top-level timeout kills it). "
+             "Pass 0 to disable (unbounded, matching tools/tests.py's own "
+             "default for interactive use). Default: 600."
     )
     parser.add_argument(
         "--no-native", action="store_true",
@@ -673,7 +728,7 @@ def main():
 
     n_jobs = args.jobs if args.jobs else (os.cpu_count() or 1)
     quiet = args.quiet
-    timeout = args.process_timeout
+    timeout = args.process_timeout or None
 
     print(f"=== CCCC Test Orchestrator ===")
     print(f"Binary: {cccc}")
@@ -706,7 +761,7 @@ def main():
         # --- Native skip-table staleness audit (#1182) ---
         print()
         print("[ native_skip_audit ]")
-        skip_audit_status, ok_skip_audit = _run_native_skip_audit_suite(cccc, n_jobs)
+        skip_audit_status, ok_skip_audit = _run_native_skip_audit_suite(cccc, n_jobs, timeout)
         print(f"  {skip_audit_status}")
         suite_results["native_skip_audit"] = ok_skip_audit
 
@@ -786,6 +841,13 @@ def main():
     nsa_unit_status, ok_nsa_unit = _run_native_skip_audit_unit_tests()
     print(f"  {nsa_unit_status}")
     suite_results["test_native_skip_audit"] = ok_nsa_unit
+
+    # --- proc.py run_capture() wedge-hardening unit tests (#1185) ---
+    print()
+    print("[ test_proc_wedge ]")
+    proc_unit_status, ok_proc_unit = _run_proc_wedge_unit_tests()
+    print(f"  {proc_unit_status}")
+    suite_results["test_proc_wedge"] = ok_proc_unit
 
     # --- Reflection FFI generation check (#859) ---
     print()

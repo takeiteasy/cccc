@@ -7,13 +7,13 @@
 #error "<getopt.h> is only available on POSIX targets in CCCC"
 #endif
 
-// #1040: same header-shadow trap as include/stdio.h's __cccc_stdin/etc --
-// see that header's comment for the full reasoning (a bare extern-only
-// guard still leaves `#define optarg (*__cccc_optarg_ptr())` live, which
-// would loop the shim body back into itself once a real host compiler
-// re-lexes this same physical file during -c=native/-c=generated replay).
-// Whole CCCC-flavored body guarded on __CCCC__, handing off to the host's
-// own <getopt.h> via #include_next otherwise.
+/* #1040: same header-shadow trap as include/stdio.h's __cccc_stdin/etc -- */
+/* see that header's comment for the full reasoning (a bare extern-only */
+/* guard still leaves `#define optarg (*__cccc_optarg_ptr())` live, which */
+/* would loop the shim body back into itself once a real host compiler */
+/* re-lexes this same physical file during -c=native/-c=generated replay). */
+/* Whole CCCC-flavored body guarded on __CCCC__, handing off to the host's */
+/* own <getopt.h> via #include_next otherwise. */
 #ifdef __CCCC__
 
 /* These alias the host's real getopt() state (via accessor functions, same

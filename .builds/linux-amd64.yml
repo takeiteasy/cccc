@@ -1,6 +1,7 @@
 image: ubuntu/lts
 packages:
   - clang
+  - gcc
   - make
   - pkg-config
   - libffi-dev
@@ -9,6 +10,19 @@ packages:
 sources:
   - https://git.sr.ht/~takeiteasy/cccc
 environment:
+  # #1186: CC only selects the compiler that builds cccc ITSELF (clang,
+  # here). It has no bearing on -c=native's own host-compiler choice --
+  # that's a separate, unpinned lookup (cccc_find_native_cc(), src/vm.c:
+  # $CCCC_NATIVE_CC, else PATH search for cc/clang/gcc in that order) run
+  # fresh for every native compile, and this image's `cc` resolves to
+  # distro gcc. Deliberately left unpinned rather than set to match CC:
+  # gcc's own presence in `packages` above (added by #1186) is only to
+  # make its version legible in the job log, not to force it -- an
+  # unpinned gcc alongside clang is exactly what caught the FTS/DIR/DBM
+  # opaque-handle bug (#1186) in the first place, and the native suite's
+  # skip tables are now keyed by compiler family (NATIVE_SKIP_TESTS_CLANG/
+  # _GCC, tools/testing/__init__.py) specifically so both sides of this
+  # split stay covered instead of being flattened to one.
   CC: clang
 tasks:
   - bootstrap: |

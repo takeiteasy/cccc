@@ -447,21 +447,42 @@ that would need type-directed comparison codegen; narrow enough in
 practice (a handful of tests) that it's deferred.
 
 **Known divergences:** the mode ships with populated skip tables
-(`NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX` in
-`tools/testing/__init__.py`) recording every test found to compile/link/run
-differently under `-c=native` than in the VM — most entries name a tracking
-ticket and are deleted once the fix lands, but several are permanent,
-`WONT_FIX` platform divergences (macOS libm lacking a C23 math family, macOS
-`aligned_alloc`'s pre-DR-460 size rule, etc.) that will never close, so
-"cited ticket is closed" is not a valid staleness check — see
-`--native-audit-skips` below for the actual guard. `NATIVE_SKIP_TESTS_MACOS`/
-`NATIVE_SKIP_TESTS_LINUX` hold entries specific to one platform, checked only
-when the running host matches; `NATIVE_SKIP_TESTS_LINUX` is currently empty
-(#1182's audit found every candidate for it — `test_suite_printf_c23.c`
-included — actually fails on both platforms and belongs in the shared table)
-but stays wired in as a real table rather than omitted, so a genuinely
-Linux-only divergence has a structural home instead of drifting into the
-shared or macOS-only table the way one already had to be corrected out of.
+(`NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX`/
+`NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC` in `tools/testing/
+__init__.py`) recording every test found to compile/link/run differently
+under `-c=native` than in the VM — most entries name a tracking ticket and
+are deleted once the fix lands, but several are permanent, `WONT_FIX`
+platform divergences (macOS libm lacking a C23 math family, macOS
+`aligned_alloc`'s pre-DR-460 size rule, Darwin gcc rejecting
+`__attribute__((constructor(N)))`'s priority argument outright, etc.) that
+will never close, so "cited ticket is closed" is not a valid staleness
+check — see `--native-audit-skips` below for the actual guard.
+`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX` hold entries specific to
+one host platform, checked only when the running host matches;
+`NATIVE_SKIP_TESTS_LINUX` is currently empty (#1182's audit found every
+candidate for it — `test_suite_printf_c23.c` included — actually fails on
+both platforms and belongs in the shared table) but stays wired in as a real
+table rather than omitted, so a genuinely Linux-only divergence has a
+structural home instead of drifting into the shared or macOS-only table the
+way one already had to be corrected out of.
+
+`NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC` (#1186) are the same idea
+along a second, orthogonal axis: which compiler `-c=native` actually shells
+out to (`cccc_find_native_cc()`, `src/vm.c` — `$CCCC_NATIVE_CC`, else a PATH
+search for `cc`/`clang`/`gcc` in that order), checked via
+`detect_native_cc_family()` (`tools/testing/platform.py`, a `cc -dM -E -`
+predefined-macro probe). This axis is what actually explained a batch of
+sr.ht failures originally guessed to be GCC-*version*-sensitive — see
+**#1186** below. To reproduce any native divergence locally against a
+specific compiler, set `CCCC_NATIVE_CC` (a real gcc, not Apple's
+gcc-is-actually-clang symlink, needs installing separately — e.g. Homebrew's
+`gcc@N` on macOS):
+
+```bash
+CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 python3 tools/tests.py --binary ./cccc --native
+CCCC_NATIVE_CC=clang                    python3 tools/tests.py --binary ./cccc --native
+```
+
 A handful of entries are not bugs at all:
 some `CCCC_EXPECT_STDERR` tests are deliberately invalid C (a bad `main()`
 signature, a non-void function falling off its end, an unterminated
@@ -484,7 +505,7 @@ separate, natively-compilable file covering the same statement (and
 declarator-label) spellings with real (empty) assembly the host accepts —
 not skipped, and not to be confused with the permanent skip above.
 
-**CI status (#1157, downgraded to advisory by #1186):** on by default.
+**CI status (#1157, hard-blocking again since #1186):** on by default.
 `tools/run_tests.py` (the entry point both `--build-target=test` and
 `.builds/linux-amd64.yml` call) runs `--native` as its own
 `[ native round-trip suite ]` sub-suite on every ordinary push, immediately
@@ -502,38 +523,77 @@ captured `#include` operand, an undeclared `reallocarray` on macOS, and a
 `--testing` diagnostic-test routing gap) went unnoticed for as long as they
 did — nothing ran `--native` on an ordinary push.
 
-**#1186 (advisory downgrade):** the very first real sr.ht push after this
-landed surfaced five compile/runtime failures and six false-positive
-skip-audit findings that neither macOS nor the `cccc-linux-amd64`
-verification container reproduced — a GCC-version sensitivity (sr.ht's own
-build image vs. the container's) this project hadn't been exercised against
-before, since nothing hard-blocked on `--native` output until now. Both
-`native` and `native_skip_audit` are listed in `run_tests.py`'s
-`_ADVISORY_SUITES`: they still run and their failures still print (a
+**#1186 (advisory downgrade, since reversed):** the very first real sr.ht
+push after this landed surfaced five compile/runtime failures and six
+false-positive skip-audit findings that neither macOS nor the
+`cccc-linux-amd64` verification container reproduced. Both `native` and
+`native_skip_audit` were listed in `run_tests.py`'s `_ADVISORY_SUITES` as a
+stopgap: they still ran and their failures still printed (a
 `⚠ FAIL (advisory)` line and a trailing `ADVISORY (not blocking): ...`
-summary line), but neither one flips the overall exit code, so this class of
-environment-specific divergence can't red out a push while #1186
-investigates. This is a deliberate, temporary weakening of the gate — flip
-the two names back out of `_ADVISORY_SUITES` once #1186 closes.
+summary line), but neither one flipped the overall exit code.
+
+The root cause was originally guessed to be GCC-*version* sensitivity
+(sr.ht's build image vs. the verification container's own, older GCC) —
+wrong. A local sweep with `CCCC_NATIVE_CC` pointed at a real Homebrew gcc
+alongside the default clang reproduced every one of sr.ht's failures and all
+six false-positive findings on this machine, immediately: the actual axis is
+compiler *family*, and the verification container simply predates GCC 14's
+promotion of `-Wincompatible-pointer-types` to a hard error, so it never
+exercised the gcc side of the split at all. Each failure got triaged to one
+of three outcomes:
+
+  - a genuine bug, fixed: the FTS/DIR/DBM opaque-handle typedef (`typedef
+    struct __cccc_FTS FTS;`, `include/fts.h`, and the same shape for `DIR`/
+    `DBM`) was spelled by its never-completed tag at the declaration site but
+    by its alias at a cast site, disagreeing once the replayed `#include`
+    resolved to the real host type — fixed in `serialize_type.c`'s `TY_STRUCT`
+    case to prefer the alias for exactly this opaque-handle shape; two
+    bundled headers plus the generated test-harness `main()` used constructs
+    illegal under strict `--std=c89`, same class as 76462e0's `stdlib.h` fix;
+    and a genuinely anonymous struct/union type reused across more than one
+    emission site (a compiler-synthesized temp's declaration and a cast
+    targeting the same type) was re-derived as two textually-identical but
+    nominally distinct C types — `hoist_compiler_temp_anon_types()`
+    (`serialize_program.c`) now hoists every such temp's type to a single,
+    stably-named file-scope definition, the same mechanism #989 already used
+    for block-literal captures.
+  - a genuine compiler-family divergence, moved into
+    `NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC`: five entries (alloca
+    slot reuse, two `-Wmain`-as-error cases, an unrecognized
+    `#pragma clang ...`, and `_Decimal64` support) are genuinely needed under
+    one family and not the other.
+  - an audit reporting artifact, fixed in the classifier: a
+    `NATIVE_SKIP_TESTS_MACOS` entry audited on Linux (the audit deliberately
+    includes platform/family tables even off their own axis, so a stale
+    *macOS* entry is still worth reporting) passed there for the mundane
+    reason that Linux isn't macOS — `_print_native_skip_audit`
+    (`tools/testing/cli.py`) now buckets that as "off_axis", not `STALE`.
+
+Both `native` and `native_skip_audit` are back out of `_ADVISORY_SUITES` —
+confirmed locally (`CCCC_NATIVE_CC=clang`/`=gcc-16 python3 tools/tests.py
+--native-audit-skips` both report zero actionable `STALE`, and the full
+`python3 tools/run_tests.py` passes end-to-end under both families). #1186's
+own acceptance clause additionally asks for two consecutive green sr.ht
+pushes before trusting this — a single local session can't provide that;
+see #1193 for the watch. Re-add a name to `_ADVISORY_SUITES` immediately if
+either push goes red.
 
 **Skip-table staleness guard (#1182):** a stale skip table is invisible for
 the same reason a native regression was — nothing runs the skipped test for
-real. `python3 tools/tests.py --native-audit-skips` bypasses the three skip
-tables above (only for the ~38 files they name — a full audit is seconds,
-not minutes) and behaviourally re-checks each one, reporting it as `STALE`
-(now passes — delete the entry), `KEPT` (still hits an independent
-`--build`/`-c`/`-o`/frontend-mode/VM-only-safety-flag skip, or is one of the
-`--testing` v1 exclusions the compiler itself refuses by design — see above),
-or `STILL FAILING` (a genuine, not-yet-fixed divergence). `run_tests.py` runs
-this as its own `[ native_skip_audit ]` sub-suite right after the native
-suite — advisory-only per #1186 above, for the same reason: a skip entry can
-be legitimately needed on one GCC version and stale on another, which the
-binary macos/linux split this table's platform argument represents can't
-express, so a `STALE` finding needs a human to look at it right now rather
-than hard-failing on sight. The recurrence this guard exists for —
-`test_attr_vector_size_variadic.c`/`test_macros_quote_args_splice.c` sitting
-un-deleted after #1018 landed — is still caught and printed, just not
-gated on.
+real. `python3 tools/tests.py --native-audit-skips` bypasses the five skip
+tables above (only for the files they name — a full audit is seconds, not
+minutes) and behaviourally re-checks each one, reporting it as `STALE` (now
+passes, and an entry that applies on this platform+compiler-family actually
+governs it — delete the entry), `off_axis` (now passes, but every entry
+naming it is scoped to a *different* platform or compiler family than this
+run — #1186's own false-positive class, not actionable here), `KEPT` (still
+hits an independent `--build`/`-c`/`-o`/frontend-mode/VM-only-safety-flag
+skip, or is one of the `--testing` v1 exclusions the compiler itself refuses
+by design — see above), or `STILL FAILING` (a genuine, not-yet-fixed
+divergence). `run_tests.py` runs this as its own `[ native_skip_audit ]`
+sub-suite right after the native suite. The recurrence this guard exists
+for — `test_attr_vector_size_variadic.c`/`test_macros_quote_args_splice.c`
+sitting un-deleted after #1018 landed — is still caught and printed.
 
 ## Architecture build and test workflows
 

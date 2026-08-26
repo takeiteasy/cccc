@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from . import C4_SKIP_TESTS, vm_profile_path
+from .proc import run_capture
 
 
 def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
@@ -41,10 +42,7 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                str(test_file)]
         start = time.perf_counter() if bench else None
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
-            )
+            result = run_capture(cmd, cwd=script_dir, timeout=process_timeout)
         except subprocess.TimeoutExpired:
             return {
                 "idx": idx,
@@ -115,10 +113,7 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
             "-c=bytecode", "-o", str(c4_path), str(test_file),
         ]
         try:
-            save = subprocess.run(
-                save_cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
-            )
+            save = run_capture(save_cmd, cwd=script_dir, timeout=process_timeout)
         except subprocess.TimeoutExpired:
             return {
                 "idx": idx,
@@ -173,10 +168,7 @@ def run_c4_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         run_cmd = [str(cccc), *profile_args, *per_test_flags, str(c4_path), *run_args]
         start = time.perf_counter() if bench else None
         try:
-            run = subprocess.run(
-                run_cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
-            )
+            run = run_capture(run_cmd, cwd=script_dir, timeout=process_timeout)
         except subprocess.TimeoutExpired:
             return {
                 "idx": idx,

@@ -29,14 +29,14 @@ typedef unsigned int       fsfilcnt_t;
 typedef int                nl_item;
 /* timer_t (POSIX timer_create/timer_settime API) intentionally omitted:
    macOS does not implement this API, so there is no host type to alias. */
-// #1031: BSD legacy short-name aliases (u_char/u_short/u_int/u_long/
-// u_int{8,16,32,64}_t) -- needed once a `-I./include`-shadowed real header
-// (e.g. <sys/attr.h>/<bsm/audit.h>, reached via <sys/mount.h>'s
-// #include_next hand-off) is reprocessed by the host compiler: since
-// -I./include shadows the real <sys/types.h> for every #include in the
-// TU, not just this file's own, these never reach the host compiler any
-// other way. Plain typedefs (not macros), so co-existing with any real
-// header that also defines them (C11+, CCCC defaults to C23) is legal.
+/* #1031: BSD legacy short-name aliases (u_char/u_short/u_int/u_long/ */
+/* u_int{8,16,32,64}_t) -- needed once a `-I./include`-shadowed real header */
+/* (e.g. <sys/attr.h>/<bsm/audit.h>, reached via <sys/mount.h>'s */
+/* #include_next hand-off) is reprocessed by the host compiler: since */
+/* -I./include shadows the real <sys/types.h> for every #include in the */
+/* TU, not just this file's own, these never reach the host compiler any */
+/* other way. Plain typedefs (not macros), so co-existing with any real */
+/* header that also defines them (C11+, CCCC defaults to C23) is legal. */
 typedef unsigned char      u_char;
 typedef unsigned short     u_short;
 typedef unsigned int       u_int;
@@ -45,14 +45,14 @@ typedef unsigned char      u_int8_t;
 typedef unsigned short     u_int16_t;
 typedef unsigned int       u_int32_t;
 typedef unsigned long long u_int64_t;
-// #1031: size_t/time_t, same reasoning as the u_* aliases just above --
-// a shadowed real header chain (<sys/attr.h>/<bsm/audit.h>) expects
-// <sys/types.h> alone to supply these (real macOS <sys/types.h> reaches
-// them via <sys/_types/_size_t.h>/<sys/_types/_time_t.h>), which CCCC's
-// own <sys/types.h> never did. Identical underlying types to
-// include/stddef.h's/include/time.h's own typedefs, so redeclaring here
-// is always legal (C11+, CCCC defaults to C23) regardless of #include
-// order in the TU.
+/* #1031: size_t/time_t, same reasoning as the u_* aliases just above -- */
+/* a shadowed real header chain (<sys/attr.h>/<bsm/audit.h>) expects */
+/* <sys/types.h> alone to supply these (real macOS <sys/types.h> reaches */
+/* them via <sys/_types/_size_t.h>/<sys/_types/_time_t.h>), which CCCC's */
+/* own <sys/types.h> never did. Identical underlying types to */
+/* include/stddef.h's/include/time.h's own typedefs, so redeclaring here */
+/* is always legal (C11+, CCCC defaults to C23) regardless of #include */
+/* order in the TU. */
 typedef unsigned long size_t;
 typedef long          time_t;
 #ifndef NGROUPS
@@ -85,16 +85,16 @@ typedef unsigned int   useconds_t;
 typedef unsigned short sa_family_t;
 typedef unsigned int   socklen_t;
 typedef int            clockid_t;
-// #1022: `__clockid_t` (leading-underscore, glibc's own internal name for
-// the same type `clockid_t` is a public alias of) is needed by real glibc
-// <pthread.h> once include/pthread.h hands off to it (#1022) --
-// pthread_mutex_clocklock()/pthread_cond_clockwait() (glibc-only extensions,
-// declared unconditionally in glibc's own header) spell their clockid_t
-// parameter with the private name. Since -I./include shadows glibc's own
-// <sys/types.h>/<bits/types.h> (which would otherwise supply it) for every
-// #include in the TU, not just ones this file itself issues, it has to be
-// supplied here too. Not needed on the __APPLE__ side: Apple's own
-// <pthread.h> has no such glibc-only extension to reach.
+/* #1022: `__clockid_t` (leading-underscore, glibc's own internal name for */
+/* the same type `clockid_t` is a public alias of) is needed by real glibc */
+/* <pthread.h> once include/pthread.h hands off to it (#1022) -- */
+/* pthread_mutex_clocklock()/pthread_cond_clockwait() (glibc-only extensions, */
+/* declared unconditionally in glibc's own header) spell their clockid_t */
+/* parameter with the private name. Since -I./include shadows glibc's own */
+/* <sys/types.h>/<bits/types.h> (which would otherwise supply it) for every */
+/* #include in the TU, not just ones this file itself issues, it has to be */
+/* supplied here too. Not needed on the __APPLE__ side: Apple's own */
+/* <pthread.h> has no such glibc-only extension to reach. */
 typedef int           __clockid_t;
 typedef void         *timer_t;
 typedef int           key_t;

@@ -14,6 +14,7 @@ from . import (
 from .c4 import run_c4_roundtrip
 from .header import parse_test_header
 from .native import run_native_roundtrip
+from .proc import run_capture
 
 
 def has_matrix_skip(test_file):
@@ -181,9 +182,8 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                 *profile_args, str(test_file), *run_args,
             ]
             try:
-                normal_result = subprocess.run(
-                    normal_cmd, capture_output=True, text=True, cwd=script_dir,
-                    timeout=process_timeout,
+                normal_result = run_capture(
+                    normal_cmd, cwd=script_dir, timeout=process_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return {
@@ -227,10 +227,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
                     *run_args,
                 ]
                 try:
-                    leak_result = subprocess.run(
-                        leak_cmd, capture_output=True, text=True, cwd=script_dir,
-                        timeout=30,
-                    )
+                    leak_result = run_capture(leak_cmd, cwd=script_dir, timeout=30)
                     leak_output = leak_result.stdout + leak_result.stderr
                 except subprocess.TimeoutExpired:
                     leak_output = "leaks timed out"
@@ -327,10 +324,7 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     if cmd is not None:
         start = time.perf_counter()
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=script_dir,
-                timeout=process_timeout,
-            )
+            result = run_capture(cmd, cwd=script_dir, timeout=process_timeout)
         except subprocess.TimeoutExpired:
             return {
                 "idx": idx,

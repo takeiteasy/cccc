@@ -39,6 +39,78 @@ All notable changes to CCCC are documented here. Format loosely follows
   undefined under cccc's default C23, matching a real C23 compiler, since
   the macro is deprecated in C17 and removed entirely in C23 (#1190).
 
+- `-c=native`: `include/fts.h`/`dirent.h`/`ndbm.h`'s opaque handle types
+  (`typedef struct __cccc_FTS FTS;`, and the same shape for `DIR`/`DBM`)
+  spelled by their never-completed tag at the declaration site
+  (`struct __cccc_FTS *fts;`) but by their alias at a cast site
+  (`(FTS *)fts_open(...)`) — the two disagree once the replayed
+  `#include` resolves to the real host header, "assignment to
+  'struct __cccc_FTS *' from incompatible pointer type 'FTS *'" on a host
+  compiler that promotes `-Wincompatible-pointer-types` to an error
+  (confirmed: GCC 14+; not clang, and not the older GCC in local
+  verification, which is why sr.ht's own build hardware caught this first).
+  Fixed in `serialize_type.c`'s `TY_STRUCT` case: an opaque, never-completed
+  tag with a `from_include` typedef alias now spells by the alias
+  everywhere, so declaration, argument, and assignment sites all agree and
+  bind to the host's real type (#1186).
+- `-c=native`: a genuinely anonymous struct/union type reused at more than
+  one emission site within a function (a compiler-synthesized temp's own
+  declaration, and a cast targeting the same type — the shape `++`/`--`/
+  `op=` desugaring through a union member routinely introduces) was
+  re-derived as a fresh, independent `struct { ... }` body at each site —
+  two textually-identical but structurally distinct C types, rejected as
+  `-Wincompatible-pointer-types` by the same class of host compiler.
+  Reproduced by `test_minilua.c` (a real Lua interpreter). Fixed by
+  `hoist_compiler_temp_anon_types()` (`serialize_program.c`), reusing #989's
+  `hoist_local_type_to_file_scope()` (previously only applied to block-
+  literal captures) for every such compiler temp, so it gets one stable,
+  named file-scope definition instead (#1186).
+- Two bundled headers (`include/fcntl.h`, plus 22 more) and the generated
+  `--testing=native` test-harness `main()` used constructs illegal under
+  strict ISO C90 (`//` line comments; a `for (int i = ...)` C99
+  declaration) — the same class of bug 0.3.12 fixed for `include/stdlib.h`,
+  just not swept exhaustively at the time. Converted the comments to
+  `/* */` and hoisted the loop variable (#1186).
+- `tools/run_tests.py -jN` could wedge indefinitely: every per-test
+  subprocess spawn inherited the harness's own stdin (a child that reads it
+  blocks forever) and had no defense against a grandchild (the host `cc`/
+  `ld` under `-c=native`, or the compiled test artifact itself) holding the
+  inherited stdout/stderr pipes open after its direct parent exited —
+  `communicate()` then waits forever for an EOF that never arrives, and
+  `subprocess.run`'s own timeout-kill path only signals the direct child,
+  never the grandchild holding the pipe. Reported as all worker threads
+  plus main parked on futexes with several exited `[cccc]` processes never
+  reaped, inside a Rosetta-emulated container at `-j8` (#1185). Not
+  root-caused to that specific run, but the mechanism is real and
+  reproducible in isolation: fixed by routing every per-test subprocess
+  spawn through one chokepoint (`tools/testing/proc.py`'s `run_capture()`)
+  that closes stdin, runs the child in its own process group
+  (`start_new_session=True`), and kills the *whole group* — not just the
+  direct child — on timeout or on a still-unresponsive drain afterward.
+  `run_tests.py --process-timeout` now defaults to 600s (was unbounded)
+  so a wedge is structurally bounded rather than merely harder to trigger;
+  `tools/tests.py` keeps no default for interactive use (#1185).
+
+### Changed
+
+- The `native`/`native_skip_audit` sub-suites (#1157/#1182), downgraded to
+  advisory by 0.3.12 after sr.ht's Linux hardware hit failures/false
+  positives neither macOS nor the verification container reproduced, are
+  hard-blocking again. Root cause: compiler *family* (clang vs. gcc), not
+  GCC version as first suspected — the verification container's own gcc
+  simply predates GCC 14's `-Wincompatible-pointer-types` promotion, so it
+  never exercised the gcc half of the split. `NATIVE_SKIP_TESTS_CLANG`/
+  `NATIVE_SKIP_TESTS_GCC` (`tools/testing/__init__.py`) join the existing
+  `_MACOS`/`_LINUX` tables for the divergences that are genuinely
+  compiler-family-specific rather than bugs, keyed by a new
+  `detect_native_cc_family()` (`tools/testing/platform.py`); the skip-audit
+  classifier (`_print_native_skip_audit`, `tools/testing/cli.py`) gained a
+  fourth "off_axis" bucket so a platform/family-scoped entry that correctly
+  passes off its own axis (e.g. a macOS-only entry audited on Linux) is no
+  longer misreported as `STALE` — the root cause of #1182's own six
+  false-positive findings. See man/TESTING.md's "Native round-trip mode"
+  section (#1186).
+
 ## [0.3.12] - 2026-08-25
 
 ### Fixed

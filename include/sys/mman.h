@@ -71,8 +71,8 @@ extern int munlockall(void);
 extern int shm_open(const char *name, int oflag, mode_t mode);
 extern int shm_unlink(const char *name);
 #ifdef __linux__
-// mremap resizes/moves an existing mapping; Linux-only glibc/syscall
-// extension, absent on macOS/BSD (#729).
+/* mremap resizes/moves an existing mapping; Linux-only glibc/syscall */
+/* extension, absent on macOS/BSD (#729). */
 extern void *mremap(void *old_address, size_t old_size, size_t new_size,
                     int flags, ...);
 #endif

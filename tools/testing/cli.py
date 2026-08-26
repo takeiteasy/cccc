@@ -6,8 +6,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import NATIVE_SKIP_TESTS, NATIVE_SKIP_TESTS_LINUX, NATIVE_SKIP_TESTS_MACOS, REPO_ROOT
-from .platform import detect_platform
+from . import (
+    NATIVE_SKIP_TESTS,
+    NATIVE_SKIP_TESTS_CLANG,
+    NATIVE_SKIP_TESTS_GCC,
+    NATIVE_SKIP_TESTS_LINUX,
+    NATIVE_SKIP_TESTS_MACOS,
+    REPO_ROOT,
+)
+from .platform import detect_native_cc_family, detect_platform
 from .discovery import discover_tests
 from .suite import run_test_suite_with_isolation
 from .report import print_summary
@@ -172,17 +179,22 @@ def main(argv=None):
     )
 
     if args.native_audit_skips:
-        # Restrict the corpus to exactly the files the three hardcoded tables
+        # Restrict the corpus to exactly the files the five hardcoded tables
         # name -- the audit's whole point is "does the skip for THIS file
         # still hold", not a full native corpus run (seconds instead of
-        # minutes). NATIVE_SKIP_TESTS_MACOS/_LINUX are included even off
-        # their platform: a stale platform-only entry is still worth
-        # reporting (it just can't be deleted here without also confirming
-        # the other platform, see man/TESTING.md).
+        # minutes). NATIVE_SKIP_TESTS_MACOS/_LINUX/_CLANG/_GCC are included
+        # even off their platform/family: a stale platform- or family-only
+        # entry is still worth reporting (it just can't be deleted here
+        # without also confirming the other platform/family, see
+        # man/TESTING.md) -- and #1186 needs the *other* direction here too:
+        # a foreign-axis entry that passes here is expected, not stale (see
+        # _print_native_skip_audit's off_axis bucket below).
         audited_names = (
             set(NATIVE_SKIP_TESTS)
             | set(NATIVE_SKIP_TESTS_MACOS)
             | set(NATIVE_SKIP_TESTS_LINUX)
+            | set(NATIVE_SKIP_TESTS_CLANG)
+            | set(NATIVE_SKIP_TESTS_GCC)
         )
         test_files = [t for t in test_files if t.name in audited_names]
 
@@ -277,7 +289,7 @@ def main(argv=None):
         # entry (passes with its skip bypassed) is something this mode
         # should ever fail CI over, so it overrides ok rather than ANDing
         # with it.
-        ok = _print_native_skip_audit(r, test_files, platform)
+        ok = _print_native_skip_audit(r, test_files, platform, detect_native_cc_family())
 
     sys.exit(0 if ok else 1)
 
@@ -312,14 +324,44 @@ _NATIVE_AUDIT_KNOWN_FLAKY = frozenset({
 })
 
 
-def _print_native_skip_audit(r, test_files, platform):
+def _entry_applies_here(name, platform, family):
+    """True if `name` has a skip-table entry that actually governs it on
+    THIS run's platform+compiler-family combination -- i.e. deleting that
+    entry, if the file now passes, would actually be correct here. #1186:
+    NATIVE_SKIP_TESTS_MACOS/_LINUX/_CLANG/_GCC entries deliberately stay in
+    the audited corpus even off their own axis (see the corpus-restriction
+    comment above), so a name can appear in the corpus with NO entry that
+    applies here at all -- that is the off_axis case _print_native_skip_audit
+    splits out below, not a staleness finding.
+    """
+    if name in NATIVE_SKIP_TESTS:
+        return True
+    if platform == "macos" and name in NATIVE_SKIP_TESTS_MACOS:
+        return True
+    if platform == "linux" and name in NATIVE_SKIP_TESTS_LINUX:
+        return True
+    if family == "clang" and name in NATIVE_SKIP_TESTS_CLANG:
+        return True
+    if family == "gcc" and name in NATIVE_SKIP_TESTS_GCC:
+        return True
+    return False
+
+
+def _print_native_skip_audit(r, test_files, platform, family=None):
     """Classify every file in the --native-audit-skips corpus as STALE
-    (passed with the table bypassed -- delete its skip entry), KEPT
-    (still skips/fails for a reason independent of the table -- a
-    --build/-c/-o/frontend-mode/VM-only-flag check, or a v1 --testing
-    exclusion refused by the compiler itself), or a genuine native failure
-    worth investigating before deciding. Returns False if anything looks
-    like a real (non-refused-by-design) failure, so CI can hard-fail on it.
+    (passed with the table bypassed, AND governed by an entry that applies
+    on this platform/family -- delete that entry), off_axis (passed, but
+    every skip-table entry naming this file is scoped to a *different*
+    platform or compiler family than this run -- an expected pass, not a
+    staleness finding: #1186's own false-positive class, e.g.
+    test_setpayload_zero_1079.c is macOS-only and correctly passes when
+    audited on Linux), KEPT (still skips/fails for a reason independent of
+    the table -- a --build/-c/-o/frontend-mode/VM-only-flag check, or a v1
+    --testing exclusion refused by the compiler itself), or a genuine
+    native failure worth investigating before deciding. Returns False if
+    anything looks like a real (non-refused-by-design) failure or an
+    actionable STALE entry, so CI can hard-fail on it -- off_axis never
+    does.
     """
     def basename_of(entry):
         # native_skipped_tests are already skip_reason dicts with a real
@@ -332,7 +374,8 @@ def _print_native_skip_audit(r, test_files, platform):
     crashed_names = {basename_of(e) for e in r.get("crashed_tests", [])}
 
     audited = sorted({t.name for t in test_files})
-    stale, kept_skip, refused_by_design, known_flaky, real_failures = [], [], [], [], []
+    stale, off_axis, kept_skip, refused_by_design, known_flaky, real_failures = (
+        [], [], [], [], [], [])
     for name in audited:
         if name in _NATIVE_AUDIT_KNOWN_FLAKY:
             known_flaky.append(name)
@@ -341,14 +384,22 @@ def _print_native_skip_audit(r, test_files, platform):
              else real_failures).append(name)
         elif name in skipped_names:
             kept_skip.append(name)
-        else:
+        elif _entry_applies_here(name, platform, family):
             stale.append(name)
+        else:
+            off_axis.append(name)
 
     print()
     print("=== --native-audit-skips report (#1182) ===")
     if stale:
         print(f"STALE ({len(stale)}) -- now pass; delete the skip entry:")
         for name in stale:
+            print(f"  {name}")
+    if off_axis:
+        print(f"PASSES here, but every entry naming it is scoped to a "
+              f"different platform/compiler family ({len(off_axis)}) -- "
+              f"not actionable on this run:")
+        for name in off_axis:
             print(f"  {name}")
     if kept_skip:
         print(f"KEPT, still hits an independent skip check ({len(kept_skip)}):")
@@ -367,7 +418,7 @@ def _print_native_skip_audit(r, test_files, platform):
         print(f"STILL FAILING, not yet resolved ({len(real_failures)}):")
         for name in real_failures:
             print(f"  {name}")
-    if not any((stale, kept_skip, refused_by_design, known_flaky, real_failures)):
+    if not any((stale, off_axis, kept_skip, refused_by_design, known_flaky, real_failures)):
         print("(no audited files matched the discovered corpus)")
     print("============================================")
 

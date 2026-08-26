@@ -2253,6 +2253,49 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
     }
 }
 
+// #1186: a compiler-synthesized temporary (empty name -- var->name[0] ==
+// '\0', see serialize_decl.c's own __cccc_tmpN naming pass, run later than
+// this one) whose type is a genuinely anonymous struct/union (no tag, no
+// typedef, and no structurally-matching typedef anywhere --
+// type_needs_anon_aggregate()) gets re-derived as a *fresh* textual
+// `struct { ... }` body at every emission site that touches it -- e.g. once
+// at its own local declaration, again at a cast that targets the same type
+// (the ++/--/op= desugaring pattern that introduces these temps routinely
+// casts back to the member's own type to complete a pointer-arithmetic
+// trick). Two independently-derived `struct { ... }` spellings are two
+// distinct types in C even with byte-identical member lists, so an
+// assignment between them is `-Wincompatible-pointer-types` -- a warning
+// under most compilers, but a hard error under GCC 14+/some clang
+// configurations (found via test_minilua.c, a real Lua interpreter
+// exercising exactly this compound-lvalue-through-a-union-member shape).
+// hoist_local_type_to_file_scope() (#989) already solves the identical
+// problem one level up, for a block literal's captured-variable types --
+// this reuses it for every such temp, not just captures, so the whole class
+// gets a single, stably-named file-scope definition instead of a fresh
+// inline body at each site. Same reachability filter as
+// serialize_nested_preamble() below, and must run at the same point in the
+// emission order (after serialize_type_defs_for_owner(f, ctx, NULL), before
+// any function body is emitted) for the same reason: a temp's anonymous
+// type may itself be declared-in-a-function (rare, but possible if it
+// mirrors a local aggregate's shape) and needs hoisting ahead of that
+// function too.
+static void hoist_compiler_temp_anon_types(FILE *f, VirtualMachine *vm,
+                                           SerializeContext *ctx, Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->body)
+            continue;
+        bool reachable = !ctx->generated_only || obj->is_macro_generated;
+        if (!reachable)
+            continue;
+        for (Obj *var = obj->locals; var; var = var->next) {
+            if (var->is_param || !var->name || var->name[0] != '\0')
+                continue;
+            if (type_needs_anon_aggregate(ctx, var->ty))
+                hoist_local_type_to_file_scope(f, vm, ctx, var->ty);
+        }
+    }
+}
+
 // #1074: emits one `struct __cccc_nenv_<name> { void *__up; T0 *__uv0; ...
 // };` for every function that directly parents at least one nested
 // function -- even one with an empty upvars list still needs `__up`, to
@@ -3422,13 +3465,22 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
 
     fputs("int main(void) {\n", f);
     fprintf(f, "    int n = %d;\n", n);
-    fputs("    int passed = 0, failed = 0, skipped = 0, timedout = 0;\n"
+    // #1186: `for (int i = ...)` is a C99 declaration -- the harness main()
+    // this function emits is itself run through a compiled --std=c89 test
+    // (test_suite_std_c89.c, whose own CCCC_FLAGS carry --testing, routed
+    // to --testing=native under -c=native), which rejects it outright
+    // ("'for' loop initial declarations are only allowed in C99 or C11
+    // mode"). `i` hoisted to an ordinary top-of-block declaration, which
+    // c89 allows, keeps every C standard this harness might be compiled
+    // under working with no behavior change for the rest.
+    fputs("    int i;\n"
+          "    int passed = 0, failed = 0, skipped = 0, timedout = 0;\n"
           "    printf(\"TAP version 13\\n\");\n"
           "    printf(\"1..%d\\n\", n);\n"
           "    const char *prev_suite = NULL;\n"
           "    int have_prev_suite = 1;\n"
           "    signal(__CCCC_SIGALRM, __cccc_test_alarm);\n"
-          "    for (int i = 0; i < n; i++) {\n"
+          "    for (i = 0; i < n; i++) {\n"
           "        __cccc_test_case *tc = &__cccc_tests[i];\n"
           "        int suite_changed = !have_prev_suite ||\n"
           "            ((tc->suite == NULL) != (prev_suite == NULL)) ||\n"
@@ -3654,7 +3706,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     if (generated_only && vm->compiler.emit_events_head) {
         serialize_type_defs_for_owner(f, &ctx, NULL);
         serialize_block_preamble(f, vm, &ctx, prog);
-        serialize_nested_preamble(f, vm, &ctx, prog); // #1074
+        serialize_nested_preamble(f, vm, &ctx, prog);      // #1074
+        hoist_compiler_temp_anon_types(f, vm, &ctx, prog); // #1186
         // #928: forward-declare every macro-generated global before any
         // definition, mirroring the #918 pass below (serialize_global_var's
         // sibling loop, further down this function) and for the same
@@ -4128,7 +4181,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // type-def pass just above, so a capture's type (however it reaches the
     // output) is already visible.
     serialize_block_preamble(f, vm, &ctx, prog);
-    serialize_nested_preamble(f, vm, &ctx, prog); // #1074
+    serialize_nested_preamble(f, vm, &ctx, prog);      // #1074
+    hoist_compiler_temp_anon_types(f, vm, &ctx, prog); // #1186
 
     // #918: forward-declare every global before any definition, mirroring
     // the function-prototype pass below and for the same reason -- a

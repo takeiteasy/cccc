@@ -7,7 +7,7 @@
 #error "<netinet/in.h> is only available on POSIX targets in CCCC"
 #endif
 
-#include <stdint.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
+#include <stdint.h> /* #1070: angle-bracket for a correct #include_next hand-off under real GCC */
 #include "sys/socket.h"
 
 typedef uint16_t in_port_t;

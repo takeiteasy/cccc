@@ -34,30 +34,30 @@ typedef long ssize_t;
 #define W_OK 2
 #define R_OK 4
 
-// #1139: unlike stdio.h's stdin/stdout/stderr (#1040) or errno.h's errno
-// (#1021/#1023), environ does NOT need this whole file guarded and handed
-// off to the host's own <unistd.h> -- a much narrower fix suffices, tried
-// first here specifically to avoid stdio.h-style collateral damage a full
-// hand-off would cause elsewhere in this file (confirmed by trying it: it
-// broke #792's own `#include "sys/uio.h"` convenience-include below,
-// losing struct iovec for any guest program that only ever `#include
-// <unistd.h>`, and separately collided with include/sched.h's own
-// non-hand-off struct sched_param once a real host's transitively-reached
-// <sched.h> disagreed with it -- both real, but out of #1139's own scope).
-// The reason a narrow guard is enough here: `environ` itself is a macro,
-// already expanded to a call to `__cccc_environ_ptr()` by CCCC's own
-// preprocessor at guest PARSE time (__CCCC__ defined then) -- the literal
-// token `environ` never reaches -c=native's emitted C at all. So the only
-// thing that can still collide once a real host reprocesses this exact
-// physical file (via -I./include forwarding, __CCCC__ undefined) is this
-// file's own unguarded `extern char ***__cccc_environ_ptr(void);` running
-// into native_accessor_shims' (src/serialize.c) own `static` definition
-// of the same name ("static declaration ... follows non-static
-// declaration", confirmed in the cccc-linux-amd64 container). Guarding
-// just that extern (and the macro that uses it, which the host never
-// needs either -- the host's own real <unistd.h>, if reached some other
-// way in this TU, declares its own real `environ` independently) removes
-// the only actual collision without touching anything else in this file.
+/* #1139: unlike stdio.h's stdin/stdout/stderr (#1040) or errno.h's errno */
+/* (#1021/#1023), environ does NOT need this whole file guarded and handed */
+/* off to the host's own <unistd.h> -- a much narrower fix suffices, tried */
+/* first here specifically to avoid stdio.h-style collateral damage a full */
+/* hand-off would cause elsewhere in this file (confirmed by trying it: it */
+/* broke #792's own `#include "sys/uio.h"` convenience-include below, */
+/* losing struct iovec for any guest program that only ever `#include */
+/* <unistd.h>`, and separately collided with include/sched.h's own */
+/* non-hand-off struct sched_param once a real host's transitively-reached */
+/* <sched.h> disagreed with it -- both real, but out of #1139's own scope). */
+/* The reason a narrow guard is enough here: `environ` itself is a macro, */
+/* already expanded to a call to `__cccc_environ_ptr()` by CCCC's own */
+/* preprocessor at guest PARSE time (__CCCC__ defined then) -- the literal */
+/* token `environ` never reaches -c=native's emitted C at all. So the only */
+/* thing that can still collide once a real host reprocesses this exact */
+/* physical file (via -I./include forwarding, __CCCC__ undefined) is this */
+/* file's own unguarded `extern char ***__cccc_environ_ptr(void);` running */
+/* into native_accessor_shims' (src/serialize.c) own `static` definition */
+/* of the same name ("static declaration ... follows non-static */
+/* declaration", confirmed in the cccc-linux-amd64 container). Guarding */
+/* just that extern (and the macro that uses it, which the host never */
+/* needs either -- the host's own real <unistd.h>, if reached some other */
+/* way in this TU, declares its own real `environ` independently) removes */
+/* the only actual collision without touching anything else in this file. */
 #ifdef __CCCC__
 /* environ aliases the host process's real environment array (via an
  * accessor function, same pattern as errno in errno.h and stdin/stdout/
@@ -99,10 +99,10 @@ extern int dup(int fd);
 extern int dup2(int oldfd, int newfd);
 extern int fsync(int fd);
 #ifdef __linux__
-// fdatasync: POSIX, but absent from Darwin's libc entirely -- macOS has no
-// equivalent syscall/libc symbol at all (the closest analog is the fcntl
-// F_FULLFSYNC command, not a drop-in replacement), unlike fsync above.
-// Same gap class as mremap/splice below (#783).
+/* fdatasync: POSIX, but absent from Darwin's libc entirely -- macOS has no */
+/* equivalent syscall/libc symbol at all (the closest analog is the fcntl */
+/* F_FULLFSYNC command, not a drop-in replacement), unlike fsync above. */
+/* Same gap class as mremap/splice below (#783). */
 extern int fdatasync(int fd);
 #endif
 extern int ftruncate(int fd, off_t length);
@@ -168,8 +168,8 @@ extern int nice(int incr);
 extern int getpagesize(void);
 
 #ifdef __linux__
-// splice: Linux-only zero-copy pipe I/O, same gap class as mremap/fallocate
-// -- SQLite's unix VFS can reference it under Linux-specific config (#731).
+/* splice: Linux-only zero-copy pipe I/O, same gap class as mremap/fallocate */
+/* -- SQLite's unix VFS can reference it under Linux-specific config (#731). */
 extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
                       size_t len, unsigned int flags);
 #endif

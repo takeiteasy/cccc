@@ -5,23 +5,23 @@
 #error "<pthread.h> is only available on POSIX targets in CCCC"
 #endif
 
-// #1022: this exact file is also what a native/generated re-emission's
-// replayed `#include <pthread.h>` resolves to (run_native_backend forwards
-// -I./include straight through to the host cc, and -I paths are searched
-// ahead of system directories) -- but the VM-ABI struct layouts below
-// (pthread_mutex_t/pthread_cond_t/... as a plain {void*,long,int} triple)
-// are CCCC's own polyfill for the FFI wrappers in src/stdlib/pthread.c, not
-// the real host layout (64/48 bytes on macOS arm64 vs. the 24/16 bytes
-// below) -- a real host compiler reading this file's projection and then
-// linking against the real libpthread silently corrupts every pthread
-// object it touches (confirmed: test_pthread_mutex.c's -c=native binary
-// flaked non-42 exit codes under repeated runs before this fix). Same
-// shape as #1021/#1040 (fenv.h/stdio.h) -- guard the whole CCCC-flavored
-// body and hand off to the host's own <pthread.h> via #include_next.
-// __CCCC__ is defined unconditionally by CCCC's own preprocessor before any
-// header is read, so its absence here means a genuine host compiler is
-// reprocessing this file -- only possible during -c=native/-c=generated
-// serializer replay.
+/* #1022: this exact file is also what a native/generated re-emission's */
+/* replayed `#include <pthread.h>` resolves to (run_native_backend forwards */
+/* -I./include straight through to the host cc, and -I paths are searched */
+/* ahead of system directories) -- but the VM-ABI struct layouts below */
+/* (pthread_mutex_t/pthread_cond_t/... as a plain {void*,long,int} triple) */
+/* are CCCC's own polyfill for the FFI wrappers in src/stdlib/pthread.c, not */
+/* the real host layout (64/48 bytes on macOS arm64 vs. the 24/16 bytes */
+/* below) -- a real host compiler reading this file's projection and then */
+/* linking against the real libpthread silently corrupts every pthread */
+/* object it touches (confirmed: test_pthread_mutex.c's -c=native binary */
+/* flaked non-42 exit codes under repeated runs before this fix). Same */
+/* shape as #1021/#1040 (fenv.h/stdio.h) -- guard the whole CCCC-flavored */
+/* body and hand off to the host's own <pthread.h> via #include_next. */
+/* __CCCC__ is defined unconditionally by CCCC's own preprocessor before any */
+/* header is read, so its absence here means a genuine host compiler is */
+/* reprocessing this file -- only possible during -c=native/-c=generated */
+/* serializer replay. */
 #ifdef __CCCC__
 
 #include "stddef.h"
@@ -57,9 +57,9 @@ typedef struct {
 #define PTHREAD_MUTEX_INITIALIZER {0, 0, 0}
 #define PTHREAD_COND_INITIALIZER  {0, 0}
 
-// Mutex types (POSIX). Values are the real host encoding so they can be
-// forwarded directly to the native pthread_mutexattr_settype() underneath
-// the FFI wrapper -- see src/stdlib/pthread.c.
+/* Mutex types (POSIX). Values are the real host encoding so they can be */
+/* forwarded directly to the native pthread_mutexattr_settype() underneath */
+/* the FFI wrapper -- see src/stdlib/pthread.c. */
 #ifdef __APPLE__
 #define PTHREAD_MUTEX_NORMAL     0
 #define PTHREAD_MUTEX_ERRORCHECK 1

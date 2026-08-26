@@ -5,16 +5,16 @@
 #error "<threads.h> is only available on POSIX targets in CCCC"
 #endif
 
-// #1070: angle-bracket for a correct #include_next hand-off under real GCC.
-// pthread.h gained its own #include_next hand-off in #1022 (previously
-// quoted here, caught by tools/header_resolution_smoke.py's case 7 static
-// audit the moment it did) -- errno.h was already angle-bracket for the
-// same reason (ETIMEDOUT was otherwise left undeclared). errno.h is NOT on
-// is_compiler_owned_header, so unlike the stdint.h/stdarg.h sites elsewhere
-// in this batch this is not behaviour-neutral: under --use-system-headers,
-// search_include_paths() now prefers system_include_paths first for this
-// spelling, same as any other non-owned std header reached by <...> --
-// verified against tests/test_use_system_headers_*.c.
+/* #1070: angle-bracket for a correct #include_next hand-off under real GCC. */
+/* pthread.h gained its own #include_next hand-off in #1022 (previously */
+/* quoted here, caught by tools/header_resolution_smoke.py's case 7 static */
+/* audit the moment it did) -- errno.h was already angle-bracket for the */
+/* same reason (ETIMEDOUT was otherwise left undeclared). errno.h is NOT on */
+/* is_compiler_owned_header, so unlike the stdint.h/stdarg.h sites elsewhere */
+/* in this batch this is not behaviour-neutral: under --use-system-headers, */
+/* search_include_paths() now prefers system_include_paths first for this */
+/* spelling, same as any other non-owned std header reached by <...> -- */
+/* verified against tests/test_use_system_headers_*.c. */
 #include <pthread.h>
 #include "time.h"
 #include <errno.h>

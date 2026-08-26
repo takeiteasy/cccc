@@ -3,7 +3,7 @@
 #ifndef __INTTYPES_H
 #define __INTTYPES_H
 
-#include <stdint.h> // #1070: angle-bracket for a correct #include_next hand-off under real GCC
+#include <stdint.h> /* #1070: angle-bracket for a correct #include_next hand-off under real GCC */
 
 #define PRId8  "d"
 #define PRIi8  "i"
