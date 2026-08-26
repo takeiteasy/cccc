@@ -236,16 +236,21 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
         AddDefine(t, "_DEFAULT_SOURCE", (const char *)0);
         AddDefine(t, "_POSIX_C_SOURCE", "200809L");
         AddLib(t, "m");
-        // Clang -O1/-O2/-O3 (any level above -O0) miscompiles glibc's
+        // A -fgnu89-inline flag used to live here, worked around a
+        // "multiple definition" link failure at -O1+ for glibc's
         // extern-inline pthread.h/wchar.h functions (pthread_equal, btowc,
-        // wctob, mbrlen) as strong (non-weak) symbols instead of discardable
-        // ones, causing "multiple definition" link errors across TUs that
-        // merely #include <pthread.h>/<wchar.h> -- reproduced with a minimal
-        // two-TU repro on Linux aarch64/clang 18.1.3 (#883's release build
-        // was the first thing to ever build this codebase above -O0 on
-        // Linux). -fgnu89-inline forces the old GNU89 inline linkage
-        // semantics, which resolves it; verified with the same repro.
-        AddCFlag(t, "-fgnu89-inline");
+        // wctob, mbrlen) that was misdiagnosed as clang miscompiling them as
+        // strong symbols. The real cause (#1199/#1200) was src/internal.h's
+        // own #define __attribute__(x) strip: its #ifndef __attribute__
+        // guard was vacuous (__attribute__ is a keyword, never a predefined
+        // macro), so the strip fired unconditionally, including under
+        // clang, deleting the __gnu_inline__ out of glibc's own
+        // extern-inline machinery and leaving a bare extern inline -- a C99
+        // *external* definition. Fixed at the source by guarding the strip
+        // to !defined(__GNUC__) && !defined(__clang__); verified (#1200)
+        // that removing -fgnu89-inline no longer reproduces the failure --
+        // a full -O2 clang build of every real source file links clean
+        // without it.
     } else if (strcmp(BuildHost(ctx), "darwin") == 0) {
         // iconv() is declared in libSystem's <iconv.h> but the symbols only
         // resolve at link time via libiconv (Makefile:97-101, verified there:

@@ -3,6 +3,22 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `build.c`'s Linux build carried a `-fgnu89-inline` flag for
+  `add_cccc_flags_opt()`, blamed on a comment claiming clang miscompiles
+  glibc's extern-inline `pthread.h`/`wchar.h` functions (`pthread_equal`,
+  `btowc`, `wctob`, `mbrlen`) as strong symbols at `-O1`+. That diagnosis
+  was wrong: the real cause was the same vacuous `__attribute__`-stripping
+  guard in `src/internal.h` fixed above (#1199) — it stripped
+  `__gnu_inline__` unconditionally, including under clang, turning glibc's
+  own `extern __inline __attribute__((__gnu_inline__))` into a bare
+  `extern inline`, a C99 external definition. With the guard fixed, the
+  flag is no longer needed; removed, and the comment corrected to point at
+  the real root cause.
+
 ## [0.3.14] - 2026-08-26
 
 ### Fixed
