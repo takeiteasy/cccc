@@ -27,8 +27,10 @@ from testing import (
     NATIVE_SKIP_TESTS_GCC_MACOS,
     NATIVE_SKIP_TESTS_LINUX,
     NATIVE_SKIP_TESTS_MACOS,
+    SMOKE_CASE_SKIPS_GCC_MACOS,
     native_audit_skips_enabled,
     native_skip_reason,
+    smoke_case_skip_reason,
 )
 from testing.cli import _entry_applies_here
 
@@ -202,6 +204,58 @@ def _(fail):
     if not _entry_applies_here(name, platform=None, family=None):
         fail(f"{name!r} is in the unconditional NATIVE_SKIP_TESTS table -- "
              f"should apply regardless of platform/family")
+
+
+# --- #1196: comptime_native_smoke.py's own case-function-keyed skip table
+# (SMOKE_CASE_SKIPS_GCC_MACOS/smoke_case_skip_reason()), separate from the
+# filename-keyed NATIVE_SKIP_TESTS* tables above but sharing their same
+# platform+family two-axis shape and audit-bypass fall-through. ---
+
+
+@case("smoke_case_skip_reason skips only on macos+gcc, not other axes")
+def _(fail):
+    if "case_ctor_dtor_native_round_trip" not in SMOKE_CASE_SKIPS_GCC_MACOS:
+        fail("case_ctor_dtor_native_round_trip should be in "
+             "SMOKE_CASE_SKIPS_GCC_MACOS -- #1196 quarantines the identical "
+             "gcc/Darwin constructor-priority WONT_FIX gap "
+             "NATIVE_SKIP_TESTS_GCC_MACOS already covers for "
+             "test_ctor_dtor_native_1020.c")
+        return
+    os.environ.pop("CCCC_AUDIT_NATIVE_SKIPS", None)
+    reason = SMOKE_CASE_SKIPS_GCC_MACOS["case_ctor_dtor_native_round_trip"]
+    got = smoke_case_skip_reason(
+        "case_ctor_dtor_native_round_trip", platform="macos", family="gcc"
+    )
+    if got != reason:
+        fail(f"expected the table's own reason under macos+gcc, got {got!r}")
+    for platform, family in (("macos", "clang"), ("linux", "gcc"),
+                              ("linux", "clang")):
+        got = smoke_case_skip_reason(
+            "case_ctor_dtor_native_round_trip", platform=platform, family=family
+        )
+        if got is not None:
+            fail(f"must not skip under platform={platform!r} family={family!r} "
+                 f"(gcc/Darwin-only gap) -- got {got!r}")
+    got = smoke_case_skip_reason(
+        "case_not_a_real_case", platform="macos", family="gcc"
+    )
+    if got is not None:
+        fail(f"an unknown case key must never be skipped, got {got!r}")
+
+
+@case("smoke_case_skip_reason is bypassed by the audit flag")
+def _(fail):
+    if "case_ctor_dtor_native_round_trip" not in SMOKE_CASE_SKIPS_GCC_MACOS:
+        return
+    os.environ["CCCC_AUDIT_NATIVE_SKIPS"] = "1"
+    try:
+        got = smoke_case_skip_reason(
+            "case_ctor_dtor_native_round_trip", platform="macos", family="gcc"
+        )
+        if got is not None:
+            fail(f"expected the entry to be bypassed (None), got {got!r}")
+    finally:
+        os.environ.pop("CCCC_AUDIT_NATIVE_SKIPS", None)
 
 
 def main():

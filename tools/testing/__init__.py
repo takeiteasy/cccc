@@ -8,7 +8,7 @@ on its own __file__ (which would produce wrong results at different depths).
 import os
 from pathlib import Path
 
-from .platform import detect_native_cc_family
+from .platform import detect_native_cc_family, detect_platform
 
 # tools/testing/ → tools/ → repo root
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -747,6 +747,46 @@ NATIVE_SKIP_TESTS_GCC_MACOS = {
                  "clang supports them and this passes there, WONT_FIX -- "
                  "permanent gcc/Darwin gap",
 }
+
+# #1196: tools/comptime_native_smoke.py is a separate script from the
+# NATIVE_SKIP_TESTS* family above and exercises the identical gcc/Darwin
+# constructor-priority WONT_FIX gap in its own case_ctor_dtor_native_
+# round_trip (case 114, constructor(150)) -- but had no skip mechanism of
+# its own, so it hard-failed under CCCC_NATIVE_CC=gcc on macOS instead of
+# being quarantined like test_ctor_dtor_native_1020.c already is above.
+# Keyed by case *function name*, not the hand-maintained case number in
+# each case's own print() (which drifts as cases are inserted/removed),
+# and checked via smoke_case_skip_reason() below -- same platform+family
+# two-axis shape as NATIVE_SKIP_TESTS_GCC_MACOS, since it's the same root
+# cause.
+SMOKE_CASE_SKIPS_GCC_MACOS = {
+    "case_ctor_dtor_native_round_trip": "gcc on Darwin rejects "
+                 "__attribute__((constructor(150))) priorities outright "
+                 "(\"constructor priorities are not supported\"); clang "
+                 "supports them and this passes there -- the same "
+                 "permanent WONT_FIX gap NATIVE_SKIP_TESTS_GCC_MACOS "
+                 "records for test_ctor_dtor_native_1020.c (#1196, #1193)",
+}
+
+
+def smoke_case_skip_reason(case_key, platform=None, family=None):
+    """Return a skip reason for a tools/comptime_native_smoke.py case
+    function (keyed by its Python function name), or None if it should
+    run. Mirrors native_skip_reason()'s platform+family fall-through
+    shape (including the CCCC_AUDIT_NATIVE_SKIPS=1 bypass, so the audit
+    can still force the case to run and prove the entry isn't stale) but
+    is a separate, smaller table since comptime_native_smoke.py's cases
+    have no relationship to the NATIVE_SKIP_TESTS* filename-keyed tables.
+    """
+    if native_audit_skips_enabled():
+        return None
+    platform = platform if platform is not None else detect_platform()
+    family = family if family is not None else detect_native_cc_family()
+    if platform == "macos" and family == "gcc" \
+            and case_key in SMOKE_CASE_SKIPS_GCC_MACOS:
+        return SMOKE_CASE_SKIPS_GCC_MACOS[case_key]
+    return None
+
 
 # CLI flags that -c=native drops with a warning rather than enforcing
 # (#935's VM-only-enforcement decision) -- exercising them natively would

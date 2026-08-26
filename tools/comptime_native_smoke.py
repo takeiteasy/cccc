@@ -152,6 +152,17 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Ensure tools/ is on sys.path so the 'testing' package is importable both
+# standalone and when run_tests.py loads this file via
+# importlib.util.spec_from_file_location (which does not add the script's
+# own directory to sys.path) -- mirrors tools/testing/test_native_skip_
+# audit.py's own explicit insert. run_tests.py's loader wraps the whole
+# module exec in `except Exception: return f"FAILED ({e})"`, so a path-
+# dependent ImportError here would otherwise surface as an opaque suite
+# failure instead of a normal skip.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from testing import smoke_case_skip_reason
+
 SHARED_HEADER = (
     "typedef struct Alpha Alpha;\n"
     "typedef struct Beta Beta;\n"
@@ -4735,7 +4746,12 @@ def case_ctor_dtor_native_round_trip(cccc: Path, tmp: str) -> bool:
           "accepts it -- the macOS-passes/Linux-fails shape this batch "
           "keeps relearning). Asserts -m output has "
           "__attribute__((constructor)) and __attribute__((constructor(150))) "
-          "as prefixes on their declarators, plus VM 42 -> native 42 (#1020).")
+          "as prefixes on their declarators, plus VM 42 -> native 42 (#1020). "
+          "Skipped under gcc on Darwin (SMOKE_CASE_SKIPS_GCC_MACOS, "
+          "tools/testing/__init__.py) -- Homebrew gcc rejects the "
+          "constructor(150) priority form outright, the same permanent "
+          "WONT_FIX gap NATIVE_SKIP_TESTS_GCC_MACOS already quarantines for "
+          "test_ctor_dtor_native_1020.c (#1196, #1193).")
     src = Path(tmp) / "ctor_dtor_native_1020.c"
     write(src, CTOR_DTOR_NATIVE_PROGRAM)
 
@@ -6690,13 +6706,28 @@ def main() -> int:
             case_atomic_var_init_native_round_trip,
             case_opaque_handle_native_round_trip,
         ]
-        results = [case(cccc, tmp) for case in cases]
+        results = []
+        for case in cases:
+            reason = smoke_case_skip_reason(case.__name__)
+            if reason:
+                print(f"  SKIP {case.__name__}: {reason}")
+                results.append(None)
+                continue
+            results.append(case(cccc, tmp))
 
-    if all(results):
-        print(f"All {len(results)} native-backend serializer smoke cases passed.")
+    failed = results.count(False)
+    skipped = results.count(None)
+    passed = len(results) - failed - skipped
+    if failed:
+        print(f"{failed} of {len(results)} native-backend serializer smoke cases FAILED"
+              f"{f' ({skipped} skipped)' if skipped else ''}.")
+        return 1
+    if skipped:
+        print(f"{passed} passed, {skipped} skipped "
+              f"(of {len(results)} native-backend serializer smoke cases).")
         return 0
-    print(f"{results.count(False)} of {len(results)} native-backend serializer smoke cases FAILED.")
-    return 1
+    print(f"All {len(results)} native-backend serializer smoke cases passed.")
+    return 0
 
 
 if __name__ == "__main__":

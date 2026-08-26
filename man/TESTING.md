@@ -350,6 +350,31 @@ serializer bugs in general. Cases covered:
   guard against over-collecting; see [HEADERS.md](HEADERS.md) for the
   full writeup).
 
+**Skips (#1196):** unlike the main `--native` corpus below,
+`comptime_native_smoke.py` had no skip mechanism of its own until #1196 —
+its case 114 (`case_ctor_dtor_native_round_trip`) exercises the same
+`__attribute__((constructor(150)))` construct `NATIVE_SKIP_TESTS_GCC_MACOS`
+already quarantines for `test_ctor_dtor_native_1020.c`, and hard-failed
+under `CCCC_NATIVE_CC=gcc` on macOS instead of being recognized as the same
+permanent gcc/Darwin WONT_FIX gap. `SMOKE_CASE_SKIPS_GCC_MACOS`/
+`smoke_case_skip_reason()` (`tools/testing/__init__.py`) give it the same
+platform+family two-axis shape as `NATIVE_SKIP_TESTS_GCC_MACOS`, keyed by
+case *function name* (not the hand-maintained case number in each case's
+own `print()`, which drifts). A skipped case is a third result state, not a
+pass — the summary line reads `"N passed, M skipped"` rather than
+`"All N passed"` whenever anything was skipped, so a skip can never
+silently masquerade as green. `CCCC_AUDIT_NATIVE_SKIPS=1` bypasses the
+table (same env var and fall-through shape as `native_skip_reason()`
+below), forcing the case to run — useful for manually confirming an entry
+isn't stale, the way `--native-audit-skips` does for the main corpus.
+Unlike that corpus, nothing wires this audit into `run_tests.py`'s
+`native_skip_audit` sub-suite automatically yet; run it by hand:
+
+```
+CCCC_AUDIT_NATIVE_SKIPS=1 CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 \
+    python3 tools/comptime_native_smoke.py
+```
+
 ### Native round-trip mode (`--native`)
 
 `tools/tests.py --c4` catches a *bytecode* round-trip regression: compile
@@ -494,6 +519,12 @@ symlink, needs installing separately — e.g. Homebrew's `gcc@N` on macOS):
 CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 python3 tools/tests.py --binary ./cccc --native
 CCCC_NATIVE_CC=clang                    python3 tools/tests.py --binary ./cccc --native
 ```
+
+`tools/comptime_native_smoke.py` (a separate script, see its own "Skips"
+paragraph above) shares this same platform+family axis via its own
+`SMOKE_CASE_SKIPS_GCC_MACOS`/`smoke_case_skip_reason()` — a distinct,
+case-function-keyed table rather than an entry in the tables above, since
+its cases have no relationship to test *filenames*.
 
 A handful of entries are not bugs at all:
 some `CCCC_EXPECT_STDERR` tests are deliberately invalid C (a bad `main()`
