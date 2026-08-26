@@ -45,6 +45,16 @@ All notable changes to CCCC are documented here. Format loosely follows
   `extern inline`, a C99 external definition. With the guard fixed, the
   flag is no longer needed; removed, and the comment corrected to point at
   the real root cause.
+- `tools/host_attribute_link_smoke.py`'s (#1199) `is_real_gcc()` ran `gcc
+  -dM -E -x c -` (and its `pkg-config`/`xcrun` probes) without closing
+  stdin. On an interactive terminal that reads a closed/EOF stdin and
+  returns immediately, but on a non-interactive CI runner stdin is
+  typically an open pipe that never sends EOF, so `-x c -` blocked forever
+  waiting for source text. This is the same subprocess-wedge class
+  `tools/testing/proc.py`'s `run_capture()` chokepoint (#1185) guards
+  against, but this standalone script bypasses that chokepoint since it
+  runs in-process via `importlib`. Fixed by closing stdin and capping the
+  call with a timeout (#1201).
 
 ## [0.3.14] - 2026-08-26
 

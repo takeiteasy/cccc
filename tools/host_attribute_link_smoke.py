@@ -93,7 +93,18 @@ int main(void) {
 
 
 def run(cmd, cwd=None):
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    # #1201: the `-x c -` call in is_real_gcc() (and, less dangerously, the
+    # pkg-config/xcrun calls) inherited the harness's own stdin. On a
+    # non-interactive CI runner that's an open pipe that never sends EOF, so
+    # `-x c -` blocks forever waiting for source text on stdin. Close it and
+    # cap the call, mirroring tools/testing/proc.py's run_capture()
+    # chokepoint (#1185) which this standalone script bypasses since it
+    # runs in-process via importlib, not as a per-test spawn.
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd,
+                               stdin=subprocess.DEVNULL, timeout=60)
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(cmd, 124, "", f"timed out: {e}")
 
 
 def is_real_gcc(cc: str) -> bool:
