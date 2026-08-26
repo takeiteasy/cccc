@@ -5,6 +5,8 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-08-26
+
 ### Fixed
 
 - `include/stdatomic.h`'s `atomic_fetch_add/sub/or/xor/and` expanded to a
@@ -90,6 +92,56 @@ All notable changes to CCCC are documented here. Format loosely follows
   `run_tests.py --process-timeout` now defaults to 600s (was unbounded)
   so a wedge is structurally bounded rather than merely harder to trigger;
   `tools/tests.py` keeps no default for interactive use (#1185).
+- `-c=native`: a non-local vector global's own natural alignment wasn't
+  stated explicitly when it exceeded 8 bytes — gcc on Darwin/arm64 does not
+  derive it from `__attribute__((vector_size(N)))` alone for a global the
+  way clang does. Fixed in `serialize_alignas_if_needed` (#1191).
+- `tests/test_suite_varargs.c`'s `sum_all_types` call passed an `int` where
+  its own `va_arg(ap, long)` read a `long` back — genuine UB that clang
+  tolerated and gcc did not, since Apple's arm64 variadic ABI packs slots to
+  their argument's own natural size. Fixed the test (#1192).
+- `NATIVE_SKIP_TESTS_GCC` (the gcc/Darwin constructor/destructor-priority
+  WONT_FIX group) had no platform axis, so it wrongly suppressed those same
+  five tests on Linux gcc too, where they actually pass — caught by sr.ht's
+  own Linux build hardware reporting all seven as `STALE`. Split into a new
+  `NATIVE_SKIP_TESTS_GCC_MACOS` requiring both the platform and
+  compiler-family axis to match. `--native-audit-skips`'s own `STALE`
+  section is now extracted by its header rather than a blind stdout tail,
+  which had been silently missing it (#1193).
+- A quoted `#include` inside a bundled header (`sys/stat.h`'s own
+  `"../time.h"`) resolved to a literal table-key lookup instead of
+  lexically against its own virtual `<embedded>/...` path. Added a real
+  embedded-relative include resolver (`src/preprocess.c`), wired into the
+  `PP_INCLUDE` handler, `eval_has_include`, and
+  `resolve_comptime_include_path` (#1194).
+- `-c=native`'s C23 IEC 60559 interchange/classification family
+  (`fromfp`/`ufromfp`/`fromfpx`/`ufromfpx`/...) read the wrong ABI return
+  register under glibc 2.43 — that release changed the family's *default*
+  symbol version to the C23-standardized signature (returns `double`
+  instead of `intmax_t`/`uintmax_t`; both `fromfp@GLIBC_2.25` and
+  `fromfp@@GLIBC_2.43` coexist), while CCCC's bundled `math.h` still
+  declared the old ABI. Fixed with a self-contained shim
+  (`serialize_c23_fromfp_shims`, porting the VM's own `cccc_fromfp_impl`
+  into the generated C) that never calls the host's own `fromfp*` at all,
+  immune to the glibc version split entirely (#1195).
+- `_Decimal32/64/128` under `-c=native`: gcc genuinely supports the GNU
+  decimal extension (verified on both macOS gcc-16 and Linux gcc 15.2), so
+  an earlier plan to hard-error unconditionally would have regressed a
+  working configuration. Instead the serializer now tracks whether any
+  reachable type uses `_Decimal` and emits a guarded `#error` preamble
+  (`#if !defined(__DEC64_MAX__)`), deferring to whichever host compiler
+  actually reads the output — gcc unaffected, clang gets a cccc-branded
+  diagnostic instead of its own generic one (#1113).
+- `tools/comptime_native_smoke.py` had no skip mechanism of its own, unlike
+  the main `--native` corpus — its case 114
+  (`case_ctor_dtor_native_round_trip`, `__attribute__((constructor(150)))`)
+  hit the identical, already-quarantined gcc-on-Darwin constructor-priority
+  WONT_FIX gap and hard-failed the whole script under
+  `CCCC_NATIVE_CC=gcc-16` on macOS. Added `SMOKE_CASE_SKIPS_GCC_MACOS`/
+  `smoke_case_skip_reason()` (`tools/testing/__init__.py`), sharing
+  `NATIVE_SKIP_TESTS_GCC_MACOS`'s platform+family two-axis shape and
+  `CCCC_AUDIT_NATIVE_SKIPS=1` bypass; a skipped case is now a distinct
+  third result state so it can never silently read as a pass (#1196).
 
 ### Changed
 
@@ -110,6 +162,14 @@ All notable changes to CCCC are documented here. Format loosely follows
   longer misreported as `STALE` — the root cause of #1182's own six
   false-positive findings. See man/TESTING.md's "Native round-trip mode"
   section (#1186).
+
+### Known issues resolved
+
+- The `native`/`native_skip_audit` sub-suites' return to hard-blocking
+  above is now confirmed on sr.ht's own Linux build hardware itself (not
+  just the local verification container) across two consecutive green
+  pushes (sr.ht builds #1872639/#1872717) — closing the watch #1186 asked
+  for (#1193).
 
 ## [0.3.12] - 2026-08-25
 
