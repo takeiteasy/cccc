@@ -115,15 +115,45 @@ static ThreadRecord *current_thread(VirtualMachine *vm) {
     return vm->active_thread ? vm->active_thread : &state->main_thread;
 }
 
-static void save_and_release_gil(VirtualMachine *vm, ExecState *state) {
-    cccc_exec_state_save(vm, state);
+// #1202/#1203: bundles ExecState with the two other pieces of "which thread
+// am I" context that live in single VM-wide fields -- vm->active_thread and
+// vm->current_tls_seg (the latter a raw pointer, not indexed by thread, per
+// LDTLS3's "current_tls_seg + offset" scheme, ops.c). vm_thread_start
+// (above) already saves/restores both of these correctly across a whole
+// thread's start-to-exit lifetime with local saved_active/saved_tls_seg
+// vars -- but every *nested* GIL release inside that lifetime (mutex lock,
+// cond wait, thrd_sleep, thrd_join, thrd_yield -- anywhere a thread blocks
+// GIL-free so another thread can run) used to restore only the ExecState
+// half via cccc_exec_state_restore, leaving vm->active_thread/
+// current_tls_seg exactly as some OTHER thread left them. A thread resuming
+// after such a release would then run with a stale current_tls_seg -- e.g.
+// reading/writing another thread's _Thread_local storage -- until it next
+// happened to pass back through vm_thread_start's own (correct) outer
+// restore, which for a long-lived thread could be never. Undetectable
+// before #1202 fixed thrd_yield to actually release the GIL (a spin loop
+// synchronized via thrd_yield alone never gave another thread a chance to
+// run, so the two threads' TLS never actually interleaved); still latent
+// via thrd_sleep/mutex/cond, which already released the GIL correctly.
+// Not caller-visible: the two fields are captured/restored as an opaque
+// unit alongside the exec-state snapshot every caller already carries.
+typedef struct {
+    ExecState     exec;
+    ThreadRecord *active_thread;
+    char         *tls_seg;
+} GilPause;
+
+static void save_and_release_gil(VirtualMachine *vm, GilPause *pause) {
+    pause->active_thread = vm->active_thread;
+    pause->tls_seg       = vm->current_tls_seg;
+    cccc_exec_state_save(vm, &pause->exec);
     cccc_gil_release(vm);
 }
 
-static void acquire_and_restore_gil(VirtualMachine  *vm,
-                                    const ExecState *state) {
+static void acquire_and_restore_gil(VirtualMachine *vm, const GilPause *pause) {
     cccc_gil_acquire(vm);
-    cccc_exec_state_restore(vm, state);
+    vm->active_thread   = pause->active_thread;
+    vm->current_tls_seg = pause->tls_seg;
+    cccc_exec_state_restore(vm, &pause->exec);
 }
 
 static void link_thread(VirtualMachine *vm, ThreadRecord *rec) {
@@ -357,7 +387,7 @@ static long long wrap_pthread_create(long long threadp, long long attrp,
         }
     }
 
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc =
         pthread_create(&rec->host_thread, host_attr_ptr, vm_thread_start, rec);
@@ -382,7 +412,7 @@ static long long wrap_pthread_join(long long thread, long long retvalp) {
     if (!vm || !rec || rec->joined || rec->detached)
         return EINVAL;
 
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     void *retval = NULL;
     int   rc     = pthread_join(rec->host_thread, &retval);
@@ -520,7 +550,7 @@ static long long wrap_pthread_mutex_lock(long long mutexp) {
         if (tr && check_lock_safety(vm, tr, (void *)mutexp))
             return EDEADLK;
     }
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_mutex_lock(host);
     acquire_and_restore_gil(vm, &caller_state);
@@ -622,7 +652,7 @@ static long long wrap_pthread_cond_wait(long long condp, long long mutexp) {
     pthread_mutex_t *mutex = ensure_mutex((CCCCUserMutex *)mutexp);
     if (!vm || !cond || !mutex)
         return EINVAL;
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_cond_wait(cond, mutex);
     acquire_and_restore_gil(vm, &caller_state);
@@ -636,7 +666,7 @@ static long long wrap_pthread_cond_timedwait(long long condp, long long mutexp,
     pthread_mutex_t *mutex = ensure_mutex((CCCCUserMutex *)mutexp);
     if (!vm || !cond || !mutex || !abstimep)
         return EINVAL;
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc =
         pthread_cond_timedwait(cond, mutex, (const struct timespec *)abstimep);
@@ -958,7 +988,30 @@ static long long wrap_thrd_detach(long long thr) {
 }
 
 static long long wrap_thrd_yield(void) {
+    // #1202: this used to call sched_yield() without releasing the VM's
+    // GIL first, unlike every other blocking wrapper here (thrd_sleep just
+    // below, mutex/cond wait, thrd_join). sched_yield() only yields the
+    // *host* OS thread's CPU slot -- it says nothing about the VM's GIL,
+    // which is held for a thread's entire vm_eval run and released only at
+    // these explicit points (see std.c's stdatomic.h ATOMIC_FLAG_INIT
+    // comment for the same invariant stated from the guest side). A thread
+    // spinning `while (!atomic_load(&flag)) thrd_yield();` that wins the
+    // GIL acquisition race against the thread that would set `flag` used
+    // to livelock forever: it happily yielded its own OS CPU slot on every
+    // iteration, but never let the *other* simulated thread's vm_eval ever
+    // acquire the GIL to make progress. This was timing-dependent (which
+    // thread's pthread_mutex_lock call wins the GIL race after main's
+    // thrd_join(pub) releases it), so it passed far more often than it
+    // failed locally, but reproduced reliably on sr.ht's more contended -j8
+    // hardware -- see tests/test_atomic_fence_1188.c, and #1202/#1203 for
+    // the multi-hour CI wedges this most likely explains.
+    VirtualMachine *vm = current_vm();
+    GilPause        caller_state;
+    if (vm)
+        save_and_release_gil(vm, &caller_state);
     sched_yield();
+    if (vm)
+        acquire_and_restore_gil(vm, &caller_state);
     return 0;
 }
 
@@ -966,7 +1019,7 @@ static long long wrap_thrd_sleep(long long durp, long long remp) {
     if (!durp)
         return -1;
     VirtualMachine *vm = current_vm();
-    ExecState       caller_state;
+    GilPause        caller_state;
     if (vm)
         save_and_release_gil(vm, &caller_state);
     int rc = nanosleep((const struct timespec *)durp,
@@ -1039,7 +1092,7 @@ static long long wrap_mtx_lock(long long mtxp) {
         if (tr && check_lock_safety(vm, tr, (void *)mtxp))
             return EDEADLK;
     }
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_mutex_lock(host);
     acquire_and_restore_gil(vm, &caller_state);
@@ -1075,7 +1128,7 @@ static long long wrap_mtx_timedlock(long long mtxp, long long tsp) {
     if (!vm || !host || !tsp)
         return 1;
     const struct timespec *abs_ts = (const struct timespec *)tsp;
-    ExecState              caller_state;
+    GilPause               caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc;
 #if defined(__linux__)
@@ -1145,7 +1198,7 @@ static long long wrap_cnd_wait(long long condp, long long mtxp) {
     pthread_mutex_t *mutex = ensure_mtx(mtx);
     if (!vm || !cond || !mutex)
         return 1;
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_cond_wait(cond, mutex);
     acquire_and_restore_gil(vm, &caller_state);
@@ -1168,7 +1221,7 @@ static long long wrap_cnd_timedwait(long long condp, long long mtxp,
     pthread_mutex_t *mutex = ensure_mtx(mtx);
     if (!vm || !cond || !mutex || !tsp)
         return 1;
-    ExecState caller_state;
+    GilPause caller_state;
     save_and_release_gil(vm, &caller_state);
     int rc = pthread_cond_timedwait(cond, mutex, (const struct timespec *)tsp);
     acquire_and_restore_gil(vm, &caller_state);

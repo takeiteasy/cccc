@@ -30,6 +30,33 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `thrd_yield()` called the host `sched_yield()` without releasing the VM's
+  GIL first, unlike every other blocking wrapper in `src/stdlib/pthread.c`
+  (`thrd_sleep`, mutex/cond wait, `thrd_join`). The GIL is held for a
+  thread's entire `vm_eval` run and released only at these explicit points,
+  so a thread spinning `while (!atomic_load(&flag)) thrd_yield();` that won
+  the GIL-acquisition race against the thread that would set `flag` used to
+  livelock forever -- `sched_yield()` only yields the *host* OS thread's CPU
+  slot, never the VM's GIL, so the other simulated thread could never run.
+  This was almost certainly the real root cause of #1202's multi-hour CI
+  hangs: reproduced directly via `tests/test_atomic_fence_1188.c` on real
+  sr.ht hardware, confirmed absent on the pre-fix binary across 100+
+  stress runs, and confirmed fixed across 100+ post-fix runs both serial
+  and under concurrent load.
+- Fixing `thrd_yield()` above exposed a second, previously-undetectable bug:
+  `vm->active_thread`/`vm->current_tls_seg` (single VM-wide fields) were
+  correctly saved/restored only at a thread's outermost start/exit boundary
+  (`vm_thread_start`), not across the *nested* GIL release/reacquire window
+  every blocking primitive shares (`save_and_release_gil`/
+  `acquire_and_restore_gil`). A thread resuming after such a release could
+  run with another thread's `_Thread_local` storage pointer still active.
+  Already latent via `thrd_sleep`/mutex/cond (which already released the
+  GIL correctly) but never observed, since no test happened to interleave
+  through them in a way that exposed it; `thrd_yield()`'s fix made it
+  directly reachable via `tests/test_thread_local_isolation.c`. Fixed by
+  bundling `active_thread`/`current_tls_seg` into the same save/restore
+  pair as the exec-state snapshot (`GilPause`, `src/stdlib/pthread.c`),
+  mirroring `vm_thread_start`'s existing pattern at the nested level too.
 - `#pragma pack(N)` was accepted, auto-captured, and re-emitted VERBATIM --
   and hoisted to the top of the file, ahead of every struct -- while struct
   layout was computed as though the pragma were absent. The folded
