@@ -30,6 +30,38 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `-c=native`'s `-std=` forwarding used to probe (and forward) the literal
+  `c<NN>`/`gnu<NN>` prefix the user typed on the CCCC command line, so an
+  explicit non-GNU `--std=c89` handed a real host GCC strict ISO C90 --
+  rejecting `//` comments, mixed declarations, VLAs, compound literals and
+  designated initializers, all constructs cccc's own frontend only
+  pedantic-warns on (never errors) under `--std=c89`, since cccc's C89
+  dialect is permissive like `gnu89`, not strict ISO C90. A guest program
+  using any of these compiled and ran fine under the VM but failed to
+  compile natively on real GCC (not reproduced on Apple clang, which is
+  lenient about the same constructs even under strict `-std=c89`). Fixed
+  by always probing `gnu<NN>` before `c<NN>` at every rung of both
+  `native_resolve_std_ladder()` ladders (the implicit-default one and the
+  explicit-`--std=` one), regardless of which prefix the user typed --
+  restoring "VM passes => native passes" (#1187).
+- `tools/audit_test_headers.py`'s typo guard only caught a misspelled
+  directive that carried a colon (`CCCC_FLAGS:` and the like) -- a
+  misspelled *bare* directive with no colon to anchor a scan on (e.g.
+  `CCCC_NATIVE_SKP`, `EXPECT_COMPILE_ERR`) was invisible to both the header
+  parser and the audit, silently never applied instead of failing loudly.
+  Now also catches a bare near-miss via Levenshtein distance (<=2) against
+  the known directive names, plus a same-components-different-order check
+  (`CCCC_SKIP_NATIVE` vs. the real `CCCC_NATIVE_SKIP`) that distance alone
+  can miss (#1158).
+- `tools/comptime_native_smoke.py` and `tools/header_resolution_smoke.py`
+  had several `subprocess.run` call sites (a `cc -x c -c -` shape, several
+  `cc -c`/`cccc`/built-binary invocations, and a bare `xcrun`) that bypassed
+  those scripts' own guarded `run()` helper -- the stdin-close/timeout fix
+  #1201 landed for the sibling `tools/host_attribute_link_smoke.py`
+  (`ff1f6ba`) and for these two scripts' own `run()` helpers (`442ca80`)
+  did not close the gap left by call sites that skip `run()` entirely.
+  Routed every direct call through `run()` (extended with optional
+  `input=`/`env=` parameters), closing the remaining #1201 residual.
 - `thrd_yield()` called the host `sched_yield()` without releasing the VM's
   GIL first, unlike every other blocking wrapper in `src/stdlib/pthread.c`
   (`thrd_sleep`, mutex/cond wait, `thrd_join`). The GIL is held for a

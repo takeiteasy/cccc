@@ -96,7 +96,13 @@ by default). Two things follow from that:
   *implements* every construct the serializer emits, and the serializer
   itself never reads the resolved standard back — the emitted dialect is a
   fixed GNU C11 floor regardless of what `--std=` was passed on the CCCC
-  command line. See `man/COVERAGE.md`'s "`-c=native` scope for v0.4.0"
+  command line. Because of that, every rung the probe tries is tried as
+  `gnu<NN>` before `c<NN>`, regardless of which prefix the user actually
+  typed (#1187) — cccc's own frontend accepts GNU/C99 extensions under a
+  non-gnu `--std=c89` too (pedantic-warn, not error), so forwarding a
+  strict ISO spelling to the host would reject programs cccc itself
+  accepts. `-Wpedantic`/other CCCC warning flags are not forwarded to the
+  host at all. See `man/COVERAGE.md`'s "`-c=native` scope for v0.4.0"
   section for the full dialect statement and required host flags
   (`-lm`/`-pthread`/`-fsigned-char`).
 - CCCC's own bundled include directory is never forwarded as a plain `-I`

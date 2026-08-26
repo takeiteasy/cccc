@@ -143,9 +143,29 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
     static char cached[16];
     if (probed)
         return found ? cached : NULL;
-    probed             = true;
+    probed = true;
 
-    const char *prefix = vm->compiler.c_std_gnu ? "gnu" : "c";
+    // #1187: always probe "gnu<NN>" before "c<NN>", regardless of which
+    // prefix the user actually typed. CCCC's own frontend is uniformly
+    // permissive -- c_std_gnu (Compiler.c_std_gnu) has no reader left
+    // besides this function, and the serializer emits a fixed GNU C11
+    // floor no matter what --std= was passed (see man/COVERAGE.md) -- so a
+    // strict ISO `c<NN>` spelling forwarded to the host compiler is a
+    // promise the rest of CCCC does not keep. A real host GCC's strict
+    // `-std=c89` rejects constructs (`//` comments, mixed declarations,
+    // VLAs, compound literals, designated initializers) that CCCC's own
+    // `--std=c89` only pedantic-warns on -- the identical guest program
+    // that compiled and ran fine under the VM would then fail to compile
+    // natively for a dialect reason CCCC itself never enforced. Trying
+    // "gnu<NN>" first (falling back to "c<NN>" only if the host rejects
+    // it) restores "VM passes => native passes" without weakening
+    // anything: a host that accepts neither spelling still gets nothing
+    // forwarded, same as before.
+    const char *prefixes[2];
+    int         prefix_n = 0;
+    prefixes[prefix_n++] = "gnu";
+    if (!vm->compiler.c_std_gnu)
+        prefixes[prefix_n++] = "c";
     const char *suffixes[6];
     int         n = 0;
     switch (vm->compiler.c_std) {
@@ -178,16 +198,18 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
     }
 
     for (int i = 0; i < n; i++) {
-        char cand[16];
-        snprintf(cand, sizeof(cand), "%s%s", prefix, suffixes[i]);
-        char probe_flag[24];
-        snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand);
-        char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag, "-x",
-                              "c",        "/dev/null",     NULL};
-        if (run_argv_quiet(probe_argv) == 0) {
-            snprintf(cached, sizeof(cached), "%s", cand);
-            found = true;
-            return cached;
+        for (int p = 0; p < prefix_n; p++) {
+            char cand[16];
+            snprintf(cand, sizeof(cand), "%s%s", prefixes[p], suffixes[i]);
+            char probe_flag[24];
+            snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand);
+            char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag, "-x",
+                                  "c",        "/dev/null",     NULL};
+            if (run_argv_quiet(probe_argv) == 0) {
+                snprintf(cached, sizeof(cached), "%s", cand);
+                found = true;
+                return cached;
+            }
         }
     }
     return NULL;

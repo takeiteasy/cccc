@@ -58,7 +58,11 @@ import tempfile
 from pathlib import Path
 
 
-def run(cmd, cwd):
+# #1201: every subprocess this script spawns must go through run() below --
+# a direct subprocess.run() call bypasses the stdin/timeout guard entirely
+# and reopens the exact wedge class #1201 fixed. When adding a new case,
+# route it through run() rather than calling subprocess.run directly.
+def run(cmd, cwd=None):
     # #1202: this local helper used to inherit the harness's own stdin with
     # no timeout -- the same class of hazard #1201 fixed in the sibling
     # host_attribute_link_smoke.py and tools/testing/proc.py's run_capture()
@@ -250,7 +254,7 @@ def sysroot() -> str:
     # go straight to the "/" fallback instead of letting that propagate.
     if sys.platform != "darwin":
         return "/"
-    result = subprocess.run(["xcrun", "--show-sdk-path"], capture_output=True, text=True)
+    result = run(["xcrun", "--show-sdk-path"])
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
     return "/"

@@ -32,6 +32,8 @@ Sub-suites:
   audit_ffi           — src/stdlib FFI registration audit (ticket #784)
   audit_test_headers  — tests/**/*.c CCCC_*/EXPECT_* header directive damage audit (ticket #1153)
   test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
+                        and tools/audit_test_headers.py audit_file() typo/near-miss unit
+                        tests (ticket #1158)
   test_native_skip_audit — native_skip_reason() fall-through-invariant unit tests (ticket #1182)
   test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
   test_wedge          — wedge.py deadline-watchdog/SIGUSR1-dump/progress-log unit tests (ticket #1202)
@@ -585,8 +587,9 @@ def _run_audit_test_headers_suite():
 
 def _run_header_parse_unit_tests():
     """Run tools/testing/test_header_parse.py's parse_test_header() unit
-    tests (#1153). Pure in-memory tests -- no cccc binary needed. Returns
-    (status_str, ok).
+    tests (#1153) and audit_test_headers.py audit_file() typo/near-miss
+    unit tests (#1158). Pure in-memory tests -- no cccc binary needed.
+    Returns (status_str, ok).
     """
     script = _TOOLS_DIR / "testing" / "test_header_parse.py"
     if not script.exists():

@@ -76,7 +76,9 @@ non-zero exit is produced if any fails):
 15. **audit_test_headers** — `tests/**/*.c` `CCCC_*`/`EXPECT_*` header
     directive damage audit (#1153).
 16. **test_header_parse** — `tools/testing/header.py`'s
-    `parse_test_header()` unit tests (#1153).
+    `parse_test_header()` unit tests (#1153), plus
+    `tools/audit_test_headers.py`'s `audit_file()` typo/near-miss detection
+    unit tests (#1158).
 17. **test_native_skip_audit** — `native_skip_reason()`
     fall-through-invariant unit tests (#1182).
 18. **test_proc_wedge** — `run_capture()` timeout/group-kill/stdin-closing
@@ -1433,7 +1435,12 @@ indistinguishable once split across lines).
 `audit_test_headers` sub-suite) hard-fails CI if a known directive name
 appears unanchored (wrapped or merged into prose), appears after the header
 block ends, is spelled with a typo, or has an empty/non-regex value — the
-recurrence guard for the whole class of bug #1153 fixed.
+recurrence guard for the whole class of bug #1153 fixed. The typo check also
+catches a *bare*-spelled directive typo with no colon to anchor a scan on
+(`CCCC_NATIVE_SKP`, `EXPECT_COMPILE_ERR`) via a Levenshtein-distance-2
+near-miss against the known directive names, plus a same-components
+different-order check (`CCCC_SKIP_NATIVE` vs. the real `CCCC_NATIVE_SKIP`)
+that distance alone can miss (#1158).
 
 ## Negative Tests
 

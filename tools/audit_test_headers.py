@@ -19,7 +19,17 @@ Checks, each independently reported and each causing a nonzero exit:
   2. after-header: a known directive appears in the file body, after the
      leading comment block ends -- also never seen by the parser.
   3. unknown-directive: a `CCCC_<ALLCAPS>:`-shaped comment that doesn't match
-     any name in tools/testing/header.py's ALL_DIRECTIVES (typo guard).
+     any name in tools/testing/header.py's ALL_DIRECTIVES (typo guard), or a
+     bare (no-colon) `CCCC_`/`EXPECT_`/`REJECT_`-shaped token in the header
+     block that is a near-miss of a known directive -- Levenshtein distance
+     <= 2, or the same underscore-separated components in a different order
+     (e.g. `CCCC_SKIP_NATIVE` vs. the real `CCCC_NATIVE_SKIP`, #1158). A
+     colon-required directive misspelled with its colon is caught by the
+     first half of this check; a *bare*-spelled directive's typo (e.g.
+     `EXPECT_COMPILE_ERR`, `CCCC_NATIVE_SKP`) has no colon to anchor on, so
+     it was invisible to both the parser and this audit before the near-miss
+     half was added -- the exact silently-ignored-directive failure class
+     #1153 fixed for a different symptom.
   4. bad-regex: an EXPECT_*/REJECT_* STDOUT/STDERR value that doesn't compile
      as a Python regex (catches a truncation that lopped off a `\\[`/`\\]` or
      similar).
@@ -89,6 +99,66 @@ def _directive_shaped_names(text):
 # mentioned in prose does (verified against the corpus).
 _TOKEN_RE = re.compile(r'\bCCCC_[A-Z0-9_]+:')
 
+# #1158: a bare-spelled directive typo (e.g. `CCCC_NATIVE_SKP`,
+# `EXPECT_COMPILE_ERR`) has no colon for _TOKEN_RE to anchor on, so it's
+# invisible to the check above even though a bare-ok real directive
+# (EXPECT_RUNTIME_ERROR and friends, header.py's _BARE_DIRECTIVES) is a
+# legitimate no-colon spelling. This wider scan also covers EXPECT_/REJECT_
+# names (not just CCCC_) since those prefixes are directive-shaped too
+# (EXPECT_RUNTIME_ERROR, CCCC_REJECT_STDOUT). It is deliberately run over
+# header-block lines only -- the file body is full of legitimate CCCC_*
+# preprocessor macros (CCCC_HAS_DECIMAL, CCCC_CHECKED_BOUNDS, ...) that
+# would otherwise need to individually clear the near-miss threshold, and
+# the existing after-header check already covers *known* names leaking past
+# the header block.
+_NEAR_MISS_TOKEN_RE = re.compile(r'\b(?:CCCC|EXPECT|REJECT)_[A-Z0-9_]+\b')
+
+# Corpus-verified false-positive margin (#1158): scanning every
+# (CCCC|EXPECT|REJECT)_[A-Z0-9_]+ token in every tests/**/*.c header block,
+# the minimum Levenshtein distance from a non-directive token to a real
+# directive name is 4 (CCCC_NATIVE_CC vs. CCCC_NATIVE_SKIP). A threshold of
+# 2 has margin to spare and no real directive-shaped prose token in the
+# corpus is a component permutation of a directive name either.
+_NEAR_MISS_MAX_DISTANCE = 2
+
+
+def _levenshtein(a, b):
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1,        # deletion
+                           cur[j - 1] + 1,      # insertion
+                           prev[j - 1] + (ca != cb)))  # substitution
+        prev = cur
+    return prev[-1]
+
+
+def _nearest_directive(tok):
+    """Return (name, distance) for the ALL_DIRECTIVES entry closest to tok
+    by Levenshtein distance."""
+    return min(((name, _levenshtein(tok, name)) for name in ALL_DIRECTIVES),
+               key=lambda pair: pair[1])
+
+
+def _component_permutation_of(tok):
+    """Return the ALL_DIRECTIVES name whose underscore-separated components
+    are a reordering of tok's (e.g. CCCC_SKIP_NATIVE vs. the real
+    CCCC_NATIVE_SKIP), or None -- a near-miss shape Levenshtein distance
+    alone can miss, since reordering three-plus components often exceeds
+    distance 2."""
+    parts = sorted(tok.split("_"))
+    for name in ALL_DIRECTIVES:
+        if parts == sorted(name.split("_")):
+            return name
+    return None
+
 
 def _line_anchor_pairs(content):
     """Return the (name, value_or_None) pairs the real parser would
@@ -119,11 +189,30 @@ def audit_file(path):
         anchored = _line_anchor_pairs(content)
         anchored_names = {name for name, _ in anchored}
 
+        colon_flagged = set()
         for m in _TOKEN_RE.finditer(content):
             name = m.group(0).rstrip(":")
             if name not in ALL_DIRECTIVES:
                 findings.append(("unknown-directive", line_no,
                                   f"unrecognised directive-shaped token {name!r}"))
+                colon_flagged.add(name)
+
+        for m in _NEAR_MISS_TOKEN_RE.finditer(content):
+            tok = m.group(0)
+            if tok in ALL_DIRECTIVES or tok in colon_flagged:
+                continue  # exact match, or already reported above
+            nearest, distance = _nearest_directive(tok)
+            if distance <= _NEAR_MISS_MAX_DISTANCE:
+                findings.append(("unknown-directive", line_no,
+                                  f"{tok!r} looks like a misspelled "
+                                  f"{nearest!r} (edit distance {distance})"))
+                continue
+            permuted = _component_permutation_of(tok)
+            if permuted:
+                findings.append(("unknown-directive", line_no,
+                                  f"{tok!r} looks like {permuted!r} with "
+                                  "components in the wrong order"))
+
         for name in _directive_shaped_names(content):
             if name not in anchored_names:
                 findings.append(("unanchored", line_no,

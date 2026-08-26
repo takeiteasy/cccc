@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Unit tests for tools/testing/header.py's parse_test_header() (#1153).
+"""Unit tests for tools/testing/header.py's parse_test_header() (#1153) and
+tools/audit_test_headers.py's audit_file() typo/near-miss detection (#1158).
 
 Pure in-memory tests against temp files -- no cccc binary needed. Run as its
 own audited sub-suite from tools/run_tests.py (mirrors audit_ffi.py's/
 audit_test_headers.py's own main() -> 0/nonzero convention), and can also be
 run standalone: `python3 tools/testing/test_header_parse.py`.
+
+The audit_file() cases live here rather than under tests/ because a
+deliberately-typo'd fixture file would make tools/audit_test_headers.py fail
+its own CI run if it lived under the directory that script scans.
 """
 
 import sys
@@ -13,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from testing.header import parse_test_header, ALL_DIRECTIVES
+from audit_test_headers import audit_file
 
 
 def _parse(text):
@@ -21,6 +27,16 @@ def _parse(text):
         path = f.name
     try:
         return parse_test_header(path)
+    finally:
+        Path(path).unlink()
+
+
+def _audit(text):
+    with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False) as f:
+        f.write(text)
+        path = f.name
+    try:
+        return audit_file(Path(path))
     finally:
         Path(path).unlink()
 
@@ -152,6 +168,54 @@ def _(fail):
     for name in ALL_DIRECTIVES:
         if not name.startswith(("CCCC_", "EXPECT_")):
             fail(f"suspicious directive name in ALL_DIRECTIVES: {name!r}")
+
+
+@case("#1158: bare misspelled directive (edit distance) is caught")
+def _(fail):
+    findings = _audit("// CCCC_NATIVE_SKP\nint main(void) { return 42; }\n")
+    kinds = [k for k, _, _ in findings]
+    if "unknown-directive" not in kinds:
+        fail(f"expected an unknown-directive finding, got {findings!r}")
+
+
+@case("#1158: bare misspelled EXPECT_* directive is caught")
+def _(fail):
+    findings = _audit("// EXPECT_COMPILE_ERR\nint main(void) { return 42; }\n")
+    kinds = [k for k, _, _ in findings]
+    if "unknown-directive" not in kinds:
+        fail(f"expected an unknown-directive finding, got {findings!r}")
+
+
+@case("#1158: component-permutation directive typo is caught")
+def _(fail):
+    # The ticket's own repro: CCCC_SKIP_NATIVE vs. the real CCCC_NATIVE_SKIP
+    # -- edit distance is too large for the Levenshtein half of the check,
+    # so this only fires via the component-permutation half.
+    findings = _audit("// CCCC_SKIP_NATIVE\nint main(void) { return 42; }\n")
+    kinds = [k for k, _, _ in findings]
+    if "unknown-directive" not in kinds:
+        fail(f"expected an unknown-directive finding, got {findings!r}")
+
+
+@case("#1158: a real bare directive is not flagged as its own near-miss")
+def _(fail):
+    findings = _audit("// EXPECT_RUNTIME_ERROR\nint main(void) { return 42; }\n")
+    if findings:
+        fail(f"expected no findings, got {findings!r}")
+
+
+@case("#1158: internal CCCC_* macro names in prose are not false positives")
+def _(fail):
+    # CCCC_NATIVE_CC is the corpus's closest non-directive token to a real
+    # directive name (edit distance 4 from CCCC_NATIVE_SKIP) -- well clear
+    # of the threshold, and not a component permutation of any real name.
+    findings = _audit(
+        "// Uses CCCC_NATIVE_CC to pick the host compiler, and touches\n"
+        "// CCCC_HAS_DECIMAL and CCCC_CHECKED_BOUNDS in the process.\n"
+        "int main(void) { return 42; }\n"
+    )
+    if findings:
+        fail(f"expected no findings, got {findings!r}")
 
 
 def main():

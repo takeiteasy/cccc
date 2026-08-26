@@ -1302,7 +1302,11 @@ accepts, never what the serializer emits** — the native `-std=` flag
 `run_native_backend` forwards is a *flag-spelling* probe
 (`native_resolve_std_ladder`, `src/main.c:139-194`), confirming the host
 accepts a given `-std=<ver>` string, not that it implements every construct
-above.
+above. The probe always tries the `gnu<NN>` spelling of a rung before the
+plain `c<NN>` one, regardless of which prefix the user typed (#1187) — see
+the `-c=native` `-std=` forwarding section above for why a strict,
+non-GNU spelling would otherwise reject constructs cccc's own frontend
+only pedantic-warns on.
 
 **Required host flags, beyond `-std=`.** `run_native_backend`
 (`src/main.c`) unconditionally appends three flags a hand-compiled `-m`/
@@ -2261,6 +2265,22 @@ the user's own stated intent" behaviour the pre-#1073 code always had.
 Both ladders' spellings are confirmed against real Apple clang 17 and
 Ubuntu GCC 13.3.0, not assumed to transfer from one compiler to the
 other.
+
+Every rung in both ladders is itself tried as `gnu<NN>` before `c<NN>`,
+regardless of which prefix the user actually typed on the CCCC command
+line — `--std=c89` probes `-std=gnu89` before falling back to `-std=c89`
+(#1187). CCCC's own frontend treats the two prefixes identically
+(`Compiler.c_std_gnu` has no reader outside `native_resolve_std_ladder()`
+itself) and its pedantic-warning-not-error C89 dialect is permissive like
+`gnu89`, not strict ISO C90, even when the user spells the non-GNU `c89`
+form — so forwarding a literal `-std=c89` to a real host GCC (which *is*
+strict ISO C90 under that spelling) rejected constructs CCCC's own
+`--std=c89 -Wpedantic` only warns on (`//` comments, mixed declarations,
+VLAs, compound literals, designated initializers), turning a native
+compile that succeeded on clang and under the VM into a GCC-only failure.
+A user who explicitly wrote a `gnu<NN>` spelling gets no `c<NN>` fallback
+rung — they already asked for the GNU dialect, there is nothing narrower
+to fall back to.
 
 While implementing #1053, a second, unrelated bug (#1065) was found and
 fixed in the same pass: `run_native_backend()` built each `-std`/`-D`/

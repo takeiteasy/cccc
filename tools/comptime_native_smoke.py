@@ -215,7 +215,11 @@ PRIMARY_FILE_PROGRAM = (
 )
 
 
-def run(cmd, cwd):
+# #1201: every subprocess this script spawns must go through run() below --
+# a direct subprocess.run() call bypasses the stdin/timeout guard entirely
+# and reopens the exact wedge class #1201 fixed. When adding a new case,
+# route it through run() rather than calling subprocess.run directly.
+def run(cmd, cwd, input=None, env=None):
     # #1202: this local helper used to inherit the harness's own stdin with
     # no timeout -- the same class of hazard #1201 fixed in the sibling
     # host_attribute_link_smoke.py (an unguarded `-x c -`-style call blocks
@@ -223,9 +227,20 @@ def run(cmd, cwd):
     # tools/testing/proc.py's run_capture() (#1185) chokepoint fixes for the
     # main per-test-file suite, which this standalone script bypasses since
     # it runs in-process via importlib, not as a per-test spawn.
+    #
+    # subprocess.run() rejects passing both `input` and `stdin` -- when a
+    # caller supplies source text on stdin (e.g. `cc -x c -c -`), that IS
+    # the guard against an inherited open stdin, so stdin=DEVNULL is only
+    # added when there's no input to pass.
+    kwargs = dict(capture_output=True, text=True, cwd=cwd, timeout=120)
+    if input is not None:
+        kwargs["input"] = input
+    else:
+        kwargs["stdin"] = subprocess.DEVNULL
+    if env is not None:
+        kwargs["env"] = env
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd,
-                               stdin=subprocess.DEVNULL, timeout=120)
+        return subprocess.run(cmd, **kwargs)
     except subprocess.TimeoutExpired as e:
         return subprocess.CompletedProcess(cmd, 124, "", f"timed out: {e}")
 
@@ -780,8 +795,8 @@ def case_gvar_builders_generated_output(cccc: Path, tmp: str) -> bool:
     # `(int *)` -- compiled as -m/-c=generated text just fine; only a real
     # `cc -c` rejects it).
     obj = Path(tmp) / "gvar_builders_928.o"
-    cc_result = subprocess.run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
-                                input=out, capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
+                                cwd=tmp, input=out)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
         return False
@@ -861,9 +876,9 @@ def case_emit_cccc_native_requires_explicit_cc(cccc: Path, tmp: str) -> bool:
     out = Path(tmp) / "emit_cccc_no_cc_out"
     env = dict(os.environ)
     env.pop("CCCC_NATIVE_CC", None)
-    result = subprocess.run(
+    result = run(
         [str(cccc), "-c=native", "--emit-cccc", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode == 0:
         print("    FAIL: compile unexpectedly succeeded with no CCCC_NATIVE_CC")
@@ -884,9 +899,9 @@ def case_emit_cccc_native_with_explicit_cc(cccc: Path, tmp: str) -> bool:
     out = Path(tmp) / "emit_cccc_with_cc_out"
     env = dict(os.environ)
     env["CCCC_NATIVE_CC"] = "cc"
-    result = subprocess.run(
+    result = run(
         [str(cccc), "-c=native", "--emit-cccc", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode != 0:
         print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
@@ -1229,8 +1244,8 @@ def case_anon_union_member_not_va_list(cccc: Path, tmp: str) -> bool:
         print(f"    FAIL: -m output missing the real anonymous member bodies\n    {out}")
         return False
     obj = Path(tmp) / "lobj_union_952.o"
-    cc_result = subprocess.run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
-                                input=out, capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-x", "c", "-c", "-", "-o", str(obj)],
+                                cwd=tmp, input=out)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -m output\n    {cc_result.stderr}\n    {out}")
         return False
@@ -1283,8 +1298,7 @@ def case_generated_no_duplicate_captured_include(cccc: Path, tmp: str) -> bool:
         print(f"    FAIL: -c=generated output missing expected content\n    {out}")
         return False
     obj = Path(tmp) / "lobj_953a.o"
-    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
-                                capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(obj)], cwd=tmp)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
         return False
@@ -1314,8 +1328,7 @@ def case_generated_comptime_include_still_derives(cccc: Path, tmp: str) -> bool:
               f"#include verbatim\n    {out}")
         return False
     obj = Path(tmp) / "lobj_953b.o"
-    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
-                                capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(obj)], cwd=tmp)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
         return False
@@ -1377,8 +1390,7 @@ def case_generated_forward_decls_hoisted(cccc: Path, tmp: str) -> bool:
               f"order\n    {out}")
         return False
     obj = Path(tmp) / "mutual_956.o"
-    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
-                                capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(obj)], cwd=tmp)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
         return False
@@ -2236,8 +2248,7 @@ def case_generated_embedded_header_no_duplicate(cccc: Path, tmp: str) -> bool:
         print(f"    FAIL: -c=generated output missing expected content\n    {out}")
         return False
     obj = Path(tmp) / "time_h_998a.o"
-    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
-                                capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(obj)], cwd=tmp)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -c=generated output (likely "
               f"a struct tm redefinition)\n    {cc_result.stderr}\n    {out}")
@@ -2268,8 +2279,7 @@ def case_generated_embedded_header_comptime_only_still_derives(cccc: Path, tmp: 
               f"#include verbatim\n    {out}")
         return False
     obj = Path(tmp) / "time_h_998b.o"
-    cc_result = subprocess.run(["cc", "-c", out_path.name, "-o", str(obj)],
-                                capture_output=True, text=True, cwd=tmp)
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(obj)], cwd=tmp)
     if cc_result.returncode != 0:
         print(f"    FAIL: host cc rejected the -c=generated output\n    {cc_result.stderr}\n    {out}")
         return False
@@ -3269,9 +3279,9 @@ def case_native_always_links_lm(cccc: Path, tmp: str) -> bool:
     wrapper.chmod(0o755)
     env = dict(os.environ)
     env["CCCC_NATIVE_CC"] = str(wrapper)
-    result = subprocess.run(
+    result = run(
         [str(cccc), "-c=native", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode != 0:
         print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
@@ -3280,7 +3290,7 @@ def case_native_always_links_lm(cccc: Path, tmp: str) -> bool:
         print(f"    FAIL: -lm not found in recorded native cc argv "
               f"({log.read_text() if log.exists() else '<no log>'})")
         return False
-    run_result = subprocess.run([f"./{out.name}"], capture_output=True, text=True, cwd=tmp)
+    run_result = run([f"./{out.name}"], cwd=tmp)
     if run_result.returncode != 42:
         print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
         return False
@@ -4123,9 +4133,9 @@ def case_native_std_ladder(cccc: Path, tmp: str) -> bool:
     wrapper.chmod(0o755)
     env = dict(os.environ)
     env["CCCC_NATIVE_CC"] = str(wrapper)
-    result = subprocess.run(
+    result = run(
         [str(cccc), "-c=native", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode != 0:
         print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
@@ -4135,7 +4145,7 @@ def case_native_std_ladder(cccc: Path, tmp: str) -> bool:
         print(f"    FAIL: no '-std=gnu...' flag found in recorded native cc "
               f"argv ({lines})")
         return False
-    run_result = subprocess.run([f"./{out.name}"], capture_output=True, text=True, cwd=tmp)
+    run_result = run([f"./{out.name}"], cwd=tmp)
     if run_result.returncode != 42:
         print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
         return False
@@ -4154,12 +4164,14 @@ def case_native_explicit_std_probed(cccc: Path, tmp: str) -> bool:
           "to spellings of the SAME standard only (never descending to an "
           "older one -- a user who named C23 must never silently get C17 "
           "semantics on the native half). Asserted here via a wrapper that "
-          "rejects '-std=c23' specifically (simulating GCC's asymmetry on "
-          "any host, including clang-only ones) and exec's the real cc for "
-          "every other flag: the recorded argv must contain '-std=c2x' "
-          "exactly, not merely some '-std=' flag -- a presence-only check "
-          "would pass even against the pre-fix binary, which also forwards "
-          "some '-std=' (just the rejected spelling).")
+          "rejects '-std=c23'/'-std=gnu23' specifically (simulating GCC's "
+          "asymmetry on any host, including clang-only ones) and exec's the "
+          "real cc for every other flag: the recorded argv must contain "
+          "'-std=gnu2x' exactly (#1187: the ladder tries the gnu spelling "
+          "of each rung before the plain c spelling), not merely some "
+          "'-std=' flag -- a presence-only check would pass even against "
+          "the pre-fix binary, which also forwards some '-std=' (just the "
+          "rejected spelling).")
     src = Path(tmp) / "native_explicit_std_1073.c"
     write(src, NATIVE_LM_PROGRAM)
     out = Path(tmp) / "native_explicit_std_1073_out"
@@ -4173,27 +4185,27 @@ def case_native_explicit_std_probed(cccc: Path, tmp: str) -> bool:
         "#!/bin/sh\n"
         f"printf '%s\\n' \"$@\" >> {log}\n"
         "for a in \"$@\"; do\n"
-        "  if [ \"$a\" = \"-std=c23\" ]; then exit 1; fi\n"
+        "  if [ \"$a\" = \"-std=c23\" ] || [ \"$a\" = \"-std=gnu23\" ]; then exit 1; fi\n"
         "done\n"
         f"exec {real_cc} \"$@\"\n"
     ))
     wrapper.chmod(0o755)
     env = dict(os.environ)
     env["CCCC_NATIVE_CC"] = str(wrapper)
-    result = subprocess.run(
+    result = run(
         [str(cccc), "--std=c23", "-c=native", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode != 0:
         print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
         return False
     lines = log.read_text().splitlines() if log.exists() else []
-    if "-std=c2x" not in lines:
-        print(f"    FAIL: expected '-std=c2x' in recorded native cc argv "
-              f"(the rung the ladder falls back to when '-std=c23' is "
-              f"rejected), got {lines}")
+    if "-std=gnu2x" not in lines:
+        print(f"    FAIL: expected '-std=gnu2x' in recorded native cc argv "
+              f"(the rung the ladder falls back to when "
+              f"'-std=c23'/'-std=gnu23' are both rejected), got {lines}")
         return False
-    run_result = subprocess.run([f"./{out.name}"], capture_output=True, text=True, cwd=tmp)
+    run_result = run([f"./{out.name}"], cwd=tmp)
     if run_result.returncode != 42:
         print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
         return False
@@ -4228,9 +4240,9 @@ def case_native_defines_survive_argv(cccc: Path, tmp: str) -> bool:
     wrapper.chmod(0o755)
     env = dict(os.environ)
     env["CCCC_NATIVE_CC"] = str(wrapper)
-    result = subprocess.run(
+    result = run(
         [str(cccc), "-c=native", "-D", "A=1", "-D", "B=2", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode != 0:
         print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
@@ -4272,9 +4284,9 @@ def case_native_signed_char_argv(cccc: Path, tmp: str) -> bool:
     wrapper.chmod(0o755)
     env = dict(os.environ)
     env["CCCC_NATIVE_CC"] = str(wrapper)
-    result = subprocess.run(
+    result = run(
         [str(cccc), "-c=native", "-o", out.name, src.name],
-        capture_output=True, text=True, cwd=tmp, env=env,
+        cwd=tmp, env=env,
     )
     if result.returncode != 0:
         print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
