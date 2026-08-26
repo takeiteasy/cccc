@@ -270,6 +270,28 @@ a `-c=native` round-trip of the `sys/stat.h` case confirming the fix reaches
 the native compile step too. See [HEADERS.md](HEADERS.md) for the header
 search order these exercise.
 
+### Host `__attribute__`-stripping link smoke-test
+
+The `test` build.c target's `run_tests.py` also runs
+`tools/host_attribute_link_smoke.py` (directly via `python3
+tools/host_attribute_link_smoke.py`). `src/internal.h` strips
+`__attribute__(...)` for compilers with no support for it at all — a real
+gcc used to be caught by the same strip (its `#ifndef __attribute__` guard
+was vacuous, `__attribute__` being a keyword, never a predefined macro),
+which deleted the `__gnu_inline__` out of Darwin's `<_ctype.h>`
+`__header_inline` and turned every translation unit reaching
+`<ctype.h>`/`<wctype.h>` into an external definition of the ctype/wctype
+helpers, failing `--build`'s own bootstrap link with 53 duplicate symbols
+under `CCCC_BUILD_CC=<real gcc>` (#1199). This compiles two TUs that both
+`#include "internal.h"` plus `<ctype.h>`/`<wctype.h>` under a genuine
+(non-clang) gcc, links them, and checks neither carries an
+externally-visible ctype/wctype symbol. It skips entirely when no real gcc
+is on `PATH` — clang was never affected, and macOS's plain `cc`/`gcc` are
+symlinks to it. Its coverage is macOS-only: verified against real gcc
+13.3.0 on Ubuntu 24.04 (`cccc-linux-amd64` container) that glibc's own
+ctype/wctype functions don't leak the same way, so a Linux run is a
+link-sanity check, not a #1199 regression guard there.
+
 ### Native-backend serializer smoke-test
 
 The `test` build.c target's `run_tests.py` also runs
@@ -980,7 +1002,9 @@ clang, gcc}` on `PATH` in that order. `CCCC_BUILD_CC` and `CCCC_NATIVE_CC`
 used to be one conflated env var (`CCCC_NATIVE_CC` alone drove both) until
 #1198 split them — pointing `CCCC_NATIVE_CC` at a different compiler family
 to exercise `-c=native` used to silently retarget the compiler that builds
-cccc itself too, which could then fail to link. GitHub's
+cccc itself too, and a real gcc pointed at `CCCC_BUILD_CC` used to fail to
+link on macOS (53 duplicate ctype/wctype symbols, #1199, fixed by a guard
+in `src/internal.h` — see `tools/host_attribute_link_smoke.py`). GitHub's
 `ubuntu-24.04-arm` runner ships a pre-installed `cc` (→ gcc), which wins
 that fallback unless overridden. macOS runners don't need any of the
 three — Apple Clang is already the default `cc`.

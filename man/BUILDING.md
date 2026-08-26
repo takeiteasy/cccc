@@ -136,6 +136,10 @@ hands its *generated* C to (#1198) — setting `CCCC_NATIVE_CC` to test
 `-c=native` under a different compiler no longer affects which compiler
 builds `--build` targets.
 
+A real gcc (e.g. Homebrew's `gcc-16` on macOS) is a supported `CCCC_BUILD_CC`
+value: `CCCC_BUILD_CC=/opt/homebrew/bin/gcc-16 ./cccc --build build.c
+--build-target=cccc` builds and links cleanly.
+
 ## The build entry
 
 The entry is the function the runner invokes. It is identified in precedence

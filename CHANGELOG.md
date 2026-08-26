@@ -3,7 +3,7 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.14] - 2026-08-26
 
 ### Fixed
 
@@ -23,7 +23,29 @@ All notable changes to CCCC are documented here. Format loosely follows
   reused across compiler families invalidates the same way it already did
   across architectures. The gcc-on-macOS duplicate-symbol link failure
   itself (reachable via an explicit `--build-cc=`/`CCCC_BUILD_CC=` pointed at
-  gcc) is a separate, still-open follow-up.
+  gcc) turned out to be a separate root cause, fixed below (#1199).
+- The gcc-on-macOS duplicate-symbol link failure above traced back to
+  `src/internal.h`'s `#ifndef __attribute__` / `#define __attribute__(x)`
+  guard, which was vacuous — `__attribute__` is a keyword under the GNU
+  family, never a predefined macro, so the strip fired unconditionally on
+  every compiler. Under a real gcc that deleted the `__gnu_inline__` out of
+  Darwin's `<_ctype.h>` `__header_inline` (`extern __inline
+  __attribute__((__gnu_inline__))`), leaving a bare `extern __inline` — a
+  C99 external definition under `-std=c23` — so every translation unit
+  reaching `<ctype.h>`/`<wctype.h>` emitted a full set of ctype/wctype
+  helpers, and `--build`'s own bootstrap link failed with the 53 duplicate
+  symbols (`___toupper_l` etc.). Clang was never affected, since its
+  `__header_inline` resolves to plain `inline` regardless (#1199). Fixed by
+  guarding the strip on `!defined(__GNUC__) && !defined(__clang__)` instead
+  — every real use of `__attribute__` left in cccc's own host-compiled
+  sources was audited first and is diagnostics-only (`format`, `unused`,
+  `__no_sanitize_address__`), so this doesn't change codegen anywhere.
+  `CCCC_BUILD_CC=<real gcc> ./cccc --build build.c --build-target=cccc` now
+  builds and links cleanly on macOS. New `tools/host_attribute_link_smoke.py`
+  regression test (wired into `run_tests.py` as `host_attribute_link_smoke`)
+  — reproduces on macOS only; glibc's ctype/wctype functions aren't
+  extern-inline the same way, so it runs as a harmless sanity check on
+  Linux rather than a #1199 regression guard there.
 - `tools/comptime_native_smoke.py`'s own skip table
   (`SMOKE_CASE_SKIPS_GCC_MACOS`, #1196) had a `CCCC_AUDIT_NATIVE_SKIPS=1`
   bypass but no staleness *verdict* — a stale entry surfaced as the whole

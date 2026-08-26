@@ -36,7 +36,18 @@
 #define noreturn
 #endif
 
-#ifndef __attribute__
+// __attribute__ is a keyword under the GNU family (gcc/clang), never a
+// predefined macro, so the old `#ifndef __attribute__` guard here never
+// fired -- the strip below was unconditional. Under a *real* gcc that
+// mattered: it deleted the __gnu_inline__ out of Darwin's __header_inline /
+// glibc's __extern_inline (`extern __inline __attribute__((__gnu_inline__))`),
+// leaving a bare `extern __inline` -- a C99 external definition under
+// -std=c23 -- so every TU reaching <ctype.h> emitted all 53 ctype/wctype
+// helpers and --build's own link died on duplicate symbols (#1199). Clang
+// was never affected: its __header_inline resolves to plain `inline`, so
+// there was nothing for the strip to break. The strip only exists for
+// compilers with no __attribute__ support at all; keep it for those alone.
+#if !defined(__GNUC__) && !defined(__clang__)
 #define __attribute__(x)
 #endif
 
@@ -50,7 +61,7 @@
 // independently. CCCC_RELEASE_VERSION is stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.3.13"
+#define CCCC_RELEASE_VERSION "0.3.14"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
