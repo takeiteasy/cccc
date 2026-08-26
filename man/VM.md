@@ -871,10 +871,14 @@ and goes through the same `find_requested_library` / `cc_dlopen` /
 `register_dynamic_externs` path as `-l`, so the requested libraries are also
 passed to the system linker when compiling with `-c=native`.
 
-When using `-E` (preprocessed output) or `-c=generated` (serialized C output), any
-queued libraries are re-emitted at the top of the output as
-`#pragma comment(lib, "name")` — the most portable spelling — so downstream
-compilers can honour them.
+When using `-E` (preprocessed output) or `-m`/`-c=generated` (serialized C
+output), any queued libraries are re-emitted at the top of the output as
+`#pragma cccc link("name")` — CCCC's own spelling, ignored as a harmless
+unknown pragma by a plain downstream `cc` but parsed back into
+`pragma_link_libs` if the output is ever re-fed to cccc itself, so the
+requirement round-trips (#1149). `-c=native` emits neither spelling: the
+library already reaches the host linker directly via the `-l` merge above,
+so re-stating it as a pragma in the temporary source would be redundant.
 
 ### Bit-Manipulation Builtins
 

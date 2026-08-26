@@ -7,6 +7,15 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ### Fixed
 
+- `#pragma cccc link("name")` queued a library and CCCC re-emitted it into
+  `-E`/`-m`/`-c=generated` output as `#pragma comment(lib, "name")` — a
+  spelling that looked portable but wasn't an alternate input syntax CCCC
+  itself understood (`handle_pragma_body` has no `comment` branch), so
+  re-feeding that output back to cccc silently dropped the library
+  requirement. Now re-emitted as `#pragma cccc link("name")`, which round-
+  trips through the same parser that produced it; `-c=native` no longer
+  emits either spelling, since the library already reaches the host linker
+  via the `-l` merge (#1149).
 - `build.c`'s Linux build carried a `-fgnu89-inline` flag for
   `add_cccc_flags_opt()`, blamed on a comment claiming clang miscompiles
   glibc's extern-inline `pthread.h`/`wchar.h` functions (`pthread_equal`,

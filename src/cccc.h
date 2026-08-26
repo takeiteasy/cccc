@@ -3684,9 +3684,12 @@ typedef struct Compiler {
     StringArray comptime_pending_includes; // #include [[cccc::comptime]]
                                            // filenames queued for comptime pass
     StringArray
-        pragma_link_libs; // Library names queued by #pragma cccc link(...) /
-                          // #pragma comment(lib, ...) (#357), merged into
-                          // the -l/--library list before FFI resolution
+        pragma_link_libs; // Library names queued by #pragma cccc link(...)
+                          // (#357), merged into the -l/--library list before
+                          // FFI resolution. NOT queued by a literal "#pragma
+                          // comment(lib, ...)" written in guest source --
+                          // that spelling is emit-only, re-emitted from this
+                          // array as "#pragma cccc link(...)" instead (#1149)
 
     // #896: files whose contents use cccc-only preprocessor routing syntax
     // (@comptime/@shared/@emit/@build/@test, or the [[cccc::...]] spellings)

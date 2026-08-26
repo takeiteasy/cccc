@@ -3706,13 +3706,27 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // reaching the real "GNU decimal type extension not supported" error.
     serialize_decimal_native_guard(f, &ctx);
 
-    // Re-emit libraries queued via #pragma cccc link() as the portable
-    // comment(lib, ...) form so downstream compilers can honour them.
-    for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
-        fprintf(f, "#pragma comment(lib, \"%s\")\n",
-                vm->compiler.pragma_link_libs.data[i]);
-    if (vm->compiler.pragma_link_libs.len > 0)
-        fprintf(f, "\n");
+    // Re-emit libraries queued via #pragma cccc link() using CCCC's own
+    // spelling, so the queue round-trips if this output is ever re-fed to
+    // cccc itself (#1149). The previous "#pragma comment(lib, ...)" spelling
+    // looked portable but wasn't an input form cccc understood either --
+    // handle_pragma_body (src/preprocess.c) has no `comment` branch, so a
+    // round-trip silently dropped the library requirement. gcc/clang ignore
+    // "#pragma cccc link(...)" exactly as harmlessly as they ignored
+    // "#pragma comment(lib, ...)" -- neither is a pragma either compiler
+    // recognizes -- so this loses nothing for a plain downstream `cc`.
+    //
+    // Skipped entirely under -c=native: main.c's own pragma_link_libs -> -l
+    // merge (before run_native_backend is ever called) already gets the
+    // library to the host linker, so the pragma here would be pure noise
+    // sitting next to a real -l for the same name.
+    if (!vm->compiler.native_mode) {
+        for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
+            fprintf(f, "#pragma cccc link(\"%s\")\n",
+                    vm->compiler.pragma_link_libs.data[i]);
+        if (vm->compiler.pragma_link_libs.len > 0)
+            fprintf(f, "\n");
+    }
 
     // #965/#993: block env structs (see serialize_block_preamble) are
     // emitted once both mechanisms that can bring a *capture's* type into

@@ -2149,19 +2149,19 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
     if (!f || !tok)
         return;
 
-    // Re-emit any libraries queued via #pragma cccc link() as the portable
-    // comment(lib, ...) form. #1149 (found, not fixed, while implementing
-    // #1147): despite this comment's own prior wording, a literal
-    // "#pragma comment(lib, ...)" written in guest source is NOT an
-    // alternate input spelling of #pragma cccc link() -- handle_pragma_body
-    // (src/preprocess.c) has no `comment` branch, so it's silently ignored
-    // on input and never reaches pragma_link_libs. Only the real "#pragma
-    // cccc link()" form queues anything; this block re-emits that queue,
-    // consumed during preprocessing so it doesn't appear in the token
+    // Re-emit any libraries queued via #pragma cccc link() using CCCC's own
+    // spelling (#1149, resolved: emit the round-tripping form rather than
+    // "#pragma comment(lib, ...)"). That prior spelling wasn't an alternate
+    // input syntax either -- handle_pragma_body (src/preprocess.c) has no
+    // `comment` branch, so it's silently ignored on input and never reaches
+    // pragma_link_libs. "#pragma cccc link(...)" IS parsed back on input by
+    // the same handler, so re-feeding this -E output to cccc preserves the
+    // library requirement instead of dropping it. This block re-emits the
+    // queue, consumed during preprocessing so it doesn't appear in the token
     // stream, before the token output.
     if (vm) {
         for (int i = 0; i < vm->compiler.pragma_link_libs.len; i++)
-            fprintf(f, "#pragma comment(lib, \"%s\")\n",
+            fprintf(f, "#pragma cccc link(\"%s\")\n",
                     vm->compiler.pragma_link_libs.data[i]);
         if (vm->compiler.pragma_link_libs.len > 0)
             fprintf(f, "\n");
