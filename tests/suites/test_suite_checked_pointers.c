@@ -399,10 +399,15 @@ void test_ntarray_bitint_terminator_nonzero_traps(void) {
     a[n] = 1; // terminator slot, non-null -- now traps via CHKNTZ
 }
 
-// long double's widened terminator slot is 16 bytes (get_vm_size), but the
-// actual store is an 8-byte flat-double FSTR -- checked_nt_pointee_supported()
-// (src/parse.c) deliberately excludes it rather than assert bytes it never
-// inspected. Pin that: a non-zero write to the terminator slot must NOT trap.
+// long double's terminator slot is get_vm_size() bytes -- sizeof(long
+// double), which is platform-conditional since #1174 (8 bytes on macOS
+// arm64, 16 elsewhere; see src/type.c's ty_ldouble) -- but the actual store
+// is always an 8-byte flat-double FSTR regardless of that size (the VM
+// models long double arithmetic as a plain double everywhere, a separate,
+// pre-existing precision gap tracked by #491). checked_nt_pointee_supported()
+// (src/parse.c) deliberately excludes long double rather than assert bytes
+// it never inspected. Pin that: a non-zero write to the terminator slot must
+// NOT trap, on either sized platform.
 [[cccc::test]]
 void test_ntarray_long_double_terminator_not_guarded(void) {
     int n = 2;

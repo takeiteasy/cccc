@@ -35,7 +35,8 @@ struct tc_bitfields_mixed {
 // previous compact-only layout (offsets/bit-packing within the container
 // were always correct; only this struct-level rounding was missing). Each
 // struct below pins one row of the divergence this fixed, verified against
-// real clang/gcc output.
+// real clang/gcc output. #1176 later reversed #1127's claim that an
+// *unnamed* bitfield never contributes -- see the tc_bf1176_* structs below.
 struct tc_bf1127_single {
     int f : 5;
 }; // clang: sizeof 4, _Alignof 4 (was 1/1)
@@ -60,25 +61,83 @@ struct tc_bf1127_after_array {
     int  f : 5;
 }; // clang: sizeof 8, _Alignof 4 (was 6/1)
 
-// Regression guards: these three already matched clang before the fix and
-// must keep doing so -- an unnamed (including zero-width) bitfield is pure
-// padding and must NOT contribute to struct alignment, and a packed struct
-// must keep cccc's compact layout regardless.
-struct tc_bf1127_zero_width {
-    char c;
-    int : 0;
-    char d;
-}; // clang: sizeof 5, _Alignof 1
-
-struct tc_bf1127_unnamed {
+// #1176 reversed part of the rule below: a nonzero-width *unnamed*
+// bitfield's storage-unit rounding follows gcc, not clang (gcc treats it
+// exactly like a named one); a *packed* struct still keeps cccc's compact
+// layout regardless (gcc and clang agree there).
+struct tc_bf1176_unnamed {
     char c;
     int : 3;
     char d;
-}; // clang: sizeof 3, _Alignof 1
+}; // gcc: sizeof 4, _Alignof 4 (was 3/1, matching clang -- see #1176)
 
 struct tc_bf1127_packed {
     int f : 5;
-} __attribute__((packed)); // clang: sizeof 1, _Alignof 1
+} __attribute__((packed)); // clang/gcc: sizeof 1, _Alignof 1
+
+// #1176: a width-0 unnamed bitfield is NOT the same rule as a nonzero-width
+// one above -- gcc raises the struct's alignment to its declared type's
+// unconditionally, surviving BOTH `packed` and `#pragma pack(N)` (clang
+// never raises it at all; cccc previously matched clang). Verified against
+// gcc-16/clang directly for every variant below.
+struct tc_bf1176_zero_width {
+    char c;
+    int : 0;
+    char d;
+}; // gcc: sizeof 8, _Alignof 4 (was 5/1, matching clang -- see #1176)
+
+struct tc_bf1176_zero_width_packed {
+    char c;
+    int : 0;
+    char d;
+} __attribute__((packed)); // gcc: sizeof 8, _Alignof 4 (packed has no effect)
+
+#pragma pack(1)
+struct tc_bf1176_zero_width_pack1 {
+    char c;
+    int : 0;
+    char d;
+}; // gcc: sizeof 8, _Alignof 4 (#pragma pack(1) has no effect either)
+#pragma pack()
+
+struct tc_bf1176_zero_width_trailing {
+    char c;
+    int : 0;
+}; // gcc: sizeof 4, _Alignof 4 (no member follows -- still contributes)
+
+struct tc_bf1176_zero_width_only {
+    int : 0;
+}; // gcc: sizeof 0, _Alignof 4
+
+#pragma pack(1)
+struct tc_bf1176_zero_width_wide_pack1 {
+    char c;
+    long long : 0;
+    char d;
+}; // gcc: sizeof 16, _Alignof 8
+
+// A nonzero-width unnamed bitfield IS capped by #pragma pack(N), unlike
+// width-0 above -- verified against gcc-16.
+struct tc_bf1176_unnamed_pack1 {
+    char c;
+    int : 3;
+    char d;
+}; // gcc: sizeof 3, _Alignof 1
+#pragma pack()
+
+// Unions have no bit-field arm at all -- every member (named/unnamed,
+// bit-field or not) already feeds ty->align unconditionally, so this
+// already matched gcc before #1176 and is untouched by it (clang instead
+// gives 1/1 for both -- cccc already followed gcc here). Regression guard.
+union tc_bf1176_union_zero_width {
+    char c;
+    int : 0;
+}; // gcc: sizeof 4, _Alignof 4 (clang: 1/1)
+
+union tc_bf1176_union_unnamed {
+    char c;
+    int : 3;
+}; // gcc: sizeof 4, _Alignof 4 (clang: 1/1)
 
 // #1135: every 16-byte _BitInt container (whether spelled _BitInt(65..128)
 // or __int128) now gets _Alignof 16, matching the __int128 host container
@@ -1012,16 +1071,46 @@ int test_bitfield_storage_unit_layout(void) {
     _Static_assert(sizeof(struct tc_bf1127_after_array) == 8, "cccc");
     _Static_assert(_Alignof(struct tc_bf1127_after_array) == 4, "cccc");
 
-    // Regression guards: unnamed/zero-width bitfields stay padding-only, and
-    // a packed struct keeps cccc's compact layout.
-    _Static_assert(sizeof(struct tc_bf1127_zero_width) == 5, "cccc");
-    _Static_assert(_Alignof(struct tc_bf1127_zero_width) == 1, "cccc");
-
-    _Static_assert(sizeof(struct tc_bf1127_unnamed) == 3, "cccc");
-    _Static_assert(_Alignof(struct tc_bf1127_unnamed) == 1, "cccc");
+    // #1176: unnamed bitfields DO contribute alignment now (following gcc,
+    // reversing #1127's original claim) -- both the nonzero-width and
+    // width-0 shapes, in every packed/pack(N) combination. A packed struct
+    // still keeps cccc's compact layout for a nonzero-width unnamed
+    // bitfield (matching both hosts); width-0 is the one shape that
+    // survives packing regardless.
+    _Static_assert(sizeof(struct tc_bf1176_unnamed) == 4, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_unnamed) == 4, "cccc");
 
     _Static_assert(sizeof(struct tc_bf1127_packed) == 1, "cccc");
     _Static_assert(_Alignof(struct tc_bf1127_packed) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width) == 8, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_packed) == 8, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_packed) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_pack1) == 8, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_pack1) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_trailing) == 4, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_trailing) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_only) == 0, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_only) == 4, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_wide_pack1) == 16,
+                   "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_wide_pack1) == 8,
+                   "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_unnamed_pack1) == 3, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_unnamed_pack1) == 1, "cccc");
+
+    _Static_assert(sizeof(union tc_bf1176_union_zero_width) == 4, "cccc");
+    _Static_assert(_Alignof(union tc_bf1176_union_zero_width) == 4, "cccc");
+
+    _Static_assert(sizeof(union tc_bf1176_union_unnamed) == 4, "cccc");
+    _Static_assert(_Alignof(union tc_bf1176_union_unnamed) == 4, "cccc");
 
     // The miscompile this fixes: under -c=native/-m, `sizeof` folds at
     // guest parse time to cccc's own struct size. Before this fix that was

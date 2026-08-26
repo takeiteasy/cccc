@@ -2098,7 +2098,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         else if (dst->kind == TY_SHORT)
                             emit_rr(vm, dst->is_unsigned ? ZX2 : SX2, dest_reg,
                                     dest_reg);
-                        else if (dst->kind == TY_INT)
+                        else if (dst->kind == TY_INT ||
+                                 (dst->kind == TY_ENUM && dst->size == 4))
                             emit_rr(vm, dst->is_unsigned ? ZX4 : SX4, dest_reg,
                                     dest_reg);
                         else if (dst->kind == TY_BITINT)
@@ -2255,7 +2256,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         else if (dst->kind == TY_SHORT)
                             emit_rr(vm, dst->is_unsigned ? ZX2 : SX2, dest_reg,
                                     dest_reg);
-                        else if (dst->kind == TY_INT)
+                        else if (dst->kind == TY_INT ||
+                                 (dst->kind == TY_ENUM && dst->size == 4))
                             emit_rr(vm, dst->is_unsigned ? ZX4 : SX4, dest_reg,
                                     dest_reg);
                         else if (dst->kind == TY_BITINT && !is_wide_bitint(dst))
@@ -2321,13 +2323,42 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_fround_f32(vm, dest_reg, dest_reg);
             } else if (!is_flonum(node->ty) && !is_flonum(node->lhs->ty)) {
                 // Integer conversion - handle truncation/extension
-                if (node->ty->kind == TY_CHAR) {
+                //
+                // #1175: TY_ENUM was never checked here at all before this
+                // fix -- every enum (whether a plain `enum E {...}` or a
+                // C23 `enum E : T`) is TY_ENUM, never TY_CHAR/TY_SHORT/
+                // TY_INT, so a cast whose *target* is an enum type fell
+                // through this whole if/else chain doing nothing, leaving
+                // whatever sign/zero-extension the source expression
+                // happened to already have in the 64-bit register. That was
+                // silently correct only by accident: a subsequent *store*
+                // to memory narrows to the variable's own declared width
+                // regardless (e.g. `enum ByteColor wrap = (enum
+                // ByteColor)256;` still truncates via the 1-byte store, not
+                // this cast), so it never showed up as a wrong stored
+                // value. It DOES show up in any register-level use that
+                // doesn't go through a narrow store first -- e.g. `(enum E)
+                // -1 < 0` for an unsigned `enum E`, which #1175 can now
+                // produce (an enum with no explicit underlying type widens
+                // to unsigned when every enumerator is non-negative but one
+                // exceeds INT32_MAX): the comparison's SLT3/ULT3 choice
+                // (codegen_expr.c's is_u64_cmp) relies on a ≤32-bit
+                // unsigned value already being zero-extended in its 64-bit
+                // register, which never happened for TY_ENUM. Also latent
+                // (found, not newly introduced) for a pre-#1175 `enum E :
+                // unsigned char`/`unsigned short` in the same
+                // register-level shape -- fixed here too since it's the
+                // same missing arm, not a separate change.
+                if (node->ty->kind == TY_CHAR ||
+                    (node->ty->kind == TY_ENUM && node->ty->size == 1)) {
                     emit_rr(vm, node->ty->is_unsigned ? ZX1 : SX1, dest_reg,
                             dest_reg);
-                } else if (node->ty->kind == TY_SHORT) {
+                } else if (node->ty->kind == TY_SHORT ||
+                           (node->ty->kind == TY_ENUM && node->ty->size == 2)) {
                     emit_rr(vm, node->ty->is_unsigned ? ZX2 : SX2, dest_reg,
                             dest_reg);
-                } else if (node->ty->kind == TY_INT) {
+                } else if (node->ty->kind == TY_INT ||
+                           (node->ty->kind == TY_ENUM && node->ty->size == 4)) {
                     emit_rr(vm, node->ty->is_unsigned ? ZX4 : SX4, dest_reg,
                             dest_reg);
                 } else if (node->ty->kind == TY_BOOL) {

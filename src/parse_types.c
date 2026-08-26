@@ -1302,6 +1302,12 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     int                  i         = 0;
     int64_t              val       = 0;
     struct EnumConstant *enum_tail = NULL;
+    // #1175: widest/narrowest enumerator values seen, used below to select
+    // ty's underlying type when the enum has no C23 `: type` of its own.
+    int64_t  min_val    = 0;
+    uint64_t max_uval   = 0;
+    bool     any_neg    = false;
+    bool     first_enum = true;
     // #1095: the previous iteration's own VarScope (NULL before the first,
     // and for a duplicate re-declaration that reused an existing one) --
     // kept around so an auto-incrementing enumerator that turns out to
@@ -1394,7 +1400,49 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         }
         enum_tail = ec;
 
+        // #1175: track this enumerator's value for underlying-type
+        // selection below, regardless of whether it came from `=` or
+        // auto-increment -- an auto-incremented value can itself overflow
+        // int32 (`enum { A = 0xFFFFFFFF, B };`).
+        if (first_enum || val < min_val)
+            min_val = val;
+        if (val < 0)
+            any_neg = true;
+        else if (first_enum || (uint64_t)val > max_uval)
+            max_uval = (uint64_t)val;
+        first_enum = false;
+
         val++;
+    }
+
+    // #1175: select the underlying type from the enumerator values actually
+    // seen, matching gcc-16/clang -- C23 6.7.2.2 requires the type be able
+    // to represent every enumerator, and both reference compilers widen past
+    // `int` for this as an extension predating C23. Only when the enum has
+    // no explicit `enum E : type` of its own (ty->enum_base_type set above,
+    // which must keep winning unconditionally) and only ever *widens* size
+    // past the plain-`int` default -- a small all-non-negative enum stays
+    // `int` (signed) here even though both gcc and clang give it `unsigned
+    // int`; that's a separate, deliberately out-of-scope divergence (doesn't
+    // move sizeof/_Alignof) filed as a follow-up to #1170, not folded in.
+    if (!ty->enum_base_type && !first_enum) {
+        if (any_neg) {
+            // Signed: needs to hold min_val and max_uval both.
+            if (min_val >= INT32_MIN && max_uval <= INT32_MAX) {
+                // int -- ty already defaults to this (4/4, signed).
+            } else {
+                ty->size  = 8;
+                ty->align = 8;
+            }
+        } else if (max_uval > UINT32_MAX) {
+            ty->size        = 8;
+            ty->align       = 8;
+            ty->is_unsigned = true;
+        } else if (max_uval > INT32_MAX) {
+            ty->is_unsigned = true; // stays 4/4
+        }
+        // else: plain non-negative, small -- leave as default int (4/4,
+        // signed), see comment above.
     }
 
     return install_tag_definition(vm, tag, ty, "enum");
@@ -2875,9 +2923,21 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
 
     for (Member *mem = ty->members; mem; mem = mem->next) {
         if (mem->is_bitfield && mem->bit_width == 0) {
-            // Zero-width anonymous bitfield has a special meaning.
-            // It affects only alignment.
+            // Zero-width anonymous bitfield has a special meaning: it forces
+            // the next member onto a fresh storage unit. #1176: verified
+            // against gcc-16, it *also* unconditionally raises the struct's
+            // own alignment to its declared type's -- unlike every other
+            // unnamed member (including a nonzero-width unnamed bit-field,
+            // handled below), this survives BOTH `packed` and `#pragma
+            // pack(N)` (`#pragma pack(1) struct{char c; int:0; char d;}` is
+            // 8/4 on gcc, not capped to 1/1 or 2/1). This reverses #1127's
+            // stated "unnamed members never contribute" rule for this one
+            // shape specifically -- clang instead never raises alignment
+            // here (align 1), which is why cccc used to match clang; #1170
+            // 's policy is to follow gcc uniformly.
             bits = align_to(bits, mem->ty->size * 8);
+            if (ty->align < mem->align)
+                ty->align = mem->align;
         } else if (mem->is_bitfield) {
             int sz = mem->ty->size;
 
@@ -2911,12 +2971,26 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // project targets (confirmed: `-c=native`/`-m` then emits a
             // `sizeof`-folded `malloc()` call too small for the struct the
             // host compiler itself lays out, a real heap overflow, not a
-            // cosmetic-only mismatch). Only a *named* member counts -- an
-            // unnamed bitfield (including width-0, handled above) is pure
-            // padding and does not, matching clang/gcc exactly.
+            // cosmetic-only mismatch).
             //
-            // #1165 update: that named-only rule is for the *implicit*
-            // natural-alignment case only. An *explicit* aligned(N) on a
+            // #1176: #1127 originally restricted this to *named* members
+            // only, on the belief that an unnamed bit-field (nonzero-width)
+            // is pure padding like an unnamed struct/union member is. That
+            // belief does not hold against gcc-16: `struct{char c; int:3;
+            // char d;}` is 4/4 on gcc (matching a *named* `int x:3` exactly)
+            // and only 3/1 on clang. gcc's rule is general -- every unnamed
+            // bit-field of nonzero width contributes its declared type's
+            // alignment just like a named one would, suppressed by `packed`
+            // and capped by `#pragma pack(N)` the same way (verified: under
+            // `#pragma pack(1)` the same struct is 3/1 even on gcc). Width-0
+            // is NOT the same rule -- it contributes unconditionally, even
+            // under `packed`/`pack(N)`; see the width-0 arm above. So the
+            // `mem->name` distinction below is dropped entirely, not
+            // replaced -- there is no remaining shape where a nonzero-width
+            // bit-field's *name* affects whether it contributes.
+            //
+            // #1165 update: that natural-alignment rule (named or not) is
+            // for the *implicit* case only. An *explicit* aligned(N) on a
             // bit-field always raises ty->align, survives `packed` (like
             // #1163's non-bit-field case), and applies even on an *unnamed*
             // bit-field -- verified against gcc-16, e.g. `struct { char a;
@@ -2926,8 +3000,8 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // that same example); cccc follows gcc, matching this project's
             // reference compiler elsewhere in this file.
             int contributed = mem->explicit_align ? mem->explicit_align
-                              : (!ty->is_packed && mem->name) ? mem->align
-                                                              : 0;
+                              : !ty->is_packed    ? mem->align
+                                                  : 0;
             // #1173: unlike `packed` (which an explicit aligned(N) always
             // overrides, #1165 above), #pragma pack(N) caps EVERY
             // contribution -- explicit or implicit -- at N. Verified
@@ -3019,6 +3093,14 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     // If union, we don't have to assign offsets because they
     // are already initialized to zero. We need to compute the
     // alignment and the size though.
+    //
+    // #1176: unlike struct_decl, this loop has no is_bitfield/mem->name
+    // distinction at all -- every member (named or not, bit-field or not)
+    // already feeds mem->align into ty->align below unconditionally. That
+    // already matches gcc-16 for the shapes #1176 fixed in struct_decl
+    // (`union{char c; int:0;}` and `union{char c; int:3;}` are both 4/4 on
+    // gcc, and this loop already gives 4/4) -- verified directly, left
+    // alone deliberately, not an oversight.
     //
     // #1163: unlike struct_decl above, this loop previously had no
     // is_packed check at all, so `packed` had no effect on a union's own

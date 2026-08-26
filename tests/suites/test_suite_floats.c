@@ -904,6 +904,50 @@ int test_discarded_deref_temp_pressure(void) {
     return 42;
 }
 
+// #1174: `long double`'s size/align is platform-conditional (src/type.c) --
+// on macOS arm64 `long double` IS `double` (8/8, verified against gcc-16 and
+// clang), everywhere else this project supports it stays 16/16. Before this
+// fix the hardcoded 16/16 was silently wrong only on macOS arm64,
+// reproduced as a real ASan stack-buffer-overflow (the array-stride case
+// below) since every folded `sizeof(long double)`/offset under -c=native/-m
+// baked in a stride 8 bytes too wide for what the host actually allocates.
+[[cccc::test(return = 42)]]
+int test_ldouble_size_matches_host(void) {
+#if defined(__APPLE__) && defined(__aarch64__)
+    _Static_assert(sizeof(long double) == 8, "cccc");
+    _Static_assert(_Alignof(long double) == 8, "cccc");
+    _Static_assert(sizeof(long double _Complex) == 16, "cccc");
+    _Static_assert(_Alignof(long double _Complex) == 8, "cccc");
+#else
+    _Static_assert(sizeof(long double) == 16, "cccc");
+    _Static_assert(_Alignof(long double) == 16, "cccc");
+    _Static_assert(sizeof(long double _Complex) == 32, "cccc");
+    _Static_assert(_Alignof(long double _Complex) == 16, "cccc");
+#endif
+
+    // The #1174 OOB repro: a folded array stride that must match sizeof
+    // exactly, or a[2] writes past what the host allocates under
+    // -c=native/-m.
+    long double a[3] = {0};
+    a[2]             = 3.0L;
+    if (a[2] != 3.0L)
+        return 1;
+    if ((char *)&a[2] - (char *)&a[0] != 2 * (long)sizeof(long double))
+        return 2;
+
+    struct ld_pair {
+        int         i;
+        long double ld;
+    };
+#if defined(__APPLE__) && defined(__aarch64__)
+    _Static_assert(sizeof(struct ld_pair) == 16, "cccc");
+#else
+    _Static_assert(sizeof(struct ld_pair) == 32, "cccc");
+#endif
+
+    return 42;
+}
+
 #pragma cccc suite end
 
 // [from test_nexttoward.c]

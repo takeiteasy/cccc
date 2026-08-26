@@ -406,4 +406,79 @@ int test_enum_switch(void) {
     }
 }
 
+// #1175: an enum with no fixed `: type` underlying type now widens past the
+// plain-`int` default when an enumerator wouldn't fit in 32 bits, matching
+// gcc-16/clang exactly (both widen as an extension predating C23's own
+// 6.7.2.2 "must be able to represent every enumerator" requirement). Values
+// already survived before this fix (stored as int64_t) -- this pins the
+// sizeof/_Alignof/signedness selection specifically. Verified against
+// gcc-16/clang for every shape below; `enum tc_1175_small` is a deliberate,
+// documented exception (see the assertion below).
+enum tc_1175_wide_unsigned { TC_1175_WU = 0x100000000LL };
+enum tc_1175_wide_mixed { TC_1175_WM_NEG = -1, TC_1175_WM = 0x100000000LL };
+enum tc_1175_narrow_unsigned { TC_1175_NU = 0x80000000ULL };
+// A value near INT64_MAX rather than UINT64_MAX -- enumerator values are
+// stored as int64_t (see the comment above and man/COVERAGE.md:182), a
+// separate, pre-existing representation limit that already loses
+// information for a value past INT64_MAX (e.g. 0xFFFFFFFFFFFFFFFFULL folds
+// to -1 before #1175's own underlying-type selection ever runs) -- out of
+// #1175's scope, not exercised here.
+enum tc_1175_wide_unsigned64 { TC_1175_WU64 = 0x7FFFFFFF00000000ULL };
+enum tc_1175_small { TC_1175_SMALL = 1 };
+enum tc_1175_neg { TC_1175_NEG = -1 };
+
+[[cccc::test(return = 42)]]
+int test_wide_enum_underlying_type(void) {
+    // Wide unsigned value (> INT32_MAX) -- widens to 8 bytes, unsigned.
+    _Static_assert(sizeof(enum tc_1175_wide_unsigned) == 8, "cccc");
+    _Static_assert(_Alignof(enum tc_1175_wide_unsigned) == 8, "cccc");
+    if ((enum tc_1175_wide_unsigned) - 1 < 0)
+        return 1; // must be unsigned
+
+    // Mixed negative + wide-positive -- widens to 8 bytes, signed (only a
+    // signed type can hold both -1 and a value past INT32_MAX).
+    _Static_assert(sizeof(enum tc_1175_wide_mixed) == 8, "cccc");
+    _Static_assert(_Alignof(enum tc_1175_wide_mixed) == 8, "cccc");
+    if (!((enum tc_1175_wide_mixed) - 1 < 0))
+        return 2; // must be signed
+    if ((TC_1175_WM >> 32) != 1)
+        return 3; // value itself already survived pre-#1175
+
+    // Fits in unsigned int (> INT32_MAX but <= UINT32_MAX) -- stays 4
+    // bytes, becomes unsigned.
+    _Static_assert(sizeof(enum tc_1175_narrow_unsigned) == 4, "cccc");
+    _Static_assert(_Alignof(enum tc_1175_narrow_unsigned) == 4, "cccc");
+    if ((enum tc_1175_narrow_unsigned) - 1 < 0)
+        return 4; // must be unsigned
+
+    // Fits in int64_t but not uint32_t -- widens to 8 bytes, unsigned.
+    _Static_assert(sizeof(enum tc_1175_wide_unsigned64) == 8, "cccc");
+    _Static_assert(_Alignof(enum tc_1175_wide_unsigned64) == 8, "cccc");
+    if ((enum tc_1175_wide_unsigned64) - 1 < 0)
+        return 5; // must be unsigned
+
+    // A small all-non-negative enum: gcc/clang give `unsigned int` here,
+    // cccc deliberately keeps plain `int` (signed) -- sizeof/_Alignof agree
+    // at 4/4 either way, so this is outside #1170's layout-parity bar, and
+    // it's a separate, documented divergence (follow-up filed against
+    // #1170), not a #1175 regression. Only the layout is pinned here
+    // (agrees on both VM and every host); deliberately no runtime
+    // signedness check like the shapes above -- this file is also
+    // recompiled and re-run natively (see man/TESTING.md's native
+    // round-trip mode), and a real host compiler picks `unsigned int` here
+    // where the VM picks signed `int`, so a `(enum tc_1175_small)-1 < 0`
+    // check would itself disagree between VM and native, not a bug in
+    // either, just this exact deliberately-unfixed gap.
+    _Static_assert(sizeof(enum tc_1175_small) == 4, "cccc");
+
+    // A small negative-only enum was already correct before #1175 --
+    // regression guard.
+    _Static_assert(sizeof(enum tc_1175_neg) == 4, "cccc");
+    _Static_assert(_Alignof(enum tc_1175_neg) == 4, "cccc");
+    if (!((enum tc_1175_neg) - 1 < 0))
+        return 7;
+
+    return 42;
+}
+
 #pragma cccc suite end

@@ -40,18 +40,45 @@ Type *ty_ulong     = &(Type){TY_LONG, 8, 8, true};
 
 Type *ty_float     = &(Type){TY_FLOAT, 4, 4};
 Type *ty_double    = &(Type){TY_DOUBLE, 8, 8};
-Type *ty_ldouble   = &(Type){TY_LDOUBLE, 16, 16};
 
-Type *ty_fcomplex  = &(Type){
+// #1174: `long double`'s size/align is NOT the same across every supported
+// platform, unlike every other scalar type declared in this file. On macOS
+// arm64 `long double` IS `double` (8/8, verified against gcc-16 and clang);
+// macOS x86_64 and Linux x86_64 give it the 80-bit x87 extended format
+// (16/16 storage) and Linux aarch64 gives it IEEE binary128 (16/16) -- three
+// different *representations* that happen to share a size, which is why only
+// the size/align constant is branched here, not anything about how the VM
+// computes with it (the VM still always models long double arithmetic as a
+// plain 64-bit double on every platform -- a separate, pre-existing
+// precision gap tracked by #491, not introduced or fixed by this). Before
+// this fix the hardcoded 16/16 was silently wrong on macOS arm64 only,
+// reproduced as a real out-of-bounds write on every folded long-double
+// stride/offset under -c=native/-m (#1174).
+#if defined(__APPLE__) && defined(__aarch64__)
+Type *ty_ldouble = &(Type){TY_LDOUBLE, 8, 8};
+#else
+Type *ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
+#endif
+
+Type *ty_fcomplex = &(Type){
     .kind = TY_COMPLEX, .size = 8, .align = 4, .base = &(Type){TY_FLOAT, 4, 4}};
-Type *ty_dcomplex  = &(Type){.kind  = TY_COMPLEX,
+Type *ty_dcomplex = &(Type){.kind  = TY_COMPLEX,
+                            .size  = 16,
+                            .align = 8,
+                            .base  = &(Type){TY_DOUBLE, 8, 8}};
+// #1174: mirrors ty_ldouble's platform split -- a long double _Complex is
+// two long doubles back to back, so its size/align/base all move together.
+#if defined(__APPLE__) && defined(__aarch64__)
+Type *ty_ldcomplex = &(Type){.kind  = TY_COMPLEX,
                              .size  = 16,
                              .align = 8,
-                             .base  = &(Type){TY_DOUBLE, 8, 8}};
+                             .base  = &(Type){TY_LDOUBLE, 8, 8}};
+#else
 Type *ty_ldcomplex = &(Type){.kind  = TY_COMPLEX,
                              .size  = 32,
                              .align = 16,
                              .base  = &(Type){TY_LDOUBLE, 16, 16}};
+#endif
 
 // C23 decimal floating-point: real IEEE-754-2008 decimal encoding (Intel BID)
 // when built with CCCC_HAS_DECIMAL=1. Declarations, sizeof, struct layout,

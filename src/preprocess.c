@@ -6454,7 +6454,17 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__SIZEOF_FLOAT__", "4");
     define_macro(vm, "__SIZEOF_INT__", "4");
     define_macro(vm, "__SIZEOF_INT128__", "16");
+    // #1174: this used to be hardcoded "8" unconditionally -- already
+    // inconsistent with sizeof(long double) (then hardcoded 16 in
+    // src/type.c's ty_ldouble) on every platform before that fix, found
+    // incidentally while fixing it. Now mirrors ty_ldouble's own platform
+    // split so a guest `#if __SIZEOF_LONG_DOUBLE__ == N` agrees with the
+    // real `sizeof(long double)` it's predicting.
+#if defined(__APPLE__) && defined(__aarch64__)
     define_macro(vm, "__SIZEOF_LONG_DOUBLE__", "8");
+#else
+    define_macro(vm, "__SIZEOF_LONG_DOUBLE__", "16");
+#endif
     define_macro(vm, "__SIZEOF_LONG_LONG__", "8");
     define_macro(vm, "__SIZEOF_LONG__", "8");
     define_macro(vm, "__SIZEOF_POINTER__", "8");

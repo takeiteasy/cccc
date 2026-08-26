@@ -3,7 +3,7 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.15] - 2026-08-27
 
 ### Added
 
@@ -29,6 +29,38 @@ All notable changes to CCCC are documented here. Format loosely follows
   wedged) (#1202).
 
 ### Fixed
+
+- `long double`'s size/align was hardcoded 16/16, silently wrong on macOS
+  arm64 where `long double` IS `double` (8/8, verified against gcc-16 and
+  clang) -- reproduced as a real ASan stack-buffer-overflow on every folded
+  array stride/struct offset under `-c=native`/`-m`. Now platform-conditional
+  (`src/type.c`'s `ty_ldouble`/`ty_ldcomplex`, mirrored by the
+  `__SIZEOF_LONG_DOUBLE__` predefined macro, found inconsistent with it
+  incidentally): 8/8 on macOS arm64, 16/16 everywhere else this project
+  supports. The VM's `long double` *precision* stays a plain 64-bit `double`
+  on every platform regardless (unaffected, separately tracked by #491)
+  (#1174).
+- An enum with an enumerator wider than 32 bits was sized as 4 bytes instead
+  of 8 (`sizeof(enum E)` where `E`'s widest value doesn't fit `int`), even
+  though the value itself always survived correctly. The underlying type is
+  now selected from the enumerator values actually seen -- matching
+  gcc-16/clang, which both widen past `int` as an extension predating C23
+  §6.7.2.2's own "must represent every enumerator" requirement -- whenever
+  the enum has no explicit `enum E : type` of its own. One documented,
+  deliberate divergence remains: a small all-non-negative enum is `unsigned
+  int` on gcc/clang but stays CCCC's plain signed `int`, since `sizeof`/
+  `_Alignof` agree either way and it's outside this fix's layout-parity
+  scope (#1175).
+- An unnamed bit-field's contribution to its containing struct's own
+  alignment followed clang for one shape (width-0, `int : 0;`) but gcc for
+  another (an explicit `__attribute__((aligned(N)))` on an unnamed
+  bit-field) -- an unstated, inconsistent tie-break between two compilers
+  that genuinely disagree here. Now follows gcc uniformly for every shape:
+  a nonzero-width unnamed bit-field contributes exactly like a named one
+  (suppressed by `packed`, capped by `#pragma pack(N)`); a width-0 unnamed
+  bit-field contributes unconditionally, surviving both. Reverses part of
+  #1127's original "no unnamed member ever contributes" rule, which had only
+  been verified against clang (#1176).
 
 - `-c=native`'s `-std=` forwarding used to probe (and forward) the literal
   `c<NN>`/`gnu<NN>` prefix the user typed on the CCCC command line, so an
