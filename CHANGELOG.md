@@ -16,6 +16,17 @@ All notable changes to CCCC are documented here. Format loosely follows
   mirroring `#pragma GCC diagnostic push/pop`'s own mechanism, and re-emitted
   for `-c=native`/`-m`/`-c=generated` as `#pragma pack(push, N)`/`pack(pop)`
   wrapped tightly around just the affected definition (#1173).
+- `tools/run_tests.py` now arms a per-phase deadline watchdog
+  (`--phase-timeout`, `tools/testing/wedge.py`) around every sub-suite: if a
+  phase doesn't finish in time, every thread's Python stack is dumped to
+  `build/wedge/traceback.log` and the process exits, instead of hanging
+  until sr.ht's own top-level job timeout eventually kills it with no
+  evidence at all. `kill -USR1 <pid>` dumps the same stacks from a live run
+  without killing it, and `build/wedge/progress.log` records which test was
+  in flight at the time. Also fixes stdout/stderr buffering (line-buffered
+  now, was block-buffered on sr.ht's non-interactive `python3`, which made
+  a hung job's last-printed line an unreliable clue to where it actually
+  wedged) (#1202).
 
 ### Fixed
 
@@ -55,6 +66,15 @@ All notable changes to CCCC are documented here. Format loosely follows
   against, but this standalone script bypasses that chokepoint since it
   runs in-process via `importlib`. Fixed by closing stdin and capping the
   call with a timeout (#1201).
+- `tools/comptime_native_smoke.py` and `tools/header_resolution_smoke.py`
+  had the same unguarded-stdin, no-timeout local `run()` helper #1201 fixed
+  in `host_attribute_link_smoke.py` — every `cccc`/host-`cc` invocation in
+  both scripts routed through it. Fixed the same way (#1202).
+- `tools/testing/proc.py`'s `run_capture()` (#1185) only `os.killpg`'d a
+  timed-out subprocess's process group; a grandchild that races to
+  `setsid()` before the kill lands can escape that group in the same
+  instant. Now also `SIGKILL`s the direct child by pid directly as a
+  belt-and-suspenders second attempt (#1202).
 
 ## [0.3.14] - 2026-08-26
 

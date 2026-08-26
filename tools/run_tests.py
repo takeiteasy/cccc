@@ -34,6 +34,7 @@ Sub-suites:
   test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
   test_native_skip_audit — native_skip_reason() fall-through-invariant unit tests (ticket #1182)
   test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
+  test_wedge          — wedge.py deadline-watchdog/SIGUSR1-dump/progress-log unit tests (ticket #1202)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
@@ -67,6 +68,7 @@ from testing.discovery import discover_tests
 from testing.suite import run_test_suite_with_isolation
 from testing.report import print_summary
 from testing.proc import run_capture
+from testing import wedge
 
 # #1186: the native round-trip suite and its skip-table staleness audit
 # (#1157/#1182) were originally wired in as hard-blocking; the first real
@@ -652,6 +654,29 @@ def _run_proc_wedge_unit_tests():
         return f"FAILED ({e})", False
 
 
+def _run_wedge_unit_tests():
+    """Run tools/testing/test_wedge.py's wedge.py unit tests (#1202).
+    Deterministic, no cccc binary, no container needed. Returns
+    (status_str, ok).
+    """
+    script = _TOOLS_DIR / "testing" / "test_wedge.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_wedge", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_audit_reflection_enums_suite():
     """Run reflection.h TypeKind/NodeKind/AttrTargetKind vs internal enum
     value audit (#860).
@@ -828,6 +853,22 @@ def main():
              "default for interactive use). Default: 600."
     )
     parser.add_argument(
+        "--phase-timeout", type=int, default=None, metavar="SECONDS",
+        help="Deadline for each whole sub-suite/phase (#1202): if a phase "
+             "doesn't finish in time, dump every thread's Python stack to "
+             "build/wedge/traceback.log and hard-exit, instead of hanging "
+             "until the CI service's own top-level job timeout kills the "
+             "job with no evidence. Covers wedges --process-timeout can't "
+             "(see tools/testing/wedge.py's module docstring for why), "
+             "including the in-process importlib sub-suites that have no "
+             "per-subprocess timeout at all. Defaults to "
+             "max(process_timeout * 3, 1800) for the parallel source/c4/"
+             "native suites and process_timeout + 300 for the rest, unless "
+             "--process-timeout is 0 (unbounded), in which case no "
+             "deadline is armed at all -- pass 0 explicitly to disable "
+             "while keeping --process-timeout nonzero."
+    )
+    parser.add_argument(
         "--no-native", action="store_true",
         help="Skip the -c=native serializer round-trip suite (#1157; on by default -- "
              "see man/TESTING.md's 'Native round-trip mode' section)"
@@ -842,6 +883,21 @@ def main():
     )
     args = parser.parse_args()
 
+    # #1202: sr.ht's CI manifest invokes plain `python3` (no -u, no
+    # PYTHONUNBUFFERED), so stdout is block-buffered (~8KB) writing to the
+    # job's log pipe -- the "last line printed" in a hung job's log can
+    # trail real progress by up to a full buffer, which is exactly what made
+    # #1202's original "wedge happens near test_attr_vector_size_*" clue an
+    # artifact rather than evidence. Force line buffering so the log always
+    # reflects real progress. errors="backslashreplace" closes a second,
+    # unrelated hazard: print_single_result (tools/testing/suite.py) prints
+    # emoji, and a UnicodeEncodeError raised inside on_done's
+    # add_done_callback is swallowed there -- next_to_print would then never
+    # advance and the log would silently stop mid-suite while the run kept
+    # going underneath, mimicking a wedge without being one.
+    sys.stdout.reconfigure(line_buffering=True, errors="backslashreplace")
+    sys.stderr.reconfigure(line_buffering=True, errors="backslashreplace")
+
     if args.binary:
         cccc = Path(args.binary).resolve()
     else:
@@ -855,15 +911,36 @@ def main():
     quiet = args.quiet
     timeout = args.process_timeout or None
 
+    # #1202: external deadline watchdog, armed per-phase below. Only makes
+    # sense when --process-timeout is itself bounded -- with it disabled
+    # (0, "unbounded, interactive use") a phase deadline would fight that
+    # same intent, so leave no deadline armed at all in that case unless the
+    # caller passes --phase-timeout explicitly.
+    if args.phase_timeout is not None:
+        phase_timeout = args.phase_timeout or None  # 0 -> disabled
+    elif timeout:
+        phase_timeout = max(timeout * 3, 1800)
+    else:
+        phase_timeout = None
+    scalar_phase_timeout = (
+        args.phase_timeout if args.phase_timeout is not None
+        else (timeout + 300 if timeout else None)
+    )
+    wedge_dir = wedge.install(REPO_ROOT)
+
     print(f"=== CCCC Test Orchestrator ===")
     print(f"Binary: {cccc}")
     print(f"Jobs:   {n_jobs}")
+    if phase_timeout or scalar_phase_timeout:
+        print(f"Wedge watchdog: armed per-phase, dumps to {wedge_dir}/ "
+              f"(kill -USR1 {os.getpid()} for a live dump)")
     print()
 
     suite_results = {}
 
     # --- Source suite ---
     print("[ source suite ]")
+    wedge.arm("source", phase_timeout)
     r_src, ok_src = _run_source_suite(cccc, n_jobs, quiet, timeout)
     print_summary(r_src, _make_suite_args(quiet=quiet))
     suite_results["source"] = ok_src
@@ -871,6 +948,7 @@ def main():
     # --- C4 round-trip suite ---
     print()
     print("[ c4 round-trip suite ]")
+    wedge.arm("c4", phase_timeout)
     r_c4, ok_c4 = _run_c4_suite(cccc, n_jobs, quiet, timeout)
     print_summary(r_c4, _make_suite_args(quiet=quiet, c4=True))
     suite_results["c4"] = ok_c4
@@ -879,6 +957,7 @@ def main():
     if not args.no_native:
         print()
         print("[ native round-trip suite ]")
+        wedge.arm("native", phase_timeout)
         r_native, ok_native = _run_native_suite(cccc, n_jobs, quiet, timeout)
         print_summary(r_native, _make_suite_args(quiet=quiet, native=True))
         suite_results["native"] = ok_native
@@ -886,6 +965,7 @@ def main():
         # --- Native skip-table staleness audit (#1182) ---
         print()
         print("[ native_skip_audit ]")
+        wedge.arm("native_skip_audit", scalar_phase_timeout)
         skip_audit_status, ok_skip_audit = _run_native_skip_audit_suite(cccc, n_jobs, timeout)
         print(f"  {skip_audit_status}")
         suite_results["native_skip_audit"] = ok_skip_audit
@@ -893,6 +973,7 @@ def main():
     # --- macOS host-signal debugger ---
     print()
     print("[ host-signal debugger ]")
+    wedge.arm("debugger", scalar_phase_timeout)
     hsd_status, ok_hsd = _run_host_signal_suite(cccc)
     print(f"  {hsd_status}")
     suite_results["debugger"] = ok_hsd
@@ -900,6 +981,7 @@ def main():
     # --- REPL PTY integration ---
     print()
     print("[ repl integration ]")
+    wedge.arm("repl", scalar_phase_timeout)
     repl_status, ok_repl = _run_repl_suite(cccc)
     print(f"  {repl_status}")
     suite_results["repl"] = ok_repl
@@ -907,6 +989,7 @@ def main():
     # --- Conditional breakpoint PTY integration ---
     print()
     print("[ debugger condition integration ]")
+    wedge.arm("debugger_condition", scalar_phase_timeout)
     cond_status, ok_cond = _run_debugger_condition_suite(cccc)
     print(f"  {cond_status}")
     suite_results["debugger_condition"] = ok_cond
@@ -914,6 +997,7 @@ def main():
     # --- Debugger print command PTY integration (#958) ---
     print()
     print("[ debugger print integration ]")
+    wedge.arm("debugger_print", scalar_phase_timeout)
     print_status, ok_print = _run_debugger_print_suite(cccc)
     print(f"  {print_status}")
     suite_results["debugger_print"] = ok_print
@@ -921,6 +1005,7 @@ def main():
     # --- SQLite smoke ---
     print()
     print("[ sqlite smoke ]")
+    wedge.arm("sqlite", scalar_phase_timeout)
     sqlite_status, ok_sqlite = _run_sqlite_suite(cccc)
     print(f"  {sqlite_status}")
     suite_results["sqlite"] = ok_sqlite
@@ -928,6 +1013,7 @@ def main():
     # --- Header resolution smoke (#891) ---
     print()
     print("[ header_resolution_smoke ]")
+    wedge.arm("header_resolution_smoke", scalar_phase_timeout)
     hdr_status, ok_hdr = _run_header_resolution_suite()
     print(f"  {hdr_status}")
     suite_results["header_resolution_smoke"] = ok_hdr
@@ -935,6 +1021,7 @@ def main():
     # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
     print()
     print("[ host_attribute_link_smoke ]")
+    wedge.arm("host_attribute_link_smoke", scalar_phase_timeout)
     attr_link_status, ok_attr_link = _run_host_attribute_link_smoke_suite()
     print(f"  {attr_link_status}")
     suite_results["host_attribute_link_smoke"] = ok_attr_link
@@ -942,6 +1029,7 @@ def main():
     # --- Comptime/native serializer smoke (#892) ---
     print()
     print("[ comptime_native_smoke ]")
+    wedge.arm("comptime_native_smoke", scalar_phase_timeout)
     ctn_status, ok_ctn = _run_comptime_native_suite()
     print(f"  {ctn_status}")
     suite_results["comptime_native_smoke"] = ok_ctn
@@ -954,6 +1042,7 @@ def main():
     if not args.no_native:
         print()
         print("[ smoke_skip_audit ]")
+        wedge.arm("smoke_skip_audit", scalar_phase_timeout)
         smoke_audit_status, ok_smoke_audit = _run_smoke_skip_audit_suite(timeout)
         print(f"  {smoke_audit_status}")
         suite_results["smoke_skip_audit"] = ok_smoke_audit
@@ -961,6 +1050,7 @@ def main():
     # --- FFI registration audit ---
     print()
     print("[ audit_ffi ]")
+    wedge.arm("audit_ffi", scalar_phase_timeout)
     audit_status, ok_audit = _run_audit_ffi_suite()
     print(f"  {audit_status}")
     suite_results["audit_ffi"] = ok_audit
@@ -968,6 +1058,7 @@ def main():
     # --- Test-header directive damage audit (#1153) ---
     print()
     print("[ audit_test_headers ]")
+    wedge.arm("audit_test_headers", scalar_phase_timeout)
     hdr_audit_status, ok_hdr_audit = _run_audit_test_headers_suite()
     print(f"  {hdr_audit_status}")
     suite_results["audit_test_headers"] = ok_hdr_audit
@@ -975,6 +1066,7 @@ def main():
     # --- Test-header parser unit tests (#1153) ---
     print()
     print("[ test_header_parse ]")
+    wedge.arm("test_header_parse", scalar_phase_timeout)
     hdr_unit_status, ok_hdr_unit = _run_header_parse_unit_tests()
     print(f"  {hdr_unit_status}")
     suite_results["test_header_parse"] = ok_hdr_unit
@@ -982,6 +1074,7 @@ def main():
     # --- Native skip-audit fall-through invariant unit tests (#1182) ---
     print()
     print("[ test_native_skip_audit ]")
+    wedge.arm("test_native_skip_audit", scalar_phase_timeout)
     nsa_unit_status, ok_nsa_unit = _run_native_skip_audit_unit_tests()
     print(f"  {nsa_unit_status}")
     suite_results["test_native_skip_audit"] = ok_nsa_unit
@@ -989,13 +1082,23 @@ def main():
     # --- proc.py run_capture() wedge-hardening unit tests (#1185) ---
     print()
     print("[ test_proc_wedge ]")
+    wedge.arm("test_proc_wedge", scalar_phase_timeout)
     proc_unit_status, ok_proc_unit = _run_proc_wedge_unit_tests()
     print(f"  {proc_unit_status}")
     suite_results["test_proc_wedge"] = ok_proc_unit
 
+    # --- wedge.py deadline-watchdog/SIGUSR1-dump unit tests (#1202) ---
+    print()
+    print("[ test_wedge ]")
+    wedge.arm("test_wedge", scalar_phase_timeout)
+    wedge_unit_status, ok_wedge_unit = _run_wedge_unit_tests()
+    print(f"  {wedge_unit_status}")
+    suite_results["test_wedge"] = ok_wedge_unit
+
     # --- Reflection FFI generation check (#859) ---
     print()
     print("[ reflection_ffi_check ]")
+    wedge.arm("reflection_ffi_check", scalar_phase_timeout)
     refl_status, ok_refl = _run_reflection_ffi_check()
     print(f"  {refl_status}")
     suite_results["reflection_ffi_check"] = ok_refl
@@ -1003,6 +1106,7 @@ def main():
     # --- Reflection enum parity audit (#860) ---
     print()
     print("[ audit_reflection_enums ]")
+    wedge.arm("audit_reflection_enums", scalar_phase_timeout)
     enum_status, ok_enum = _run_audit_reflection_enums_suite()
     print(f"  {enum_status}")
     suite_results["audit_reflection_enums"] = ok_enum
@@ -1010,6 +1114,7 @@ def main():
     # --- Fuzz regression corpus replay ---
     print()
     print("[ fuzz replay ]")
+    wedge.arm("fuzz", scalar_phase_timeout)
     fuzz_status, ok_fuzz = _run_fuzz_suite(cccc)
     print(f"  {fuzz_status}")
     suite_results["fuzz"] = ok_fuzz
@@ -1018,6 +1123,7 @@ def main():
     if args.bench:
         print()
         print("[ benchmark ]")
+        wedge.arm("bench", scalar_phase_timeout)
         bench_status, ok_bench = _run_bench(cccc)
         print(f"  {bench_status}")
         suite_results["bench"] = ok_bench
@@ -1026,9 +1132,14 @@ def main():
     if args.perf:
         print()
         print("[ perf ]")
+        wedge.arm("perf", scalar_phase_timeout)
         perf_status, ok_perf = _run_perf_suite(cccc)
         print(f"  {perf_status}")
         suite_results["perf"] = ok_perf
+
+    # #1202: everything that could wedge has finished -- cancel the deadline
+    # watchdog before the summary/exit so it can't fire spuriously mid-print.
+    wedge.disarm()
 
     # --- Unified summary ---
     print()

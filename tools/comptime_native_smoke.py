@@ -216,7 +216,18 @@ PRIMARY_FILE_PROGRAM = (
 
 
 def run(cmd, cwd):
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    # #1202: this local helper used to inherit the harness's own stdin with
+    # no timeout -- the same class of hazard #1201 fixed in the sibling
+    # host_attribute_link_smoke.py (an unguarded `-x c -`-style call blocks
+    # forever on a non-interactive CI runner's open, never-EOF stdin) and
+    # tools/testing/proc.py's run_capture() (#1185) chokepoint fixes for the
+    # main per-test-file suite, which this standalone script bypasses since
+    # it runs in-process via importlib, not as a per-test spawn.
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd,
+                               stdin=subprocess.DEVNULL, timeout=120)
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(cmd, 124, "", f"timed out: {e}")
 
 
 def write(path: Path, contents: str):

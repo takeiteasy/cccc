@@ -822,6 +822,53 @@ see #1185: `tools/run_tests.py` hung once inside this same container under
 sr.ht's own hardware) — a second, independent reason a container run isn't
 interchangeable with a real push.
 
+#### Diagnosing a live wedge (#1202)
+
+`-j8` on real sr.ht hardware has wedged `run_tests.py` for hours more than
+once (#1185, #1202) without ever reproducing under a local container run or
+being catchable with gdb there (Rosetta translation and a PID-namespace
+mismatch garble every backtrace). `--process-timeout`'s `run_capture()`
+chokepoint (#1185, `tools/testing/proc.py`) cannot structurally cover every
+wedge shape — see that module's docstring for exactly which gap remains
+(`subprocess.Popen` construction itself, before any per-subprocess timeout
+is armed) — so `tools/testing/wedge.py` adds a second, independent layer:
+
+- **A per-phase deadline.** `--phase-timeout SECONDS` (default:
+  `max(--process-timeout * 3, 1800)` for the parallel source/c4/native
+  suites, `--process-timeout + 300` for the rest, disabled entirely when
+  `--process-timeout 0`) re-arms before every sub-suite in `run_tests.py`'s
+  `main()`. If a phase doesn't finish in time, every thread's Python stack
+  is dumped to `build/wedge/traceback.log` and the process hard-exits,
+  instead of hanging until sr.ht's own top-level job timeout kills it with
+  no evidence at all. This is built on `faulthandler.dump_traceback_later`,
+  not a hand-rolled watchdog thread — a plain Python thread needs the GIL
+  scheduled to run, which a GIL-holding wedge would deny it, whereas
+  `dump_traceback_later` fires from a dedicated C thread that doesn't need
+  the GIL.
+- **A live dump.** Send `SIGUSR1` to the `run_tests.py` process
+  (`kill -USR1 <pid>`; the pid is printed at startup whenever a phase
+  deadline is armed) to get the same all-thread stack dump into
+  `build/wedge/traceback.log` **without** killing the process — useful for
+  inspecting a wedge that's still short of its phase deadline, or when
+  `--phase-timeout 0` is in effect.
+- **`build/wedge/progress.log`** records a `S <mono> <phase> <name>` /
+  `E <mono> <phase> <name>` line around every per-test-file subprocess
+  invocation. Subtracting `E` lines from `S` lines gives exactly the set of
+  tests still in flight at the moment a dump was taken — the CI log's
+  *printed* order under `-j` parallelism is not reliable evidence of that
+  (workers finish out of submission order), which is what made #1202's
+  original "the hang is near `test_attr_vector_size_*`" clue a red herring:
+  sr.ht's plain (non-`-u`) `python3` invocation block-buffers stdout at
+  ~8KB, so the last line actually flushed to the job log can trail real
+  progress by a full buffer. `run_tests.py`'s `main()` now force-enables
+  line buffering on both stdout and stderr for exactly this reason.
+
+None of this fixes the underlying wedge — it has never been caught live, so
+its root cause is still unknown (tracked in a follow-up ticket). It turns
+the next occurrence from "silent multi-hour hang, no evidence" into "bounded
+failure with a stack dump and an in-flight test name," which is what a
+future investigation actually needs.
+
 #### MemorySanitizer (MSan)
 
 MSan is Linux-only (clang, not available on macOS). This target builds

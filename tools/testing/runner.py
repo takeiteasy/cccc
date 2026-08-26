@@ -15,6 +15,7 @@ from .c4 import run_c4_roundtrip
 from .header import parse_test_header
 from .native import run_native_roundtrip
 from .proc import run_capture
+from . import wedge
 
 
 def has_matrix_skip(test_file):
@@ -33,7 +34,27 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     tests whose correctness depends on a specific -O level the per-pass
     matrix cannot reproduce, since it always forces -O0 plus at most one -f
     pass).
+
+    #1202: the whole body runs under wedge.inflight() so a wedge diagnostic
+    dump (tools/testing/wedge.py) can name exactly which test file(s) were
+    still running when it fired -- printed test order under -j is not
+    reliable evidence of that (parallel workers finish out of submission
+    order), and thread stacks alone don't carry a test name at all.
     """
+    tests_dir = Path(script_dir) / "tests"
+    test_name = str(test_file.relative_to(tests_dir))
+    with wedge.inflight(test_name):
+        return _run_single_test_body(
+            idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
+            bench=bench, c4_mode=c4_mode, profile_dir=profile_dir,
+            process_timeout=process_timeout, matrix_mode=matrix_mode,
+            native_mode=native_mode,
+        )
+
+
+def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
+                          bench=False, c4_mode=False, profile_dir=None, process_timeout=None,
+                          matrix_mode=False, native_mode=False):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 

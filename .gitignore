@@ -23,6 +23,10 @@ profile/vm-opcodes/
 profile/perf/
 build/bench-*
 build/test_out/
+# run_tests.py's wedge-diagnostic dumps (tools/testing/wedge.py, #1202):
+# traceback.log/progress.log, written on a phase-deadline timeout or a live
+# `kill -USR1 <pid>` dump, never committed.
+build/wedge/
 # Doxygen HTML API docs: generated on demand by
 # `./cccc --build build.c --build-target=docs`, never committed.
 build/docs/

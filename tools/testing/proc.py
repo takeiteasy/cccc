@@ -29,6 +29,20 @@ its own process group via `start_new_session=True`, stdin is always
 `DEVNULL`, and a timeout kills the whole group (`os.killpg`), not just the
 direct child. Every subprocess.run call in runner.py/native.py/c4.py and
 run_tests.py's native_skip_audit shell-out goes through this one function.
+
+Known residual gap (#1202): the `timeout=` argument only bounds
+`proc.communicate()` below -- `subprocess.Popen(...)` itself, a few lines
+above the `try`, is not covered by any timeout here. `start_new_session=
+True` (needed for the process-group kill above) rules out CPython's
+`posix_spawn` fast path, so this is a real `fork()`+`exec()`, and
+`Popen.__init__` blocks on an unbounded read of its errpipe waiting for
+`exec()` to either succeed (EOF) or report a failure back to the parent. A
+child wedged between `fork` and `exec` -- or a parent wedged inside the
+`fork()` call itself, e.g. contending on the libc allocator/malloc-arena
+lock another thread holds across the fork -- hangs here, before this
+function's own timeout is ever armed. This is not fixable by rewriting
+Popen; tools/testing/wedge.py's external deadline watchdog exists
+specifically to catch a hang that starts here, not to eliminate it.
 """
 
 import os
@@ -82,5 +96,16 @@ def run_capture(cmd, timeout=None, cwd=None):
 def _killpg(pid):
     try:
         os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    # #1202: os.killpg targets the process *group* the direct child was
+    # placed in by start_new_session=True above. A grandchild that races to
+    # call setsid() before the killpg lands escapes that group entirely (see
+    # test_proc_wedge.py's "fully detaches" case) and killpg alone won't
+    # reach the direct child either in that split second. Also SIGKILL the
+    # direct child by pid directly, belt-and-suspenders: cheap, and it's the
+    # one process we always know the exact pid of.
+    try:
+        os.kill(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
         pass
