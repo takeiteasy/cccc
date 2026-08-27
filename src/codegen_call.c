@@ -276,8 +276,7 @@ bool cast_is_repr_noop(Type *to, Type *from) {
 
 // Return true when `expr` is a tail-call candidate: a direct, in-VM,
 // non-variadic, non-nested, non-noreturn, non-struct-returning call with ≤8
-// args. The caller is responsible for the opt_level >= 1 and inline_exit_name
-// guards.
+// args. The caller is responsible for the inline_exit_name guard.
 bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     if (!expr || expr->kind != ND_FUNCALL)
         return false;

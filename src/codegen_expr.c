@@ -2770,8 +2770,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 Obj *ffi_fn =
                     (node->lhs->kind == ND_VAR) ? node->lhs->var : NULL;
                 bool skip_dead_callf =
-                    vm->compiler.opt_level >= 1 && dest_reg == REG_ZERO &&
-                    ffi_fn && (ffi_fn->is_pure || ffi_fn->is_func_const);
+                    dest_reg == REG_ZERO && ffi_fn &&
+                    (ffi_fn->is_pure || ffi_fn->is_func_const);
                 if (!skip_dead_callf) {
                     emit(vm, CALLF);
                     emit_word(vm, ffi_idx);
@@ -3172,11 +3172,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // falls back to LEV3.
                     vm->compiler.pending_tail_callee = fn;
                 } else {
-                    // Dead-call elimination: skip pure/const calls whose result
-                    // is unused. Arguments were already evaluated above, so
-                    // their side effects still run.
-                    bool skip_dead_call = vm->compiler.opt_level >= 1 &&
-                                          dest_reg == REG_ZERO &&
+                    // Dead-call elimination: skip a call to an explicitly
+                    // pure/const-attributed function whose result is unused.
+                    // Arguments were already evaluated above, so their side
+                    // effects still run.
+                    bool skip_dead_call = dest_reg == REG_ZERO &&
                                           (fn->is_pure || fn->is_func_const);
                     if (!skip_dead_call) {
                         emit(vm, CALL);
@@ -3210,8 +3210,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     gen_expr(vm, node->lhs, r_fn);
                 }
                 bool skip_dead_calln =
-                    vm->compiler.opt_level >= 1 && dest_reg == REG_ZERO &&
-                    node->func_ty &&
+                    dest_reg == REG_ZERO && node->func_ty &&
                     (node->func_ty->is_pure || node->func_ty->is_func_const);
                 if (!skip_dead_calln) {
                     // Meta word (InstrWord = uint32_t) layout: bits 0-15 nargs,

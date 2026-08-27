@@ -3819,11 +3819,6 @@ typedef struct Compiler {
     int macro_gensym_counter; // Counter for __cccc_gensym()
     int counter_macro_value;  // __COUNTER__ macro value
 
-    // Optimisation level. The VM has no bytecode optimiser; this is 0 in VM
-    // mode and only non-zero under -c=native, where it is forwarded to the
-    // host cc (#1159).
-    int opt_level;
-
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask; // CCCCFlags bits explicitly set on the CLI; these
                              // win over `#pragma cccc config(...)` (#357)

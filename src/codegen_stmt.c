@@ -183,11 +183,12 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             }
 
             // Tail-call optimisation: return f(args) → CALLT instead of
-            // CALL+LEV3. Guards: opt >= 1, not inlining, predicate checks
-            // FFI/variadic/nested/etc. After gen_expr, pending_tail_callee is
-            // set only if CALL was reached; inlining/builtins leave it NULL and
-            // we fall through to the LEV3 path. expr_already_eval prevents
-            // re-evaluating node->lhs in the LEV3 path below.
+            // CALL+LEV3. Guards: vm->compiler.tail_calls, not inlining,
+            // predicate checks FFI/variadic/nested/etc. After gen_expr,
+            // pending_tail_callee is set only if CALL was reached;
+            // inlining/builtins leave it NULL and we fall through to the
+            // LEV3 path. expr_already_eval prevents re-evaluating node->lhs
+            // in the LEV3 path below.
             //
             // The parser always wraps the return expression in ND_CAST, even
             // for identity conversions (e.g. int→int).  Strip through those
