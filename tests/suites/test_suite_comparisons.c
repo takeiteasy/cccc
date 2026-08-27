@@ -73,7 +73,7 @@ void test_ternary(void) {
 }
 
 // test_ult_ule: unsigned 64-bit comparison (ULT3/ULE3 opcodes)
-[[cccc::test(flags = "--optimize=2")]]
+[[cccc::test]]
 void test_unsigned_comparisons(void) {
 #include <stdint.h>
     volatile uint64_t large = 18446744073709551614ULL;

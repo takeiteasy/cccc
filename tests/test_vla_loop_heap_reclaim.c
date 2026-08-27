@@ -1,4 +1,3 @@
-// CCCC_FLAGS: -O0
 // CCCC_MATRIX_SKIP: address-identity assertion, sensitive to bytecode
 // reordering under an individual -f pass #981: a VLA declared inside a loop
 // body (all within ONE frame) must be reclaimed at each iteration's *block*

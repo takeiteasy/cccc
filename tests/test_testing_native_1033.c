@@ -32,7 +32,7 @@ void test_exit_via_libc(void) {
     exit(42);
 }
 
-[[cccc::test(flags = "-O2")]]
+[[cccc::test(flags = "-3")]]
 int test_per_test_flags_skipped_natively(void) {
     return 42;
 }

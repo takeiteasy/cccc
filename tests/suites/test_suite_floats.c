@@ -694,7 +694,7 @@ int test_float_simple(void) {
 }
 
 // test_fstr_promoted
-[[cccc::test(return = 42, flags = "--optimize=3")]]
+[[cccc::test(return = 42)]]
 int test_fstr_promoted(void) {
     double d_out;
     store_via_ptr(&d_out, 1.0, 99.0);
@@ -715,7 +715,7 @@ int test_fstr_promoted(void) {
 }
 
 // test_optimizer_fmadd
-[[cccc::test(return = 42, flags = "--optimize=4")]]
+[[cccc::test(return = 42)]]
 int test_optimizer_fmadd(void) {
     double a[4] = {1.0, 2.0, 3.0, 4.0};
     double b[4] = {5.0, 6.0, 7.0, 8.0};
@@ -745,7 +745,7 @@ int test_optimizer_fmadd(void) {
 }
 
 // test_optimizer_fmsub
-[[cccc::test(return = 42, flags = "--optimize=4")]]
+[[cccc::test(return = 42)]]
 int test_optimizer_fmsub(void) {
     double a[4] = {1.0, 2.0, 3.0, 4.0};
     double b[4] = {5.0, 6.0, 7.0, 8.0};
@@ -775,7 +775,7 @@ int test_optimizer_fmsub(void) {
 }
 
 // test_optimizer_fnmsub
-[[cccc::test(return = 42, flags = "--optimize=4")]]
+[[cccc::test(return = 42)]]
 int test_optimizer_fnmsub(void) {
     double a[4] = {1.0, 2.0, 3.0, 4.0};
     double b[4] = {5.0, 6.0, 7.0, 8.0};
@@ -812,7 +812,7 @@ int test_optimizer_fnmsub(void) {
 }
 
 // test_optimizer_fp_promotion
-[[cccc::test(return = 42, flags = "--optimize=3")]]
+[[cccc::test(return = 42)]]
 int test_optimizer_fp_promotion(void) {
     // sum_double(100) == 0+0.5+1+...+49.5 == 2475.0
     if (sum_double(100) != 2475.0)

@@ -1,4 +1,3 @@
-// CCCC_FLAGS: -O0
 // #981: a __block variable's heap box (ALLOC_KIND_BLOCK_BOX) must never be
 // swept by heap reclamation, at either block or frame exit -- Block_copy is
 // expected to let it legitimately outlive its declaring frame. This is the

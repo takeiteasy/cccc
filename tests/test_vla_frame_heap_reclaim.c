@@ -1,4 +1,3 @@
-// CCCC_FLAGS: -O0
 // CCCC_MATRIX_SKIP: address-identity assertion, sensitive to bytecode
 // reordering under an individual -f pass #981: alloca/VLA storage is reclaimed
 // at frame exit when it is provably safe to do so (no address-keyed safety

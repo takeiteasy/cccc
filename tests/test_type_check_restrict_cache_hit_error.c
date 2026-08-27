@@ -1,4 +1,9 @@
-// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks --optimize=3
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
+// The restrict-value cache is gone with the bytecode optimiser; this now
+// verifies the type-confusion below (a store through a restrict pointer at a
+// different pointee type, then a read at the original type) still traps via
+// the ordinary CHKT3 path.
+// Historical context:
 // Ticket #750: re-enabling the restrict-value cache under safety flags
 // (instead of disabling it wholesale per #654) means restrict_cache_handle_
 // deref's cache-hit path (src/codegen.c) must run its own CHKP3/CHKT3

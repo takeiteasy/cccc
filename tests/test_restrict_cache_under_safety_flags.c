@@ -1,4 +1,8 @@
-// CCCC_FLAGS: -3 --optimize=3
+// CCCC_FLAGS: -3
+// The VM has no bytecode optimiser or restrict-value cache any more; this now
+// pins that the three restrict-deref access-pattern shapes below still
+// compute correct results under -3 through the ordinary checked path.
+// Historical context:
 // Ticket #750: the restrict-value cache is re-enabled under safety flags
 // (previously disabled wholesale under CCCC_FUSION_UNSAFE_FLAGS per #654).
 // Exercises correctness across the cache's three access patterns with

@@ -1,11 +1,9 @@
-// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks --optimize=3
-// Ticket #654: emit_indexed_load_if_possible/restrict-value-cache fusion
-// paths bypass emit_load's CHKT3 emission at opt_level >= 2 and were only
-// disabled when CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH |
-// CCCC_PROVENANCE_TRACK was set -- CCCC_TYPE_CHECKS wasn't in that mask.
-// A standalone --type-checks -O3 build must still catch type confusion
-// through a repeated restrict-pointer deref (restrict-cache pattern 1),
-// which is exactly the path that used to slip through.
+// EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
+// The VM has no bytecode optimiser (and no indexed-load fusion or
+// restrict-value cache) any more, so every deref takes the checked path.
+// This verifies a --type-checks build catches type confusion through a
+// repeated restrict-pointer deref -- the shape #654's fusion bypass used to
+// slip through -- via the ordinary CHKT3 emission.
 #include <stdlib.h>
 
 static int touch(int *restrict p) {

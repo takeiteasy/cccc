@@ -1,5 +1,7 @@
-// CCCC_FLAGS: --optimize=3
-// CCCC_MATRIX_SKIP: depends on --optimize=3 (the restrict-value cache)
+// The VM has no bytecode optimiser or restrict-value cache any more; this now
+// pins that the narrowing store-through-restrict shape below still computes
+// correct results through the ordinary codegen path.
+// Historical context:
 // Ticket #757: the restrict-value cache's write-through path
 // (restrict_cache_handle_store, src/codegen.c) fully replaced the cached
 // slot's contents and normalized to the *param's* declared pointee type,

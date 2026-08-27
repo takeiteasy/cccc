@@ -1,4 +1,3 @@
-// CCCC_FLAGS: -O0
 // #981: a genuine user allocation (malloc & co, ALLOC_KIND_USER) sitting
 // above a heap-reclamation watermark must pin the bump pointer at its own
 // end -- heap_rewind_to (src/ops.c) must never sweep past it. Declares a

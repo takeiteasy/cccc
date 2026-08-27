@@ -69,14 +69,14 @@ void test_overflow_div_signed(void) {
 }
 
 // ── test_overflow_opt_add: overflow traps survive -O3 constant folding ──
-[[cccc::test(flags = "--overflow-checks --optimize=3", exit_code = 255)]]
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
 void test_overflow_opt_add(void) {
     long long result = LLONG_MAX + 1LL;
     (void)result;
 }
 
 // ── test_optimizer_trap_preservation: div-by-zero trap survives -O3 ──
-[[cccc::test(flags = "--optimize=3", exit_code = 255)]]
+[[cccc::test(exit_code = 255)]]
 void test_div_by_zero_optimized(void) {
     int result = 42 / (6 - 6);
     (void)result;

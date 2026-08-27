@@ -721,7 +721,7 @@ int test_deep_initializer_576(void) {
 // [from test_memzero_init]
 // Regression #464: partial aggregate initialiser must zero unspecified
 // elements.
-[[cccc::test(return = 42, flags = "-O0")]]
+[[cccc::test(return = 42)]]
 int test_memzero_init(void) {
     static void dirty_stack(void) {
         volatile unsigned char buf[256];
@@ -808,7 +808,7 @@ int test_coalesce(void) {
 // [from test_block_partial_init]
 // Regression #473: __block aggregate partial-init must zero unspecified
 // elements.
-[[cccc::test(return = 42, flags = "-O0 --memory-poisoning")]]
+[[cccc::test(return = 42, flags = "--memory-poisoning")]]
 int test_block_partial_init(void) {
     struct BpS {
         int  a;

@@ -1,4 +1,8 @@
-// CCCC_FLAGS: -3 --optimize=3
+// CCCC_FLAGS: -3
+// The VM has no bytecode optimiser or restrict-value cache any more; this now
+// pins that the restrict-qualified pointer / argument-fill shape below still
+// computes correct results through the ordinary checked codegen path.
+// Historical context:
 // Regression test for a gap found while fixing #754 (restrict cache not
 // invalidated by intrinsic-lowered calls). The original fix hoisted a
 // single restrict_cache_invalidate_all() to the top of case ND_FUNCALL, run
