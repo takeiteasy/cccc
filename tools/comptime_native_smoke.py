@@ -6725,42 +6725,145 @@ def case_layout_guards_shape_1172(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1176 follow-up: whether the width-0 unnamed bit-field shape's own guard
+# is a true positive under a given host cc is no longer predictable purely
+# from the cc's *family* (clang vs. gcc) -- it's the real AAPCS64 rule
+# (CCCC_ALIGN_ANON_BITFIELDS, src/parse_types.c), true on AArch64 except
+# Darwin, with macOS/arm64 gcc-16 as a WONT_FIX outlier that mismatches its
+# own platform's rule. cccc folds its layout guard's sizeof/_Alignof
+# constants at BUILD time from ITS OWN target platform, so the two probes
+# below ask the actual question directly instead of assuming an axis: does
+# this candidate cc's real sizeof/_Alignof for the shape match what this
+# cccc binary itself folded? -c=native must succeed iff they do, and name
+# the divergent type in its diagnostic when they don't. This is correct on
+# every platform/family combination without hardcoding which one is today's
+# outlier.
+PROBE_ZERO_WIDTH_SIZEOF_PROGRAM = """
+#include <stdio.h>
+struct probe_zero_width_bitfield { char c; int : 0; char d; };
+int main(void) {
+    printf("%zu/%zu\\n", sizeof(struct probe_zero_width_bitfield),
+           _Alignof(struct probe_zero_width_bitfield));
+    return 0;
+}
+"""
+
+
+def _cccc_folded_zero_width_layout(cccc: Path, tmp: str):
+    """Parse this cccc binary's own -m output for
+    LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM to learn the (size, align) it folded
+    for lg1172_zero_width_bitfield -- i.e. what it believes ITS OWN target
+    platform's ABI does with this shape, regardless of which host cc
+    -c=native ends up shelling out to.
+    """
+    src = Path(tmp) / "layout_guards_zw_fold_1172.c"
+    write(src, LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    m_size = re.search(
+        r"sizeof\(struct lg1172_zero_width_bitfield\) == (\d+)",
+        result.stdout)
+    m_align = re.search(
+        r"_Alignof\(struct lg1172_zero_width_bitfield\) == (\d+)",
+        result.stdout)
+    if not m_size or not m_align:
+        return None
+    return (int(m_size.group(1)), int(m_align.group(1)))
+
+
+def _probe_cc_zero_width_layout(cc: str, tmp: str, tag: str):
+    """Compile+run PROBE_ZERO_WIDTH_SIZEOF_PROGRAM under a real `cc`;
+    return its actual (size, align) for the shape, or None if the probe
+    itself couldn't be compiled/run (should never happen for a real cc on
+    plain ISO C).
+    """
+    src = Path(tmp) / f"lg1172_probe_{tag}.c"
+    out = Path(tmp) / f"lg1172_probe_{tag}_out"
+    write(src, PROBE_ZERO_WIDTH_SIZEOF_PROGRAM)
+    r = run([cc, "-w", "-o", out.name, src.name], cwd=tmp)
+    if r.returncode != 0:
+        return None
+    rr = run([f"./{out.name}"], cwd=tmp)
+    if rr.returncode != 0 or "/" not in rr.stdout:
+        return None
+    size_s, align_s = rr.stdout.strip().split("/")
+    return (int(size_s), int(align_s))
+
+
+def _case_layout_guards_true_positive_1172(cccc: Path, tmp: str, cc: str,
+                                            label: str) -> bool:
+    folded = _cccc_folded_zero_width_layout(cccc, tmp)
+    if folded is None:
+        print(f"    FAIL: couldn't parse this cccc's own folded "
+              f"sizeof/_Alignof for lg1172_zero_width_bitfield from its "
+              f"-m output")
+        return False
+    actual = _probe_cc_zero_width_layout(cc, tmp, label)
+    if actual is None:
+        print(f"    FAIL: {label} at {cc} couldn't compile/run the plain "
+              f"ISO C probe program")
+        return False
+    src = Path(tmp) / f"layout_guards_{label}_1172.c"
+    out = Path(tmp) / f"layout_guards_{label}_1172_out"
+    write(src, LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = cc
+    result = run([str(cccc), "-c=native", "-o", out.name, src.name],
+                 cwd=tmp, env=env)
+    if actual == folded:
+        if result.returncode != 0:
+            print(f"    FAIL: cccc folded {folded} and {label} at {cc} "
+                  f"actually lays it out as {actual} (agreement), but "
+                  f"-c=native still failed\n    {result.stderr}")
+            return False
+        run_result = run([f"./{out.name}"], cwd=tmp)
+        if run_result.returncode != 42:
+            print(f"    FAIL: exit {run_result.returncode}\n"
+                  f"    {run_result.stderr}")
+            return False
+        print(f"    ok: {label} agrees with cccc's own folded {folded}, "
+              f"-c=native round-trips clean")
+        return True
+    else:
+        if result.returncode == 0:
+            print(f"    FAIL: cccc folded {folded} but {label} at {cc} "
+                  f"actually lays it out as {actual} (disagreement) -- "
+                  f"-c=native should have hard-failed the layout guard, "
+                  f"not compiled clean")
+            return False
+        if "lg1172_zero_width_bitfield" not in result.stderr:
+            print(f"    FAIL: expected the failing _Static_assert to name "
+                  f"the divergent type\n    {result.stderr}")
+            return False
+        print(f"    ok: {label} lays it out as {actual}, cccc folded "
+              f"{folded} (disagreement) -- -c=native correctly hard-failed "
+              f"naming the type")
+        return True
+
+
 def case_layout_guards_clang_true_positive_1172(cccc: Path, tmp: str) -> bool:
-    print("  142: #1172 -- a width-0 unnamed bit-field struct's layout "
-          "guard is a TRUE POSITIVE under a clang host: #1176 adopted "
-          "gcc's rule for this construct (gcc/cccc: 8/4, clang: 5/1), a "
-          "deliberate, permanent divergence, not a bug -- so -c=native "
-          "must now hard-fail naming the type under clang rather than "
-          "silently writing out of bounds. Skips cleanly if no real clang "
-          "is on PATH.")
+    print("  142: #1172 -- the width-0 unnamed bit-field struct's layout "
+          "guard against a real clang host: probes clang's actual "
+          "sizeof/_Alignof for the shape and asserts -c=native succeeds "
+          "iff it matches what this cccc binary itself folded for its own "
+          "target platform, hard-failing (naming the type) when it "
+          "doesn't (#1176 follow-up: this is the real AAPCS64 rule, not a "
+          "gcc-vs-clang split). Skips cleanly if no real clang is on "
+          "PATH.")
     clang = _find_family_cc(["clang", "cc"], "clang")
     if not clang:
         print("    skip: no real clang on PATH")
         return True
-    src = Path(tmp) / "layout_guards_clang_1172.c"
-    out = Path(tmp) / "layout_guards_clang_1172_out"
-    write(src, LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM)
-    env = dict(os.environ)
-    env["CCCC_NATIVE_CC"] = clang
-    result = run([str(cccc), "-c=native", "-o", out.name, src.name],
-                 cwd=tmp, env=env)
-    if result.returncode == 0:
-        print("    FAIL: -c=native unexpectedly succeeded under clang for "
-              "a construct known to diverge from it")
-        return False
-    if "lg1172_zero_width_bitfield" not in result.stderr:
-        print(f"    FAIL: expected the failing _Static_assert to name the "
-              f"divergent type\n    {result.stderr}")
-        return False
-    print("    ok")
-    return True
+    return _case_layout_guards_true_positive_1172(cccc, tmp, clang, "clang")
 
 
 def case_layout_guards_gcc_clean_1172(cccc: Path, tmp: str) -> bool:
     print("  143: #1172 -- the same width-0 unnamed bit-field program "
-          "compiles clean under a real gcc host (gcc and cccc agree, "
-          "#1176) -- proves the guard is a targeted true positive, not a "
-          "blanket failure. Skips cleanly if no real (non-clang-symlink) "
+          "against a real gcc host: probes gcc's actual sizeof/_Alignof "
+          "for the shape and asserts -c=native succeeds iff it matches "
+          "what this cccc binary itself folded, hard-failing (naming the "
+          "type) when it doesn't -- catches both the ordinary agreement "
+          "case and macOS/arm64 gcc-16's own WONT_FIX ABI mismatch "
+          "(#1176 follow-up). Skips cleanly if no real (non-clang-symlink) "
           "gcc is on PATH.")
     gcc = _find_family_cc(
         ["gcc-16", "gcc-15", "gcc-14", "gcc-13", "gcc",
@@ -6768,24 +6871,7 @@ def case_layout_guards_gcc_clean_1172(cccc: Path, tmp: str) -> bool:
     if not gcc:
         print("    skip: no real gcc on PATH")
         return True
-    src = Path(tmp) / "layout_guards_gcc_1172.c"
-    out = Path(tmp) / "layout_guards_gcc_1172_out"
-    write(src, LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM)
-    env = dict(os.environ)
-    env["CCCC_NATIVE_CC"] = gcc
-    result = run([str(cccc), "-c=native", "-o", out.name, src.name],
-                 cwd=tmp, env=env)
-    if result.returncode != 0:
-        print(f"    FAIL: compile exited {result.returncode}\n"
-              f"    {result.stderr}")
-        return False
-    run_result = run([f"./{out.name}"], cwd=tmp)
-    if run_result.returncode != 42:
-        print(f"    FAIL: exit {run_result.returncode}\n"
-              f"    {run_result.stderr}")
-        return False
-    print("    ok")
-    return True
+    return _case_layout_guards_true_positive_1172(cccc, tmp, gcc, "gcc")
 
 
 def case_layout_guards_exclusions_1172(cccc: Path, tmp: str) -> bool:

@@ -626,22 +626,28 @@ separate, natively-compilable file covering the same statement (and
 declarator-label) spellings with real (empty) assembly the host accepts —
 not skipped, and not to be confused with the permanent skip above.
 
-`NATIVE_SKIP_TESTS_CLANG` also carries three entries for the `-c=native`
-layout guards (see
+`NATIVE_SKIP_TESTS_GCC_MACOS` also carries three entries for the
+`-c=native` layout guards (see
 [COVERAGE.md](COVERAGE.md#layout-guards-static_assert-next-to-every-emitted-aggregate)):
 `test_suite_layout_guards_1172.c`, `test_suite_attributes_layout_1129.c`, and
-`test_bitfield_unnamed_aligned_1165.c` all instantiate a struct shape gcc and
-clang genuinely disagree on (width-0 unnamed bit-field alignment, or an
-unnamed bit-field's explicit `aligned(N)`), so the guard now emitted next to
-each one's definition is a **true positive** under a clang host — the
-emitted C really is miscompiled there. Confirmed passing under
-`CCCC_NATIVE_CC=gcc-16`, same reproduction command as above. No new test-file
-header directive was added for this: `EXPECT_COMPILE_ERROR` under `--native`
-only checks *cccc's own* exit code (`tools/testing/native.py`), which cannot
-distinguish a front-end rejection from a host-cc rejection, so an assertion
-that the *host compiler* specifically rejects a construct lives in
-`tools/comptime_native_smoke.py` instead, which invokes `cc`/`clang`/`gcc`
-directly and can check its return code (cases 141–145).
+`test_bitfield_unnamed_aligned_1165.c` all instantiate a struct shape whose
+unnamed-bit-field alignment/size contribution is the real AAPCS64 rule
+(`CCCC_ALIGN_ANON_BITFIELDS`, `src/parse_types.c`) — true on AArch64 except
+Darwin. macOS/arm64 gcc-16 is a permanent outlier there (it never
+implemented Apple's own AAPCS64 deviation), so the guard now emitted next to
+each one's definition is a **true positive** specifically under
+`CCCC_NATIVE_CC` pointed at that gcc — the emitted C really is miscompiled
+relative to what cccc itself folded for its own target. Confirmed passing
+under the default host `cc` (clang) on every platform, and under gcc on
+Linux (either architecture), same reproduction command as above. No new
+test-file header directive was added for this: `EXPECT_COMPILE_ERROR` under
+`--native` only checks *cccc's own* exit code (`tools/testing/native.py`),
+which cannot distinguish a front-end rejection from a host-cc rejection, so
+an assertion that the *host compiler* specifically rejects a construct
+lives in `tools/comptime_native_smoke.py` instead, which invokes
+`cc`/`clang`/`gcc` directly, probes each one's actual `sizeof`/`_Alignof`
+for the shape, and checks `-c=native`'s return code against whether that
+probe agrees with what this cccc binary itself folded (cases 141–145).
 
 **CI status (#1157, hard-blocking again since #1186):** on by default.
 `tools/run_tests.py` (the entry point both `--build-target=test` and

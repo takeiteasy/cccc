@@ -1411,27 +1411,38 @@ never claimed to own:
 
 **A genuine, permanent divergence, not a bug.** `#pragma pack(N)`
 (#1173), `long double` (#1174), a too-narrow enum underlying type (#1175),
-and width-0 unnamed bit-field alignment (#1176) were all real CCCC bugs, now
-fixed. One class of divergence remains and is *intentional*: gcc and clang
-themselves disagree on unnamed bit-field storage-unit rounding in ways CCCC
-cannot match both of simultaneously (policy: follow gcc, matching this
-project's reference compiler throughout `parse_types.c`'s bit-field layout
-comments) —
+and an unnamed bit-field's contribution to struct/union alignment and size
+(#1176, and its follow-up) were all real CCCC bugs, now fixed. One class of
+divergence remains and is *intentional*: some host compilers, on some
+targets, don't implement their own platform's real ABI rule for an unnamed
+bit-field, in a way CCCC cannot match simultaneously with a target that
+does —
 
-- a width-0 unnamed bit-field's contribution to struct alignment (gcc
-  raises it, clang never does — `struct{char c; int : 0; char d;}` is 8/4
-  under gcc, 5/1 under clang), and
+- a width-0 unnamed bit-field's contribution to struct/union alignment
+  (and, for a union, size) — `struct{char c; int : 0; char d;}` is 8/4
+  under real AAPCS64 (Linux/aarch64, either compiler family) and 5/1
+  everywhere else (x86_64, either compiler family; Darwin/arm64 clang);
+- a nonzero-width unnamed bit-field's contribution to the same — `struct{
+  char c; int : 3; char d;}` is 4/4 under real AAPCS64, 3/1 everywhere
+  else; and
 - an unnamed bit-field carrying an explicit `__attribute__((aligned(N)))`
-  (`struct{char a; int : 5 __attribute__((aligned(16))); int c;}` is 32/16
-  under gcc, 24/4 under clang).
+  — `struct{char a; int : 5 __attribute__((aligned(16))); int c;}` is
+  32/16 under real AAPCS64, 24/4 everywhere else.
 
-Since macOS's default `cc` is clang, `-c=native` on either shape under a
-clang host is now a **hard compile error** naming the type — this is the
-guard doing its job (the emitted C really is miscompiled under clang for
-these two shapes), not a regression. Escapes: point `CCCC_NATIVE_CC` at a
-real gcc (`CCCC_NATIVE_CC=gcc-16` on macOS/Homebrew), or `--no-layout-
-guards`. The test corpus quarantines the handful of files that instantiate
-one of these two shapes via `NATIVE_SKIP_TESTS_CLANG`
+This is the true AAPCS64 rule (`CCCC_ALIGN_ANON_BITFIELDS`,
+`src/parse_types.c`), not a gcc-vs-clang split as originally believed —
+verified directly against both compiler families, on x86_64, Linux/aarch64,
+and macOS/arm64. **macOS/arm64 gcc-16 is the one outlier**: gcc never
+implemented Apple's AAPCS64 deviation there, so it gives the AAPCS64 answer
+on a target that doesn't use it — a permanent gcc/Darwin gap, not a CCCC
+bug, matching the existing constructor/destructor-priority gap in the same
+table. Since macOS's default `cc` is clang (which agrees with cccc's own
+folded layout there), this divergence only surfaces as a **hard compile
+error** naming the type under `CCCC_NATIVE_CC` pointed at a real Homebrew
+gcc on macOS specifically — not under the default host, and not on Linux
+under either compiler family. Escapes: `--no-layout-guards`, or simply use
+the default host `cc`. The test corpus quarantines the handful of files
+that instantiate one of these shapes via `NATIVE_SKIP_TESTS_GCC_MACOS`
 (`tools/testing/__init__.py`) rather than softening the guard.
 
 ### Output dialect: GNU C11 required

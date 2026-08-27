@@ -61,83 +61,90 @@ struct tc_bf1127_after_array {
     int  f : 5;
 }; // clang: sizeof 8, _Alignof 4 (was 6/1)
 
-// #1176 reversed part of the rule below: a nonzero-width *unnamed*
-// bitfield's storage-unit rounding follows gcc, not clang (gcc treats it
-// exactly like a named one); a *packed* struct still keeps cccc's compact
-// layout regardless (gcc and clang agree there).
+// #1176 follow-up: a nonzero-width *unnamed* bitfield's storage-unit
+// rounding is not a gcc-vs-clang split -- it is the real AAPCS64 rule
+// (true on AArch64 everywhere except Darwin, false on x86_64 and
+// Darwin/arm64 clang; macOS/arm64 gcc-16 is a WONT_FIX outlier that
+// still gives the "contributes" answer -- see CCCC_ALIGN_ANON_BITFIELDS,
+// src/parse_types.c). A *packed* struct still keeps cccc's compact layout
+// regardless of target (verified both compiler families, all archs).
 struct tc_bf1176_unnamed {
     char c;
     int : 3;
     char d;
-}; // gcc: sizeof 4, _Alignof 4 (was 3/1, matching clang -- see #1176)
+}; // AAPCS64: sizeof 4, _Alignof 4; x86_64/Darwin-clang: sizeof 3, _Alignof 1
 
 struct tc_bf1127_packed {
     int f : 5;
 } __attribute__((packed)); // clang/gcc: sizeof 1, _Alignof 1
 
-// #1176: a width-0 unnamed bitfield is NOT the same rule as a nonzero-width
-// one above -- gcc raises the struct's alignment to its declared type's
-// unconditionally, surviving BOTH `packed` and `#pragma pack(N)` (clang
-// never raises it at all; cccc previously matched clang). Verified against
-// gcc-16/clang directly for every variant below.
+// #1176 follow-up: a width-0 unnamed bitfield is NOT the same rule as a
+// nonzero-width one above -- under real AAPCS64 it raises the struct's
+// alignment to its declared type's unconditionally, surviving BOTH
+// `packed` and `#pragma pack(N)`; under x86_64/Darwin-clang it never
+// raises it at all. Verified directly for every variant below, both
+// compiler families, all three architectures this project targets.
 struct tc_bf1176_zero_width {
     char c;
     int : 0;
     char d;
-}; // gcc: sizeof 8, _Alignof 4 (was 5/1, matching clang -- see #1176)
+}; // AAPCS64: sizeof 8, _Alignof 4; x86_64/Darwin-clang: sizeof 5, _Alignof 1
 
 struct tc_bf1176_zero_width_packed {
     char c;
     int : 0;
     char d;
-} __attribute__((packed)); // gcc: sizeof 8, _Alignof 4 (packed has no effect)
+} __attribute__((packed)); // packed has no effect on this shape, either side
 
 #pragma pack(1)
 struct tc_bf1176_zero_width_pack1 {
     char c;
     int : 0;
     char d;
-}; // gcc: sizeof 8, _Alignof 4 (#pragma pack(1) has no effect either)
+}; // #pragma pack(1) has no effect on this shape either, either side
 #pragma pack()
 
 struct tc_bf1176_zero_width_trailing {
     char c;
     int : 0;
-}; // gcc: sizeof 4, _Alignof 4 (no member follows -- still contributes)
+}; // AAPCS64: sizeof 4, _Alignof 4; x86_64/Darwin-clang: sizeof 4, _Alignof 1
+   // (no member follows -- AAPCS64 still contributes)
 
 struct tc_bf1176_zero_width_only {
     int : 0;
-}; // gcc: sizeof 0, _Alignof 4
+}; // AAPCS64: sizeof 0, _Alignof 4; x86_64/Darwin-clang: sizeof 0, _Alignof 1
 
 #pragma pack(1)
 struct tc_bf1176_zero_width_wide_pack1 {
     char c;
     long long : 0;
     char d;
-}; // gcc: sizeof 16, _Alignof 8
+}; // AAPCS64: sizeof 16, _Alignof 8; x86_64/Darwin-clang: sizeof 9, _Alignof 1
 
-// A nonzero-width unnamed bitfield IS capped by #pragma pack(N), unlike
-// width-0 above -- verified against gcc-16.
+// A nonzero-width unnamed bitfield IS capped by #pragma pack(N), on every
+// target -- verified against gcc-16/clang, x86_64 and aarch64 alike.
 struct tc_bf1176_unnamed_pack1 {
     char c;
     int : 3;
     char d;
-}; // gcc: sizeof 3, _Alignof 1
+}; // sizeof 3, _Alignof 1 (all targets)
 #pragma pack()
 
-// Unions have no bit-field arm at all -- every member (named/unnamed,
-// bit-field or not) already feeds ty->align unconditionally, so this
-// already matched gcc before #1176 and is untouched by it (clang instead
-// gives 1/1 for both -- cccc already followed gcc here). Regression guard.
+// Unions have no bit-field arm's mem->name distinction to speak of, but the
+// same CCCC_ALIGN_ANON_BITFIELDS arch split governs both shapes below --
+// verified directly: AAPCS64 gives 4/4 for both (an unnamed bit-field
+// member contributes exactly like an ordinary int member would);
+// x86_64/Darwin-clang gives 1/1 for both (it contributes nothing at all,
+// not even its size).
 union tc_bf1176_union_zero_width {
     char c;
     int : 0;
-}; // gcc: sizeof 4, _Alignof 4 (clang: 1/1)
+}; // AAPCS64: sizeof 4, _Alignof 4; x86_64/Darwin-clang: sizeof 1, _Alignof 1
 
 union tc_bf1176_union_unnamed {
     char c;
     int : 3;
-}; // gcc: sizeof 4, _Alignof 4 (clang: 1/1)
+}; // AAPCS64: sizeof 4, _Alignof 4; x86_64/Darwin-clang: sizeof 1, _Alignof 1
 
 // #1135: every 16-byte _BitInt container (whether spelled _BitInt(65..128)
 // or __int128) now gets _Alignof 16, matching the __int128 host container
@@ -1071,18 +1078,27 @@ int test_bitfield_storage_unit_layout(void) {
     _Static_assert(sizeof(struct tc_bf1127_after_array) == 8, "cccc");
     _Static_assert(_Alignof(struct tc_bf1127_after_array) == 4, "cccc");
 
-    // #1176: unnamed bitfields DO contribute alignment now (following gcc,
-    // reversing #1127's original claim) -- both the nonzero-width and
-    // width-0 shapes, in every packed/pack(N) combination. A packed struct
-    // still keeps cccc's compact layout for a nonzero-width unnamed
-    // bitfield (matching both hosts); width-0 is the one shape that
-    // survives packing regardless.
+    // #1176 follow-up: whether an unnamed bit-field contributes alignment
+    // (and, for a union, size) is not a gcc-vs-clang split as #1176
+    // originally concluded -- it is the real AAPCS64 rule, true on AArch64
+    // everywhere except Darwin (see the CCCC_ALIGN_ANON_BITFIELDS comment,
+    // src/parse_types.c). macOS/arm64 gcc-16 is the one WONT_FIX outlier
+    // that still gives the "contributes" answer despite being Darwin (gcc
+    // never implemented Apple's AAPCS64 deviation) -- pinned here to
+    // cccc's own target-ABI rule, which matches the real host `cc`
+    // (clang) on this machine, not to gcc-16 specifically.
+#if defined(__aarch64__) && !defined(__APPLE__)
     _Static_assert(sizeof(struct tc_bf1176_unnamed) == 4, "cccc");
     _Static_assert(_Alignof(struct tc_bf1176_unnamed) == 4, "cccc");
+#else
+    _Static_assert(sizeof(struct tc_bf1176_unnamed) == 3, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_unnamed) == 1, "cccc");
+#endif
 
     _Static_assert(sizeof(struct tc_bf1127_packed) == 1, "cccc");
     _Static_assert(_Alignof(struct tc_bf1127_packed) == 1, "cccc");
 
+#if defined(__aarch64__) && !defined(__APPLE__)
     _Static_assert(sizeof(struct tc_bf1176_zero_width) == 8, "cccc");
     _Static_assert(_Alignof(struct tc_bf1176_zero_width) == 4, "cccc");
 
@@ -1102,15 +1118,46 @@ int test_bitfield_storage_unit_layout(void) {
                    "cccc");
     _Static_assert(_Alignof(struct tc_bf1176_zero_width_wide_pack1) == 8,
                    "cccc");
+#else
+    _Static_assert(sizeof(struct tc_bf1176_zero_width) == 5, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width) == 1, "cccc");
 
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_packed) == 5, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_packed) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_pack1) == 5, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_pack1) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_trailing) == 4, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_trailing) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_only) == 0, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_only) == 1, "cccc");
+
+    _Static_assert(sizeof(struct tc_bf1176_zero_width_wide_pack1) == 9, "cccc");
+    _Static_assert(_Alignof(struct tc_bf1176_zero_width_wide_pack1) == 1,
+                   "cccc");
+#endif
+
+    // Unaffected on every target: a nonzero-width unnamed bit-field is
+    // still capped by #pragma pack(N) regardless of arch (verified: 3/1
+    // even under real AAPCS64 and macOS/arm64 gcc-16).
     _Static_assert(sizeof(struct tc_bf1176_unnamed_pack1) == 3, "cccc");
     _Static_assert(_Alignof(struct tc_bf1176_unnamed_pack1) == 1, "cccc");
 
+#if defined(__aarch64__) && !defined(__APPLE__)
     _Static_assert(sizeof(union tc_bf1176_union_zero_width) == 4, "cccc");
     _Static_assert(_Alignof(union tc_bf1176_union_zero_width) == 4, "cccc");
 
     _Static_assert(sizeof(union tc_bf1176_union_unnamed) == 4, "cccc");
     _Static_assert(_Alignof(union tc_bf1176_union_unnamed) == 4, "cccc");
+#else
+    _Static_assert(sizeof(union tc_bf1176_union_zero_width) == 1, "cccc");
+    _Static_assert(_Alignof(union tc_bf1176_union_zero_width) == 1, "cccc");
+
+    _Static_assert(sizeof(union tc_bf1176_union_unnamed) == 1, "cccc");
+    _Static_assert(_Alignof(union tc_bf1176_union_unnamed) == 1, "cccc");
+#endif
 
     // The miscompile this fixes: under -c=native/-m, `sizeof` folds at
     // guest parse time to cccc's own struct size. Before this fix that was

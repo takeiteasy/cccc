@@ -694,41 +694,21 @@ NATIVE_SKIP_TESTS_CLANG = {
                  "clang, #1113 -- gcc has native _Decimal64 support "
                  "(confirmed: passes under CCCC_NATIVE_CC=gcc), so #1113's "
                  "gap is clang-specific, not universal",
-    "test_suite_layout_guards_1172.c": "deliberately instantiates a "
-                 "width-0 unnamed bit-field struct (#1176: gcc/cccc "
-                 "sizeof/_Alignof 8/4, clang 5/1 -- a permanent, "
-                 "intentional divergence, not a bug) so #1172's own "
-                 "_Static_assert layout guard is exercised as a genuine "
-                 "TRUE POSITIVE: the emitted C really is miscompiled "
-                 "under a clang host, and the guard is doing its job by "
-                 "rejecting it (confirmed: passes under "
-                 "CCCC_NATIVE_CC=gcc-16), see man/COVERAGE.md's layout-"
-                 "guards entry",
-    "test_suite_attributes_layout_1129.c": "#1172's layout guard "
-                 "now emits a live _Static_assert(sizeof(struct "
-                 "UnnamedSuffixAlignedBitfield1165) == 32, ...) next to "
-                 "this struct's definition -- #1165/#1170's own "
-                 "documented Class-1 divergence for an UNNAMED bit-field "
-                 "carrying an explicit __attribute__((aligned(16))) (gcc "
-                 "32, clang 20; cccc follows gcc). This file's own test "
-                 "was deliberately written to check only offsetof (both "
-                 "compilers agree) specifically so the file stayed clang-"
-                 "green pre-#1172 -- the guard now checks sizeof/_Alignof "
-                 "too, unconditionally, and correctly rejects it under "
-                 "clang as a true positive (confirmed: passes under "
-                 "CCCC_NATIVE_CC=gcc-16), see test_bitfield_unnamed_"
-                 "aligned_1165.c's own comment for the full gcc/clang "
-                 "table",
-    "test_bitfield_unnamed_aligned_1165.c": "the VM-only pin (see this "
-                 "file's own header comment) of the same #1165/#1170 "
-                 "Class-1 divergence as suites/test_suite_attributes_"
-                 "layout_1129.c above -- an UNNAMED bit-field's explicit "
-                 "__attribute__((aligned(16))) (gcc 32/16, clang 20/4; "
-                 "cccc follows gcc). #1172's layout guard now emits a "
-                 "live _Static_assert on this struct's sizeof/_Alignof, "
-                 "a true positive under clang (confirmed: passes under "
-                 "CCCC_NATIVE_CC=gcc-16)",
 }
+# #1176 follow-up (#1211): the three entries below used to live in
+# NATIVE_SKIP_TESTS_CLANG above -- #1176 originally concluded the width-0/
+# explicit-aligned(N) unnamed-bit-field shapes were a gcc-vs-clang
+# divergence, adopted gcc's rule uniformly, and quarantined them as clang
+# true positives. Direct measurement (gcc-16/clang, x86_64 and aarch64,
+# Linux and Darwin) showed that premise was wrong: it's the real AAPCS64
+# rule (true on AArch64 except Darwin), and cccc now follows the target
+# ABI (CCCC_ALIGN_ANON_BITFIELDS, src/parse_types.c) rather than either
+# compiler family uniformly. The one surviving outlier is macOS/arm64
+# gcc-16 specifically -- gcc never implemented Apple's AAPCS64 deviation
+# there, so it mismatches cccc's (now-correct) folded layout on that one
+# platform+family combination -- hence NATIVE_SKIP_TESTS_GCC_MACOS, not
+# NATIVE_SKIP_TESTS_CLANG.
+
 # #1193: the five ctor/dtor-priority entries this table used to hold were
 # gcc-on-*Darwin* specific, but this table has no platform axis of its own --
 # checked purely on compiler family, regardless of host OS -- so they wrongly
@@ -791,6 +771,44 @@ NATIVE_SKIP_TESTS_GCC_MACOS = {
                  "__attribute__((destructor(N))) priorities outright; "
                  "clang supports them and this passes there, WONT_FIX -- "
                  "permanent gcc/Darwin gap",
+    # #1176 follow-up (#1211): moved here from NATIVE_SKIP_TESTS_CLANG
+    # (see that table's own comment for the full story). gcc on Darwin
+    # never implemented Apple's AAPCS64 deviation for an unnamed bit-field's
+    # alignment contribution -- it gives the real-AAPCS64 answer instead
+    # (matching Linux/aarch64), which mismatches cccc's own folded layout
+    # for its actual target (macOS/arm64). Real clang on this same host
+    # agrees with cccc, so this is a Darwin-gcc-only outlier, WONT_FIX,
+    # not a general clang divergence.
+    "test_suite_layout_guards_1172.c": "deliberately instantiates a "
+                 "width-0 unnamed bit-field struct; on macOS/arm64, gcc "
+                 "gives 8/4 for sizeof/_Alignof (the real AAPCS64 answer) "
+                 "while clang and cccc's own folded layout both give 5/1 "
+                 "-- gcc's disagreement with the actual host ABI here is "
+                 "a permanent gcc/Darwin gap, so #1172's own "
+                 "_Static_assert layout guard genuinely hard-fails under "
+                 "CCCC_NATIVE_CC=gcc-16 (confirmed: passes under clang, "
+                 "the default host cc), see man/COVERAGE.md's layout-"
+                 "guards entry",
+    "test_suite_attributes_layout_1129.c": "#1172's layout guard emits "
+                 "a live _Static_assert(sizeof(struct "
+                 "UnnamedSuffixAlignedBitfield1165) == 24, ...) next to "
+                 "this struct's definition on macOS/arm64 (cccc's own "
+                 "folded value there); gcc on Darwin instead lays it out "
+                 "as 32/16 (the real AAPCS64 answer, mismatching its own "
+                 "host), a permanent gcc/Darwin gap -- confirmed: passes "
+                 "under clang, the default host cc. This file's own test "
+                 "only asserts offsetof (both compilers agree on that), "
+                 "so it stays otherwise green; see test_bitfield_unnamed_"
+                 "aligned_1165.c's own comment for the full table",
+    "test_bitfield_unnamed_aligned_1165.c": "the VM-only pin (see this "
+                 "file's own header comment) of the same permanent gcc/"
+                 "Darwin gap as suites/test_suite_attributes_layout_1129.c "
+                 "above -- an UNNAMED bit-field's explicit "
+                 "__attribute__((aligned(16))) gives 24/4 on macOS/arm64 "
+                 "under clang (matching cccc's own fold) and 32/16 under "
+                 "gcc-16 (mismatching it, the real-AAPCS64 answer gcc "
+                 "gives even on Darwin). #1172's layout guard hard-fails "
+                 "under CCCC_NATIVE_CC=gcc-16 as a result",
 }
 
 # #1196: tools/comptime_native_smoke.py is a separate script from the

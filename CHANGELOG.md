@@ -5,6 +5,21 @@ All notable changes to CCCC are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- An *unnamed* bit-field's contribution to its enclosing `struct`/`union`'s
+  own alignment (and, for a union, size) followed the wrong rule on 3 of
+  the 4 platform/architecture combinations this project targets. #1176 had
+  concluded this was a gcc-vs-clang divergence and adopted gcc's rule
+  uniformly; it is actually the real AAPCS64 ABI rule (true on AArch64
+  except Darwin, false on x86_64 and Darwin/arm64 clang), with macOS/arm64
+  gcc-16 as the one outlier that never implemented Apple's own AAPCS64
+  deviation. `-c=native` now follows the real target ABI
+  (`CCCC_ALIGN_ANON_BITFIELDS`, `src/parse_types.c`) instead of either
+  compiler family uniformly; the macOS/arm64 gcc-16 mismatch is a
+  documented, permanent WONT_FIX gap (`NATIVE_SKIP_TESTS_GCC_MACOS`), not a
+  CCCC bug. See `man/COVERAGE.md`'s layout-guards divergence entry.
+
 ### Changed
 
 - `-O<n>`/`-O`/`--optimize[=n]` is no longer a hard error under `-c=native`.

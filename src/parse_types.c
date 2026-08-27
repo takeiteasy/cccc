@@ -2901,6 +2901,32 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     return ty;
 }
 
+// #1176 follow-up (#1211): whether an *unnamed* bit-field contributes
+// its declared type's alignment (and, for a union, its size) to the
+// enclosing aggregate is not a gcc-vs-clang split as #1176 originally
+// concluded -- it is the real AAPCS64 rule, true on AArch64 everywhere
+// *except* Darwin. Measured directly (gcc-16/clang, both `struct{char c;
+// int:0; char d;}` and `struct{char c; int:3; char d;}`, both compilers):
+// x86_64 (any OS) and macOS/arm64 clang all agree at 5/1 and 3/1
+// (unnamed bit-fields contribute nothing); Linux/aarch64 (both compiler
+// families) gives 8/4 and 4/4 (they contribute, matching a *named*
+// bit-field of the same width exactly). macOS/arm64 gcc-16 alone gives
+// 8/4 and 4/4 too -- gcc simply never implemented Apple's AAPCS64
+// deviation there (`targetm.align_anon_bitfields()` is unconditionally
+// true for the whole AArch64 target in gcc, Darwin included), so it is
+// the one WONT_FIX outlier, not a second axis (tools/testing/__init__.py's
+// NATIVE_SKIP_TESTS_GCC_MACOS quarantines it). Since -c=native shells out
+// to the real host `cc` (clang on Darwin, gcc-or-clang elsewhere) and this
+// project's own reference target is that host, follow the true ABI rather
+// than either compiler family uniformly. A *named* bit-field of any width
+// is unaffected on every target (verified 4/4 everywhere) and is not
+// gated by this.
+#if defined(__aarch64__) && !defined(__APPLE__)
+#define CCCC_ALIGN_ANON_BITFIELDS 1
+#else
+#define CCCC_ALIGN_ANON_BITFIELDS 0
+#endif
+
 // struct-decl = struct-union-decl
 static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     bool  is_definition = false;
@@ -2924,20 +2950,20 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     for (Member *mem = ty->members; mem; mem = mem->next) {
         if (mem->is_bitfield && mem->bit_width == 0) {
             // Zero-width anonymous bitfield has a special meaning: it forces
-            // the next member onto a fresh storage unit. #1176: verified
-            // against gcc-16, it *also* unconditionally raises the struct's
-            // own alignment to its declared type's -- unlike every other
-            // unnamed member (including a nonzero-width unnamed bit-field,
-            // handled below), this survives BOTH `packed` and `#pragma
-            // pack(N)` (`#pragma pack(1) struct{char c; int:0; char d;}` is
-            // 8/4 on gcc, not capped to 1/1 or 2/1). This reverses #1127's
-            // stated "unnamed members never contribute" rule for this one
-            // shape specifically -- clang instead never raises alignment
-            // here (align 1), which is why cccc used to match clang; #1170
-            // 's policy is to follow gcc uniformly.
+            // the next member onto a fresh storage unit -- this part is
+            // universal, unconditional. Whether it *also* raises the
+            // struct's own alignment to its declared type's is the
+            // CCCC_ALIGN_ANON_BITFIELDS arch split above (see its comment):
+            // true under real AAPCS64, false on x86_64 and Darwin/arm64,
+            // and (unlike a plain unnamed member, #1127) this survives BOTH
+            // `packed` and `#pragma pack(N)` wherever it applies at all
+            // (`#pragma pack(1) struct{char c; int:0; char d;}` is 8/4 on
+            // Linux/aarch64, not capped to 1/1 or 2/1).
             bits = align_to(bits, mem->ty->size * 8);
+#if CCCC_ALIGN_ANON_BITFIELDS
             if (ty->align < mem->align)
                 ty->align = mem->align;
+#endif
         } else if (mem->is_bitfield) {
             int sz = mem->ty->size;
 
@@ -2973,32 +2999,32 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             // host compiler itself lays out, a real heap overflow, not a
             // cosmetic-only mismatch).
             //
-            // #1176: #1127 originally restricted this to *named* members
-            // only, on the belief that an unnamed bit-field (nonzero-width)
-            // is pure padding like an unnamed struct/union member is. That
-            // belief does not hold against gcc-16: `struct{char c; int:3;
-            // char d;}` is 4/4 on gcc (matching a *named* `int x:3` exactly)
-            // and only 3/1 on clang. gcc's rule is general -- every unnamed
-            // bit-field of nonzero width contributes its declared type's
-            // alignment just like a named one would, suppressed by `packed`
-            // and capped by `#pragma pack(N)` the same way (verified: under
-            // `#pragma pack(1)` the same struct is 3/1 even on gcc). Width-0
-            // is NOT the same rule -- it contributes unconditionally, even
-            // under `packed`/`pack(N)`; see the width-0 arm above. So the
-            // `mem->name` distinction below is dropped entirely, not
-            // replaced -- there is no remaining shape where a nonzero-width
-            // bit-field's *name* affects whether it contributes.
+            // #1127: a nonzero-width bit-field's declared type's natural
+            // alignment contributes to the struct's own alignment, same as
+            // an ordinary member -- true for a *named* bit-field on every
+            // target. For an *unnamed* one, this is the same
+            // CCCC_ALIGN_ANON_BITFIELDS arch split as the width-0 arm above
+            // (#1176 follow-up): `struct{char c; int:3; char d;}` is 4/4
+            // under real AAPCS64 (matching a named `int x:3` exactly) and
+            // 3/1 everywhere else (x86_64, Darwin/arm64 clang) -- verified
+            // both compiler families agree on both sides. Suppressed by
+            // `packed` and capped by `#pragma pack(N)` the same way as an
+            // ordinary member, wherever it contributes at all (verified:
+            // under `#pragma pack(1)` the struct is 3/1 even on Linux/
+            // aarch64). Width-0 is NOT the same rule -- it contributes
+            // unconditionally on the targets where it contributes at all,
+            // even under `packed`/`pack(N)`; see the width-0 arm above.
             //
-            // #1165 update: that natural-alignment rule (named or not) is
-            // for the *implicit* case only. An *explicit* aligned(N) on a
-            // bit-field always raises ty->align, survives `packed` (like
-            // #1163's non-bit-field case), and applies even on an *unnamed*
-            // bit-field -- verified against gcc-16, e.g. `struct { char a;
-            // int : 5 __attribute__((aligned(16))); int c; }` has align 16.
-            // clang instead never raises alignment for an unnamed
-            // bit-field's explicit align (its ty->align there stays 4 for
-            // that same example); cccc follows gcc, matching this project's
-            // reference compiler elsewhere in this file.
+            // #1165: an *explicit* aligned(N) on a bit-field always raises
+            // ty->align and survives `packed` (like #1163's non-bit-field
+            // case) -- for a *named* bit-field, on every target (verified:
+            // `struct { char a; int x : 5 __attribute__((aligned(16))); int
+            // c; }` is 32/16 under both gcc and clang, every arch). For an
+            // *unnamed* one it is gated exactly like the implicit case
+            // above: `struct { char a; int : 5 __attribute__((aligned(16)));
+            // int c; }` is 32/16 only under real AAPCS64 (and macOS/arm64
+            // gcc-16's WONT_FIX outlier), 24/4 everywhere else -- verified
+            // directly, both compiler families, all three architectures.
             int contributed = mem->explicit_align ? mem->explicit_align
                               : !ty->is_packed    ? mem->align
                                                   : 0;
@@ -3012,7 +3038,8 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
             if (!ty->is_packed && ty->pack_align &&
                 ty->pack_align < contributed)
                 contributed = ty->pack_align;
-            if (ty->align < contributed)
+            if (ty->align < contributed &&
+                (mem->name || CCCC_ALIGN_ANON_BITFIELDS))
                 ty->align = contributed;
         } else {
             // #1163: `packed` only suppresses a member's *implicit* (natural)
@@ -3094,13 +3121,16 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     // are already initialized to zero. We need to compute the
     // alignment and the size though.
     //
-    // #1176: unlike struct_decl, this loop has no is_bitfield/mem->name
-    // distinction at all -- every member (named or not, bit-field or not)
-    // already feeds mem->align into ty->align below unconditionally. That
-    // already matches gcc-16 for the shapes #1176 fixed in struct_decl
-    // (`union{char c; int:0;}` and `union{char c; int:3;}` are both 4/4 on
-    // gcc, and this loop already gives 4/4) -- verified directly, left
-    // alone deliberately, not an oversight.
+    // #1176 follow-up: an *unnamed* bit-field member (width-0 or not) must
+    // not feed either ty->align or ty->size here except under the same
+    // CCCC_ALIGN_ANON_BITFIELDS arch split as struct_decl's bit-field arms
+    // above -- verified directly: `union{char c; int:0;}` and `union{char
+    // c; int:3;}` are both 1/1 on x86_64/Darwin-arm64-clang (neither
+    // contributes) and 4/4 under real AAPCS64 and macOS/arm64 gcc-16's
+    // WONT_FIX outlier (both do, same as an ordinary `int` member would).
+    // A *named* bit-field member, and every non-bit-field member, is
+    // unaffected on every target and keeps contributing unconditionally
+    // below.
     //
     // #1163: unlike struct_decl above, this loop previously had no
     // is_packed check at all, so `packed` had no effect on a union's own
@@ -3108,6 +3138,8 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
     // is suppressed under packed, but an *explicit* aligned(N)/_Alignas(N)
     // request still applies (verified against gcc-16/clang).
     for (Member *mem = ty->members; mem; mem = mem->next) {
+        if (mem->is_bitfield && !mem->name && !CCCC_ALIGN_ANON_BITFIELDS)
+            continue;
         int mem_align;
         if (ty->is_packed) {
             mem_align = mem->explicit_align ? mem->explicit_align : 1;
