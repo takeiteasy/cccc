@@ -1279,6 +1279,93 @@ can never model — which is worse than the status quo. `#657`'s existing
 architecturally inert" classification the format/alloc_size/etc. attributes
 already get.
 
+### Layout guards: `_Static_assert` next to every emitted aggregate
+
+`-c=native`/`-m`/`-c=generated` const-fold `sizeof`, `_Alignof`, and member
+offsets at parse time, then emit the aggregate definition alongside those
+folded literals — correct only if the host compiler independently arrives at
+the same layout CCCC did. Where it doesn't, the emitted C compiles clean,
+runs, and writes out of bounds, with no diagnostic on either side. The native
+round-trip corpus alone cannot see this: an affected test still passes, since
+the runtime check it makes is against CCCC's own folded literal, not a value
+the host actually recomputes.
+
+To close that gap, every emitted `struct`/`union`/`enum` definition is now
+followed by a `_Static_assert` layout guard: `sizeof`, `_Alignof`, and (for a
+struct/union, one per named non-bit-field member) `__builtin_offsetof`. Any
+disagreement between CCCC's own layout computation and the host compiler that
+will actually consume the emitted C becomes a host compile error naming the
+type, instead of a silent out-of-bounds write. On by default; `--no-layout-
+guards` suppresses all of it.
+
+```c
+struct Point { int x, y; };
+_Static_assert(sizeof(struct Point) == 8, "cccc/host layout disagreement: struct Point");
+_Static_assert(_Alignof(struct Point) == 4, "cccc/host layout disagreement: struct Point");
+_Static_assert(__builtin_offsetof(struct Point, x) == 0, "cccc/host layout disagreement: struct Point.x");
+_Static_assert(__builtin_offsetof(struct Point, y) == 4, "cccc/host layout disagreement: struct Point.y");
+```
+
+**Two exclusions**, both required so the guard never fires on layout CCCC
+never claimed to own:
+
+- A type whose own layout is already deferred to the host
+  (`type_layout_is_host_owned()`, `src/serialize_type.c`) — an ordinary
+  `from_include` struct/union/enum, e.g. `struct timespec`.
+- A type that transitively **contains** a compiler-owned-header type
+  (`type_contains_compiler_owned_layout()`) — `va_list`/`jmp_buf` are
+  deliberately widened to a safe upper bound covering every supported host
+  (see `type_header_is_compiler_owned()`'s own comment), so CCCC's folded
+  size for one is intentionally *not* the real host's; a guard there would
+  fire on every host, gcc and clang alike, not just a divergent one. This is
+  a deliberate deviation from a literal reading of the ticket that introduced
+  these guards — reusing `type_layout_is_host_owned()` alone is not
+  sufficient, since it returns `false` for exactly these types on purpose.
+
+**Three documented residuals** — real gaps in coverage, not bugs:
+
+- **Tagless aggregates.** A truly tagless, alias-less aggregate (no tag, no
+  typedef, no `typedef struct {...} P;`-style anonymous-typedef alias) never
+  gets a standalone definition emitted either — it's inlined at its point of
+  use — so there is no name to write the assert with and no guard is
+  attempted. `typedef struct {...} P;` **is** nameable and does get a guard;
+  the residual is narrower than it might first appear.
+- **`--emit-only` (`emit_strict`).** Under `--emit-only`,
+  `type_def_is_from_include_suppressed()` returns `false` unconditionally
+  (no auto-captured `#include` to defer to), which collapses both exclusions
+  above to `false` too. Rather than emit a guard that might duplicate or
+  conflict with one of CCCC's own bundled headers' pre-existing per-platform
+  `_Static_assert`s (`include/sys/stat.h`, `signal.h`, `fts.h`, `aio.h`,
+  `mqueue.h`, `ndbm.h`), no guards are emitted under `--emit-only` at all.
+- **`--emit-cccc`.** This output is CCCC dialect fed back into CCCC's own
+  front end, not a real host compiler — a layout guard would be tautological
+  noise, so none is emitted.
+
+**A genuine, permanent divergence, not a bug.** `#pragma pack(N)`
+(#1173), `long double` (#1174), a too-narrow enum underlying type (#1175),
+and width-0 unnamed bit-field alignment (#1176) were all real CCCC bugs, now
+fixed. One class of divergence remains and is *intentional*: gcc and clang
+themselves disagree on unnamed bit-field storage-unit rounding in ways CCCC
+cannot match both of simultaneously (policy: follow gcc, matching this
+project's reference compiler throughout `parse_types.c`'s bit-field layout
+comments) —
+
+- a width-0 unnamed bit-field's contribution to struct alignment (gcc
+  raises it, clang never does — `struct{char c; int : 0; char d;}` is 8/4
+  under gcc, 5/1 under clang), and
+- an unnamed bit-field carrying an explicit `__attribute__((aligned(N)))`
+  (`struct{char a; int : 5 __attribute__((aligned(16))); int c;}` is 32/16
+  under gcc, 24/4 under clang).
+
+Since macOS's default `cc` is clang, `-c=native` on either shape under a
+clang host is now a **hard compile error** naming the type — this is the
+guard doing its job (the emitted C really is miscompiled under clang for
+these two shapes), not a regression. Escapes: point `CCCC_NATIVE_CC` at a
+real gcc (`CCCC_NATIVE_CC=gcc-16` on macOS/Homebrew), or `--no-layout-
+guards`. The test corpus quarantines the handful of files that instantiate
+one of these two shapes via `NATIVE_SKIP_TESTS_CLANG`
+(`tools/testing/__init__.py`) rather than softening the guard.
+
 ### Output dialect: GNU C11 required
 
 The emitted C is **not** a fixed ISO standard — it requires a GCC/clang-

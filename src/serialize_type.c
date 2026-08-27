@@ -1842,6 +1842,12 @@ static const char *aggregate_keyword(Type *ty) {
     return ty->kind == TY_UNION ? "union" : "struct";
 }
 
+// #1172: defined below (near type_layout_is_host_owned, which it calls) --
+// forward-declared here so serialize_struct_def/serialize_enum_def can call
+// it right after printing each definition's closing `;`.
+static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
+                                    TypeName *tag, TypeName *alias, int indent);
+
 static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     if (!ty)
         return;
@@ -1901,6 +1907,8 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     if (ty->pack_align)
         fprintf(f, "#pragma pack(pop)\n");
+
+    serialize_layout_guards(f, ctx, ty, tag, alias, 0);
     fprintf(f, "\n");
 }
 
@@ -1952,7 +1960,10 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     if (!tag && alias)
         fprintf(f, " %.*s", alias->name_len, alias->name);
-    fprintf(f, ";\n\n");
+    fprintf(f, ";\n");
+
+    serialize_layout_guards(f, ctx, ty, tag, alias, 0);
+    fprintf(f, "\n");
 }
 
 bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn) {
@@ -2269,6 +2280,181 @@ bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty, int depth) {
             if (type_layout_is_host_owned(ctx, m->ty, depth + 1))
                 return true;
     return false;
+}
+
+// #1172: true when `ty` is, or transitively contains, a from_include type
+// whose body is suppressed *because* it's compiler-owned (stdarg.h's
+// va_list, setjmp.h's jmp_buf -- type_header_is_compiler_owned() above).
+// This is deliberately the complement of type_layout_is_host_owned(), which
+// returns false for exactly these types: per that function's own doc
+// comment (block above type_header_is_compiler_owned), CCCC's va_list/
+// jmp_buf layout is *deliberately widened* to a safe upper bound covering
+// every supported host (#1054/#1059), so the folded sizeof/_Alignof CCCC
+// emits for one is correct-by-construction and intentionally NOT equal to
+// the real host's own (possibly smaller) size. A layout guard is a
+// cross-check against the real host size, so emitting one for a struct
+// containing a va_list/jmp_buf member would assert CCCC's padded literal
+// against the host's real, smaller size and fire on every host, gcc and
+// clang alike -- a guard on correct code. serialize_layout_guards() below
+// must OR this in alongside type_layout_is_host_owned() as a second,
+// independent exclusion; reusing only type_layout_is_host_owned() (as the
+// ticket's own text suggests in isolation) is not sufficient. Recursion
+// mirrors type_layout_is_host_owned() exactly (TY_ARRAY/TY_VLA descend,
+// TY_PTR stops, same depth cap) so the two predicates can't disagree by
+// parallel edit on a shape neither was written to handle.
+static bool type_contains_compiler_owned_layout(SerializeContext *ctx, Type *ty,
+                                                int depth) {
+    if (!ty || depth > 32)
+        return false;
+    // #1172: checked BEFORE descending into an array's element type (unlike
+    // type_layout_is_host_owned()'s own TY_ARRAY arm, which recurses first)
+    // -- jmp_buf is itself `typedef long long jmp_buf[40]` (include/
+    // setjmp.h), an array typedef, not a struct. Recursing to the element
+    // type first would check plain `long long` instead, which
+    // find_typedef_name() can never resolve back to jmp_buf, silently
+    // reopening the exact hazard this function exists to close. Checking
+    // the array type itself first catches jmp_buf; checking a struct/union
+    // (e.g. va_list) at this same point is equally correct since the guard
+    // this function feeds is per-aggregate-type, not per-array-element.
+    //
+    // #1168/#1169: a bare scalar member (e.g. plain `int`) must NOT be
+    // handed to type_def_is_from_include_suppressed() unless
+    // find_typedef_name_exact()'s pointer-identity walk actually resolves
+    // it to a named from_include typedef -- that function's own
+    // find_typedef_name() fallback matches STRUCTURALLY (same_type_or_
+    // origin) for a scalar, which spuriously matches ANY from_include
+    // typedef sharing the same underlying representation (e.g. a plain
+    // `int` member matching stdint.h's `int32_t`, merely because some
+    // other #include reached stdint.h) -- exactly #1168's own bug, in the
+    // sibling predicate type_layout_is_host_owned(), whose fix
+    // (restricting the non-aggregate arm to find_typedef_name_exact()) is
+    // mirrored here verbatim. Without this guard, an entirely ordinary
+    // struct with a plain `int`/`char`/`long` member could be wrongly
+    // judged "contains a compiler-owned type" the moment the TU includes
+    // ANY header on is_compiler_owned_header()'s list transitively (e.g.
+    // <time.h> pulling in stdint.h-shaped typedefs) -- confirmed via a
+    // direct repro: struct B_plain { int a; char b; long c; } lost its
+    // guard entirely as soon as the TU also #include <time.h>, with no
+    // jmp_buf/va_list anywhere in sight.
+    bool ty_is_aggregate =
+        ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM;
+    if ((ty_is_aggregate || find_typedef_name_exact(ctx, ty)) &&
+        type_def_is_from_include_suppressed(ctx, ty) &&
+        type_header_is_compiler_owned(ctx, ty))
+        return true;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_contains_compiler_owned_layout(ctx, ty->base, depth + 1);
+    if (ty->kind == TY_PTR)
+        return false;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            if (type_contains_compiler_owned_layout(ctx, m->ty, depth + 1))
+                return true;
+    return false;
+}
+
+// #1172: emits `_Static_assert(sizeof(<spelling>) == N, ...)`,
+// `_Static_assert(_Alignof(<spelling>) == N, ...)`, and (for a struct/union,
+// one per named non-bitfield member) `_Static_assert(__builtin_offsetof(
+// <spelling>, <member>) == N, ...)` immediately after `ty`'s own definition
+// -- the systematic detector #1170 asked for: any layout disagreement
+// between CCCC's own const-folding and the host compiler that will actually
+// consume this output becomes a host compile error naming the type, instead
+// of a silent out-of-bounds write (#1170's own evidence table). `tag`/
+// `alias` are the exact TypeName pointers the caller already resolved
+// (serialize_struct_def/serialize_enum_def) -- reused rather than
+// re-derived so the guard's spelling can never diverge from what was
+// actually just printed for the definition itself (see
+// type_needs_anon_aggregate()'s own doc comment for why re-deriving
+// nameability independently is the wrong shape here: it does not tell you
+// *which* name was chosen when both a tag and an alias exist).
+//
+// Exclusions, in order:
+//   - !ctx->emit_layout_guards: --no-layout-guards.
+//   - ctx->emit_cccc: this output is CCCC dialect fed back into CCCC's own
+//     front end, not a real host compiler -- the guard would be tautological.
+//   - ctx->emit_strict (--emit-only): type_def_is_from_include_suppressed()
+//     returns false unconditionally under emit_strict (see its own comment),
+//     which collapses both host-owned exclusions below to false too. A
+//     from_include struct's body IS emitted under emit_strict (no auto-
+//     captured #include to defer to), but CCCC's bundled headers already
+//     carry their own per-platform _Static_asserts for exactly these types
+//     (include/sys/stat.h, signal.h, fts.h, aio.h, mqueue.h, ndbm.h --
+//     same trap serialize_static_assert()'s own doc comment warns about);
+//     re-deriving a second, unconditional guard here would duplicate or
+//     conflict with those. Documented residual, man/COVERAGE.md.
+//   - No name to write the assert with at all (neither tag nor alias).
+//   - type_layout_is_host_owned(): `ty` defers to the host's own real
+//     layout already (an ordinary from_include struct/union/enum) -- no
+//     literal of CCCC's own to check.
+//   - type_contains_compiler_owned_layout(): `ty` contains a va_list/
+//     jmp_buf-shaped member -- see that function's own comment.
+static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
+                                    TypeName *tag, TypeName *alias,
+                                    int indent) {
+    if (!ctx->emit_layout_guards || ctx->emit_cccc || ctx->emit_strict)
+        return;
+    if (!tag && !alias)
+        return;
+    if (type_layout_is_host_owned(ctx, ty, 0) ||
+        type_contains_compiler_owned_layout(ctx, ty, 0))
+        return;
+
+    char spelling[320];
+    if (tag)
+        // #1172: aggregate_keyword() only distinguishes struct/union -- it
+        // returns "struct" for a TY_ENUM (there is no third branch), which
+        // silently spelled every enum guard as "struct <tag>" instead of
+        // "enum <tag>". Harmless when the name is unique, but a real bug
+        // once two same-named-but-distinct enum tags exist in one TU (the
+        // #1015 dup-enum-tag-rename corpus case): both got spelled as the
+        // same bogus "struct <tag>", which the host cc then rejected as a
+        // tag-kind mismatch against the real (correctly spelled) enum
+        // definition, an outright compile failure -- not merely a
+        // cosmetic wrong keyword.
+        snprintf(spelling, sizeof(spelling), "%s %.*s",
+                 ty->kind == TY_ENUM ? "enum" : aggregate_keyword(ty),
+                 tag->name_len, tag->name);
+    else
+        snprintf(spelling, sizeof(spelling), "%.*s", alias->name_len,
+                 alias->name);
+
+    char msg[384];
+    print_indent_level(f, indent);
+    snprintf(msg, sizeof(msg), "cccc/host layout disagreement: %s", spelling);
+    fprintf(f, "_Static_assert(sizeof(%s) == %lld, ", spelling,
+            (long long)ty->size);
+    serialize_string_n(f, msg, (int)strlen(msg));
+    fprintf(f, ");\n");
+
+    print_indent_level(f, indent);
+    fprintf(f, "_Static_assert(_Alignof(%s) == %lld, ", spelling,
+            (long long)ty->align);
+    serialize_string_n(f, msg, (int)strlen(msg));
+    fprintf(f, ");\n");
+
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return;
+    for (Member *m = ty->members; m; m = m->next) {
+        if (m->is_bitfield || !m->name)
+            continue; // no __builtin_offsetof for a bit-field or an
+                      // anonymous struct/union member
+        int  len = m->name->len;
+        char mname[256];
+        if (len >= (int)sizeof(mname))
+            len = sizeof(mname) - 1;
+        memcpy(mname, m->name->loc, len);
+        mname[len] = '\0';
+
+        char mmsg[420];
+        snprintf(mmsg, sizeof(mmsg), "cccc/host layout disagreement: %s.%s",
+                 spelling, mname);
+        print_indent_level(f, indent);
+        fprintf(f, "_Static_assert(__builtin_offsetof(%s, %s) == %lld, ",
+                spelling, mname, (long long)m->offset);
+        serialize_string_n(f, mmsg, (int)strlen(mmsg));
+        fprintf(f, ");\n");
+    }
 }
 
 // #1031: true when serialize_type() can spell `ty` by a real name (tag,

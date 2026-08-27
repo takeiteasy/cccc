@@ -4067,6 +4067,9 @@ typedef struct Compiler {
     CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
     bool           emit_cccc;   // --emit-cccc: preserve CCCC dialect syntax in
                                 // -E/-m/-c=generated/-c=native output
+    bool no_layout_guards; // --no-layout-guards: suppress the _Static_assert
+                           // layout guards (#1172) next to emitted aggregate
+                           // definitions in -m/-c=generated/-c=native output
 
     // Custom entry point name (NULL means "main")
     char *entry_name;

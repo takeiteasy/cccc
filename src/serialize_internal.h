@@ -137,7 +137,13 @@ typedef struct {
     bool emit_strict;
     bool emit_cccc; // --emit-cccc: serialize checked-pointer qualifiers instead
                     // of dropping them
-    int anon_local_counter;  // names compiler-synthesized temps (e.g. ++/--
+    // #1172: mirrors !vm->compiler.no_layout_guards -- true unless
+    // --no-layout-guards was given. Read by serialize_layout_guards() (which
+    // also independently bails under emit_cccc/emit_strict; see its own
+    // comment) so a single flag check at each aggregate-def call site covers
+    // every guard-emission path.
+    bool emit_layout_guards;
+    int  anon_local_counter; // names compiler-synthesized temps (e.g. ++/--
                              // desugaring)
     int anon_global_counter; // names non-string-literal `.L..N` globals (#925)
     // #953: resolved paths of headers actually auto-captured into

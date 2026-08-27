@@ -3641,7 +3641,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     SerializeContext ctx = {.generated_only = generated_only,
                             .emit_strict    = vm->compiler.emit_strict != 0,
                             .emit_cccc      = vm->compiler.emit_cccc,
-                            .vm             = vm};
+                            .emit_layout_guards =
+                                !vm->compiler.no_layout_guards,
+                            .vm = vm};
     // #1096: populated unconditionally now, not only under generated_only --
     // the bodiless-declaration prototype pass below needs path_is_captured()
     // to tell a *replayed* bundled-header #include (already supplying the

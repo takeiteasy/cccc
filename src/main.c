@@ -534,6 +534,12 @@ static void usage(const char *argv0, int exit_code) {
            "must name a\n");
     printf("\t                         compiler that understands the dialect "
            "explicitly\n");
+    printf("\t   --no-layout-guards    Suppress the _Static_assert layout "
+           "guards emitted next to\n");
+    printf("\t                         every aggregate definition in "
+           "-m/-c=generated/-c=native\n");
+    printf("\t                         output (see man/COVERAGE.md); on by "
+           "default\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
     printf("\t-J/--ffi-decls           Emit parsed function/struct/enum "
@@ -1411,7 +1417,8 @@ int main(int argc, const char *argv[]) {
 #endif
     CCCCAttrTarget attr_target    = CCCC_ATTR_TARGET_AUTO; // --attr-target
     int            emit_cccc_mode = 0;                     // --emit-cccc
-    int            test_run_mode  = 0;                     // --test-run[=LEVEL]
+    int            no_layout_guards_mode = 0; // --no-layout-guards (#1172)
+    int            test_run_mode         = 0; // --test-run[=LEVEL]
     uint64_t       test_run_flags =
         0; // safety preset bits for --test-run's VM smoke test
     int compile_only =
@@ -1529,6 +1536,7 @@ int main(int argc, const char *argv[]) {
         {"checked-pointers", no_argument, 0, 1119},
         {"emit-cccc", no_argument, 0, 1120},
         {"test-run", optional_argument, 0, 1121},
+        {"no-layout-guards", no_argument, 0, 1122},
         {"uaf-detection", no_argument, 0, 1078},
         {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
@@ -2160,6 +2168,9 @@ int main(int argc, const char *argv[]) {
             case 1120:   // --emit-cccc
                 emit_cccc_mode = 1;
                 break;
+            case 1122:   // --no-layout-guards (#1172)
+                no_layout_guards_mode = 1;
+                break;
             case 1121: { // --test-run[=LEVEL]
                 test_run_mode     = 1;
                 const char *level = optarg;
@@ -2742,6 +2753,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.emit_strict             = emit_only;
     vm.compiler.attr_target             = attr_target;
     vm.compiler.emit_cccc               = (bool)emit_cccc_mode;
+    vm.compiler.no_layout_guards        = (bool)no_layout_guards_mode;
     vm.compiler.entry_name              = (char *)entry_name;
     vm.compiler.testing_mode            = (bool)testing_mode;
     vm.compiler.build_mode              = (bool)build_mode;

@@ -6583,6 +6583,309 @@ def case_opaque_handle_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def _find_family_cc(candidates, want_family):
+    """First PATH executable among `candidates` whose detect_native_cc_family()
+    actually reports `want_family` -- not just a name match. On macOS, plain
+    "gcc" is a clang symlink (see CLAUDE.md), so a name-only search would
+    silently pick clang for a "find me a real gcc" request; checking the
+    family via -dM -E is the only way to tell.
+    """
+    for name in candidates:
+        path = shutil.which(name)
+        if path and detect_native_cc_family(cc=path) == want_family:
+            return path
+    return None
+
+
+# #1172: struct/union bodies used by every case below -- the same shape
+# tests/suites/test_suite_structs.c's tc_bf1176_* structs pin on the VM side
+# (#1176), but here each is actually INSTANTIATED as a global so
+# serialize_type_defs_for_owner emits a real definition (and hence a real
+# layout guard) rather than staying a folded-away compile-time-only
+# reference -- see serialize_layout_guards()'s own doc comment for why an
+# unreferenced type never gets a guard at all.
+LAYOUT_GUARDS_PROGRAM = """
+struct lg1172_plain {
+    int a;
+    char b;
+    long c;
+};
+struct lg1172_plain g_plain;
+
+int main(void) { return 42; }
+"""
+
+# #1176: gcc and clang genuinely disagree on this shape (gcc/cccc: 8/4,
+# clang: 5/1) -- a deliberate, permanent divergence (#1176 adopted gcc's
+# rule), not a bug. The layout guard this ticket adds must therefore be a
+# TRUE POSITIVE under a clang host: the emitted C really is miscompiled
+# there. Kept in its own program, separate from LAYOUT_GUARDS_PROGRAM above,
+# so an "ordinary struct compiles clean" assertion never gets contaminated
+# by this known, intentional divergence.
+LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM = """
+struct lg1172_zero_width_bitfield {
+    char c;
+    int : 0;
+    char d;
+};
+struct lg1172_zero_width_bitfield g_zw;
+
+int main(void) { return 42; }
+"""
+
+LAYOUT_GUARDS_EXCLUSIONS_PROGRAM = """
+#include <setjmp.h>
+#include <time.h>
+
+// jmp_buf (include/setjmp.h: `typedef long long jmp_buf[40];`) is
+// deliberately widened to a safe upper bound covering every supported host
+// (#1054/#1059) -- CCCC's own folded size is intentionally NOT the real
+// host's, so a guard here would fire on every host, gcc and clang alike. No
+// guard must be emitted for a struct containing one.
+struct lg1172_with_jmp {
+    int x;
+    jmp_buf env;
+};
+struct lg1172_with_jmp g_jmp;
+
+// struct timespec is from_include and defers to the host's own real layout
+// (type_layout_is_host_owned()) -- also excluded.
+struct lg1172_with_ts {
+    int x;
+    struct timespec t;
+};
+struct lg1172_with_ts g_ts;
+
+// A truly tagless, alias-less aggregate has no name to write the assert
+// with at all -- documented residual, man/COVERAGE.md. Used only via a
+// pointer here so it still needs a real (inline, unnamed) definition.
+struct lg1172_holds_anon {
+    struct { int x; int y; } *p;
+};
+struct lg1172_holds_anon g_anon;
+
+// Regression guard for the bug this program's own exclusions caught while
+// writing this case: an entirely ordinary struct with plain scalar members
+// (no from_include/compiler-owned type anywhere in it) lost its guard
+// ENTIRELY the moment the same TU also #include <time.h> -- a bare `int`/
+// `char`/`long` member was handed to type_def_is_from_include_suppressed()
+// without first requiring find_typedef_name_exact()'s pointer-identity
+// match, so it spuriously matched some unrelated from_include typedef
+// sharing the same representation (#1168's own bug, reopened in the sibling
+// predicate type_contains_compiler_owned_layout()). This struct's guard
+// must be present and correct despite <setjmp.h>/<time.h> both being
+// #include'd above.
+struct lg1172_plain_amid_includes {
+    int  a;
+    char b;
+    long c;
+};
+struct lg1172_plain_amid_includes g_plain_amid_includes;
+
+int main(void) { return 42; }
+"""
+
+
+def case_layout_guards_shape_1172(cccc: Path, tmp: str) -> bool:
+    print("  141: #1172 -- -c=native/-m now emits a _Static_assert layout "
+          "guard (sizeof/_Alignof/__builtin_offsetof per named non-bitfield "
+          "member) immediately after every emitted aggregate definition, so "
+          "any layout disagreement between CCCC's own const-folding and the "
+          "host compiler that will actually consume this output becomes a "
+          "host compile error naming the type instead of a silent "
+          "out-of-bounds write (#1170). Asserts the -m output shape "
+          "directly, and that an ordinary struct's guards compile clean "
+          "under whatever `cc` this host has.")
+    src = Path(tmp) / "layout_guards_shape_1172.c"
+    write(src, LAYOUT_GUARDS_PROGRAM)
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = m_result.stdout
+    for needle in (
+        "_Static_assert(sizeof(struct lg1172_plain) == 16, ",
+        "_Static_assert(_Alignof(struct lg1172_plain) == 8, ",
+        "_Static_assert(__builtin_offsetof(struct lg1172_plain, a) == 0, ",
+        "_Static_assert(__builtin_offsetof(struct lg1172_plain, b) == 4, ",
+        "_Static_assert(__builtin_offsetof(struct lg1172_plain, c) == 8, ",
+    ):
+        if needle not in out:
+            print(f"    FAIL: -m output missing expected guard line "
+                  f"{needle!r}\n    {out}")
+            return False
+    cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not cc:
+        print("    FAIL: no real cc found to compile the guarded output")
+        return False
+    compile_result = run([cc, "-x", "c", "-c", "-o", os.devnull, "-"],
+                         cwd=tmp, input=out)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: an ordinary struct's own guards failed to "
+              f"compile under the host cc\n    {compile_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_layout_guards_clang_true_positive_1172(cccc: Path, tmp: str) -> bool:
+    print("  142: #1172 -- a width-0 unnamed bit-field struct's layout "
+          "guard is a TRUE POSITIVE under a clang host: #1176 adopted "
+          "gcc's rule for this construct (gcc/cccc: 8/4, clang: 5/1), a "
+          "deliberate, permanent divergence, not a bug -- so -c=native "
+          "must now hard-fail naming the type under clang rather than "
+          "silently writing out of bounds. Skips cleanly if no real clang "
+          "is on PATH.")
+    clang = _find_family_cc(["clang", "cc"], "clang")
+    if not clang:
+        print("    skip: no real clang on PATH")
+        return True
+    src = Path(tmp) / "layout_guards_clang_1172.c"
+    out = Path(tmp) / "layout_guards_clang_1172_out"
+    write(src, LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = clang
+    result = run([str(cccc), "-c=native", "-o", out.name, src.name],
+                 cwd=tmp, env=env)
+    if result.returncode == 0:
+        print("    FAIL: -c=native unexpectedly succeeded under clang for "
+              "a construct known to diverge from it")
+        return False
+    if "lg1172_zero_width_bitfield" not in result.stderr:
+        print(f"    FAIL: expected the failing _Static_assert to name the "
+              f"divergent type\n    {result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_layout_guards_gcc_clean_1172(cccc: Path, tmp: str) -> bool:
+    print("  143: #1172 -- the same width-0 unnamed bit-field program "
+          "compiles clean under a real gcc host (gcc and cccc agree, "
+          "#1176) -- proves the guard is a targeted true positive, not a "
+          "blanket failure. Skips cleanly if no real (non-clang-symlink) "
+          "gcc is on PATH.")
+    gcc = _find_family_cc(
+        ["gcc-16", "gcc-15", "gcc-14", "gcc-13", "gcc",
+         "/opt/homebrew/bin/gcc-16"], "gcc")
+    if not gcc:
+        print("    skip: no real gcc on PATH")
+        return True
+    src = Path(tmp) / "layout_guards_gcc_1172.c"
+    out = Path(tmp) / "layout_guards_gcc_1172_out"
+    write(src, LAYOUT_GUARDS_ZERO_WIDTH_PROGRAM)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = gcc
+    result = run([str(cccc), "-c=native", "-o", out.name, src.name],
+                 cwd=tmp, env=env)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n"
+              f"    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n"
+              f"    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_layout_guards_exclusions_1172(cccc: Path, tmp: str) -> bool:
+    print("  144: #1172 -- three documented exclusions from layout-guard "
+          "emission: a member whose type is compiler-owned (jmp_buf, "
+          "deliberately widened to a safe upper bound, #1054/#1059 -- a "
+          "guard there would fire on every host); a member whose type is an "
+          "ordinary from_include struct deferring to the host's own real "
+          "layout (struct timespec, type_layout_is_host_owned()); and a "
+          "truly tagless/alias-less aggregate (no name to write the assert "
+          "with at all -- documented residual). None of the three gets a "
+          "guard, and the whole program still compiles clean.")
+    src = Path(tmp) / "layout_guards_exclusions_1172.c"
+    write(src, LAYOUT_GUARDS_EXCLUSIONS_PROGRAM)
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = m_result.stdout
+    for bad in ("lg1172_with_jmp", "lg1172_with_ts"):
+        if f"disagreement: struct {bad}" in out:
+            print(f"    FAIL: -m output emitted a guard for {bad}, which "
+                  f"should be excluded\n    {out}")
+            return False
+    # lg1172_holds_anon is itself an ordinary tagged struct (its member is a
+    # *pointer* to the tagless inline body, which is what has no name) --
+    # it should still get its own guard normally; this is the control that
+    # confirms the exclusion above isn't accidentally overbroad.
+    if "disagreement: struct lg1172_holds_anon" not in out:
+        print(f"    FAIL: -m output missing the expected (non-excluded) "
+              f"guard for lg1172_holds_anon\n    {out}")
+        return False
+    # Regression guard: an ordinary struct with only plain scalar members,
+    # in the same TU as <setjmp.h>/<time.h>, must still get its own guard
+    # -- see LAYOUT_GUARDS_EXCLUSIONS_PROGRAM's own comment on this struct.
+    if ("disagreement: struct lg1172_plain_amid_includes" not in out or
+            "sizeof(struct lg1172_plain_amid_includes) == 16" not in out):
+        print(f"    FAIL: -m output missing the expected guard for "
+              f"lg1172_plain_amid_includes (plain struct sharing a TU with "
+              f"setjmp.h/time.h)\n    {out}")
+        return False
+    cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not cc:
+        print("    FAIL: no real cc found to compile the output")
+        return False
+    compile_result = run([cc, "-x", "c", "-c", "-o", os.devnull, "-"],
+                         cwd=tmp, input=out)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: excluded-member program failed to compile\n"
+              f"    {compile_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_layout_guards_no_flag_and_emit_strict_1172(cccc: Path, tmp: str) -> bool:
+    print("  145: #1172 -- --no-layout-guards suppresses every guard and "
+          "leaves the rest of -m output byte-identical to a plain -m run; "
+          "--emit-only (emit_strict) also emits no guards -- "
+          "type_def_is_from_include_suppressed() returns false "
+          "unconditionally under it, which would otherwise assert CCCC's "
+          "own from_include projection (e.g. struct statfs) against a real "
+          "host header a replayed #include might still reach -- "
+          "documented residual, same trap serialize_static_assert()'s own "
+          "doc comment warns about.")
+    src = Path(tmp) / "layout_guards_flag_1172.c"
+    write(src, LAYOUT_GUARDS_PROGRAM)
+    plain = run([str(cccc), "-m", src.name], cwd=tmp)
+    no_guards = run([str(cccc), "--no-layout-guards", "-m", src.name], cwd=tmp)
+    if "_Static_assert" in no_guards.stdout:
+        print(f"    FAIL: --no-layout-guards still emitted a guard\n"
+              f"    {no_guards.stdout}")
+        return False
+    reference = plain.stdout.replace(
+        "_Static_assert(sizeof(struct lg1172_plain) == 16, "
+        "\"cccc/host layout disagreement: struct lg1172_plain\");\n", "")
+    if reference == plain.stdout:
+        print("    FAIL: expected guard line not present in the plain -m "
+              "output to begin with -- test is broken, not the feature")
+        return False
+    # #1172: byte-identity constraint from the plan -- guards are purely
+    # additive lines; --no-layout-guards output must equal plain -m output
+    # with exactly the guard lines removed, no reflow of anything else.
+    stripped = "\n".join(
+        line for line in plain.stdout.splitlines()
+        if "_Static_assert(" not in line or "layout disagreement" not in line
+    )
+    got = "\n".join(no_guards.stdout.splitlines())
+    if stripped != got:
+        print(f"    FAIL: --no-layout-guards output is not the plain "
+              f"output with only guard lines removed\n"
+              f"    plain: {plain.stdout!r}\n    no-guards: "
+              f"{no_guards.stdout!r}")
+        return False
+    strict = run([str(cccc), "--emit-only", "-m", src.name], cwd=tmp)
+    if "_Static_assert" in strict.stdout:
+        print(f"    FAIL: --emit-only still emitted a guard\n"
+              f"    {strict.stdout}")
+        return False
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -6731,6 +7034,11 @@ CASES = [
     case_atomic_fence_native_round_trip,
     case_atomic_var_init_native_round_trip,
     case_opaque_handle_native_round_trip,
+    case_layout_guards_shape_1172,
+    case_layout_guards_clang_true_positive_1172,
+    case_layout_guards_gcc_clean_1172,
+    case_layout_guards_exclusions_1172,
+    case_layout_guards_no_flag_and_emit_strict_1172,
 ]
 
 

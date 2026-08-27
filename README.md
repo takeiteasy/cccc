@@ -89,6 +89,9 @@ Options:
 	                         instead of stripping it to portable C. With -c=native, the usual
 	                         cc/clang/gcc PATH search is disabled -- CCCC_NATIVE_CC must name a
 	                         compiler that understands the dialect explicitly
+	   --no-layout-guards    Suppress the _Static_assert layout guards emitted next to
+	                         every aggregate definition in -m/-c=generated/-c=native
+	                         output (see man/COVERAGE.md); on by default
 	-j/--json                Emit JSON for all eligible output (diagnostics, header declarations, --fusion-candidates, etc.)
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step

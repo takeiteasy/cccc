@@ -694,6 +694,40 @@ NATIVE_SKIP_TESTS_CLANG = {
                  "clang, #1113 -- gcc has native _Decimal64 support "
                  "(confirmed: passes under CCCC_NATIVE_CC=gcc), so #1113's "
                  "gap is clang-specific, not universal",
+    "test_suite_layout_guards_1172.c": "deliberately instantiates a "
+                 "width-0 unnamed bit-field struct (#1176: gcc/cccc "
+                 "sizeof/_Alignof 8/4, clang 5/1 -- a permanent, "
+                 "intentional divergence, not a bug) so #1172's own "
+                 "_Static_assert layout guard is exercised as a genuine "
+                 "TRUE POSITIVE: the emitted C really is miscompiled "
+                 "under a clang host, and the guard is doing its job by "
+                 "rejecting it (confirmed: passes under "
+                 "CCCC_NATIVE_CC=gcc-16), see man/COVERAGE.md's layout-"
+                 "guards entry",
+    "test_suite_attributes_layout_1129.c": "#1172's layout guard "
+                 "now emits a live _Static_assert(sizeof(struct "
+                 "UnnamedSuffixAlignedBitfield1165) == 32, ...) next to "
+                 "this struct's definition -- #1165/#1170's own "
+                 "documented Class-1 divergence for an UNNAMED bit-field "
+                 "carrying an explicit __attribute__((aligned(16))) (gcc "
+                 "32, clang 20; cccc follows gcc). This file's own test "
+                 "was deliberately written to check only offsetof (both "
+                 "compilers agree) specifically so the file stayed clang-"
+                 "green pre-#1172 -- the guard now checks sizeof/_Alignof "
+                 "too, unconditionally, and correctly rejects it under "
+                 "clang as a true positive (confirmed: passes under "
+                 "CCCC_NATIVE_CC=gcc-16), see test_bitfield_unnamed_"
+                 "aligned_1165.c's own comment for the full gcc/clang "
+                 "table",
+    "test_bitfield_unnamed_aligned_1165.c": "the VM-only pin (see this "
+                 "file's own header comment) of the same #1165/#1170 "
+                 "Class-1 divergence as suites/test_suite_attributes_"
+                 "layout_1129.c above -- an UNNAMED bit-field's explicit "
+                 "__attribute__((aligned(16))) (gcc 32/16, clang 20/4; "
+                 "cccc follows gcc). #1172's layout guard now emits a "
+                 "live _Static_assert on this struct's sizeof/_Alignof, "
+                 "a true positive under clang (confirmed: passes under "
+                 "CCCC_NATIVE_CC=gcc-16)",
 }
 # #1193: the five ctor/dtor-priority entries this table used to hold were
 # gcc-on-*Darwin* specific, but this table has no platform axis of its own --
