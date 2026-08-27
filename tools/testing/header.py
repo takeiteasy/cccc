@@ -2,8 +2,7 @@
 that lead every tests/**/*.c file.
 
 Historically this parsing was duplicated three ways (tools/testing/runner.py's
-inline parse in run_single_test(), its separate has_matrix_skip() 5-line
-reader, and tools/triage_tests.py's own regex re-implementation), all reading
+inline parse in run_single_test(), and tools/triage_tests.py's own regex re-implementation), all reading
 only the first 5 physical lines of the file with a bare substring scan. Any
 directive landing on line 6+ (because earlier lines carried longer prose) was
 silently never read -- not an error, just absent, so e.g. a CCCC_REJECT_STDOUT
@@ -47,13 +46,11 @@ _VALUE_DIRECTIVES = frozenset({
 # explicit `: reason`.
 _OPTIONAL_VALUE_DIRECTIVES = frozenset({
     "CCCC_NATIVE_SKIP",
-    "CCCC_MATRIX_SKIP",
     "CCCC_EXPECT_LEAK",
 })
 
 _DEFAULT_REASONS = {
     "CCCC_NATIVE_SKIP": "native-incompatible",
-    "CCCC_MATRIX_SKIP": "matrix-incompatible",
     "CCCC_EXPECT_LEAK": "expected leak",
 }
 
@@ -73,7 +70,7 @@ _TRAILING_BLOCK_COMMENT_END = re.compile(r"\s*\*/\s*$")
 # empty CCCC_FLAGS directive (first token of its comment line, followed by
 # whitespace). Directives that are legitimately bare (EXPECT_COMPILE_ERROR,
 # CCCC_LEAKS_KEEP_VM_HEAP) or optionally bare with a default
-# reason (CCCC_NATIVE_SKIP, CCCC_MATRIX_SKIP, CCCC_EXPECT_LEAK) keep the
+# reason (CCCC_NATIVE_SKIP, CCCC_EXPECT_LEAK) keep the
 # original terminated-by-':'-or-whitespace-or-end anchor.
 _COLON_REQUIRED_NAMES = sorted(_VALUE_DIRECTIVES, key=len, reverse=True)
 _BARE_OK_NAMES = sorted(_BARE_DIRECTIVES | _OPTIONAL_VALUE_DIRECTIVES, key=len, reverse=True)
@@ -107,7 +104,6 @@ class TestHeader:
     expect_stdout: str | None = None
     reject_stdout: str | None = None
     native_skip: str | None = None
-    matrix_skip: str | None = None
     expect_leak: str | None = None
     leaks_keep_vm_heap: bool = False
 
@@ -222,8 +218,6 @@ def _apply(header: TestHeader, name: str, value: str | None) -> None:
         header.leaks_keep_vm_heap = True
     elif name == "CCCC_NATIVE_SKIP":
         header.native_skip = value if value else _DEFAULT_REASONS[name]
-    elif name == "CCCC_MATRIX_SKIP":
-        header.matrix_skip = value if value else _DEFAULT_REASONS[name]
     elif name == "CCCC_EXPECT_LEAK":
         header.expect_leak = value if value else _DEFAULT_REASONS[name]
     elif name == "CCCC_FLAGS":

@@ -19,16 +19,10 @@ from .platform import detect_native_cc_family, detect_platform
 from .discovery import discover_tests
 from .suite import run_test_suite_with_isolation
 from .report import print_summary
-from .matrix import run_pass_matrix
 
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Test runner for CCCC")
-    parser.add_argument(
-        "--matrix", action="store_true",
-        help="Run the full test suite once per individual -f optimization pass "
-             "(9 runs: baseline, 7 passes, stress) and show a per-pass attribution table"
-    )
     parser.add_argument(
         "--quiet", action="store_true",
         help="Suppress per-test output; only show final summary"
@@ -207,9 +201,6 @@ def main(argv=None):
         use_leaks = False
 
     if args.native:
-        if args.matrix:
-            print("Error: --native cannot be combined with --matrix (native doesn't use the VM optimization pipeline).")
-            sys.exit(1)
         if use_leaks:
             print("Warning: --leaks/--profile-mem are not supported in --native mode and will be ignored.")
             use_leaks = False
@@ -253,10 +244,6 @@ def main(argv=None):
         print(f"Using {n_jobs} parallel jobs")
         print("=======================")
         print()
-
-    if args.matrix:
-        ok = run_pass_matrix(cccc, script_dir, platform, cccc_args, n_jobs, args, test_files)
-        sys.exit(0 if ok else 1)
 
     r = run_test_suite_with_isolation(
         cccc, script_dir, use_leaks, platform, cccc_args,

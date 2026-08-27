@@ -17,22 +17,10 @@ from .proc import run_capture
 from . import wedge
 
 
-def has_matrix_skip(test_file):
-    """Return True if test_file carries a CCCC_MATRIX_SKIP annotation in its header."""
-    return parse_test_header(test_file).matrix_skip is not None
-
-
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
                     bench=False, profile_dir=None, process_timeout=None,
-                    matrix_mode=False, native_mode=False):
+                    native_mode=False):
     """Run one test file and return a result dict.
-
-    matrix_mode: when True, strip any -On flags from per-test CCCC_FLAGS so
-    they do not override the matrix sweep flags injected via cccc_args. Tests
-    annotated with CCCC_MATRIX_SKIP are skipped entirely in this mode (e.g.
-    tests whose correctness depends on a specific -O level the per-pass
-    matrix cannot reproduce, since it always forces -O0 plus at most one -f
-    pass).
 
     #1202: the whole body runs under wedge.inflight() so a wedge diagnostic
     dump (tools/testing/wedge.py) can name exactly which test file(s) were
@@ -46,14 +34,13 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
         return _run_single_test_body(
             idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
             bench=bench, profile_dir=profile_dir,
-            process_timeout=process_timeout, matrix_mode=matrix_mode,
-            native_mode=native_mode,
+            process_timeout=process_timeout, native_mode=native_mode,
         )
 
 
 def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
                           bench=False, profile_dir=None, process_timeout=None,
-                          matrix_mode=False, native_mode=False):
+                          native_mode=False):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
 
@@ -74,40 +61,14 @@ def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform,
     expect_leak_reason = header.expect_leak
     leak_suppressed = False
     native_skip = header.native_skip
-    matrix_skip_reason = header.matrix_skip
     leaks_keep_vm_heap = header.leaks_keep_vm_heap
 
-    # In matrix mode, strip any -On from per-test flags so they cannot
-    # override the matrix sweep flags injected via cccc_args.
-    if matrix_mode:
-        per_test_flags = [
-            f for f in per_test_flags
-            if not (f.startswith("-O") and len(f) > 2 and f[2].isdigit())
-        ]
-
-    if matrix_mode and matrix_skip_reason:
-        return {
-            "idx": idx,
-            "test_name": test_name,
-            "exit_code": 0,
-            "status": "matrix_skipped",
-            "output": "",
-            "is_negative_test": is_negative_test,
-            "expects_runtime_error": expects_runtime_error,
-            "stderr_mismatch": None,
-            "elapsed": 0,
-            "skip_reason": f"matrix-incompatible: {matrix_skip_reason}",
-        }
-
-    # --build is incompatible with -O and -f<pass> flags (build mode runs the
-    # build script in-process and does not compile VM bytecode at an
-    # optimization level or through the peephole/pass pipeline; the compiler
-    # rejects --build combined with either). Strip both from cccc_args so
-    # matrix sweeps don't break build tests.
+    # --build is incompatible with -O<n> (build mode runs the build script
+    # in-process and does not compile VM bytecode; the compiler rejects
+    # --build combined with -O<n>). Strip it from cccc_args defensively.
     if is_build_mode:
         cccc_args = [a for a in cccc_args
-                     if not (a.startswith("-O") and len(a) > 2 and a[2].isdigit())
-                     and not a.startswith("-f")]
+                     if not (a.startswith("-O") and len(a) > 2 and a[2].isdigit())]
 
     # #1182: --native-audit-skips bypasses CCCC_NATIVE_SKIP the same way it
     # bypasses NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS (native_skip_reason,

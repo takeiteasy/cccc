@@ -8,11 +8,8 @@ from .runner import run_single_test
 
 
 def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, args,
-                    test_files, header=None, matrix_mode=False):
-    """Execute test files in parallel and return aggregate results dict.
-
-    matrix_mode: passed through to run_single_test to strip per-test -On flags.
-    """
+                    test_files, header=None):
+    """Execute test files in parallel and return aggregate results dict."""
     if header:
         print(header)
 
@@ -30,7 +27,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
             getattr(args, "bench", False),
             str(profile_dir) if profile_dir else None,
             process_timeout,
-            matrix_mode,
             getattr(args, "native", False),
         )
         for i, test_file in enumerate(test_files)
@@ -45,14 +41,12 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
     failed = 0
     crashed = 0
     negative_passed = 0
-    matrix_skipped = 0
     native_passed = 0
     native_failed = 0
     native_skipped = 0
     native_compile_failed = 0
     failed_tests = []
     crashed_tests = []
-    matrix_skipped_tests = []
     native_skipped_tests = []
     timings = []
 
@@ -60,7 +54,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
 
     def print_single_result(result):
         nonlocal total, passed, failed, crashed, negative_passed
-        nonlocal matrix_skipped
         nonlocal native_passed, native_failed, native_skipped, native_compile_failed
         total += 1
         test_name = result["test_name"]
@@ -163,11 +156,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
                 print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
                 for line in output.splitlines()[:5]:
                     print(f"  {line}")
-        elif status == "matrix_skipped":
-            matrix_skipped += 1
-            reason = result.get("skip_reason", "")
-            if reason:
-                matrix_skipped_tests.append(f"{test_name} ({reason})")
         elif status == "native_passed":
             native_passed += 1
             if not quiet:
@@ -233,14 +221,12 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         "failed": failed,
         "crashed": crashed,
         "negative_passed": negative_passed,
-        "matrix_skipped": matrix_skipped,
         "native_passed": native_passed,
         "native_failed": native_failed,
         "native_skipped": native_skipped,
         "native_compile_failed": native_compile_failed,
         "failed_tests": failed_tests,
         "crashed_tests": crashed_tests,
-        "matrix_skipped_tests": matrix_skipped_tests,
         "native_skipped_tests": native_skipped_tests,
         "timings": timings,
     }
@@ -248,12 +234,11 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
 
 _SUM_KEYS = (
     "total", "passed", "failed", "crashed", "negative_passed",
-    "matrix_skipped",
     "native_passed", "native_failed", "native_skipped", "native_compile_failed",
 )
 _LIST_KEYS = (
     "failed_tests", "crashed_tests",
-    "matrix_skipped_tests", "native_skipped_tests", "timings",
+    "native_skipped_tests", "timings",
 )
 
 
@@ -282,7 +267,7 @@ ISOLATED_SERIAL_TESTS = frozenset({"test_suite_posix.c", "test_pthread_mutex.c"}
 
 
 def run_test_suite_with_isolation(cccc, script_dir, use_leaks, platform, cccc_args,
-                                  n_jobs, args, test_files, header=None, matrix_mode=False):
+                                  n_jobs, args, test_files, header=None):
     """_run_test_suite(), but ISOLATED_SERIAL_TESTS run in their own -j1 pass
     after the rest of the batch. Every caller (tools/testing/cli.py,
     tools/run_tests.py) must go through this, not _run_test_suite directly,
@@ -293,12 +278,12 @@ def run_test_suite_with_isolation(cccc, script_dir, use_leaks, platform, cccc_ar
     if not (isolated_files and n_jobs > 1 and parallel_files):
         return _run_test_suite(
             cccc, script_dir, use_leaks, platform, cccc_args,
-            n_jobs, args, test_files, header=header, matrix_mode=matrix_mode,
+            n_jobs, args, test_files, header=header,
         )
 
     r = _run_test_suite(
         cccc, script_dir, use_leaks, platform, cccc_args,
-        n_jobs, args, parallel_files, header=header, matrix_mode=matrix_mode,
+        n_jobs, args, parallel_files, header=header,
     )
     isolated_header = "[ isolated (serial) tests -- see #853 ]"
     if header:
@@ -307,6 +292,5 @@ def run_test_suite_with_isolation(cccc, script_dir, use_leaks, platform, cccc_ar
         cccc, script_dir, use_leaks, platform, cccc_args,
         1, args, isolated_files,
         header=isolated_header if not getattr(args, "quiet", False) else None,
-        matrix_mode=matrix_mode,
     )
     return merge_suite_results(r, r_isolated)

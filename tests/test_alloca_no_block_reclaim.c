@@ -1,5 +1,4 @@
-// CCCC_MATRIX_SKIP: address-identity assertion, sensitive to bytecode
-// reordering under an individual -f pass #981: a bare __builtin_alloca in the
+// #981: a bare __builtin_alloca in the
 // SAME block as a VLA declaration must NOT be reclaimed at that block's exit --
 // only the VLA's own storage (ALLOC_KIND_FRAME) dies at block exit; a bare
 // alloca (ALLOC_KIND_ALLOCA) lives until the *frame* returns, matching every

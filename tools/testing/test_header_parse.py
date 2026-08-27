@@ -89,16 +89,17 @@ def _(fail):
         fail(f"expect_stderr={h.expect_stderr!r}")
 
 
-@case("prose containing 'CCCC_MATRIX_SKIP)' mid-sentence is not a directive")
+@case("prose containing 'CCCC_NATIVE_SKIP)' mid-sentence is not a directive")
 def _(fail):
-    # tests/test_vla_heap_exhaustion.c's actual pre-repair shape (#1153).
+    # A bare-ok directive name appearing inside ordinary prose (with a
+    # trailing ')') must not be picked up (#1153).
     h = _parse(
         "// Deliberately no per-test flags override (and no\n"
-        "// CCCC_MATRIX_SKIP) -- unlike the address-identity tests, this is robust\n"
+        "// CCCC_NATIVE_SKIP) -- unlike the address-identity tests, this is robust\n"
         "int main(void) { return 42; }\n"
     )
-    if h.matrix_skip is not None:
-        fail(f"matrix_skip should be None, got {h.matrix_skip!r}")
+    if h.native_skip is not None:
+        fail(f"native_skip should be None, got {h.native_skip!r}")
 
 
 @case("bare mention of a colon-required name (no colon) is not a directive")

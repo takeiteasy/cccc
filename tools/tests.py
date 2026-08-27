@@ -7,10 +7,7 @@ All logic lives in tools/testing/. This file exists so that:
   - 'make test-suites', 'make test-legacy', etc. are unchanged
 
 Arguments after -- are forwarded verbatim to the cccc binary for every test
-(e.g. `tools/tests.py -- -O2 -Wall`).  Unknown flags before -- are an error.
-
-With --matrix, runs the full suite once per individual -f optimization pass
-(9 runs: baseline, one per pass, stress) and shows a per-pass attribution table.
+(e.g. `tools/tests.py -- -Wall`).  Unknown flags before -- are an error.
 """
 
 import sys

@@ -2,9 +2,10 @@
 """Cross-compiler benchmark runner for CCCC.
 
 Compiles and runs a set of portable C99/C11 benchmark programs under CCCC
-(across all --optimize levels) and under GCC (across -O0..-O3), verifies that
-the programs produce identical output under each compiler, and reports wall
-clock timings as a human-readable table and as a machine-readable JSON file.
+(the VM has no optimiser -- one configuration) and under GCC (across
+-O0..-O3), verifies that the programs produce identical output under each
+compiler, and reports wall clock timings as a human-readable table and as a
+machine-readable JSON file.
 
 Usage:
     python3 bench.py [options]
@@ -39,10 +40,6 @@ from pathlib import Path
 
 CCCC_CONFIGS = [
     ("cccc", []),
-    ("cccc-O1", ["--optimize=1"]),
-    ("cccc-O2", ["--optimize=2"]),
-    ("cccc-O3", ["--optimize=3"]),
-    ("cccc-O4", ["--optimize=4"]),
 ]
 
 GCC_CONFIGS = [
