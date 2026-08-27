@@ -87,9 +87,11 @@ non-zero exit is produced if any fails):
     tests (#1202; see "Diagnosing a live wedge" below).
 20. **reflection_ffi_check** — `reflection_ffi_gen` freshness check
     (`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)).
-21. **audit_reflection_enums** — `reflection.h` enum-parity audit
+21. **shims_check** — `src/shims.inc` freshness vs `src/shims/*.c`
+    (`tools/gen_shims.py --check`, see [BUILDING.md](BUILDING.md)).
+22. **audit_reflection_enums** — `reflection.h` enum-parity audit
     (`tools/audit_reflection_enums.py`, see below).
-22. **fuzz** — fuzz regression corpus replay, compile-only against
+23. **fuzz** — fuzz regression corpus replay, compile-only against
     `tests/fuzz/corpus/` (#625).
 
 `--bench` (cross-compiler benchmark) and `--perf` (instrumented VM-opcode

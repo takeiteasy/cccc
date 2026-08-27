@@ -38,6 +38,7 @@ Sub-suites:
   test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
   test_wedge          — wedge.py deadline-watchdog/SIGUSR1-dump/progress-log unit tests (ticket #1202)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
+  shims_check          — src/shims.inc freshness vs src/shims/*.c
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
 
@@ -728,6 +729,29 @@ def _run_reflection_ffi_check():
         return f"FAILED ({e})", False
 
 
+def _run_shims_check():
+    """Check src/shims.inc is up to date with src/shims/*.c.
+
+    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "gen_shims.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gen_shims", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(check=True)
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_fuzz_suite(cccc):
     """Run the fuzz regression corpus replay (#625).
 
@@ -1105,6 +1129,14 @@ def main():
     refl_status, ok_refl = _run_reflection_ffi_check()
     print(f"  {refl_status}")
     suite_results["reflection_ffi_check"] = ok_refl
+
+    # --- -c=native shim text generation check ---
+    print()
+    print("[ shims_check ]")
+    wedge.arm("shims_check", scalar_phase_timeout)
+    shims_status, ok_shims = _run_shims_check()
+    print(f"  {shims_status}")
+    suite_results["shims_check"] = ok_shims
 
     # --- Reflection enum parity audit (#860) ---
     print()

@@ -408,16 +408,19 @@ BuildTarget *libcccc(Builder *ctx) {
 // (CCCC's own default), so an explicit prototype is required like any
 // other forward reference.
 BuildTarget *reflection_ffi_gen(Builder *ctx);
+BuildTarget *shims_gen(Builder *ctx); // same forward-reference reason as above
 
 [[cccc::build_target]]
 BuildTarget *release(Builder *ctx) {
     BuildTarget *bt             = make_libbacktrace(ctx);
     BuildTarget *gen            = stdlib_regen_step(ctx, bt);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
+    BuildTarget *shims_gen_step = shims_gen(ctx);
     BuildTarget *final =
         make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
     DependsOn(final, gen);
     DependsOn(final, reflection_gen);
+    DependsOn(final, shims_gen_step);
     return final;
 }
 
@@ -705,6 +708,30 @@ BuildTarget *reflection_ffi_gen(Builder *ctx) {
 BuildTarget *reflection_ffi_check(Builder *ctx) {
     return RunCustom(ctx, "reflection-ffi-check",
                      "python3 tools/gen_reflection_ffi.py --check");
+}
+
+// src/shims.inc is the -c=native support-shim text table, generated from the
+// ordinary C under src/shims/ by tools/gen_shims.py and #include'd by
+// src/serialize_shims.c. Committed (like reflection_ffi_*.inc, unlike
+// src/std.c) so plain `make` needs no python3; this step keeps it fresh on
+// every default build, shims_check below (wired into the test target)
+// catches staleness for any build that skips it. AddInput declares the real
+// dependency -- every src/shims/*.c plus the generator itself.
+[[cccc::build_target]]
+BuildTarget *shims_gen(Builder *ctx) {
+    BuildTarget *gen =
+        RunCustom(ctx, "shims-gen", "python3 tools/gen_shims.py");
+    DeclareOutput(gen, "src/shims.inc");
+    AddInput(gen, "tools/gen_shims.py");
+    const char **shims = GlobFiles(ctx, "src/shims/*.c");
+    for (int i = 0; shims && shims[i]; i++)
+        AddInput(gen, shims[i]);
+    return gen;
+}
+
+[[cccc::build_target]]
+BuildTarget *shims_check(Builder *ctx) {
+    return RunCustom(ctx, "shims-check", "python3 tools/gen_shims.py --check");
 }
 
 // Doxygen HTML API docs for the three public headers.
@@ -1266,8 +1293,10 @@ int build_main(Builder *ctx) {
     BuildTarget *bt             = make_libbacktrace(ctx);
     BuildTarget *gen            = stdlib_regen_step(ctx, bt);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
+    BuildTarget *shims_gen_step = shims_gen(ctx);
     BuildTarget *final          = make_cccc_exe_named(ctx, bt, "cccc");
     DependsOn(final, gen);
     DependsOn(final, reflection_gen);
+    DependsOn(final, shims_gen_step);
     return BuildAll(ctx);
 }

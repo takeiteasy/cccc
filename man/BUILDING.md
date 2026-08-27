@@ -1253,11 +1253,32 @@ tools/gen_reflection_ffi.py` directly to refresh them by hand, or `--check`
 to verify they're current without writing (this is what the `test` build
 target's `reflection_ffi_check` sub-suite runs).
 
+**`src/shims.inc`** (the `-c=native` support-shim text table: one
+`static const char CCCC_SHIM_<group>_<name>[]` per shim chunk) is generated
+from the ordinary C under **`src/shims/`** by `tools/gen_shims.py` and
+`#include`'d by `src/serialize_shims.c`, which references each constant by
+name where it used to hold the same text as a hand-escaped `fprintf` string
+literal — so a mistyped chunk name is now a compile error, not a
+silently-missing shim. `src/shims/` has one `.c` file per emitter group
+(`native_accessor`, `reallocarray`, `threads`, `uchar`, `posix_compat`,
+`canonical_const`, `dlfcn`, `c23_fromfp`); within each, chunks are delimited
+by `// >>> shim: <name>` … `// <<< shim`, whole-line `//` comments and
+blank lines at a chunk's edges are dropped, and the emitted text is
+otherwise byte-for-byte what the old string literals produced. These files
+are **never compiled** — they are source-of-truth text only; the gating
+logic and rationale for each shim stay in `src/serialize_shims.c` next to
+the code that selects it. Like the reflection `.inc`s and unlike `src/std.c`,
+`src/shims.inc` **is committed** (pure-Python-generated, so plain `make`
+needs no `python3` — stage0 invariant intact). `./cccc --build build.c`'s
+default build regenerates it via the `shims_gen` step; run `python3
+tools/gen_shims.py` to refresh by hand, or `--check` to verify without
+writing (the `test` build target's `shims_check` sub-suite).
+
 `build.c` itself, once bootstrapped, covers what used to be Makefile
 targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
 `fuzz_harness`, `libcccc`, `clean`, `host_tests`, `test`/`test_suites`/
 `test_legacy`, `sqlite_smoke`, `audit_ffi`, `audit_reflection_enums`,
-`reflection_ffi_gen`/`reflection_ffi_check`, `bench`/`bench_compare`/`bench_compare_quick`/
+`reflection_ffi_gen`/`reflection_ffi_check`, `shims_gen`/`shims_check`, `bench`/`bench_compare`/`bench_compare_quick`/
 `bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/`afl_asan`,
 `docs` (Doxygen HTML API docs), and `stdlib_gen` (the two-pass regen alone,
 no final rebuild).
