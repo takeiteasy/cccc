@@ -148,7 +148,7 @@ Wide immediates (64-bit) are stored little-endian across **two consecutive** 32-
   Used by three-register arithmetic, comparisons, and FP ops.
 
 * **RRRS** — `[opcode] [rd:8 | base:8 | index:8 | scale:8] [offset:64]`
-  Used by fused indexed load/store opcodes.
+  Used by the checked-access opcodes (`CHKR`, `CHKNT`, `CHKAB`, …).
 
 * **RR** — `[opcode] [rd:8 | rs1:8 | unused:16]`  
   Used by moves, negations, loads, stores, and conversions.
@@ -198,9 +198,6 @@ Local/parameter offsets (`assign_stack_offsets`, `src/codegen_stmt.c`) are word 
 | `ADD3` | `rd = rs1 + rs2` |
 | `SUB3` | `rd = rs1 - rs2` |
 | `MUL3` | `rd = rs1 * rs2` |
-| `MULI3` | `rd = rs1 * immediate` |
-| `MULADD3` | `rd = rs1 + rs2 * rs3` |
-| `MULADDI3` | `rd = rs1 + rs2 * immediate` |
 | `DIV3` | `rd = rs1 / rs2` (signed; traps on divide-by-zero) |
 | `ADDC` | Checked signed addition; traps on overflow |
 | `SUBC` | Checked signed subtraction; traps on overflow |
@@ -345,9 +342,6 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FEQ3` … `FGE3` | f64 comparisons |
 | `FADD3_F32` … `FDIV3_F32` | f32 arithmetic |
 | `FNEG3_F32` | f32 negation |
-| `FMADD3{,_F32,_FMA,_F32_FMA}` | fused multiply-add. **Not emitted:** the codegen fusion that produced these was removed with the VM optimiser (#1214); the handlers survive as reserved slots pending #1219. |
-| `FMSUB3{,_F32,_FMA,_F32_FMA}` | fused multiply-subtract. Reserved, not emitted (see above). |
-| `FNMSUB3{,_F32,_FMA,_F32_FMA}` | fused negated multiply-subtract. Reserved, not emitted (see above). |
 | `FEQ3_F32` … `FGE3_F32` | f32 comparisons |
 | `FLDR` | `fregs[rd] = *(double*)regs[rs]` |
 | `FSTR` | `*(double*)regs[rs] = fregs[rd]` |
@@ -936,15 +930,6 @@ These replace the common `LEA3 + LDR/STR` two-opcode sequence for local variable
 | `FSTR_LOCAL` | `*(double*)(bp + offset) = fregs[rd]` |
 | `FLDR_LOCAL_F32` | `fregs[rd] = *(float*)(bp + offset)` |
 | `FSTR_LOCAL_F32` | `*(float*)(bp + offset) = fregs[rd]` |
-
-### Fused Indexed Load / Store (reserved, not emitted)
-
-`LDR_INDEX_{B,H,W,D}`, `STR_INDEX_{B,H,W,D}`, `FLDR_INDEX{,_F32}`, and
-`FSTR_INDEX{,_F32}` collapsed a `base + index * scale + offset` address
-sequence into one opcode. The codegen fusion that produced them was an
-`--optimize=2` optimisation, removed with the VM optimiser (#1214). The
-handlers survive as reserved slots pending their deletion in #1219; the
-address sequence is now emitted as separate multiply/add/load opcodes.
 
 ## Decimal Floating-Point
 

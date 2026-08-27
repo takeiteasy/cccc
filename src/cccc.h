@@ -120,26 +120,23 @@ extern "C" {
     X(SETJMP, 0)  /* Save execution context to jmp_buf, return 0 */                  \
     X(LONGJMP, 0) /* Restore execution context from jmp_buf, return val */           \
     /* Register-based arithmetic */                                                  \
-    X(ADD3, 1)     /* rd = rs1 + rs2 */                                              \
-    X(SUB3, 1)     /* rd = rs1 - rs2 */                                              \
-    X(MUL3, 1)     /* rd = rs1 * rs2 */                                              \
-    X(MULI3, 3)    /* rd = rs1 * immediate */                                        \
-    X(MULADD3, 1)  /* rd = rs1 + rs2 * rs3 */                                        \
-    X(MULADDI3, 3) /* rd = rs1 + rs2 * immediate */                                  \
-    X(DIV3, 1)     /* rd = rs1 / rs2 (signed) */                                     \
-    X(ADDC, 1)     /* checked signed add: rd = rs1 + rs2 */                          \
-    X(SUBC, 1)     /* checked signed sub: rd = rs1 - rs2 */                          \
-    X(MULC, 1)     /* checked signed mul: rd = rs1 * rs2 */                          \
-    X(DIVC, 1)     /* checked signed div: rd = rs1 / rs2 */                          \
-    X(UDIV3, 1)    /* rd = rs1 / rs2 (unsigned) */                                   \
-    X(MOD3, 1)     /* rd = rs1 % rs2 (signed) */                                     \
-    X(UMOD3, 1)    /* rd = rs1 % rs2 (unsigned) */                                   \
-    X(AND3, 1)     /* rd = rs1 & rs2 */                                              \
-    X(OR3, 1)      /* rd = rs1 | rs2 */                                              \
-    X(XOR3, 1)     /* rd = rs1 ^ rs2 */                                              \
-    X(SHL3, 1)     /* rd = rs1 << rs2 */                                             \
-    X(SHR3, 1)     /* rd = rs1 >> rs2 (arithmetic, signed) */                        \
-    X(USHR3, 1)    /* rd = rs1 >> rs2 (logical, unsigned) */                         \
+    X(ADD3, 1)  /* rd = rs1 + rs2 */                                                 \
+    X(SUB3, 1)  /* rd = rs1 - rs2 */                                                 \
+    X(MUL3, 1)  /* rd = rs1 * rs2 */                                                 \
+    X(DIV3, 1)  /* rd = rs1 / rs2 (signed) */                                        \
+    X(ADDC, 1)  /* checked signed add: rd = rs1 + rs2 */                             \
+    X(SUBC, 1)  /* checked signed sub: rd = rs1 - rs2 */                             \
+    X(MULC, 1)  /* checked signed mul: rd = rs1 * rs2 */                             \
+    X(DIVC, 1)  /* checked signed div: rd = rs1 / rs2 */                             \
+    X(UDIV3, 1) /* rd = rs1 / rs2 (unsigned) */                                      \
+    X(MOD3, 1)  /* rd = rs1 % rs2 (signed) */                                        \
+    X(UMOD3, 1) /* rd = rs1 % rs2 (unsigned) */                                      \
+    X(AND3, 1)  /* rd = rs1 & rs2 */                                                 \
+    X(OR3, 1)   /* rd = rs1 | rs2 */                                                 \
+    X(XOR3, 1)  /* rd = rs1 ^ rs2 */                                                 \
+    X(SHL3, 1)  /* rd = rs1 << rs2 */                                                \
+    X(SHR3, 1)  /* rd = rs1 >> rs2 (arithmetic, signed) */                           \
+    X(USHR3, 1) /* rd = rs1 >> rs2 (logical, unsigned) */                            \
     /* Wide _BitInt(N>64) multi-word arithmetic/shifts.  All operand-free   */       \
     /* (args read from fixed REG_A0-A5, like MCPY): arithmetic ops take     */       \
     /* dst=A0,a=A1,b=A2,words=A3,width=A4 (DIV/MOD add is_signed=A5);       */       \
@@ -281,47 +278,6 @@ extern "C" {
     X(FSTR_LOCAL, 3)     /* *(double*)(bp+offset) = fregs[rd] */                     \
     X(FLDR_LOCAL_F32, 3) /* fregs[rd] = *(float*)(bp+offset) */                      \
     X(FSTR_LOCAL_F32, 3) /* *(float*)(bp+offset) = (float)fregs[rd] */               \
-    /* Fused indexed load/store: base + index * scale + byte offset */               \
-    X(LDR_INDEX_B, 3)    /* regs[rd] = *(char*)(base+idx*scale+off) */               \
-    X(LDR_INDEX_H, 3)    /* regs[rd] = *(short*)(base+idx*scale+off) */              \
-    X(LDR_INDEX_W, 3)    /* regs[rd] = *(int*)(base+idx*scale+off) */                \
-    X(LDR_INDEX_D, 3)    /* regs[rd] = *(long long*)(base+idx*scale+off) */          \
-    X(STR_INDEX_B, 3)    /* *(char*)(base+idx*scale+off) = regs[rd] */               \
-    X(STR_INDEX_H, 3)    /* *(short*)(base+idx*scale+off) = regs[rd] */              \
-    X(STR_INDEX_W, 3)    /* *(int*)(base+idx*scale+off) = regs[rd] */                \
-    X(STR_INDEX_D, 3)    /* *(long long*)(base+idx*scale+off) = regs[rd] */          \
-    X(FLDR_INDEX, 3)     /* fregs[rd] = *(double*)(base+idx*scale+off) */            \
-    X(FSTR_INDEX, 3)     /* *(double*)(base+idx*scale+off) = fregs[rd] */            \
-    X(FLDR_INDEX_F32, 3) /* fregs[rd] = *(float*)(base+idx*scale+off) */             \
-    X(FSTR_INDEX_F32, 3) /* *(float*)(base+idx*scale+off) = fregs[rd] */             \
-    /* Fused floating-point multiply-add: fregs[rd] = fregs[rs1] +                   \
-     * fregs[rs2]*fregs[rs3] */                                                      \
-    X(FMADD3, 1) /* f64 two-rounding: product rounded to double, then added */       \
-    X(FMADD3_F32,                                                                    \
-      1)         /* f32 two-rounding: product rounded to float, then added */        \
-    X(FMADD3_FMA,                                                                    \
-      1)         /* f64 single-rounding: fma(rs2,rs3,rs1)  (--fma opt-in) */         \
-    X(FMADD3_F32_FMA,                                                                \
-      1)         /* f32 single-rounding: fmaf(rs2,rs3,rs1) (--fma opt-in) */         \
-    /* Fused floating-point multiply-subtract: fregs[rd] =                           \
-     * fregs[rs2]*fregs[rs3] - fregs[rs1] */                                         \
-    X(FMSUB3,                                                                        \
-      1) /* f64 two-rounding: product rounded to double, then subtracted */          \
-    X(FMSUB3_F32,                                                                    \
-      1) /* f32 two-rounding: product rounded to float, then subtracted */           \
-    X(FMSUB3_FMA,                                                                    \
-      1) /* f64 single-rounding: fma(rs2,rs3,-rs1)  (--fma opt-in) */                \
-    X(FMSUB3_F32_FMA,                                                                \
-      1) /* f32 single-rounding: fmaf(rs2,rs3,-rs1) (--fma opt-in) */                \
-    /* Fused floating-point negated multiply-subtract: fregs[rd] = fregs[rs1]        \
-     * - fregs[rs2]*fregs[rs3] */                                                    \
-    X(FNMSUB3, 1) /* f64 two-rounding: rs1 minus product, rounded to double */       \
-    X(FNMSUB3_F32,                                                                   \
-      1)          /* f32 two-rounding: rs1 minus product, rounded to float */        \
-    X(FNMSUB3_FMA,                                                                   \
-      1)          /* f64 single-rounding: fma(-rs2,rs3,rs1)  (--fma opt-in) */       \
-    X(FNMSUB3_F32_FMA,                                                               \
-      1)          /* f32 single-rounding: fmaf(-rs2,rs3,rs1) (--fma opt-in) */       \
     /* Return-address capture */                                                     \
     X(RETADDR, 3) /* rd = return address n frames up; NULL past outermost            \
                      frame. Format: [RETADDR][rd:8|unused:56][level:i64] */          \
