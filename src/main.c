@@ -2511,9 +2511,6 @@ int main(int argc, const char *argv[]) {
                 "warning: -O%d has no effect in VM mode (the VM does not "
                 "optimise); use -c=native for host -O\n",
                 opt_level);
-    // Only -c=native consumes the level (forwarded to the host cc). Keep it
-    // at 0 for the VM path so nothing downstream misreads a stale non-zero.
-    vm.compiler.opt_level = (compile_format == COMPILE_NATIVE) ? opt_level : 0;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;
 
