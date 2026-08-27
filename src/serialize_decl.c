@@ -134,14 +134,17 @@ static const char *va_list_shim_param_name(char *buf, size_t bufsz,
     return buf;
 }
 
-// KNOWN ISSUE (#897): a struct/union-by-value parameter's type is
+// #897 (RESOLVED): a struct/union-by-value parameter's type used to be
 // mis-serialized here as "struct <param-name>" instead of its real tag --
-// e.g. `int helper(struct Point q)` emits "struct q" in the generated
-// native C, which clang then rejects as an incomplete/undeclared type.
-// Found incidentally while fixing #896; confirmed unrelated to #896's
-// #include/@comptime handling (reproduces in a single file with no
-// #include at all). Not fixed here -- see #897 for the repro and a
-// (unverified) hypothesis about the root cause.
+// e.g. `int helper(struct Point q)` emitted "struct q" in the generated
+// native C, which clang then rejected as an incomplete/undeclared type. The
+// serializer was innocent: the real bug was in struct_union_decl/
+// struct_decl/union_decl (src/parse.c) re-running install_tag_definition()
+// on a bare *reference* to an already-defined tag, which re-registered the
+// shared Type under whatever name declarator() had most recently written to
+// ty->name (a previous parameter's own identifier) -- fixed by reporting
+// whether an actual `{ ... }` body was parsed and installing via
+// ty->struct_tag (immune to the overwrite) instead of ty->name.
 void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
                                   bool with_asm_label) {
     // #1025/#1039: an asm("symbol")-labeled block-scope declaration (`Put
@@ -1060,8 +1063,14 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
                     (unsigned long long)lo);
             return;
         }
-        // size > 16 (bit_width > 128): fall through to the loud error below,
-        // consistent with serialize_type()'s own refusal for this width.
+        // size > 16 (bit_width > 128): named error, consistent with
+        // serialize_type()'s own #1123 refusal for this width -- distinct
+        // from the generic fallback below so this doesn't read as an
+        // unrecognized/unknown type (#1128 audit).
+        error("cccc: cannot serialize initializer for global '%s' in native "
+              "mode: _BitInt(%d) exceeds 128 bits, which has no native/-m "
+              "lowering (#1123)",
+              var->name, ty->bit_width);
     }
 
     // TY_COMPLEX and anything else with no verified byte layout here: fail

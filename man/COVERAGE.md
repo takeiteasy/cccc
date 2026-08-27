@@ -1279,6 +1279,74 @@ can never model — which is worse than the status quo. `#657`'s existing
 architecturally inert" classification the format/alloc_size/etc. attributes
 already get.
 
+### Refusals: what `-c=native` declines to lower
+
+The admissibility rule above is enforced by construction for `NodeKind`s and
+`TypeKind`s, but a handful of shapes still reach an explicit, named
+`error()`/`error_tok()` call in the serializer (`src/serialize_decl.c`,
+`serialize_expr.c`, `serialize_stmt.c`, `serialize_type.c`,
+`serialize_program.c` — the old single-file `src/serialize.c` was split into
+these by #1150) rather than a `default:` case, because the *reason* they
+can't be lowered is specific to the construct, not "unhandled". This table is
+the complement of "any standard C compiles" — audited directly against every
+`error`/`error_tok` call site in those five files (#1128).
+
+| Construct | Site | Why |
+|---|---|---|
+| `__builtin_pc_function_name` / `__builtin_pc_source_location` | `serialize_expr.c` (`ND_FUNCALL` case) | resolves a VM bytecode offset through the VM's own symbol table; no host equivalent exists to translate to |
+| bare reference to a nested function (`int (*p)(int) = inner;`, or passing one as a callback) | `serialize_program.c` (`collect_nested_refs`) | the lowered signature carries a hidden leading `__static_link` parameter no real function-pointer type can express (#1074). The one legal shape — a direct call's own callee — is exempted, not rejected |
+| block literal at file scope | `serialize_expr.c` (`ND_BLOCK_LITERAL` case) | a block's descriptor is a *local*, living on the enclosing function's frame (#965); there is no frame at file scope to hold one |
+| a block literal's own descriptor local, captured by a nested function's static link | `serialize_program.c` (`record_nested_upvar`) | a descriptor has no meaningful value to hand across a static link (distinct from an ordinary `__block`-storage local, which #1080 does support this way) |
+| anonymous `struct`/`union` under `#pragma pack(N)` | `serialize_type.c` (`serialize_anon_aggregate`) | has no tag or typedef name to wrap in its own `#pragma pack(push, N)`/`pop` pair at file scope (#1173) — user-actionable: give it a name |
+| a non-zero store into a member CCCC treats as host-owned layout (`{0}`-then-assign pattern reaching a `from_include` struct's member) | `serialize_expr.c` (`serialize_host_owned_zero_init_chain`) | the member path is CCCC's own projection, not necessarily the host's real layout — emitting the store would be silently unsound rather than merely incomplete (#1103) |
+
+Every other `error`/`error_tok` site in those five files is an **internal-
+invariant guard**, not a refusal of valid user input — reaching one means a
+prior compiler pass violated its own contract (`serialize_stmt.c`'s
+break/continue-target lookup; `serialize_expr.c`'s "block literal missing its
+descriptor" and unexpanded-macro/splice checks; `serialize_type.c`'s
+unresolved `TY_ERROR`/`TY_AUTO`; the `default:` arms in `serialize_expr.c`/
+`serialize_type.c`, #963c; and `serialize_decl.c`'s relocation-resolution
+checks backing #918/#925/#1044's fail-loudly initializer policy).
+
+Two more refusals exist but are already tracked elsewhere, not new here:
+`_Decimal`/`<decimal_math.h>` (`serialize_expr.c`/`serialize_program.c`, only
+under a clang host — #1113, see the `_Decimal` section below) and
+`_BitInt(N)` past 128 bits (`serialize_type.c`/`serialize_decl.c` — #1123,
+open). `_Decimal`'s host-side refusal is also notable for *not* being an
+`error()` call at all: `cc_serialize_program` emits an
+`#if !defined(__DEC64_MAX__) #error ...` preamble into the generated C
+itself, deferring the decision to whichever host compiler reads the output —
+invisible to an `error(`-grep audit, worth remembering for the next one.
+
+The remaining gaps below are plain ISO C the serializer could, in principle,
+reconstruct but doesn't yet — accepted at the time, with no ticket carrying
+them until this audit:
+
+- **Union global initializer with no member spanning the full object**
+  (`serialize_decl.c`, `serialize_init_bytes`'s `TY_UNION` case) — e.g.
+  `union U { char c[3]; short s; } u = {...}` where the largest member is
+  smaller than the union's own padded size. #1207.
+- **`_Complex` (and any other type with no verified byte layout) as a global
+  initializer** (`serialize_decl.c`, `serialize_init_bytes`'s final
+  fallback) — `_Complex` has a well-known two-part host layout that could be
+  reconstructed as a compound literal. #1208.
+- **#1074 residual: a VLA, or a pointer-to-VLA local, read by a nested
+  function** (`serialize_program.c`, `record_nested_upvar`) — accepted at
+  the time the general nested-function static-link lowering landed; no
+  fixed-address slot exists to hand across the link because the VLA's
+  declaration can't be hoisted ahead of its own length expression (#964).
+  #1209.
+- **#1081 residual: calling a nested function whose own parent lies beyond a
+  block ancestor** (`serialize_program.c`, `collect_nested_refs`) — needs
+  the block's *enclosing frame*, which a heap-copyable block descriptor
+  deliberately never stores. #1210.
+
+A fifth site, a bitfield initializer wider than 128 bits
+(`serialize_decl.c`, `serialize_init_bytes`'s `TY_STRUCT` member loop), is
+the same construct class as #1123 rather than a separate gap — tracked there
+as a follow-up note, not its own ticket.
+
 ### Layout guards: `_Static_assert` next to every emitted aggregate
 
 `-c=native`/`-m`/`-c=generated` const-fold `sizeof`, `_Alignof`, and member
@@ -1418,7 +1486,7 @@ the v2 epic, #1055, targeting v0.5.0.
 
 `-c=native`, `-m` and `-c=generated` re-emit the program as C and hand it to a
 host compiler. The rule everywhere else in this document is that the emitted C
-behaves as the VM behaves. Thirteen constructs cannot fully honour that, and
+behaves as the VM behaves. Fourteen constructs cannot fully honour that, and
 they are listed here rather than left to be discovered:
 
 | Construct | VM | Serialized output |

@@ -21,6 +21,14 @@ All notable changes to CCCC are documented here. Format loosely follows
   equivalent to repurpose them as. See `man/COVERAGE.md`'s tail-call-
   elimination and `__builtin_dynamic_object_size` divergence rows.
 
+### Added
+
+- `man/COVERAGE.md`'s "`-c=native` scope for v0.4.0" section gains a
+  "Refusals: what `-c=native` declines to lower" index -- every construct
+  the serializer refuses, classified as either permanent-by-design (the
+  construct has no portable host translation) or an untracked gap (plain
+  ISO C the serializer could, in principle, lower but doesn't yet).
+
 ## [0.3.17] - 2026-08-27
 
 ### Added
