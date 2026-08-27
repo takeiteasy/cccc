@@ -3,6 +3,30 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.16] - 2026-08-27
+
+### Fixed
+
+- `include/stddef.h`'s `wchar_t` was hardcoded `int`, wrong on Linux
+  aarch64 (AAPCS64 defines it `unsigned int`, matching clang/gcc's own
+  `__WCHAR_TYPE__` there) -- silently fine on the VM, but a redefinition
+  compile error under `-c=native`/`-m` the moment a program's replayed
+  `#include`s reached the real host `<stddef.h>`. Now platform-conditional,
+  same shape as #1174's `long double` fix. Found via the v0.3.15 GitHub
+  Release CI run (linux-aarch64), the only place this quadrant is tested
+  (sr.ht has no aarch64 runners) -- pre-existing since before v0.3.13, not
+  introduced by v0.3.15's changes.
+- `serialize_string_n` (`src/serialize_expr.c`) always spelled a string
+  literal's own implicit trailing NUL out explicitly as `\000`, even though
+  the host compiler adds an identical one back regardless -- functionally
+  harmless, but a `\000` immediately before a printf-style format
+  argument's closing quote reads as a suspicious embedded NUL to clang 18's
+  `-Wformat` checker and failed a `-Werror` native build (again only
+  exercised by the GitHub Release CI's Linux aarch64 job). Now strips
+  exactly one genuinely-redundant trailing NUL before escaping; any NUL
+  before that stays escaped as before (#918's embedded-NUL fix is
+  unaffected).
+
 ## [0.3.15] - 2026-08-27
 
 ### Added

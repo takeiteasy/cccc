@@ -342,6 +342,24 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
 // character '1') would be misparsed by the host compiler as a 2-digit
 // octal escape `\01`; `\000` has no such ambiguity.
 void serialize_string_n(FILE *f, const char *str, int len) {
+    // A C string literal always gets an implicit trailing NUL from the host
+    // compiler regardless of what's inside the quotes, so a `str`/`len` that
+    // already ends in one (the common case: an ordinary string literal's
+    // array_len includes its own terminator) doesn't need that last byte
+    // spelled out explicitly -- the compiler adds an identical one right
+    // back. Strip exactly one such trailing NUL, not more: any NUL before
+    // it is genuine embedded content (#918) and must stay escaped, and the
+    // resulting byte sequence is identical either way once the array
+    // declaration's own size (set independently, from the same `len` this
+    // caller had before calling in) still governs how many bytes actually
+    // land in memory. This was previously spelled out unconditionally --
+    // harmless for plain data, but a `\000` this close to the closing quote
+    // of a printf-style format-string argument reads to clang's -Wformat
+    // checker as a suspicious embedded NUL and fails a -Werror native
+    // build (clang 18/Ubuntu, Linux aarch64 release CI) even though the
+    // bytes were always correct.
+    if (len > 0 && str[len - 1] == '\0')
+        len--;
     fprintf(f, "\"");
     for (int i = 0; i < len; i++) {
         unsigned char c = (unsigned char)str[i];
