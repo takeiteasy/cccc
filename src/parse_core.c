@@ -360,7 +360,7 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
     bool has_std = attr.is_maybe_unused || attr.is_deprecated ||
                    attr.is_noreturn || attr.is_nodiscard || attr.is_pure ||
                    attr.is_func_const || attr.format_style || attr.cleanup_fn ||
-                   attr.align > 0 || attr.fn_optimize_set;
+                   attr.align > 0;
     bool has_custom = attr.custom_attrs != NULL;
 
     if (!has_std && !has_custom)
@@ -696,17 +696,15 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->tok       = ty->name;
     var->display_name =
         ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : name;
-    var->is_maybe_unused   = ty->is_maybe_unused;
-    var->is_deprecated     = ty->is_deprecated;
-    var->is_noreturn       = ty->is_noreturn;
-    var->is_pure           = ty->is_pure;
-    var->is_func_const     = ty->is_func_const;
-    var->fn_optimize_level = ty->fn_optimize_level;
-    var->fn_optimize_set   = ty->fn_optimize_set;
-    var->deprecated_msg    = ty->deprecated_msg;
-    var->is_constructor    = ty->is_constructor;
-    var->is_destructor     = ty->is_destructor;
-    var->init_priority     = ty->init_priority;
+    var->is_maybe_unused = ty->is_maybe_unused;
+    var->is_deprecated   = ty->is_deprecated;
+    var->is_noreturn     = ty->is_noreturn;
+    var->is_pure         = ty->is_pure;
+    var->is_func_const   = ty->is_func_const;
+    var->deprecated_msg  = ty->deprecated_msg;
+    var->is_constructor  = ty->is_constructor;
+    var->is_destructor   = ty->is_destructor;
+    var->init_priority   = ty->init_priority;
     if (var->is_constructor || var->is_destructor) {
         // Reachable only via the attribute (gen() walks prog for
         // is_constructor/ is_destructor, not through any call site) — keep it

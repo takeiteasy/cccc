@@ -492,7 +492,7 @@ extern "C" {
        tracker #402). Appended here, never interleaved with earlier                  \
        opcodes, so TypeKind/opcode numbering never shifts regardless of              \
        whether the build has CCCC_HAS_DECIMAL=1 (only the ops.c *handler             \
-       bodies* are #ifdef'd;                                                        \
+       bodies* are #ifdef'd;                                                         \
        these opcode slots and their operand-word counts always exist).               \
        \                                                                             \
        Zero-operand, fixed-A-register convention -- identical shape to               \
@@ -625,7 +625,7 @@ extern "C" {
                     man/SAFETY.md's Checked Pointers section for the v1              \
                     scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */            \
     /* #982: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers. */                                          \
+       so no existing opcode renumbers. */                                           \
     X(CHKBN, 1) /* Check array bounds, subtracting form: CHKB's sibling for          \
                    pointer SUBTRACTION (`p - n`). Same operand format as CHKB        \
                    ([rs1:base, rs2:scaled_offset], RR operand word), but the         \
@@ -660,7 +660,7 @@ extern "C" {
                    frame-scoped storage (#981) must never sweep this kind.           \
                    CHKB/CHKBN/CHKP3/DYNOBJSZ are unaffected, same as ALCA. */        \
     /* #983: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers. */                                          \
+       so no existing opcode renumbers. */                                           \
     X(CHKD, 3) /* Check bounds at DEREFERENCE time (the other half of the            \
                    #983 formation-vs-dereference split). CHKB/CHKBN (below)          \
                    check a pointer *value* when it is formed by `p + n` /            \
@@ -688,7 +688,7 @@ extern "C" {
                    non-heap base" limitation CHKB/CHKBN already document.            \
                    Gated on CCCC_BOUNDS_CHECKS, same as CHKB/CHKBN. */               \
     /* #981: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers. */                                          \
+       so no existing opcode renumbers. */                                           \
     X(ALCV, 0) /* VLA storage: size=A0, result=A0; identical register shape          \
                   to ALCA/MALC/ALCB, tagged AllocHeader.kind=ALLOC_KIND_FRAME        \
                   instead of ALCA's ALLOC_KIND_ALLOCA (see ALCA's own                \
@@ -702,7 +702,7 @@ extern "C" {
                   explicit `__builtin_alloca`/`__builtin_alloca_with_align`          \
                   call-construction sites in primary()/unary(). */                   \
     /* #981: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers. */                                          \
+       so no existing opcode renumbers. */                                           \
     X(HMRK, 1) /* Heap mark: push a reclamation watermark for the current            \
                   block. Format: [HMRK] [depth:i32], mirrors SCOPEIN's               \
                   single-word immediate exactly (emit_word, not emit_i64 --          \
@@ -1473,12 +1473,6 @@ struct Type {
     struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); copied
                             // to Obj by new_var()
 
-    // Per-function optimization level (__attribute__((optimize)) /
-    // [[cccc::optimize]])
-    int fn_optimize_level; // requested opt level (0–4); only valid if
-                           // fn_optimize_set
-    bool fn_optimize_set;  // true if an optimize attribute was present
-
     // _BitInt(N): bit width for TY_BITINT types
     int bit_width;
 
@@ -2100,12 +2094,6 @@ struct Obj {
     char *attr_error_msg;   // __attribute__((error("msg")))
     char *attr_warning_msg; // __attribute__((warning("msg")))
 
-    // Per-function optimization level (GCC-style: attribute overrides global
-    // -O)
-    int fn_optimize_level; // requested opt level (0–4); only valid if
-                           // fn_optimize_set
-    bool fn_optimize_set;  // true if an optimize attribute was present
-
     // Local variable
     int offset;    /**< For local variables: stack offset. For globals/functions
                       some fields (like code_addr) are used instead. */
@@ -2568,16 +2556,12 @@ void cc_free_ret_fields(TestRetField *f);
 typedef struct {
     uint32_t or_bits;            // CCCCFlags bits to force on
     uint32_t set_mask;           // CCCCFlags bits explicitly named (on or off)
-    int      opt_level;          // -O level (valid only when opt_set)
-    bool     opt_set;            // true if -O/-Ox/--optimize=N was present
     uint64_t warn_or;            // CCCCWarning bits to enable
     uint64_t warn_mask;          // CCCCWarning bits explicitly named
     uint64_t warn_errors_or;     // warning_errors bits to enable
     uint64_t warn_errors_mask;   // warning_errors bits explicitly named
     bool     warn_as_errors;     // true if -Werror (global) was given
     bool     warn_as_errors_set; // true if any -Werror variant was present
-    uint32_t f_enable;           // CcccOptPass bits to force ON
-    uint32_t f_disable;          // CcccOptPass bits to force OFF
     char   **ffi_allow;          // names to add to allow-list (heap-allocated)
     int      ffi_allow_count;    // number of entries in ffi_allow
 } CcTestFlagsDelta;
@@ -2618,8 +2602,6 @@ struct TestFnRecord {
     uint32_t test_flags_or;   // bits to force on when compiling this test
     uint32_t test_flags_mask; // which bits the string explicitly controls (on
                               // or off)
-    int  test_opt_level;      // per-test optimisation level (0..4)
-    bool test_opt_set; // true if flags= specified an -O/-Ox/--optimize=N level
     // Per-test warning delta (#612)
     uint64_t test_warn_or;            // CCCCWarning bits to enable
     uint64_t test_warn_mask;          // CCCCWarning bits explicitly named
@@ -2627,10 +2609,6 @@ struct TestFnRecord {
     uint64_t test_warn_errors_mask;   // warning_errors bits explicitly named
     bool     test_warn_as_errors;     // -Werror (global) given
     bool     test_warn_as_errors_set; // any -Werror variant present
-    // Per-test -f pass delta (#612)
-    uint32_t test_f_enable;  // CcccOptPass bits to force ON
-    uint32_t test_f_disable; // CcccOptPass bits to force OFF
-    bool     test_f_set;     // true if any -f/-fno- flag given
     // Per-test ffi-allow list
     char **test_ffi_allow;       // NULL or names to allow; heap-allocated
     int    test_ffi_allow_count; // number of entries
@@ -3405,19 +3383,6 @@ typedef struct {
     Token          *open_tok;  // for unclosed-block diagnostics
 } ComptimeCtxEntry;
 
-// Bitmask of individual optimisation passes for -f/-fno- CLI overrides.
-// The effective pass set is (level_to_opt_mask(opt_level) | opt_f_enable) &
-// ~opt_f_disable.
-typedef enum {
-    CCCC_OPT_FOLD      = 1 << 0, // Constant folding           (-ffold)
-    CCCC_OPT_PEEPHOLE  = 1 << 1, // Peephole reductions        (-fpeephole)
-    CCCC_OPT_COPY_PROP = 1 << 2, // Copy propagation           (-fcopy-prop)
-    CCCC_OPT_DCE       = 1 << 3, // Dead code elimination      (-fdce)
-    CCCC_OPT_CSE       = 1 << 4, // Common-subexp elimination  (-fcse)
-    CCCC_OPT_FUSE      = 1 << 5, // Opcode fusion              (-ffuse)
-    CCCC_OPT_ELIM_EXT  = 1 << 6, // Redundant extension elim   (-felim-ext)
-} CcccOptPass;
-
 // One __attribute__((constructor)) / ((destructor)) function, gathered by
 // gen() (codegen.c) and run around main() by cc_run() (vm.c).
 typedef struct {
@@ -3821,9 +3786,9 @@ typedef struct Compiler {
         long long target_offset;  // Target offset in data segment (text NYI)
         long long addend;         // Byte addend applied to target
         int       target_segment; // 0 = data (only supported value currently)
-    }  *tls_relocs;
-    int num_tls_relocs;
-    int tls_relocs_cap;
+    }         *tls_relocs;
+    int        num_tls_relocs;
+    int        tls_relocs_cap;
 
     LabelEntry label_table[MAX_LABELS];
     int        num_labels;
@@ -3898,30 +3863,16 @@ typedef struct Compiler {
     int macro_gensym_counter; // Counter for __cccc_gensym()
     int counter_macro_value;  // __COUNTER__ macro value
 
-    // Optimization settings
-    int opt_level;          // Optimization level (0=none, 1=basic, 2=standard,
-                            // 3=aggressive; 4 enables fused-op pass)
-    bool ffp_contract_fma;  // --fma: emit FMADD3_FMA (single-rounding) instead
-                            // of FMADD3
-    int  inline_node_limit; // Max AST nodes for full inlining (0=disable)
-    bool have_fn_opt_attrs; // True if any function carries an optimize
-                            // attribute; gates the per-function optimizer path
-                            // in cc_optimize
-    // Per-pass overrides from -f<pass> / -fno-<pass> (bitmask of CcccOptPass).
-    // Applied on top of the level-derived default: effective = (level_mask |
-    // opt_f_enable) & ~opt_f_disable.
-    uint32_t opt_f_enable;  // Passes forced ON regardless of -O level
-    uint32_t opt_f_disable; // Passes forced OFF regardless of -O level
-    uint32_t cli_f_mask;    // -f/-fno- pass bits pinned by CLI (#612: pragma
-                            // config won't override)
+    // Optimisation level. The VM has no bytecode optimiser; this is 0 in VM
+    // mode and only non-zero under -c=native, where it is forwarded to the
+    // host cc (#1159).
+    int opt_level;
 
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask; // CCCCFlags bits explicitly set on the CLI; these
                              // win over `#pragma cccc config(...)` (#357)
-    bool cli_opt_level_set;  // True if -O/--optimize was passed on the CLI;
-                             // `config(optimisation = N)` is ignored if so
     bool native_mode;        // True when compile_format == COMPILE_NATIVE;
-                             // config()'s flag/opt_level effects are skipped
+                             // config()'s flag effects are skipped
 
     // Inlining context (used during codegen when expanding inline bodies)
     char *inline_exit_name; // Exit label name for inlined returns (NULL = not

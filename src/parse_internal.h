@@ -108,10 +108,6 @@ typedef struct {
                    // seen in declspec position: a floor, never lowers
                    // (#1160)
 
-    // Per-function optimization level
-    int  fn_optimize_level;
-    bool fn_optimize_set;
-
     // Format string validation
     int format_style;         // 0=none/unvalidated, 1=printf, 2=scanf
     int format_string_index;  // 1-based index of format string arg

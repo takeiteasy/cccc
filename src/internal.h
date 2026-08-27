@@ -1136,43 +1136,6 @@ void cccc_gil_acquire(VirtualMachine *vm);
 void cccc_gil_release(VirtualMachine *vm);
 
 //
-// optimize.c
-//
-
-void cc_optimize(VirtualMachine *vm, int level);
-
-//
-// analyze.c
-//
-// CcAnalyzeNgramOptions/cc_analyze_ngram_* live in cccc.h (main.c-only);
-// the fusion-candidate half lives here since optimize.c calls it too.
-
-typedef struct {
-    int  top_n;
-    bool json; // emit JSON instead of text
-} CcAnalyzeFusionOptions;
-
-typedef struct CcFusionState CcFusionState;
-
-CcFusionState *cc_analyze_fusion_begin(const CcAnalyzeFusionOptions *opts);
-void cc_analyze_fusion_feed(CcFusionState *st, const InstrWord *text,
-                            long long num_words, const char *label, FILE *out);
-void cc_analyze_fusion_finish(CcFusionState *st, FILE *out);
-
-typedef struct {
-    int def_op;
-    int def_pc;
-    int def_size;
-    int use_op;
-    int use_pc;
-    int reg;
-    int def_rd;
-    int use_byte;
-} CcFusionCandidate;
-
-CcFusionCandidate *cc_analyze_fusion_collect(CcFusionState *st, int *out_count);
-
-//
 // debugger.c
 //
 

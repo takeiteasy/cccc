@@ -1879,19 +1879,20 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     }
 }
 
-// Parse optimize attribute argument: (N) where N is an integer 0-4, or ("ON")
-// where the string is "O0".."O4" or "-O0".."-O4" (GCC-compatible form). Sets
-// the optimize fields on ty and/or attr and marks have_fn_opt_attrs on the
-// compiler. Returns the token after the closing ')'.
+// Parse and discard an optimize attribute argument: (N) where N is an integer
+// 0-4, or ("ON") where the string is "O0".."O4" or "-O0".."-O4" (GCC form).
+// The VM has no optimiser, so the attribute has no effect -- it is still
+// syntax-checked (a malformed argument is an error) and then ignored, for
+// compatibility with GCC/Clang sources that carry it. Returns the token after
+// the closing ')'.
 static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok, Type *ty,
                                   VarAttr *attr) {
-    tok       = skip(vm, tok, "(");
-
-    int level = -1;
+    (void)ty;
+    (void)attr;
+    Token *attr_tok = tok;
+    tok             = skip(vm, tok, "(");
 
     if (tok->kind == TK_NUM || tok->kind == TK_PP_NUM) {
-        // Integer form: [[cccc::optimize(2)]] / __attribute__((optimize(2)))
-        // Use tok->val if available (TK_NUM); fall back to strtol on raw text.
         long long val;
         if (tok->kind == TK_NUM) {
             val = tok->val;
@@ -1906,14 +1907,11 @@ static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok, Type *ty,
         if (val < 0 || val > 4)
             error_tok(vm, tok,
                       "optimize level must be an integer 0-4 (got %lld)", val);
-        level = (int)val;
-        tok   = tok->next;
+        tok = tok->next;
     } else if (tok->kind == TK_STR) {
-        // String form: __attribute__((optimize("O2"))) or
-        // [[cccc::optimize("-O2")]]
         const char *s = tok->str;
         if (*s == '-')
-            s++; // skip optional leading '-'
+            s++;
         if (*s != 'O' && *s != 'o')
             error_tok(
                 vm, tok,
@@ -1925,24 +1923,17 @@ static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok, Type *ty,
                 vm, tok,
                 "optimize string must be 'O0'–'O4' or '-O0'–'-O4' (got '%s')",
                 tok->str);
-        level = (int)(*s - '0');
-        tok   = tok->next;
+        tok = tok->next;
     } else {
         error_tok(vm, tok,
                   "optimize attribute expects an integer 0-4 or a string "
                   "like \"O2\" or \"-O2\"");
     }
 
-    if (ty) {
-        ty->fn_optimize_level = level;
-        ty->fn_optimize_set   = true;
-    }
-    if (attr) {
-        attr->fn_optimize_level = level;
-        attr->fn_optimize_set   = true;
-    }
     if (!vm->compiler.in_type_lookahead)
-        vm->compiler.have_fn_opt_attrs = true;
+        warn_tok(vm, attr_tok, CCCC_WARN_IGNORED_FEATURES,
+                 "'optimize' attribute ignored: the VM has no optimiser (use "
+                 "-c=native for host -O)");
 
     tok = skip(vm, tok, ")");
     return tok;

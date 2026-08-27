@@ -558,7 +558,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         output (see man/COVERAGE.md); on by "
            "default\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
-           "(diagnostics, header declarations, --fusion-candidates, etc.)\n");
+           "(diagnostics, header declarations, etc.)\n");
     printf("\t-J/--ffi-decls           Emit parsed function/struct/enum "
            "declarations "
            "as JSON (for FFI wrapper generation)\n");
@@ -577,7 +577,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                                    objects to C; writes to -o "
            "file, or ./a.gen.c\n");
     printf("\t                                    if -o omitted\n");
-    printf("\t                         Aliases: native=n, generated=gen=g. Use\n");
+    printf(
+        "\t                         Aliases: native=n, generated=gen=g. Use\n");
     printf("\t                         -cnative or --compile=native (short "
            "form must be\n");
     printf("\t                         attached; long form may use '=' or "
@@ -816,38 +817,11 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                              (pre-#283 behavior; default is "
            "isolated)\n");
     printf("\nOptimization:\n");
-    printf("\t-O/--optimize[=LEVEL]        Enable bytecode optimization "
-           "(default: disabled)\n");
-    printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
-           "3=aggressive, 4=fused\n");
-    printf("\t                             Under -c=native: forwarded "
-           "verbatim as -O<n> to the host cc\n");
-    printf("\t                             instead (no bytecode pipeline to "
-           "optimize)\n");
-    printf("\t                             1: constant folding (-ffold)\n");
-    printf("\t                             2: +peephole, +CSE (-fpeephole "
-           "-fcse)\n");
-    printf("\t                             3: +copy-prop, +DCE (-fcopy-prop "
-           "-fdce)\n");
-    printf("\t                             4: +opcode fusion, +redundant "
-           "extension elimination (-ffuse -felim-ext)\n");
-    printf("\t-f<pass>                     Enable a single optimisation pass "
-           "regardless of -O level.\n");
-    printf("\t-fno-<pass>                  Disable a pass even if enabled by "
-           "-O.\n");
-    printf("\t                             Passes: fold, peephole, copy-prop, "
-           "dce, cse, fuse, elim-ext\n");
-    printf("\t                             Examples: -O3 -fno-cse, -O0 "
-           "-fpeephole, "
-           "-ffold -fdce\n");
-    printf("\t                             Long-form aliases also accepted: "
-           "--ffold, --fpeephole, "
-           "--fcopy-prop,\n");
-    printf("\t                             --fdce, --fcse, --ffuse, "
-           "--felim-ext, and their "
-           "--fno-* counterparts\n");
-    printf("\t--fma                        Enable single-rounding FMA (-ffuse "
-           "implied; may change FP results)\n");
+    printf("\t-O/--optimize[=LEVEL]        No effect in VM mode (the VM does "
+           "not optimise).\n");
+    printf("\t                             Under -c=native it is forwarded "
+           "verbatim as -O<n>\n");
+    printf("\t                             to the host cc. LEVEL: 0..4.\n");
     printf("\t--trap-fp-divzero            Abort on float division by zero "
            "instead of IEEE +-Inf/NaN\n");
     printf("\t--posix-emulation            Enable lossy/approximate emulation "
@@ -862,8 +836,6 @@ static void usage(const char *argv0, int exit_code) {
            "codes outside the\n");
     printf("\t                             layout-verified allowlist (off by "
            "default there too). VM-only.\n");
-    printf("\t--inline-limit=N             Limit inlining to N AST nodes "
-           "(default: 20, 0=disable)\n");
     printf("\nStatic Bytecode Analysis (compile input, walk text "
            "segment, exit):\n");
     printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
@@ -871,9 +843,6 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t--ngrams-top=N          Show top N sequences (default 25)\n");
     printf("\t--ngrams-per-file       Print a per-input section in addition to "
            "the aggregate\n");
-    printf("\t--fusion-candidates[=N] Use-def fusion candidate analysis (top "
-           "N, default 50)\n");
-    printf("\t                        JSON output via -j/--json\n");
     printf("\nInline Assembly:\n");
     printf("\t-A/--asm-passthru   Compile asm(\"...\") statements via native C "
            "compiler\n");
@@ -1270,7 +1239,6 @@ static const struct {
     {CCCC_ENABLE_DEBUGGER, "--debug"},
     {CCCC_THREAD_SAFETY, "--thread-safety"},
     {CCCC_NO_DEBUG_ON_CRASH, "--no-debug-on-crash"},
-    {CCCC_FMA, "--fma"},
     {CCCC_TRAP_FP_DIVZERO, "--trap-fp-divzero"},
 };
 
@@ -1343,8 +1311,6 @@ int main(int argc, const char *argv[]) {
     bool vm_heap_disable_requested =
         false; // True if -V/--no-vm-heap was passed (now toggles the heap off)
                // (#665)
-    bool cli_opt_level_set =
-        false; // True if -O/--optimize was passed on the CLI (#357)
     int print_tokens        = 0;   // -p
     int preprocess_only     = 0;   // -E
     int dump_expanded_only  = 0;   // -m
@@ -1365,11 +1331,10 @@ int main(int argc, const char *argv[]) {
     int            no_layout_guards_mode = 0; // --no-layout-guards (#1172)
     int            test_run_mode         = 0; // --test-run[=LEVEL]
     uint64_t       test_run_flags =
-        0; // safety preset bits for --test-run's VM smoke test
-    int compile_only =
-        0; // -c (set whenever -c/--compile is given; semantics:
-           //   "compile, do not execute". -c=native hands off to the
-           //   system compiler.)
+        0;                // safety preset bits for --test-run's VM smoke test
+    int compile_only = 0; // -c (set whenever -c/--compile is given; semantics:
+                          //   "compile, do not execute". -c=native hands off to
+                          //   the system compiler.)
     int      max_errors         = 20; // --max-errors (default: 20)
     int      warnings_as_errors = 0;  // -Werror / --Werror
     uint64_t warnings           = 0;
@@ -1381,15 +1346,10 @@ int main(int argc, const char *argv[]) {
     int    embed_hard_error      = 0;  // --embed-hard-limit
     int    macro_recursion_limit = -1; // --macro-recursion-limit
     int    repl_mode             = 0;  // -r / --repl
-    int    opt_level = 0; // -O0/-O1/-O2/-O3/-O4 (default: 0 = no optimization)
-    int    ffp_contract_fma = 0; // --fma
-    uint32_t opt_f_enable   = 0; // passes forced ON  by -f<pass>
-    uint32_t opt_f_disable  = 0; // passes forced OFF by -fno-<pass>
-    uint32_t opt_f_mask     = 0; // all bits touched by -f/-fno- CLI args (#612)
-    int      inline_node_limit  = 20; // --inline-limit (default 20, 0=disable)
-    int      asm_passthru       = 0;  // --asm-passthru
-    const char  *std_arg        = NULL; // --std=<standard>
-    const char **ffi_allow_args = NULL;
+    int opt_level = 0; // -O<n>: VM no-op; forwarded to host cc under -c=native
+    int asm_passthru                      = 0;    // --asm-passthru
+    const char  *std_arg                  = NULL; // --std=<standard>
+    const char **ffi_allow_args           = NULL;
     int          ffi_allow_args_count     = 0;
     const char **ffi_deny_args            = NULL;
     int          ffi_deny_args_count      = 0;
@@ -1402,23 +1362,26 @@ int main(int argc, const char *argv[]) {
     const char  *vm_profile_input         = NULL;
     int          vm_profile_ran           = 0;
     const char  *entry_name               = NULL; // -e / --entry
-    enum { COMPILE_NONE, COMPILE_NATIVE, COMPILE_GENERATED } compile_format =
-        COMPILE_NONE;
-    int            no_comptime             = 0; // --no-comptime / -C
-    int            comptime_include_all    = 0; // --comptime-include-all
-    int            allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
-    int            run_ngrams = 0; // 0 = off; 2 or 3 = enabled with n-gram size
-    int            ngrams_top = 25;
-    int            ngrams_per_file = 0;
-    int            run_fusion      = 0; // 0 = off; >0 = enabled, value is top-N
-    CcNgramState  *ngram_state     = NULL;
-    CcFusionState *fusion_state    = NULL;
+    enum {
+        COMPILE_NONE,
+        COMPILE_NATIVE,
+        COMPILE_GENERATED
+    } compile_format                      = COMPILE_NONE;
+    int           no_comptime             = 0; // --no-comptime / -C
+    int           comptime_include_all    = 0; // --comptime-include-all
+    int           allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
+    int           run_ngrams = 0; // 0 = off; 2 or 3 = enabled with n-gram size
+    int           ngrams_top = 25;
+    int           ngrams_per_file = 0;
+    CcNgramState *ngram_state     = NULL;
     int testing_mode = 0; // any --testing[=...]/--test*/--list-tests flag
     // --testing[=vm|native]: bare -t/--testing defaults to VM (today's
     // behaviour, unchanged); =native drives a serialized-harness -c=native
     // round-trip (#1033).
-    enum { TESTING_BACKEND_VM, TESTING_BACKEND_NATIVE } testing_backend =
-        TESTING_BACKEND_VM;
+    enum {
+        TESTING_BACKEND_VM,
+        TESTING_BACKEND_NATIVE
+    } testing_backend          = TESTING_BACKEND_VM;
     const char  *test_glob     = NULL;            // --test=GLOB
     const char  *suite_filter  = NULL;            // --test-suite=NAME
     int          list_tests    = 0;               // --list-tests
@@ -1509,7 +1472,6 @@ int main(int argc, const char *argv[]) {
         {"embed-limit", required_argument, 0, 1048},
         {"embed-hard-limit", no_argument, 0, 1060},
         {"optimize", optional_argument, 0, 'O'},
-        {"fma", no_argument, 0, 1072},
         {"posix-emulation", no_argument, 0, 1117},
         {"macro-recursion-limit", required_argument, 0, 1115},
         {"repl", no_argument, 0, 'r'},
@@ -1524,10 +1486,8 @@ int main(int argc, const char *argv[]) {
         {"ngrams", optional_argument, 0, 1057},
         {"ngrams-top", required_argument, 0, 1030},
         {"ngrams-per-file", no_argument, 0, 1031},
-        {"fusion-candidates", optional_argument, 0, 1058},
         {"comptime-include-all", no_argument, 0, 1050},
         {"allow-comptime-pp-bleed", no_argument, 0, 1068},
-        {"inline-limit", required_argument, 0, 1051},
         {"asm-passthru", no_argument, 0, 'A'},
         {"testing", optional_argument, 0, 't'},
         {"test", required_argument, 0, 1061},
@@ -1556,22 +1516,6 @@ int main(int argc, const char *argv[]) {
         {"build-cache", optional_argument, 0, 1091},
         {"build-option", required_argument, 0, 1092},
         {"build-install", no_argument, 0, 1093},
-        // Per-pass optimisation enables/disables (long-form aliases for
-        // -f<pass>)
-        {"ffold", no_argument, 0, 1096},
-        {"fpeephole", no_argument, 0, 1097},
-        {"fcopy-prop", no_argument, 0, 1098},
-        {"fdce", no_argument, 0, 1099},
-        {"fcse", no_argument, 0, 1100},
-        {"ffuse", no_argument, 0, 1101},
-        {"fno-fold", no_argument, 0, 1102},
-        {"fno-peephole", no_argument, 0, 1103},
-        {"fno-copy-prop", no_argument, 0, 1104},
-        {"fno-dce", no_argument, 0, 1105},
-        {"fno-cse", no_argument, 0, 1106},
-        {"fno-fuse", no_argument, 0, 1107},
-        {"felim-ext", no_argument, 0, 1108},
-        {"fno-elim-ext", no_argument, 0, 1109},
         // System-header mode
         {"use-system-headers", no_argument, 0, 1112},
         {"no-builtin-includes", no_argument, 0, 1113},
@@ -1590,7 +1534,7 @@ int main(int argc, const char *argv[]) {
     }
     int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
     const char *optstring =
-        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABf:w";
+        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABw";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1910,8 +1854,11 @@ int main(int argc, const char *argv[]) {
                 break;
             case 'O':  // --optimize / -O (also matches --optimize via
                        // long_options)
+                // The VM has no bytecode optimiser. -O<n> is accepted and,
+                // under -c=native, forwarded verbatim to the host cc (#1159);
+                // in plain VM mode it is a no-op (a warning is emitted later,
+                // once the compile mode is known).
                 if (optarg == NULL) {
-                    // Just -O or --optimize without argument means -O1
                     opt_level = 1;
                 } else if (optarg[0] >= '0' && optarg[0] <= '4' &&
                            optarg[1] == '\0') {
@@ -1924,12 +1871,6 @@ int main(int argc, const char *argv[]) {
                         optarg);
                     usage(argv[0], 1);
                 }
-                cli_opt_level_set = true;
-                break;
-            case 1072: // --fma
-                opt_f_enable     |= CCCC_OPT_FUSE;
-                ffp_contract_fma  = 1;
-                flags            |= CCCC_FMA;
                 break;
             case 1117:   // --posix-emulation
                 flags |= CCCC_POSIX_EMULATION;
@@ -2011,27 +1952,16 @@ int main(int argc, const char *argv[]) {
                 ngrams_top = (int)val;
                 break;
             }
-            case 1031:   // --ngrams-per-file
+            case 1031: // --ngrams-per-file
                 ngrams_per_file = 1;
                 break;
-            case 1050:   // --comptime-include-all
+            case 1050: // --comptime-include-all
                 comptime_include_all = 1;
                 break;
-            case 1051: { // --inline-limit
-                char *end = NULL;
-                long  val = strtol(optarg, &end, 10);
-                if (!optarg[0] || *end != '\0' || val < 0 || val > INT32_MAX) {
-                    fprintf(stderr, "error: --inline-limit must be a "
-                                    "non-negative integer\n");
-                    usage(argv[0], 1);
-                }
-                inline_node_limit = (int)val;
-                break;
-            }
-            case 'A': // --asm-passthru
+            case 'A':  // --asm-passthru
                 asm_passthru = 1;
                 break;
-            case 't': // --testing[=vm|native]
+            case 't':  // --testing[=vm|native]
                 testing_mode = 1;
                 if (optarg) {
                     if (strcmp(optarg, "vm") == 0) {
@@ -2241,119 +2171,9 @@ int main(int argc, const char *argv[]) {
                 }
                 testing_mode = 1;
                 break;
-            case 1058: { // --fusion-candidates[=N]
-                if (optarg == NULL) {
-                    run_fusion = 1;
-                } else {
-                    char *end = NULL;
-                    long  val = strtol(optarg, &end, 10);
-                    if (!optarg[0] || *end != '\0' || val <= 0 ||
-                        val > INT32_MAX) {
-                        fprintf(stderr,
-                                "error: --fusion-candidates top-N must be a "
-                                "positive integer\n");
-                        usage(argv[0], 1);
-                    }
-                    run_fusion = (int)val;
-                }
-                break;
-            }
-            case 'f': { // -f<pass> / -fno-<pass>  (e.g. -ffold, -fno-cse)
-                static const struct {
-                    const char *name;
-                    CcccOptPass bit;
-                } pass_table[]      = {{"fold", CCCC_OPT_FOLD},
-                                       {"peephole", CCCC_OPT_PEEPHOLE},
-                                       {"copy-prop", CCCC_OPT_COPY_PROP},
-                                       {"dce", CCCC_OPT_DCE},
-                                       {"cse", CCCC_OPT_CSE},
-                                       {"fuse", CCCC_OPT_FUSE},
-                                       {"elim-ext", CCCC_OPT_ELIM_EXT},
-                                       {NULL, 0}};
-                bool        neg     = (strncmp(optarg, "no-", 3) == 0);
-                const char *name    = neg ? optarg + 3 : optarg;
-                bool        matched = false;
-                for (int k = 0; pass_table[k].name; k++) {
-                    if (strcmp(name, pass_table[k].name) == 0) {
-                        if (neg)
-                            opt_f_disable |= (uint32_t)pass_table[k].bit;
-                        else
-                            opt_f_enable |= (uint32_t)pass_table[k].bit;
-                        opt_f_mask |= (uint32_t)pass_table[k].bit;
-                        matched     = true;
-                        break;
-                    }
-                }
-                if (!matched) {
-                    fprintf(stderr,
-                            "error: unknown optimisation pass '-f%s'\n"
-                            "       valid: fold, peephole, copy-prop, dce, "
-                            "cse, fuse "
-                            "(prefix 'no-' to disable)\n",
-                            optarg);
-                    usage(argv[0], 1);
-                }
-                break;
-            }
             case 'J':
                 output_ffi_decls = 1;
                 break;
-            case 1096:
-                opt_f_enable |= CCCC_OPT_FOLD;
-                opt_f_mask   |= CCCC_OPT_FOLD;
-                break; // --ffold
-            case 1097:
-                opt_f_enable |= CCCC_OPT_PEEPHOLE;
-                opt_f_mask   |= CCCC_OPT_PEEPHOLE;
-                break; // --fpeephole
-            case 1098:
-                opt_f_enable |= CCCC_OPT_COPY_PROP;
-                opt_f_mask   |= CCCC_OPT_COPY_PROP;
-                break; // --fcopy-prop
-            case 1099:
-                opt_f_enable |= CCCC_OPT_DCE;
-                opt_f_mask   |= CCCC_OPT_DCE;
-                break; // --fdce
-            case 1100:
-                opt_f_enable |= CCCC_OPT_CSE;
-                opt_f_mask   |= CCCC_OPT_CSE;
-                break; // --fcse
-            case 1101:
-                opt_f_enable |= CCCC_OPT_FUSE;
-                opt_f_mask   |= CCCC_OPT_FUSE;
-                break; // --ffuse
-            case 1102:
-                opt_f_disable |= CCCC_OPT_FOLD;
-                opt_f_mask    |= CCCC_OPT_FOLD;
-                break; // --fno-fold
-            case 1103:
-                opt_f_disable |= CCCC_OPT_PEEPHOLE;
-                opt_f_mask    |= CCCC_OPT_PEEPHOLE;
-                break; // --fno-peephole
-            case 1104:
-                opt_f_disable |= CCCC_OPT_COPY_PROP;
-                opt_f_mask    |= CCCC_OPT_COPY_PROP;
-                break; // --fno-copy-prop
-            case 1105:
-                opt_f_disable |= CCCC_OPT_DCE;
-                opt_f_mask    |= CCCC_OPT_DCE;
-                break; // --fno-dce
-            case 1106:
-                opt_f_disable |= CCCC_OPT_CSE;
-                opt_f_mask    |= CCCC_OPT_CSE;
-                break; // --fno-cse
-            case 1107:
-                opt_f_disable |= CCCC_OPT_FUSE;
-                opt_f_mask    |= CCCC_OPT_FUSE;
-                break; // --fno-fuse
-            case 1108:
-                opt_f_enable |= CCCC_OPT_ELIM_EXT;
-                opt_f_mask   |= CCCC_OPT_ELIM_EXT;
-                break; // --felim-ext
-            case 1109:
-                opt_f_disable |= CCCC_OPT_ELIM_EXT;
-                opt_f_mask    |= CCCC_OPT_ELIM_EXT;
-                break; // --fno-elim-ext
             case 1112:
                 use_system_headers = true;
                 break; // --use-system-headers
@@ -2442,9 +2262,8 @@ int main(int argc, const char *argv[]) {
         // combining the two is redundant, so it's rejected too rather than
         // silently picking one.
         if (repl_mode || build_mode || testing_mode || run_ngrams ||
-            run_fusion || disassemble || preprocess_only ||
-            dump_expanded_only || print_tokens || output_json ||
-            output_ffi_decls || dump_ast) {
+            disassemble || preprocess_only || dump_expanded_only ||
+            print_tokens || output_json || output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --test-run cannot be combined with --repl, "
                     "--build, --testing, --ngrams/--fusion-candidates, -d, "
@@ -2492,13 +2311,13 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "error: --repl does not take input files\n");
             usage(argv[0], 1);
         }
-        if (build_mode || testing_mode || run_ngrams || run_fusion ||
+        if (build_mode || testing_mode || run_ngrams ||
             compile_format != COMPILE_NONE || disassemble || preprocess_only ||
             dump_expanded_only || print_tokens || output_json ||
             output_ffi_decls || dump_ast || vm_profile) {
             fprintf(stderr,
                     "error: --repl cannot be combined with --build, --testing, "
-                    "--ngrams/--fusion-candidates, -c (incl. -c=native), -d, "
+                    "--ngrams, -c (incl. -c=native), -d, "
                     "-E, -m, --ast, --vm-profile, or other output modes\n");
             usage(argv[0], 1);
         }
@@ -2508,13 +2327,11 @@ int main(int argc, const char *argv[]) {
         // --build runs the build script in the VM; the host runner compiles the
         // declared targets. VM-only and output modes do not apply here.
         if (compile_format != COMPILE_NONE || disassemble || opt_level != 0 ||
-            opt_f_enable || opt_f_disable || vm_profile || out_file ||
-            preprocess_only || dump_expanded_only || print_tokens ||
-            output_json || output_ffi_decls || dump_ast) {
+            vm_profile || out_file || preprocess_only || dump_expanded_only ||
+            print_tokens || output_json || output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --build cannot be combined with VM/output options "
-                    "(-c, -d, -O<n>, -f<pass>, --vm-profile, -o, -E, -m, "
-                    "--ast, ...)\n");
+                    "(-c, -d, -O<n>, --vm-profile, -o, -E, -m, --ast, ...)\n");
             usage(argv[0], 1);
         }
         if (flags & CCCC_ENABLE_DEBUGGER) {
@@ -2530,16 +2347,11 @@ int main(int argc, const char *argv[]) {
                             "output modes\n");
             usage(argv[0], 1);
         }
-        // #1159: -O<n> used to be rejected here alongside the other VM
-        // bytecode-pipeline-only options -- but under -c=native it no longer
-        // means "optimize CCCC's own bytecode" (there is no bytecode; the
-        // native path never runs one), so run_native_backend() now repurposes
-        // it as the level to forward to the host cc instead of erroring.
-        // -f<pass>/-d/--entry/--vm-profile stay rejected: they genuinely only
-        // make sense against the VM's own pipeline, with no host-cc
-        // equivalent to repurpose them as.
-        if (disassemble || entry_name || opt_f_enable || opt_f_disable ||
-            vm_profile) {
+        // #1159: -O<n> under -c=native does not mean "optimise CCCC's own
+        // bytecode" (there is none) -- run_native_backend() forwards it to the
+        // host cc as the level to build with. -d/--entry/--vm-profile stay
+        // rejected: they only make sense against the VM's own pipeline.
+        if (disassemble || entry_name || vm_profile) {
             fprintf(stderr, "error: -c=native cannot be combined with VM "
                             "bytecode options\n");
             usage(argv[0], 1);
@@ -2570,49 +2382,37 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    if (run_ngrams || run_fusion) {
+    if (run_ngrams) {
         // Static analysis is mutually exclusive with execution / output modes.
-        if (run_ngrams && run_fusion) {
-            fprintf(
-                stderr,
-                "error: --ngrams and --fusion-candidates cannot be combined\n");
-            usage(argv[0], 1);
-        }
         if (preprocess_only || dump_expanded_only || print_tokens ||
             output_json || output_ffi_decls || dump_ast) {
-            fprintf(stderr,
-                    "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with frontend output modes\n");
+            fprintf(stderr, "error: --ngrams cannot be combined with frontend "
+                            "output modes\n");
             usage(argv[0], 1);
         }
         if (compile_only || disassemble || out_file || entry_name) {
-            fprintf(stderr,
-                    "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with VM bytecode output or entry options\n");
+            fprintf(stderr, "error: --ngrams cannot be combined with VM "
+                            "bytecode output or entry options\n");
             usage(argv[0], 1);
         }
         if (vm_profile) {
             fprintf(stderr,
-                    "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with --vm-profile\n");
+                    "error: --ngrams cannot be combined with --vm-profile\n");
             usage(argv[0], 1);
         }
         if (flags & CCCC_ENABLE_DEBUGGER) {
             fprintf(stderr,
-                    "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with -g/--debug\n");
+                    "error: --ngrams cannot be combined with -g/--debug\n");
             usage(argv[0], 1);
         }
         if (flags != 0) {
-            fprintf(stderr,
-                    "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with VM runtime safety options\n");
+            fprintf(stderr, "error: --ngrams cannot be combined with VM "
+                            "runtime safety options\n");
             usage(argv[0], 1);
         }
         if (compile_format == COMPILE_NATIVE) {
             fprintf(stderr,
-                    "error: --ngrams/--fusion-candidates cannot be combined "
-                    "with -c=native\n");
+                    "error: --ngrams cannot be combined with -c=native\n");
             usage(argv[0], 1);
         }
     }
@@ -2634,10 +2434,9 @@ int main(int argc, const char *argv[]) {
     cc_init(&vm, flags);
     if (auto_debug_on_crash)
         vm.dbg.crash_debug_auto = true;
-    vm.compiler.cli_flags_mask    = cli_flags_mask;
-    vm.compiler.cli_opt_level_set = cli_opt_level_set;
-    vm.compiler.native_mode       = (compile_format == COMPILE_NATIVE);
-    vm.compiler.compile_only      = compile_only;
+    vm.compiler.cli_flags_mask          = cli_flags_mask;
+    vm.compiler.native_mode             = (compile_format == COMPILE_NATIVE);
+    vm.compiler.compile_only            = compile_only;
     vm.compiler.asm_passthru            = asm_passthru;
     vm.compiler.no_comptime             = no_comptime;
     vm.compiler.comptime_include_all    = comptime_include_all;
@@ -2712,12 +2511,9 @@ int main(int argc, const char *argv[]) {
                 "warning: -O%d has no effect in VM mode (the VM does not "
                 "optimise); use -c=native for host -O\n",
                 opt_level);
-    vm.compiler.opt_level         = opt_level;
-    vm.compiler.ffp_contract_fma  = ffp_contract_fma;
-    vm.compiler.opt_f_enable      = opt_f_enable;
-    vm.compiler.opt_f_disable     = opt_f_disable;
-    vm.compiler.cli_f_mask        = opt_f_mask;
-    vm.compiler.inline_node_limit = inline_node_limit;
+    // Only -c=native consumes the level (forwarded to the host cc). Keep it
+    // at 0 for the VM path so nothing downstream misreads a stale non-zero.
+    vm.compiler.opt_level = (compile_format == COMPILE_NATIVE) ? opt_level : 0;
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;
 
@@ -3293,8 +3089,7 @@ int main(int argc, const char *argv[]) {
         // artifact once any test has failed. This is deliberately independent
         // of --fail-fast, which only stops the test *run* early; a red suite
         // never reaches the compile step.
-        if ((!build_mode && compile_format != COMPILE_NATIVE) ||
-            exit_code != 0)
+        if ((!build_mode && compile_format != COMPILE_NATIVE) || exit_code != 0)
             goto BAIL;
     }
 
@@ -3439,33 +3234,19 @@ int main(int argc, const char *argv[]) {
     }
 
     // Static bytecode analysis on the just-compiled text segment.
-    if (run_ngrams || run_fusion) {
-        if (run_ngrams) {
-            CcAnalyzeNgramOptions opts = {
-                .n        = run_ngrams,
-                .top_n    = ngrams_top,
-                .per_file = ngrams_per_file,
-            };
-            ngram_state = cc_analyze_ngram_begin(&opts);
-            const char *label =
-                input_files_count == 1 ? input_files[0] : "<merged source>";
-            cc_analyze_ngram_feed(ngram_state, vm.text_seg,
-                                  (long long)vm.text_ptr + 1, label, stdout);
-            cc_analyze_ngram_finish(ngram_state, stdout);
-            ngram_state = NULL;
-        } else {
-            CcAnalyzeFusionOptions opts = {
-                .top_n = run_fusion,
-                .json  = output_json,
-            };
-            fusion_state = cc_analyze_fusion_begin(&opts);
-            const char *label =
-                input_files_count == 1 ? input_files[0] : "<merged source>";
-            cc_analyze_fusion_feed(fusion_state, vm.text_seg,
-                                   (long long)vm.text_ptr + 1, label, stdout);
-            cc_analyze_fusion_finish(fusion_state, stdout);
-            fusion_state = NULL;
-        }
+    if (run_ngrams) {
+        CcAnalyzeNgramOptions opts = {
+            .n        = run_ngrams,
+            .top_n    = ngrams_top,
+            .per_file = ngrams_per_file,
+        };
+        ngram_state = cc_analyze_ngram_begin(&opts);
+        const char *label =
+            input_files_count == 1 ? input_files[0] : "<merged source>";
+        cc_analyze_ngram_feed(ngram_state, vm.text_seg,
+                              (long long)vm.text_ptr + 1, label, stdout);
+        cc_analyze_ngram_finish(ngram_state, stdout);
+        ngram_state = NULL;
         goto BAIL;
     }
 
@@ -3510,9 +3291,6 @@ BAIL:
     // happy).
     if (ngram_state) {
         cc_analyze_ngram_finish(ngram_state, stdout);
-    }
-    if (fusion_state) {
-        cc_analyze_fusion_finish(fusion_state, stdout);
     }
     if (input_tokens)
         free(input_tokens);

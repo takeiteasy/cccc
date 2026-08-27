@@ -413,7 +413,6 @@ int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
     fprintf(f, "  \"input\": \"");
     json_escape(f, input_name ? input_name : "");
     fprintf(f, "\",\n");
-    fprintf(f, "  \"optimize_level\": %d,\n", vm->compiler.opt_level);
     fprintf(f, "  \"cycles\": %lld,\n", vm->cycle);
     fprintf(f, "  \"shadow_sweeps\": %llu,\n",
             (unsigned long long)vm->type_shadow_sweeps);

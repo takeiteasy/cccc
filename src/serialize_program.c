@@ -3277,9 +3277,9 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
                 break;
             }
         }
-        bool has_flags = r->test_flags_mask || r->test_opt_set ||
-                         r->test_warn_mask || r->test_warn_errors_mask ||
-                         r->test_warn_as_errors_set || r->test_f_set ||
+        bool has_flags = r->test_flags_mask || r->test_warn_mask ||
+                         r->test_warn_errors_mask ||
+                         r->test_warn_as_errors_set ||
                          r->test_ffi_allow_count > 0;
         if (!fn || has_flags) {
             skip[i] = 1;

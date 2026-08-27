@@ -4390,21 +4390,16 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                                         &_delta);
                     rec->test_flags_or           = _delta.or_bits;
                     rec->test_flags_mask         = _delta.set_mask;
-                    rec->test_opt_level          = _delta.opt_level;
-                    rec->test_opt_set            = _delta.opt_set;
                     rec->test_warn_or            = _delta.warn_or;
                     rec->test_warn_mask          = _delta.warn_mask;
                     rec->test_warn_errors_or     = _delta.warn_errors_or;
                     rec->test_warn_errors_mask   = _delta.warn_errors_mask;
                     rec->test_warn_as_errors     = _delta.warn_as_errors;
                     rec->test_warn_as_errors_set = _delta.warn_as_errors_set;
-                    rec->test_f_enable           = _delta.f_enable;
-                    rec->test_f_disable          = _delta.f_disable;
-                    rec->test_f_set     = (_delta.f_enable || _delta.f_disable);
-                    rec->test_ffi_allow = _delta.ffi_allow;
-                    rec->test_ffi_allow_count = _delta.ffi_allow_count;
-                    _delta.ffi_allow          = NULL;
-                    _delta.ffi_allow_count    = 0;
+                    rec->test_ffi_allow          = _delta.ffi_allow;
+                    rec->test_ffi_allow_count    = _delta.ffi_allow_count;
+                    _delta.ffi_allow             = NULL;
+                    _delta.ffi_allow_count       = 0;
                 }
                 rec->expect_stderr =
                     ta.expect_stderr ? strdup(ta.expect_stderr) : NULL;
@@ -4894,57 +4889,15 @@ static void pragma_config_set_safety(VirtualMachine *vm, int level) {
     vm->flags          = (vm->flags & ~touchable) | (preset & touchable);
 }
 
-// Applies `optimisation = N` (0..3), unless -O/--optimize was given on the CLI.
-static void pragma_config_set_optimisation(VirtualMachine *vm, int level) {
-    if (vm->compiler.native_mode)
-        return;
-    if (vm->compiler.cli_opt_level_set)
-        return;
-    vm->compiler.opt_level = level;
-}
-
-// Table of optimisation-pass keys accepted by #pragma cccc config(...) (#612).
-typedef struct {
-    const char *name;
-    uint32_t    bit;
-} PragmaConfigOptPass;
-static const PragmaConfigOptPass pragma_config_opt_passes[] = {
-    {"fold", CCCC_OPT_FOLD},
-    {"peephole", CCCC_OPT_PEEPHOLE},
-    {"copy_prop", CCCC_OPT_COPY_PROP},
-    {"dce", CCCC_OPT_DCE},
-    {"cse", CCCC_OPT_CSE},
-    {"fuse", CCCC_OPT_FUSE},
-    {"elim_ext", CCCC_OPT_ELIM_EXT},
-};
-
-// Enables or disables a single optimisation pass, unless the CLI pinned it via
-// -f/-fno-. Note: enable and disable are mutually exclusive; setting one clears
-// the other so that opt_f_enable and opt_f_disable stay consistent.
-static void pragma_config_set_opt_pass(VirtualMachine *vm, uint32_t bit,
-                                       bool enable) {
-    if (vm->compiler.native_mode)
-        return;
-    if (vm->compiler.cli_f_mask & bit)
-        return;
-    if (enable) {
-        vm->compiler.opt_f_enable  |= bit;
-        vm->compiler.opt_f_disable &= ~bit;
-    } else {
-        vm->compiler.opt_f_disable |= bit;
-        vm->compiler.opt_f_enable  &= ~bit;
-    }
-}
-
 // Applies a single `key [= value]` pair from #pragma cccc config(...).
 // `value` is NULL for a bare key. Unknown keys and invalid values are hard
 // errors, matching existing #pragma cccc diagnostic style.
 static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
-    // #924: every key this function handles (safety/optimisation/individual
-    // flag/opt-pass) only ever touches VM bytecode generation or runtime
-    // behavior -- pragma_config_set_flag/_safety/_optimisation/_opt_pass
-    // all early-return under native_mode already (see their own comments),
-    // so the pragma is silently a no-op there. Surface that instead of
+    // #924: every key this function handles (safety/individual flag) only ever
+    // touches VM bytecode generation or runtime behavior --
+    // pragma_config_set_flag/_safety both early-return under native_mode
+    // already (see their own comments), so the pragma is silently a no-op
+    // there. Surface that instead of
     // staying quiet about it, matching -c=native/-m/-c=generated's CLI-flag
     // warning for the same reason (main.c's warn_ignored_vm_flags). Fires
     // before key validation below: even a malformed value is still a no-op
@@ -4965,16 +4918,6 @@ static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
         pragma_config_set_safety(vm, (int)level);
         return;
     }
-    if (equal(key, "optimisation")) {
-        long level = 0;
-        if (!value || !pragma_config_read_int(value, &level) || level < 0 ||
-            level > 3)
-            error_tok(vm, value ? value : key,
-                      "#pragma cccc config: 'optimisation' requires an integer "
-                      "value 0..3");
-        pragma_config_set_optimisation(vm, (int)level);
-        return;
-    }
     for (size_t i = 0;
          i < sizeof(pragma_config_flags) / sizeof(pragma_config_flags[0]);
          i++) {
@@ -4987,22 +4930,6 @@ static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
                       "(true/false)",
                       (int)key->len, key->loc);
         pragma_config_set_flag(vm, pragma_config_flags[i].bit, enable);
-        return;
-    }
-    // Optimisation-pass keys (#612): fold, peephole, copy_prop, dce, cse, fuse,
-    // elim_ext
-    for (size_t i = 0; i < sizeof(pragma_config_opt_passes) /
-                               sizeof(pragma_config_opt_passes[0]);
-         i++) {
-        if (!equal(key, (char *)pragma_config_opt_passes[i].name))
-            continue;
-        bool enable = true;
-        if (value && !pragma_config_read_bool(value, &enable))
-            error_tok(vm, value,
-                      "#pragma cccc config: '%.*s' requires a boolean value "
-                      "(true/false)",
-                      (int)key->len, key->loc);
-        pragma_config_set_opt_pass(vm, pragma_config_opt_passes[i].bit, enable);
         return;
     }
     error_tok(vm, key, "#pragma cccc config: unknown option '%.*s'",
@@ -6958,25 +6885,6 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                            (uint32_t)CCCC_SAFETY_MAX;
             out->set_mask |= (uint32_t)CCCC_SAFETY_PRESET_BITS;
 
-            // --- optimisation level ---
-        } else if (strcmp(tok, "-O") == 0 || strcmp(tok, "--optimize") == 0) {
-            out->opt_level = 1;
-            out->opt_set   = true;
-        } else if (tok[0] == '-' && tok[1] == 'O' && tok[2] >= '0' &&
-                   tok[2] <= '4' && tok[3] == '\0') {
-            out->opt_level = tok[2] - '0';
-            out->opt_set   = true;
-        } else if (strncmp(tok, "--optimize=", 11) == 0) {
-            char *endp;
-            long  v = strtol(tok + 11, &endp, 10);
-            if (*endp != '\0' || v < 0 || v > 4)
-                error_tok(vm, src_tok,
-                          "[[cccc::test]] flags=\"...\": invalid optimization"
-                          " level '%s' (use 0..4) in test '%s'",
-                          tok, test_name ? test_name : "?");
-            out->opt_level = (int)v;
-            out->opt_set   = true;
-
             // --- individual check flags (matching long_options names in
             // main.c) ---
 #define SET_FLAG(bit)                                                          \
@@ -7044,8 +6952,6 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
             SET_FLAG(CCCC_CFI);
         } else if (strcmp(tok, "-g") == 0 || strcmp(tok, "--debug") == 0) {
             SET_FLAG(CCCC_ENABLE_DEBUGGER);
-        } else if (strcmp(tok, "--fma") == 0) {
-            SET_FLAG(CCCC_FMA);
         } else if (strcmp(tok, "--ffi-errors-fatal") == 0) {
             SET_FLAG(CCCC_FFI_ERRORS_FATAL);
         } else if (strcmp(tok, "--trap-fp-divzero") == 0) {
@@ -7121,48 +7027,6 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                     out->warn_or   |= mask;
                     out->warn_mask |= mask;
                 }
-            }
-
-            // --- optimisation-pass flags (#612): -f<pass> / -fno-<pass> ---
-        } else if (tok[0] == '-' && tok[1] == 'f' && tok[2] != '\0') {
-            static const struct {
-                const char *name;
-                uint32_t    bit;
-            } ptab[]            = {{"fold", CCCC_OPT_FOLD},
-                                   {"peephole", CCCC_OPT_PEEPHOLE},
-                                   {"copy-prop", CCCC_OPT_COPY_PROP},
-                                   {"dce", CCCC_OPT_DCE},
-                                   {"cse", CCCC_OPT_CSE},
-                                   {"fuse", CCCC_OPT_FUSE},
-                                   {"elim-ext", CCCC_OPT_ELIM_EXT},
-                                   {NULL, 0}};
-            const char *fname   = tok + 2;
-            bool        neg     = (strncmp(fname, "no-", 3) == 0);
-            const char *pname   = neg ? fname + 3 : fname;
-            bool        matched = false;
-            for (int k = 0; ptab[k].name; k++) {
-                if (strcmp(pname, ptab[k].name) == 0) {
-                    if (neg) {
-                        out->f_disable |= ptab[k].bit;
-                        out->f_enable  &= ~ptab[k].bit;
-                    } else {
-                        out->f_enable  |= ptab[k].bit;
-                        out->f_disable &= ~ptab[k].bit;
-                    }
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) {
-                char bad[256];
-                snprintf(bad, sizeof(bad), "%s", tok);
-                free(buf);
-                error_tok(vm, src_tok,
-                          "[[cccc::test]] flags=\"...\": unknown optimisation"
-                          " pass '%s' in test '%s'"
-                          " (valid: fold, peephole, copy-prop, dce, cse,"
-                          " fuse, elim-ext; prefix 'no-' to disable)",
-                          bad, test_name ? test_name : "?");
             }
 
         } else {

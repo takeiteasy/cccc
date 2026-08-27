@@ -63,15 +63,10 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
     // Store the merged program for variable lookup during codegen
     vm->compiler.globals = prog;
 
-    // Generate bytecode from AST using new register-based codegen
+    // Generate bytecode from AST using new register-based codegen. The VM has
+    // no bytecode optimiser: -O<n> only affects -c=native, where it is
+    // forwarded to the host cc (#1159).
     gen(vm, prog);
-
-    // Run optimizer if enabled at the global level, any per-pass flags are set,
-    // or any function carries a per-function [[cccc::optimize]] attribute.
-    if (vm->compiler.opt_level > 0 || vm->compiler.opt_f_enable ||
-        vm->compiler.have_fn_opt_attrs) {
-        cc_optimize(vm, vm->compiler.opt_level);
-    }
 
     // Build source index for O(log n) line→PC lookups
     if (vm->flags & CCCC_ENABLE_DEBUGGER && vm->dbg.source_map_count > 0) {
