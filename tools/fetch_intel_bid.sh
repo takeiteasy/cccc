@@ -188,8 +188,8 @@ echo "Building BID library ($JOBS parallel jobs, via the vendor makefile) ..."
 # decimal_math.c already call against (DECIMAL_CALL_BY_REFERENCE=0,
 # DECIMAL_GLOBAL_ROUNDING=0, DECIMAL_GLOBAL_EXCEPTION_FLAGS=0 -- this is
 # just the vendor makefile's own spelling of the same three switches).
-# eval is required, not cosmetic: $CC may itself contain flags (e.g. the
-# macos-x86_64-build target sets CC="clang -arch x86_64"), and eval is what
+# eval is required, not cosmetic: $CC may itself contain flags (e.g.
+# "cc -arch x86_64" or an msan-instrumented compiler), and eval is what
 # lets that word-split correctly inside the make invocation.
 if ! ( cd "$VENDOR_DIR" && eval "$CC -E -x c /dev/null >/dev/null 2>&1" ); then
   echo "FAIL: \$CC ($CC) does not appear to work" >&2

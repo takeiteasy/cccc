@@ -26,11 +26,7 @@
 //   header_resolution_smoke, comptime_native_smoke, audit_ffi,
 //   audit_reflection_enums, reflection_ffi_gen / _check
 //   docs                Doxygen HTML API docs for include/cccc/*.h (needs
-//   doxygen) macos_x86_64             macOS x86_64 cross-build only (Rosetta
-//   needed to run it) macos_x86_64_smoke       + Rosetta smoke test + the
-//   build_cache_arch_smoke guard macos_x86_64_test        + full test suite
-//   (source, --c4, host-signal debugger) build_cache_arch_smoke   #730
-//   regression guard (native vs. cross --build-cache reuse)
+//   doxygen)
 //   build_cache_toolchain_smoke   #1198 regression guard (same-arch,
 //   different-compiler-family --build-cache reuse; skips if only one
 //   compiler family is on PATH) linux_amd64_build /
@@ -147,13 +143,10 @@ static void maybe_add_ndbm(Builder *ctx, BuildTarget *t) {
 // "no libbacktrace" (skips the CCCC_HAS_BACKTRACE define, the include path,
 // and the LinkWith) -- every one of the ~25 call sites that thread `bt`
 // through was already written against that contract from #842 onward, so
-// this opt-out needed no changes anywhere else except macos_x86_64's
-// SetTargetTriple(bt, ...) call, guarded below.
+// this opt-out needed no changes anywhere else.
 
 // Named variant (#850): lets a graph that needs two libbacktrace archives at
-// once -- e.g. build_cache_arch_smoke's native + Rosetta cross build, which
-// can't share one "backtrace" StaticLib since each needs a different (or no)
-// SetTargetTriple -- avoid the duplicate-target-name check (#842 Step 1).
+// once avoid the duplicate-target-name check (#842 Step 1).
 // make_libbacktrace(ctx) below is the common case: same body, fixed name.
 static BuildTarget *make_libbacktrace_named(Builder *ctx, const char *name) {
     const char *has_bt = GetEnv(ctx, "CCCC_HAS_BACKTRACE");
@@ -905,132 +898,7 @@ BuildTarget *afl_asan(Builder *ctx) {
     return t;
 }
 
-// ---- macOS x86_64 cross-compile (Makefile:391-483) -------------------------
-// Cross-build only (SetTargetTriple + SDK include paths -- clang's
-// `--target=x86_64-apple-macos` cross-compiles without needing a different
-// compiler binary or SetToolchain's `-arch x86_64`, which does not work
-// there: SetToolchain treats its argument as a single executable path, not
-// a compiler-plus-flags command line, so "/usr/bin/clang -arch x86_64"
-// fails execvp with "No such file or directory"). Unlike the Makefile
-// (which hardcodes /usr/local/opt/readline and thereby defeats its own
-// readline auto-probe), no readline override is added here.
-//
-// #850 ports the staged -build/-smoke/-test workflow the Makefile keeps as
-// separate targets (build.c previously only had the single build-only
-// macos_x86_64 below). The Rosetta smoke/test recipes need $(...) command
-// substitution, $? capture, and (for -test) "run every phase, then fail if
-// any failed" -- none of which the vendored build shell supports (see
-// build_shell.c) -- so they're delegated to real shell scripts
-// (tools/macos_x86_64_smoke.sh / tools/macos_x86_64_test.sh) rather than
-// inlined into RunCustom command strings.
-
-// Builds the cross-compiled executable only (no SDK/OS-check duplication
-// between the plain macos_x86_64 target and the composing
-// build_cache_arch_smoke below, which needs its own separately-named
-// libbacktrace -- see make_libbacktrace_named's comment). Returns NULL (with no
-// diagnostic; the caller prints one) if the macOS SDK can't be found.
-static BuildTarget *make_macos_x86_64_exe(Builder *ctx, BuildTarget *bt) {
-    const char *sdk = CaptureCommand(ctx, "xcrun --sdk macosx --show-sdk-path");
-    if (!sdk || !*sdk)
-        return NULL;
-    BuildTarget *t = Executable(ctx, "cccc-macos-x86_64");
-    SetOutput(t, "cccc-macos-x86_64");
-    add_cccc_sources(ctx, t);
-    add_cccc_flags(ctx, t, bt);
-    SetTargetTriple(t, "x86_64-apple-macos");
-    char ffi_inc[512];
-    snprintf(ffi_inc, sizeof(ffi_inc), "%s/usr/include/ffi", sdk);
-    AddInclude(t, ffi_inc);
-    AddLib(t, "ffi");
-    return t;
-}
-
-[[cccc::build_target]]
-BuildTarget *macos_x86_64(Builder *ctx) {
-    if (strcmp(BuildHost(ctx), "darwin") != 0) {
-        fprintf(stderr, "build: macos_x86_64 requires macOS\n");
-        return RunCustom(ctx, "macos-x86_64", "false");
-    }
-    BuildTarget *bt = make_libbacktrace(ctx);
-    if (bt) // CCCC_HAS_BACKTRACE=0 (#850): no "backtrace" target to
-            // cross-triple
-        SetTargetTriple(bt, "x86_64-apple-macos");
-    BuildTarget *t = make_macos_x86_64_exe(ctx, bt);
-    if (!t) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command "
-                        "Line Tools.\n");
-        return RunCustom(ctx, "macos-x86_64", "false");
-    }
-    return t;
-}
-
-// #730 regression guard (Makefile:436-450): reusing the same --build-cache
-// across a native build and a different-arch cccc binary must not serve
-// wrong-arch objects to the link step. Reproduces the ticket's exact repro
-// sequence: build native (arm64), then cross (x86_64 via Rosetta) into the
-// SAME --build-cache + --build-out-dir, and assert neither contaminates the
-// other's cached objects. Builds both a native and a cross executable in
-// ONE graph, so it needs two independently-named libbacktrace archives
-// (make_libbacktrace_named) -- one target can't be compiled for both
-// architectures.
-//
-// Factored out (rather than inlined into the build_cache_arch_smoke factory
-// below) so macos_x86_64_smoke can reuse the SAME cross-compiled
-// "cccc-macos-x86_64" binary via *out_cross instead of building a second one
-// under a second, differently-named set of targets -- the graph-uniqueness
-// rule that forces bt_x86's distinct name here would otherwise force a
-// second distinct name for the cross executable too.
-static BuildTarget *make_build_cache_arch_smoke(Builder      *ctx,
-                                                BuildTarget **out_cross) {
-    BuildTarget *bt_native = make_libbacktrace(ctx);
-    BuildTarget *native    = make_cccc_exe_named(ctx, bt_native, "cccc");
-
-    BuildTarget *bt_x86    = make_libbacktrace_named(ctx, "backtrace-x86_64");
-    if (bt_x86)
-        SetTargetTriple(bt_x86, "x86_64-apple-macos");
-    BuildTarget *cross = make_macos_x86_64_exe(ctx, bt_x86);
-    if (out_cross)
-        *out_cross = cross;
-    if (!cross) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command "
-                        "Line Tools.\n");
-        return RunCustom(ctx, "build-cache-arch-smoke", "false");
-    }
-
-    char cmd[2048];
-    snprintf(
-        cmd, sizeof(cmd),
-        "rm -rf build/build_cache_arch_smoke && "
-        "%s -I./include --build --build-out-dir=build/build_cache_arch_smoke "
-        "--build-cache tests/test_build_cache.c >/dev/null && "
-        "file build/build_cache_arch_smoke/bin/cache_app | grep -q "
-        "'arm64\\|aarch64\\|arm64e' && "
-        "/usr/bin/arch -x86_64 %s -I./include --build "
-        "--build-out-dir=build/build_cache_arch_smoke --build-cache "
-        "tests/test_build_cache.c && "
-        "file build/build_cache_arch_smoke/bin/cache_app | grep -q 'x86_64' && "
-        "/usr/bin/arch -x86_64 build/build_cache_arch_smoke/bin/cache_app && "
-        "rm -rf build/build_cache_arch_smoke && "
-        "echo 'build-cache-arch-smoke: OK'",
-        TargetOutput(native), TargetOutput(cross));
-    BuildTarget *step = RunCustom(ctx, "build-cache-arch-smoke", cmd);
-    DependsOn(step, native);
-    DependsOn(step, cross);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *build_cache_arch_smoke(Builder *ctx) {
-    if (strcmp(BuildHost(ctx), "darwin") != 0) {
-        fprintf(stderr, "build: build_cache_arch_smoke requires macOS (native "
-                        "arm64 + Rosetta x86_64)\n");
-        return RunCustom(ctx, "build-cache-arch-smoke", "false");
-    }
-    return make_build_cache_arch_smoke(ctx, NULL);
-}
-
-// #1198 regression guard, platform-agnostic sibling to build_cache_arch_
-// smoke above: reusing the same --build-cache across two DIFFERENT
+// #1198 regression guard: reusing the same --build-cache across two DIFFERENT
 // COMPILER FAMILIES (not architectures) must not serve the wrong family's
 // objects to the link step off the Level 1 mtime fast path. Builds
 // tests/test_build_cache.c into a shared --build-cache dir three times --
@@ -1078,50 +946,6 @@ BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
              other_cc, other_cc);
     BuildTarget *step = RunCustom(ctx, "build-cache-toolchain-smoke", cmd);
     DependsOn(step, cccc);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *macos_x86_64_smoke(Builder *ctx) {
-    if (strcmp(BuildHost(ctx), "darwin") != 0) {
-        fprintf(stderr, "build: macos_x86_64_smoke requires macOS\n");
-        return RunCustom(ctx, "macos-x86_64-smoke", "false");
-    }
-    // Makefile:452 chains macos-x86_64-smoke onto build-cache-arch-smoke;
-    // reuse its cross-compiled binary rather than building a second one.
-    BuildTarget *cross     = NULL;
-    BuildTarget *arch_step = make_build_cache_arch_smoke(ctx, &cross);
-    if (!cross)
-        return arch_step; // already printed its own diagnostic
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_smoke.sh %s",
-             TargetOutput(cross));
-    BuildTarget *step = RunCustom(ctx, "macos-x86_64-smoke", cmd);
-    DependsOn(step, cross);
-    DependsOn(step, arch_step);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *macos_x86_64_test(Builder *ctx) {
-    if (strcmp(BuildHost(ctx), "darwin") != 0) {
-        fprintf(stderr, "build: macos_x86_64_test requires macOS\n");
-        return RunCustom(ctx, "macos-x86_64-test", "false");
-    }
-    BuildTarget *bt = make_libbacktrace(ctx);
-    if (bt)
-        SetTargetTriple(bt, "x86_64-apple-macos");
-    BuildTarget *t = make_macos_x86_64_exe(ctx, bt);
-    if (!t) {
-        fprintf(stderr, "build: macOS SDK not found. Install the Xcode Command "
-                        "Line Tools.\n");
-        return RunCustom(ctx, "macos-x86_64-test", "false");
-    }
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "sh tools/macos_x86_64_test.sh %s",
-             TargetOutput(t));
-    BuildTarget *step = RunCustom(ctx, "macos-x86_64-test", cmd);
-    DependsOn(step, t);
     return step;
 }
 

@@ -789,41 +789,9 @@ sitting un-deleted after #1018 landed — is still caught and printed.
 > `tools/Makefile.backup` (the pre-cut, full-featured Makefile, kept as an
 > escape hatch — not maintained going forward) is still there if `build.c`
 > itself doesn't work yet (e.g. bisecting a bootstrap regression), but as of
-> #850 every staged `<platform>-build`/`-smoke`/`-test` workflow below,
-> `build-cache-arch-smoke`, and `linux-x86_64-msan-test` all have
-> `--build-target=NAME` equivalents in `build.c` — see each subsection.
-
-### macOS x86_64 under Rosetta 2
-
-The macOS cross-build uses clang's `--target=x86_64-apple-macos` and libffi
-from the active macOS SDK. It does not use an arm64-only Homebrew library.
-Run each stage with `--build-target=NAME`:
-
-```bash
-./cccc --build build.c --build-target=macos_x86_64          # build only
-./cccc --build build.c --build-target=macos_x86_64_smoke    # + Rosetta smoke test
-./cccc --build build.c --build-target=macos_x86_64_test     # + full suite
-```
-
-`macos_x86_64` produces `build/cccc-macos-x86_64` and links it (no smoke/test
-performed). `macos_x86_64_smoke` additionally:
-
-- runs `build_cache_arch_smoke` (see below) first — the #730 regression
-  guard, reusing the same `--build-cache` across a native and cross build;
-- asserts that Rosetta reports `uname -m` as `x86_64`;
-- runs `tests/test_fortytwo.c` and the `--asm-passthru` regression;
-- runs `-c=native` with Apple Clang, checks the child executable with `file`,
-  and executes it under Rosetta.
-
-(That last bullet needs `CCCC_NATIVE_CC=/usr/bin/clang` set for the cross
-binary's own `-c=native` step, which `tools/macos_x86_64_smoke.sh` — the
-script the build target shells out to, since the Rosetta dance needs
-`$(...)` substitution and `$?` capture the vendored build shell doesn't
-support — sets internally.)
-
-`macos_x86_64_test` runs the complete source and `.c4` suites (via
-`tools/tests.py --binary`) plus the macOS host-signal debugger integration
-(`tools/test_host_signal_debugger.py`), all under Rosetta.
+> #850 every staged `<platform>-build`/`-smoke`/`-test` workflow below
+> and `linux-x86_64-msan-test` all have `--build-target=NAME` equivalents
+> in `build.c` — see each subsection.
 
 ### Linux/amd64 with VZ/Rosetta
 
@@ -995,10 +963,6 @@ the Makefile was always single-shot too).
 **macOS arm64 (native):** all source-mode tests pass. `.c4` and sqlite sub-suites
 pass. The host-signal debugger integration passes.
 
-**macOS x86_64 (Rosetta 2):** build, smoke, and architecture assertions pass.
-Source and `.c4` suites match the arm64 baseline. The host-signal debugger
-integration passes.
-
 **Linux x86_64 (VZ/Rosetta, linux/amd64 container):** the full suite is
 partitioned into alphabetical filename batches to avoid child-reaping stalls
 (#500, resolved WONT_FIX). The x86_64 `struct stat` layout fix (#499) corrects
@@ -1014,19 +978,19 @@ to mode-incompatible tests and include explicit reasons.
 ## Continuous Integration
 
 CI is split across two hosts, and by *when* it runs — on every push vs.
-only at release time — because no single CI provider covers all four
-release-target quadrants and per-push coverage of all four isn't the goal:
+only at release time — because no single CI provider covers all three
+release-target quadrants and per-push coverage of all three isn't the goal:
 
 | What | Host | Manifest | Trigger |
 |---|---|---|---|
 | Linux amd64 build+test | sr.ht (`builds.sr.ht`) | [`.builds/linux-amd64.yml`](../.builds/linux-amd64.yml) | every push to `trunk` — **canonical**, gates `trunk` |
 | Doxygen docs build, publish to GitHub Pages | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | every push to `trunk` (build-only, no deploy, on `pull_request`) |
-| Linux aarch64 / macOS arm64 / macOS x86_64 build+test+package | GitHub Actions | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | `v*` tag push only |
+| Linux aarch64 / macOS arm64 build+test+package | GitHub Actions | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | `v*` tag push only |
 
 `builds.sr.ht` cannot run arm64/aarch64 images at all (confirmed against the
 raw compatibility matrix — every arch: arm64/aarch64 cell is empty — and
 empirically, three different images all failed identically with "Image ..
-is not available for arch .arm64."), which is why those three quadrants
+is not available for arch .arm64."), which is why those two quadrants
 live on GitHub Actions. They're only built and tested when a release is
 tagged (`release.yml`'s `v*` trigger), not on every push — see
 [man/RELEASING.md](RELEASING.md) for the full release procedure. This is a

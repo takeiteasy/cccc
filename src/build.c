@@ -1448,9 +1448,9 @@ static void push_cross_flags(ArgVec *args, const Builder *ctx,
     // accepts "--target=<triple>" or "-target <triple>" (single dash, two
     // tokens) but NOT "--target <triple>" (double dash, two tokens) --
     // verified against real clang, which reports "unknown argument
-    // '--target'; did you mean '-target'?" for that form. This was never
-    // exercised by a real (non-dry-run) build before #842 added
-    // macos_x86_64 to build.c.
+    // '--target'; did you mean '-target'?" for that form. First exercised by
+    // a real (non-dry-run) build when #842 added cross-compile targets to
+    // build.c.
     size_t len = strlen(triple) + 10;
     char  *f   = malloc(len);
     if (!f)
@@ -1667,8 +1667,9 @@ static int source_is_excluded(const BuildTarget *t, const char *src) {
 
 // Host architecture tag folded into the native object cache (#730). A plain
 // native build emits no --target flag, so two same-OS cccc binaries built
-// for different architectures (e.g. native arm64 macOS vs a cccc-macos-x86_64
-// binary run under Rosetta) can produce identical argv+source-content cache
+// for different architectures (e.g. an arm64 cccc vs an x86_64 cccc run
+// under Rosetta on the same macOS box) can produce identical
+// argv+source-content cache
 // keys if a build/cache directory is reused between them -- the second build
 // then links against wrong-arch object files. The compiler/linker cccc
 // spawns inherit its own process architecture, so the arch cccc itself was

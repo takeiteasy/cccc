@@ -1311,21 +1311,16 @@ Doxygen); the older HeaderDoc-style tags (`@abstract`, `@discussion`,
 favor of this.
 
 The full staged cross-platform workflow is also covered (#850):
-`macos_x86_64`/`macos_x86_64_smoke`/`macos_x86_64_test` (macOS x86_64
-cross-build under Rosetta 2), `build_cache_arch_smoke` (the #730
-cross-arch `--build-cache` regression guard), `linux_amd64_build`/
-`linux_amd64_smoke`/`linux_amd64_test` (5-way sharded) and
+`linux_amd64_build`/`linux_amd64_smoke`/`linux_amd64_test` (5-way sharded),
 `linux_aarch64_build`/`linux_aarch64_smoke`/`linux_aarch64_test`, and
 `linux_amd64_msan_test`. The smoke and sharded-test recipes need `$(...)`
 command substitution, `$?` exit-code capture, and (for the amd64 shard loop)
 a fail-flag accumulator across a `for` loop — none of which the vendored
 build shell (`src/build_shell.c`) supports — so those are delegated to real
-shell scripts (`tools/macos_x86_64_smoke.sh`, `tools/macos_x86_64_test.sh`,
-`tools/linux_container_smoke.sh`, `tools/linux_amd64_test.sh`,
+shell scripts (`tools/linux_container_smoke.sh`, `tools/linux_amd64_test.sh`,
 `tools/linux_amd64_msan_test.sh`) rather than inlined into `RunCustom`
 command strings. See [man/TESTING.md](TESTING.md#architecture-build-and-test-workflows)
-for the full walkthrough of each, including the required Colima/Rosetta
-setup.
+for the full walkthrough of each, including the required Colima setup.
 
 `./cccc --build build.c --build-list-targets` lists them all.
 

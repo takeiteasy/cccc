@@ -1,8 +1,8 @@
 name: Release
 
-# Builds and publishes GitHub release artifacts for the four supported
+# Builds and publishes GitHub release artifacts for the three supported
 # platform quadrants on every `v*` tag push (#883). ci.yml's linux-aarch64/
-# macos-arm64/macos-x86_64 jobs (and this workflow's linux-amd64 job, which
+# macos-arm64 jobs (and this workflow's linux-amd64 job, which
 # ci.yml deliberately omits -- sr.ht already covers amd64 per-push CI, see
 # man/RELEASING.md) share the same bootstrap->build shape; this workflow
 # additionally builds the `release` target (build.c, host -O2 -g -DNDEBUG)
@@ -15,7 +15,7 @@ name: Release
 # (e.g. after fixing a platform-specific build bug the first run surfaced)
 # without moving the tag -- publishing was skipped on the v0.1.0 run that
 # found the linux CC selection + -fgnu89-inline issues below, since
-# `publish` needs all four platform jobs green.
+# `publish` needs all three platform jobs green.
 on:
   push:
     tags: ["v*"]
@@ -140,40 +140,8 @@ jobs:
           name: macos-arm64
           path: cccc-*.tar.gz
 
-  macos-x86_64:
-    # Native Intel build+test -- NOT build.c's macos_x86_64 cross-compile
-    # target (see ci.yml's macos-x86_64 job for why).
-    runs-on: macos-15-intel
-    env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-      - name: Install dependencies
-        run: brew install libffi pkg-config
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: make bootstrap
-      - name: Build release
-        run: ./cccc --build build.c --build-target=release
-      - name: Test release binary
-        run: python3 tools/run_tests.py --binary build/cccc-release -j 4
-      - name: Package
-        run: |
-          set -e
-          VERSION="${RELEASE_TAG#v}"
-          NAME="cccc-${VERSION}-macos-x86_64"
-          mkdir "$NAME"
-          cp build/cccc-release "$NAME/cccc"
-          cp LICENSE README.md "$NAME/"
-          tar czf "$NAME.tar.gz" "$NAME"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-x86_64
-          path: cccc-*.tar.gz
-
   publish:
-    needs: [linux-amd64, linux-aarch64, macos-arm64, macos-x86_64]
+    needs: [linux-amd64, linux-aarch64, macos-arm64]
     runs-on: ubuntu-24.04
     # Repo default workflow token permission is read-only; softprops/
     # action-gh-release needs contents:write to create the release.

@@ -5,8 +5,8 @@
 #
 #   make                       # produce ./cccc
 #   ./cccc --build build.c     # everything else: test, clean, sanitizers,
-#                               # afl, bench, profile-*, the macOS x86_64
-#                               # cross build, the Linux Colima targets, ...
+#                               # afl, bench, profile-*, the Linux Colima
+#                               # targets, ...
 #   ./cccc --build build.c --build-list-targets
 #
 # No libbacktrace (nicer crash traces) and no readline (REPL line editing)

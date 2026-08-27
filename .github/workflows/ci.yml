@@ -12,10 +12,10 @@ name: Docs
 # since Doxyfile's INPUT is just the three headers and `doxygen Doxyfile`
 # runs standalone.
 #
-# The full four-quadrant build+test+package (Linux amd64/aarch64, macOS
-# arm64/x86_64) only runs at release time, via .github/workflows/release.yml
-# (triggered by a `v*` tag push) -- not on every push. See
-# man/RELEASING.md.
+# The full build+test+package for the three supported quadrants (Linux
+# amd64/aarch64, macOS arm64) only runs at release time, via
+# .github/workflows/release.yml (triggered by a `v*` tag push) -- not on
+# every push. See man/RELEASING.md.
 #
 # pull_request builds (WARN_AS_ERROR in Doxyfile makes this a real
 # completeness gate on @param/@return coverage) but never deploys -- a PR
