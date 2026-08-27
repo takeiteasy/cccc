@@ -5085,20 +5085,6 @@ int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
                              const char *input_name);
 long long generate_random_canary(void);
 
-// analyze.c: -a/--analyze n-gram + fusion-candidate reports.
-typedef struct {
-    int  n; // 2 or 3
-    int  top_n;
-    bool per_file;
-} CcAnalyzeNgramOptions;
-
-typedef struct CcNgramState CcNgramState;
-
-CcNgramState *cc_analyze_ngram_begin(const CcAnalyzeNgramOptions *opts);
-void cc_analyze_ngram_feed(CcNgramState *st, const InstrWord *text,
-                           long long num_words, const char *label, FILE *out);
-void cc_analyze_ngram_finish(CcNgramState *st, FILE *out);
-
 // host_backtrace.c
 /*!
  @brief Initialise libbacktrace state and warm up DWARF/Mach-O caches.

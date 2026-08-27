@@ -259,11 +259,6 @@ Optimization:
 	                             raw ioctl() passthrough for request codes outside the
 	                             layout-verified allowlist (off by default there too). VM-only.
 
-Static Bytecode Analysis (compile input, walk text segment, exit):
-	--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)
-	--ngrams-top=N          Show top N sequences (default 25)
-	--ngrams-per-file       Print a per-input section in addition to the aggregate
-
 Inline Assembly:
 	-A/--asm-passthru   Compile asm("...") statements via native C compiler
 	                    and execute them via FFI (default: no-op)

@@ -2160,7 +2160,7 @@ Where `--testing -c=native` guards compilation behind a passing `[[cccc::test]]`
 - The smoke-test run happens in a forked child process, so it never touches the compiled program's actual global/heap state -- the eventual native artifact still starts from the source's real compile-time initializers, not whatever the smoke test's `main()` left them as.
 - Success is "ran to completion without a VM-detected safety violation (bounds/UAF/CFI/uninitialized-read/etc.), a real crash (signal), or a hang" -- capped at `--test-timeout` seconds (default 30s when unset). The program's own exit code is **not** checked: a CLI that legitimately returns nonzero on bad input is not a `--test-run` failure. A safety violation alone (no accompanying crash) still refuses to compile; a bare memory leak with no other violation does not.
 - Implies `-c=native` when no `-c=FMT` is given (matching bare `-c`'s own default); an explicit `-c=native` still picks the format. `-o`'s default-filename behavior (`./a.out`) applies the same as plain `-c`.
-- Not compatible with `--repl`, `--build`, `--testing`, `--ngrams`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
+- Not compatible with `--repl`, `--build`, `--testing`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
 
 ## Filtering Tests
 

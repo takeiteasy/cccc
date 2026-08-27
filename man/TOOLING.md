@@ -496,7 +496,7 @@ Notes on the formatting rules:
   general error-handling model everywhere else. Only parse-time and
   type-checking diagnostics are recoverable in the REPL today.
 - `-r`/`--repl` is VM-only: it cannot be combined with `-c=native`, `--build`,
-  `--testing`, `--ngrams`, or any frontend/output mode
+  `--testing`, or any frontend/output mode
   (`-c`, `-d`, `-E`, `-M`, `--ast`, `--vm-profile`).
 
 ### Optional readline support
@@ -737,26 +737,6 @@ many 64 KiB shadow pages, the page-reclamation sweep has freed; `shadow_pages_li
 is the number of currently-allocated shadow pages across the heap and globals
 segments, sampled at print time. All three are zero when `--type-checks` isn't
 enabled.
-
-### Static Bytecode Analysis
-
-For understanding *static* instruction patterns (independent of any
-execution), cccc has an in-process n-gram analysis that compiles the given C
-source(s) and walks the resulting in-memory text segment:
-
-```bash
-./cccc --ngrams=2 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
-./cccc --ngrams=3 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
-./cccc --ngrams=2 --ngrams-per-file -I./include tests/benchmarks/sieve.c
-```
-
-`--ngrams[=N]` walks the text segment of one or more compiled sources and ranks
-2-grams (`N=2`, default) or 3-grams (`N=3`) by occurrence. `--ngrams-per-file`
-also prints a per-input section in addition to the aggregate. `--ngrams-top=N`
-limits the rows per section.
-
-`--ngrams` is mutually exclusive with `--vm-profile*`, `-g/--debug`,
-`-d/--disassemble`, `-c=native`, and any safety / execution / output flags.
 
 ### Manual Profiling
 

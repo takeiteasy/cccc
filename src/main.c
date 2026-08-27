@@ -836,13 +836,6 @@ static void usage(const char *argv0, int exit_code) {
            "codes outside the\n");
     printf("\t                             layout-verified allowlist (off by "
            "default there too). VM-only.\n");
-    printf("\nStatic Bytecode Analysis (compile input, walk text "
-           "segment, exit):\n");
-    printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
-           "default 2)\n");
-    printf("\t--ngrams-top=N          Show top N sequences (default 25)\n");
-    printf("\t--ngrams-per-file       Print a per-input section in addition to "
-           "the aggregate\n");
     printf("\nInline Assembly:\n");
     printf("\t-A/--asm-passthru   Compile asm(\"...\") statements via native C "
            "compiler\n");
@@ -1366,14 +1359,10 @@ int main(int argc, const char *argv[]) {
         COMPILE_NONE,
         COMPILE_NATIVE,
         COMPILE_GENERATED
-    } compile_format                      = COMPILE_NONE;
-    int           no_comptime             = 0; // --no-comptime / -C
-    int           comptime_include_all    = 0; // --comptime-include-all
-    int           allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
-    int           run_ngrams = 0; // 0 = off; 2 or 3 = enabled with n-gram size
-    int           ngrams_top = 25;
-    int           ngrams_per_file = 0;
-    CcNgramState *ngram_state     = NULL;
+    } compile_format            = COMPILE_NONE;
+    int no_comptime             = 0; // --no-comptime / -C
+    int comptime_include_all    = 0; // --comptime-include-all
+    int allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
     int testing_mode = 0; // any --testing[=...]/--test*/--list-tests flag
     // --testing[=vm|native]: bare -t/--testing defaults to VM (today's
     // behaviour, unchanged); =native drives a serialized-harness -c=native
@@ -1483,9 +1472,6 @@ int main(int argc, const char *argv[]) {
         {"ffi-type-checking", no_argument, 0, 1024},
         {"vm-profile", no_argument, 0, 1056},
         {"entry", required_argument, 0, 'e'},
-        {"ngrams", optional_argument, 0, 1057},
-        {"ngrams-top", required_argument, 0, 1030},
-        {"ngrams-per-file", no_argument, 0, 1031},
         {"comptime-include-all", no_argument, 0, 1050},
         {"allow-comptime-pp-bleed", no_argument, 0, 1068},
         {"asm-passthru", no_argument, 0, 'A'},
@@ -1790,7 +1776,7 @@ int main(int argc, const char *argv[]) {
                     // below (same as -m), which historically has never been
                     // gated by compile_only. Flipping compile_only here would
                     // change behavior at every site that branches on it (the
-                    // --repl/--build/--ngrams validation blocks, etc.) for no
+                    // --repl/--build validation blocks, etc.) for no
                     // reason -- -c=generated is a serialize-and-exit mode, not
                     // a "hand off to another backend" mode like native is.
                     // compile_format is only consulted here to pick
@@ -1921,39 +1907,6 @@ int main(int argc, const char *argv[]) {
             case 1056: // --vm-profile
                 vm_profile      = 1;
                 vm_profile_text = 1;
-                break;
-            case 1057: { // --ngrams[=N]
-                if (optarg == NULL) {
-                    run_ngrams = 2;
-                } else if (optarg[0] >= '0' && optarg[0] <= '9' &&
-                           optarg[1] == '\0') {
-                    run_ngrams = optarg[0] - '0';
-                } else {
-                    fprintf(stderr,
-                            "error: invalid --ngrams value '%s' (use 2 or 3)\n",
-                            optarg);
-                    usage(argv[0], 1);
-                }
-                if (run_ngrams != 2 && run_ngrams != 3) {
-                    fprintf(stderr, "error: --ngrams must be 2 or 3 (got %d)\n",
-                            run_ngrams);
-                    usage(argv[0], 1);
-                }
-                break;
-            }
-            case 1030: { // --ngrams-top=N
-                char *end = NULL;
-                long  val = strtol(optarg, &end, 10);
-                if (!optarg[0] || *end != '\0' || val <= 0 || val > INT32_MAX) {
-                    fprintf(stderr,
-                            "error: --ngrams-top must be a positive integer\n");
-                    usage(argv[0], 1);
-                }
-                ngrams_top = (int)val;
-                break;
-            }
-            case 1031: // --ngrams-per-file
-                ngrams_per_file = 1;
                 break;
             case 1050: // --comptime-include-all
                 comptime_include_all = 1;
@@ -2261,13 +2214,12 @@ int main(int argc, const char *argv[]) {
         // blocks). --testing is its own compile-then-run-tests pipeline;
         // combining the two is redundant, so it's rejected too rather than
         // silently picking one.
-        if (repl_mode || build_mode || testing_mode || run_ngrams ||
-            disassemble || preprocess_only || dump_expanded_only ||
-            print_tokens || output_json || output_ffi_decls || dump_ast) {
-            fprintf(stderr,
-                    "error: --test-run cannot be combined with --repl, "
-                    "--build, --testing, --ngrams/--fusion-candidates, -d, "
-                    "-E, -m, --ast, -j, -J, or other output modes\n");
+        if (repl_mode || build_mode || testing_mode || disassemble ||
+            preprocess_only || dump_expanded_only || print_tokens ||
+            output_json || output_ffi_decls || dump_ast) {
+            fprintf(stderr, "error: --test-run cannot be combined with --repl, "
+                            "--build, --testing, -d, "
+                            "-E, -m, --ast, -j, -J, or other output modes\n");
             usage(argv[0], 1);
         }
         // Bare -c already means native; --test-run mirrors that default
@@ -2311,13 +2263,13 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "error: --repl does not take input files\n");
             usage(argv[0], 1);
         }
-        if (build_mode || testing_mode || run_ngrams ||
-            compile_format != COMPILE_NONE || disassemble || preprocess_only ||
-            dump_expanded_only || print_tokens || output_json ||
-            output_ffi_decls || dump_ast || vm_profile) {
+        if (build_mode || testing_mode || compile_format != COMPILE_NONE ||
+            disassemble || preprocess_only || dump_expanded_only ||
+            print_tokens || output_json || output_ffi_decls || dump_ast ||
+            vm_profile) {
             fprintf(stderr,
                     "error: --repl cannot be combined with --build, --testing, "
-                    "--ngrams, -c (incl. -c=native), -d, "
+                    "-c (incl. -c=native), -d, "
                     "-E, -m, --ast, --vm-profile, or other output modes\n");
             usage(argv[0], 1);
         }
@@ -2379,41 +2331,6 @@ int main(int argc, const char *argv[]) {
             // Match cc/clang/gcc's a.out convention: -c=native with no -o
             // builds ./a.out instead of erroring.
             out_file = strdup("a.out");
-        }
-    }
-
-    if (run_ngrams) {
-        // Static analysis is mutually exclusive with execution / output modes.
-        if (preprocess_only || dump_expanded_only || print_tokens ||
-            output_json || output_ffi_decls || dump_ast) {
-            fprintf(stderr, "error: --ngrams cannot be combined with frontend "
-                            "output modes\n");
-            usage(argv[0], 1);
-        }
-        if (compile_only || disassemble || out_file || entry_name) {
-            fprintf(stderr, "error: --ngrams cannot be combined with VM "
-                            "bytecode output or entry options\n");
-            usage(argv[0], 1);
-        }
-        if (vm_profile) {
-            fprintf(stderr,
-                    "error: --ngrams cannot be combined with --vm-profile\n");
-            usage(argv[0], 1);
-        }
-        if (flags & CCCC_ENABLE_DEBUGGER) {
-            fprintf(stderr,
-                    "error: --ngrams cannot be combined with -g/--debug\n");
-            usage(argv[0], 1);
-        }
-        if (flags != 0) {
-            fprintf(stderr, "error: --ngrams cannot be combined with VM "
-                            "runtime safety options\n");
-            usage(argv[0], 1);
-        }
-        if (compile_format == COMPILE_NATIVE) {
-            fprintf(stderr,
-                    "error: --ngrams cannot be combined with -c=native\n");
-            usage(argv[0], 1);
         }
     }
 
@@ -3230,23 +3147,6 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Static bytecode analysis on the just-compiled text segment.
-    if (run_ngrams) {
-        CcAnalyzeNgramOptions opts = {
-            .n        = run_ngrams,
-            .top_n    = ngrams_top,
-            .per_file = ngrams_per_file,
-        };
-        ngram_state = cc_analyze_ngram_begin(&opts);
-        const char *label =
-            input_files_count == 1 ? input_files[0] : "<merged source>";
-        cc_analyze_ngram_feed(ngram_state, vm.text_seg,
-                              (long long)vm.text_ptr + 1, label, stdout);
-        cc_analyze_ngram_finish(ngram_state, stdout);
-        ngram_state = NULL;
-        goto BAIL;
-    }
-
     if (out_file) {
         // -o with no -c/--compile format has no artifact left to write --
         // on-disk bytecode output was removed. Use -c=native (or
@@ -3283,12 +3183,6 @@ BAIL:
         }
     }
     cc_destroy(&vm);
-    // Defensive: free analysis state if it was allocated but not finalized
-    // (shouldn't happen given the dispatch flow, but keeps leak-checkers
-    // happy).
-    if (ngram_state) {
-        cc_analyze_ngram_finish(ngram_state, stdout);
-    }
     if (input_tokens)
         free(input_tokens);
     if (input_progs) {

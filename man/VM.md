@@ -1290,8 +1290,6 @@ The VM can collect dynamic execution statistics:
 
 Enable profiling with `--vm-profile` (text report to stderr). Combine it with `--json` to also write the same data as JSON to stdout.  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages.
 
-Static n-gram mining (`cccc --ngrams`) complements the dynamic data by showing which opcode sequences are common in the bytecode *and* hot at runtime.
-
 ## Performance Notes
 
 The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.

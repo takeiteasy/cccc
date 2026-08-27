@@ -2211,9 +2211,8 @@ void cc_load_stdlib(VirtualMachine *vm) {
 // vm->dynobjsz_scan_pc rather than rescanning from the top, since text_seg
 // can still grow between cc_run_at calls (comptime macros / --build factory
 // functions run interleaved with codegen; testing.c also calls cc_run_at
-// once per test function). Same walk shape as the ngram/fusion analyzers
-// (analyze.c): step by cc_instr_words(), starting after the reserved
-// text_seg[0] entry-point slot.
+// once per test function). Steps by cc_instr_words(), starting after the
+// reserved text_seg[0] entry-point slot.
 static void cc_scan_dynobjsz(VirtualMachine *vm) {
     if (vm->dynobjsz_present)
         return; // already found; nothing left to look for
