@@ -7,7 +7,7 @@
 
 CCCC adds compile-time macro expansion and AST building capabilities on top of the existing toolchain by adding a new 'comptime' pass that runs between the preprocessor and the AST parser. Functions marked with `[[cccc::comptime]]` are run and expanded inside the VM during compilation and can then be forwarded to your native compiler.
 
-Currently targets **MacOS** (aarch64/x86_64) and **Linux** (aarch64/x86_64). Windows support is planned but not started. Release builds are published at [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases).
+Currently targets **MacOS** (aarch64) and **Linux** (aarch64/x86_64). Windows support is planned but not started. Release builds are published at [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases).
 
 Guides live in [`man/`](man/) (linked throughout below); generated API docs for the public headers (`building.h`, `reflection.h`, `testing.h`) are published at [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
 
@@ -76,6 +76,10 @@ Options:
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
 	   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) built with -c=bytecode
+	   --url-cache-dir <path> Directory for caching #include/#embed <https://...> fetches
+	   --url-cache-clear     Clear the URL fetch cache and exit
+	   --url-timeout=SECONDS Set URL fetch timeout in seconds (default: 30)
+	   --url-max-size=SIZE   Cap fetched URL payload size (e.g., 50MB, default: 10MB)
 	-D/--define <macro>[=def] Define a macro
 	-U/--undef <macro>       Undefine a macro
 	-a/--ast                 Dump AST
@@ -235,10 +239,7 @@ Language Standard:
 Preprocessor Options:
 	   --embed-limit=SIZE         Set #embed file size warning limit (e.g., 50MB, 100mb, default: 10MB)
 	   --embed-hard-limit         Make #embed limit a hard error instead of warning
-	   --url-timeout=SECONDS      Set URL #include/#embed fetch timeout in seconds (curl builds; default: 30)
-	   --url-max-size=SIZE        Cap fetched URL payload size (curl builds; default: 10MB, independent
-	                              of the #embed limits)
-	   --macro-recursion-limit=N  Limit recursive pragma macro expansion (default: 256, 0=unlimited)
+	   --macro-recursion-limit=N  Limit recursive comptime macro expansion (default: 256, 0=unlimited)
 	-n/--max-errors=N             Cap diagnostics at N (default: 20)
 	-C/--no-comptime              Skip the comptime/macro phase entirely (for
 	                              large TUs that don't use [[cccc::comptime]])
@@ -255,6 +256,8 @@ Preprocessor Options:
 Optimization:
 	-O/--optimize[=LEVEL]        Enable bytecode optimization (default: disabled)
 	                             LEVEL: 0=none, 1=basic, 2=standard, 3=aggressive, 4=fused
+	                             Under -c=native: forwarded verbatim as -O<n> to the host cc
+	                             instead (no bytecode pipeline to optimize)
 	                             1: constant folding (-ffold)
 	                             2: +peephole, +CSE (-fpeephole -fcse)
 	                             3: +copy-prop, +DCE (-fcopy-prop -fdce)
@@ -418,26 +421,6 @@ SQLite smoke test, and the `src/stdlib` FFI registration audit
 `make -f tools/Makefile.backup test` (the pre-cut, full-featured Makefile,
 kept as an escape hatch) is the equivalent when there is no working `cccc`
 yet.
-
-### macOS x86_64 with Rosetta 2
-
-On Apple Silicon, the x86_64 workflow uses clang's `--target=x86_64-apple-macos`,
-the macOS SDK's universal libffi, and Rosetta 2. The full staged
-build+smoke+test workflow is available directly via `--build-target`:
-
-```bash
-./cccc --build build.c --build-target=macos_x86_64          # build only
-./cccc --build build.c --build-target=macos_x86_64_smoke    # + Rosetta smoke test
-./cccc --build build.c --build-target=macos_x86_64_test     # + full suite
-```
-
-`macos_x86_64_smoke` asserts `uname -m` and `file` output, runs a VM program
-and `--asm-passthru`, confirms that `-c=native` produces an executable x86_64
-child process, and also runs `build_cache_arch_smoke` (the #730 regression
-guard: reusing the same `--build-cache` across a native and cross build must
-not serve wrong-arch objects). `macos_x86_64_test` runs the source suite,
-`.c4` round-trip, and macOS host-signal debugger integration against
-`cccc-macos-x86_64`.
 
 ### Linux with Colima
 
