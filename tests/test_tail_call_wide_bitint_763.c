@@ -1,7 +1,8 @@
-// CCCC_FLAGS: --testing -O1
-// CCCC_MATRIX_SKIP: exercises can_emit_tail_call's CALLT eligibility, which
-// requires -O1; the per-pass matrix forces -O0 and would trivially pass
-// without exercising the guard this test locks in.
+// CCCC_FLAGS: --testing -O2
+//
+// The VM eliminates eligible tail calls unconditionally; the -O2 above is
+// retained only for the -c=native round-trip leg (forwarded verbatim to the
+// host cc, #1159).
 //
 // #763: can_emit_tail_call (src/codegen.c) already rejects a tail call whose
 // return type is a struct, union, or vector, because those returns go

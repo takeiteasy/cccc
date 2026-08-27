@@ -1,18 +1,11 @@
-// CCCC_FLAGS: --testing -O1
-// CCCC_MATRIX_SKIP: exercises CALLT tail-call codegen, which requires -O1;
-// the per-pass matrix forces -O0 and would trivially pass without exercising
-// the bug this test guards against.
+// CCCC_FLAGS: --testing -O2
 //
-// #1159: this file's native round-trip used to be unconditionally skipped --
-// -O<n> is now forwarded verbatim to the host cc under -c=native, and under clang
-// this file's own `-O1` (above) is enough: test_762_identity_cast_tail_
-// recursion_still_tco's 1M-deep recursion round-trips clean. gcc-16 at -O1
-// does NOT eliminate this specific tail call (confirmed: segfaults; passes
-// at -O2) -- a real, compiler-family-specific TCO-heuristic gap, not
-// fixable from CCCC's side (this file's -O1 drives both the VM's own
-// bytecode pipeline and, now, the native build; bumping it to satisfy gcc
-// would test a different CALLT configuration than the one this file exists
-// to guard). See NATIVE_SKIP_TESTS_GCC (tools/testing/__init__.py).
+// The VM eliminates eligible tail calls unconditionally, so the VM leg
+// ignores the -O2 above; it is retained for the -c=native round-trip leg,
+// where -O<n> is forwarded verbatim to the host cc (#1159) and
+// test_762_identity_cast_tail_recursion_still_tco's 1M-deep recursion needs
+// an optimising host -O to not overflow the native stack. -O2 (not -O1) so
+// both gcc-16 and clang eliminate the call -- gcc's -O1 heuristic does not.
 //
 // #762: the parser always wraps a `return` expression in ND_CAST, even for
 // identity conversions. To reach the underlying ND_FUNCALL for

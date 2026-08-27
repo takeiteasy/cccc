@@ -1135,8 +1135,14 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
 
     // URL fetch defaults (only consulted in curl-enabled builds; see also
     // the --url-timeout/--url-max-size overrides in main.c)
-    vm->compiler.url_timeout           = 30;               // seconds
-    vm->compiler.url_max_size          = 10 * 1024 * 1024; // 10MB fetch cap
+    vm->compiler.url_timeout  = 30;               // seconds
+    vm->compiler.url_max_size = 10 * 1024 * 1024; // 10MB fetch cap
+
+    // Tail-call elimination is unconditional: deep-recursion correctness
+    // depends on CALLT reusing the current frame instead of growing the host
+    // stack. Eligibility is still decided per call site by
+    // can_emit_tail_call().
+    vm->compiler.tail_calls            = true;
 
     vm->compiler.macro_recursion_limit = 256;
     vm->compiler.warnings              = 0;

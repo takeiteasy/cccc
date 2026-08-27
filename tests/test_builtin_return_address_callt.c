@@ -1,6 +1,4 @@
-// CCCC_FLAGS: --testing -O1
-// CCCC_MATRIX_SKIP: CALLT tail-call codegen requires -O1; the per-pass matrix
-// forces -O0
+// CCCC_FLAGS: --testing
 // CCCC_NATIVE_SKIP: uses __builtin_pc_function_name, which resolves a VM
 // bytecode offset via the VM's own symbol table and has no native
 // equivalent (#969)

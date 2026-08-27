@@ -1,5 +1,4 @@
-// CCCC_FLAGS: --control-flow-integrity --optimize=1
-// CCCC_MATRIX_SKIP: depends on --optimize=1 (tail-call elimination)
+// CCCC_FLAGS: --control-flow-integrity
 // Regression coverage for #756's fix: a plain CALL -> CALLT -> CALLT chain
 // under --control-flow-integrity alone (no other safety flag) must still
 // return correctly. The suite had no CFI + tail-call coverage at all before

@@ -1,22 +1,17 @@
-// CCCC_FLAGS: --testing -O0
-// CCCC_MATRIX_SKIP: the two-deep test_fn -> outer() -> inner() helper chain
-//   requires no tail-call collapse; -O1+ behaviour is covered by
-//   test_builtin_return_address_callt.c
+// CCCC_FLAGS: --testing
 // CCCC_NATIVE_SKIP: uses __builtin_pc_function_name, which resolves a VM
 // bytecode offset via the VM's own symbol table and has no native
 // equivalent (#969)
 //
 // Tests for __builtin_return_address(n) and __builtin_pc_function_name that
 // depend on a *non-tail-call* two-deep helper chain (see below). Split out of
-// test_builtin_return_address.c / test_builtin_pc_symbolize.c (#835): at
-// `-O1`+, `return inner();` in each of these helpers is a textbook tail call,
-// and CALLT (gated `opt_level >= 1`, src/codegen.c's can_emit_tail_call)
-// elides the caller's stack frame in that position. That collapses the
-// two-deep chain these tests assume down to one frame, so the level-1 lookups
-// here would observe the *tail-called* semantics instead — already covered,
-// on purpose, by test_builtin_return_address_callt.c. Pinning to -O0 keeps
-// this file testing the plain (non-TCO) frame-walk behaviour its comments
-// describe.
+// test_builtin_return_address.c / test_builtin_pc_symbolize.c (#835). Tail
+// calls are eliminated unconditionally, so `return inner();` would become a
+// CALLT and collapse the caller's frame -- already covered, on purpose, by
+// test_builtin_return_address_callt.c. Each helper here instead assigns the
+// call result to a local and returns that (`v = inner(); return v;`), which
+// is not a tail-call position (can_emit_tail_call only accepts a bare
+// ND_FUNCALL), so the two-deep frame chain these tests assume is preserved.
 //
 // Frame structure notes:
 // Each test function is run via cc_run_at(), so it is the outermost frame and
@@ -43,14 +38,19 @@ static void *inner_ra2(void) {
     return __builtin_return_address(2);
 }
 
+// `v = inner(); return v;` — deliberately NOT a tail-call position, so the
+// caller's frame survives and the two-deep chain stays two-deep.
 static void *outer_calls_inner_ra0(void) {
-    return inner_ra0();
+    void *v = inner_ra0();
+    return v;
 }
 static void *outer_calls_inner_ra1(void) {
-    return inner_ra1();
+    void *v = inner_ra1();
+    return v;
 }
 static void *outer_calls_inner_ra2(void) {
-    return inner_ra2();
+    void *v = inner_ra2();
+    return v;
 }
 
 // Three-level chain for testing level-1 __builtin_pc_function_name lookup:
@@ -59,11 +59,13 @@ static void *outer_calls_inner_ra2(void) {
 //   level 0 → return addr in outer_calls_name_inner body
 //   level 1 → return addr in test_fn body
 static const char *name_inner_ra1(void) {
-    void *ra = __builtin_return_address(1);
-    return __builtin_pc_function_name(ra);
+    void       *ra = __builtin_return_address(1);
+    const char *n  = __builtin_pc_function_name(ra);
+    return n;
 }
 static const char *outer_calls_name_inner(void) {
-    return name_inner_ra1();
+    const char *v = name_inner_ra1();
+    return v;
 }
 
 // ─── Level 1 from two-deep chain is nonzero ──────────────────────────────

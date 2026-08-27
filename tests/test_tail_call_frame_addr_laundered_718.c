@@ -1,7 +1,8 @@
-// CCCC_FLAGS: --testing -O1
-// CCCC_MATRIX_SKIP: exercises CALLT tail-call codegen, which requires -O1;
-// the per-pass matrix forces -O0 and would trivially pass without exercising
-// the bug this test guards against.
+// CCCC_FLAGS: --testing -O2
+//
+// The VM eliminates eligible tail calls unconditionally; the -O2 above is
+// retained only for the -c=native round-trip leg (the host cc needs an
+// optimising -O to collapse the deep recursion these tests drive).
 //
 // #718: follow-up to #716's CALLT frame-reuse guard (can_emit_tail_call /
 // tail_arg_carries_frame_addr in codegen.c). That guard's second leg treats

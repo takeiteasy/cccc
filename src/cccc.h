@@ -3929,6 +3929,9 @@ typedef struct Compiler {
     int inline_result_reg;  // Register for inlined return values
 
     // Tail-call context (used during codegen for return f(args) TCO)
+    bool tail_calls;          // Emit CALLT for eligible return f(args). Always
+                              // true after cc_init; deep-recursion correctness
+                              // depends on it (host stack does not grow).
     bool emitting_tail_call;  // Set in ND_RETURN; cleared immediately in
                               // ND_FUNCALL
     Obj *pending_tail_callee; // Callee recorded by ND_FUNCALL; NULL if

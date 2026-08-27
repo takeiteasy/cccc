@@ -1,16 +1,12 @@
-// CCCC_FLAGS: --testing -O1
-// CCCC_MATRIX_SKIP: exercises CALLT tail-call codegen, which requires -O1;
-// the per-pass matrix forces -O0 and would trivially pass without exercising
-// the bug this test guards against.
+// CCCC_FLAGS: --testing -O2
 //
-// #1159: this file's native round-trip used to be skipped -- run_native_
-// backend() passed no -O flag to the host cc at all, so test_716_pure_
-// recursion_still_correct's 500k-deep tail recursion overflowed the host
-// stack at the host's own default -O0. -O<n> is now forwarded verbatim to
-// the host cc under -c=native, and this file's own `-O1` (above) is enough:
-// confirmed directly under CCCC_NATIVE_CC=clang and CCCC_NATIVE_CC=/opt/
-// homebrew/bin/gcc-16, both eliminate the tail call and return correctly at
-// -O1.
+// The VM eliminates eligible tail calls unconditionally, so the VM leg
+// ignores the -O2 above. It is retained for the -c=native round-trip leg:
+// -O<n> is forwarded verbatim to the host cc (#1159) and
+// test_716_pure_recursion_still_correct's 500k-deep tail recursion needs an
+// optimising host -O to not overflow the native stack. -O2 (not -O1) so both
+// gcc-16 and clang eliminate the call (gcc's -O1 heuristic does not; see the
+// sibling test_tail_call_narrowing_cast_762.c).
 //
 // #716: CALLT reuses the caller's frame (op_CALLT_fn does `sp = bp`), so a
 // tail call that hands the callee a pointer into the caller's own frame

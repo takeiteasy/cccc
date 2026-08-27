@@ -454,7 +454,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             while (tco_expr && tco_expr->kind == ND_CAST && tco_expr->lhs &&
                    cast_is_repr_noop(tco_expr->ty, tco_expr->lhs->ty))
                 tco_expr = tco_expr->lhs;
-            if (tco_expr && vm->compiler.opt_level >= 1 &&
+            if (tco_expr && vm->compiler.tail_calls &&
                 can_emit_tail_call(vm, tco_expr)) {
                 int tco_dest = is_flonum(tco_expr->ty) ? FREG_A0 : REG_A0;
                 vm->compiler.emitting_tail_call  = true;

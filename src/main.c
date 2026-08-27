@@ -2702,7 +2702,16 @@ int main(int argc, const char *argv[]) {
         vm.compiler.embed_hard_error = true;
     }
 
-    // Set optimization level and per-pass overrides
+    // Optimisation level. The VM has no bytecode optimiser: -O<n> only has an
+    // effect under -c=native, where it is forwarded verbatim to the host cc
+    // (#1159). In plain VM mode it is accepted and ignored; warn once so the
+    // user is not surprised. The warning is suppressed under --testing because
+    // a test's CCCC_FLAGS carries -O for the native round-trip leg on purpose.
+    if (opt_level != 0 && compile_format != COMPILE_NATIVE && !testing_mode)
+        fprintf(stderr,
+                "warning: -O%d has no effect in VM mode (the VM does not "
+                "optimise); use -c=native for host -O\n",
+                opt_level);
     vm.compiler.opt_level         = opt_level;
     vm.compiler.ffp_contract_fma  = ffp_contract_fma;
     vm.compiler.opt_f_enable      = opt_f_enable;
