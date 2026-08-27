@@ -3904,26 +3904,6 @@ typedef struct Compiler {
     bool frame_has_esc_scalar; // body emits a recorded LEA3 for an escaping
                                // scalar
 
-    // Scalar local promotion (#249). Active only while generating one function.
-    // Capped at 4 slots (REG_S0-S3) to leave S4-S7 for the restrict cache.
-    Obj *promoted_locals[4];
-    int  promoted_regs[4];
-    int  promoted_save_offsets[4];
-    bool promoted_dirty[4];
-    int  promoted_count;
-
-    // FP scalar local promotion (#461). Parallel to integer promotion above.
-    Obj *fp_promoted_locals[4];
-    int  fp_promoted_regs[4];         // FREG_S0–S3
-    int  fp_promoted_save_offsets[4]; // stack slots (after integer promoted
-                                      // slots)
-    bool fp_promoted_dirty[4];
-    int  fp_promoted_count;
-
-    Obj *promotion_alias_vars[16];
-    Obj *promotion_alias_targets[16];
-    int  promotion_alias_count;
-
     // True while gen_expr/gen_addr are emitting a load or store through a
     // union member access (#653). Threaded as compiler-scoped state rather
     // than a parameter on emit_load_ex/emit_store_ex (mirroring
@@ -3933,32 +3913,6 @@ typedef struct Compiler {
     // a union load skips the type check entirely, a union store clears the
     // accessed range's effective-type shadow instead of stamping it.
     bool in_union_member_access;
-
-    // Restrict-param deref cache (#267). Active only while generating one
-    // function. Cache key is (param, byte_offset); up to MAX_RESTRICT_CACHE
-    // distinct pairs. Slots are lazily bound on first access;
-    // restrict_cache_capacity tracks the number of stack/register slots
-    // pre-reserved in the frame for sizing purposes.
-#define MAX_RESTRICT_CACHE 4
-    int restrict_cache_count;    // number of lazily-bound entries so far
-    int restrict_cache_capacity; // slots pre-reserved (0 or MAX_RESTRICT_CACHE)
-    Obj *restrict_cache_params[MAX_RESTRICT_CACHE];
-    long restrict_cache_offsets[MAX_RESTRICT_CACHE]; // byte offset per entry
-    int  restrict_cache_regs[MAX_RESTRICT_CACHE];
-    int  restrict_cache_save_offsets[MAX_RESTRICT_CACHE];
-    bool restrict_cache_valid[MAX_RESTRICT_CACHE];
-
-    // Restrict derived-local map (#269). Populated by a pre-pass AST walk
-    // before codegen; maps local pointer variables provably derived from
-    // restrict params to their (param, byte_offset) pair so the deref cache can
-    // treat *q like *p. var_offset[i]=true means the offset is non-constant
-    // (used for invalidation only).
-#define MAX_RESTRICT_DERIVED 16
-    int  restrict_derived_count;
-    Obj *restrict_derived_vars[MAX_RESTRICT_DERIVED];
-    Obj *restrict_derived_params[MAX_RESTRICT_DERIVED];
-    long restrict_derived_offsets[MAX_RESTRICT_DERIVED];
-    bool restrict_derived_var_offset[MAX_RESTRICT_DERIVED];
 
     // C language standard selection
     CStdVersion    c_std; // Selected standard version (default: CCCC_STD_C23)

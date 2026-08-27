@@ -1253,10 +1253,10 @@ static bool var_in_fn_locals(Obj *fn, Obj *var) {
 // function's local directly (through the static-link chain and that local's
 // stack slot) without ever taking its address -- collect_captures_in_node
 // only marks is_captured for Apple block literals, so a plain nested
-// function's captures went unmarked and prepare_local_promotion /
-// prepare_fp_local_promotion (src/codegen.c) were free to hold such a local
-// in a saved register while the nested function kept mutating the stack
-// slot behind its back (#836). Any is_local ND_VAR reached from `fn`'s body
+// function's captures went unmarked, leaving downstream analyses (e.g.
+// checked-bounds propagation) with an incomplete picture of which of an
+// enclosing function's locals a nested function mutates (#836). Any is_local
+// ND_VAR reached from `fn`'s body
 // that is not in `fn`'s own locals list must belong to some enclosing
 // frame -- depth-agnostic, so a multi-level nest (main -> mid -> inner) is
 // covered without walking the parent chain explicitly. Mirrors the child set
@@ -1449,8 +1449,7 @@ typedef struct {
     NNState state;
 } NNEnvEntry;
 
-// Locals lists are short; a linear-scan array keeps this pass simple (same
-// spirit as restrict_derived_walk()'s DerivedCand[] scratch array).
+// Locals lists are short; a linear-scan array keeps this pass simple.
 #define NN_MAX_TRACKED 256
 
 typedef struct {

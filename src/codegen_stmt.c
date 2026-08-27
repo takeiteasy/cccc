@@ -50,251 +50,6 @@ void emit_source_location(VirtualMachine *vm, Node *node) {
     vm->dbg.last_debug_col  = node->tok->col_no;
 }
 
-// ========== Restrict Memcpy Loop Lowering (#268) ==========
-//
-// Recognises: for (T i = 0; i < n; i++) dst[i] = src[i]
-// where dst and src are restrict-qualified pointers.
-// Emits a single MCPY opcode instead of the loop.
-
-// Strip casts to find the underlying node (re-uses strip_index_casts logic).
-static Node *strip_casts(Node *n) {
-    while (n && n->kind == ND_CAST)
-        n = n->lhs;
-    return n;
-}
-
-// Matches dst[i] = src[i] body: returns true and populates
-// dst_var/src_var/ind_var/scale. body must be a single ND_ASSIGN of the form:
-// *(base + i*scale) = *(base2 + i*scale)
-static bool match_memcpy_body(Node *body, Obj **dst_var, Obj **src_var,
-                              Obj **ind_var, int *elem_scale) {
-    // Accept either bare ND_EXPR_STMT or bare ND_ASSIGN (from ND_FOR body).
-    Node *assign = body;
-    if (assign && assign->kind == ND_EXPR_STMT)
-        assign = assign->lhs;
-    // Also handle an ND_BLOCK wrapping a single ND_EXPR_STMT
-    if (assign && assign->kind == ND_BLOCK) {
-        Node *inner = assign->body;
-        if (!inner || inner->next)
-            return false;
-        assign = inner;
-        if (assign->kind == ND_EXPR_STMT)
-            assign = assign->lhs;
-    }
-    if (!assign || assign->kind != ND_ASSIGN)
-        return false;
-
-    Node *lhs = assign->lhs;
-    Node *rhs = assign->rhs;
-
-    // Both sides must be ND_DEREF of pointer arithmetic.
-    if (!lhs || lhs->kind != ND_DEREF || !rhs || rhs->kind != ND_DEREF)
-        return false;
-
-    Node *laddr = strip_casts(lhs->lhs);
-    Node *raddr = strip_casts(rhs->lhs);
-    if (!laddr || !raddr)
-        return false;
-
-    // Match: base + index*scale
-    // laddr/raddr must be ND_ADD(base_var, ND_MUL(index, scale)).
-    if (laddr->kind != ND_ADD || raddr->kind != ND_ADD)
-        return false;
-
-    Node *l_index = NULL, *r_index = NULL;
-    int   l_scale = 0, r_scale = 0;
-
-    // Decompose lhs address
-    Node *ll = strip_casts(laddr->lhs);
-    Node *lr = strip_casts(laddr->rhs);
-    // Try rhs side being the index*scale
-    if (!is_index_scale(lr, &l_index, &l_scale)) {
-        // Maybe lhs side is the index*scale (commuted)
-        if (!is_index_scale(ll, &l_index, &l_scale))
-            return false;
-        Node *tmp = ll;
-        ll        = lr;
-        lr        = tmp; // swap so ll=base, lr=index*scale
-    }
-    Node *l_base = ll;
-
-    // Decompose rhs address
-    Node *rl = strip_casts(raddr->lhs);
-    Node *rr = strip_casts(raddr->rhs);
-    if (!is_index_scale(rr, &r_index, &r_scale)) {
-        if (!is_index_scale(rl, &r_index, &r_scale))
-            return false;
-        Node *tmp = rl;
-        rl        = rr;
-        rr        = tmp;
-    }
-    Node *r_base = rl;
-
-    // Scales must match.
-    if (l_scale != r_scale)
-        return false;
-
-    // Index variables must be the same.
-    l_index = strip_casts(l_index);
-    r_index = strip_casts(r_index);
-    if (!l_index || l_index->kind != ND_VAR || !r_index ||
-        r_index->kind != ND_VAR)
-        return false;
-    if (l_index->var != r_index->var)
-        return false;
-
-    // Base pointers must be restrict-qualified parameters.
-    l_base = strip_casts(l_base);
-    r_base = strip_casts(r_base);
-    if (!l_base || l_base->kind != ND_VAR || !r_base || r_base->kind != ND_VAR)
-        return false;
-    Obj *dst = l_base->var;
-    Obj *src = r_base->var;
-    if (!dst || !src || dst == src)
-        return false;
-    if (!dst->ty || dst->ty->kind != TY_PTR || !dst->ty->is_restrict)
-        return false;
-    if (!src->ty || src->ty->kind != TY_PTR || !src->ty->is_restrict)
-        return false;
-
-    *dst_var    = dst;
-    *src_var    = src;
-    *ind_var    = l_index->var;
-    *elem_scale = l_scale;
-    return true;
-}
-
-// Try to emit a restrict memcpy loop as a single MCPY opcode.
-// Returns true if the pattern matched and MCPY was emitted.
-static bool try_emit_restrict_memcpy(VirtualMachine *vm, Node *node) {
-    if (!node || node->kind != ND_FOR)
-        return false;
-    if (vm->compiler.opt_level < 2)
-        return false;
-    // Flags that disable indexed-load optimisation also make this unsafe.
-    if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS)
-        return false;
-
-    // 1. Init: must be a declaration/assignment of induction variable to 0.
-    //    After parsing, for-init declarations come as ND_BLOCK{ ND_EXPR_STMT{
-    //    ND_ASSIGN } }.
-    Node *init = node->init;
-    if (!init)
-        return false;
-    Node *init_assign = init;
-    if (init_assign->kind == ND_BLOCK) {
-        if (!init_assign->body || init_assign->body->next)
-            return false;
-        init_assign = init_assign->body;
-    }
-    if (init_assign->kind == ND_EXPR_STMT)
-        init_assign = init_assign->lhs;
-    if (!init_assign || init_assign->kind != ND_ASSIGN)
-        return false;
-    Node *init_lhs = strip_casts(init_assign->lhs);
-    Node *init_rhs = strip_casts(init_assign->rhs);
-    if (!init_lhs || init_lhs->kind != ND_VAR || !init_rhs ||
-        init_rhs->kind != ND_NUM)
-        return false;
-    if (init_rhs->val != 0)
-        return false;
-    Obj *ind_init = init_lhs->var;
-
-    // 2. Condition: must be ind_var < bound_expr.
-    Node *cond = node->cond;
-    if (!cond || cond->kind != ND_LT)
-        return false;
-    Node *cond_lhs = strip_casts(cond->lhs);
-    if (!cond_lhs || cond_lhs->kind != ND_VAR || cond_lhs->var != ind_init)
-        return false;
-    Node *bound_expr = cond->rhs;
-
-    // 3. Increment: must be i = i+1 (the parser desugars i++ and ++i to this).
-    Node *inc = node->inc;
-    if (!inc)
-        return false;
-    inc = strip_casts(inc);
-    if (!inc || inc->kind != ND_ASSIGN)
-        return false;
-    {
-        Node *inc_lhs = strip_casts(inc->lhs);
-        if (!inc_lhs || inc_lhs->kind != ND_VAR || inc_lhs->var != ind_init)
-            return false;
-        Node *inc_rhs = strip_casts(inc->rhs);
-        // Accept i+1 or 1+i
-        if (!inc_rhs || inc_rhs->kind != ND_ADD)
-            return false;
-        Node *add_lhs = strip_casts(inc_rhs->lhs);
-        Node *add_rhs = strip_casts(inc_rhs->rhs);
-        bool  lhs_is_ind =
-            add_lhs && add_lhs->kind == ND_VAR && add_lhs->var == ind_init;
-        bool rhs_is_one =
-            add_rhs && add_rhs->kind == ND_NUM && add_rhs->val == 1;
-        bool rhs_is_ind =
-            add_rhs && add_rhs->kind == ND_VAR && add_rhs->var == ind_init;
-        bool lhs_is_one =
-            add_lhs && add_lhs->kind == ND_NUM && add_lhs->val == 1;
-        if (!((lhs_is_ind && rhs_is_one) || (rhs_is_ind && lhs_is_one)))
-            return false;
-    }
-
-    // 4. Body: must be dst[i] = src[i] with restrict pointers.
-    Obj *dst_var = NULL, *src_var = NULL, *ind_var = NULL;
-    int  elem_scale = 0;
-    if (!match_memcpy_body(node->then, &dst_var, &src_var, &ind_var,
-                           &elem_scale))
-        return false;
-    if (ind_var != ind_init)
-        return false;
-
-    // All checks passed: emit MCPY.
-    reset_temp_regs();
-
-    // Compute bound (n).
-    int r_n = alloc_temp_reg();
-    gen_expr(vm, bound_expr, r_n);
-
-    // Guard: if n <= 0 the loop is a no-op; skip MCPY to avoid memcpy with
-    // a huge size_t when n is a negative signed value.
-    // emit_jnz3 also invalidates the restrict cache (control-flow split).
-    int r_guard = alloc_temp_reg();
-    emit_rrr(vm, SLE3, r_guard, r_n, REG_ZERO);
-    Pc skip_patch = emit_jnz3(vm, r_guard);
-    free_temp_reg(r_guard);
-
-    int r_dst = alloc_temp_reg();
-    // Load dst pointer value — the var is a function param (pointer type)
-    emit_local_load(vm, dst_var->ty, r_dst, dst_var->offset);
-
-    int r_src = alloc_temp_reg();
-    emit_local_load(vm, src_var->ty, r_src, src_var->offset);
-
-    if (elem_scale <= 1) {
-        emit_mov3(vm, REG_A2, r_n);
-    } else {
-        int r_scale = alloc_temp_reg();
-        emit_li3(vm, r_scale, elem_scale);
-        emit_rrr(vm, MUL3, REG_A2, r_n, r_scale);
-        free_temp_reg(r_scale);
-    }
-
-    emit_mov3(vm, REG_A0, r_dst);
-    emit_mov3(vm, REG_A1, r_src);
-    emit(vm, MCPY);
-
-    free_temp_reg(r_n);
-    free_temp_reg(r_dst);
-    free_temp_reg(r_src);
-
-    // Patch the skip-MCPY target. Cache was already invalidated by emit_jnz3
-    // above.
-    vm->text_seg[skip_patch] = vm->text_ptr + 1;
-
-    // The induction variable is loop-scoped and dead after MCPY; no need to
-    // update it.
-    return true;
-}
-
 // #981: true if `blk` (a real, non-is_decl_group C block scope) declares a
 // VLA anywhere among its *immediate* statements, looking exactly one level
 // through a declaration()-built synthetic wrapper (Node.is_decl_group,
@@ -465,13 +220,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 if (vm->compiler.pending_tail_callee) {
                     Obj *tco_fn = vm->compiler.pending_tail_callee;
                     vm->compiler.pending_tail_callee = NULL;
-                    emit_flush_promoted_locals(vm);
-                    emit_flush_fp_promoted_locals(vm);
                     if (vm->flags & CCCC_STACK_INSTR)
                         emit_scopeout(vm, vm->current_function_scope_id);
-                    emit_restore_restrict_cache_regs(vm);
-                    emit_restore_fp_promoted_registers(vm);
-                    emit_restore_promoted_registers(vm);
                     emit(vm, CALLT);
                     Pc tco_patch            = emit_word_ptr(vm);
                     vm->text_seg[tco_patch] = 0;
@@ -597,14 +347,9 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 }
             }
 
-            emit_flush_promoted_locals(vm);
-            emit_flush_fp_promoted_locals(vm);
             // Deactivate function-level scope before returning.
             if (vm->flags & CCCC_STACK_INSTR)
                 emit_scopeout(vm, vm->current_function_scope_id);
-            emit_restore_restrict_cache_regs(vm);
-            emit_restore_fp_promoted_registers(vm);
-            emit_restore_promoted_registers(vm);
             emit(vm, LEV3);
             return;
 
@@ -630,19 +375,11 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         }
 
         case ND_FOR: {
-            // Try to lower restrict copy loops to MCPY before emitting loop
-            // code.
-            if (try_emit_restrict_memcpy(vm, node))
-                return;
-
             // Init
             if (node->init) {
                 gen_stmt(vm, node->init);
             }
 
-            // Loop start is a join point (init falls through; back-edge arrives
-            // here).
-            restrict_cache_invalidate_all(vm);
             Pc loop_start = vm->text_ptr + 1;
 
             // Condition
@@ -672,8 +409,6 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             // Jump back to start
             emit(vm, JMP);
             emit_word(vm, loop_start);
-            // After back-edge, any fall-through is from a join; invalidate.
-            restrict_cache_invalidate_all(vm);
 
             // Define break label (jumps past loop)
             if (node->brk_label) {
@@ -688,8 +423,6 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         }
 
         case ND_DO: {
-            // Loop start is a join point (back-edge arrives here).
-            restrict_cache_invalidate_all(vm);
             Pc loop_start = vm->text_ptr + 1;
 
             gen_stmt(vm, node->then);

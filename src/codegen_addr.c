@@ -497,9 +497,8 @@ bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
 //
 // Scoped to struct/union member chains only, not array/vector indexing
 // (arr[i] on a local array reaches the same unchecked emit_load/store surface
-// under -3, since match_indexed_addr's fused fast path is disabled whenever
-// CCCC_POINTER_CHECKS is set -- but distinguishing an array/vector-decay base
-// from a pointer-variable base in that ND_ADD indexing chain needs its own
+// under -3 -- but distinguishing an array/vector-decay base from a
+// pointer-variable base in that ND_ADD indexing chain needs its own
 // classifier and has no known reproducer yet; tracked separately).
 // Is `node` a member access directly on a union expression (`u.m`, not a
 // struct nested inside a union or vice versa -- only the immediate parent

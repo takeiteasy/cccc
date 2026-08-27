@@ -428,8 +428,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     // because op_LDR_*_fn skips the load when rd == REG_ZERO; FLDR/FLDR_F32
     // have no such guard and segfault. Routing through a real temp also
     // makes the discarded-deref safety checks meaningful again -- they were
-    // being run against address 0 (see the matching note in
-    // restrict_cache_handle_deref above).
+    // being run against address 0.
     if (dest_reg == REG_ZERO &&
         (node->kind == ND_DEREF || node->kind == ND_MEMBER)) {
         int tmp = alloc_temp_reg();
@@ -653,14 +652,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     if (vm->flags & CCCC_STACK_INSTR)
                         emit_markr(vm, node->var->offset);
                 }
-                if (is_promoted_local(vm, node->var)) {
-                    emit_promoted_read(vm, node->var, dest_reg);
-                    return;
-                }
-                if (is_fp_promoted_local(vm, node->var)) {
-                    emit_fp_promoted_read(vm, node->var, dest_reg);
-                    return;
-                }
                 // Fused local load: skip the LEA3+LDR two-step for simple
                 // locals
                 if (is_simple_local_scalar(vm, node)) {
@@ -690,23 +681,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
 
         case ND_DEREF:
-            if (restrict_cache_handle_deref(vm, node, dest_reg))
-                return;
-            // Scalar-promotion alias reads bypass the address entirely (the
-            // pointer is proven to always equal &target, see
-            // promotion_alias_add()), so a checked-bounds deref (#770/#484)
-            // must not take this path -- fall through to gen_addr below so its
-            // CHKR check still runs, same reasoning as
-            // restrict_cache_handle_deref declining above.
-            if (!((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                  node->checked_bounds_lo && node->checked_bounds_hi) &&
-                promoted_deref_target(vm, node)) {
-                emit_promoted_read(vm, promoted_deref_target(vm, node),
-                                   dest_reg);
-                return;
-            }
-            if (emit_indexed_load_if_possible(vm, node, dest_reg))
-                return;
             // Routed through gen_addr() (rather than gen_expr(node->lhs, ...)
             // directly, which computes the identical address) so the checked-
             // pointer bounds check (#770/#484) in gen_addr's own ND_DEREF case
@@ -1415,33 +1389,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
 
         case ND_ASSIGN: {
-            // See the matching guard in gen_expr's ND_DEREF case: a checked-
-            // bounds store must not take the promotion-alias fast path either,
-            // for the same CHKR-bypass reason.
-            Obj *lhs_promoted_deref =
-                ((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                 node->lhs->checked_bounds_lo && node->lhs->checked_bounds_hi)
-                    ? NULL
-                    : promoted_deref_target(vm, node->lhs);
-            if (lhs_promoted_deref) {
-                int  r_val = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
-                bool need_free = dest_reg == REG_ZERO;
-                gen_expr(vm, node->rhs, r_val);
-                emit_promoted_write(vm, lhs_promoted_deref, r_val);
-                if (!lhs_promoted_deref->is_param && lhs_promoted_deref->ty &&
-                    lhs_promoted_deref->ty->kind != TY_ARRAY &&
-                    lhs_promoted_deref->ty->kind != TY_STRUCT &&
-                    lhs_promoted_deref->ty->kind != TY_UNION) {
-                    if (vm->flags & CCCC_STACK_INSTR)
-                        emit_markw(vm, lhs_promoted_deref->offset);
-                    if (vm->flags & CCCC_UNINIT_DETECTION)
-                        emit_marki(vm, lhs_promoted_deref->offset);
-                }
-                if (need_free)
-                    free_temp_reg(r_val);
-                return;
-            }
-
             // IMPORTANT: Evaluate RHS *before* computing LHS address!
             // If RHS is a function call, it will clobber temp registers.
             // Computing LHS address after ensures we get a fresh temp reg.
@@ -1616,22 +1563,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // r_addr!
             mark_temp_reg_used(r_val);
 
-            bool rhs_promoted_addr =
-                node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
-                node->lhs->var->name && node->lhs->var->name[0] == '\0' &&
-                node->rhs && node->rhs->kind == ND_ADDR && node->rhs->lhs &&
-                node->rhs->lhs->kind == ND_VAR &&
-                is_promoted_local(vm, node->rhs->lhs->var);
-
             // Fused local store: skip LEA3+STR for simple locals
-            bool        lhs_fused     = node->lhs->kind == ND_VAR &&
-                                        is_simple_local_scalar(vm, node->lhs);
-            IndexedAddr lhs_idx_check = {};
-            bool        lhs_indexed =
-                node->lhs->kind == ND_DEREF &&
-                match_indexed_addr(vm, node->lhs->lhs, &lhs_idx_check) &&
-                !expr_has_call(lhs_idx_check.base) &&
-                !expr_has_call(lhs_idx_check.index);
+            bool lhs_fused = node->lhs->kind == ND_VAR &&
+                             is_simple_local_scalar(vm, node->lhs);
             // If the LHS address expression itself contains a function call
             // (e.g. `form[strlen(form) - 1] = 's'`), that call clobbers every
             // caller-saved temp register at runtime — including the one holding
@@ -1647,7 +1581,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
 
             int r_addr = -1;
-            if (!lhs_fused && !lhs_indexed) {
+            if (!lhs_fused) {
                 // Now compute LHS address (after any function calls in RHS are
                 // done)
                 r_addr = alloc_temp_reg();
@@ -1674,12 +1608,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // gen_addr above, inside the r_addr computation) already
             // range-checked r_addr; this only re-checks the stored *value*,
             // which gen_addr has no access to. Runs on the ND_DEREF-lhs store
-            // path only: lhs_fused is ND_VAR-only and lhs_indexed's
-            // match_indexed_addr() already declines under CCCC_CHECKED_BOUNDS
-            // (CCCC_FUSION_UNSAFE_FLAGS, src/codegen_regalloc.c's #770/#484
-            // fusion-gate comment), so an ND_DEREF checked store always has
-            // r_addr >= 0 and reaches the standard emit_store_ex below --
-            // verified by the -O2/-O3 tests, not assumed.
+            // path only: lhs_fused is ND_VAR-only, so an ND_DEREF checked store
+            // always has r_addr >= 0 and reaches the standard emit_store_ex
+            // below.
             if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
                 node->lhs->kind == ND_DEREF &&
                 node->lhs->checked_nt_terminator && r_addr >= 0) {
@@ -1772,15 +1703,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_new);
                 free_temp_reg(r_mask);
                 free_temp_reg(r_container);
-            } else if (node->lhs->kind == ND_VAR &&
-                       is_promoted_local(vm, node->lhs->var)) {
-                emit_promoted_write(vm, node->lhs->var, r_val);
-            } else if (node->lhs->kind == ND_VAR &&
-                       is_fp_promoted_local(vm, node->lhs->var)) {
-                emit_fp_promoted_write(vm, node->lhs->var, r_val);
-            } else if (lhs_indexed && emit_indexed_store_if_possible(
-                                          vm, node->lhs, node->ty, r_val)) {
-                // stored by fused indexed opcode
             } else if (lhs_fused) {
                 emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
             } else {
@@ -1838,9 +1760,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_slo);
             }
 
-            // Update or invalidate the restrict cache for this store.
-            restrict_cache_handle_store(vm, node->lhs, r_val);
-
             // Stack instrumentation: record write and mark initialized (scalars
             // only). A VLA declaration's lhs is ND_VLA_PTR, not ND_VAR (its
             // lowering is ND_ASSIGN(ND_VLA_PTR, alloca(...)) -- see parse.c)
@@ -1877,8 +1796,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             if (need_free) {
                 free_temp_reg(r_val);
             }
-            if (rhs_promoted_addr)
-                promotion_alias_add(vm, node->lhs->var, node->rhs->lhs->var);
             return;
         }
 
@@ -2381,35 +2298,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
 
         case ND_FUNCALL: {
-            // Invalidate the restrict cache up front for every call, not just
-            // the general CALL/CALLN/CALLF path below. Several intrinsics
-            // (malloc/ free/calloc/realloc/... under CCCC_VM_HEAP,
-            // setjmp/longjmp/signal/ raise/dlopen/dlsym/dlclose/dlerror) lower
-            // to a dedicated opcode via an early `return` that never reaches
-            // the general path's invalidate, leaving stale cache entries after
-            // e.g. free() (#754). The general path below still invalidates
-            // again *after* the call: this call's own argument expressions run
-            // after this point and may fill a cache entry (e.g. f(*p) as the
-            // first access to *p), which must not survive the call it was
-            // evaluated for. Over-invalidating only costs cache throughput,
-            // never correctness.
-            //
-            // Residual gap, not fixed here: an intrinsic's *own* argument
-            // expression can itself fill a cache entry (e.g. realloc(p, *p) --
-            // *p is read as the size argument), and that intrinsic's early
-            // `return` below skips any invalidate after it runs, same as before
-            // this fix. Unlike the general-path case above, there is no
-            // "after this call" invalidate to add for those branches without
-            // touching every intrinsic's early return individually. Any
-            // subsequent call (of any kind) still invalidates via its own
-            // top-of-case entry into this invalidate, so the gap is narrow:
-            // an intrinsic argument fill immediately followed by a stale access
-            // with no further call in between. restrict_cache_handle_deref's
-            // hit-site checks (#750) still catch anything CHKP3/CHKT3 would
-            // catch on a real load; only a silent value divergence under no
-            // safety flags at all would slip through. Tracked as a follow-up.
-            restrict_cache_invalidate_all(vm);
-
             // Capture and clear the tail-call flag immediately so that argument
             // sub-calls (e.g. return f(g(x))) and inlined bodies never see it.
             // The captured value is used below when deciding CALL vs CALLT.
@@ -2902,14 +2790,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     return;
                 }
 
-                // Reset temp regs after call; function may have modified
-                // *restrict_params. Also invalidate the restrict cache again:
-                // the up-front invalidate at the top of ND_FUNCALL runs before
-                // this call's own argument expressions are evaluated, so an
-                // argument access that fills a cache entry (e.g. f(*p) as the
-                // first access to *p) would otherwise survive past the call it
-                // was evaluated for (#754).
-                restrict_cache_invalidate_all(vm);
+                // Reset temp regs after call (caller-saved clobber).
                 reset_temp_regs();
 
                 // Result in REG_A0/FREG_A0
@@ -3372,11 +3253,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
             // Function calls clobber all temp registers (caller-saved)
             // Reset allocator so caller will recompute any addresses it needs.
-            // Also invalidate the restrict cache again: see the comment on the
-            // matching invalidate in the tail-call branch above (#754) -- this
-            // call's own argument expressions may have filled a cache entry
-            // after the up-front invalidate at the top of ND_FUNCALL ran.
-            restrict_cache_invalidate_all(vm);
             reset_temp_regs();
 
             // Note: With runtime return buffer rotation (RETBUF opcode),

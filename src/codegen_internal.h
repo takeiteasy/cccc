@@ -66,28 +66,9 @@ typedef struct CleanupScopeEntry {
 } CleanupScopeEntry;
 extern CleanupScopeEntry *g_cleanup_scope;
 
-// Combined flags that make the indexed load/store fusion path (and the
-// restrict-value cache's non-cache-hit path) unsafe to take, since either
-// would bypass a safety check that only the slow, unfused path re-derives
-// (#654/#750/#770/#484). Used from codegen_regalloc.c, codegen_emit.c, and
-// codegen_stmt.c.
 // Register-allocator spill threshold for the reg-heavy binary-op path.
 // Defined in codegen_regalloc.c, used from codegen_expr.c.
 #define TEMP_REG_SPILL_THRESHOLD 2
-
-#define CCCC_FUSION_UNSAFE_FLAGS                                               \
-    (CCCC_POINTER_CHECKS | CCCC_INVALID_ARITH | CCCC_PROVENANCE_TRACK |        \
-     CCCC_TYPE_CHECKS | CCCC_CHECKED_BOUNDS)
-
-// Address decomposed into base + (index * scale) + offset, used by the
-// indexed load/store fusion path. Defined/used in codegen_emit.c and
-// codegen_expr.c.
-typedef struct {
-    Node     *base;
-    Node     *index;
-    int       scale;
-    long long offset;
-} IndexedAddr;
 
 // One `switch` case's jump-table bookkeeping. Defined/used in
 // codegen_emit.c and codegen_stmt.c.
@@ -121,42 +102,28 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
                                 Obj *owner_fn, Obj *var, int dest_reg);
 void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
                              bool dangling_check);
-void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty, int reg);
 bool block_capture_needs_mcpy(Type *ty);
 bool can_emit_tail_call(VirtualMachine *vm, Node *expr);
 bool cast_is_repr_noop(Type *to, Type *from);
 bool contains_funcall(Node *node);
 bool contains_self_call(Node *node, Obj *fn);
-bool contains_unsupported_control_flow(Node *node);
-bool emit_indexed_load_if_possible(VirtualMachine *vm, Node *node,
-                                   int dest_reg);
-bool emit_indexed_store_if_possible(VirtualMachine *vm, Node *lhs, Type *ty,
-                                    int value_reg);
 bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs);
 bool expr_has_call(Node *node);
 bool is_extern_func_name(Node *node, const char *name);
-bool is_fp_promoted_local(VirtualMachine *vm, Obj *var);
-bool is_index_scale(Node *node, Node **index, int *scale);
-bool is_promoted_local(VirtualMachine *vm, Obj *var);
 bool is_simple_local_scalar(VirtualMachine *vm, Node *node);
 bool is_u64_int(Type *ty);
 bool is_union_member_access(Node *node);
 bool is_wide_bitint(Type *ty);
 bool is_zero_size_aggregate(Type *ty);
-bool match_indexed_addr(VirtualMachine *vm, Node *addr, IndexedAddr *out);
-bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node, int dest_reg);
 const char *obj_external_name(Obj *obj);
 int alloc_temp_reg(void);
 int assign_stack_offsets(VirtualMachine *vm, Obj *fn);
-int count_ast_nodes(Node *node);
 int ffi_index_for_callee(VirtualMachine *vm, Obj *callee);
 int find_capture_index(Obj *block_fn, Obj *var);
 int find_ffi_function(VirtualMachine *vm, const char *name);
 int fop_for_type(Type *ty, int f64_op);
 int gen_checked_nt_hi(VirtualMachine *vm, Node *deref);
 int gen_flonum_arg_to_scratch(VirtualMachine *vm, Node *arg);
-int promoted_local_index(VirtualMachine *vm, Obj *var);
-int promoted_local_reg(VirtualMachine *vm, Obj *var);
 int temp_regs_free(void);
 int var_stack_slots(Obj *var);
 long long alloc_decimal_temp(VirtualMachine *vm, int bytes);
@@ -165,7 +132,6 @@ Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args);
 Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target);
 Obj *find_static_link_var(Obj *fn);
 int static_link_hop_bytes(VirtualMachine *vm);
-Obj *promoted_deref_target(VirtualMachine *vm, Node *node);
 Pc emit_addi3(VirtualMachine *vm, int rd, int rs, long long imm);
 Pc emit_i64(VirtualMachine *vm, long long val);
 Pc emit_jnz3(VirtualMachine *vm, int rs);
@@ -212,18 +178,12 @@ void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
 void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
                  long long elem_size);
 void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth);
-void emit_flush_fp_promoted_locals(VirtualMachine *vm);
-void emit_flush_promoted_locals(VirtualMachine *vm);
 void emit_fmov3(VirtualMachine *vm, int rd, int rs);
-void emit_fp_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg);
-void emit_fp_promoted_write(VirtualMachine *vm, Obj *var, int value_reg);
 void emit_fround_f32(VirtualMachine *vm, int rd, int rs);
 void emit_frr(VirtualMachine *vm, int op, int rd, int rs1);
 void emit_frrr(VirtualMachine *vm, int op, int rd, int rs1, int rs2);
 void emit_hmrk(VirtualMachine *vm, int depth);
 void emit_hrel(VirtualMachine *vm, int depth);
-void emit_init_fp_promoted_params(VirtualMachine *vm);
-void emit_init_promoted_params(VirtualMachine *vm);
 void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
                   bool dangling_check);
 void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr);
@@ -237,19 +197,11 @@ void emit_markr(VirtualMachine *vm, long long offset);
 void emit_markw(VirtualMachine *vm, long long offset);
 void emit_mov3(VirtualMachine *vm, int rd, int rs);
 void emit_pop3(VirtualMachine *vm, int rd);
-void emit_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg);
-void emit_promoted_write(VirtualMachine *vm, Obj *var, int value_reg);
 void emit_psh3(VirtualMachine *vm, int rs);
-void emit_restore_fp_promoted_registers(VirtualMachine *vm);
-void emit_restore_promoted_registers(VirtualMachine *vm);
-void emit_restore_restrict_cache_regs(VirtualMachine *vm);
 void emit_rr(VirtualMachine *vm, int op, int rd, int rs1);
 void emit_rrr(VirtualMachine *vm, int op, int rd, int rs1, int rs2);
 void emit_rrrs(VirtualMachine *vm, int op, int rd, int rs1, int rs2, int scale);
 void emit_rrs(VirtualMachine *vm, int op, int rd, int rs1, int scale);
-void emit_save_fp_promoted_registers(VirtualMachine *vm);
-void emit_save_promoted_registers(VirtualMachine *vm);
-void emit_save_restrict_cache_regs(VirtualMachine *vm);
 void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope);
 void emit_scopein(VirtualMachine *vm, int scope_id);
 void emit_scopeout(VirtualMachine *vm, int scope_id);
@@ -279,15 +231,8 @@ void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
 void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg);
 void mark_temp_reg_used(int reg);
 void patch_labels(VirtualMachine *vm);
-void prepare_fp_local_promotion(VirtualMachine *vm, Obj *fn,
-                                int base_stack_size);
-void prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size);
-void prepare_restrict_cache(VirtualMachine *vm, Obj *fn, int base_stack_size);
-void promotion_alias_add(VirtualMachine *vm, Obj *alias, Obj *target);
 void replace_locals_in_ast(Node *node, Obj **orig, Obj **map, int count);
 void reset_labels(void);
 void reset_temp_regs(void);
-void restrict_cache_handle_store(VirtualMachine *vm, Node *lhs, int val_reg);
-void restrict_cache_invalidate_all(VirtualMachine *vm);
 
 #endif // CCCC_CODEGEN_INTERNAL_H

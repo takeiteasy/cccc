@@ -45,14 +45,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Count parameters first
     // Assign stack offsets early
-    int stack_size      = assign_stack_offsets(vm, fn);
-    int base_stack_size = stack_size;
-    prepare_local_promotion(vm, fn, base_stack_size);
-    prepare_fp_local_promotion(
-        vm, fn, base_stack_size); // must follow prepare_local_promotion
-    prepare_restrict_cache(vm, fn, base_stack_size);
-    stack_size += vm->compiler.promoted_count + vm->compiler.fp_promoted_count +
-                  vm->compiler.restrict_cache_capacity;
+    int stack_size = assign_stack_offsets(vm, fn);
     if (stack_size % 2 != 0)
         stack_size++;
 
@@ -121,12 +114,6 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Activate function-level scope (marks params/locals as alive).
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopein(vm, fn_scope_id);
-
-    emit_save_promoted_registers(vm);
-    emit_save_fp_promoted_registers(vm);
-    emit_save_restrict_cache_regs(vm);
-    emit_init_promoted_params(vm);
-    emit_init_fp_promoted_params(vm);
 
     // Mark parameters initialized (they arrive via registers).
     if (vm->flags & CCCC_UNINIT_DETECTION) {
@@ -262,14 +249,9 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     if (strncmp(fn->name, entry_fn, strlen(entry_fn) + 1) == 0) {
         emit_li3(vm, REG_A0, 0);
     }
-    emit_flush_promoted_locals(vm);
-    emit_flush_fp_promoted_locals(vm);
     // Deactivate function scope (for fall-through returns).
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
-    emit_restore_restrict_cache_regs(vm);
-    emit_restore_fp_promoted_registers(vm);
-    emit_restore_promoted_registers(vm);
     emit(vm, LEV3);
     fn->code_end_addr = vm->text_ptr + 1;
 }

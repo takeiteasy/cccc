@@ -868,8 +868,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         propagate_checked_bounds(vm, fn);
         verify_checked_assign_bounds(vm, fn);
         // #836: mark this nested function's captures on whichever enclosing
-        // function(s) they belong to, before that/those function(s)'s own
-        // codegen runs prepare_local_promotion / prepare_fp_local_promotion.
+        // function(s) they belong to, so later analyses over those functions
+        // see a complete picture of which locals a nested function mutates.
         if (is_nested)
             mark_nested_captures(fn, fn->body);
         // check_nonnull_flow() runs post-parse now (#688) -- see the loop

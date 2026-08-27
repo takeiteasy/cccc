@@ -359,62 +359,6 @@ bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
     return true;
 }
 
-// Count total AST nodes (statements + expressions) in a subtree.
-// Used by the inliner to enforce the node-count threshold.
-int count_ast_nodes(Node *node) {
-    if (!node)
-        return 0;
-    int count  = 1; // this node
-    count     += count_ast_nodes(node->next);
-    count     += count_ast_nodes(node->lhs);
-    count     += count_ast_nodes(node->rhs);
-    count     += count_ast_nodes(node->cond);
-    count     += count_ast_nodes(node->then);
-    count     += count_ast_nodes(node->els);
-    count     += count_ast_nodes(node->init);
-    count     += count_ast_nodes(node->inc);
-    count     += count_ast_nodes(node->body);
-    count     += count_ast_nodes(node->args);
-    count     += count_ast_nodes(node->cas_addr);
-    count     += count_ast_nodes(node->cas_old);
-    count     += count_ast_nodes(node->cas_new);
-    count     += count_ast_nodes(node->atomic_expr);
-    // Don't follow goto_next/case_next/default_case/init_tail — they are
-    // chain pointers within switch/label structures, not tree children.
-    return count;
-}
-
-// Check if a subtree contains switch, goto, or label nodes — these have
-// chain pointers (goto_next, case_next, default_case, init_tail) that
-// clone_subst zeroes, so inlining them would produce broken code.
-bool contains_unsupported_control_flow(Node *node) {
-    if (!node)
-        return false;
-    if (node->kind == ND_SWITCH || node->kind == ND_CASE ||
-        node->kind == ND_GOTO || node->kind == ND_LABEL ||
-        node->kind == ND_GOTO_EXPR)
-        return true;
-    if (contains_unsupported_control_flow(node->lhs))
-        return true;
-    if (contains_unsupported_control_flow(node->rhs))
-        return true;
-    if (contains_unsupported_control_flow(node->cond))
-        return true;
-    if (contains_unsupported_control_flow(node->then))
-        return true;
-    if (contains_unsupported_control_flow(node->els))
-        return true;
-    if (contains_unsupported_control_flow(node->init))
-        return true;
-    if (contains_unsupported_control_flow(node->inc))
-        return true;
-    if (contains_unsupported_control_flow(node->body))
-        return true;
-    if (contains_unsupported_control_flow(node->args))
-        return true;
-    return false;
-}
-
 // Walk a cloned AST and replace ND_VAR pointers from the original local
 // array with corresponding entries in the remapped array.
 void replace_locals_in_ast(Node *node, Obj **orig, Obj **map, int count) {
@@ -588,10 +532,6 @@ void define_label(VirtualMachine *vm, char *name) {
     global_label_map[num_global_labels].name   = name;
     global_label_map[num_global_labels].offset = label_pc;
     num_global_labels++;
-
-    // A label is a control-flow join point; the restrict cache is no longer
-    // valid.
-    restrict_cache_invalidate_all(vm);
 }
 
 // Record a jump that needs to be patched later
