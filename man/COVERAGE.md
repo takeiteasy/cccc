@@ -120,8 +120,8 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | Postfix tails bind directly to the literal — `(struct P){30, 12}.x`, `(int[]){1,2,3}[0]`, and `((struct T *){p})->m` all parse (C99 6.5.2p5); `&` of a member through a literal serializes with the & bound inside the literal's initializer chain (#1102) | |
-| `inline` functions | ✓ | Dead-function elimination + single-return inlining (unconditional); full AST inlining at `-O2`/`-O3` (`--inline-limit=N` controls size threshold) |
-| `restrict` pointers | ✓ | Parsed and stored on `Type`; codegen exploits non-aliasing: straight-line loads through `*restrict_param` or `restrict_param[const]` are cached in callee-saved registers (cache key is `(param, byte_offset)`, so `p[0]`, `p[1]`, etc. occupy separate slots); stores through a constant index update only that slot, while variable-index stores invalidate all slots for that param; `for (i=0;i<n;i++) dst[i]=src[i]` loops with both pointers restrict-qualified are lowered to a single `MCPY` opcode ([#267](https://todo.sr.ht/~takeiteasy/cccc/267), [#268](https://todo.sr.ht/~takeiteasy/cccc/268)); locals provably derived from restrict params (e.g. `int *q = p + 1`) inherit the non-aliasing property via a single-function AST pre-pass, extending the deref cache to `*q` and `q[const]` patterns ([#269](https://todo.sr.ht/~takeiteasy/cccc/269)) |
+| `inline` functions | ✓ | Dead-function elimination + single-return inlining of `static inline` callees (both unconditional). The VM has no optimiser, so there is no size-thresholded multi-statement inliner |
+| `restrict` pointers | ✓ | Parsed and stored on `Type`. The VM has no optimiser, so the non-aliasing property drives no codegen exploitation (the register deref cache and restrict memcpy-loop lowering were removed with the optimiser, #1214). Under `-c=native` the qualifier is serialized verbatim and the host cc acts on it |
 | Type qualifiers in array-parameter indices (`void f(int a[const static 10])`) | ✓ | `static` enforces minimum-size, emitting `-Wstatic-array-size` when a constant-size argument is too small (best-effort: bare pointer args not checked). `const`/`volatile`/`restrict` inside `[...]` are applied to the decayed pointer (e.g. `[const N]` → `int *const`); VLA-form qualifiers (`[const n]`) not yet adjusted. |
 | `__func__` predefined identifier | ✓ | |
 | Variadic macros `__VA_ARGS__` | ✓ | |
@@ -217,7 +217,7 @@ language coverage figures apply.
 | Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy. Serializes under `-c=native`/`-m`/`-c=generated` too (#965) — see [Serialized-output divergences](#serialized-output-divergences) for the lowering shape and its residual gaps |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](#built-in-functions) below |
 | `__thread` storage class | ✓ | TLS segment; per-thread private storage |
-| `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict`; fully optimised (see `restrict` entry above) |
+| `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict` (see `restrict` entry above) |
 | `__inline` / `__inline__` | ✓ | Spelling aliases for `inline`; recognized as GCC keyword aliases (GCC compatibility) |
 | `__typeof__` | ✓ | Synonym for `typeof` |
 | `asm(...)`/`__asm__(...)`/`__asm(...)` inline assembly | ✓ | `asm(...)` statements are no-ops by default; `--asm-passthru` compiles via native CC and executes via FFI; custom callback via `cc_set_asm_callback`. All three alternate-keyword spellings are accepted in statement position, matching `is_asm_label_tok`'s existing acceptance of all three for `asm("symbol")` declarator labels (#1130). **`-c=native`/`-m`/`-c=generated` always emit `__asm__(...)` verbatim** (never bare `asm`, which GCC/clang both disable as a keyword under a strict ISO `-std=cNN` — confirmed on real GCC and on the `cccc-linux-amd64` container's clang, which reproduce the failure Apple clang's leniency does not), regardless of `--asm-passthru` — the one construct where serialized output deliberately does not mirror default VM behaviour, since there is no way to evaluate host assembly inside the VM at all. Executing it is the host compiler's job, and `--asm-passthru` governs VM execution only. See [Serialized-output divergences](#serialized-output-divergences) and the #1119 note there (dedicated asm suite, skipped natively) |
@@ -270,7 +270,7 @@ groups from that ticket.
 | `#pragma message("...")` | ✓ | |
 | `#pragma region` / `#pragma endregion` | ✗ | IDE-only, no-op — pending |
 | `#pragma intrinsic(...)` / `#pragma function(...)` | ✗ | Intrinsic toggle, no-op — pending |
-| `#pragma optimize(...)` | ✗ | No-op — pending |
+| `#pragma optimize(...)` | ✗ | No-op — the VM has no optimiser |
 | `#pragma loop(...)` | ✗ | Loop-hint pragma, no-op — pending |
 | `#pragma data_seg` / `bss_seg` / `code_seg` | ✗ | Section placement, no-op — pending |
 | `#pragma section(...)` | ✗ | No-op — pending |
@@ -333,7 +333,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `nodiscard` | C23 | ✓ | Warns on discarded return values (`-Wnodiscard`, part of `-Wall`) |
 | `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
 | `noreturn` | C23 / GNU | ✓ | Emits `BTRAP` after calls; warns on returns |
-| `optimize("ON")` / `optimize(N)` | GNU / CCCC | ✓ | Per-function optimization level (0–4); attribute wins over global `-O` |
+| `optimize("ON")` / `optimize(N)` | GNU / CCCC | ~ | Parsed, syntax-checked, then ignored with a warning (the VM has no optimiser) |
 | `cleanup(fn)` | GNU | ✓ | Scope-exit callback: calls `fn(&var)` when the variable goes out of scope |
 | `error("msg")` | GNU | ✓ | Emits a compile-time error when called; DCE-aware: suppressed inside statically-dead positions (constant-fold + unsigned boundary tautology): `if`/`else` branches, `while(0)`/`for(;0;)` bodies and increment expressions, `false && call()` / `true \|\| call()` short-circuit operands, ternary `cond ? dead : live` branches, GNU elvis `truthy ?: dead` — enabling the `_FORTIFY_SOURCE` `__chk_fail` idiom |
 | `warning("msg")` | GNU | ✓ | Emits a compile-time warning when called; same DCE-aware suppression as `error` |
@@ -485,21 +485,10 @@ Marks a function as *pure*: it may read global state but has no side effects
 and always returns the same result for the same arguments given unchanged
 global state.
 
-**Optimizer effect:**
-
-- **`--optimize=1` and above**: Dead-call elimination — calls whose return
-  value is discarded are omitted entirely.  Argument expressions are still
-  evaluated so their side effects run.
-
-Pure functions are **not** eligible for common-subexpression elimination
-because their result may change if a global is modified between two calls.
-
-```c
-__attribute__((pure)) int strlen_pure(const char *s) { /* ... */ }
-
-// Dead call at -O1+: result discarded, but side effects of ++n still run.
-strlen_pure(buf);  // result unused — call omitted
-```
+**Effect:** parsed and stored on the function. The VM has no optimiser, so
+this drives no dead-call elimination or CSE — it is informational (visible to
+`__has_attribute` and reflection) and forwarded to the host cc under
+`-c=native`, which acts on it.
 
 Accepted spellings: `__attribute__((pure))`, `__attribute__((__pure__))`,
 `[[gnu::pure]]`, `[[cccc::pure]]`.
@@ -513,22 +502,8 @@ Accepted spellings: `__attribute__((pure))`, `__attribute__((__pure__))`,
 Marks a function as *const*: it has no side effects and its return value
 depends only on its arguments (no global reads).  Stronger than `pure`.
 
-**Optimizer effect:**
-
-- **`--optimize=1` and above**: Dead-call elimination (same as `pure`).
-- **`--optimize=2` and above**: Common-subexpression elimination (CSE) — if
-  the same const function is called more than once with the same argument
-  values within a straight-line block, the second call is replaced by a
-  register move reusing the first result.  CSE fires when all argument
-  registers hold known value numbers (compile-time constants or unmodified
-  local-variable loads).
-
-```c
-[[gnu::const]] int square(int x) { return x * x; }
-
-int a = square(5);  // called normally
-int b = square(5);  // same constant arg — second call eliminated at -O2+
-```
+**Effect:** parsed and stored, informational only in VM mode (no optimiser);
+forwarded to the host cc under `-c=native`.
 
 Accepted spellings: `__attribute__((const))`, `__attribute__((__const__))`,
 `[[gnu::const]]`, `[[cccc::const]]`.
@@ -541,56 +516,18 @@ Accepted spellings: `__attribute__((const))`, `__attribute__((__const__))`,
 
 ---
 
-#### `__attribute__((optimize(...)))` / `[[cccc::optimize(N)]]` / `@optimize(N)` (CCCC-specific)
+#### `__attribute__((optimize(...)))` / `[[cccc::optimize(N)]]` / `@optimize(N)`
 
-Controls the optimization level for a single function, independently of the
-global `-O` flag.  CCCC uses **GCC-style attribute precedence**: the attribute
-always overrides the global level for that function, regardless of what
-`-O`, `--optimize=N`, or `#pragma cccc config(optimisation=N)` specify.
+Parsed, syntax-checked, and then **ignored** with a `-Wignored-features`
+warning. The VM has no optimiser, so a per-function optimisation level has
+nothing to act on. The attribute is kept in the grammar for compatibility
+with GCC/Clang sources that carry it; use `-c=native -O<n>` if a real host
+optimisation level is wanted.
 
-This is the inverse of CCCC's `#pragma cccc config` rule (where CLI wins) —
-for the `optimize` attribute the function's explicit annotation always takes
-priority.
-
-| Level | Behaviour |
-|-------|-----------|
-| 0 | No optimization for this function (useful for timing-stable or debug code) |
-| 1 | Constant folding + dead-call elimination |
-| 2 | Level 1 + peephole + CSE for const functions |
-| 3 | Level 2 + dead-code elimination |
-| 4 | Level 3 + opcode fusion |
-
-**Three accepted spellings:**
-
-```c
-// 1. GCC-compatible GNU attribute — string form "ON" or "-ON"
-__attribute__((optimize("O2")))
-int hot_fn(int a, int b) { return a + b; }
-
-// 2. C23 cccc-native integer
-[[cccc::optimize(3)]]
-static int aggressive_fn(int x) { return x * x; }
-
-// 3. @ shorthand (rewrites to [[cccc::optimize(...)]])
-@optimize(2)
-static long search(const long *arr, long n) { /* ... */ }
-```
-
-The string form (`"O2"` / `"-O2"`) accepts `O0` through `O4` (with an
-optional leading `-`), matching GCC's `__attribute__((optimize("O2")))`.
-The integer form accepts `0` through `4` directly.
-
-**Interaction with global optimization:**
-
-```c
-// With -O0 globally:
-//   - aggressive_fn is still optimized at level 3 (attribute wins)
-//   - plain_fn runs at level 0 (no attribute → follows global)
-[[cccc::optimize(3)]]
-int aggressive_fn(int x) { return x * x; }
-
-int plain_fn(int x) { return x * 2; }  // follows -O flag
-```
+Accepted spellings: `__attribute__((optimize("O2")))` (string form `"O0"`
+through `"O4"`, optional leading `-`), `[[cccc::optimize(3)]]` (integer `0`
+through `4`), and the `@optimize(2)` shorthand. A malformed argument is still
+a hard error.
 
 **`__has_attribute` / `__has_c_attribute`:** both return `1` for `optimize`
 (as a CCCC vendor attribute).
@@ -945,20 +882,10 @@ allocator can return `NULL` on failure). libc's `malloc`, `calloc`, and
 `aligned_alloc` carry it in `include/stdlib.h`; `realloc`/`reallocarray` do
 not, since they may return the same block as their input pointer.
 
-Exploiting the attribute (as GCC/Clang do, to justify reordering loads/stores
-around a call and eliding dead stores) needs a memory-dependency / alias
-analysis the bytecode optimizer (`src/optimize.c`) doesn't have: there is no
-dead-store elimination, no load/store reordering, and no general "does pointer
-A alias pointer B" reasoning anywhere in the pass pipeline — stores are
-deliberately never removed by the DCE pass, and the CSE pass's only memory
-model is an exact-offset local-slot cache that a call invalidates outright
-regardless of `malloc`. The closest existing aliasing consumer, the
-`restrict`-pointer register cache (see [OPTIMIZATION.md](OPTIMIZATION.md)),
-relies on `restrict`'s *scope-wide* non-aliasing promise; `malloc` only gives
-*point-wise* freshness at the instant of return, so feeding it into that cache
-would require the same missing dataflow analysis. Wiring `is_malloc` in is
-tracked as low-priority future work, gated on a memory-dependency pass being
-added first.
+The VM has no optimiser, so there is nothing for the attribute to feed:
+GCC/Clang exploit it to reorder loads/stores around a call and elide dead
+stores, all of which the VM never did. Under `-c=native` the attribute is
+serialized verbatim and the host cc acts on it.
 
 #### `__attribute__((designated_init))` / `[[gnu::designated_init]]`
 
@@ -1513,7 +1440,7 @@ they are listed here rather than left to be discovered:
 | Which -c=native host compiler `test_main_bad_argc_error.c`/`test_warning_main_bad_params.c` (bad `main()` signature warnings), `test_use_system_headers_pragma_suppress.c` (`#pragma clang assume_nonnull`), and `test_suite_decimal.c` (`_Decimal64`) round-trip under | n/a — VM-only constructs/warnings, no native equivalent to diverge from | clang treats a bad `main()` signature and gcc's `_Decimal64` gap as hard failures where gcc treats the first as a warning and supports `_Decimal64` natively; only clang recognizes `#pragma clang assume_nonnull` at all. Compiler-*family*-keyed, not GCC-version- or platform-keyed as first suspected (#1186) — `NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC` (`tools/testing/__init__.py`), reproduce locally with `CCCC_NATIVE_CC=<compiler>` (see man/TESTING.md's "Native round-trip mode" section) |
 | `__attribute__((constructor(N)))`/`(destructor(N))`'s priority argument, under gcc on Darwin specifically | codegen honours the numeric priority in the VM's own init/fini ordering | Darwin gcc (Homebrew, not Apple's `gcc`-is-actually-`clang` symlink) rejects the priority argument outright ("constructor priorities are not supported"); clang supports it and this round-trips there, as does gcc on Linux. Permanent, `WONT_FIX` gcc/Darwin gap (#1186) — `NATIVE_SKIP_TESTS_GCC_MACOS`, which needs both the platform and compiler-family axis since the group passes under gcc on Linux (`tools/testing/__init__.py`, split out from the platform-less `NATIVE_SKIP_TESTS_GCC` by #1193 after it wrongly suppressed the test there too). The identical gap in `tools/comptime_native_smoke.py`'s own case 114 (`case_ctor_dtor_native_round_trip`) is quarantined the same two-axis way via `SMOKE_CASE_SKIPS_GCC_MACOS` (#1196), that script's separate case-function-keyed skip table |
 | a `void`-returning entry function that falls off its end | codegen unconditionally loads 0 into the return register at the end of the entry function, regardless of its declared return type, so the process always exits 0 (#1031) | no equivalent injection — the host compiler leaves a `void main`'s exit status undefined, so it is whatever the ABI happened to leave in the return register (observed values are not stable across hosts/compilers) |
-| Tail-call elimination (`-O1`+, `CALLT`) | guaranteed: the VM reuses the caller's frame, so an arbitrarily deep tail-recursive call runs in constant stack space | best-effort, not guaranteed. `run_native_backend` (`src/main.c`) used to pass no `-O` flag to the host cc at all, so the host always built at its own default (`-O0` for both clang and gcc), which performs no TCO and overflows the stack under deep tail recursion (found while fixing #1155). #1159 fixed the missing flag: `-O<n>` is now forwarded verbatim to the host cc, and a test whose own `CCCC_FLAGS` requests e.g. `-O1` gets that level applied natively too. That is enough for `tests/test_tail_call_frame_addr_716.c` (500k-deep) on both clang and gcc-16 at `-O1`, and for `tests/test_tail_call_narrowing_cast_762.c` (1M-deep) under clang — but confirmed directly, gcc-16 at `-O1` does *not* eliminate that specific 1M-deep tail call (segfaults; passes at `-O2`), a genuine compiler-family TCO-heuristic gap CCCC cannot close by forwarding a different flag, since the guest's own `-O1` drives both the VM bytecode pipeline and the native build from the same source line. `test_tail_call_narrowing_cast_762.c` stays in `NATIVE_SKIP_TESTS_GCC` (`tools/testing/__init__.py`) for exactly that reason — host TCO at a given `-O` level is the host optimizer's own heuristic, not part of any C standard, so a real host cc remains free to not eliminate a given tail call at all |
+| Tail-call elimination (`CALLT`, unconditional) | guaranteed: the VM reuses the caller's frame, so an arbitrarily deep tail-recursive call runs in constant stack space | best-effort, not guaranteed. The native build's TCO is the host cc's own heuristic, not part of any C standard. `-O<n>` is forwarded verbatim to the host cc (#1159); the deep-recursion tail-call tests pass `-O2` so both clang and gcc-16 eliminate the call (gcc's `-O1` heuristic does not, for some shapes). With no `-O` on the command line the host builds at its own `-O0` and does no TCO |
 | `sizeof`/`_Alignof` of a `from_include` type, reached through a bitfield width (`int x : sizeof(struct statfs);`) or a global initializer's byte image (`serialize_init_bytes`) — including an array dimension on a struct/union *member*, or on an *initialized* global | folds against CCCC's own (correct-for-the-VM) type projection | stays folded. A bitfield width determines the *containing struct's own layout*, which CCCC also emits — re-materializing the width would make the host compute different member offsets than CCCC folded for the rest of that struct, actively unsound rather than merely incomplete, so this is not attempted (#1099, `WONT_FIX`). An initialized global's byte image is sized off the folded value by `serialize_init_bytes`; re-materializing only its declared dimension would desync the two (same reasoning, member arrays inherit it via the enclosing aggregate; also `WONT_FIX`). A bare `sizeof(T)`/`_Alignof(T)` *expression* (#1031), a *local or uninitialized-global* array dimension, a `case` label, and an enum value (#1095) all re-materialize the operator textually against the real host layout instead — see `man/HEADERS.md`. A `_Static_assert(sizeof(struct statfs) == N, "...")` condition depending on one of these types is a distinct case, not merely a re-materialization gap: CCCC's parser evaluates it against its own projection, so only a passing assertion ever reaches the serializer, which used to emit no `_Static_assert` construct at all — a host whose real layout would fail the same check compiled anyway. `-c=native` now re-emits the assert (both file- and block-scope forms) for the host to genuinely re-check it, gated on the condition actually depending on a host-owned `from_include` struct/union layout *and* the assert being written in a command-line input file — so one of CCCC's own bundled headers' own per-platform layout asserts (`include/sys/stat.h`, `signal.h`, `fts.h`, `aio.h`, etc.) is never re-emitted against the wrong host (#1098) |
 `_Decimal32`/`_Decimal64`/`_Decimal128` declarations and literals (the `df`/
 `dd`/`dl` suffix) pass through to `-m`/`-c=native` output as plain GNU decimal
@@ -2736,11 +2663,11 @@ These are lowered to equivalent arithmetic comparisons at parse time.
 | `__builtin_alloca(size)` | Dynamically allocate `size` bytes on the stack |
 | `__builtin_alloca_with_align(size, align)` | Like `__builtin_alloca`; `align` is in bits and must be a constant. Only 16-byte alignment is guaranteed; finer alignment is accepted but not enforced. |
 | `__builtin_frame_address(0)` | Returns the current frame's base pointer (level 0 only) |
-| `__builtin_return_address(n)` | Returns the return address `n` frames up the call stack (all levels supported). The value is a VM bytecode offset (`Pc`/`uint32_t`) cast to `void*`, **not** a host machine address — unlike `__builtin_frame_address`, which returns a real `bp` pointer. Returns `NULL` past the outermost frame. Implemented via the `RETADDR` VM opcode, which walks the saved-bp chain with runtime bounds-checking. **CALLT interaction**: when a function is reached via a tail call (`CALLT`, enabled at `-O1`), the intermediate frame has been unwound; `__builtin_return_address(0)` therefore returns the *original caller's* address, not the address of the tail-call site. See [VM.md](VM.md) (Tail-Call Optimisation section) for details. |
+| `__builtin_return_address(n)` | Returns the return address `n` frames up the call stack (all levels supported). The value is a VM bytecode offset (`Pc`/`uint32_t`) cast to `void*`, **not** a host machine address — unlike `__builtin_frame_address`, which returns a real `bp` pointer. Returns `NULL` past the outermost frame. Implemented via the `RETADDR` VM opcode, which walks the saved-bp chain with runtime bounds-checking. **CALLT interaction**: when a function is reached via a tail call (`CALLT`, unconditional), the intermediate frame has been unwound; `__builtin_return_address(0)` therefore returns the *original caller's* address, not the address of the tail-call site. See [VM.md](VM.md) (Tail-Call Optimisation section) for details. |
 | `__builtin_pc_function_name(pc)` | Maps a VM bytecode offset (`void*` as returned by `__builtin_return_address`) to the name (`const char*`) of the enclosing C function. Returns `NULL` if `pc` is `NULL` or outside all known function ranges. Works in all builds — does **not** require `-g`. **VM only**: a hard error under `-c=native`/`-m`/`-c=generated` — see [Serialized-output divergences](#serialized-output-divergences). |
 | `__builtin_pc_source_location(pc, &file, &line)` | Maps a VM bytecode offset to a source file name and 1-based line number. On success sets `*file` (a `const char*` pointing into the VM's internal table) and `*line`, and returns `1`. On failure (unknown pc or source map not populated) sets `*file = NULL`, `*line = 0`, and returns `0`. Requires the program to have been compiled with `-g`; without it this always returns `0`. Use together with `__builtin_return_address` for a full symbolization pipeline. **VM only**: a hard error under `-c=native`/`-m`/`-c=generated` — see [Serialized-output divergences](#serialized-output-divergences). |
 | `__builtin_object_size(ptr, type)` | Compile-time object-size computation for statically-known objects (local/global arrays, scalars, struct members reachable via constant-offset chains). Returns exact remaining byte count for `type` 0–3 (bit 0: whole object vs nearest subobject; bit 1: max vs min fallback). Ternary expressions (`cond ? a : b`) are resolved by computing the size for each branch independently and returning the larger (type 0/1) or smaller (type 2/3). Union member accesses report the whole-union size for `type` 0/2 and the specific member size for `type` 1/3. **Heap allocations**: a pointer initialized directly from a call to a function declared `__attribute__((alloc_size(...)))` (see [Attributes](#attributes) above) with compile-time constant size argument(s) resolves to the real allocation size, *provided* the pointer is never reassigned or has its address taken anywhere in the enclosing function — this is checked across the whole function body (including loop back-edges) before the query is resolved, so it can't fold a stale size for a pointer that is reassigned later in the source. Recognition is attribute-driven, not name-based: libc's `malloc`/`calloc`/`realloc`/`reallocarray`/`aligned_alloc` self-describe via `alloc_size` in `include/stdlib.h`, and any annotated custom allocator (e.g. an arena/pool wrapper) participates the same way — a function that merely shares an allocator's name but carries no attribute is correctly left untracked. **Interior heap pointers**: an offset written inline in the builtin's argument, e.g. `__builtin_object_size(p + 32, 0)`, resolves to `alloc_size - 32` when the offset is a compile-time constant and `p` is an alloc-tracked, unpoisoned base pointer — the offset rides the same deferred reassignment/address-of poisoning check as the base pointer itself, so it stays sound across later reassignment (including loop back-edges). The same tracking extends to an interior pointer captured in an intermediate variable, e.g. `char *q = p + 32;` followed by `__builtin_object_size(q, 0)` — `q` records a link to its base pointer and offset at declaration time (chains of such derivations, e.g. a further `char *r = q + 8;`, are followed transitively), and the whole chain must be unpoisoned (every pointer in it single-assignment and never address-taken, for the *entire* enclosing function — including a reassignment of the base pointer that happens *before* the derived variable's own declaration) for the query to resolve; any poisoning anywhere in the chain — of the derived variable itself or of any ancestor it was derived from — keeps it conservative. A **statically-sized array** is also a valid derivation base, without the same-function restriction that applies to a heap base (an array's size is fixed at declaration and its name is never reassignable, so there is nothing to poison against): `char buf[64]; char *q = buf + 8;` followed by `__builtin_object_size(q, 0)` resolves to `56`, the same answer the direct form `__builtin_object_size(buf + 8, 0)` already gave — a VLA base, having no compile-time size, is excluded. Constant pointer **subtraction** is peeled the same way addition is, both written inline (`__builtin_object_size(buf + 16 - 4, 0)`) and through a derived variable — including a subtraction that goes negative *relative to an intermediate variable* while still resolving to a valid, non-negative offset from the true root object (`char *q = p + 64; __builtin_object_size(q - 16, 0)` is `16` bytes before `q` but `48` bytes into the underlying allocation, and resolves to `80`); only a subtraction that goes negative relative to the *root* object falls back conservatively. `ptr - ptr` (element-count subtraction) is never mistaken for a pointer offset. An offset past the end of the allocation falls back to the conservative default rather than clamping to 0. Any other pattern (non-constant size or offset, reassignment, `&ptr`, an allocator with no `alloc_size` attribute) falls back conservatively to `(size_t)-1` (type 0/1) or `0` (type 2/3) — preserving `_FORTIFY_SOURCE` safety. |
-| `__builtin_dynamic_object_size(ptr, type)` | Runtime object-size query. For statically-known objects (stack/global arrays, constant-offset chains — including constant pointer subtraction, e.g. `buf + 16 - 4` — ternary expressions where both branches are statically resolvable) the result is folded to a compile-time constant (identical to `__builtin_object_size`). **Heap** (`malloc`/`calloc`/`realloc`/`reallocarray`, which lower to the `MALC` VM-heap opcode, and `alloca`/VLA buffers, which lower to the sibling `ALCA` opcode — same `AllocHeader`/`sorted_allocs` shape as `MALC`, just excluded from leak-detection reporting since it's compiler-internal automatic storage, #979): the `DYNOBJSZ` opcode binary-searches the `sorted_allocs` base-address table for the containing allocation and returns `AllocHeader.requested_size - offset` — this works for both base pointers and **interior pointers** (`p + k`), resolving to the exact remaining byte count. The VM heap (`-V`/`--no-vm-heap`, on by default, #665) must be active for `malloc`/`calloc`/`realloc`/`reallocarray` to route through it; `alloca`/VLA always do. **Stack**: an escaping fixed-size stack array/struct/union — one whose address has been passed somewhere the compiler can't statically resolve, e.g. through a function parameter — resolves via `vm->stack_intervals`, the stack analogue of `sorted_allocs` (#675): the compiler tags the local's `[base, base+size)` extent (`STKTAG`) with its creating frame's epoch, and `DYNOBJSZ` trusts a match only while that frame's epoch is still live. Using the builtin at all activates this epoch/interval bookkeeping, independently of `--dangling-detection` (`-1`/`-2`/`-3`). The `type` argument has the same bit encoding as `__builtin_object_size`. **CALLT interaction**: a pointer to a local passed into a *tail-called* function (`CALLT`, `-O1`+) resolves conservatively even though the pointee is still within the same source-level call — the tail call reuses the caller's stack frame for the callee immediately, so the caller's epoch (and its locals' storage) is retired before the callee runs; write the call in non-tail-call form (e.g. assign the argument-holding pointer's use to a local before returning) if this matters. **Limitations**: pointers past the end of the requested allocation (e.g. into 8-byte alignment padding), and any pointer whose owning stack frame has already returned (dangling) or whose provenance cannot be resolved at all, fall back to the conservative value, preserving `_FORTIFY_SOURCE` safety. |
+| `__builtin_dynamic_object_size(ptr, type)` | Runtime object-size query. For statically-known objects (stack/global arrays, constant-offset chains — including constant pointer subtraction, e.g. `buf + 16 - 4` — ternary expressions where both branches are statically resolvable) the result is folded to a compile-time constant (identical to `__builtin_object_size`). **Heap** (`malloc`/`calloc`/`realloc`/`reallocarray`, which lower to the `MALC` VM-heap opcode, and `alloca`/VLA buffers, which lower to the sibling `ALCA` opcode — same `AllocHeader`/`sorted_allocs` shape as `MALC`, just excluded from leak-detection reporting since it's compiler-internal automatic storage, #979): the `DYNOBJSZ` opcode binary-searches the `sorted_allocs` base-address table for the containing allocation and returns `AllocHeader.requested_size - offset` — this works for both base pointers and **interior pointers** (`p + k`), resolving to the exact remaining byte count. The VM heap (`-V`/`--no-vm-heap`, on by default, #665) must be active for `malloc`/`calloc`/`realloc`/`reallocarray` to route through it; `alloca`/VLA always do. **Stack**: an escaping fixed-size stack array/struct/union — one whose address has been passed somewhere the compiler can't statically resolve, e.g. through a function parameter — resolves via `vm->stack_intervals`, the stack analogue of `sorted_allocs` (#675): the compiler tags the local's `[base, base+size)` extent (`STKTAG`) with its creating frame's epoch, and `DYNOBJSZ` trusts a match only while that frame's epoch is still live. Using the builtin at all activates this epoch/interval bookkeeping, independently of `--dangling-detection` (`-1`/`-2`/`-3`). The `type` argument has the same bit encoding as `__builtin_object_size`. **CALLT interaction**: a pointer to a local passed into a *tail-called* function (`CALLT`, unconditional) resolves conservatively even though the pointee is still within the same source-level call — the tail call reuses the caller's stack frame for the callee immediately, so the caller's epoch (and its locals' storage) is retired before the callee runs; write the call in non-tail-call form (e.g. assign the argument-holding pointer's use to a local before returning) if this matters. **Limitations**: pointers past the end of the requested allocation (e.g. into 8-byte alignment padding), and any pointer whose owning stack frame has already returned (dangling) or whose provenance cannot be resolved at all, fall back to the conservative value, preserving `_FORTIFY_SOURCE` safety. |
 | `__builtin_unreachable()` | Marks an unreachable code path; halts the VM if executed |
 
 #### String Builtins
@@ -2873,7 +2800,7 @@ if (__builtin_mul_overflow(a, b, &r))
 | `<inttypes.h>` | ✓ | |
 | `<stdbool.h>` | ✓ | |
 | `<stdint.h>` | ✓ | |
-| `<fenv.h>` | ✓ | `FE_*` constants and `fexcept_t`/`fenv_t` sizes are injected from the real host `<fenv.h>` this binary was compiled against (not hardcoded), so rounding-mode and exception-flag calls are correct on whatever platform is running; `FLT_ROUNDS` (`<float.h>`) tracks the dynamic mode via `fegetround()`, on both the VM and `-c=native` paths (the native `__cccc_flt_rounds` shim mirrors the VM's own mapping — it used to call the clang-only `__builtin_flt_rounds()`, which fails to link on real GCC). `#pragma STDC FENV_ACCESS` / `FP_CONTRACT` are accepted and ignored (no scoped in-source toggle; `FP_CONTRACT` behaves correctly by default since contraction only happens when `--fma` is passed). Float-to-integer conversion (`(long long)some_double`, both explicit casts and implicit ones from constant folding) is defined and saturating rather than a bare UB host cast: NaN → 0, out-of-range → `LLONG_MIN`/`LLONG_MAX` matching the sign, `FE_INVALID` raised in all three cases; a cast to an *unsigned* 64-bit destination (`(unsigned long long)some_double`) saturates against its own `[0, 2^64)` range instead (NaN → 0, ≥2⁶⁴ → `ULLONG_MAX`, ≤-1 → `0`, `FE_INVALID` raised in all three — but a value in `(-1, 0)` truncates to `0` with no exception, since that's a well-defined conversion). The reverse direction (`(double)some_u64`) also converts unsigned 64-bit sources correctly rather than reinterpreting the register as signed. This is a VM/`-c=native` parity guarantee, not just a VM one (#1068): every real-floating → non-floating `ND_CAST` serializes as a call to one of four on-demand helpers (`__cccc_f2i64`/`__cccc_f2i64_f32`/`__cccc_f2u64`/`__cccc_f2u64_f32`, `serialize_synth_f2i_helpers`, `src/serialize_program.c`) that are near-verbatim ports of the VM's own `cccc_f64_to_i64`/etc (`src/internal.h`), rather than a bare native cast — needed because a real host compiler's own lowering isn't merely "implementation-defined" here but actively wrong on x86_64: clang/GCC's common branchless `double`/`float` → `uint64` sequence spuriously raises `FE_INVALID` even for a value proven in `[0, 2^64)` (measured directly; aarch64's `FCVTZU` has no such issue) |
+| `<fenv.h>` | ✓ | `FE_*` constants and `fexcept_t`/`fenv_t` sizes are injected from the real host `<fenv.h>` this binary was compiled against (not hardcoded), so rounding-mode and exception-flag calls are correct on whatever platform is running; `FLT_ROUNDS` (`<float.h>`) tracks the dynamic mode via `fegetround()`, on both the VM and `-c=native` paths (the native `__cccc_flt_rounds` shim mirrors the VM's own mapping — it used to call the clang-only `__builtin_flt_rounds()`, which fails to link on real GCC). `#pragma STDC FENV_ACCESS` / `FP_CONTRACT` are accepted and ignored (no scoped in-source toggle). The VM never contracts `a*b+c` (equivalent to `-ffp-contract=off`); `-c=native` follows the host cc's own `-ffp-contract` default. Float-to-integer conversion (`(long long)some_double`, both explicit casts and implicit ones from constant folding) is defined and saturating rather than a bare UB host cast: NaN → 0, out-of-range → `LLONG_MIN`/`LLONG_MAX` matching the sign, `FE_INVALID` raised in all three cases; a cast to an *unsigned* 64-bit destination (`(unsigned long long)some_double`) saturates against its own `[0, 2^64)` range instead (NaN → 0, ≥2⁶⁴ → `ULLONG_MAX`, ≤-1 → `0`, `FE_INVALID` raised in all three — but a value in `(-1, 0)` truncates to `0` with no exception, since that's a well-defined conversion). The reverse direction (`(double)some_u64`) also converts unsigned 64-bit sources correctly rather than reinterpreting the register as signed. This is a VM/`-c=native` parity guarantee, not just a VM one (#1068): every real-floating → non-floating `ND_CAST` serializes as a call to one of four on-demand helpers (`__cccc_f2i64`/`__cccc_f2i64_f32`/`__cccc_f2u64`/`__cccc_f2u64_f32`, `serialize_synth_f2i_helpers`, `src/serialize_program.c`) that are near-verbatim ports of the VM's own `cccc_f64_to_i64`/etc (`src/internal.h`), rather than a bare native cast — needed because a real host compiler's own lowering isn't merely "implementation-defined" here but actively wrong on x86_64: clang/GCC's common branchless `double`/`float` → `uint64` sequence spuriously raises `FE_INVALID` even for a value proven in `[0, 2^64)` (measured directly; aarch64's `FCVTZU` has no such issue) |
 | `<tgmath.h>` | ~ | Type-generic macros for real floating types and complex absolute value. The complex `_Generic` arms reference cccc-internal accessor names, which `-c=native` synthesizes host-side definitions for (#1117) |
 | `<wchar.h>` / `<wctype.h>` | ~ | Common wide-character APIs registered |
 | `<iso646.h>` | ✓ | |

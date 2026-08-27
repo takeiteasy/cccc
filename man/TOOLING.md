@@ -496,7 +496,7 @@ Notes on the formatting rules:
   general error-handling model everywhere else. Only parse-time and
   type-checking diagnostics are recoverable in the REPL today.
 - `-r`/`--repl` is VM-only: it cannot be combined with `-c=native`, `--build`,
-  `--testing`, `--ngrams`/`--fusion-candidates`, or any frontend/output mode
+  `--testing`, `--ngrams`, or any frontend/output mode
   (`-c`, `-d`, `-E`, `-M`, `--ast`, `--vm-profile`).
 
 ### Optional readline support
@@ -727,9 +727,8 @@ On Linux it uses `valgrind --tool=massif`.
 
 `--vm-profile` prints a compact dynamic opcode count table to stderr after the
 program exits. Combine it with `--json` to also write the same data as JSON to
-stdout. The JSON includes the execution mode (`source` or `c4`), selected
-`--optimize` level, total VM cycles, total profiled opcodes, and per-op counts
-and percentages.
+stdout. The JSON includes the execution mode, total VM cycles, total profiled
+opcodes, and per-op counts and percentages.
 
 Alongside the opcode table, both the stderr report and the JSON output always
 include three CHKT3 type-shadow counters (see SAFETY.md's `--type-checks`
@@ -742,18 +741,13 @@ enabled.
 ### Static Bytecode Analysis
 
 For understanding *static* instruction patterns (independent of any
-execution), cccc has two in-process analyses that compile the given C
-source(s) and walk the resulting in-memory text segment:
+execution), cccc has an in-process n-gram analysis that compiles the given C
+source(s) and walks the resulting in-memory text segment:
 
 ```bash
-# Static n-gram mining
 ./cccc --ngrams=2 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
 ./cccc --ngrams=3 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
 ./cccc --ngrams=2 --ngrams-per-file -I./include tests/benchmarks/sieve.c
-
-# Use-def fusion candidate detection
-./cccc --fusion-candidates=50 -I./include tests/benchmarks/sieve.c
-./cccc --fusion-candidates=50 --json -I./include tests/benchmarks/sieve.c
 ```
 
 `--ngrams[=N]` walks the text segment of one or more compiled sources and ranks
@@ -761,15 +755,8 @@ source(s) and walk the resulting in-memory text segment:
 also prints a per-input section in addition to the aggregate. `--ngrams-top=N`
 limits the rows per section.
 
-`--fusion-candidates[=N]` walks the text segment, tracks register defs/uses
-per instruction, and reports adjacent `def -> use` pairs where the defining
-instruction has a single reader. Add `--json` to get JSON output for scripting.
-
-These two analyses are mutually exclusive with `--vm-profile*`, `-g/--debug`,
+`--ngrams` is mutually exclusive with `--vm-profile*`, `-g/--debug`,
 `-d/--disassemble`, `-c=native`, and any safety / execution / output flags.
-
-See [VM.md](VM.md) for how to combine the static counts with the dynamic bigram
-profile to surface the strongest fusion candidates.
 
 ### Manual Profiling
 
@@ -840,6 +827,12 @@ All profiling output is written to `profile/`:
 
 A focused cross-compiler benchmark suite that measures the cost of the **CCCC bytecode VM** by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples.
 
+VM execution speed is an explicit non-goal, so there is **one** CCCC
+configuration (the VM has no optimiser; `-O<n>` only affects `-c=native`).
+The numbers below are from before the optimiser was removed and are kept
+only for the shape of the gap — re-run `make bench-compare` for current
+figures against the single `cccc` column.
+
 For production builds, CCCC also offers a `-c=native` mode that hands macro-expanded C to `cc` / `clang` / `gcc` — that path bypasses the VM entirely and matches the `gcc*` columns below. The benchmarks in this document are deliberately scoped to the VM, because that is the part CCCC is responsible for.
 
 ### Quick Start
@@ -857,50 +850,28 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0   gcc-O1   gcc-O2   gcc-O3 
------------  -------  -------  -------  -------  -------  -------  -------  -------  -------
-ackermann    682.9    681.9    918.5    793.8    781.7    16.6     16.4     4.3      6.0    
-binary_tree  868.6    859.5    963.1    824.1    809.9    20.6     20.3     19.4     22.9   
-fib          573.7    597.4    674.6    580.0    577.3    7.5      8.8      4.1      7.3    
-mandelbrot   6101.2   6065.3   4983.7   3970.9   3626.0   62.0     30.4     29.4     28.4   
-matrix_mul   5014.6   4997.7   4136.5   3747.4   3309.6   24.6     5.7      4.0      3.8    
-nqueens      1322.5   1234.3   1141.5   979.8    948.9    14.4     5.1      8.1      9.2    
-quicksort    1829.9   1772.4   1565.3   1498.8   1378.8   18.5     9.1      12.5     13.0   
-sieve        9660.6   9328.2   7331.3   7311.1   7075.3   36.2     24.4     21.2     20.4   
+benchmark    cccc     gcc-O0   gcc-O1   gcc-O2   gcc-O3
+-----------  -------  -------  -------  -------  -------
+ackermann    682.9    16.6     16.4     4.3      6.0
+fib          573.7    7.5      8.8      4.1      7.3
+mandelbrot   6101.2   62.0     30.4     29.4     28.4
+matrix_mul   5014.6   24.6     5.7      4.0      3.8
+sieve        9660.6   36.2     24.4     21.2     20.4
+(pre-#1214 `cccc` column; the removed optimiser's best geomean was ~1.25x
+this. Re-run for current numbers.)
 
-Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0   gcc-O1   gcc-O2   gcc-O3 
------------  -------  -------  -------  -------  -------  -------  -------  -------  -------
-ackermann    158.4x   158.2x   213.0x   184.1x   181.3x   3.9x     3.8x     1.0x     1.4x   
-binary_tree  44.8x    44.3x    49.6x    42.5x    41.7x    1.1x     1.0x     1.0x     1.2x   
-fib          141.2x   147.1x   166.1x   142.8x   142.1x   1.9x     2.2x     1.0x     1.8x   
-mandelbrot   207.3x   206.1x   169.4x   135.0x   123.2x   2.1x     1.0x     1.0x     0.97x  
-matrix_mul   1265.2x  1260.9x  1043.6x  945.5x   835.0x   6.2x     1.4x     1.0x     0.97x  
-nqueens      162.6x   151.8x   140.4x   120.5x   116.7x   1.8x     0.63x    1.0x     1.1x   
-quicksort    146.6x   142.0x   125.4x   120.1x   110.5x   1.5x     0.73x    1.0x     1.0x   
-sieve        455.0x   439.4x   345.3x   344.4x   333.3x   1.7x     1.1x     1.0x     0.96x
-geomean      202.70x  199.76x  192.52x  170.37x  162.05x  2.14x    1.27x    1.00x    1.15x  
-
-Correctness: all benchmarks produce identical output across all configs
+Correctness: all benchmarks produce identical output
 ```
 
 > **Note:** The `gcc*` columns use Homebrew GCC-15 (auto-detected by `bench.py` when the system `gcc` is Apple Clang). GCC-15 is substantially faster than Apple Clang on some workloads — notably `ackermann` (deep recursion) and `fib` — so the `×` ratios for those benchmarks are larger than they were when earlier runs used Clang. The `cccc*` absolute timings are directly comparable with older runs.
 
-Key VM improvements reflected in these numbers:
+Two always-on lowerings keep the interpreter from being needlessly slow (they are not tunable):
 - **#227 — inlined threaded dispatch**: opcode logic embedded directly at each computed-goto label (~1.2–1.7× on VM-bound workloads).
 - **#250 — fused local load/store opcodes**: `LEA3+LDR/STR` two-opcode sequence replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` (~23% geomean improvement).
-- **#249 — scalar local promotion**: at `--optimize=2`+, hot eligible integer/pointer locals held in VM saved registers, flushed at exits — reduces repeated local load/store traffic in tight loops.
-- **#251 — indexed load/store opcodes**: at `--optimize=2`+, `base + index * scale` patterns use `LDR_INDEX_*`/`STR_INDEX_*` fused opcodes — removes explicit MUL+ADD address calculation from array loops.
-- **#261 — automatic opcode fusion**: at `--optimize=4` or with `--fuse-ops`, adjacent single-def/single-use arithmetic chains are rewritten to fused opcodes (`MULI3`, `MULADD3`, `MULADDI3`).
-- **#415 — CSE for `[[gnu::const]]` + extended dead-call elimination**: at `--optimize=2`+, duplicate calls to const functions within a straight-line block are replaced by a register move. Dead-call elimination extended to indirect (CALLN) and FFI (CALLF) calls at `--optimize=1`+.
-- **#461 — float/double local promotion**: at `--optimize=2`+, hot floating-point locals held in VM saved FP registers (`FREG_S0`–`FREG_S3`) — eliminates per-iteration `FLDR_LOCAL`/`FSTR_LOCAL` round-trips in FP-heavy loops. Notable improvement on mandelbrot (6412ms → 5034ms at `--optimize=3`).
-- **#462 — fused FP multiply-add (`FMADD3`/`FMADD3_F32`)**: at `--optimize=4` or with `--fuse-ops`, adjacent `FMUL3+FADD3` chains are rewritten to a single `FMADD3` dispatch — one less opcode per multiply-accumulate iteration. Largest visible wins are matrix_mul (4007ms → 3444ms vs `--optimize=3`) and mandelbrot (5034ms → 4782ms). Add `--fma` to additionally enable single-rounding FMA (see correctness note below).
-- **#478 — fused FP multiply-subtract (`FMSUB3`/`FMSUB3_F32`)**: extends the fusion pass to the minuend form (`a*b - c`) of `FMUL3+FSUB3` — emits `FMSUB3` when the multiply result is the left-hand operand of the subtraction.
-- **#479 — fused negated multiply-subtract (`FNMSUB3`/`FNMSUB3_F32`) + dead-FMOV3 elimination**: adds the accumulating-subtract form (`sum -= a*b`, i.e. `rd = rs1 - rs2*rs3`) as `FNMSUB3`. The dead-FMOV3 elimination in copy-prop (sub-pass C global use-count scan) removes the promoted-register read copy that the float local promotion pass inserts between `FMUL3` and `FSUB3`, restoring adjacency so the fusion fires on loop patterns. Combined impact: mandelbrot `--optimize=3` 5034ms → 3990ms (−21%), `--optimize=4` 4782ms → 3643ms (−24%); matrix_mul `--optimize=4` 3444ms → 3325ms (−3%).
 
-Validation run (2026-06-18, `--runs 2`, Homebrew GCC-15): all correctness checks passed. `--optimize=4` geomean is 162.05× slower than GCC-O2 (down from 182.61× before #479).
+Everything the VM optimiser used to add on top (scalar/FP local promotion, indexed load/store fusion, opcode fusion, CSE, dead-call elimination) was removed in #1214 — it was ~1.25× geomean best case and frequently net-negative on recursion-heavy code, which did not justify its footprint.
 
-Re-run `make bench-compare` to get updated numbers for your machine.
+Re-run `make bench-compare` to get numbers for your machine.
 
 JSON output is also written to `profile/bench-results/run-<UTC>.json` for tracking over time.
 
@@ -924,7 +895,7 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tools/t
 `tools/bench.py` does the following for each benchmark:
 
 1. **Compile** the source with GCC at every optimization level (cached in `build/`).
-2. **Run** CCCC at every `--optimize` level on the source directly — this measures the full parse+execute cost.
+2. **Run** CCCC on the source directly — this measures the full parse+execute cost.
 3. **Run** the prebuilt GCC binaries.
 4. **Time** each run with `time.perf_counter()`; discard `N` warmup runs, time `R` runs, take min/median/mean.
 5. **Verify** that every config's stdout matches the CCCC reference. A mismatch is flagged and causes a non-zero exit.
@@ -940,9 +911,7 @@ profiles to `profile/bench-results/vm-profile-<UTC>/`.
 
 ### Correctness
 
-C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `tools/bench.py` compiles GCC with `-ffp-contract=off -std=c11`. CCCC's default `FMADD3` opcode uses two separate roundings — semantically identical to the separate `FMUL3`+`FADD3` it replaces, so the benchmark outputs match GCC `-ffp-contract=off` exactly.
-
-The optional `--fma` flag enables true single-rounding FMA. This can yield a few percent additional speedup on multiply-accumulate loops but **will diverge from GCC `-ffp-contract=off`** on inputs where the intermediate product has rounding error.
+C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `tools/bench.py` compiles GCC with `-ffp-contract=off -std=c11`. The VM never contracts `a*b+c`, so its outputs match GCC `-ffp-contract=off` exactly.
 
 ### Tips for Clean Numbers
 

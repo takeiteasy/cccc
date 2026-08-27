@@ -104,7 +104,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. (#558) |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
-`-U`, `--std=`, `-L`, `-l`. VM-only options (`-c`, `-d`/`--disassemble`,
+`-U`, `--std=`, `-L`, `-l`. VM-only / output options (`-c`, `-d`/`--disassemble`,
 `-O<n>`/`--optimize`, `--vm-profile`, `-g`/`--debug`, `-o`, `-E`, `-m`, `--ast`)
 are rejected in `--build` mode.
 

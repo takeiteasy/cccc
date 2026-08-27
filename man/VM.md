@@ -86,14 +86,18 @@ When codegen detects that a `return` statement's outermost expression is a direc
 
 `CALLT` unwinds the current frame (`sp = bp`, restores saved `bp`) without consuming the return address already on the stack. The callee's subsequent `LEV3` therefore returns directly to the *original* caller, so deeply-recursive helpers and mutually-recursive function pairs execute in O(1) stack space regardless of recursion depth.
 
-**Eligibility** (all must hold, checked at `-O1` and above):
+Tail-call elimination is **unconditional** — deep-recursion correctness
+depends on it, so there is no flag to disable it. Eligibility is decided per
+call site (`can_emit_tail_call`, `src/codegen_call.c`).
+
+**Eligibility** (all must hold):
 
 * The call is the sole, outermost expression of the `return` — `return f() + 1` is not a tail call.
 * The callee is a directly-addressed in-VM function (not FFI, not a function pointer).
 * The callee is not variadic and not a nested function (nested functions require a static-link argument in `REG_A0`).
 * The callee does not return a struct, union, or a wide `_BitInt` (over 64 bits) — these returns are materialised through a frame-relative scratch buffer (`RETBUF` for struct/union, a compiler-synthesized scratch slot for wide `_BitInt`), which `CALLT`'s frame reuse would invalidate.
 * The call uses 8 or fewer arguments (stack-spilled arguments would fall below the unwound frame).
-* No argument carries the address of one of the caller's own locals or parameters — directly (`&x`), via pointer arithmetic on a frame-local base (`buf + i`), via array/struct/union decay, or via a local whose address is already known to escape the frame (a pointer variable holding `&x`, `&x` stored into a global, etc.). `CALLT` reuses the caller's frame, so a pointer into that frame would dangle the instant the callee's own prologue or body overwrites the slot.
+* No argument carries the address of one of the caller's own locals or parameters — directly (`&x`), via pointer arithmetic on a frame-local base (`buf + i`), via array/struct/union decay, or via a local whose address is already known to escape the frame (a pointer variable holding `&x`, `&x` stored into a global, etc.). `CALLT` reuses the caller's frame, so a pointer into that frame would dangle the instant the callee's own prologue or body overwrites the slot. This check (`addr_escapes`-driven) carries a known accepted residual: a caller-frame address that reaches an argument only through a path `addr_escapes` does not model can still slip past. It was accepted when TCO was opt-in (#716/#718); with TCO now unconditional it is a property of every compile. The #716/#718 mitigations are in place.
 * The `return` statement's implicit cast to the function's own return type must be representation-preserving with respect to the callee's return type — an identity conversion (e.g. `int → int`) or one that leaves the value's register representation unchanged (e.g. `long`/pointer/enum, all read the same 64-bit register). A genuine narrowing or rounding at the return site itself (`return (unsigned char) g(x);`, `return (float) g(x);`) disqualifies the call: `CALLT` hands the callee's raw return value straight to the *original* caller, with no later point at which the narrowing/rounding could be applied.
 
 Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT` leaves the caller's return address in place; `B`'s `CALLT` back to `A` reuses `B`'s frame, and so on.
@@ -102,7 +106,7 @@ Mutually-recursive pairs (`A → B → A`) are handled correctly because `CALLT`
 
 Because `CALLT` unwinds the intermediate frame, `__builtin_return_address(0)` called from inside a tail-called function returns the *original caller's* return address — the frame for the tail-call site no longer exists on the stack.
 
-Example with `-O1`:
+Example:
 
 ```
 // test_fn → tail_wrapper → ra_capture  (CALLT used for tail_wrapper → ra_capture)
@@ -115,9 +119,9 @@ Inside `ra_capture`:
 * `__builtin_return_address(1)` → `NULL` (sentinel: `test_fn` is outermost).
 * `__builtin_pc_function_name(__builtin_return_address(0))` → `"test_fn"`, not `"tail_wrapper"`.
 
-This is deterministic and by design: `CALLT` semantics guarantee that the callee's stack view is identical to what it would see if the tail-call site had never existed. Without `-O1` (no TCO), `tail_wrapper`'s frame is present and `__builtin_return_address(0)` returns a PC inside `tail_wrapper`.
+This is deterministic and by design: `CALLT` semantics guarantee that the callee's stack view is identical to what it would see if the tail-call site had never existed. When a call is *not* tail-call-eligible (e.g. its result is used after the call), the intermediate frame is present and `__builtin_return_address(0)` returns a PC inside it.
 
-More generally, a level-`n` `__builtin_return_address` walk counts only the frames actually present on the stack — it has no way to know how many tail calls were elided along the way. Each `CALLT` in the chain being walked shifts every level below it down by one, so a lookup that would have returned a real return address without TCO can instead hit the outermost sentinel (`NULL`) early, or land on a different frame's return address than a naive (non-TCO) frame count would suggest. `tests/test_builtin_return_address_callt.c` (pinned to `-O1`, `CCCC_MATRIX_SKIP`) asserts this collapsed-frame behavior directly; `tests/test_builtin_return_address_notco.c` (pinned to `-O0`) covers the same nonzero-level lookups through a helper chain with no tail calls, for comparison.
+More generally, a level-`n` `__builtin_return_address` walk counts only the frames actually present on the stack — it has no way to know how many tail calls were elided along the way. Each `CALLT` in the chain being walked shifts every level below it down by one, so a lookup that would have returned a real return address without TCO can instead hit the outermost sentinel (`NULL`) early, or land on a different frame's return address than a naive frame count would suggest. `tests/test_builtin_return_address_callt.c` asserts this collapsed-frame behavior directly; `tests/test_builtin_return_address_notco.c` covers the same nonzero-level lookups through a helper chain shaped so its calls are *not* tail-call-eligible, for comparison.
 
 ### VM Threads
 
@@ -341,18 +345,9 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FEQ3` … `FGE3` | f64 comparisons |
 | `FADD3_F32` … `FDIV3_F32` | f32 arithmetic |
 | `FNEG3_F32` | f32 negation |
-| `FMADD3` | `fregs[rd] = fregs[rs1] + fregs[rs2] * fregs[rs3]` (f64, two roundings; emitted by fusion pass) |
-| `FMADD3_F32` | f32 two-rounding fused multiply-add |
-| `FMADD3_FMA` | f64 single-rounding fused multiply-add via `fma()` (emitted under `--fma`) |
-| `FMADD3_F32_FMA` | f32 single-rounding fused multiply-add via `fmaf()` (emitted under `--fma`) |
-| `FMSUB3` | `fregs[rd] = fregs[rs2]*fregs[rs3] - fregs[rs1]` (f64, two roundings; emitted by fusion pass) |
-| `FMSUB3_F32` | f32 two-rounding fused multiply-subtract |
-| `FMSUB3_FMA` | f64 single-rounding fused multiply-subtract via `fma(rs2,rs3,-rs1)` (emitted under `--fma`) |
-| `FMSUB3_F32_FMA` | f32 single-rounding fused multiply-subtract via `fmaf(rs2,rs3,-rs1)` (emitted under `--fma`) |
-| `FNMSUB3` | `fregs[rd] = fregs[rs1] - fregs[rs2]*fregs[rs3]` (f64, two roundings; emitted by fusion pass) |
-| `FNMSUB3_F32` | f32 two-rounding fused negated multiply-subtract |
-| `FNMSUB3_FMA` | f64 single-rounding via `fma(-rs2,rs3,rs1)` (emitted under `--fma`) |
-| `FNMSUB3_F32_FMA` | f32 single-rounding via `fmaf(-rs2,rs3,rs1)` (emitted under `--fma`) |
+| `FMADD3{,_F32,_FMA,_F32_FMA}` | fused multiply-add. **Not emitted:** the codegen fusion that produced these was removed with the VM optimiser (#1214); the handlers survive as reserved slots pending #1219. |
+| `FMSUB3{,_F32,_FMA,_F32_FMA}` | fused multiply-subtract. Reserved, not emitted (see above). |
+| `FNMSUB3{,_F32,_FMA,_F32_FMA}` | fused negated multiply-subtract. Reserved, not emitted (see above). |
 | `FEQ3_F32` … `FGE3_F32` | f32 comparisons |
 | `FLDR` | `fregs[rd] = *(double*)regs[rs]` |
 | `FSTR` | `*(double*)regs[rs] = fregs[rd]` |
@@ -408,8 +403,6 @@ Vector opcodes operating on `vregs[]` (see [Register File](#register-file)). Int
 **`__builtin_shuffle` (constant-mask and runtime-mask forms).** CCCC accepts `__builtin_shuffle(v, {i0,...,iN-1})` (1-vector permute) or `__builtin_shuffle(v1, v2, {i0,...,iN-1})` (2-vector blend) with a bare, compile-time-constant brace list mask (CCCC's original constant-mask form, closer to clang's `__builtin_shufflevector` than the syntax below), as well as `__builtin_shuffle(v, mask)` / `__builtin_shuffle(v1, v2, mask)` with `mask` an ordinary integer-vector expression — a named local, function parameter, or runtime-computed value — matching upstream GCC's general vector-typed mask argument. A `(vTYPE){...}` compound literal mask is rejected as ambiguous with the two-vector form's second argument (both start with `(`); a bare `{` unambiguously marks a constant mask, so the parser distinguishes the forms with one token of lookahead there, and (since the 1-vector runtime form and the 2-vector form both start with a non-brace expression) by checking whether a further `,` follows the second parsed argument.
 
 No new opcode for either form: the parser materializes the source vector(s) (and, for the runtime form, the mask) into hidden locals (so side effects run once), then builds a chain of per-lane scalar reads/writes through the same vector-subscript lvalue lowering `v[i]` uses — this per-lane approach is width-agnostic and works unchanged at 256/512-bit, and works with a runtime index exactly as it does with a constant one. The runtime mask must be an integer vector with the same lane count and element byte width as the shuffled vector (validated at parse time, rejected with a diagnostic otherwise). The two forms diverge on out-of-range indices: the constant form range-checks every index at compile time and rejects an out-of-range one outright, while the runtime form can't be checked until run time, so each index is taken modulo the lane count (1-vector) or twice the lane count (2-vector) before use — matching GCC's documented wraparound semantics.
-
-**Optimizer interaction.** The bytecode optimizer's copy-propagation and dead-code passes (`optimize.c`, `-O3`+) generically decode instruction operand bytes as living in either the int or float register file. Vector opcodes introduce a third namespace (`vregs[]`) and mix it with real `freg`/`greg` operands in opcode-specific ways that model can't express safely — `op_has_vector_operand()` in `optimize.c` treats every vector opcode as opaque to those passes (never substituted, conservatively invalidated), at the cost of a missed optimization opportunity but never a miscompile. See `man/OPTIMIZATION.md`.
 
 **By-value function args/returns (#714, widened by #722).** Reuses the struct-by-value call ABI rather than a register (FReg/GReg) convention, since a vector doesn't fit an 8-byte arg slot. Argument: the caller materializes the vector's value (a `vregs[]` register) into a fresh frame scratch slot sized to the argument's own byte width via `VSTR`, then passes that slot's address in the integer arg register — a caller-side copy, unlike a struct-by-value arg's own copy, which happens in the *callee's* prologue instead (#1078); both end up giving true by-value semantics, just on opposite sides of the call. Return: the callee requests a buffer from the `RETBUF` rotating pool (1024 bytes, comfortably covering the 64-byte maximum), `VSTR`s the result into it, and returns the buffer address; the caller `VLDR`s out of it. The callee reads a vector parameter the same way a struct parameter is read — the param's stack slot holds a pointer to the value, not the value itself (`gen_addr`'s param-slot dereference). Not supported through the native FFI marshalling path (int/float-only slot classification), a variadic `...` parameter (register spilling for `va_arg` is int/float-only), or a GNU/Apple block invocation (no by-memory ABI for aggregates at all) — each rejected at compile time. Tail-call elimination (`can_emit_tail_call`) excludes any vector-returning call and any call with a vector argument, since `CALLT` reuses the caller's frame and both the RETBUF buffer and the argument scratch slot are frame-local.
 
@@ -667,9 +660,6 @@ which pointee types set `checked_nt_terminator` at all — both the
 direct-access site (`compute_checked_bounds()`) and the propagation
 attach site (`checked_prop_attach_scan()`) call it, so `CHKNT`/`CHKNTZ`
 selection and propagation agree on exactly the same supported-pointee set.
-`op_byte0_is_int_src()` (`src/optimize.c`) lists `CHKNTZ` alongside `CHKNT`
-(all three operand bytes are pure sources), so it gets the same
-copy-propagation and reordering-barrier treatment.
 
 `CHKAB` (#944) is `CHKR`'s counterpart for the *opposite* trust direction —
 Checked C's `_Assume_bounds_cast`. Where propagation only ever widens trust
@@ -947,28 +937,14 @@ These replace the common `LEA3 + LDR/STR` two-opcode sequence for local variable
 | `FLDR_LOCAL_F32` | `fregs[rd] = *(float*)(bp + offset)` |
 | `FSTR_LOCAL_F32` | `*(float*)(bp + offset) = fregs[rd]` |
 
-### Fused Indexed Load / Store
+### Fused Indexed Load / Store (reserved, not emitted)
 
-These replace simple `base + index * scale + offset` address sequences for
-scalar array and pointer accesses. The integer operand word stores `rd`, `base`,
-`index`, and an 8-bit byte scale; the following 64-bit immediate stores the byte
-offset. Codegen emits these opcodes at `--optimize=2` and above when pointer
-safety instrumentation is not active.
-
-| Opcode | Description |
-|--------|-------------|
-| `LDR_INDEX_B` | `regs[rd] = *(char*)(regs[base] + regs[index] * scale + offset)` |
-| `LDR_INDEX_H` | `regs[rd] = *(short*)(regs[base] + regs[index] * scale + offset)` |
-| `LDR_INDEX_W` | `regs[rd] = *(int*)(regs[base] + regs[index] * scale + offset)` |
-| `LDR_INDEX_D` | `regs[rd] = *(long long*)(regs[base] + regs[index] * scale + offset)` |
-| `STR_INDEX_B` | `*(char*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
-| `STR_INDEX_H` | `*(short*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
-| `STR_INDEX_W` | `*(int*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
-| `STR_INDEX_D` | `*(long long*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
-| `FLDR_INDEX` | `fregs[rd] = *(double*)(regs[base] + regs[index] * scale + offset)` |
-| `FSTR_INDEX` | `*(double*)(regs[base] + regs[index] * scale + offset) = fregs[rd]` |
-| `FLDR_INDEX_F32` | `fregs[rd] = *(float*)(regs[base] + regs[index] * scale + offset)` |
-| `FSTR_INDEX_F32` | `*(float*)(regs[base] + regs[index] * scale + offset) = fregs[rd]` |
+`LDR_INDEX_{B,H,W,D}`, `STR_INDEX_{B,H,W,D}`, `FLDR_INDEX{,_F32}`, and
+`FSTR_INDEX{,_F32}` collapsed a `base + index * scale + offset` address
+sequence into one opcode. The codegen fusion that produced them was an
+`--optimize=2` optimisation, removed with the VM optimiser (#1214). The
+handlers survive as reserved slots pending their deletion in #1219; the
+address sequence is now emitted as separate multiply/add/load opcodes.
 
 ## Decimal Floating-Point
 
@@ -1008,11 +984,8 @@ All twelve decimal opcodes share one convention: **zero operand words,
 fixed argument registers** (`REG_A0`–`REG_A3`), identical in shape to the
 `WIDE_ADD`/`WIDE_SUB`/… family (#456) used for wide `_BitInt`. Arguments are
 loaded into place with ordinary `MOV3`/`LEA3`/`LI3` immediately beforehand;
-the opcode itself just performs the operation and is treated as fully
-**opaque** by the optimizer (`op_implicit_abi_regs`, `src/optimize.c`) —
-the same conservative treatment already used for `WIDE_*`/`CALLF`, which is
-what makes this safe: no decimal op is ever RRRS-operand-decoded, so there
-is no `op_byte0_is_int_src`-style classification to keep in sync.
+the opcode itself just performs the operation. No decimal op is ever
+RRRS-operand-decoded.
 
 `width` is `0` = `_Decimal32`, `1` = `_Decimal64`, `2` = `_Decimal128`.
 
@@ -1332,20 +1305,20 @@ The VM can collect dynamic execution statistics:
 
 Enable profiling with `--vm-profile` (text report to stderr). Combine it with `--json` to also write the same data as JSON to stdout.  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages.
 
-Static n-gram mining (`cccc --ngrams`) and use-def fusion analysis (`cccc --fusion-candidates`) complement the dynamic data by showing which sequences are common in the bytecode *and* hot at runtime. `--optimize=4` / `--fuse-ops` uses the same in-process use-def analysis to apply registered fused-op rewrites automatically.
+Static n-gram mining (`cccc --ngrams`) complements the dynamic data by showing which opcode sequences are common in the bytecode *and* hot at runtime.
 
 ## Performance Notes
 
 The VM is the runtime for compile-time macro bodies and for VM-only workflows (the safety suite, the debugger, the profiler, quick iteration without a system compiler).  For production code, `-c=native` hands macro-expanded C to `cc` / `clang` / `gcc` and skips the VM entirely, so the interpreter cost only matters for the things that *run on it*.
 
-Seven optimisations have significantly reduced interpreter overhead:
+**VM execution speed is an explicit non-goal.** There is no bytecode
+optimiser: the VM compiles C to bytecode and interprets it at `-O0`
+equivalent. `-O<n>` is accepted but only has an effect under `-c=native`,
+where it is forwarded to the host cc (#1159). A few always-on lowerings keep
+the interpreter honest rather than fast:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
-3. **Scalar local promotion** — Hot eligible integer, pointer, and floating-point locals are held in callee-saved VM registers at `--optimize=2` and above. Integer/pointer locals use `REG_S0`–`S3`; `float`/`double` locals use `FREG_S0`–`S3`. Locals captured by an Apple block literal or a GNU nested function (at any nesting depth) are excluded, even with no `&` in the source — a nested function reaches such a local directly through the static-link chain and its stack slot, and promoting it would let the enclosing function and the nested function disagree about its value.
-4. **Fused indexed load/store** — Simple array and pointer accesses use `LDR_INDEX_*` / `STR_INDEX_*`, removing separate index multiply and address-add opcodes in hot loops.
-5. **Automatic opcode fusion** — `--optimize=4` / `--fuse-ops` rewrites adjacent single-def/single-use arithmetic chains to fused opcodes such as `MULI3`, `MULADD3`, `MULADDI3`, `FMADD3`, `FMADD3_F32`, `FMSUB3`, `FMSUB3_F32`, `FNMSUB3`, and `FNMSUB3_F32`.
-6. **Fused floating-point multiply-add/subtract** — `FMUL3+FADD3` chains fuse to `FMADD3`; `FMUL3+FSUB3` fuses to `FMSUB3` (minuend form) or `FNMSUB3` (accumulating-subtract form). Dead-FMOV3 elimination in copy-prop restores adjacency when float local promotion inserts a register-copy between the multiply and subtract.
-7. **Tail-call optimisation** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above).
+3. **Tail-call elimination** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above). This one is not a speed knob: deep-recursion correctness depends on it, so it is unconditional.
 
-The dominant cost remains the interpreter itself (as opposed to compile time); see [TOOLING.md](TOOLING.md#benchmarks) for full numbers and [TOOLING.md](TOOLING.md#profiling) for analysis tooling.
+The dominant cost is the interpreter itself; see [TOOLING.md](TOOLING.md#benchmarks) for numbers and [TOOLING.md](TOOLING.md#profiling) for analysis tooling.

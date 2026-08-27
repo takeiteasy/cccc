@@ -130,13 +130,13 @@ Safety levels are **additive** - you can combine a preset level with individual 
 ## Configuring Safety from Source: `#pragma cccc config(...)`
 
 `#pragma cccc config(key = value, ...)` is a file-scope pragma that sets
-safety levels, the optimisation level, and individual safety-check flags
-directly from source, without needing matching command-line flags. It is
-useful for self-contained test files and examples that must run with a
-specific safety/optimisation profile regardless of how they're invoked.
+safety levels and individual safety-check flags directly from source,
+without needing matching command-line flags. It is useful for self-contained
+test files and examples that must run with a specific safety profile
+regardless of how they're invoked.
 
 ```c
-#pragma cccc config(safety = 2, optimisation = 1)
+#pragma cccc config(safety = 2)
 #pragma cccc config(bounds_checks = true, memory_tagging = false)
 #pragma cccc config(overflow_checks) // bare key is shorthand for "= true"
 ```
@@ -146,7 +146,6 @@ specific safety/optimisation profile regardless of how they're invoked.
 | Key | Values | Effect |
 |-----|--------|--------|
 | `safety` | `0`-`3` | Same as `-0`/`-1`/`-2`/`-3` (none/basic/standard/max) |
-| `optimisation` | `0`-`3` | Same as `--optimize=N` |
 | `bounds_checks` | `true`/`false` (or `1`/`0`) | `--bounds-checks` |
 | `uaf_detection` | `true`/`false` | `--uaf-detection` |
 | `type_checks` | `true`/`false` | `--type-checks` |
@@ -165,13 +164,13 @@ appear multiple times in a file — later pragmas win for the same key
 
 ### Precedence
 
-- **Command-line flags always win.** If a safety/optimisation setting was
-  explicitly passed on the command line (`-0`/`-1`/`-2`/`-3`,
-  `--safety=...`, `--optimize=...`, `--bounds-checks`, etc.), `config(...)`
-  silently has no effect on that setting — the CLI value is kept.
+- **Command-line flags always win.** If a safety setting was explicitly
+  passed on the command line (`-0`/`-1`/`-2`/`-3`, `--safety=...`,
+  `--bounds-checks`, etc.), `config(...)` silently has no effect on that
+  setting — the CLI value is kept.
 - **Ignored in native mode.** When compiling with `-c=native`, `config(...)`
-  has no effect on `vm->flags`/optimisation level (native output is handed
-  to the system `cc`, which has its own optimisation/sanitizer flags). This
+  has no effect on `vm->flags` (native output is handed to the system `cc`,
+  which has its own sanitizer flags). This
   prints a `-Wignored-features` warning (on by default under `-Wall`) naming
   the pragma; it is otherwise silent by default, the same as every other
   `-Wignored-features` diagnostic (`_Atomic`, etc.). Unknown keys and invalid
@@ -425,14 +424,12 @@ All features listed below can be enabled individually or through the safety leve
     because slot reuse across frames would need its own liveness tracking
     to avoid the false-positive class the dangling-pointer detector's
     frame-epoch/stack-interval bookkeeping exists to prevent
-  - Full coverage at every optimization level, including standalone
-    `--type-checks -O2`/`-O3`: the codegen fusion paths that bypass
-    `emit_load`/`emit_store` (indexed-load fusion, restrict memcpy-loop
-    lowering) are disabled whenever `--type-checks` is enabled, not just
-    alongside `--bounds-checks`/`--uaf-detection`. The restrict-value cache
-    stays enabled instead of disabled — its cache-hit path re-derives the
-    address and runs CHKP3/CHKT3 itself, so a cache hit gets the same
-    coverage as a real load (see OPTIMIZATION.md)
+  - Uniform coverage: the VM has no optimiser, so every dereference takes
+    the ordinary `emit_load`/`emit_store` path and its CHKT3. The codegen
+    fusion paths that once bypassed those (indexed-load fusion, restrict
+    memcpy-loop lowering, the restrict-value cache) were removed with the
+    optimiser (#1214), so there is no longer an opt-level-dependent gap to
+    guard against.
   - The shadow is a sparse page table (64 KiB pages), not one flat
     heap_committed-sized array: a page is allocated lazily on first stamp
     and freed back the instant a *single* clear zeroes it in full, so host

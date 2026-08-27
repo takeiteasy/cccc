@@ -497,26 +497,22 @@ Three tiers, chosen per test from its header annotations:
   can also force a skip itself with a `CCCC_NATIVE_SKIP[: reason]` header
   annotation for behavior that is genuinely
   VM-only rather than a serializer bug (e.g. `cc_run_at`'s sentinel
-  outermost-frame return address). A tail-call-elimination assertion is no
-  longer forced into this bucket by default (#1159: `-O<n>` is forwarded to
-  the host cc now, so a test carrying its own `-O1` gets that level natively
-  too) — but host TCO is the host optimizer's own heuristic, not a language
-  guarantee, so a specific case can still need a genuine, compiler-family-
-  keyed skip (`NATIVE_SKIP_TESTS_GCC`, `tools/testing/__init__.py`) the way
-  `test_tail_call_narrowing_cast_762.c` does.
+  outermost-frame return address). A tail-call-elimination assertion is not
+  forced into this bucket: `-O<n>` is forwarded to the host cc (#1159), so
+  the deep-recursion tail-call tests carry `-O2` and both clang and gcc-16
+  eliminate the call. Host TCO at a given `-O` level is the host optimiser's
+  own heuristic, not a language guarantee, so a shape that a particular
+  compiler still won't eliminate can need a compiler-family-keyed skip
+  (`NATIVE_SKIP_TESTS_GCC`, `tools/testing/__init__.py`).
 
 **Two-process structure:** under `--native`, `cccc`'s own exit code only
 reports whether the *compile* succeeded; the compiled artifact is a second,
 independent binary, and it is *that* binary that is expected to return 42.
 `-I./include` and the test's `CCCC_FLAGS` apply to the compile step only;
-`CCCC_RUN_ARGS` are passed to the child binary, not to `cccc`. `-f<pass>` is
-stripped from a test's flags before the compile step rather than causing a
-skip — it tunes the VM bytecode pipeline `-c=native` doesn't use, and
-`-c=native` hard-errors if it sees it verbatim. `-O<n>`/`-O`/
-`--optimize[=n]`, by contrast, is *not* stripped (#1159): `-c=native` now
-forwards it to the host cc as its own `-O<n>` instead of rejecting it, so a
-test's own optimization level applies to both the VM and (when the test is
-otherwise native-eligible) the native build.
+`CCCC_RUN_ARGS` are passed to the child binary, not to `cccc`. `-O<n>` in a
+test's flags is forwarded to the host cc as its own `-O<n>` (#1159); the VM
+ignores it (there is no VM optimiser). This is how the deep-recursion
+tail-call tests get an optimising host build for their native leg.
 
 **`[[cccc::test]]` suite files (`--testing=native`, #1033):** a native
 artifact is a wholly separate binary with no `cc_run_tests` to call in-process
@@ -542,8 +538,8 @@ diagnostic (not silently mis-serialized) rather than attempted:
   error-recovery AST, not something safe to hand to a real host compiler.
   A file containing any negative test is rejected outright.
 
-A per-test `flags=` delta (a different safety/optimisation/warning
-configuration, applied via an in-process VM recompile in `cc_run_tests`)
+A per-test `flags=` delta (a different safety/warning configuration, applied
+via an in-process VM recompile in `cc_run_tests`)
 has no native equivalent either — each such test is individually marked
 `SKIP` in the generated TAP output rather than rejecting the whole file,
 since flags= is a per-test, not a per-file, concern. `RET_STRUCT` return
@@ -656,8 +652,8 @@ at `-j8` (Rosetta-emulated, so slower than real sr.ht hardware) — against a
 pre-existing baseline suite of roughly 274s, both comfortably inside CI
 budget.
 
-Before this landed, the mode was opt-in only, run by hand like `--matrix`.
-That is exactly how the 16 failures found and fixed in #1155 (struct-layout
+Before this landed, the mode was opt-in only, run by hand. That is exactly
+how the 16 failures found and fixed in #1155 (struct-layout
 drift corrupting enum constants under `-c=native`, a stray space in a
 captured `#include` operand, an undeclared `reallocarray` on macOS, and a
 `--testing` diagnostic-test routing gap) went unnoticed for as long as they
@@ -1392,7 +1388,6 @@ header comment block, parsed by `tools/testing/header.py`'s
 | `CCCC_EXPECT_STDERR:` | regex | stderr must match this regex. |
 | `CCCC_REJECT_STDERR:` | regex | stderr must **not** match this regex. |
 | `CCCC_NATIVE_SKIP[: reason]` | bare or reason | Skip this test under `--native` (see [Native round-trip mode](#native-round-trip-mode---native)). |
-| `CCCC_MATRIX_SKIP[: reason]` | bare or reason | Skip this test under `--matrix` (per-optimization-pass sweep). |
 | `CCCC_EXPECT_LEAK[: reason]` | bare or reason | This test is expected to leak under `--leaks`; the reason is informational only (see [Memory leak detection](#memory-leak-detection---leaks)). |
 | `CCCC_LEAKS_KEEP_VM_HEAP` | bare | Force the VM-heap-backed allocator under `--leaks` (see [Memory leak detection](#memory-leak-detection---leaks)). |
 
@@ -2023,7 +2018,7 @@ BID-backed arithmetic when the flag is on:
 python3 tools/tests.py                                   # default build
 tools/fetch_intel_bid.sh && make CCCC_HAS_DECIMAL=1
 python3 tools/tests.py                                   # decimal-enabled build
-python3 tools/tests.py --match "*decimal*"                # focused, also at -O3 and -3
+python3 tools/tests.py --match "*decimal*"                # focused
 python3 tools/tests.py --native                            # native round-trip
 ```
 
@@ -2165,7 +2160,7 @@ Where `--testing -c=native` guards compilation behind a passing `[[cccc::test]]`
 - The smoke-test run happens in a forked child process, so it never touches the compiled program's actual global/heap state -- the eventual native artifact still starts from the source's real compile-time initializers, not whatever the smoke test's `main()` left them as.
 - Success is "ran to completion without a VM-detected safety violation (bounds/UAF/CFI/uninitialized-read/etc.), a real crash (signal), or a hang" -- capped at `--test-timeout` seconds (default 30s when unset). The program's own exit code is **not** checked: a CLI that legitimately returns nonzero on bad input is not a `--test-run` failure. A safety violation alone (no accompanying crash) still refuses to compile; a bare memory leak with no other violation does not.
 - Implies `-c=native` when no `-c=FMT` is given (matching bare `-c`'s own default); an explicit `-c=native` still picks the format. `-o`'s default-filename behavior (`./a.out`) applies the same as plain `-c`.
-- Not compatible with `--repl`, `--build`, `--testing`, `--ngrams`/`--fusion-candidates`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
+- Not compatible with `--repl`, `--build`, `--testing`, `--ngrams`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
 
 ## Filtering Tests
 
@@ -2250,14 +2245,14 @@ void test_with_bounds(void) {
     AssertEq(arr[0], 1);
 }
 
-[[cccc::test(flags = "--optimize=2 --safety=1")]]
-void test_optimised(void) {
+[[cccc::test(flags = "--safety=1 --overflow-checks")]]
+void test_safety(void) {
     AssertEq(1 + 1, 2);
 }
 ```
 
 The `flags` value is a whitespace-separated string of CCCC CLI flags. Any flag
-accepted by `cccc` for safety, optimisation, or warnings can be used:
+accepted by `cccc` for safety or warnings can be used:
 
 **Safety check flags:** `-b`/`--bounds-checks`, `--overflow-checks`, `--type-checks`,
 `--stack-canaries`, `--heap-canaries`, `--uaf-detection`, `--pointer-sanitizer`,
@@ -2265,7 +2260,7 @@ accepted by `cccc` for safety, optimisation, or warnings can be used:
 `--stack-instrumentation`, `--alignment-checks`, `--provenance-tracking`,
 `--invalid-arithmetic`, `--format-string-checks`, `--random-canaries`,
 `--memory-poisoning`, `--thread-safety`, `--dangling-pointers`, `-V`/`--require-vm-heap`,
-`-C`/`--control-flow-integrity`, `--fma`, `--ffi-errors-fatal`,
+`-C`/`--control-flow-integrity`, `--ffi-errors-fatal`,
 `--ffi-allow=NAME` (additive; adds to any suite-level allow list)
 
 Note: in the test-dialect, `-V`/`--require-vm-heap` means "this test requires
@@ -2280,16 +2275,10 @@ of what its name says.
 
 **Safety presets:** `-0`/`-1`/`-2`/`-3` and `--safety=none|basic|standard|max`
 
-**Optimisation level:** `-O<n>`/`--optimize=<n>`
-
-**Optimisation-pass flags** (enable/disable individual passes regardless of `-O` level):
-- `-ffold` / `-fno-fold` — constant folding
-- `-fpeephole` / `-fno-peephole` — peephole reduction
-- `-fcopy-prop` / `-fno-copy-prop` — copy propagation
-- `-fdce` / `-fno-dce` — dead code elimination
-- `-fcse` / `-fno-cse` — common subexpression elimination
-- `-ffuse` / `-fno-fuse` — opcode fusion
-- `-felim-ext` / `-fno-elim-ext` — redundant extension elimination
+`-O<n>` is **not** a per-test flag: the VM has no optimiser, so it would do
+nothing. (A test that needs an optimising host build for its `-c=native`
+round-trip leg carries `-O2` in its file-scope `CCCC_FLAGS:` comment, which
+the runner forwards to the host cc.)
 
 **Warning flags** (affect compilation diagnostics for this test's lazy recompile):
 - `-W<name>` / `-Wno-<name>` — enable/disable a warning category
@@ -2302,8 +2291,8 @@ of what its name says.
 [[cccc::test(return = 42, flags = "-Wpedantic")]]
 int test_pedantic_clean(void) { return 42; }
 
-[[cccc::test(return = 42, flags = "-ffold -fno-cse")]]
-int test_fold_no_cse(void) { return 6 * 7; }
+[[cccc::test(return = 42, flags = "--bounds-checks")]]
+int test_bounds(void) { int a[1] = {42}; return a[0]; }
 ```
 
 Unknown flags are a hard compile error referencing the test name.
@@ -2322,8 +2311,8 @@ Use a dedicated suite file with the flag in its `CCCC_FLAGS:` comment instead:
 
 ### Semantics
 
-Because safety and optimisation flags are baked into bytecode generation (not
-applied at runtime), `flags=` triggers a **lazy recompile** of the whole
+Because safety flags are baked into bytecode generation (not applied at
+runtime), `flags=` triggers a **lazy recompile** of the whole
 program immediately before the test runs. Adjacent tests that share the same
 flag set share one compile; only tests with a `flags=` attribute pay any
 recompile cost — unflagged tests run on the initial compile.
@@ -2345,7 +2334,7 @@ options. Both can coexist: per-test `flags=` takes precedence over
 `flags=` applies only to the bytecode/VM execution path. Under
 `--testing=native` (#1033) a test carrying a `flags=` delta is not
 silently ignored — it is individually marked `SKIP` in the generated TAP
-output, since a per-test safety/optimisation/warning configuration would
+output, since a per-test safety/warning configuration would
 need a separate native binary per test, which v1 doesn't attempt.
 
 ## Per-test output assertions
@@ -2389,8 +2378,8 @@ All four keys can be combined in one attribute and with all other
 
 When `flags = "..."` is also present, `expect_stderr`/`reject_stderr` capture
 output from both the lazy-recompile phase and the test-execution phase.
-The recompile invokes `cc_compile()` (code generation and optimisation only —
-not preprocessing or parsing), so any gen-phase or optimiser diagnostics are
+The recompile invokes `cc_compile()` (code generation only — not
+preprocessing or parsing), so any gen-phase diagnostics are
 also captured and prepended to the test-execution output before the pattern check.
 
 **Note:** Parse-time diagnostics (such as `-W` warnings emitted during
@@ -2504,4 +2493,4 @@ When an assertion fails, the test is marked `not ok` and a diagnostic block is p
 - **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
 - `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.
 - **`flags=` triggers a whole-program recompile.** The recompile is lazy (only when the required config changes), but setup/teardown hook once-snapshots taken before a recompile are discarded and re-taken under the new compile. If a once-setup hook leaves per-test state in global variables, that state may not survive across recompile boundaries.
-- **`flags=` supports safety, optimisation, warning, and -f pass flags.** Flags that affect tokenisation, preprocessing, or output format (e.g. `--std=`, `--include`, `-D`) cannot be per-test and will be rejected as unknown flags.
+- **`flags=` supports safety and warning flags.** Flags that affect tokenisation, preprocessing, or output format (e.g. `--std=`, `--include`, `-D`) cannot be per-test and will be rejected as unknown flags.

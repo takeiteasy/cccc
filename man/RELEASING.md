@@ -38,9 +38,9 @@ by tagging and pushing the tag (see Tagging, below) in the same sitting.
 ```
 
 Builds `cccc-release` at `-O2 -g -DNDEBUG` (the *host* compiler optimizing
-the cccc binary itself — unrelated to CCCC's own guest-side `--optimize`
-bytecode passes or `-0`/`-1`/`-2`/`-3` safety levels, neither of which this
-changes). `-g` is kept even in release builds; symbols are stripped at
+the cccc binary itself — unrelated to the `-0`/`-1`/`-2`/`-3` guest safety
+levels, which this does not change; there is no VM bytecode optimiser).
+`-g` is kept even in release builds; symbols are stripped at
 packaging time by the release workflow, not at compile time, so a release
 binary a user hands back a crash report from is still debuggable locally.
 
