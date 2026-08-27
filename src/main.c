@@ -477,7 +477,6 @@ static void print_version(void) {
 #define CCCC_HOST_OS "unknown"
 #endif
     printf("host: %s-%s\n", CCCC_HOST_ARCH, CCCC_HOST_OS);
-    printf("bytecode format: v%d\n", CCCC_VERSION);
     printf("features:");
 #ifdef CCCC_HAS_BACKTRACE
     printf(" backtrace");
@@ -514,8 +513,6 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-L/--library-path <path> Add <path> to dynamic library search "
            "paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
-    printf("\t   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) "
-           "built with -c=bytecode\n");
 #ifdef CCCC_HAS_CURL
     printf("\t   --url-cache-dir <path> Directory for caching #include/#embed "
            "<https://...> fetches\n");
@@ -569,22 +566,19 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-S/--no-stdlib           Do not link standard library\n");
     printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: "
            "native (default), "
-           "bytecode, generated\n");
+           "generated\n");
     printf("\t                         native: build a native executable via "
            "CCCC_NATIVE_CC\n");
     printf("\t                                 (cc, clang, or gcc); writes to "
            "-o file, or ./a.out\n");
     printf("\t                                 if -o omitted\n");
-    printf("\t                         bytecode: write .c4 to -o file, or "
-           "./a.c4 if -o omitted\n");
     printf("\t                         generated: serialize the runtime TU + "
            "macro-generated\n");
     printf("\t                                    objects to C; writes to -o "
            "file, or ./a.gen.c\n");
     printf("\t                                    if -o omitted\n");
-    printf("\t                         Aliases: bytecode=bc=c4, native=n, "
-           "generated=gen=g. Use\n");
-    printf("\t                         -cbytecode or --compile=bytecode (short "
+    printf("\t                         Aliases: native=n, generated=gen=g. Use\n");
+    printf("\t                         -cnative or --compile=native (short "
            "form must be\n");
     printf("\t                         attached; long form may use '=' or "
            "separate arg).\n");
@@ -604,11 +598,10 @@ static void usage(const char *argv0, int exit_code) {
         "\t                         explicit -c=FMT still picks the format\n");
     printf("\t-o/--out <file>          Output file. For -c=native, defaults to "
            "./a.out if omitted.\n");
-    printf("\t                         For -c=bytecode, defaults to ./a.c4 if "
-           "omitted. For\n");
-    printf("\t                         -c=generated, defaults to ./a.gen.c if "
-           "omitted.\n");
-    printf("\t-d/--disassemble         Disassemble bytecode to stdout\n");
+    printf("\t                         For -c=generated, defaults to "
+           "./a.gen.c if omitted.\n");
+    printf("\t-d/--disassemble         Disassemble compiled bytecode to "
+           "stdout\n");
     printf("\t-v/--verbose             Enable debug logging\n");
     printf("\t-g/--debug               Enable interactive debugger\n");
     printf("\t   --no-debug-on-crash   Disable auto-drop into debugger on "
@@ -622,15 +615,12 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         Combine with --json to also dump the "
            "profile as JSON to stdout\n");
     printf("\nTesting Options:\n");
-    printf("\t-t/--testing[=vm|bytecode|native]\n");
+    printf("\t-t/--testing[=vm|native]\n");
     printf("\t                         Discover and run [[cccc::test]] "
            "functions. Bare -t/--testing\n");
     printf("\t                         (default =vm) runs them in-process; "
-           "=bytecode compiles, saves\n");
-    printf("\t                         .c4, reloads, then runs (exercises "
-           "FFI-table and bytecode\n");
-    printf("\t                         persistence); =native serializes the "
-           "harness itself and runs\n");
+           "=native serializes the\n");
+    printf("\t                         harness itself and runs\n");
     printf("\t                         it as a standalone binary via "
            "CCCC_NATIVE_CC (implies -c=native;\n");
     printf("\t                         [[cccc::test_setup/teardown]] hooks "
@@ -874,7 +864,7 @@ static void usage(const char *argv0, int exit_code) {
            "default there too). VM-only.\n");
     printf("\t--inline-limit=N             Limit inlining to N AST nodes "
            "(default: 20, 0=disable)\n");
-    printf("\nStatic Bytecode Analysis (compile or load input, walk text "
+    printf("\nStatic Bytecode Analysis (compile input, walk text "
            "segment, exit):\n");
     printf("\t--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, "
            "default 2)\n");
@@ -1031,59 +1021,6 @@ static int verify_dynamic_externs(VirtualMachine *vm) {
             (!ff->func_ptr || ff->func_ptr == (void *)1)) {
             fprintf(stderr, "error: unresolved dynamic library symbol '%s'\n",
                     ff->name);
-            ok = 0;
-        }
-    }
-    return ok ? 0 : -1;
-}
-
-// report_link_with_prebuilt_c4: --link only runs as part of the compile-time
-// linker pass (apply_link_pass(), below), which requires codegen to have
-// just produced pending text/address relocations to resolve. A prebuilt .c4
-// loaded fresh in this process has none of that, so --link against one is a
-// silent no-op rather than an error; reject it instead. Shared by both the
-// single-.c4 run path and the multi-.c4 --ngrams/--fusion-candidates
-// analysis path (#902) so the message can't drift between the two.
-static void report_link_with_prebuilt_c4(const char *path) {
-    fprintf(stderr,
-            "error: --link is not supported when running a "
-            "prebuilt .c4 file (%s)\n",
-            path);
-}
-
-// apply_link_pass: run the bytecode linker pass for every --link lib.c4a,
-// appending each library into the VM and resolving pending text/address
-// relocations (#565/#566), then hard-erroring on anything left unresolved.
-// Runs once, immediately after codegen, so it applies uniformly to every
-// terminal sink that follows (--testing, --disassemble, --ngrams/--fusion,
-// -o <file>, and the plain in-memory run) rather than only to the -o path
-// (#898: previously --link without -o skipped linking entirely and ran a
-// corrupt image with unresolved CALLs left at PC 0).
-static int apply_link_pass(VirtualMachine *vm, const char **paths, int count) {
-    for (int i = 0; i < count; i++) {
-        if (cc_link_bytecode(vm, paths[i]) != 0) {
-            fprintf(stderr, "error: failed to link %s\n", paths[i]);
-            return -1;
-        }
-    }
-    int ok = 1;
-    // Error on any remaining unresolved text relocations.
-    for (int i = 0; i < vm->compiler.num_text_relocs; i++) {
-        if (!vm->compiler.text_relocs[i].resolved) {
-            fprintf(stderr, "error: unresolved external: %s\n",
-                    vm->compiler.text_relocs[i].name
-                        ? vm->compiler.text_relocs[i].name
-                        : "(unknown)");
-            ok = 0;
-        }
-    }
-    // Error on any remaining unresolved address relocations (#566).
-    for (int i = 0; i < vm->compiler.num_addr_relocs; i++) {
-        if (!vm->compiler.addr_relocs[i].resolved) {
-            fprintf(stderr, "error: unresolved function pointer: %s\n",
-                    vm->compiler.addr_relocs[i].name
-                        ? vm->compiler.addr_relocs[i].name
-                        : "(unknown)");
             ok = 0;
         }
     }
@@ -1297,22 +1234,6 @@ static char **build_source_argv(int *prog_argc, int argc, const char *argv[],
     return prog_argv;
 }
 
-static char **build_c4_argv(int *prog_argc, const char *input_file, int argc,
-                            const char *argv[], int dashdash) {
-    if (dashdash >= 0)
-        *prog_argc = argc - dashdash; // input_file + everything after "--"
-    else
-        *prog_argc = 1;
-
-    char **prog_argv = malloc(sizeof(char *) * (size_t)*prog_argc);
-    if (!prog_argv)
-        error("out of memory");
-    prog_argv[0] = (char *)input_file;
-    for (int i = 1; i < *prog_argc; i++)
-        prog_argv[i] = (char *)argv[dashdash + i];
-    return prog_argv;
-}
-
 // VM-only runtime flags (safety instrumentation + debug support) and their
 // CLI spelling, for the "-c=native"/"-m"/"-c=generated ignores these" warning
 // below (#924). Deliberately excludes CCCC_VM_HEAP (forcing the VM-managed heap
@@ -1447,8 +1368,8 @@ int main(int argc, const char *argv[]) {
         0; // safety preset bits for --test-run's VM smoke test
     int compile_only =
         0; // -c (set whenever -c/--compile is given; semantics:
-           //   "compile, do not execute". -c=bytecode writes bytecode,
-           //   -c=native hands off to the system compiler.)
+           //   "compile, do not execute". -c=native hands off to the
+           //   system compiler.)
     int      max_errors         = 20; // --max-errors (default: 20)
     int      warnings_as_errors = 0;  // -Werror / --Werror
     uint64_t warnings           = 0;
@@ -1481,12 +1402,8 @@ int main(int argc, const char *argv[]) {
     const char  *vm_profile_input         = NULL;
     int          vm_profile_ran           = 0;
     const char  *entry_name               = NULL; // -e / --entry
-    enum {
-        COMPILE_NONE,
-        COMPILE_BYTECODE,
-        COMPILE_NATIVE,
-        COMPILE_GENERATED
-    } compile_format                       = COMPILE_NONE;
+    enum { COMPILE_NONE, COMPILE_NATIVE, COMPILE_GENERATED } compile_format =
+        COMPILE_NONE;
     int            no_comptime             = 0; // --no-comptime / -C
     int            comptime_include_all    = 0; // --comptime-include-all
     int            allow_comptime_pp_bleed = 0; // --allow-comptime-pp-bleed
@@ -1497,15 +1414,11 @@ int main(int argc, const char *argv[]) {
     CcNgramState  *ngram_state     = NULL;
     CcFusionState *fusion_state    = NULL;
     int testing_mode = 0; // any --testing[=...]/--test*/--list-tests flag
-    // --testing[=vm|bytecode|native]: bare -t/--testing defaults to VM
-    // (today's behaviour, unchanged); =bytecode replaces the old --test-c4
-    // boolean; =native drives a serialized-harness -c=native round-trip
-    // (#1033).
-    enum {
-        TESTING_BACKEND_VM,
-        TESTING_BACKEND_BYTECODE,
-        TESTING_BACKEND_NATIVE
-    } testing_backend          = TESTING_BACKEND_VM;
+    // --testing[=vm|native]: bare -t/--testing defaults to VM (today's
+    // behaviour, unchanged); =native drives a serialized-harness -c=native
+    // round-trip (#1033).
+    enum { TESTING_BACKEND_VM, TESTING_BACKEND_NATIVE } testing_backend =
+        TESTING_BACKEND_VM;
     const char  *test_glob     = NULL;            // --test=GLOB
     const char  *suite_filter  = NULL;            // --test-suite=NAME
     int          list_tests    = 0;               // --list-tests
@@ -1531,8 +1444,6 @@ int main(int argc, const char *argv[]) {
     const char **build_options       = NULL;  // --build-option=key=value (#559)
     int          build_options_count = 0;
     int          build_install       = 0;     // --build-install (#560)
-    const char **link_paths          = NULL;  // --link lib.c4a (#565)
-    int          link_paths_count    = 0;
     bool         use_system_headers  = false; // --use-system-headers
     bool         no_builtin_includes = false; // --no-builtin-includes
     const char  *sysroot             = NULL;  // --sysroot <path>
@@ -1645,7 +1556,6 @@ int main(int argc, const char *argv[]) {
         {"build-cache", optional_argument, 0, 1091},
         {"build-option", required_argument, 0, 1092},
         {"build-install", no_argument, 0, 1093},
-        {"link", required_argument, 0, 1094},
         // Per-pass optimisation enables/disables (long-form aliases for
         // -f<pass>)
         {"ffold", no_argument, 0, 1096},
@@ -1923,10 +1833,6 @@ int main(int argc, const char *argv[]) {
                 if (!fmt || !*fmt) {
                     compile_format = COMPILE_NATIVE;
                     compile_only   = 1;
-                } else if (strcmp(fmt, "bytecode") == 0 ||
-                           strcmp(fmt, "bc") == 0 || strcmp(fmt, "c4") == 0) {
-                    compile_format = COMPILE_BYTECODE;
-                    compile_only   = 1;
                 } else if (strcmp(fmt, "native") == 0 ||
                            strcmp(fmt, "n") == 0) {
                     compile_format = COMPILE_NATIVE;
@@ -1934,25 +1840,24 @@ int main(int argc, const char *argv[]) {
                 } else if (strcmp(fmt, "generated") == 0 ||
                            strcmp(fmt, "gen") == 0 || strcmp(fmt, "g") == 0) {
                     // -c=generated (#936): folds the old standalone -G/
-                    // --emit-generated into the -c namespace. Unlike native/
-                    // bytecode this does NOT set compile_only -- it reuses the
+                    // --emit-generated into the -c namespace. Unlike native
+                    // this does NOT set compile_only -- it reuses the
                     // dump_expanded_only/emit_generated_only serialization path
                     // below (same as -m), which historically has never been
                     // gated by compile_only. Flipping compile_only here would
                     // change behavior at every site that branches on it (the
-                    // --repl/--build/--ngrams validation blocks, deferred_link,
-                    // etc.) for no reason -- -c=generated is a
-                    // serialize-and-exit mode, not a "hand off to another
-                    // backend" mode like native/bytecode are. compile_format is
-                    // only consulted here to pick -c=generated's default output
-                    // filename.
+                    // --repl/--build/--ngrams validation blocks, etc.) for no
+                    // reason -- -c=generated is a serialize-and-exit mode, not
+                    // a "hand off to another backend" mode like native is.
+                    // compile_format is only consulted here to pick
+                    // -c=generated's default output filename.
                     compile_format      = COMPILE_GENERATED;
                     dump_expanded_only  = 1;
                     emit_generated_only = 1;
                 } else {
                     fprintf(stderr,
                             "error: invalid --compile format '%s' "
-                            "(use 'bytecode', 'native', or 'generated')\n",
+                            "(use 'native' or 'generated')\n",
                             fmt);
                     usage(argv[0], 1);
                 }
@@ -2126,19 +2031,17 @@ int main(int argc, const char *argv[]) {
             case 'A': // --asm-passthru
                 asm_passthru = 1;
                 break;
-            case 't': // --testing[=vm|bytecode|native]
+            case 't': // --testing[=vm|native]
                 testing_mode = 1;
                 if (optarg) {
                     if (strcmp(optarg, "vm") == 0) {
                         testing_backend = TESTING_BACKEND_VM;
-                    } else if (strcmp(optarg, "bytecode") == 0) {
-                        testing_backend = TESTING_BACKEND_BYTECODE;
                     } else if (strcmp(optarg, "native") == 0) {
                         testing_backend = TESTING_BACKEND_NATIVE;
                     } else {
                         fprintf(stderr,
                                 "error: --testing: unknown backend '%s' "
-                                "(expected vm, bytecode, or native)\n",
+                                "(expected vm or native)\n",
                                 optarg);
                         usage(argv[0], 1);
                     }
@@ -2322,17 +2225,6 @@ int main(int argc, const char *argv[]) {
                 build_install = 1;
                 build_mode    = 1;
                 break;
-            case 1094: { // --link lib.c4a (#565)
-                void *tmp = realloc(link_paths, (size_t)(link_paths_count + 1) *
-                                                    sizeof(*link_paths));
-                if (!tmp) {
-                    fprintf(stderr, "error: out of memory\n");
-                    return 1;
-                }
-                link_paths                     = tmp;
-                link_paths[link_paths_count++] = optarg;
-                break;
-            }
             case 1066: // --test-format=FORMAT
                 if (strcmp(optarg, "tap") == 0) {
                     test_format = TEST_FORMAT_TAP;
@@ -2568,8 +2460,7 @@ int main(int argc, const char *argv[]) {
         // phase actually runs with the requested safety instrumentation
         // baked into codegen -- unlike a plain -c=native, whose serializer
         // reconstructs C from the AST and never looks at vm.flags, so
-        // carrying these bits costs the eventual native/bytecode artifact
-        // nothing.
+        // carrying these bits costs the eventual native artifact nothing.
         flags |= test_run_flags;
     }
 
@@ -2577,7 +2468,7 @@ int main(int argc, const char *argv[]) {
         // --testing=native serializes the [[cccc::test]] harness itself and
         // hands off to the host toolchain (#1033) -- it's a compile-then-run
         // pipeline in the same spirit as --test-run/-c=native, not the
-        // in-process cc_run_tests path --testing=vm/=bytecode use.
+        // in-process cc_run_tests path --testing=vm uses.
         if (build_mode || repl_mode || test_run_mode ||
             (compile_format != COMPILE_NONE &&
              compile_format != COMPILE_NATIVE) ||
@@ -2585,7 +2476,7 @@ int main(int argc, const char *argv[]) {
             print_tokens || output_json || output_ffi_decls || dump_ast) {
             fprintf(stderr,
                     "error: --testing=native cannot be combined with "
-                    "--build, --repl, --test-run, -c=bytecode, -c=generated, "
+                    "--build, --repl, --test-run, -c=generated, "
                     "-d, -E, -m, --ast, -j, -J, or other output modes\n");
             usage(argv[0], 1);
         }
@@ -2672,31 +2563,10 @@ int main(int argc, const char *argv[]) {
                             "policy options\n");
             usage(argv[0], 1);
         }
-        for (int i = 0; i < input_files_count; i++) {
-            size_t len = strlen(input_files[i]);
-            if (len > 3 &&
-                strncmp(input_files[i] + len - 3, ".c4", sizeof(".c4")) == 0) {
-                fprintf(stderr,
-                        "error: -c=native expects C source input, not bytecode "
-                        "'%s'\n",
-                        input_files[i]);
-                usage(argv[0], 1);
-            }
-        }
         if (!out_file) {
             // Match cc/clang/gcc's a.out convention: -c=native with no -o
             // builds ./a.out instead of erroring.
             out_file = strdup("a.out");
-        }
-        if (link_paths_count > 0) {
-            // --link resolves against the CCCC bytecode linker (#565); the
-            // native backend hands off to the host C compiler and has no
-            // way to consume a .c4a library, so this silently dropped the
-            // library and failed later with a confusing "implicit function
-            // declaration" error from the native compiler instead.
-            fprintf(stderr,
-                    "error: -c=native cannot be combined with --link\n");
-            usage(argv[0], 1);
         }
     }
 
@@ -2768,16 +2638,6 @@ int main(int argc, const char *argv[]) {
     vm.compiler.cli_opt_level_set = cli_opt_level_set;
     vm.compiler.native_mode       = (compile_format == COMPILE_NATIVE);
     vm.compiler.compile_only      = compile_only;
-    vm.compiler.deferred_link     = (link_paths_count > 0 && !compile_only);
-    // #882: pre-scan every --link library's exported symbols before gen()
-    // runs, so codegen can prefer a guest definition that --link will
-    // supply over a same-named host FFI symbol. Also covers the
-    // compile_only case (a -c bytecode target built alongside --link libs
-    // still runs codegen and can carry the same shadowing hazard).
-    if (link_paths_count > 0) {
-        for (int i = 0; i < link_paths_count; i++)
-            cc_collect_link_symbols(&vm, link_paths[i]);
-    }
     vm.compiler.asm_passthru            = asm_passthru;
     vm.compiler.no_comptime             = no_comptime;
     vm.compiler.comptime_include_all    = comptime_include_all;
@@ -2830,135 +2690,6 @@ int main(int argc, const char *argv[]) {
         }
         free((void *)input_files[0]);
         input_files[0] = tmp;
-    }
-
-    // Check if input is a bytecode file (.c4 extension)
-    // If so, load and run it directly without compilation
-    //
-    // In analysis mode we accept multiple .c4 files and walk each one in
-    // turn, aggregating counts across all of them.
-    if (input_files_count >= 1 && (run_ngrams || run_fusion)) {
-        int all_c4 = 1;
-        for (int i = 0; i < input_files_count; i++) {
-            size_t len = strlen(input_files[i]);
-            if (len <= 3 ||
-                strncmp(input_files[i] + len - 3, ".c4", sizeof(".c4")) != 0) {
-                all_c4 = 0;
-                break;
-            }
-        }
-        if (all_c4) {
-            if (link_paths_count > 0) {
-                report_link_with_prebuilt_c4(input_files[0]);
-                exit_code = 1;
-                goto BAIL;
-            }
-            if (run_ngrams) {
-                CcAnalyzeNgramOptions opts = {
-                    .n        = run_ngrams,
-                    .top_n    = ngrams_top,
-                    .per_file = ngrams_per_file,
-                };
-                ngram_state = cc_analyze_ngram_begin(&opts);
-                for (int i = 0; i < input_files_count; i++) {
-                    if (cc_load_bytecode(&vm, input_files[i]) != 0) {
-                        fprintf(stderr,
-                                "error: failed to load bytecode from %s\n",
-                                input_files[i]);
-                        exit_code = 1;
-                        goto BAIL;
-                    }
-                    cc_analyze_ngram_feed(ngram_state, vm.text_seg,
-                                          (long long)vm.text_ptr + 1,
-                                          input_files[i], stdout);
-                }
-                cc_analyze_ngram_finish(ngram_state, stdout);
-                ngram_state = NULL;
-            } else {
-                CcAnalyzeFusionOptions opts = {
-                    .top_n = run_fusion,
-                    .json  = output_json,
-                };
-                fusion_state = cc_analyze_fusion_begin(&opts);
-                for (int i = 0; i < input_files_count; i++) {
-                    if (cc_load_bytecode(&vm, input_files[i]) != 0) {
-                        fprintf(stderr,
-                                "error: failed to load bytecode from %s\n",
-                                input_files[i]);
-                        exit_code = 1;
-                        goto BAIL;
-                    }
-                    cc_analyze_fusion_feed(fusion_state, vm.text_seg,
-                                           (long long)vm.text_ptr + 1,
-                                           input_files[i], stdout);
-                }
-                cc_analyze_fusion_finish(fusion_state, stdout);
-                fusion_state = NULL;
-            }
-            goto BAIL;
-        }
-    }
-
-    if (input_files_count == 1) {
-        const char *input_file = input_files[0];
-        size_t      len        = strlen(input_file);
-        if (len > 3 &&
-            strncmp(input_file + len - 3, ".c4", sizeof(".c4")) == 0) {
-            if (link_paths_count > 0) {
-                report_link_with_prebuilt_c4(input_file);
-                exit_code = 1;
-                goto BAIL;
-            }
-            // Load bytecode file
-            if (cc_load_bytecode(&vm, input_file) != 0) {
-                fprintf(stderr, "error: failed to load bytecode from %s\n",
-                        input_file);
-                exit_code = 1;
-                goto BAIL;
-            }
-
-            if (disassemble) {
-                cc_disassemble(&vm);
-                goto BAIL;
-            }
-
-            // Rehydrate stdlib FFI entries. This mirrors parse+execute so
-            // wrapper registrations such as realloc and wide-char helpers keep
-            // their VM-facing signatures after a bytecode load.
-            int stdlib_entries = 0;
-            for (int i = 0; i < vm.compiler.ffi_count; i++) {
-                if (!vm.compiler.ffi_table[i].is_dynamic_placeholder)
-                    stdlib_entries++;
-            }
-            if (stdlib_entries > 0)
-                cc_load_stdlib(&vm);
-
-            if (load_requested_libraries(&vm, libs, libs_count, lib_paths,
-                                         lib_paths_count) != 0) {
-                exit_code = 1;
-                goto BAIL;
-            }
-            if (cc_rehydrate_asm_passthru(&vm) != 0) {
-                exit_code = 1;
-                goto BAIL;
-            }
-            if (verify_dynamic_externs(&vm) != 0) {
-                exit_code = 1;
-                goto BAIL;
-            }
-
-            // Run the loaded bytecode. The loaded program sees its own .c4
-            // path as argv[0], plus explicit args after "--" if present.
-            int    prog_argc = 0;
-            char **prog_argv =
-                build_c4_argv(&prog_argc, input_file, argc, argv, dashdash);
-            exit_code        = cc_run(&vm, prog_argc, prog_argv);
-            vm_profile_mode  = "c4";
-            vm_profile_input = input_file;
-            vm_profile_ran   = 1;
-            free(prog_argv);
-            goto BAIL;
-        }
     }
 
     // Configure #embed limits if specified
@@ -3339,9 +3070,9 @@ int main(int argc, const char *argv[]) {
     // If -m/--dump-expanded (or -c=generated) is set, output
     // macro-expanded/serialized source and exit.
     if (dump_expanded_only) {
-        // -c=generated defaults its output file the same way -c=native/
-        // -c=bytecode do (a.out/a.c4), unlike plain -m which still falls
-        // back to stdout when -o is omitted (#936).
+        // -c=generated defaults its output file the same way -c=native
+        // does (a.out), unlike plain -m which still falls back to stdout
+        // when -o is omitted (#936).
         if (compile_format == COMPILE_GENERATED && !out_file)
             out_file = strdup("a.gen.c");
         FILE *f = out_file ? fopen(out_file, "w") : stdout;
@@ -3369,9 +3100,8 @@ int main(int argc, const char *argv[]) {
         // earlier TU than the one holding the initializer was reported as
         // an unresolved relocation even though it's really just not merged
         // in yet. Mirrors bytecode.c's own `vm->compiler.globals = prog`
-        // assignment (the -c=native/-c=bytecode path, which runs
-        // cc_compile() first and already sees the merged list) for the
-        // same reason.
+        // assignment (the -c=native path, which runs cc_compile() first
+        // and already sees the merged list) for the same reason.
         vm.compiler.globals = merged_prog;
         cc_serialize_program(f, &vm, merged_prog, emit_generated_only, false);
         // #1017: as above (run_native_backend) -- a warning queued by
@@ -3442,27 +3172,15 @@ int main(int argc, const char *argv[]) {
         goto BAIL;
     }
 
-    // Run the bytecode linker pass for --link libs (#565/#566/#898). A -c
-    // bytecode target (compile_only) is handled separately below with its
-    // own "--link has no effect" warning -- deferred_link left its text
-    // relocations unresolved on purpose so a later --link can resolve them.
-    if (link_paths_count > 0 && !compile_only) {
-        if (apply_link_pass(&vm, link_paths, link_paths_count) != 0) {
-            exit_code = 1;
-            goto BAIL;
-        }
-    }
-
     // --test-run: smoke-test the compiled program in the VM before
     // proceeding to the compile step below. Runs in a forked child so the
     // parent's vm (text/data segments) and merged_prog stay pristine for
     // the compile step that follows -- cc_run() below mutates guest globals
-    // in place, and cc_save_bytecode() serializes that same live vm state,
-    // so running in-process here would silently bake the test run's
-    // post-execution global values into a -c=bytecode artifact instead of
-    // the program's real initial state. The native path doesn't share this
-    // hazard (run_native_backend re-derives C from the untouched AST), but
-    // forking unconditionally keeps one code path for both.
+    // in place, so running in-process here would silently bake the test
+    // run's post-execution global values into the program's real initial
+    // state. The native path doesn't share this hazard (run_native_backend
+    // re-derives C from the untouched AST), but forking unconditionally
+    // keeps one code path for both.
     if (test_run_mode) {
 #if defined(_WIN32)
         fprintf(stderr,
@@ -3535,76 +3253,20 @@ int main(int argc, const char *argv[]) {
 #endif
     }
 
-    // -c/--compile: write bytecode (or hand off to native) and exit. This
-    // runs BEFORE the "save bytecode to out_file, then run" branch below so
-    // -c=bytecode can write to stdout / arbitrary paths and -c=native can
-    // short-circuit out of the VM runtime path. The order is also the fix
-    // for ticket #300: previously `compile_only` short-circuited at
-    // `goto BAIL;` before the legacy `out_file` save block, silently
-    // swallowing `-c -o foo.c4`.
+    // -c/--compile: hand off to native (or serialize generated C) and exit.
+    // This runs BEFORE the legacy bare "-o with no -c" error branch below so
+    // -c=native can short-circuit out of the VM runtime path. The order is
+    // also the fix for ticket #300: previously `compile_only` short-circuited
+    // at `goto BAIL;` before that branch, silently swallowing `-c -o <file>`.
     // --testing=native skips cc_run_tests entirely -- there's no in-process
     // harness to run against; control falls through to the
     // compile_format == COMPILE_NATIVE dispatch below, which serializes the
     // [[cccc::test]] harness itself into the generated C (#1033).
-    // The vm/bytecode backends run the suite as a pre-pass (#1106): on a
-    // passing (or --list-tests) run, control falls through into the -c
-    // dispatches below, so `--testing -c=bytecode/-c=native` really does
-    // compile after the tests; a failing suite bails before any artifact is
-    // written.
+    // The vm backend runs the suite as a pre-pass (#1106): on a passing (or
+    // --list-tests) run, control falls through into the -c dispatches below,
+    // so `--testing -c=native` really does compile after the tests; a
+    // failing suite bails before any artifact is written.
     if (testing_mode && testing_backend != TESTING_BACKEND_NATIVE) {
-        if (testing_backend == TESTING_BACKEND_BYTECODE) {
-            // In-process bytecode round-trip: compile → save .c4 → reload → run
-            // tests. test_fns/test_setups survive cc_load_bytecode (not stored
-            // in .c4); text_ptr is reset correctly (bytecode.c:925); only FFI
-            // func_ptrs need restoration.
-            int    n_ffi = vm.compiler.ffi_count;
-            void **ffi_ptrs =
-                n_ffi > 0 ? malloc((size_t)n_ffi * sizeof(void *)) : NULL;
-            if (n_ffi > 0 && !ffi_ptrs) {
-                fprintf(stderr, "error: --testing=bytecode: out of memory\n");
-                exit_code = 1;
-                goto BAIL;
-            }
-            for (int i = 0; i < n_ffi; i++)
-                ffi_ptrs[i] = vm.compiler.ffi_table[i].func_ptr;
-
-            char *c4_tmp = make_tmp_path(".c4");
-            if (!c4_tmp) {
-                fprintf(stderr,
-                        "error: --testing=bytecode: failed to create temp "
-                        "file\n");
-                free(ffi_ptrs);
-                exit_code = 1;
-                goto BAIL;
-            }
-            if (cc_save_bytecode(&vm, c4_tmp) != 0) {
-                fprintf(stderr, "error: --testing=bytecode: failed to save "
-                                "bytecode\n");
-                unlink(c4_tmp);
-                free(c4_tmp);
-                free(ffi_ptrs);
-                exit_code = 1;
-                goto BAIL;
-            }
-            if (cc_load_bytecode(&vm, c4_tmp) != 0) {
-                fprintf(stderr, "error: --testing=bytecode: failed to reload "
-                                "bytecode\n");
-                unlink(c4_tmp);
-                free(c4_tmp);
-                free(ffi_ptrs);
-                exit_code = 1;
-                goto BAIL;
-            }
-            unlink(c4_tmp);
-            free(c4_tmp);
-
-            int n_after =
-                vm.compiler.ffi_count < n_ffi ? vm.compiler.ffi_count : n_ffi;
-            for (int i = 0; i < n_after; i++)
-                vm.compiler.ffi_table[i].func_ptr = ffi_ptrs[i];
-            free(ffi_ptrs);
-        }
-
         CcTestOptions test_opts = {
             .test_glob    = test_glob,
             .suite_filter = suite_filter,
@@ -3618,12 +3280,11 @@ int main(int argc, const char *argv[]) {
 
         // Fall through into the compile dispatch below only when there is a
         // compile step to run AND the suite passed (#1106): --testing acts as
-        // a pre-pass guard, so -c=bytecode/-c=native/--build all refuse to
-        // produce an artifact once any test has failed. This is deliberately
-        // independent of --fail-fast, which only stops the test *run* early;
-        // a red suite never reaches the compile step.
-        if ((!build_mode && compile_format != COMPILE_BYTECODE &&
-             compile_format != COMPILE_NATIVE) ||
+        // a pre-pass guard, so -c=native/--build both refuse to produce an
+        // artifact once any test has failed. This is deliberately independent
+        // of --fail-fast, which only stops the test *run* early; a red suite
+        // never reaches the compile step.
+        if ((!build_mode && compile_format != COMPILE_NATIVE) ||
             exit_code != 0)
             goto BAIL;
     }
@@ -3672,7 +3333,6 @@ int main(int argc, const char *argv[]) {
             .cross_triple        = build_triple,
             .cross_cc            = build_cc,
             .build_cache         = build_cache,
-            .cccc_self           = argv[0],
             .build_options       = build_options,
             .build_options_count = build_options_count,
             .build_install       = build_install,
@@ -3688,32 +3348,6 @@ int main(int argc, const char *argv[]) {
         if (build_code != 0)
             exit_code = build_code;
 
-        goto BAIL;
-    }
-
-    if (compile_format == COMPILE_BYTECODE) {
-        // --link has no effect when writing a .c4a library: the linker pass
-        // now runs unconditionally right after codegen (see apply_link_pass()
-        // above, #898), but a -c/--compile bytecode target is always
-        // compile_only, so that pass is a no-op here and the library output
-        // still retains its text relocations for a later --link to resolve.
-        if (link_paths_count > 0 && compile_only) {
-            fprintf(
-                stderr,
-                "warning: --link has no effect when combined with -c bytecode "
-                "(library output retains its text relocations)\n");
-        }
-        if (!out_file) {
-            // Match cc/clang/gcc's a.out convention: -c=bytecode with no -o
-            // writes ./a.c4 instead of falling back to stdout.
-            out_file = strdup("a.c4");
-        }
-        if (cc_save_bytecode(&vm, out_file) != 0) {
-            fprintf(stderr, "error: failed to save bytecode to %s\n", out_file);
-            exit_code = 1;
-            goto BAIL;
-        }
-        fprintf(stderr, "Bytecode saved to %s\n", out_file);
         goto BAIL;
     }
 
@@ -3742,13 +3376,12 @@ int main(int argc, const char *argv[]) {
             // AST for source that was never meant to compile cleanly --
             // not something safe to hand to a real host compiler. Both are
             // narrow in practice (7 and 4 files respectively in this
-            // repo's own suite corpus) and stay on --testing=vm/=bytecode.
+            // repo's own suite corpus) and stay on --testing=vm.
             if (vm.compiler.test_setups) {
                 fprintf(stderr,
                         "error: --testing=native: [[cccc::test_setup]] / "
                         "[[cccc::test_teardown]] hooks are not supported "
-                        "(#1033 v1) -- use --testing=vm or "
-                        "--testing=bytecode\n");
+                        "(#1033 v1) -- use --testing=vm\n");
                 exit_code = 1;
                 goto BAIL;
             }
@@ -3757,8 +3390,7 @@ int main(int argc, const char *argv[]) {
                     fprintf(stderr,
                             "error: --testing=native: negative test '%s' "
                             "(error=/expect_compile_error=) is not "
-                            "supported (#1033 v1) -- use --testing=vm or "
-                            "--testing=bytecode\n",
+                            "supported (#1033 v1) -- use --testing=vm\n",
                             r->display_name ? r->display_name : r->name);
                     exit_code = 1;
                     goto BAIL;
@@ -3829,16 +3461,13 @@ int main(int argc, const char *argv[]) {
     }
 
     if (out_file) {
-        // The bytecode linker pass for --link libs already ran, right after
-        // codegen (apply_link_pass(), #898) — it applies uniformly whether
-        // we end up here, at cc_run() below, or in --testing/--disassemble.
-        // Save bytecode to file and exit (legacy path: no -c, just -o).
-        if (cc_save_bytecode(&vm, out_file) != 0) {
-            fprintf(stderr, "error: failed to save bytecode to %s\n", out_file);
-            exit_code = 1;
-            goto BAIL;
-        }
-        fprintf(stderr, "Bytecode saved to %s\n", out_file);
+        // -o with no -c/--compile format has no artifact left to write --
+        // on-disk bytecode output was removed. Use -c=native (or
+        // -c=generated) to produce a file.
+        fprintf(stderr,
+                "error: -o requires -c/--compile (native or generated); "
+                "plain -o with no compile format has nothing to write\n");
+        exit_code = 1;
         goto BAIL;
     }
 
@@ -3931,7 +3560,6 @@ BAIL:
         free(input_files);
     }
     free(build_options);
-    free(link_paths);
     if (build_tool_allow) {
         for (int i = 0; i < build_tool_allow_count; i++)
             free((void *)build_tool_allow[i]);

@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/global_canon_957_defs.c
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 //
 // #957: an extern global declared in one translation unit and defined in
 // another (tests/fixtures/global_canon_957_defs.c, listed first via

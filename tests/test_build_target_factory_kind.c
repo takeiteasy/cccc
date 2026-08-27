@@ -1,10 +1,11 @@
 // CCCC_FLAGS: --build --build-dry-run --build-target=my_target
-// CCCC_EXPECT_STDOUT: \.c4
+// CCCC_EXPECT_STDOUT: bin/app
 //
-// kind=bytecode is now a valid [[cccc::build_target]] option (#545).
-// Dry-run must print the cccc invocation with a .c4 output path.
+// kind=native is the only valid [[cccc::build_target]] option (on-disk
+// bytecode targets were removed, #1215). Dry-run must still print the
+// factory-returned target's native executable output path.
 
-[[cccc::build_target(kind = bytecode)]]
+[[cccc::build_target(kind = native)]]
 BuildTarget *my_target(Builder *ctx) {
     BuildTarget *t = Executable(ctx, "app");
     AddSource(t, "examples/build_demo/src/main.c");

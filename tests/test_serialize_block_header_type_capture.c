@@ -1,6 +1,5 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: #include <time\.h>[\s\S]*struct __cccc_block_env_
-// CCCC_C4_SKIP
 //
 // #993: serialize_block_preamble() used to run ahead of the #include
 // replay, so a by-value capture of a header-declared type (struct tm) was

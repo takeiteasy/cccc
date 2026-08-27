@@ -53,7 +53,7 @@ tasks:
       set -e
       ./cccc --build build.c
   - test: |
-      # Aggregate driver: source suite, .c4 bytecode round-trip,
+      # Aggregate driver: source suite, native round-trip,
       # audit_ffi, and sqlite_smoke (skips cleanly -- the amalgamation
       # zip is not committed to the repo) all in one run, against the
       # build.c-produced (not the stage0 bootstrap) binary.

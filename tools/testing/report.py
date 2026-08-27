@@ -5,41 +5,29 @@ def print_summary(r, args):
     """Print the final summary block for a single test suite run.
 
     r      — dict returned by _run_test_suite
-    args   — argparse namespace (or SimpleNamespace) with c4, bench, quiet attrs
+    args   — argparse namespace (or SimpleNamespace) with bench, quiet attrs
     """
     total = r["total"]
     passed = r["passed"]
     failed = r["failed"]
     crashed = r["crashed"]
     negative_passed = r["negative_passed"]
-    c4_passed = r["c4_passed"]
-    c4_failed = r["c4_failed"]
-    c4_skipped = r["c4_skipped"]
-    c4_save_failed = r["c4_save_failed"]
     native_passed = r.get("native_passed", 0)
     native_failed = r.get("native_failed", 0)
     native_skipped = r.get("native_skipped", 0)
     native_compile_failed = r.get("native_compile_failed", 0)
     failed_tests = r["failed_tests"]
     crashed_tests = r["crashed_tests"]
-    c4_skipped_tests = r["c4_skipped_tests"]
     native_skipped_tests = r.get("native_skipped_tests", [])
     timings = r["timings"]
 
-    c4_mode = getattr(args, "c4", False)
     native_mode = getattr(args, "native", False)
 
     print()
     print("=======================")
     print("Test Results Summary")
     print("=======================")
-    if c4_mode:
-        print(f"Total:          {total}")
-        print(f"C4 passed:      {c4_passed}")
-        print(f"C4 skipped:     {c4_skipped}")
-        print(f"C4 failed:      {c4_failed}")
-        print(f"C4 save fail:   {c4_save_failed}")
-    elif native_mode:
+    if native_mode:
         print(f"Total:              {total}")
         print(f"Native passed:      {native_passed}")
         print(f"Native skipped:     {native_skipped}")
@@ -62,12 +50,6 @@ def print_summary(r, args):
         print()
         print("Failed tests:")
         for test in failed_tests:
-            print(f"  - {test}")
-
-    if c4_mode and c4_skipped > 0 and not getattr(args, "quiet", False):
-        print()
-        print(f"C4 skipped tests ({c4_skipped}):")
-        for test in c4_skipped_tests:
             print(f"  - {test}")
 
     if native_mode and native_skipped > 0 and not getattr(args, "quiet", False):
@@ -95,10 +77,7 @@ def print_summary(r, args):
 
     if failed > 0 or crashed > 0:
         return False
-    if c4_mode:
-        print()
-        print(f"All {c4_passed} c4 roundtrips passed ({c4_skipped} skipped).")
-    elif native_mode:
+    if native_mode:
         print()
         print(f"All {native_passed} native roundtrips passed ({native_skipped} skipped).")
     else:
@@ -127,7 +106,7 @@ def print_matrix_summary(all_results, passes, declared_result=None):
     for label, name in passes:
         r = all_results[label]
         r_total = r["total"]
-        r_passed = r["passed"] + r["negative_passed"] + r["c4_passed"]
+        r_passed = r["passed"] + r["negative_passed"]
         r_failed = r["failed"]
         r_crashed = r["crashed"]
         r_skipped = r.get("matrix_skipped", 0)

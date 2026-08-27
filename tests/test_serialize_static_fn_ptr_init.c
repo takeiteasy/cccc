@@ -1,5 +1,4 @@
 // CCCC_FLAGS: -m
-// CCCC_C4_SKIP: -m dumps source and exits, no bytecode to round-trip
 // CCCC_EXPECT_STDOUT: static int none_open\(void\);[\s\S]*static const VT
 // kNoneVT = \{ \.open = \(int \(\*\)\(void\)\)\(\(char \*\)&none_open
 //

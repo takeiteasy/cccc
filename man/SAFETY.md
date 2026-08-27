@@ -123,7 +123,7 @@ Safety levels are **additive** - you can combine a preset level with individual 
 
 ### Smoke-testing before a real compile: `--test-run[=LEVEL]`
 
-`--test-run[=LEVEL]` (see [TESTING.md](TESTING.md#test-runlevel-smoke-test-the-program-itself-before-compiling)) reuses these same preset names/levels (`LEVEL` accepts `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`, defaulting to `max`) to run the program once under the VM's safety instrumentation before handing it to `-c=native`/`-c=bytecode`. It's a way to get this level's crash/safety-violation coverage as a pre-compile gate — e.g. `-1`/`--safety=basic`'s low-overhead checks as a cheap CI smoke test before every native build — without needing a `[[cccc::test]]` suite.
+`--test-run[=LEVEL]` (see [TESTING.md](TESTING.md#test-runlevel-smoke-test-the-program-itself-before-compiling)) reuses these same preset names/levels (`LEVEL` accepts `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`, defaulting to `max`) to run the program once under the VM's safety instrumentation before handing it to `-c=native`. It's a way to get this level's crash/safety-violation coverage as a pre-compile gate — e.g. `-1`/`--safety=basic`'s low-overhead checks as a cheap CI smoke test before every native build — without needing a `[[cccc::test]]` suite.
 
 ---
 

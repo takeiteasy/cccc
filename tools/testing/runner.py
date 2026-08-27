@@ -11,7 +11,6 @@ from . import (
     native_audit_skips_enabled,
     vm_profile_path,
 )
-from .c4 import run_c4_roundtrip
 from .header import parse_test_header
 from .native import run_native_roundtrip
 from .proc import run_capture
@@ -24,7 +23,7 @@ def has_matrix_skip(test_file):
 
 
 def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
-                    bench=False, c4_mode=False, profile_dir=None, process_timeout=None,
+                    bench=False, profile_dir=None, process_timeout=None,
                     matrix_mode=False, native_mode=False):
     """Run one test file and return a result dict.
 
@@ -46,14 +45,14 @@ def run_single_test(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_
     with wedge.inflight(test_name):
         return _run_single_test_body(
             idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
-            bench=bench, c4_mode=c4_mode, profile_dir=profile_dir,
+            bench=bench, profile_dir=profile_dir,
             process_timeout=process_timeout, matrix_mode=matrix_mode,
             native_mode=native_mode,
         )
 
 
 def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform, cccc_args,
-                          bench=False, c4_mode=False, profile_dir=None, process_timeout=None,
+                          bench=False, profile_dir=None, process_timeout=None,
                           matrix_mode=False, native_mode=False):
     tests_dir = Path(script_dir) / "tests"
     test_name = str(test_file.relative_to(tests_dir))
@@ -74,7 +73,6 @@ def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform,
     reject_stdout = header.reject_stdout
     expect_leak_reason = header.expect_leak
     leak_suppressed = False
-    c4_skip = header.c4_skip
     native_skip = header.native_skip
     matrix_skip_reason = header.matrix_skip
     leaks_keep_vm_heap = header.leaks_keep_vm_heap
@@ -101,36 +99,6 @@ def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform,
             "skip_reason": f"matrix-incompatible: {matrix_skip_reason}",
         }
 
-    if c4_mode and c4_skip:
-        return {
-            "idx": idx,
-            "test_name": test_name,
-            "exit_code": 0,
-            "status": "c4_skipped",
-            "output": "",
-            "is_negative_test": is_negative_test,
-            "expects_runtime_error": expects_runtime_error,
-            "stderr_mismatch": None,
-            "elapsed": 0,
-            "skip_reason": "c4-incompatible: CCCC_C4_SKIP",
-        }
-
-    if c4_mode and is_build_mode:
-        # Build scripts emit no bytecode to round-trip; the runner compiles
-        # native targets instead. Skip the .c4 pass entirely.
-        return {
-            "idx": idx,
-            "test_name": test_name,
-            "exit_code": 0,
-            "status": "c4_skipped",
-            "output": "",
-            "is_negative_test": is_negative_test,
-            "expects_runtime_error": expects_runtime_error,
-            "stderr_mismatch": None,
-            "elapsed": 0,
-            "skip_reason": "c4-incompatible: --build mode",
-        }
-
     # --build is incompatible with -O and -f<pass> flags (build mode runs the
     # build script in-process and does not compile VM bytecode at an
     # optimization level or through the peephole/pass pipeline; the compiler
@@ -140,19 +108,6 @@ def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform,
         cccc_args = [a for a in cccc_args
                      if not (a.startswith("-O") and len(a) > 2 and a[2].isdigit())
                      and not a.startswith("-f")]
-
-    if c4_mode:
-        return run_c4_roundtrip(
-            idx, test_file, test_name, cccc, script_dir, cccc_args, per_test_flags,
-            per_test_run_args, is_negative_test, expects_runtime_error, bench,
-            profile_dir,
-            is_testing_mode=is_testing_mode,
-            expect_stdout=expect_stdout,
-            reject_stdout=reject_stdout,
-            expect_stderr=expect_stderr,
-            reject_stderr=reject_stderr,
-            process_timeout=process_timeout,
-        )
 
     # #1182: --native-audit-skips bypasses CCCC_NATIVE_SKIP the same way it
     # bypasses NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS (native_skip_reason,

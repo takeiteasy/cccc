@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/header_static_skip_999_a.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: int header_static_skip_999_a\(void\)
 // CCCC_REJECT_STDOUT: static int header_static_skip_999_helper
 //

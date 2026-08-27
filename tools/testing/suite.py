@@ -28,7 +28,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         (
             i, test_file, cccc, str(script_dir), use_leaks, platform, cccc_args,
             getattr(args, "bench", False),
-            getattr(args, "c4", False),
             str(profile_dir) if profile_dir else None,
             process_timeout,
             matrix_mode,
@@ -46,10 +45,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
     failed = 0
     crashed = 0
     negative_passed = 0
-    c4_passed = 0
-    c4_failed = 0
-    c4_skipped = 0
-    c4_save_failed = 0
     matrix_skipped = 0
     native_passed = 0
     native_failed = 0
@@ -57,7 +52,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
     native_compile_failed = 0
     failed_tests = []
     crashed_tests = []
-    c4_skipped_tests = []
     matrix_skipped_tests = []
     native_skipped_tests = []
     timings = []
@@ -66,7 +60,7 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
 
     def print_single_result(result):
         nonlocal total, passed, failed, crashed, negative_passed
-        nonlocal c4_passed, c4_failed, c4_skipped, c4_save_failed, matrix_skipped
+        nonlocal matrix_skipped
         nonlocal native_passed, native_failed, native_skipped, native_compile_failed
         total += 1
         test_name = result["test_name"]
@@ -169,52 +163,11 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
                 print(f"✗ {test_name} ({result['stderr_mismatch']}){timing_str}")
                 for line in output.splitlines()[:5]:
                     print(f"  {line}")
-        elif status == "c4_passed":
-            c4_passed += 1
-            if not quiet:
-                print(f"✓ {test_name}{timing_str}")
-        elif status == "c4_skipped":
-            c4_skipped += 1
-            reason = result.get("skip_reason", "")
-            if reason:
-                c4_skipped_tests.append(f"{test_name} ({reason})")
         elif status == "matrix_skipped":
             matrix_skipped += 1
             reason = result.get("skip_reason", "")
             if reason:
                 matrix_skipped_tests.append(f"{test_name} ({reason})")
-        elif status == "c4_save_failed":
-            c4_save_failed += 1
-            failed += 1
-            failed_tests.append(f"{test_name} (C4 SAVE FAILED)")
-            if not quiet:
-                print(f"✗ {test_name} (C4 SAVE FAILED){timing_str}")
-                for line in output.splitlines()[:3]:
-                    print(f"  {line}")
-        elif status == "c4_failed":
-            c4_failed += 1
-            failed += 1
-            failed_tests.append(f"{test_name} (C4 RUNTIME FAILED, exit {exit_code})")
-            if not quiet:
-                print(f"✗ {test_name} (C4 RUNTIME FAILED, exit {exit_code}){timing_str}")
-                lines = output.splitlines()
-                shown = 0
-                for i, line in enumerate(lines):
-                    if line.startswith("not ok"):
-                        for follow in lines[i:i + 6]:
-                            print(f"  {follow}")
-                            shown += 1
-                        if shown >= 18:
-                            break
-                if shown == 0:
-                    # No TAP "not ok" markers found (e.g. crashed before
-                    # emitting one, or died mid-run with the crash past the
-                    # last flushed line) — fall back to the tail of the
-                    # output instead of always showing just the first 3
-                    # lines, which on a crash mid-suite hid the actual
-                    # failure behind the TAP header/plan.
-                    for line in lines[-10:]:
-                        print(f"  {line}")
         elif status == "native_passed":
             native_passed += 1
             if not quiet:
@@ -280,10 +233,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         "failed": failed,
         "crashed": crashed,
         "negative_passed": negative_passed,
-        "c4_passed": c4_passed,
-        "c4_failed": c4_failed,
-        "c4_skipped": c4_skipped,
-        "c4_save_failed": c4_save_failed,
         "matrix_skipped": matrix_skipped,
         "native_passed": native_passed,
         "native_failed": native_failed,
@@ -291,7 +240,6 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
         "native_compile_failed": native_compile_failed,
         "failed_tests": failed_tests,
         "crashed_tests": crashed_tests,
-        "c4_skipped_tests": c4_skipped_tests,
         "matrix_skipped_tests": matrix_skipped_tests,
         "native_skipped_tests": native_skipped_tests,
         "timings": timings,
@@ -300,11 +248,11 @@ def _run_test_suite(cccc, script_dir, use_leaks, platform, cccc_args, n_jobs, ar
 
 _SUM_KEYS = (
     "total", "passed", "failed", "crashed", "negative_passed",
-    "c4_passed", "c4_failed", "c4_skipped", "c4_save_failed", "matrix_skipped",
+    "matrix_skipped",
     "native_passed", "native_failed", "native_skipped", "native_compile_failed",
 )
 _LIST_KEYS = (
-    "failed_tests", "crashed_tests", "c4_skipped_tests",
+    "failed_tests", "crashed_tests",
     "matrix_skipped_tests", "native_skipped_tests", "timings",
 )
 

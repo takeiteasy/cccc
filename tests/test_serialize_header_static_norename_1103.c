@@ -1,7 +1,6 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: [^_]getline\(\)
 // CCCC_REJECT_STDOUT: getline__cccc_dup[0-9]+
-// CCCC_C4_SKIP: -m serializer-shape check, not a bytecode round-trip
 //
 // #1103: rename_colliding_static_names()'s host-libc-symbol probe (Tier A,
 // #1042(c)) renames ANY static, defining Obj whose name dlsym finds in the

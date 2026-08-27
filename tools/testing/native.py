@@ -1,11 +1,10 @@
 """Native-backend (-c=native) round-trip test execution.
 
-Mirrors c4.py's shape, with one structural difference: under --c4, cccc
-itself executes the bytecode and returns 42 (c4.py's run step). Under
---native, cccc's own exit code only reports whether the *compile* succeeded
-(0) or failed (nonzero) -- the compiled *child* binary is a second process,
-and it is the child that is expected to return 42. -I./include and the test's
-CCCC_FLAGS apply to the compile step only; CCCC_RUN_ARGS go to the child.
+Under --native, cccc's own exit code only reports whether the *compile*
+succeeded (0) or failed (nonzero) -- the compiled *child* binary is a second
+process, and it is the child that is expected to return 42. -I./include and
+the test's CCCC_FLAGS apply to the compile step only; CCCC_RUN_ARGS go to
+the child.
 
 Three tiers, chosen by run_single_test (runner.py) before calling in here:
   - SKIP: filtered out entirely (see NATIVE_SKIP_TESTS / NATIVE_VM_ONLY_FLAGS
@@ -128,7 +127,7 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
                          process_timeout=None, platform=None,
                          is_testing_mode=False):
     """Compile a test with -c=native, then (for FULL-tier tests) run the
-    resulting binary. Returns a result dict shaped like c4.run_c4_roundtrip's.
+    resulting binary. Returns a result dict shaped like the other tiers'.
 
     is_negative_test:      EXPECT_COMPILE_ERROR -- compile must fail.
     expects_runtime_error: EXPECT_RUNTIME_ERROR -- compile-only (see module

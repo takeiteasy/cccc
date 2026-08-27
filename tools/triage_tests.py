@@ -21,7 +21,7 @@ from testing.header import parse_test_header
 # -M (--memory-leak-detection) and -m (--dump-expanded) were previously
 # conflated here; -M is a safety flag, not an output mode, so it's dropped.
 # -G folded into -c=generated/-c=gen/-c=g (#936) -- only the generated
-# spelling, not -c=native/-c=bytecode, which aren't "dump text" output modes.
+# spelling, not -c=native, which isn't a "dump text" output mode.
 RE_OUTPUT_FLAG    = re.compile(
     r'\s(-E|-m|-c=(generated|gen|g)\b|-c(generated|gen|g)\b|--compile=(generated|gen|g)\b)')
 

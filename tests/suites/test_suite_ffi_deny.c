@@ -30,7 +30,7 @@ int test_ffi_deny_dlfcn_zero(void) {
     return 3;      // dlsym should have been blocked
 }
 
-// test_c4_ffi_rehydrate: deny policy survives a .c4 save/load round-trip
+// test_c4_ffi_rehydrate: deny policy applies consistently across calls
 [[cccc::test(return = 42)]]
 int test_c4_ffi_rehydrate(void) {
     // strlen is in the deny list: blocked call returns 0

@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/multi_tu_unique_static_1002_a.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: static int test_1002_helper\(void\)
 //
 // Found investigating #1002 (not what that ticket itself reported, but it

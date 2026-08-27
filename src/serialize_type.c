@@ -1763,7 +1763,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             // project targets (macOS/Linux x aarch64/x86_64), including
             // under the strict -std=cNN native_resolve_std_ladder passes,
             // and round-trips back through this compiler's own parser
-            // (DK_INT128, parse_types.c) for -c=bytecode re-serialization.
+            // (DK_INT128, parse_types.c).
             // #1121: previously fell into the size==8 "long" arm below,
             // silently truncating every 128-bit value/operation to 64 bits.
             if (ty->size == 1)
@@ -1790,7 +1790,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
                 // generated." phrasing the test harness's compile-error
                 // heuristic (tools/testing/runner.py) already scans for.
                 error("cccc: _BitInt(%d) exceeds 128 bits, which has no "
-                      "native/-m lowering (VM and -c=bytecode only)\n\n1 "
+                      "native/-m lowering (VM only)\n\n1 "
                       "error generated.",
                       ty->bit_width);
             break;

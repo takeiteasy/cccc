@@ -30,7 +30,6 @@ from pathlib import Path
 _BARE_DIRECTIVES = frozenset({
     "EXPECT_COMPILE_ERROR",
     "EXPECT_RUNTIME_ERROR",
-    "CCCC_C4_SKIP",
     "CCCC_LEAKS_KEEP_VM_HEAP",
 })
 
@@ -73,7 +72,7 @@ _TRAILING_BLOCK_COMMENT_END = re.compile(r"\s*\*/\s*$")
 # corpus, and without this split the anchor rule would mistake either for an
 # empty CCCC_FLAGS directive (first token of its comment line, followed by
 # whitespace). Directives that are legitimately bare (EXPECT_COMPILE_ERROR,
-# CCCC_C4_SKIP, CCCC_LEAKS_KEEP_VM_HEAP) or optionally bare with a default
+# CCCC_LEAKS_KEEP_VM_HEAP) or optionally bare with a default
 # reason (CCCC_NATIVE_SKIP, CCCC_MATRIX_SKIP, CCCC_EXPECT_LEAK) keep the
 # original terminated-by-':'-or-whitespace-or-end anchor.
 _COLON_REQUIRED_NAMES = sorted(_VALUE_DIRECTIVES, key=len, reverse=True)
@@ -107,7 +106,6 @@ class TestHeader:
     reject_stderr: str | None = None
     expect_stdout: str | None = None
     reject_stdout: str | None = None
-    c4_skip: bool = False
     native_skip: str | None = None
     matrix_skip: str | None = None
     expect_leak: str | None = None
@@ -220,8 +218,6 @@ def _apply(header: TestHeader, name: str, value: str | None) -> None:
         header.is_negative_test = True
     elif name == "EXPECT_RUNTIME_ERROR":
         header.expects_runtime_error = True
-    elif name == "CCCC_C4_SKIP":
-        header.c4_skip = True
     elif name == "CCCC_LEAKS_KEEP_VM_HEAP":
         header.leaks_keep_vm_heap = True
     elif name == "CCCC_NATIVE_SKIP":

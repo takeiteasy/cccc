@@ -1,10 +1,10 @@
 // CCCC_FLAGS: --build --build-cache=build/test_link_staleness_cache --build-out-dir=build/test_link_staleness_out
 // CCCC_EXPECT_STDOUT: (?=[\s\S]*\(up to date\) linkstale_app)(?=[\s\S]*link_staleness_ok)
 //
-// #851: link-step staleness. Only kind=bytecode targets had any incremental
-// check at the link/archive step before this; a native EXE relinked
-// unconditionally every build even when every .o and the link command line
-// were unchanged. Two Build() calls on the same target within one
+// #851: link-step staleness. No target had any incremental check at the
+// link/archive step before this; a native EXE relinked unconditionally
+// every build even when every .o and the link command line were unchanged.
+// Two Build() calls on the same target within one
 // build_main (the serial run_graph dispatch path re-invokes build_target()
 // unconditionally each call): the second must report the link step
 // "(up to date)" and must not touch the binary at all.

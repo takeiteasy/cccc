@@ -1,6 +1,5 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: struct __cccc_block \{
-// CCCC_C4_SKIP
 //
 // #990/#993: serialize_block_preamble() used to bail out entirely (no
 // `struct __cccc_block` definition, no __cccc_block_copy_impl, no free()

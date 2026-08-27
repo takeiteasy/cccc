@@ -1,7 +1,6 @@
 // CCCC_FLAGS: --testing --uninitialized-detection
 // CCCC_EXPECT_STDERR: UNINITIALIZED VARIABLE READ
 // CCCC_EXPECT_STDOUT: not ok 1 -
-// CCCC_C4_SKIP
 //
 // #1013: a runtime safety violation inside a [[cccc::test]] body silently
 // aborted the test -- cc_run_at's return value was discarded entirely at

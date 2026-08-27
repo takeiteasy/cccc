@@ -10,7 +10,7 @@ by the same preprocessor / parser / VM as every other CCCC source file. The mode
 mirrors `--testing` (see [TESTING.md](TESTING.md)) and reuses the
 `[[cccc::comptime]]` interception machinery (see [MACROS.md](MACROS.md)).
 
-> Native and bytecode output is supported. See [Scope](#scope) for what is deferred.
+> Native output is supported. See [Scope](#scope) for what is deferred.
 
 ## Quick start
 
@@ -98,7 +98,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
-| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD` (#851, see "Incremental builds and header dependencies" below), gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check (#851); bytecode targets cache at per-target granularity (all sources hashed together) and are not arch-tagged, since `.c4` bytecode is portable across same-OS architectures. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc, #1198), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD` (#851, see "Incremental builds and header dependencies" below), gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check (#851). Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc, #1198), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
 | `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. (#559) |
 | `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. (#560) |
 | `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. (#558) |
@@ -282,205 +282,17 @@ for (int i = 0; i < n; i++)
     printf("factory: %s\n", BuildTargetName(ctx, i));
 ```
 
-The `kind=` option selects the output backend:
-
-| `kind=` | Backend | Output |
-|---------|---------|--------|
-| `native` (default) | system `cc`/`ar`/`ld` | platform binary |
-| `bytecode` | `cccc` whole-program compile | `.c4` bytecode file |
-
-**`kind=bytecode`** compiles all sources in a single `cccc` invocation, producing
-a runnable `.c4` file (default path `bin/<name>.c4`). This uses CCCC's existing
-AST-level multi-TU merge (same as `cccc a.c b.c -o out.c4`). The factory must
-be invoked via `--build-target=NAME`; the target must call `Executable()`.
-
-```c
-[[cccc::build_target(kind=bytecode)]]
-BuildTarget *bc_app(Builder *ctx) {
-    BuildTarget *t = Executable(ctx, "app");
-    AddSource(t, "src/main.c");
-    AddSource(t, "src/lib.c");
-    AddInclude(t, "include");
-    return t;
-}
-```
-
-```sh
-cccc --build build.c --build-target=bc_app
-# produces build/bin/app.c4 — run with: cccc build/bin/app.c4
-```
-
-Flags forwarded to the `cccc` invocation: `-I`, `-D`, `-U`, `--std`. Native
-`cflags`/`ldflags`/profile flags are skipped. Incremental caching is supported
-via `--build-cache` at per-target granularity (all sources hashed together).
-
-### Bytecode static libraries (`.c4a`)
-
-A `StaticLib()` returned from a `kind=bytecode` factory produces a `.c4a` file
-(default path `lib/<name>.c4a`) — the bytecode equivalent of a native `.a` archive.
-The sources are compiled as a single `cccc -c bytecode` invocation (which skips the
-`main()` requirement).
-
-```c
-[[cccc::build_target(kind=bytecode)]]
-BuildTarget *bc_mathlib(Builder *ctx) {
-    BuildTarget *lib = StaticLib(ctx, "mathlib");
-    AddSource(lib, "src/math.c");
-    AddInclude(lib, "include");
-    return lib;
-}
-```
-
-```sh
-cccc --build build.c --build-target=bc_mathlib
-# produces build/lib/mathlib.c4a
-```
-
-### Bytecode dynamic modules (`.c4d`)
-
-A `DynamicLib()` returned from (or created inside) a `kind=bytecode` factory
-produces a `.c4d` file (default path `lib/<name>.c4d`) — a bytecode module that
-can be loaded into a running CCCC VM at runtime via `cc_load_module()`.
-
-```c
-[[cccc::build_target(kind=bytecode)]]
-BuildTarget *bc_plugin(Builder *ctx) {
-    BuildTarget *plugin = DynamicLib(ctx, "plugin");
-    AddSource(plugin, "src/plugin.c");
-    return plugin;
-}
-```
-
-```sh
-cccc --build build.c --build-target=bc_plugin
-# produces build/lib/plugin.c4d
-```
-
-### LinkWith between bytecode targets
-
-`LinkWith(app, lib)` is supported when `app` is a `kind=bytecode` target (#563, #565).
-
-Inside a `kind=bytecode` factory, `StaticLib()` and `DynamicLib()` targets are
-automatically treated as bytecode (no separate annotation needed):
-- `StaticLib` deps are compiled **standalone** as `.c4a` files and then linked into
-  the exe via the bytecode linker pass (`--link`). This uses cross-module symbol
-  resolution: the lib exports a symbol table and the exe carries text-relocation
-  entries that are patched at link time.
-- `DynamicLib` deps are **not linked statically**; they are built as standalone `.c4d`
-  modules and loaded at runtime via `cc_load_module()`. Use `DependsOn(exe, plugin)`
-  to ensure the `.c4d` is built before the exe.
-
-```c
-[[cccc::build_target(kind=bytecode)]]
-BuildTarget *bc_app(Builder *ctx) {
-    // Static lib dep: compiled as .c4a, linked into exe at build time.
-    BuildTarget *lib = StaticLib(ctx, "mylib");
-    AddSource(lib, "src/lib.c");
-    AddInclude(lib, "include");
-
-    // Dynamic module dep: built as .c4d, loaded at runtime.
-    BuildTarget *plugin = DynamicLib(ctx, "plugin");
-    AddSource(plugin, "src/plugin.c");
-
-    BuildTarget *app = Executable(ctx, "app");
-    AddSource(app, "src/main.c");
-    AddInclude(app, "include");
-    LinkWith(app, lib);        // lib built as .c4a, linked via --link
-    DependsOn(app, plugin);    // plugin.c4d built first, not folded
-    return app;
-}
-```
-
-The build system generates two separate `cccc` invocations:
-```sh
-cccc src/lib.c --compile=bytecode -o build/lib/mylib.c4a -I include
-cccc src/main.c -o build/bin/app.c4 -I include --link build/lib/mylib.c4a
-```
-
-`DependsOn` edges are ordering-only (as for native targets). `LinkWith` from a
-bytecode target to a source-less target (a `CUSTOM` step or a native FFI library)
-is ignored with a warning; native linking into `.c4` goes through FFI, not
-`LinkWith`.
-
-Function-pointer decay to cross-module symbols (taking the address of a function
-defined in a `.c4a`) is supported: the text-relocation pass resolves both direct
-`CALL` sites and address-taken references to exported symbols (#566).
-
-A guest definition in a linked `.c4a` takes precedence over a same-named host FFI
-symbol: every `--link` path is pre-scanned for its exported symbol names before
-codegen runs, so a call to a name that is both a registered FFI symbol (e.g. libc's
-`abs`) and defined in a linked library resolves to the library's own definition, not
-silently to the host function. The same precedence applies to taking a bodiless
-function's address inside a function body (`int (*fp)(int) = abs;` as a local). This
-only covers the compile-time-knowable case — a standalone `-c` object built with no
-matching `--link` path on the same command line, or a symbol supplied only later via
-a runtime `cc_load_module()` call, still resolves to the host FFI symbol. One
-narrower gap remains even with a matching `--link` path: a **file-scope** global
-variable's initializer taking that address (`int (*fp)(int) = abs;` at file scope,
-as opposed to inside a function body) still resolves to the host FFI symbol —
-`apply_global_relocations` (`src/codegen_regalloc.c`) has no relocation mechanism for an
-unresolved data-segment reference by name, unlike the text-segment case. This is
-also why an undefined *data* global (not a function) can only be **suppressed**
-under `-c`/`--link`, never deferred to a link-time diagnostic the way an
-undefined function is (a `text_relocs` entry, resolved by name when the link
-step runs): there is no equivalent data-segment relocation table, so a
-`.c4a` library's exported data symbols can't be resolved by name either (#957).
-
-### The `--link` compiler flag
-
-```sh
-cccc src/main.c -o app.c4 --link build/lib/mylib.c4a
-```
-
-`--link lib.c4a` appends the library's text and data into the compiled program,
-resolves any unresolved `CALL` sites that match exported symbols, and then writes
-the fully linked `.c4` file.  Multiple `--link` flags are processed in order.  Any
-symbol that remains unresolved after all libraries are linked causes a hard error.
-
-The linker pass runs once, immediately after codegen, so it applies uniformly no
-matter what happens next: writing a `.c4` file (`-o file`), running the program
-directly in-memory (no `-o`), `--testing`, and `--disassemble` all see the fully
-linked program. Using `--link` with `--compile=bytecode` (library output) emits a
-warning and is a no-op, since a library target is meant to retain its own
-unresolved text relocations for a later consumer to link. `--link` cannot be
-combined with `-c=native` (the native backend hands off to the host C compiler,
-which has no notion of a `.c4a` library) or with running a prebuilt `.c4` file as
-input (there is no fresh codegen output for the pass to resolve against) — both
-are rejected with a clean error. The prebuilt-`.c4` rejection applies to every
-`.c4` input, including the `--ngrams`/`--fusion-candidates` static-analysis mode
-when it's given one or more prebuilt `.c4` files to walk.
-
-### Runtime module loading — `cc_load_module`
-
-A `.c4d` module built by the build system can be appended into a running VM:
-
-```c
-#include "cccc.h"
-
-int main(void) {
-    VirtualMachine *vm = cc_init(NULL);
-    cc_load_module(vm, "build/lib/plugin.c4d");
-    // module's exported symbols are now callable via the resolved text relocations
-    cc_destroy(vm);
-    return 0;
-}
-```
-
-`cc_load_module` appends the module's text and data segments into the host VM,
-patching all absolute PC operands (jump/call targets) by the pre-append text size,
-and re-anchoring data relocations. FFI registrations from the module are merged.
-After appending, it also resolves any of the host VM's pending text relocations
-whose target names match symbols exported by the loaded module.
+`kind=native` is the only supported value (on-disk bytecode targets were
+removed, #1215) -- it exists mainly so the attribute has an explicit form to
+match its C23/GNU spellings below.
 
 The attribute accepts C23 and GNU forms:
 
 ```c
 [[cccc::build_target]]
 [[cccc::build_target(kind=native)]]
-[[cccc::build_target(kind=bytecode)]]
 __attribute__((build_target))
 __attribute__((build_target(kind=native)))
-__attribute__((build_target(kind=bytecode)))
 __attribute__((cccc::build_target))
 ```
 
@@ -492,9 +304,6 @@ __attribute__((cccc::build_target))
 | Static library | `StaticLib(name)` | `lib/lib<name>.a` | `ar rcs` |
 | Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
 | Custom step | `RunCustom(name, cmd)` | (none) | vendored shell |
-| Bytecode executable | `Executable(name)` + `kind=bytecode` | `bin/<name>.c4` | `cccc` |
-| Bytecode static lib | `StaticLib(name)` + `kind=bytecode` | `lib/<name>.c4a` | `cccc -c bytecode` |
-| Bytecode dynamic mod | `DynamicLib(name)` + `kind=bytecode` | `lib/<name>.c4d` | `cccc -c bytecode` |
 
 ## Builder API
 
@@ -618,7 +427,7 @@ BuildTarget *gen = RunCustom(ctx, "gen-api", cmd);
 DependsOn(gen, tool);
 ```
 
-For `Executable`/`StaticLib`/`DynamicLib`/bytecode targets this is always
+For `Executable`/`StaticLib`/`DynamicLib` targets this is always
 `<out_dir>/<path>` — the explicit `SetOutput()` path if given, else the
 kind-appropriate default (`bin/<name>`, `lib/lib<name>.a`, ...). A
 `RunCustom` target has no such convention (its command can write anywhere,
@@ -735,9 +544,9 @@ source `#include`s — not just the `.c`/`.cpp` file itself:
   rcs ...`) step is skipped — reported as `(up to date) <target>` — when the
   output already exists, is at least as new as every object file, and an
   argv hash stamped in the objdir (`<objdir>/.cccc-link`) matches the
-  current link command line. Before this, only `kind=bytecode` targets had
-  any incremental check at the link step; a native EXE/STATIC/DYNAMIC
-  target relinked unconditionally every build even when nothing changed.
+  current link command line. Before this, no target had any incremental
+  check at the link step; a native EXE/STATIC/DYNAMIC target relinked
+  unconditionally every build even when nothing changed.
 
 All of this is gated on `ctx->cache_dir` (i.e. `--build-cache` must be
 passed) — without it, every step rebuilds unconditionally, which the
@@ -1378,13 +1187,6 @@ cross-compilation via `--build-triple` / `SetTargetTriple` and
 `--build-cc` / `SetToolchain` (#547),
 `GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers,
 `--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546),
-incremental per-target caching for `kind=bytecode` targets (#562),
-`kind=bytecode` build targets producing `.c4` executables via whole-program cccc
-compilation (#545),
-`LinkWith` between bytecode targets via source-folding (#563),
-`StaticLib(kind=bytecode)` producing `.c4a` files and `DynamicLib(kind=bytecode)`
-producing `.c4d` modules, runtime `cc_load_module()` API for appending `.c4d`
-modules into a running VM (#564),
 `FindTool` / `AddFramework` / `GetBuildOption` / `HaveBuildOption` /
 `--build-option=KEY=VALUE` (#559),
 `InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),

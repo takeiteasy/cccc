@@ -27,7 +27,7 @@ children never reaped):
 `run_capture()` closes all three: the child (and everything it spawns) gets
 its own process group via `start_new_session=True`, stdin is always
 `DEVNULL`, and a timeout kills the whole group (`os.killpg`), not just the
-direct child. Every subprocess.run call in runner.py/native.py/c4.py and
+direct child. Every subprocess.run call in runner.py/native.py and
 run_tests.py's native_skip_audit shell-out goes through this one function.
 
 Known residual gap (#1202): the `timeout=` argument only bounds

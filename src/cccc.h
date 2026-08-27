@@ -490,9 +490,9 @@ extern "C" {
                                                                                      \
     /* C23 _Decimal32/64/128 (real IEEE-754-2008 decimal via Intel BID,              \
        tracker #402). Appended here, never interleaved with earlier                  \
-       opcodes, so TypeKind/opcode numbering never shifts under an                   \
-       unchanged CCCC_VERSION regardless of whether the build has                    \
-       CCCC_HAS_DECIMAL=1 (only the ops.c *handler bodies* are #ifdef'd;             \
+       opcodes, so TypeKind/opcode numbering never shifts regardless of              \
+       whether the build has CCCC_HAS_DECIMAL=1 (only the ops.c *handler             \
+       bodies* are #ifdef'd;                                                        \
        these opcode slots and their operand-word counts always exist).               \
        \                                                                             \
        Zero-operand, fixed-A-register convention -- identical shape to               \
@@ -625,7 +625,7 @@ extern "C" {
                     man/SAFETY.md's Checked Pointers section for the v1              \
                     scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */            \
     /* #982: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */        \
+       so no existing opcode renumbers. */                                          \
     X(CHKBN, 1) /* Check array bounds, subtracting form: CHKB's sibling for          \
                    pointer SUBTRACTION (`p - n`). Same operand format as CHKB        \
                    ([rs1:base, rs2:scaled_offset], RR operand word), but the         \
@@ -660,7 +660,7 @@ extern "C" {
                    frame-scoped storage (#981) must never sweep this kind.           \
                    CHKB/CHKBN/CHKP3/DYNOBJSZ are unaffected, same as ALCA. */        \
     /* #983: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */        \
+       so no existing opcode renumbers. */                                          \
     X(CHKD, 3) /* Check bounds at DEREFERENCE time (the other half of the            \
                    #983 formation-vs-dereference split). CHKB/CHKBN (below)          \
                    check a pointer *value* when it is formed by `p + n` /            \
@@ -688,7 +688,7 @@ extern "C" {
                    non-heap base" limitation CHKB/CHKBN already document.            \
                    Gated on CCCC_BOUNDS_CHECKS, same as CHKB/CHKBN. */               \
     /* #981: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */        \
+       so no existing opcode renumbers. */                                          \
     X(ALCV, 0) /* VLA storage: size=A0, result=A0; identical register shape          \
                   to ALCA/MALC/ALCB, tagged AllocHeader.kind=ALLOC_KIND_FRAME        \
                   instead of ALCA's ALLOC_KIND_ALLOCA (see ALCA's own                \
@@ -702,7 +702,7 @@ extern "C" {
                   explicit `__builtin_alloca`/`__builtin_alloca_with_align`          \
                   call-construction sites in primary()/unary(). */                   \
     /* #981: appended (never interleaved -- see the rule stated above CHKR)          \
-       so no existing opcode renumbers and no .c4/.c4a needs regenerating. */        \
+       so no existing opcode renumbers. */                                          \
     X(HMRK, 1) /* Heap mark: push a reclamation watermark for the current            \
                   block. Format: [HMRK] [depth:i32], mirrors SCOPEIN's               \
                   single-word immediate exactly (emit_word, not emit_i64 --          \
@@ -3825,61 +3825,6 @@ typedef struct Compiler {
     int num_tls_relocs;
     int tls_relocs_cap;
 
-    // Exported symbol table [V3]: non-static function definitions emitted by
-    // -c bytecode so --link and cc_load_module() can resolve CALLs (#565).
-    struct {
-        Pc     pc_offset; // Instruction-word index of the function
-        char  *name;      // Heap-allocated symbol name (owned)
-        size_t name_len;
-    }  *sym_table;
-    int num_sym_table;
-    int sym_table_cap;
-
-    // Text relocations [V3]: unresolved external CALL sites recorded instead
-    // of erroring when building a -c bytecode target or when --link libs are
-    // provided (#565).  Resolved by --link (compile-time) or cc_load_module()
-    // (runtime).
-    struct {
-        Pc     location; // Instruction-word index of the CALL operand to patch
-        char  *name;     // Heap-allocated target symbol name (owned)
-        size_t name_len;
-        int    resolved; // 1 once patched by cc_link_bytecode / cc_load_module
-    }  *text_relocs;
-    int num_text_relocs;
-    int text_relocs_cap;
-
-    // Address relocations [V3+]: unresolved function-pointer address sites
-    // recorded when compile_only or deferred_link is set (#566).
-    // location = instruction-word index of the lo-word of the LTA3 i64
-    // immediate. Resolved by --link (compile-time) or cc_load_module()
-    // (runtime).
-    struct {
-        Pc    location; // Instruction-word index of the lo-word of the LTA3 i64
-        char *name;     // Heap-allocated target symbol name (owned)
-        size_t name_len;
-        int    resolved; // 1 once patched by cc_link_bytecode / cc_load_module
-    }  *addr_relocs;
-    int num_addr_relocs;
-    int addr_relocs_cap;
-
-    // Set to 1 when --link libs are provided: defers undefined-symbol errors
-    // from codegen to the post-link check in main.c (#565).
-    int deferred_link;
-
-    // Symbol names exported by every --link library on this command line,
-    // pre-scanned (via cc_collect_link_symbols, src/bytecode.c) before gen()
-    // runs so codegen can tell a same-named FFI symbol apart from a guest
-    // definition that will be supplied by --link at link time (#882): a
-    // guest program calling a function that is itself defined in a linked
-    // module, under a name that also happens to be a registered FFI symbol,
-    // must resolve to the linked module's definition, not silently bind to
-    // the host FFI function. Values are unused (presence-only set, like a
-    // HashSet); keys owned by the map. Only covers the compile-time-knowable
-    // case -- a standalone `-c` object (no --link on this command line) or a
-    // module appended later via cc_load_module() still binds such a call to
-    // the host FFI symbol, since codegen has no way to know about it yet.
-    HashMap    link_syms;
-
     LabelEntry label_table[MAX_LABELS];
     int        num_labels;
     GotoPatch  goto_patches[MAX_LABELS];
@@ -5131,87 +5076,6 @@ void cc_output_json(FILE *f, Obj *prog);
 void cc_output_source_map_json(VirtualMachine *vm, FILE *f);
 
 /*!
- @brief Save compiled bytecode to a file for later execution.
- @details Serializes the text segment, data segment, and necessary
-             metadata to a binary file. The file can be loaded and executed
-             by cc_load_bytecode().
- @param vm The CCCC instance containing compiled bytecode.
- @param path Output file path.
- @return 0 on success, -1 on error.
-*/
-int cc_save_bytecode(VirtualMachine *vm, const char *path);
-
-/*!
- @brief Write compiled bytecode to an open stdio stream.
- @details Serializes the text segment, data segment, and necessary
-             metadata as a binary blob to @c f. The output is the same
-             format as cc_save_bytecode(), so it can be loaded with
-             cc_load_bytecode() after being written to a file.
- @param vm The CCCC instance containing compiled bytecode.
- @param f Output stream opened in binary mode (e.g. stdout via
-          @c freopen with "wb", or a file returned by fopen("wb")).
- @return 0 on success, -1 on error.
-*/
-int cc_write_bytecode(VirtualMachine *vm, FILE *f);
-
-/*!
- @brief Load compiled bytecode from a file.
- @details Deserializes bytecode previously saved with cc_save_bytecode()
-             and prepares the VM for execution with cc_run().
- @param vm The CCCC instance to load bytecode into.
- @param path Input file path.
- @return 0 on success, -1 on error.
-*/
-int cc_load_bytecode(VirtualMachine *vm, const char *path);
-
-/*!
- @brief Append a compiled bytecode module (.c4d or .c4a) into a running VM.
- @details Merges the module's text and data segments onto the host VM.
-             All absolute-PC jump/call operands and text-relative (LTA3)
-             immediates in the appended text are patched by the pre-append text
-             size. Data pointer slots are re-anchored. FFI, TLS, and
- return-buffer metadata are merged. The module should be compiled with `-c
- bytecode` (no main() required). If the host VM has unresolved text relocations
-             (from compiling with external CALL sites), they are patched using
- the module's exported symbol table (#565).
- @param vm   The running CCCC VM instance to load the module into.
- @param path Path to the .c4d (or .c4a) bytecode module file.
- @return 0 on success, -1 on error.
-*/
-int cc_load_module(VirtualMachine *vm, const char *path);
-
-/*!
- @brief Link a compiled bytecode library (.c4a) into a VM at compile time.
- @details Appends the library's text and data segments onto the VM (like
-             cc_load_module), then resolves the VM's pending text relocations
-             using the library's exported symbol table. Used to implement the
-             `--link` flag and the build-system bytecode linker pass (#565).
- @param vm   The VM instance to link the library into (must have been compiled).
- @param path Path to the .c4a bytecode library file.
- @return 0 on success, -1 on error.
-*/
-int cc_link_bytecode(VirtualMachine *vm, const char *path);
-
-/*!
- @brief Pre-scan a `.c4a` library's exported symbol names into
- vm->compiler.link_syms.
- @details Stages the module exactly as cc_load_module does (a throwaway VM,
-             cc_load_bytecode, then cc_destroy) but only copies the exported
-             *names*, not the code/data. Called once per `--link` path before
-             gen() so codegen can tell a guest definition that will be
-             supplied by --link apart from a same-named host FFI symbol
-             (#882). A bad/missing path is silently ignored here -- the
-             existing text-relocation error path in cc_link_bytecode still
-             catches it at actual link time, so this must never be the first
-             place a bad --link path is reported.
- @param vm   The VM instance being compiled (vm->compiler.link_syms is
- populated).
- @param path Path to the .c4a bytecode library file.
- @return void; failures are silent (see @details).
-*/
-void cc_collect_link_symbols(VirtualMachine *vm, const char *path);
-
-/*!
  @brief Add a breakpoint at a specific program counter.
  @param vm The CCCC instance.
  @param pc Instruction-word index where breakpoint should be set.
@@ -5454,8 +5318,6 @@ typedef struct {
         *cross_cc; // --build-cc=COMPILER: override CC binary globally (#547)
     const char *build_cache; // --build-cache[=PATH]: NULL=off, ""=default path,
                              // else given path (#546)
-    const char *cccc_self;   // path to the cccc binary (argv[0]); used for
-                             // kind=bytecode targets (#545)
     const char **build_options; // --build-option=key=value strings (#559)
     int          build_options_count;
     int build_install; // --build-install: copy artifacts after build (#560)

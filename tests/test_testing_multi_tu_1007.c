@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/testing_multi_tu_1007_helper.c --testing
-// CCCC_C4_SKIP
 //
 // #1007: `cccc -t two.c helper.c` (test file first) passed, but
 // `cccc -t helper.c two.c` (test file second) failed with

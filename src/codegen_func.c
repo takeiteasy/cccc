@@ -459,23 +459,6 @@ void gen(VirtualMachine *vm, Obj *prog) {
             hashmap_put(&fn_defs, fn->name, fn);
     }
 
-    // Build exported symbol table [V3]: non-static function definitions (#565).
-    // This is emitted into the .c4 so --link and cc_load_module() can resolve
-    // cross-module CALLs.
-    for (Obj *fn = prog; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body || fn->is_static)
-            continue;
-        const char *sym_name = obj_external_name(fn);
-        if (!sym_name)
-            continue;
-        PATCH_GROW(vm, sym_table, num_sym_table, sym_table_cap);
-        int idx                               = vm->compiler.num_sym_table;
-        vm->compiler.sym_table[idx].pc_offset = fn->code_addr;
-        vm->compiler.sym_table[idx].name      = strdup(sym_name);
-        vm->compiler.sym_table[idx].name_len  = strlen(sym_name);
-        vm->compiler.num_sym_table++;
-    }
-
     // Second pass: Patch function call addresses
     for (int i = 0; i < vm->compiler.num_call_patches; i++) {
         Obj        *target  = vm->compiler.call_patches[i].function;
@@ -485,36 +468,18 @@ void gen(VirtualMachine *vm, Obj *prog) {
         Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
 
         if (!fn_def) {
-            // #882: a symbol that --link will supply must not be treated as
-            // FFI here even though it's also a registered FFI symbol -- fall
-            // straight through to the text-reloc path below. Must run
-            // *before* the find_ffi_function check: that check `continue`s
-            // (skips patching entirely, since FFI calls use CALLF/CALLN, not
-            // CALL), which would leave this CALL's operand at its unpatched
-            // placeholder value of 0 instead of getting a relocation.
-            bool linked_elsewhere =
-                symbol_defined_by_linked_module(vm, fn_name);
             // Check for FFI function
-            int ffi_idx =
-                linked_elsewhere ? -1 : find_ffi_function(vm, fn_name);
+            int ffi_idx = find_ffi_function(vm, fn_name);
             if (ffi_idx >= 0) {
                 // FFI - not handled via CALL, skip
                 continue;
             }
-            // When building a -c bytecode target or when --link libs are
-            // provided, record a text relocation instead of erroring — the
-            // symbol will be resolved at link time (#565).
-            if ((vm->compiler.compile_only || vm->compiler.deferred_link) &&
-                fn_name) {
-                PATCH_GROW(vm, text_relocs, num_text_relocs, text_relocs_cap);
-                int ridx = vm->compiler.num_text_relocs;
-                vm->compiler.text_relocs[ridx].location = loc;
-                vm->compiler.text_relocs[ridx].name     = strdup(fn_name);
-                vm->compiler.text_relocs[ridx].name_len = strlen(fn_name);
-                vm->compiler.text_relocs[ridx].resolved = 0;
-                vm->compiler.num_text_relocs++;
+            // Under -c/--compile (any format), defer the undefined-function
+            // error: the native backend hands the call off to the host C
+            // compiler/linker, which is the one that actually knows whether
+            // the symbol exists.
+            if (vm->compiler.compile_only && fn_name)
                 continue;
-            }
             error("undefined function: %s", fn_name);
         }
 
@@ -533,11 +498,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
                             cc_pc_to_byte_offset((Pc)fn_def->code_addr));
         } else {
             const char *fn_name = obj_external_name(target);
-            // #882: see the matching comment in the call-patch pass above.
-            bool linked_elsewhere =
-                symbol_defined_by_linked_module(vm, fn_name);
-            int ffi_idx =
-                linked_elsewhere ? -1 : find_ffi_function(vm, fn_name);
+            int         ffi_idx = find_ffi_function(vm, fn_name);
             if (ffi_idx >= 0) {
                 // FFI function used as a value: store token so CALLN can
                 // call it. (JMPI, the other indirect-control-flow opcode,
@@ -545,21 +506,10 @@ void gen(VirtualMachine *vm, Obj *prog) {
                 // computed goto -- landing on this token there is a runtime
                 // error, not a call.)
                 cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
-            } else if ((vm->compiler.compile_only ||
-                        vm->compiler.deferred_link) &&
-                       fn_name) {
-                // Cross-module function-pointer: record addr reloc for
-                // link-time patching (#566).
-                PATCH_GROW(vm, addr_relocs, num_addr_relocs, addr_relocs_cap);
-                int ridx = vm->compiler.num_addr_relocs;
-                vm->compiler.addr_relocs[ridx].location = loc;
-                vm->compiler.addr_relocs[ridx].name     = strdup(fn_name);
-                vm->compiler.addr_relocs[ridx].name_len = strlen(fn_name);
-                vm->compiler.addr_relocs[ridx].resolved = 0;
-                vm->compiler.num_addr_relocs++;
             }
-            // else: non-deferred mode; parser already rejects
-            // address-of-undeclared.
+            // else: under -c/--compile, deferred to the host C
+            // compiler/linker, same as the call-patch pass above; otherwise
+            // the parser already rejects address-of-undeclared.
         }
     }
 
@@ -580,17 +530,15 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     // Fourth pass: a global variable that is referenced but never defined
     // (mirrors the "undefined function" check above -- see #957). Suppressed
-    // under -c/--link for the same reason as the function case: there is no
-    // name-based data relocation mechanism (unlike text_relocs for
-    // functions), so this can only be suppressed here, not deferred; a
-    // real cross-module miss surfaces as a link-time/runtime failure
-    // instead.
+    // under -c/--compile for the same reason as the function case: the host
+    // C compiler/linker is the one that actually knows whether the symbol
+    // exists; a real miss surfaces as a link-time/runtime failure instead.
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function || !var->is_referenced)
             continue;
         if (var->is_definition || var->is_tentative || var->init_data)
             continue;
-        if (vm->compiler.compile_only || vm->compiler.deferred_link)
+        if (vm->compiler.compile_only)
             continue;
         error("undefined global: %s", obj_external_name(var));
     }

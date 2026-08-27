@@ -1,5 +1,4 @@
 // CCCC_FLAGS: -m
-// CCCC_C4_SKIP: -m dumps source and exits, no bytecode to round-trip
 // CCCC_EXPECT_STDOUT: MyValue box\(MyValue t\)
 // CCCC_REJECT_STDOUT: unsigned long box
 //

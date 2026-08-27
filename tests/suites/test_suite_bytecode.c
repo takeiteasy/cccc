@@ -14,7 +14,7 @@ static int callee(int x) {
 int (*global_fp)(int) = callee;
 
 // [from test_c4_abi_rehydrate]
-// Regression coverage for .c4 ABI rehydration.
+// Regression coverage for struct/union-by-value and varargs ABI edge cases.
 // Expected return: 42
 
 struct Pair {

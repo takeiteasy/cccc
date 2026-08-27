@@ -4173,13 +4173,12 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                             equal(p->next, "=") && p->next->next &&
                             p->next->next->kind == TK_IDENT) {
                             Token *kind_tok = p->next->next;
-                            if (!equal(kind_tok, "native") &&
-                                !equal(kind_tok, "bytecode"))
+                            if (!equal(kind_tok, "native"))
                                 error_tok(vm, kind_tok,
                                           "[[cccc::build_target(kind=%.*s)]] "
                                           "is not supported — "
-                                          "valid values are kind=native and "
-                                          "kind=bytecode",
+                                          "the only valid value is "
+                                          "kind=native",
                                           kind_tok->len, kind_tok->loc);
                             build_target_kind =
                                 strndup(kind_tok->loc, kind_tok->len);
@@ -4210,13 +4209,11 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                     if (equal(p, "kind") && p->next && equal(p->next, "=") &&
                         p->next->next && p->next->next->kind == TK_IDENT) {
                         Token *kind_tok = p->next->next;
-                        if (!equal(kind_tok, "native") &&
-                            !equal(kind_tok, "bytecode"))
+                        if (!equal(kind_tok, "native"))
                             error_tok(
                                 vm, kind_tok,
                                 "build_target(kind=%.*s) is not supported — "
-                                "valid values are kind=native and "
-                                "kind=bytecode",
+                                "the only valid value is kind=native",
                                 kind_tok->len, kind_tok->loc);
                         build_target_kind =
                             strndup(kind_tok->loc, kind_tok->len);
@@ -4486,11 +4483,11 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
         return true;
     }
 
-    // [[cccc::build_target]] / [[cccc::build_target(kind=native|bytecode)]]:
-    // record the factory function name and kind.  Supported kinds: "native"
-    // (default), "bytecode" (#545).  The attribute is stripped; the function
-    // stays in the normal compilation stream so the runner can find and invoke
-    // it by address.
+    // [[cccc::build_target]] / [[cccc::build_target(kind=native)]]: record
+    // the factory function name and kind.  "native" is the only supported
+    // (and default) kind.  The attribute is stripped; the function stays in
+    // the normal compilation stream so the runner can find and invoke it by
+    // address.
     if (is_build_target_kind) {
         const char *kind  = build_target_kind ? build_target_kind : "native";
         Token      *probe = attr_end;

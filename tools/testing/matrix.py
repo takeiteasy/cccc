@@ -73,7 +73,6 @@ def run_pass_matrix(cccc, script_dir, platform, base_cccc_args, n_jobs, args, te
         run_args = types.SimpleNamespace(
             vm_profile=getattr(args, "vm_profile", False),
             bench=False,
-            c4=getattr(args, "c4", False),
             quiet=True,
             process_timeout=getattr(args, "process_timeout", None),
         )
@@ -105,7 +104,6 @@ def run_pass_matrix(cccc, script_dir, platform, base_cccc_args, n_jobs, args, te
         run_args = types.SimpleNamespace(
             vm_profile=getattr(args, "vm_profile", False),
             bench=False,
-            c4=getattr(args, "c4", False),
             quiet=True,
             process_timeout=getattr(args, "process_timeout", None),
         )

@@ -7,22 +7,19 @@ release process gates on.
 
 ## Version stamping
 
-`CCCC_RELEASE_VERSION` (`src/internal.h`) is the product version, distinct
-from `CCCC_VERSION` (same file) — that one is the `.c4` bytecode container
-format version, bumped independently and unrelated to releases.
+`CCCC_RELEASE_VERSION` (`src/internal.h`) is the product version.
 
 `--version` prints `CCCC_RELEASE_VERSION`, plus a git describe string
 (`CCCC_GIT_DESC`, stamped in by `build.c`/`Makefile` from `git describe
 --tags --always --dirty` whenever a `.git` directory is present — absent
-from release tarballs, which have no `.git`), the host triple, the bytecode
-format version, and which optional features (`backtrace`, `decimal`,
-`curl`) this binary was built with.
+from release tarballs, which have no `.git`), the host triple, and which
+optional features (`backtrace`, `decimal`, `curl`) this binary was built
+with.
 
 ```
 $ ./cccc --version
 cccc 0.1.0 (v0.1.0-3-gabc1234)
 host: aarch64-darwin
-bytecode format: v1
 features: backtrace
 ```
 

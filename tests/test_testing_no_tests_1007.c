@@ -1,6 +1,5 @@
 // CCCC_FLAGS: --testing
 // CCCC_EXPECT_STDERR: no \[\[cccc::test\]\] functions found
-// CCCC_C4_SKIP
 //
 // #1007 (secondary issue): --testing exited 0 when zero [[cccc::test]]
 // functions were collected -- a bare "TAP version 13 / 1..0" reads as a

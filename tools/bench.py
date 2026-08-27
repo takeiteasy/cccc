@@ -20,8 +20,7 @@ Options:
     --json-out PATH     json output file (default: profile/bench-results/run-<utc>.json)
     --filter PATTERN    glob filter on benchmark source names
     --no-correctness    skip the stdout-equality check
-    --no-c4             skip the cccc-c4* (precompiled bytecode) configs
-    --vm-profile        collect VM opcode profile JSON for CCCC/C4 configs
+    --vm-profile        collect VM opcode profile JSON for CCCC configs
     --keep-builds       keep compiled gcc binaries in build/ (default: clean)
     --quiet             suppress per-benchmark progress output
 """
@@ -44,14 +43,6 @@ CCCC_CONFIGS = [
     ("cccc-O2", ["--optimize=2"]),
     ("cccc-O3", ["--optimize=3"]),
     ("cccc-O4", ["--optimize=4"]),
-]
-
-C4_CONFIGS = [
-    ("cccc-c4", []),
-    ("cccc-c4-O1", ["--optimize=1"]),
-    ("cccc-c4-O2", ["--optimize=2"]),
-    ("cccc-c4-O3", ["--optimize=3"]),
-    ("cccc-c4-O4", ["--optimize=4"]),
 ]
 
 GCC_CONFIGS = [
@@ -138,27 +129,6 @@ def build_gcc(src, out, gcc, opt, root, log):
     return True
 
 
-def c4_out_path(build_dir, stem, extra):
-    # e.g. "build/fib.c4" or "build/fib-O2.c4"
-    suffix = ""
-    for flag in extra:
-        if flag.startswith("--optimize="):
-            suffix = "-" + flag.split("=", 1)[1]
-            break
-    return build_dir / f"{stem}{suffix}.c4"
-
-
-def build_c4(src, out, cccc, opt_flags, include_flag, root, log):
-    cmd = [cccc, include_flag, *opt_flags, "-o", str(out), str(src)]
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=root)
-    if r.returncode != 0:
-        log(
-            f"  cccc {opt_flags or 'no-opt'} build failed for {src.name}:\n{r.stderr.strip()}"
-        )
-        return False
-    return True
-
-
 def run_benchmark(src, args, root, build_dir, log):
     log(f"\n=== {src.name} ===")
     log("  compiling gcc variants...")
@@ -168,15 +138,6 @@ def run_benchmark(src, args, root, build_dir, log):
         if not build_gcc(src, out, args.gcc, opt, root, log):
             continue
         binaries[label] = out
-
-    c4_paths = {}
-    if not args.no_c4:
-        log("  compiling cccc-c4 variants...")
-        for label, extra in C4_CONFIGS:
-            out = c4_out_path(build_dir, src.stem, extra)
-            if not build_c4(src, out, args.cccc, extra, args.include, root, log):
-                continue
-            c4_paths[label] = out
 
     results = {}
 
@@ -199,33 +160,6 @@ def run_benchmark(src, args, root, build_dir, log):
         log(
             f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
         )
-
-    if not args.no_c4:
-        log("  running cccc-c4 variants...")
-        for label, extra in C4_CONFIGS:
-            if label not in c4_paths:
-                continue
-            c4 = c4_paths[label]
-            _, compile_ms = run_cmd(
-                [args.cccc, args.include, *extra, "-o", str(c4), str(src)], root
-            )
-            profile_path = None
-            if args.vm_profile:
-                profile_path = args.vm_profile_dir / f"{src.stem}-{label}.json"
-
-            def make_c4():
-                profile_args = ["--vm-profile", "--json"] if profile_path else []
-                return run_cmd([args.cccc, *profile_args, str(c4)], root)
-
-            r = time_runs(make_c4, args.runs, args.warmup)
-            r["compile_ms"] = compile_ms * 1000.0
-            if profile_path and r.get("stdout"):
-                profile_path.write_text(r["stdout"])
-                r["vm_profile_json"] = str(profile_path)
-            results[label] = r
-            log(
-                f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms  compile={r['compile_ms']:>8.1f}ms"
-            )
 
     log("  running gcc variants...")
     for label, opt in GCC_CONFIGS:
@@ -293,10 +227,9 @@ def detect_platform_info():
     return info
 
 
-def render_table(records, cccc_configs, jbc_configs, gcc_configs):
+def render_table(records, cccc_configs, gcc_configs):
     all_configs = (
         [c[0] for c in cccc_configs]
-        + [c[0] for c in jbc_configs]
         + [c[0] for c in gcc_configs]
     )
     headers = ["benchmark"] + all_configs
@@ -332,11 +265,10 @@ def render_table(records, cccc_configs, jbc_configs, gcc_configs):
     return "\n".join(lines)
 
 
-def render_speedup_table(records, cccc_configs, jbc_configs, gcc_configs):
+def render_speedup_table(records, cccc_configs, gcc_configs):
     lines = []
     all_configs = (
         [c[0] for c in cccc_configs]
-        + [c[0] for c in jbc_configs]
         + [c[0] for c in gcc_configs]
     )
     header = ["benchmark"] + all_configs
@@ -406,14 +338,9 @@ def main():
     p.add_argument("--filter", default=None)
     p.add_argument("--no-correctness", action="store_true")
     p.add_argument(
-        "--no-c4",
-        action="store_true",
-        help="skip the cccc-c4* (precompiled bytecode) configs",
-    )
-    p.add_argument(
         "--vm-profile",
         action="store_true",
-        help="write VM opcode profile JSON for CCCC/C4 configs",
+        help="write VM opcode profile JSON for CCCC configs",
     )
     p.add_argument("--keep-builds", action="store_true")
     p.add_argument("--quiet", action="store_true")
@@ -470,8 +397,7 @@ def main():
     log(f"Runs: {args.runs} (warmup: {args.warmup})")
     log(f"CCCC: {args.cccc}    GCC: {args.gcc}")
     cccc_cfg_str = " × {none,O1,O2,O3,O4}"
-    c4_cfg_str = "" if args.no_c4 else "    cccc-c4 × {none,O1,O2,O3,O4}"
-    log(f"Configs: cccc{cccc_cfg_str}{c4_cfg_str}    gcc × {{O0,O1,O2,O3}}")
+    log(f"Configs: cccc{cccc_cfg_str}    gcc × {{O0,O1,O2,O3}}")
     if args.vm_profile:
         log(f"VM opcode profiles: {args.vm_profile_dir}")
 
@@ -497,11 +423,6 @@ def main():
                 f.unlink()
             except Exception:
                 pass
-        for f in build_dir.glob("*.c4"):
-            try:
-                f.unlink()
-            except Exception:
-                pass
 
     if args.format in ("table", "both"):
         print()
@@ -512,7 +433,6 @@ def main():
             render_table(
                 records,
                 CCCC_CONFIGS,
-                C4_CONFIGS if not args.no_c4 else [],
                 GCC_CONFIGS,
             )
         )
@@ -521,7 +441,6 @@ def main():
             render_speedup_table(
                 records,
                 CCCC_CONFIGS,
-                C4_CONFIGS if not args.no_c4 else [],
                 GCC_CONFIGS,
             )
         )
@@ -561,7 +480,6 @@ def main():
                 "gcc_extra_flags": GCC_EXTRA_FLAGS,
             },
             "cccc_configs": [c[0] for c in CCCC_CONFIGS],
-            "c4_configs": [c[0] for c in C4_CONFIGS] if not args.no_c4 else [],
             "gcc_configs": [c[0] for c in GCC_CONFIGS],
             "benchmarks": [
                 {

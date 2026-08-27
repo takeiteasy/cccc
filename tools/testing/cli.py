@@ -79,11 +79,6 @@ def build_parser():
         help="Collect per-test VM opcode profile JSON under profile/vm-opcodes"
     )
     parser.add_argument(
-        "--c4", action="store_true",
-        help="Run the .c4 bytecode round-trip: compile each positive test to a .c4, then run it. "
-             "Negative tests and a small set of FFI tests that cannot survive rehydration are skipped."
-    )
-    parser.add_argument(
         "--native", action="store_true",
         help="Run the -c=native serializer round-trip: compile each eligible test with -c=native, "
              "then run the resulting binary and check its exit code. EXPECT_COMPILE_ERROR tests "
@@ -211,18 +206,7 @@ def main(argv=None):
         print("Warning: Memory leak detection not supported on this platform")
         use_leaks = False
 
-    if args.c4:
-        if use_leaks:
-            print("Warning: --leaks/--profile-mem are not supported in --c4 mode and will be ignored.")
-            use_leaks = False
-        if args.profile_cpu:
-            print("Warning: --profile-cpu is not supported in --c4 mode and will be ignored.")
-            args.profile_cpu = False
-
     if args.native:
-        if args.c4:
-            print("Error: --native cannot be combined with --c4 (they compile through different backends).")
-            sys.exit(1)
         if args.matrix:
             print("Error: --native cannot be combined with --matrix (native doesn't use the VM optimization pipeline).")
             sys.exit(1)
@@ -264,8 +248,6 @@ def main(argv=None):
             print(f"VM opcode profiling enabled (JSON: {vm_profile_dir})")
         if args.match:
             print(f"Filtering tests matching: {args.match}")
-        if args.c4:
-            print("C4 mode: compiling each positive test to .c4, then executing the bytecode")
         if args.native:
             print("Native mode: compiling each eligible test with -c=native, then executing the binary")
         print(f"Using {n_jobs} parallel jobs")

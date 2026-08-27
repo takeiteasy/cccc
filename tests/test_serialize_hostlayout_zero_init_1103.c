@@ -1,7 +1,6 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: __builtin_memset\(&st, 0, sizeof\(st\)\)
 // CCCC_REJECT_STDOUT: __opaque
-// CCCC_C4_SKIP: -m serializer-shape check, not a bytecode round-trip
 //
 // #1103: `mbstate_t st = {0};` lowers to
 // ND_COMMA(ND_MEMZERO(st), st.__opaque[0] = 0) -- `__opaque` is CCCC's own

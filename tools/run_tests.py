@@ -6,7 +6,6 @@ Exit code is non-zero if any sub-suite fails.
 
 Sub-suites:
   source              — main test suite (tools/testing/ package)
-  c4                  — .c4 bytecode round-trip (compile → save → reload → run)
   native              — -c=native serializer round-trip (ticket #1157; on by
                         default, --no-native opts out -- see man/TESTING.md's
                         "Native round-trip mode" section)
@@ -115,13 +114,12 @@ from testing import wedge
 _ADVISORY_SUITES = frozenset()
 
 
-def _make_suite_args(quiet=True, bench=False, c4=False, native=False,
+def _make_suite_args(quiet=True, bench=False, native=False,
                      vm_profile=False, process_timeout=None):
     """Return a SimpleNamespace compatible with _run_test_suite's args parameter."""
     return types.SimpleNamespace(
         quiet=quiet,
         bench=bench,
-        c4=c4,
         native=native,
         vm_profile=vm_profile,
         process_timeout=process_timeout,
@@ -141,17 +139,6 @@ def _run_source_suite(cccc, n_jobs, quiet, process_timeout):
     return r, ok
 
 
-def _run_c4_suite(cccc, n_jobs, quiet, process_timeout):
-    """Run the .c4 bytecode round-trip suite. Returns (r_dict, ok)."""
-    platform = detect_platform()
-    tests_dir = REPO_ROOT / "tests"
-    test_files = discover_tests(tests_dir)
-    args = _make_suite_args(quiet=quiet, c4=True, process_timeout=process_timeout)
-    if not quiet:
-        print(f"Running c4 round-trip suite ({len(test_files)} tests)…")
-    r = run_test_suite_with_isolation(cccc, REPO_ROOT, False, platform, [], n_jobs, args, test_files)
-    ok = r["failed"] == 0 and r["crashed"] == 0
-    return r, ok
 
 
 def _run_native_suite(cccc, n_jobs, quiet, process_timeout):
@@ -889,7 +876,7 @@ def main():
              "(see tools/testing/wedge.py's module docstring for why), "
              "including the in-process importlib sub-suites that have no "
              "per-subprocess timeout at all. Defaults to "
-             "max(process_timeout * 3, 1800) for the parallel source/c4/"
+             "max(process_timeout * 3, 1800) for the parallel source/"
              "native suites and process_timeout + 300 for the rest, unless "
              "--process-timeout is 0 (unbounded), in which case no "
              "deadline is armed at all -- pass 0 explicitly to disable "
@@ -971,14 +958,6 @@ def main():
     r_src, ok_src = _run_source_suite(cccc, n_jobs, quiet, timeout)
     print_summary(r_src, _make_suite_args(quiet=quiet))
     suite_results["source"] = ok_src
-
-    # --- C4 round-trip suite ---
-    print()
-    print("[ c4 round-trip suite ]")
-    wedge.arm("c4", phase_timeout)
-    r_c4, ok_c4 = _run_c4_suite(cccc, n_jobs, quiet, timeout)
-    print_summary(r_c4, _make_suite_args(quiet=quiet, c4=True))
-    suite_results["c4"] = ok_c4
 
     # --- Native round-trip suite (#1157) ---
     if not args.no_native:

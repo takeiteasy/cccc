@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/multi_tu_typedef_1006_a.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: (?=[\s\S]*#include <stdlib\.h>)(?=[\s\S]*typedef enum \{)
 // CCCC_REJECT_STDOUT: unsupported expr kind
 //

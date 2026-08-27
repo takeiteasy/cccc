@@ -48,7 +48,7 @@ A third register file, `vregs[32]` (`VReg`, see [SIMD / Vector Operations](#simd
 
 All segments are reserved upfront as large virtual ranges and committed in `poolsize` chunks (default 256 KiB elements, max 64 MiB elements).  This gives the VM stable base pointers while keeping resident memory modest.
 
-A global (and TLS, see below) object is placed at its own **declared alignment**, not a hardcoded 8 bytes: an explicit `_Alignas(N)` overrides the type's own alignment, capped at `CCCC_MAX_DATA_ALIGN` (64 bytes — the widest alignment any type requests today, a 512-bit vector, #722). `_Alignas(N)` with `N > 64` is accepted but only gets 64-byte placement, a known limitation. `cc_effective_align()` (`src/codegen_emit.c`) computes this for every data-segment/TLS-template allocation site, including `cc_load_module`'s cross-module re-anchoring (#1136). This does not extend to **local** (stack-frame) variables — see [Function Frame](#function-frame)'s own note.
+A global (and TLS, see below) object is placed at its own **declared alignment**, not a hardcoded 8 bytes: an explicit `_Alignas(N)` overrides the type's own alignment, capped at `CCCC_MAX_DATA_ALIGN` (64 bytes — the widest alignment any type requests today, a 512-bit vector, #722). `_Alignas(N)` with `N > 64` is accepted but only gets 64-byte placement, a known limitation. `cc_effective_align()` (`src/codegen_emit.c`) computes this for every data-segment/TLS-template allocation site (#1136). This does not extend to **local** (stack-frame) variables — see [Function Frame](#function-frame)'s own note.
 
 ### Thread-Local Storage (TLS)
 
@@ -293,7 +293,7 @@ own word-array loop, which had the same past-the-object overwrite risk.
 | `LDA3` | 3 | `regs[rd] = data_seg + byte_offset` |
 | `LTA3` | 3 | `regs[rd] = text_seg + byte_offset` (stores raw offset) |
 | `LEA3` | 3 | `regs[rd] = bp + offset` (local variable address). Format: `[LEA3][rd:8\|LEA3_NO_RECORD:1\|unused:55][offset:i64]`. When `CCCC_DANGLING_DETECT` is active, tags the result with the current frame's liveness epoch in `vm->stack_ptr_epochs` (#673) — unless `LEA3_NO_RECORD` is set, in which case the tag is skipped (#676). Codegen sets the flag only when a local's address is proven never to escape its creating frame (compiler-internal bookkeeping addresses, or a user local whose escape analysis found no call-argument/return/pointer-store use); see `man/SAFETY.md`. |
-| `STKTAG` | 5 | Tags `[bp+offset, bp+offset+size)` with the current frame's liveness epoch in `vm->stack_intervals`, for interior dangling-pointer resolution (#675) and `DYNOBJSZ` stack-buffer sizing (#648). Format: `[STKTAG][unused:32][offset:i64][size:i64]`. Emitted immediately after the `LEA3` base of an *escaping* array/struct local or parameter (never for scalars, which are already covered exactly by `stack_ptr_epochs`). No-op unless `stack_extents_enabled()` is true — `CCCC_DANGLING_DETECT`, or the program contains a `DYNOBJSZ` opcode (`vm->dynobjsz_present`, set by a one-time incremental scan of the text segment before the first `cc_run_at`, so it survives a `.c4` save/reload) — *and* the current frame is one that pushed an epoch (see the lazy-activation note under "Dangling pointers" below; a function whose body emits `STKTAG` always pushes one). See `man/SAFETY.md`. |
+| `STKTAG` | 5 | Tags `[bp+offset, bp+offset+size)` with the current frame's liveness epoch in `vm->stack_intervals`, for interior dangling-pointer resolution (#675) and `DYNOBJSZ` stack-buffer sizing (#648). Format: `[STKTAG][unused:32][offset:i64][size:i64]`. Emitted immediately after the `LEA3` base of an *escaping* array/struct local or parameter (never for scalars, which are already covered exactly by `stack_ptr_epochs`). No-op unless `stack_extents_enabled()` is true — `CCCC_DANGLING_DETECT`, or the program contains a `DYNOBJSZ` opcode (`vm->dynobjsz_present`, set by a one-time incremental scan of the text segment before the first `cc_run_at`) — *and* the current frame is one that pushed an epoch (see the lazy-activation note under "Dangling pointers" below; a function whose body emits `STKTAG` always pushes one). See `man/SAFETY.md`. |
 | `RETADDR` | 3 | `regs[rd] = return address of the nth caller frame`. Walks the saved-bp chain `level` steps from `vm->bp`; each step loads `frame[0]` (saved old-bp). Bounds-checks each frame against the live stack (`vm->sp ≤ frame < vm->initial_sp`). On success, sets `regs[rd] = frame[+1]` (the `Pc` return address stored by `CALL`/`CALLI`). Returns `NULL` (0) past the outermost frame. Format: `[RETADDR][rd:8\|unused:56][level:i64]`. Lowered from `__builtin_return_address(n)`. The returned value (a `Pc`/`uint32_t` offset) can be passed to `__builtin_pc_function_name` or `__builtin_pc_source_location` for symbolization; see the [Source Map API](TOOLING.md#source-map-api). |
 | `DYNOBJSZ` | 3 | `regs[rd] = runtime byte-size remaining at regs[rs]`. First tries the **heap** path: looks up the containing allocation in `vm->sorted_allocs` (binary search for the largest tracked base address ≤ `ptr`) for pointers into the VM heap (`heap_seg ≤ ptr < heap_end` — `malloc`/`calloc`/`realloc`/`reallocarray` require the VM heap (i.e. not `-V`/`--no-vm-heap`); `alloca`/VLA, which lower to the `ALCA` opcode, always qualify), validates the `AllocHeader` magic (`0xDEADBEEF`) and `freed` flag, and returns `requested_size - offset`. Handles both base pointers (offset 0) and interior pointers (`p + k`) uniformly. On a heap miss, tries the **stack** path (#648): stabs `vm->stack_intervals` (`stack_interval_stab`, same max-epoch resolution `CHKP3` uses, #675) for an escaping fixed-size stack array/struct/union tagged by `STKTAG`, and returns `hi - ptr` only if the matched interval's epoch is still in `vm->live_epochs` — a match whose epoch has retired (frame already returned) is dangling, not resolvable, and falls through. Returns the conservative fallback — `(size_t)-1` (type 0/1) or `0` (type 2/3) — if both paths miss (non-heap and non-stack-tracked, freed, out-of-bounds `requested_size` offset, or dangling). Format: `[DYNOBJSZ][rd:8\|rs:8\|unused:48][type:i64]`. Lowered from `__builtin_dynamic_object_size(ptr, type)` when the pointer's size cannot be resolved at compile time. Using this opcode at all sets `vm->dynobjsz_present`, activating `STKTAG`/epoch bookkeeping independently of `CCCC_DANGLING_DETECT` (see `STKTAG` above) — but only for the functions that actually need it: see the lazy per-function activation note under "Dangling pointers" below. |
 | `MOV3` | 1 | Register-to-register move |
@@ -1273,201 +1273,6 @@ value as a **fixed** parameter or return through a **native FFI call**
 remains rejected with a diagnostic: `libffi` has no decimal `ffi_type`, so
 neither has a sound by-value marshalling convention yet (tracked as #830).
 
-## Bytecode File Format (`.c4`)
-
-Saved bytecode files are self-contained and can be loaded into a fresh VM instance without recompilation.  The format is versioned (current version **1**).
-
-```
-+---------------+  offset 0
-| Magic "CCCC\0" |  4 bytes
-+---------------+
-| Version       |  4 bytes (int)
-+---------------+
-| Flags         |  4 bytes (CCCCFlags bitfield)
-+---------------+
-| Text size     |  8 bytes (bytes, not words)
-+---------------+
-| Data size     |  8 bytes
-+---------------+
-| Main offset   |  8 bytes (instruction index of main())
-+---------------+
-| Data reloc cnt|  8 bytes
-+---------------+
-| Text segment  |  text_size bytes
-+---------------+
-| Data segment  |  data_size bytes
-+---------------+
-| Data relocs   |  N × (data_offset, target_segment, target_offset, addend)
-+---------------+
-| Ret buf count |  8 bytes
-+---------------+
-| Ret buf size  |  8 bytes
-+---------------+
-| Ret buf offsets| N × 8 bytes
-+---------------+
-| FFI count     |  8 bytes
-+---------------+
-| FFI entries   |  name_len, name, num_args, returns_double, returns_float,
-|               |  is_variadic, num_fixed_args, double_arg_mask,
-|               |  is_dynamic_placeholder, is_asm_passthru,
-|               |  asm_src_len, asm_src (asm_src_len bytes)
-+---------------+
-| FFI policy    |  disable_all_ffi (int),
-|               |  allow_count, allow_list strings,
-|               |  deny_count, deny_list strings
-+---------------+
-| TLS tmpl size |  8 bytes (byte length of TLS template)
-+---------------+
-| TLS template  |  tls_template_size bytes
-|               |  (pointer slots stripped to addend, re-anchored on load)
-+---------------+
-| TLS reloc cnt |  8 bytes
-+---------------+
-| TLS relocs    |  N × (tls_offset, target_segment, target_offset, addend)
-|               |  each field 8 bytes; target_segment: 0=data, 1=text
-+---------------+
-| [V3] Sym cnt  |  8 bytes — count of exported symbol entries (optional)
-+---------------+
-| [V3] Sym entries | N × (pc_offset: 8 bytes, name_len: 4 bytes, name: name_len bytes)
-|               |  pc_offset is the instruction index of the exported function
-+---------------+
-| [V3] Reloc cnt|  8 bytes — count of unresolved text-relocation entries
-+---------------+
-| [V3] Text relocs | N × (location: 8 bytes, name_len: 4 bytes, name: name_len bytes)
-|               |  location is the text-seg slot to patch when the symbol is resolved
-+---------------+
-| [V3] Addr reloc cnt | 8 bytes — count of unresolved function-pointer address sites
-+---------------+
-| [V3] Addr relocs | N × (location: 8 bytes, name_len: 4 bytes, name: name_len bytes)
-|               |  location is the instruction-word index of the lo-word of the LTA3
-|               |  i64 immediate; resolved by writing cc_pc_to_byte_offset(target_pc)
-+---------------+
-```
-
-The V3 sections are appended at the end and are optional — older `.c4` files that
-lack them are still valid.  Presence is detected by `cursor < end` in the reader.
-
-On load, the loader re-anchors global pointers, function-pointer offsets, FFI entries, return-buffer addresses, and TLS template pointer slots to the new VM’s segment bases.
-
-**Data reloc / TLS reloc record layout** (each field is a signed 64-bit integer):
-```
-data_offset     — byte offset within the data/TLS segment where a pointer slot lives
-target_offset   — byte offset of the pointed-to symbol within its segment
-addend          — addend baked into the pointer (usually 0)
-target_segment  — 0 = data segment, 1 = text segment
-```
-
-### Module Loading — `.c4d` files
-
-Bytecode dynamic modules (`.c4d`, built via `DynamicLib(kind=bytecode)`) can be
-appended into a running VM at runtime:
-
-```c
-#include "cccc.h"
-int cc_load_module(VirtualMachine *vm, const char *path);
-```
-
-`cc_load_module` loads the `.c4d` file into a staging VM via `cc_load_bytecode`,
-then merges its segments into the host VM:
-
-1. **Text append**: the staging text words (indices 1…N, skipping the `main_offset`
-   metadata slot at 0) are appended to `vm->text_seg`. All absolute-PC operands
-   in the appended block are patched by `pc_shift = host_vm->text_ptr` — the
-   instruction-index offset at append time.
-2. **PC-typed operands patched**: `JMP`/`CALL`/`CALLT` (operand 0), `JZ3`/`JNZ3`
-   (operand 1), `JMPT` (operand 0 and operand 2 plus inline table entries), `LTA3`
-   (64-bit byte-offset immediate, shifted by `pc_shift × sizeof(InstrWord)`).
-3. **Data append**: staging data bytes are appended; all data-reloc pointer slots
-   are re-anchored to the host VM's segment base addresses.
-4. **TLS merge**: TLS template and relocs from the module are appended and adjusted.
-5. **Return-buffer pool**: the return-buffer pool is a fixed-size *rotating scratch*
-   pool (`RETURN_BUFFER_POOL_SIZE` slots), not a per-module resource list — a host
-   VM produced by normal codegen always starts with every slot already filled, and
-   struct/union-returning calls in appended module text resolve their buffer purely
-   at runtime from the *host's* pool (the `RETBUF` opcode). So a host VM with its
-   own pool keeps it as-is and the module's entries are not merged. The module's
-   pool is adopted wholesale only when the host has none of its own yet (e.g. a
-   from-scratch VM built solely to stage a loaded module) — offsets and pool
-   pointers are re-anchored by `data_shift` together with `return_buffer_size`,
-   since a slot's size and its buffer pointers must always move together.
-6. **FFI merge**: FFI table entries from the module are merged (name strings are
-   transferred; `asm_src` passthru entries remain independently rehydratable).
-7. **Symbol resolution**: the host VM's pending text relocations (`vm->compiler.text_relocs`)
-   are scanned against the module's exported symbol table.  Any CALL site whose
-   target symbol name appears in the module is patched to `sym.pc_offset + pc_shift`
-   and marked resolved.  Address relocations (`vm->compiler.addr_relocs`) are also
-   resolved: each records the lo-word PC of an LTA3 i64 immediate for a cross-module
-   function-pointer; the resolved value is `cc_pc_to_byte_offset(sym.pc_offset + pc_shift)`
-   written via `cc_write_i64_at`.
-
-### Static Library Linking — `.c4a` files and `cc_link_bytecode`
-
-Bytecode static libraries (`.c4a`, built via `StaticLib(kind=bytecode)`) are linked
-at **compile time** by the `--link` flag or by the build system's `LinkWith` on a
-bytecode executable target.
-
-```c
-#include "cccc.h"
-int cc_link_bytecode(VirtualMachine *vm, const char *path);
-```
-
-`cc_link_bytecode` is a thin wrapper around `cc_load_module` that performs the same
-segment-append and symbol-resolution steps.  It is called by the compiler after
-generating a bytecode executable with unresolved external `CALL` sites:
-
-0. Before codegen, `cc_collect_link_symbols` (also in `src/bytecode.c`) pre-scans
-   each `--link lib.c4a` path's exported symbol names into `vm->compiler.link_syms`.
-   Codegen consults this set wherever it would otherwise resolve a bodiless callee to
-   a registered FFI symbol — both a direct `CALL` (`ffi_index_for_callee`, the
-   call-patch pass) and a function-pointer address-of inside a function body (the
-   `func_addr_patches` pass) — so a name that is both an FFI symbol and defined in a
-   linked library resolves to the library's definition instead of silently binding to
-   the host function (#882). Scoped to what's knowable at this point: a standalone
-   `-c` object with no matching `--link` path, a symbol supplied only later via a
-   runtime `cc_load_module()` call, or a **file-scope** global initializer's
-   address-of (`apply_global_relocations` has no relocation mechanism for an
-   unresolved data-segment reference by name, unlike the text-segment case above),
-   still resolve to FFI.
-1. The compiler emits text-relocation entries instead of erroring when a called
-   symbol is declared but not yet defined (`deferred_link` mode).  Function-pointer
-   address-of expressions against cross-module symbols similarly emit address-relocation
-   entries rather than erroring.
-2. After compilation, each `--link lib.c4a` file is processed by `cc_link_bytecode`.
-3. Any text relocation whose name matches a symbol exported by the library has its
-   CALL site patched to the correct PC.  Any address relocation whose name matches
-   has its LTA3 i64 immediate patched to the byte-offset of the resolved symbol.
-4. After all libraries are linked, any remaining unresolved text or address relocations
-   cause a hard link error.
-5. Linking runs once, immediately after codegen — before any terminal sink decides
-   what to do with the result. So the fully linked program is what gets written to
-   `-o <file>`, what `--testing`/`--disassemble` operate on, and what runs when there
-   is no `-o` at all (the compiled program executes directly in-memory). Earlier
-   versions only linked on the `-o` path; `--link` with no `-o` silently skipped
-   linking and ran the unlinked image, whose deferred `CALL` sites were left at their
-   unpatched placeholder operand of 0.
-
-`--link` cannot be combined with `-c=native` (no bytecode linker step exists in the
-native-backend handoff to the host C compiler) or with a prebuilt `.c4` file as input
-(there is no fresh codegen output in that process for the pass to resolve relocations
-against); both are rejected with a clean CLI error rather than silently ignoring the
-flag. The prebuilt-`.c4`-input rejection covers every `.c4` input file, not just the
-single-file run/`--testing`/`--disassemble` dispatch: the `--ngrams`/`--fusion-candidates`
-static-analysis dispatch, which accepts and walks one or more prebuilt `.c4` files via
-`cc_load_bytecode`, hits the same rejection when `--link` is also on the command line.
-
-The build system automatically adds `--link dep.c4a` flags for all `LinkWith` edges
-on a `kind=bytecode` executable target.  `.c4a` dependencies are compiled standalone
-first (with `--compile=bytecode`), then linked into the executable in a separate
-step.
-
-### Asm-Passthru Rehydration
-
-FFI entries created by `--asm-passthru` cannot survive serialisation as raw function pointers because the compiled shared library is unlinked immediately after `dlopen`.  The `.c4` format stores the original assembly source string (`asm_src`) alongside each such entry (flagged `is_asm_passthru = 1`).  On load, `cc_rehydrate_asm_passthru()` recompiles each `asm_src` string into a fresh temporary shared library, `dlopen`s it, and resolves the function pointer — making the round-trip transparent to the program.
-
-Rehydration applies the same FFI allow/deny policy as other symbol lookups: if `--disable-ffi` is active, or the symbol is on the deny list, the entry is left unresolved and a `CALLF` targeting it will fail at execution time with `error: FFI function … not resolved`.
-
-Because recompilation uses the host’s native C compiler at `.c4` run time, the resulting bytecode file is architecture-portable but requires a C compiler to be available when it is executed.
-
 ## Execution Model
 
 ### Threaded Dispatch
@@ -1486,7 +1291,7 @@ The central loop reads the next opcode, increments the cycle counter, optionally
 
 ### Exit Detection
 
-`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`; for loaded `.c4` files, `argv[0]` is the `.c4` path and arguments after `--` are forwarded to the program.  When `LEV3` pops this sentinel, it sets `vm->pc = CCCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
+`main()` is invoked with a synthetic return address of `0`.  `cc_run()` passes `argc` in `REG_A0` and `argv` in `REG_A1`.  When `LEV3` pops this sentinel, it sets `vm->pc = CCCC_INVALID_PC` and the dispatch loop returns `(int)vm->regs[REG_A0]` as the process exit code.
 
 ### Debugger Integration
 

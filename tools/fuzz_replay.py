@@ -34,10 +34,10 @@ SANITIZER_RE = re.compile(r"(AddressSanitizer|UndefinedBehaviorSanitizer|runtime
 def replay_one(cccc, src, timeout):
     """Compile a single corpus file. Returns (ok, reason)."""
     with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "out.c4"
+        out = Path(tmp) / "out"
         try:
             r = subprocess.run(
-                [str(cccc), "-I", str(REPO_ROOT / "include"), "-c=bytecode", "-o", str(out), str(src)],
+                [str(cccc), "-I", str(REPO_ROOT / "include"), "-c=native", "-o", str(out), str(src)],
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,

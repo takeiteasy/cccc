@@ -1,6 +1,5 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: (?=[\s\S]*int use_block\(void\);\s*\n\s*\nstatic int __cccc_block_0\(void \*__static_link\);)(?=[\s\S]*static int __cccc_block_0\(void \*__static_link\) \{)
-// CCCC_C4_SKIP
 //
 // Ticket #995: a block literal lifted while building a macro-generated
 // function body (FunctionSetBody(fn, Quote(...)) without WithFn(fn)) never

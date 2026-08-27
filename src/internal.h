@@ -51,14 +51,7 @@
 #define __attribute__(x)
 #endif
 
-#define CCCC_MAGIC "CCCC\0"
-#define CCCC_VERSION                                                           \
-    1 // Bytecode format version (pre-1.0; bump only at release)
-      // V2: TLS template + reloc section added (#493)
-
-// Product release version (#883), distinct from CCCC_VERSION above -- that
-// one is the .c4 bytecode container format version and is bumped
-// independently. CCCC_RELEASE_VERSION is stamped by tools/release.sh into an
+// Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
 #define CCCC_RELEASE_VERSION "0.1.0"

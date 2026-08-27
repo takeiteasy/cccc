@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/opaque_handle_1010_use.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: struct DyAtoms1010 \{[\s\S]*int x;[\s\S]*\};
 // CCCC_REJECT_STDOUT: struct DyAtoms1010;\n|unsupported expr kind
 //

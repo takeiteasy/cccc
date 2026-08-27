@@ -145,7 +145,6 @@ bool is_wide_bitint(Type *ty);
 bool is_zero_size_aggregate(Type *ty);
 bool match_indexed_addr(VirtualMachine *vm, Node *addr, IndexedAddr *out);
 bool restrict_cache_handle_deref(VirtualMachine *vm, Node *node, int dest_reg);
-bool symbol_defined_by_linked_module(VirtualMachine *vm, const char *name);
 const char *obj_external_name(Obj *obj);
 int alloc_temp_reg(void);
 int assign_stack_offsets(VirtualMachine *vm, Obj *fn);

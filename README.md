@@ -75,7 +75,6 @@ Options:
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
-	   --link <lib.c4a>      Link a CCCC bytecode library (.c4a) built with -c=bytecode
 	   --url-cache-dir <path> Directory for caching #include/#embed <https://...> fetches
 	   --url-cache-clear     Clear the URL fetch cache and exit
 	   --url-timeout=SECONDS Set URL fetch timeout in seconds (default: 30)
@@ -100,16 +99,15 @@ Options:
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
 	-S/--no-stdlib           Do not link standard library
-	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), bytecode, generated
+	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), generated
 	                         native: build a native executable via CCCC_NATIVE_CC
 	                                 (cc, clang, or gcc); writes to -o file, or ./a.out
 	                                 if -o omitted
-	                         bytecode: write .c4 to -o file, or ./a.c4 if -o omitted
 	                         generated: serialize the runtime TU + macro-generated
 	                                    objects to C; writes to -o file, or ./a.gen.c
 	                                    if -o omitted
-	                         Aliases: bytecode=bc=c4, native=n, generated=gen=g. Use
-	                         -cbytecode or --compile=bytecode (short form must be
+	                         Aliases: native=n, generated=gen=g. Use
+	                         -cnative or --compile=native (short form must be
 	                         attached; long form may use '=' or separate arg).
 	   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL
 	                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)
@@ -119,9 +117,8 @@ Options:
 	                         checked. Implies -c=native when no -c is given; an
 	                         explicit -c=FMT still picks the format
 	-o/--out <file>          Output file. For -c=native, defaults to ./a.out if omitted.
-	                         For -c=bytecode, defaults to ./a.c4 if omitted. For
-	                         -c=generated, defaults to ./a.gen.c if omitted.
-	-d/--disassemble         Disassemble bytecode to stdout
+	                         For -c=generated, defaults to ./a.gen.c if omitted.
+	-d/--disassemble         Disassemble compiled bytecode to stdout
 	-v/--verbose             Enable debug logging
 	-g/--debug               Enable interactive debugger
 	   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)
@@ -131,11 +128,10 @@ Options:
 	                         Combine with --json to also dump the profile as JSON to stdout
 
 Testing Options:
-	-t/--testing[=vm|bytecode|native]
+	-t/--testing[=vm|native]
 	                         Discover and run [[cccc::test]] functions. Bare -t/--testing
-	                         (default =vm) runs them in-process; =bytecode compiles, saves
-	                         .c4, reloads, then runs (exercises FFI-table and bytecode
-	                         persistence); =native serializes the harness itself and runs
+	                         (default =vm) runs them in-process; =native serializes the
+	                         harness itself and runs
 	                         it as a standalone binary via CCCC_NATIVE_CC (implies -c=native;
 	                         [[cccc::test_setup/teardown]] hooks and negative tests are not
 	                         supported under =native, see man/TESTING.md)
@@ -278,7 +274,7 @@ Optimization:
 	                             layout-verified allowlist (off by default there too). VM-only.
 	--inline-limit=N             Limit inlining to N AST nodes (default: 20, 0=disable)
 
-Static Bytecode Analysis (compile or load input, walk text segment, exit):
+Static Bytecode Analysis (compile input, walk text segment, exit):
 	--ngrams[=N]            Static opcode n-gram analysis (N=2 or 3, default 2)
 	--ngrams-top=N          Show top N sequences (default 25)
 	--ngrams-per-file       Print a per-input section in addition to the aggregate
@@ -372,30 +368,27 @@ Native mode runs CCCC's preprocessing and compile-time macro stages first, then 
 
 ### Run in the VM
 
-Without `-c=native`, CCCC compiles C to portable bytecode and runs it in its built-in interpreter. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`. `-c=bytecode` (or `-cbc`/`-cc4`) is the explicit spelling for a compile-only `.c4` bytecode file, since bare `-c` defaults to native (see above); with no `-o`, it writes `./a.c4`.
+Without `-c=native` (or `-c=generated`), CCCC compiles C to bytecode in memory and runs it immediately in its built-in interpreter — there is no on-disk bytecode artifact. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`.
 
 ```bash
 # Compile and run immediately on the VM
 ./cccc program.c
 
-# Compile to a bytecode file for later execution
-./cccc -o program.bin program.c
-
 # Multiple input files
-./cccc -o app.bin main.c utils.c helpers.c
+./cccc main.c utils.c helpers.c
 
 # With preprocessor flags
-./cccc -I./include -DDEBUG -o debug.bin main.c
+./cccc -I./include -DDEBUG main.c
 
-# Compile only, to a .c4 bytecode file (does not run)
-./cccc -c=bytecode -o program.c4 program.c
+# Disassemble compiled bytecode to stdout instead of running it
+./cccc -d program.c
 ```
 
 A leading `#!` (shebang) line on the command-line input file is ignored, so a
 `.c` file can carry `#!/usr/bin/env cccc`, be marked executable, and run
 directly — dispatch through `env` is the kernel/shell's job, not cccc's.
 
-Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. Saved `.c4` files include relocation and ABI metadata so loaded programs re-anchor global pointers, function-pointer offsets, FFI entries, and aggregate return buffers to the new VM instance. See [VM.md](man/VM.md) for the full instruction set, ABI, and file format.
+Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. See [VM.md](man/VM.md) for the full instruction set and ABI.
 
 ## Running Tests
 
@@ -405,17 +398,17 @@ python3 tools/tests.py --match "*embed*"   # Run only tests matching a glob patt
 python3 tools/tests.py -j 4                # Run with 4 parallel workers
 python3 tools/tests.py -2                  # Run all tests under safety level 2
 python3 tools/tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
-python3 tools/tests.py --c4               # Bytecode round-trip: compile each positive test to .c4, then run it
+python3 tools/tests.py --native            # Native round-trip: compile each eligible test with -c=native, then run it
 # I recommend running --leaks with -j (takes a long time synchronously)
 ```
 
 `./cccc --build build.c --build-target=test` calls `tools/run_tests.py`, the
-unified orchestrator that runs: source-mode suite, `.c4` bytecode
-round-trip, the macOS host-signal debugger integration (skipped on other
+unified orchestrator that runs: source-mode suite, the native round-trip,
+the macOS host-signal debugger integration (skipped on other
 platforms), the REPL and conditional-breakpoint PTY integrations, the
 SQLite smoke test, and the `src/stdlib` FFI registration audit
 (`--build-target=audit_ffi`). Run sub-suites standalone with
-`python3 tools/tests.py` or `python3 tools/tests.py --c4`. See
+`python3 tools/tests.py` or `python3 tools/tests.py --native`. See
 [TESTING.md](man/TESTING.md) for details.
 
 `make -f tools/Makefile.backup test` (the pre-cut, full-featured Makefile,

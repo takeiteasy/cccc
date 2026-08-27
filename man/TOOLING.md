@@ -298,33 +298,13 @@ Example output:
 }
 ```
 
-#### Bytecode File Format
-
-Binary format (little-endian):
-```
-[Magic: "CCCC\0" (4 bytes)]
-[Version: 4 (4 bytes)]
-[Flags: CCCCFlags bitfield (4 bytes)]
-[Text size: bytes (8 bytes)]
-[Data size: bytes (8 bytes)]
-[Main offset: instruction offset (8 bytes)]
-[Data relocation count (8 bytes)]
-[Text segment: 32-bit bytecode instruction words]
-[Data segment: global variables and constants]
-[Data relocations]
-[Return buffer count (8 bytes)]
-[Return buffer size (8 bytes)]
-[Return buffer data offsets]
-[FFI table]
-```
+#### Instruction Encoding
 
 The VM text segment uses 32-bit instruction words. Operands that need 64 bits,
 such as C integer immediates and text/data byte offsets, are encoded as two
 consecutive 32-bit words. Direct branch and call targets are instruction
 indexes, while C-visible function and label values are byte offsets from the
-text segment base. Saved bytecode stores data relocations and aggregate
-return-buffer offsets separately from raw segment bytes so `cc_load_bytecode()`
-can rebuild process-local VM pointers after loading.
+text segment base.
 
 Floating-point bytecode uses a tagged register file. `FLDR`/`FSTR` load and
 store `double` values tagged as f64, while `FLDR_F32`/`FSTR_F32` load and store
@@ -743,7 +723,6 @@ On Linux it uses `valgrind --tool=massif`.
 ```bash
 ./cccc --vm-profile -I./include tests/benchmarks/mandelbrot.c
 ./cccc --vm-profile --json -I./include tests/benchmarks/mandelbrot.c > profile/vm-opcodes/mandelbrot.json
-./cccc -Y build/fib.c4
 ```
 
 `--vm-profile` prints a compact dynamic opcode count table to stderr after the
@@ -762,25 +741,22 @@ enabled.
 
 ### Static Bytecode Analysis
 
-For understanding *static* instruction patterns in `.c4` files (independent of
-any execution), cccc has two in-process analyses:
+For understanding *static* instruction patterns (independent of any
+execution), cccc has two in-process analyses that compile the given C
+source(s) and walk the resulting in-memory text segment:
 
 ```bash
-# Static n-gram mining on a pre-compiled .c4
-./cccc -o /tmp/sieve.c4 -I./include tests/benchmarks/sieve.c
-./cccc --ngrams=2 --ngrams-top=15 /tmp/sieve.c4
-./cccc --ngrams=3 --ngrams-top=15 /tmp/sieve.c4
-./cccc --ngrams=2 --ngrams-per-file /tmp/sieve.c4
-
-# Same analysis directly on .c source — compiles in-process first
+# Static n-gram mining
 ./cccc --ngrams=2 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
+./cccc --ngrams=3 --ngrams-top=15 -I./include tests/benchmarks/sieve.c
+./cccc --ngrams=2 --ngrams-per-file -I./include tests/benchmarks/sieve.c
 
 # Use-def fusion candidate detection
-./cccc --fusion-candidates=50 /tmp/sieve.c4
-./cccc --fusion-candidates=50 --json /tmp/sieve.c4
+./cccc --fusion-candidates=50 -I./include tests/benchmarks/sieve.c
+./cccc --fusion-candidates=50 --json -I./include tests/benchmarks/sieve.c
 ```
 
-`--ngrams[=N]` walks the text segment of one or more `.c4` files and ranks
+`--ngrams[=N]` walks the text segment of one or more compiled sources and ranks
 2-grams (`N=2`, default) or 3-grams (`N=3`) by occurrence. `--ngrams-per-file`
 also prints a per-input section in addition to the aggregate. `--ngrams-top=N`
 limits the rows per section.
@@ -791,15 +767,6 @@ instruction has a single reader. Add `--json` to get JSON output for scripting.
 
 These two analyses are mutually exclusive with `--vm-profile*`, `-g/--debug`,
 `-d/--disassemble`, `-c=native`, and any safety / execution / output flags.
-
-`--ngrams`/`--fusion-candidates` with one or more prebuilt `.c4` inputs rejects
-`--link` on the same command line — a prebuilt `.c4` has no fresh codegen output
-in that process for the linker pass to resolve relocations against, so `--link`
-there would otherwise be a silent no-op (same reasoning as `--link` against a
-single prebuilt `.c4` in the run/`--testing`/`--disassemble` dispatch). Analysing
-a **source** input still links normally: `--link lib.c4a` runs the same
-compile-time linker pass first, and the analysis then walks the fully linked
-text segment.
 
 See [VM.md](VM.md) for how to combine the static counts with the dynamic bigram
 profile to surface the strongest fusion candidates.
@@ -849,12 +816,10 @@ python3 tools/tests.py --bench --match "*compre*"     # Benchmark matching tests
 python3 tools/tests.py --profile-cpu --match "*compre*"  # CPU profile matching tests
 python3 tools/tests.py --profile-mem --match "*malloc*"  # Memory profile matching tests
 python3 tools/tests.py --vm-profile --match "*profile*"  # VM opcode JSON profiles
-python3 tools/tests.py --c4 --vm-profile --match "*profile*"  # Profile .c4 execution
 ```
 
 `tools/tests.py --vm-profile` writes one JSON file per test under
-`profile/vm-opcodes/`. In `--c4` mode it profiles the bytecode execution phase,
-not the source-to-bytecode save step.
+`profile/vm-opcodes/`.
 
 ### Output Files
 
@@ -873,7 +838,7 @@ All profiling output is written to `profile/`:
 
 ## Benchmarks
 
-A focused cross-compiler benchmark suite that measures the cost of the **CCCC bytecode VM** by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples. The suite also times CCCC's precompiled-bytecode mode (`cccc-c4*`) so you can separate the bytecode VM cost from the source-to-bytecode compile cost.
+A focused cross-compiler benchmark suite that measures the cost of the **CCCC bytecode VM** by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples.
 
 For production builds, CCCC also offers a `-c=native` mode that hands macro-expanded C to `cc` / `clang` / `gcc` — that path bypasses the VM entirely and matches the `gcc*` columns below. The benchmarks in this document are deliberately scoped to the VM, because that is the part CCCC is responsible for.
 
@@ -883,7 +848,6 @@ For production builds, CCCC also offers a `-c=native` mode that hands macro-expa
 make bench-compare            # full run: 3 timed iterations per (bench, config), ~10 min
 make bench-compare-quick      # 2 iterations, ~5 min, good for quick checks
 python3 tools/bench.py --filter fib.c    # run a single benchmark
-python3 tools/bench.py --no-c4 --filter fib.c   # skip the cccc-c4 columns
 python3 tools/bench.py --filter fib.c --vm-profile   # also write opcode profile JSON
 ```
 
@@ -893,29 +857,29 @@ Sample output:
 ====================================================================================================
  CCCC vs GCC benchmark results (median ms, lower is better)
 ====================================================================================================
-benchmark    cccc    cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  ------  -------  -------  -------  -------  -------  ----------  ----------  ----------  ----------  ------  ------  ------  ------
-ackermann    682.9   681.9    918.5    793.8    781.7    652.3    652.2       889.8       765.9       749.6       16.6    16.4    4.3     6.0   
-binary_tree  868.6   859.5    963.1    824.1    809.9    821.1    823.5       922.9       788.2       777.2       20.6    20.3    19.4    22.9  
-fib          573.7   597.4    674.6    580.0    577.3    550.2    543.8       651.5       545.8       550.3       7.5     8.8     4.1     7.3   
-mandelbrot   6101.2  6065.3   4983.7   3970.9   3626.0   6064.4   6078.5      4992.8      3970.4      3610.3      62.0    30.4    29.4    28.4  
-matrix_mul   5014.6  4997.7   4136.5   3747.4   3309.6   4980.4   5024.9      4131.1      3741.5      3318.6      24.6    5.7     4.0     3.8   
-nqueens      1322.5  1234.3   1141.5   979.8    948.9    1297.3   1210.7      1121.7      953.7       921.3       14.4    5.1     8.1     9.2   
-quicksort    1829.9  1772.4   1565.3   1498.8   1378.8   1808.9   1745.4      1531.0      1466.5      1343.3      18.5    9.1     12.5    13.0  
-sieve        9660.6  9328.2   7331.3   7311.1   7075.3   9519.7   9295.3      7865.2      7292.1      7067.4      36.2    24.4    21.2    20.4  
+benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0   gcc-O1   gcc-O2   gcc-O3 
+-----------  -------  -------  -------  -------  -------  -------  -------  -------  -------
+ackermann    682.9    681.9    918.5    793.8    781.7    16.6     16.4     4.3      6.0    
+binary_tree  868.6    859.5    963.1    824.1    809.9    20.6     20.3     19.4     22.9   
+fib          573.7    597.4    674.6    580.0    577.3    7.5      8.8      4.1      7.3    
+mandelbrot   6101.2   6065.3   4983.7   3970.9   3626.0   62.0     30.4     29.4     28.4   
+matrix_mul   5014.6   4997.7   4136.5   3747.4   3309.6   24.6     5.7      4.0      3.8    
+nqueens      1322.5   1234.3   1141.5   979.8    948.9    14.4     5.1      8.1      9.2    
+quicksort    1829.9   1772.4   1565.3   1498.8   1378.8   18.5     9.1      12.5     13.0   
+sieve        9660.6   9328.2   7331.3   7311.1   7075.3   36.2     24.4     21.2     20.4   
 
 Speedup vs gcc -O2 (>1.0x = slower than gcc -O2):
-benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  cccc-c4  cccc-c4-O1  cccc-c4-O2  cccc-c4-O3  cccc-c4-O4  gcc-O0  gcc-O1  gcc-O2  gcc-O3
------------  -------  -------  -------  -------  -------  -------  ----------  ----------  ----------  ----------  ------  ------  ------  ------
-ackermann    158.4x   158.2x   213.0x   184.1x   181.3x   151.3x   151.3x      206.4x      177.6x      173.9x      3.9x    3.8x    1.0x    1.4x  
-binary_tree  44.8x    44.3x    49.6x    42.5x    41.7x    42.3x    42.4x       47.6x       40.6x       40.1x       1.1x    1.0x    1.0x    1.2x  
-fib          141.2x   147.1x   166.1x   142.8x   142.1x   135.4x   133.9x      160.4x      134.4x      135.5x      1.9x    2.2x    1.0x    1.8x  
-mandelbrot   207.3x   206.1x   169.4x   135.0x   123.2x   206.1x   206.6x      169.7x      134.9x      122.7x      2.1x    1.0x    1.0x    0.97x 
-matrix_mul   1265.2x  1260.9x  1043.6x  945.5x   835.0x   1256.6x  1267.8x     1042.3x     944.0x      837.3x      6.2x    1.4x    1.0x    0.97x 
-nqueens      162.6x   151.8x   140.4x   120.5x   116.7x   159.5x   148.9x      137.9x      117.3x      113.3x      1.8x    0.63x   1.0x    1.1x  
-quicksort    146.6x   142.0x   125.4x   120.1x   110.5x   144.9x   139.8x      122.7x      117.5x      107.6x      1.5x    0.73x   1.0x    1.0x  
-sieve        455.0x   439.4x   345.3x   344.4x   333.3x   448.4x   437.8x      370.5x      343.5x      332.9x      1.7x    1.1x    1.0x    0.96x 
-geomean      202.70x  199.76x  192.52x  170.37x  162.05x  197.64x  194.54x     190.65x     166.28x     158.25x     2.14x   1.27x   1.00x   1.15x 
+benchmark    cccc     cccc-O1  cccc-O2  cccc-O3  cccc-O4  gcc-O0   gcc-O1   gcc-O2   gcc-O3 
+-----------  -------  -------  -------  -------  -------  -------  -------  -------  -------
+ackermann    158.4x   158.2x   213.0x   184.1x   181.3x   3.9x     3.8x     1.0x     1.4x   
+binary_tree  44.8x    44.3x    49.6x    42.5x    41.7x    1.1x     1.0x     1.0x     1.2x   
+fib          141.2x   147.1x   166.1x   142.8x   142.1x   1.9x     2.2x     1.0x     1.8x   
+mandelbrot   207.3x   206.1x   169.4x   135.0x   123.2x   2.1x     1.0x     1.0x     0.97x  
+matrix_mul   1265.2x  1260.9x  1043.6x  945.5x   835.0x   6.2x     1.4x     1.0x     0.97x  
+nqueens      162.6x   151.8x   140.4x   120.5x   116.7x   1.8x     0.63x    1.0x     1.1x   
+quicksort    146.6x   142.0x   125.4x   120.1x   110.5x   1.5x     0.73x    1.0x     1.0x   
+sieve        455.0x   439.4x   345.3x   344.4x   333.3x   1.7x     1.1x     1.0x     0.96x
+geomean      202.70x  199.76x  192.52x  170.37x  162.05x  2.14x    1.27x    1.00x    1.15x  
 
 Correctness: all benchmarks produce identical output across all configs
 ```
@@ -938,7 +902,7 @@ Validation run (2026-06-18, `--runs 2`, Homebrew GCC-15): all correctness checks
 
 Re-run `make bench-compare` to get updated numbers for your machine.
 
-JSON output is also written to `profile/bench-results/run-<UTC>.json` for tracking over time. Each `cccc-c4*` row includes a `compile_ms` field showing the one-time cost of producing the bytecode file (this cost is paid once, not in the timed median).
+JSON output is also written to `profile/bench-results/run-<UTC>.json` for tracking over time.
 
 ### The Benchmark Suite
 
@@ -960,33 +924,19 @@ All programs are portable C99/C11, exit with code `42` (so the standard `tools/t
 `tools/bench.py` does the following for each benchmark:
 
 1. **Compile** the source with GCC at every optimization level (cached in `build/`).
-2. **Compile** the source with CCCC at every `--optimize` level to a `.c4` bytecode file (cached in `build/`).
-3. **Run** CCCC at every `--optimize` level on the source directly — this measures the full parse+execute cost.
-4. **Run** the prebuilt `.c4` files — this measures just the bytecode VM cost.
-5. **Run** the prebuilt GCC binaries.
-6. **Time** each run with `time.perf_counter()`; discard `N` warmup runs, time `R` runs, take min/median/mean.
-7. **Verify** that every config's stdout matches the CCCC reference. A mismatch is flagged and causes a non-zero exit.
-8. **Report** as a human-readable table + a JSON file.
+2. **Run** CCCC at every `--optimize` level on the source directly — this measures the full parse+execute cost.
+3. **Run** the prebuilt GCC binaries.
+4. **Time** each run with `time.perf_counter()`; discard `N` warmup runs, time `R` runs, take min/median/mean.
+5. **Verify** that every config's stdout matches the CCCC reference. A mismatch is flagged and causes a non-zero exit.
+6. **Report** as a human-readable table + a JSON file.
 
-With `--vm-profile`, CCCC and CCCC-C4 configs also write dynamic opcode count
+With `--vm-profile`, CCCC configs also write dynamic opcode count
 profiles to `profile/bench-results/vm-profile-<UTC>/`.
 
 ### What's Being Measured
 
 - **`cccc*`** — end-to-end wall time: source on disk → bytecode compilation → VM startup → bytecode execution → exit.
-- **`cccc-c4*`** — bytecode execution only: load a precompiled `.c4` from disk and run it. The compile cost is paid once (reported in `compile_ms`) and is not part of the timed median.
 - **`gcc*`** — execution time of a prebuilt native binary.
-
-The `cccc-c4*` columns are the cleanest apples-to-apples comparison with GCC: both are "compile once, run many times" measurements.
-
-### Bytecode (.c4) Configs
-
-```bash
-./cccc --optimize=N -o build/fib.c4 tests/benchmarks/fib.c   # compile once
-./cccc build/fib.c4                                    # run many times
-```
-
-The `.c4` files are cached in `build/` and rebuilt only when missing. The bytecode format self-resolves FFI symbols via `dlsym` on load, so `.c4` files built on one machine run on the same machine without bundling libc. Use `--no-c4` to skip these columns for faster iteration.
 
 ### Correctness
 
@@ -999,7 +949,6 @@ The optional `--fma` flag enables true single-rounding FMA. This can yield a few
 - **Close other apps** to reduce noise.
 - **Run multiple iterations** (`--runs 5` or more) for benchmarks under ~50ms.
 - **Use `--filter`** to iterate on a single benchmark.
-- **Use `--no-c4`** when iterating on parse/compile performance.
 - **Use `--vm-profile`** when optimizing bytecode generation or VM dispatch.
 - **Compare JSON files over time** — `profile/bench-results/run-*.json` includes compiler versions, host info, and run settings.
 
@@ -1015,7 +964,6 @@ The optional `--fma` flag enables true single-rounding FMA. This can yield a few
 - **`median ms`** — middle value of the timed runs.
 - **`min ms`** — fastest run; useful as a lower bound.
 - **`stable`** — whether every run produced identical stdout.
-- **`compile_ms`** — for `cccc-c4*` configs only, the one-time compile cost. Not part of the timed median.
 - **Speedup vs gcc -O2** — `median_ms / median_gcc_O2_ms`. Above 1.0× means slower than gcc -O2.
 - **`geomean`** — geometric mean of per-benchmark ratios; the right "overall" comparison number.
 
@@ -1060,7 +1008,7 @@ Starts `afl-fuzz` in the background with sensible defaults:
 - Output: `fuzz/out/`
 - Timeout: 1000ms
 - Memory: none (unlimited)
-- Flags: `-I./include -c` (bytecode compile, no `main()` required)
+- Flags: `-I./include -c=generated` (serialize-and-exit, no `main()` required, no host toolchain invoked)
 
 #### 4. Inspect crashes
 
@@ -1077,21 +1025,21 @@ make fuzz-minimize   # minimize all crashes with afl-tmin
 cp tests/test_*.c fuzz/seeds/
 
 # Run AFL++ (single instance)
-afl-fuzz -i fuzz/seeds -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
+afl-fuzz -i fuzz/seeds -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c=generated @@
 
 # Run with ASan + AFL++ (slower but catches more bugs)
 make afl-asan
-afl-fuzz -i fuzz/seeds -o fuzz/out -m none -t 1000 -- ./cccc-afl-asan -I./include -c @@
+afl-fuzz -i fuzz/seeds -o fuzz/out -m none -t 1000 -- ./cccc-afl-asan -I./include -c=generated @@
 
 # Resume a stopped session
-afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c @@
+afl-fuzz -i - -o fuzz/out -m none -t 1000 -- ./cccc-afl -I./include -c=generated @@
 ```
 
 ### Corpus Tips
 
 - The existing `tests/` suite provides excellent seeds — they cover many C constructs.
-- AFL++ will mutate these; even removing `main()` is fine because `-c`
-  (bytecode compile) does not require an entry point.
+- AFL++ will mutate these; even removing `main()` is fine because
+  `-c=generated` does not require an entry point.
 - For deeper fuzzing, add hand-crafted seeds for edge cases:
   - Empty files
   - Very long identifiers

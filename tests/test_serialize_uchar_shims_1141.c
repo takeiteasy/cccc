@@ -1,6 +1,5 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: __cccc_c8state
-// CCCC_C4_SKIP: -m serializer-shape check, not a bytecode round-trip
 //
 // #1141: <uchar.h>'s C11/C23 conversions (mbrtoc16/c16rtomb/mbrtoc32/
 // c32rtomb/mbrtoc8/c8rtomb) are VM cfuncs (src/stdlib/wide.c) with no

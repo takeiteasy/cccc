@@ -1,6 +1,5 @@
 // CCCC_FLAGS: -m
 // CCCC_EXPECT_STDOUT: __cccc_environ_ptr\(void\) \{ return &environ; \}
-// CCCC_C4_SKIP: -m serializer-shape check, not a bytecode round-trip
 //
 // #1139: environ (include/unistd.h) is `#define environ
 // (*__cccc_environ_ptr())`, an accessor for a VM-only cfunc

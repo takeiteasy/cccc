@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/tu_isolation_1001_guard_a.c
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 //
 // #1001: an include-guard macro tripped by the *first* TU to #include a
 // header used to silently empty that same #include for every later TU

@@ -3,7 +3,7 @@
 // CCCC_EXPECT_STDOUT: gen output: src/std.c
 //
 // #842: TargetOutput() resolves the on-disk path a target will produce.
-// For a compiled target (exe/static/dynamic/bytecode) that's <out_dir>/<path>
+// For a compiled target (exe/static/dynamic) that's <out_dir>/<path>
 // (explicit SetOutput() or the kind-appropriate default). For a RunCustom
 // target it's whatever DeclareOutput() recorded, taken verbatim (not joined
 // onto out_dir) -- a custom command can write anywhere, e.g. the two-pass

@@ -21,13 +21,6 @@ def vm_profile_path(profile_dir, test_name, mode):
     return Path(profile_dir) / f"{safe}.{mode}.json"
 
 
-# Tests that cannot survive the .c4 bytecode round-trip
-# (FFI-table rehydration or stack-size constraints).
-C4_SKIP_TESTS = {
-    "test_ffi_fatal_error.c",
-    "test_ffi_type_check_arity.c",
-    "test_stack_overflow_large_frame.c",
-}
 
 # Tests that hang under macOS `leaks -atExit` due to fork()/wait() interactions
 # with the leak instrumentation.  The child inherits MallocStackLogging hooks;
@@ -65,8 +58,8 @@ LEAKS_VM_HEAP_DEPENDENT_FLAGS = {
 
 
 # Tests that cannot survive the -c=native round-trip (tools/testing/native.py,
-# ticket #967). Unlike C4_SKIP_TESTS this is a dict, not a set: {filename:
-# "reason (#ticket)"}, grouped by bug class under a comment header per group,
+# ticket #967). A dict, not a set: {filename: "reason (#ticket)"}, grouped by
+# bug class under a comment header per group,
 # so the reason surfaces through the existing skip_reason plumbing
 # (report.py) and each entry can be deleted individually as its ticket
 # closes. Populated from a full-corpus sweep done while building #967 --
@@ -286,15 +279,6 @@ NATIVE_SKIP_TESTS = {
     # `#pragma clang assume_nonnull` at all, so gcc's own compile is
     # unaffected by the file's deliberately-unterminated one (confirmed:
     # passes under CCCC_NATIVE_CC=gcc).
-    "test_c4_argv.c": "asserts argv[0]/argv[1] against the VM's own "
-                 "bytecode-mode naming convention (argv[0] ending in "
-                 "'.c4', mimicking the bytecode file `cccc file.c` would "
-                 "have produced); a natively-compiled binary's argv[0] is "
-                 "whatever the OS execve() gives it, with no bytecode file "
-                 "involved and no host equivalent to translate the "
-                 "convention to, see COVERAGE.md Serialized-output "
-                 "divergences (#1060)",
-
     # --- no compiled artifact to run (frontend-only invocation) ---
     "test_version.c": "--version prints and exits; no program to compile",
     "test_testing_no_tests_1007.c": "#1033: CCCC_EXPECT_STDERR without "
@@ -441,7 +425,7 @@ NATIVE_SKIP_TESTS = {
     # silently wrong. Fixed by giving size==16 its own __int128/unsigned
     # __int128 arm (host-supported everywhere this project targets) and
     # hard-erroring size>16 (_BitInt(N>128) has no native/-m lowering,
-    # VM/-c=bytecode only, per the #824 no-lossy-emulation policy) --
+    # VM only, per the #824 no-lossy-emulation policy) --
     # test_suite_c23.c above is the file that refusal newly blocks. Also
     # fixed the two adjacent gaps the audit turned up: wb/uwb literals over
     # 64 bits ignored node->wide_digits and printed the truncated 64-bit

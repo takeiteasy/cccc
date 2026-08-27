@@ -1,5 +1,4 @@
 // CCCC_FLAGS: -m
-// CCCC_C4_SKIP: -m dumps source and exits, no bytecode to round-trip
 // CCCC_EXPECT_STDOUT: static struct Foo1011 __cccc_a_0;
 // CCCC_REJECT_STDOUT: __cccc_a_0;[\s]*static struct Foo1011 __cccc_a_0;
 //

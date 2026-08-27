@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/dup_enum_1015_typedef_a.c tests/fixtures/dup_enum_1015_typedef_b.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: (?=[\s\S]*typedef enum \{\n    AA1015TD = 1,)(?=[\s\S]*typedef enum \{\n    AA1015TD__cccc_dup[0-9]+ = 5,)
 // CCCC_REJECT_STDOUT: ^    AA1015TD = 5,$
 //

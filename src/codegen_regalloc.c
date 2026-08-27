@@ -54,30 +54,6 @@ const char *obj_external_name(Obj *obj) {
     return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
 }
 
-// FFI resolution for a call/tail-call *callee*, as opposed to a bare name
-// lookup (find_ffi_function above, still used directly by the reloc/patch
-// passes and by runtime-helper lookups that have no guest Obj at all).
-//
-// #882: cross-module counterpart of the #880 shadow-fix above. A guest
-// module can call a function that is itself *defined in a different
-// translation unit* (declared here with no body, supplied at link time via
-// `--link lib.c4a`), under a name that also happens to be a registered FFI
-// symbol. find_ffi_function's/ffi_index_for_callee's exact-name match can't
-// see that cross-module definition -- it isn't a body in *this* module's Obj
-// list -- so such a call used to always resolve to the host FFI function.
-// vm->compiler.link_syms is pre-scanned (cc_collect_link_symbols, called
-// from main.c for every --link path before gen() runs) with exactly the
-// symbol names that --link's own resolution pass will match, so consulting
-// it here keeps this decision consistent with what --link/cc_link_bytecode
-// will actually do afterwards. Only covers the compile-time-knowable case:
-// a standalone `-c` build with no matching --link path, or a symbol
-// supplied only later via runtime cc_load_module(), still resolves to FFI.
-bool symbol_defined_by_linked_module(VirtualMachine *vm, const char *name) {
-    if (!vm || !name || vm->compiler.link_syms.capacity == 0)
-        return false;
-    return hashmap_get(&vm->compiler.link_syms, name) != NULL;
-}
-
 // A guest program can define its own function whose name happens to match
 // a registered FFI symbol -- e.g. `int printf(const char *fmt, ...) { ... }`
 // wrapping the real one. find_ffi_function's exact-name match doesn't know
@@ -89,8 +65,6 @@ int ffi_index_for_callee(VirtualMachine *vm, Obj *callee) {
     if (callee && callee->body)
         return -1;
     const char *name = obj_external_name(callee);
-    if (symbol_defined_by_linked_module(vm, name))
-        return -1; // #882: --link will supply this definition; emit CALL
     return find_ffi_function(vm, name);
 }
 
@@ -213,8 +187,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                 // without this an extern-declared-but-never-defined global
                 // silently gets an address into an inert zero slot.
                 if (!target->is_definition && !target->is_tentative &&
-                    !target->init_data &&
-                    !(vm->compiler.compile_only || vm->compiler.deferred_link))
+                    !target->init_data && !vm->compiler.compile_only)
                     error("undefined global: %s", target->name);
                 segment       = 0;
                 target_offset = target->offset;

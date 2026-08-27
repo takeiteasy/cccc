@@ -846,26 +846,6 @@ def case_bare_c_defaults_to_native_a_out(cccc: Path, tmp: str) -> bool:
     return True
 
 
-def case_bare_c_bytecode_defaults_to_a_c4(cccc: Path, tmp: str) -> bool:
-    print("  26: -c=bytecode with no -o writes ./a.c4")
-    src = Path(tmp) / "bare_c_bytecode.c"
-    write(src, "int main(void) { return 42; }\n")
-    a_c4 = Path(tmp) / "a.c4"
-    if a_c4.exists():
-        a_c4.unlink()
-    result = run([str(cccc), "-c=bytecode", src.name], cwd=tmp)
-    if result.returncode != 0:
-        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
-        return False
-    if not a_c4.exists():
-        print(f"    FAIL: ./a.c4 was not written\n    {result.stderr}")
-        return False
-    run_result = run([str(cccc), "a.c4"], cwd=tmp)
-    if run_result.returncode != 42:
-        print(f"    FAIL: running a.c4 exited {run_result.returncode}\n    {run_result.stderr}")
-        return False
-    print("    ok")
-    return True
 
 
 def case_emit_cccc_native_requires_explicit_cc(cccc: Path, tmp: str) -> bool:
@@ -1005,64 +985,6 @@ def case_test_run_basic_level_compiles(cccc: Path, tmp: str) -> bool:
     return True
 
 
-def case_test_run_bytecode_no_global_contamination(cccc: Path, tmp: str) -> bool:
-    print("  33: --test-run -c=bytecode's smoke-test execution doesn't contaminate the saved "
-          "bytecode's global initializers (fork isolation)")
-    src = Path(tmp) / "test_run_contam.c"
-    write(src, "int g = 5;\n"
-               "int main(void) {\n"
-               "    int was = g;\n"
-               "    g = 999;\n"
-               "    return was;\n"
-               "}\n")
-    out = Path(tmp) / "test_run_contam.c4"
-    if out.exists():
-        out.unlink()
-    result = run([str(cccc), "--test-run", "-c=bytecode", "-o", out.name, src.name], cwd=tmp)
-    if result.returncode != 0:
-        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
-        return False
-    # A freshly-loaded run of the saved .c4 must see g's compile-time
-    # initializer (5), not the smoke-test run's post-execution value (999)
-    # -- if the smoke test had run in-process instead of in a forked child,
-    # cc_save_bytecode() would have serialized the mutated live vm state.
-    run_result = run([str(cccc), out.name], cwd=tmp)
-    if run_result.returncode != 5:
-        print(f"    FAIL: reloaded .c4 exited {run_result.returncode}, expected 5 "
-              f"(global contamination from the smoke-test run)\n    {run_result.stderr}")
-        return False
-    print("    ok")
-    return True
-
-
-def case_testing_bytecode_prepass_compiles(cccc: Path, tmp: str) -> bool:
-    print("  131: --testing -c=bytecode runs the suite as a pre-pass, then writes "
-          "the artifact (#1106)")
-    src = Path(tmp) / "testing_prepass_bc.c"
-    write(src, "[[cccc::test(return = 42)]] int t_pass(void) { return 42; }\n"
-               "int main(void) { return 7; }\n")
-    out = Path(tmp) / "testing_prepass_bc.c4"
-    if out.exists():
-        out.unlink()
-    result = run([str(cccc), "--testing", "-c=bytecode", "-o", out.name, src.name],
-                 cwd=tmp)
-    if result.returncode != 0:
-        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
-        return False
-    if not out.exists():
-        print("    FAIL: artifact was not written despite the suite passing\n"
-              f"    {result.stderr}")
-        return False
-    # The saved .c4 must be a real artifact of the guarded program.
-    run_result = run([str(cccc), out.name], cwd=tmp)
-    if run_result.returncode != 7:
-        print(f"    FAIL: reloaded .c4 exited {run_result.returncode}, expected 7\n"
-              f"    {run_result.stderr}")
-        return False
-    print("    ok")
-    return True
-
-
 def case_testing_native_prepass_compiles(cccc: Path, tmp: str) -> bool:
     print("  132: --testing -c=native runs the suite as a pre-pass, then builds via "
           "the host toolchain (#1106)")
@@ -1091,15 +1013,15 @@ def case_testing_native_prepass_compiles(cccc: Path, tmp: str) -> bool:
 
 
 def case_testing_failing_suite_refuses_compile(cccc: Path, tmp: str) -> bool:
-    print("  133: --testing -c=bytecode refuses to compile (no artifact) when the "
+    print("  133: --testing -c=native refuses to compile (no artifact) when the "
           "suite fails (#1106)")
     src = Path(tmp) / "testing_prepass_fail.c"
     write(src, "[[cccc::test(return = 999)]] int t_fail(void) { return 1; }\n"
                "int main(void) { return 42; }\n")
-    out = Path(tmp) / "testing_prepass_fail.c4"
+    out = Path(tmp) / "testing_prepass_fail_out"
     if out.exists():
         out.unlink()
-    result = run([str(cccc), "--testing", "-c=bytecode", "-o", out.name, src.name],
+    result = run([str(cccc), "--testing", "-c=native", "-o", out.name, src.name],
                  cwd=tmp)
     if result.returncode == 0:
         print("    FAIL: compile unexpectedly succeeded for a failing suite")
@@ -1110,7 +1032,7 @@ def case_testing_failing_suite_refuses_compile(cccc: Path, tmp: str) -> bool:
     # The guard is independent of --fail-fast: that flag only stops the test
     # *run* early; a red suite blocks compilation either way.
     result_ff = run(
-        [str(cccc), "--testing", "--fail-fast", "-c=bytecode", "-o", out.name,
+        [str(cccc), "--testing", "--fail-fast", "-c=native", "-o", out.name,
          src.name], cwd=tmp)
     if result_ff.returncode == 0 or out.exists():
         print("    FAIL: --fail-fast variant should also refuse to compile")
@@ -7003,15 +6925,12 @@ CASES = [
     case_arrays_suite_no_serializer_gaps,
     case_gvar_builders_generated_output,
     case_bare_c_defaults_to_native_a_out,
-    case_bare_c_bytecode_defaults_to_a_c4,
     case_emit_cccc_native_requires_explicit_cc,
     case_emit_cccc_native_with_explicit_cc,
     case_emit_cccc_m_output_round_trips,
     case_test_run_clean_program_compiles,
     case_test_run_oob_write_refused,
     case_test_run_basic_level_compiles,
-    case_test_run_bytecode_no_global_contamination,
-    case_testing_bytecode_prepass_compiles,
     case_testing_native_prepass_compiles,
     case_testing_failing_suite_refuses_compile,
     case_testing_build_blocked_by_failing_suite,

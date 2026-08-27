@@ -45,53 +45,52 @@ which is the unified orchestrator. It runs 22 sub-suites in sequence (a
 non-zero exit is produced if any fails):
 
 1. **source** — the main `tests/`/`tests/suites/` suite, VM mode.
-2. **c4** — `.c4` bytecode round-trip (compile → save → reload → run).
-3. **native** — `-c=native` serializer round-trip (#1157; on by default,
+2. **native** — `-c=native` serializer round-trip (#1157; on by default,
    `--no-native` opts out — see "Native round-trip mode" below).
-4. **native_skip_audit** — behavioural staleness audit of
+3. **native_skip_audit** — behavioural staleness audit of
    `NATIVE_SKIP_TESTS`/`NATIVE_SKIP_TESTS_MACOS`/`NATIVE_SKIP_TESTS_LINUX`/
    `NATIVE_SKIP_TESTS_CLANG`/`NATIVE_SKIP_TESTS_GCC`/
    `NATIVE_SKIP_TESTS_GCC_MACOS`, hard-fails on any stale entry (#1182).
-5. **debugger** — macOS host-signal crash-debugger integration (macOS only).
-6. **repl** — interactive REPL PTY integration (`tools/test_repl.py`,
+4. **debugger** — macOS host-signal crash-debugger integration (macOS only).
+5. **repl** — interactive REPL PTY integration (`tools/test_repl.py`,
    POSIX-only, #661).
-7. **debugger_condition** — conditional breakpoint PTY integration
+6. **debugger_condition** — conditional breakpoint PTY integration
    (`tools/test_debugger_condition.py`, POSIX-only, ticket 113).
-8. **debugger_print** — debugger `print`/`p` command PTY integration
+7. **debugger_print** — debugger `print`/`p` command PTY integration
    (`tools/test_debugger_print.py`, POSIX-only, #958).
-9. **sqlite** — SQLite amalgamation smoke test (skips cleanly when the zip
+8. **sqlite** — SQLite amalgamation smoke test (skips cleanly when the zip
    is absent).
-10. **header_resolution_smoke** — CCCC header resolution from a foreign CWD
+9. **header_resolution_smoke** — CCCC header resolution from a foreign CWD
     (`tools/header_resolution_smoke.py`, #891).
-11. **host_attribute_link_smoke** — host `__attribute__`-stripping
+10. **host_attribute_link_smoke** — host `__attribute__`-stripping
     duplicate-symbol link regression under a real gcc (#1199; skips when no
     real, non-clang gcc is on `PATH`).
-12. **comptime_native_smoke** — `-m`/`-c=generated`/`-c=native` serializer
+11. **comptime_native_smoke** — `-m`/`-c=generated`/`-c=native` serializer
     regressions (`tools/comptime_native_smoke.py`, #892/#897/#901/#904/#918).
-13. **smoke_skip_audit** — behavioural staleness audit of
+12. **smoke_skip_audit** — behavioural staleness audit of
     `comptime_native_smoke.py`'s own `SMOKE_CASE_SKIPS_GCC_MACOS` (#1197);
-    gated on `--no-native` alongside sub-suite 3.
-14. **audit_ffi** — `src/stdlib` FFI registration audit (`tools/audit_ffi.py`,
+    gated on `--no-native` alongside sub-suite 2.
+13. **audit_ffi** — `src/stdlib` FFI registration audit (`tools/audit_ffi.py`,
     see below).
-15. **audit_test_headers** — `tests/**/*.c` `CCCC_*`/`EXPECT_*` header
+14. **audit_test_headers** — `tests/**/*.c` `CCCC_*`/`EXPECT_*` header
     directive damage audit (#1153).
-16. **test_header_parse** — `tools/testing/header.py`'s
+15. **test_header_parse** — `tools/testing/header.py`'s
     `parse_test_header()` unit tests (#1153), plus
     `tools/audit_test_headers.py`'s `audit_file()` typo/near-miss detection
     unit tests (#1158).
-17. **test_native_skip_audit** — `native_skip_reason()`
+16. **test_native_skip_audit** — `native_skip_reason()`
     fall-through-invariant unit tests (#1182).
-18. **test_proc_wedge** — `run_capture()` timeout/group-kill/stdin-closing
+17. **test_proc_wedge** — `run_capture()` timeout/group-kill/stdin-closing
     unit tests (#1185).
-19. **test_wedge** — deadline-watchdog/`SIGUSR1`-dump/progress-log unit
+18. **test_wedge** — deadline-watchdog/`SIGUSR1`-dump/progress-log unit
     tests (#1202; see "Diagnosing a live wedge" below).
-20. **reflection_ffi_check** — `reflection_ffi_gen` freshness check
+19. **reflection_ffi_check** — `reflection_ffi_gen` freshness check
     (`tools/gen_reflection_ffi.py --check`, see [BUILDING.md](BUILDING.md)).
-21. **shims_check** — `src/shims.inc` freshness vs `src/shims/*.c`
+20. **shims_check** — `src/shims.inc` freshness vs `src/shims/*.c`
     (`tools/gen_shims.py --check`, see [BUILDING.md](BUILDING.md)).
-22. **audit_reflection_enums** — `reflection.h` enum-parity audit
+21. **audit_reflection_enums** — `reflection.h` enum-parity audit
     (`tools/audit_reflection_enums.py`, see below).
-23. **fuzz** — fuzz regression corpus replay, compile-only against
+22. **fuzz** — fuzz regression corpus replay, compile-only against
     `tests/fuzz/corpus/` (#625).
 
 `--bench` (cross-compiler benchmark) and `--perf` (instrumented VM-opcode
@@ -450,11 +449,8 @@ CCCC_NATIVE_CC=/opt/homebrew/bin/gcc-16 python3 tools/comptime_native_smoke.py -
 
 ### Native round-trip mode (`--native`)
 
-`tools/tests.py --c4` catches a *bytecode* round-trip regression: compile
-each positive test to `.c4`, reload it, run it, compare against 42. Before
-#967 there was no equivalent for the *serializer* — nothing ran the corpus
-through `-c=native` and compared the result against the VM run. That gap
-mattered more than it looked: `serialize_stmt`'s `default:` arm used to emit
+Before #967 nothing ran the corpus through `-c=native` and compared the
+result against the VM run. That gap mattered more than it looked: `serialize_stmt`'s `default:` arm used to emit
 `/* ... */;`, a valid null statement, so an unhandled or *wrong* node in
 statement position produced a native binary that compiled, ran, and
 returned a different answer than the VM — a class of bug
@@ -474,8 +470,8 @@ Three tiers, chosen per test from its header annotations:
   below) is run and its exit code checked against 42, or its stdout against
   `CCCC_EXPECT_STDOUT`/`CCCC_REJECT_STDOUT` if the test declares those
   instead.
-- **Compile-only**: `EXPECT_COMPILE_ERROR` tests assert the compile *fails*
-  (mirroring `--c4`'s negative-test handling); `EXPECT_RUNTIME_ERROR` tests
+- **Compile-only**: `EXPECT_COMPILE_ERROR` tests assert the compile *fails*;
+  `EXPECT_RUNTIME_ERROR` tests
   and non-`--testing` tests with `CCCC_EXPECT_STDERR`/`CCCC_REJECT_STDERR`
   assert the compile *succeeds*, but are not run — the exit-255
   runtime-safety-violation trap is a VM-only convention (`-c=native` warns
@@ -499,7 +495,7 @@ Three tiers, chosen per test from its header annotations:
   `--type-checks`, `--memory-leak-detection`, `-1`/`-2`/`-3`, the FFI policy
   flags, …) — exercising those natively would silently test nothing. A test
   can also force a skip itself with a `CCCC_NATIVE_SKIP[: reason]` header
-  annotation, mirroring `CCCC_C4_SKIP`, for behavior that is genuinely
+  annotation for behavior that is genuinely
   VM-only rather than a serializer bug (e.g. `cc_run_at`'s sentinel
   outermost-frame return address). A tail-call-elimination assertion is no
   longer forced into this bucket by default (#1159: `-O<n>` is forwarded to
@@ -509,8 +505,7 @@ Three tiers, chosen per test from its header annotations:
   keyed skip (`NATIVE_SKIP_TESTS_GCC`, `tools/testing/__init__.py`) the way
   `test_tail_call_narrowing_cast_762.c` does.
 
-**Structural difference from `--c4`:** under `--c4`, `cccc` itself executes
-the bytecode and returns 42. Under `--native`, `cccc`'s own exit code only
+**Two-process structure:** under `--native`, `cccc`'s own exit code only
 reports whether the *compile* succeeded; the compiled artifact is a second,
 independent binary, and it is *that* binary that is expected to return 42.
 `-I./include` and the test's `CCCC_FLAGS` apply to the compile step only;
@@ -523,10 +518,9 @@ forwards it to the host cc as its own `-O<n>` instead of rejecting it, so a
 test's own optimization level applies to both the VM and (when the test is
 otherwise native-eligible) the native build.
 
-**`[[cccc::test]]` suite files (`--testing=native`, #1033):** unlike
-`--testing=bytecode` (an in-process round-trip, since `cc_load_bytecode` is
-a VM-internal API), a native artifact is a wholly separate binary with no
-`cc_run_tests` to call — so `--testing=native` serializes a standalone TAP
+**`[[cccc::test]]` suite files (`--testing=native`, #1033):** a native
+artifact is a wholly separate binary with no `cc_run_tests` to call in-process
+— so `--testing=native` serializes a standalone TAP
 harness *into* the generated C: the `__builtin_assert_*` runtime
 transliterated with real C types, a table built from the compiled
 program's own `[[cccc::test]]` records, and a `main()` that forks each test
@@ -542,7 +536,7 @@ diagnostic (not silently mis-serialized) rather than attempted:
 - **`[[cccc::test_setup]]`/`[[cccc::test_teardown]]` hooks** — a `once`
   hook exists specifically so a mutation outlives one test, which cannot
   work once each test is its own forked child. No hook machinery is
-  emitted; use `--testing=vm`/`=bytecode` for a suite that needs hooks.
+  emitted; use `--testing=vm` (the default) for a suite that needs hooks.
 - **Negative tests** (`error=`/`expect_compile_error=`) — the function
   body for a test expected *not* to compile cleanly is the parser's
   error-recovery AST, not something safe to hand to a real host compiler.
@@ -819,8 +813,8 @@ The image is built and run with `--platform linux/amd64` and tagged
 `x86_64` and `file ./cccc` to identify an x86-64 ELF executable (delegated to
 `tools/linux_container_smoke.sh`, shared with the aarch64 side below).
 `linux_amd64_test` depends on `linux_amd64_smoke` and then shards the suite
-5 ways by test-filename pattern, each shard under a 300s `timeout`, plain and
-`--c4` (delegated to `tools/linux_amd64_test.sh`, since the vendored build
+5 ways by test-filename pattern, each shard under a 300s `timeout`
+(delegated to `tools/linux_amd64_test.sh`, since the vendored build
 shell has no loop construct or fail-flag accumulator to express "run every
 shard, then fail if any failed" — the same partitioning that avoids
 child-reaping stalls under Rosetta binfmt, #500, resolved WONT_FIX). All
@@ -948,7 +942,7 @@ Then run the staged workflow:
 ```bash
 ./cccc --build build.c --build-target=linux_aarch64_build    # nerdctl build --platform linux/arm64
 ./cccc --build build.c --build-target=linux_aarch64_smoke    # assert uname -m == aarch64; run test_fortytwo.c
-./cccc --build build.c --build-target=linux_aarch64_test     # full run_tests.py suite (source + c4 + sqlite)
+./cccc --build build.c --build-target=linux_aarch64_test     # full run_tests.py suite (source + native + sqlite)
 ```
 
 `linux_aarch64_smoke` asserts `uname -m` is `aarch64` and `file ./cccc`
@@ -960,8 +954,8 @@ the Makefile was always single-shot too).
 
 ### Current results
 
-**macOS arm64 (native):** all source-mode tests pass. `.c4` and sqlite sub-suites
-pass. The host-signal debugger integration passes.
+**macOS arm64 (native):** all source-mode tests pass. The native round-trip
+and sqlite sub-suites pass. The host-signal debugger integration passes.
 
 **Linux x86_64 (VZ/Rosetta, linux/amd64 container):** the full suite is
 partitioned into alphabetical filename batches to avoid child-reaping stalls
@@ -972,8 +966,8 @@ the field ordering for glibc x86_64, so `test_posix_sys_stat.c` and
 **Linux aarch64 (native arm64 container):** runs unbatched via `run_tests.py`.
 All tests pass at parity with the macOS arm64 baseline.
 
-No architecture-specific tests are silently skipped; `.c4` skips remain limited
-to mode-incompatible tests and include explicit reasons.
+No architecture-specific tests are silently skipped; native-round-trip skips
+remain limited to mode-incompatible tests and include explicit reasons.
 
 ## Continuous Integration
 
@@ -1100,7 +1094,7 @@ sequential run never fails.
 
 **Mitigation:** `tools/testing/cli.py`'s `ISOLATED_SERIAL_TESTS` set makes
 `test_suite_posix.c` run in its own serial (`-j1`) pass, sequenced after the
-rest of the parallel batch finishes, in both plain and `--c4` runs (labeled
+rest of the parallel batch finishes (labeled
 `[ isolated (serial) tests -- see #853 ]` in output). This removes
 contention from other test-file processes during that file's
 signal-timing-sensitive window and was confirmed effective under repeated
@@ -1397,7 +1391,6 @@ header comment block, parsed by `tools/testing/header.py`'s
 | `CCCC_REJECT_STDOUT:` | regex | stdout must **not** match this regex. |
 | `CCCC_EXPECT_STDERR:` | regex | stderr must match this regex. |
 | `CCCC_REJECT_STDERR:` | regex | stderr must **not** match this regex. |
-| `CCCC_C4_SKIP[: reason]` | bare or reason | Skip this test under `--c4` (bytecode round-trip). |
 | `CCCC_NATIVE_SKIP[: reason]` | bare or reason | Skip this test under `--native` (see [Native round-trip mode](#native-round-trip-mode---native)). |
 | `CCCC_MATRIX_SKIP[: reason]` | bare or reason | Skip this test under `--matrix` (per-optimization-pass sweep). |
 | `CCCC_EXPECT_LEAK[: reason]` | bare or reason | This test is expected to leak under `--leaks`; the reason is informational only (see [Memory leak detection](#memory-leak-detection---leaks)). |
@@ -2031,7 +2024,7 @@ python3 tools/tests.py                                   # default build
 tools/fetch_intel_bid.sh && make CCCC_HAS_DECIMAL=1
 python3 tools/tests.py                                   # decimal-enabled build
 python3 tools/tests.py --match "*decimal*"                # focused, also at -O3 and -3
-python3 tools/tests.py --c4                               # bytecode round-trip
+python3 tools/tests.py --native                            # native round-trip
 ```
 
 Negative tests that only make sense in one configuration (e.g. a decimal
@@ -2122,33 +2115,10 @@ Line-delimited JSON objects, one per test, wrapped in an array:
 
 The process exits with code `0` if all tests pass, `1` if any fail.
 
-### Testing backends (`--testing[=vm|bytecode|native]`)
+### Testing backends (`--testing[=vm|native]`)
 
 `--testing`/`-t` takes an optional backend selector. Bare `-t`/`--testing`
 (no `=`) means `=vm` — the default, in-process behaviour described above.
-
-`--testing=bytecode` (replaces the retired `--test-c4` boolean) compiles
-the source, saves the bytecode to a temporary `.c4` file, reloads it via
-`cc_load_bytecode`, and then runs the test suite against the reloaded
-bytecode. This exercises FFI-table persistence and bytecode round-trip
-correctness:
-
-```
-./cccc --testing=bytecode myfile.c
-```
-
-The round-trip is transparent to the test suite — all assertion macros,
-setup/teardown hooks, and output formats work identically. Tests with
-per-test `flags =` attributes that trigger lazy recompilation still execute
-correctly; their specific run uses freshly compiled bytecode rather than
-the round-tripped copy, which is expected behaviour.
-
-The `tools/tests.py --c4` runner uses this backend automatically for
-`[[cccc::test]]` suite files:
-
-```
-python3 tools/tests.py --suites --c4
-```
 
 `--testing=native` serializes the harness itself into a standalone native
 binary — see "`[[cccc::test]]` suite files (`--testing=native`, #1033)"
@@ -2156,18 +2126,15 @@ above for what it covers and its v1 scope cuts.
 
 ### Combining `--testing` with `-c` (compile pre-pass)
 
-`--testing`/`-t` (the VM and `=bytecode` backends) can be combined with
-`-c=bytecode` or `-c=native`, where the test suite acts as a pre-pass guard
-in front of the compile: the suite runs first, and only if every collected
-`[[cccc::test]]` passes does the compile step proceed —
-`-c=bytecode` writes the `.c4` to `-o FILE` (or `a.c4` by default, matching
-cc's `a.out` convention), and `-c=native` builds an executable through the
-host toolchain. Any test failure (or a run that hits its timeout) exits
-nonzero without producing an artifact, so an artifact's existence certifies
-that the suite was green at compile time:
+`--testing`/`-t` (the VM backend) can be combined with `-c=native`, where
+the test suite acts as a pre-pass guard in front of the compile: the suite
+runs first, and only if every collected `[[cccc::test]]` passes does the
+compile step proceed, building an executable through the host toolchain.
+Any test failure (or a run that hits its timeout) exits nonzero without
+producing an artifact, so an artifact's existence certifies that the suite
+was green at compile time:
 
 ```
-./cccc --testing -c=bytecode -o out.c4 myfile.c   # tests, then bytecode artifact
 ./cccc --testing -c=native -o prog myfile.c       # tests, then host compile
 ```
 
@@ -2187,18 +2154,17 @@ route-token leak check.
 
 ### `--test-run[=LEVEL]`: smoke-test the program itself before compiling
 
-Where `--testing -c=...` guards compilation behind a passing `[[cccc::test]]` suite, `--test-run[=LEVEL]` guards it behind a single VM execution of the program's own `main()` under safety instrumentation -- a "does this crash under CCCC's safety checks" smoke test, with no test functions involved.
+Where `--testing -c=native` guards compilation behind a passing `[[cccc::test]]` suite, `--test-run[=LEVEL]` guards it behind a single VM execution of the program's own `main()` under safety instrumentation -- a "does this crash under CCCC's safety checks" smoke test, with no test functions involved.
 
 ```
 ./cccc --test-run program.c                          # VM run at safety=max, then compile native
 ./cccc --test-run=basic program.c                     # VM run at a lower safety preset
-./cccc --test-run -c=bytecode -o out.c4 program.c      # VM run, then write bytecode
 ```
 
 - `LEVEL` accepts the same values as `--safety=`: `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`. Bare `--test-run` (no `=LEVEL`) is `max`.
-- The smoke-test run happens in a forked child process, so it never touches the compiled program's actual global/heap state -- the eventual `-c=bytecode` artifact still starts from the source's real compile-time initializers, not whatever the smoke test's `main()` left them as.
+- The smoke-test run happens in a forked child process, so it never touches the compiled program's actual global/heap state -- the eventual native artifact still starts from the source's real compile-time initializers, not whatever the smoke test's `main()` left them as.
 - Success is "ran to completion without a VM-detected safety violation (bounds/UAF/CFI/uninitialized-read/etc.), a real crash (signal), or a hang" -- capped at `--test-timeout` seconds (default 30s when unset). The program's own exit code is **not** checked: a CLI that legitimately returns nonzero on bad input is not a `--test-run` failure. A safety violation alone (no accompanying crash) still refuses to compile; a bare memory leak with no other violation does not.
-- Implies `-c=native` when no `-c=FMT` is given (matching bare `-c`'s own default); an explicit `-c=bytecode`/`-c=native` still picks the format. `-o`'s default-filename behavior (`./a.out`/`./a.c4`) applies the same as plain `-c`.
+- Implies `-c=native` when no `-c=FMT` is given (matching bare `-c`'s own default); an explicit `-c=native` still picks the format. `-o`'s default-filename behavior (`./a.out`) applies the same as plain `-c`.
 - Not compatible with `--repl`, `--build`, `--testing`, `--ngrams`/`--fusion-candidates`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
 
 ## Filtering Tests

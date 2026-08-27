@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/enum_hdr_collision_1017_a.c tests/fixtures/enum_hdr_collision_1017_b.c -m -Wall
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: (?=[\s\S]*#include "enum_hdr_collision_1017\.h")(?=[\s\S]*static int AA1017;)(?=[\s\S]*static int AA1017 = 3;)
 // CCCC_REJECT_STDOUT: __cccc_dup
 // CCCC_EXPECT_STDERR: enumerator 'AA1017' is declared by an enum reached through a replayed #include .*enum_hdr_collision_1017\.h.* and cannot be renamed; the file-scope 'AA1017' declared here cannot be renamed either.*\[-Wnative-name-collision\]

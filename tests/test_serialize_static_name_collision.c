@@ -1,5 +1,4 @@
 // CCCC_FLAGS: tests/fixtures/static_name_collision_1002_a.c -m
-// CCCC_C4_SKIP: multi-source compile, not a single-TU bytecode round-trip
 // CCCC_EXPECT_STDOUT: static int collide_1002__cccc_dup\d+\(void\)
 //
 // #1002: two different .c inputs, each independently defining

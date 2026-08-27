@@ -1,8 +1,7 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_C4_SKIP: in -c mode (used by C4 round-trip), compile_only allows text
-// relocations for undefined symbols (library semantics), so the error is
-// intentionally deferred -- same reasoning as test_bytecode_link_unresolved.c
-// (#565). This test covers exe-mode-only behaviour.
+// A plain (non -c) run hard-errors on an undefined function immediately;
+// only -c/--compile defers it (compile_only lets the host C linker resolve
+// or reject it instead). This test covers the immediate-error, non -c case.
 // CCCC_EXPECT_STDERR: undefined function: undefined_func
 //
 // Test for an undefined extern function - should fail at link time. The

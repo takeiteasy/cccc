@@ -1490,10 +1490,6 @@ void cc_destroy(VirtualMachine *vm) {
     // insert); values are integers, arena-allocated, or freed separately.
     hashmap_deinit(&vm->compiler.included_headers);
 
-    // Free link_syms HashMap (#882: --link symbol pre-scan; presence-only
-    // set, values are not pointers to free)
-    hashmap_deinit(&vm->compiler.link_syms);
-
     // Free sorted allocation arrays
     if (vm->sorted_allocs.addresses)
         free(vm->sorted_allocs.addresses);
@@ -1580,21 +1576,6 @@ void cc_destroy(VirtualMachine *vm) {
         free(vm->compiler.data_relocs);
     if (vm->compiler.tls_relocs)
         free(vm->compiler.tls_relocs);
-    if (vm->compiler.sym_table) {
-        for (int i = 0; i < vm->compiler.num_sym_table; i++)
-            free(vm->compiler.sym_table[i].name);
-        free(vm->compiler.sym_table);
-    }
-    if (vm->compiler.text_relocs) {
-        for (int i = 0; i < vm->compiler.num_text_relocs; i++)
-            free(vm->compiler.text_relocs[i].name);
-        free(vm->compiler.text_relocs);
-    }
-    if (vm->compiler.addr_relocs) {
-        for (int i = 0; i < vm->compiler.num_addr_relocs; i++)
-            free(vm->compiler.addr_relocs[i].name);
-        free(vm->compiler.addr_relocs);
-    }
     if (vm->compiler.ctor_list)
         free(vm->compiler.ctor_list);
     if (vm->compiler.dtor_list)
