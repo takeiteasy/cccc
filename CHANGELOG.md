@@ -3,7 +3,7 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.18] - 2026-08-27
 
 ### Fixed
 
