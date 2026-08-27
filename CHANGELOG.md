@@ -3,6 +3,30 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.17] - 2026-08-27
+
+### Added
+
+- `-c=native`/`-m`/`-c=generated` now emit a `_Static_assert` layout guard
+  (`sizeof`, `_Alignof`, and `__builtin_offsetof` per named non-bit-field
+  member) immediately after every emitted `struct`/`union`/`enum`
+  definition. These backends const-fold layout at parse time and emit the
+  aggregate definition alongside the folded literals, which is only correct
+  if the host compiler independently arrives at the same layout CCCC did --
+  where it doesn't, the emitted C compiled clean, ran, and wrote out of
+  bounds, with no diagnostic on either side, and the native round-trip
+  corpus alone could not see it. Any disagreement -- including ones nobody
+  has found yet -- is now a host compile error naming the type. On by
+  default; `--no-layout-guards` opts out. A struct/union deferring to the
+  host's own real layout (an ordinary `from_include` type) or containing a
+  `va_list`/`jmp_buf`-shaped member (deliberately widened to a safe upper
+  bound, not the real host's size) is excluded, since a guard there would
+  fire on every host regardless of any actual disagreement. See
+  `man/COVERAGE.md`'s layout-guards entry for the two documented residuals
+  (tagless aggregates; `--emit-only`) and the one genuine, permanent
+  gcc/clang divergence this now surfaces as a hard compile error under a
+  clang host (unnamed bit-field storage-unit rounding).
+
 ## [0.3.16] - 2026-08-27
 
 ### Fixed
