@@ -215,15 +215,13 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
     return NULL;
 }
 
-static int run_native_backend(VirtualMachine *vm, Obj *prog,
-                              const char *out_file, const char **inc_paths,
-                              int inc_paths_count, const char **sys_inc_paths,
-                              int sys_inc_paths_count, const char **lib_paths,
-                              int lib_paths_count, const char **libs,
-                              int libs_count, const char **defines,
-                              int defines_count, const char **undefs,
-                              int undefs_count, const char *std_arg,
-                              bool emit_cccc, bool emit_test_harness) {
+static int run_native_backend(
+    VirtualMachine *vm, Obj *prog, const char *out_file, const char **inc_paths,
+    int inc_paths_count, const char **sys_inc_paths, int sys_inc_paths_count,
+    const char **lib_paths, int lib_paths_count, const char **libs,
+    int libs_count, const char **defines, int defines_count,
+    const char **undefs, int undefs_count, const char *std_arg, bool emit_cccc,
+    bool emit_test_harness, int opt_level) {
     if (!out_file) {
         fprintf(
             stderr,
@@ -420,6 +418,28 @@ static int run_native_backend(VirtualMachine *vm, Obj *prog,
     // -c=generated output compiled by hand still needs the flag passed
     // explicitly (documented in man/COVERAGE.md).
     argv_push(&cc_args, "-fsigned-char");
+    // #1159: -O<n> used to be a hard error under -c=native (it tunes the VM's
+    // own bytecode pipeline, which the native path never runs), so the host
+    // cc always built at its own default (-O0 for both clang and gcc) --
+    // which performs no tail-call elimination, so a deeply tail-recursive
+    // guest program relying on CCCC's own VM-side TCO guarantee (CALLT,
+    // -O1+) overflowed the host stack natively even though the VM itself
+    // handles it in constant stack space (confirmed: identical tail-
+    // recursive C via host clang segfaults at -O0, returns correctly at
+    // -O2). The two concepts (VM bytecode optimization level vs. host
+    // compiler optimization level) are unrelated, but reusing the same
+    // -O<n> spelling for "the level the host cc should build at" is the
+    // obvious, least-surprising interface -- -c=native's own admissibility
+    // check (below, in main()) now lets opt_level through instead of
+    // rejecting it, and forwards it here verbatim. No -O on the command
+    // line means opt_level == 0 and nothing is forwarded, so the host's own
+    // default (-O0) is unchanged from before this fix -- every existing
+    // divergence this project documents as depending on that default (e.g.
+    // __builtin_dynamic_object_size, man/COVERAGE.md) keeps its meaning.
+    if (opt_level != 0) {
+        char buf[2] = {(char)('0' + opt_level), '\0'};
+        push_owned_flag(&cc_args, &owned, "-O", buf);
+    }
 
     int rc = run_argv((char *const *)cc_args.data);
 
@@ -810,6 +830,10 @@ static void usage(const char *argv0, int exit_code) {
            "(default: disabled)\n");
     printf("\t                             LEVEL: 0=none, 1=basic, 2=standard, "
            "3=aggressive, 4=fused\n");
+    printf("\t                             Under -c=native: forwarded "
+           "verbatim as -O<n> to the host cc\n");
+    printf("\t                             instead (no bytecode pipeline to "
+           "optimize)\n");
     printf("\t                             1: constant folding (-ffold)\n");
     printf("\t                             2: +peephole, +CSE (-fpeephole "
            "-fcse)\n");
@@ -2615,8 +2639,16 @@ int main(int argc, const char *argv[]) {
                             "output modes\n");
             usage(argv[0], 1);
         }
-        if (disassemble || entry_name || opt_level != 0 || opt_f_enable ||
-            opt_f_disable || vm_profile) {
+        // #1159: -O<n> used to be rejected here alongside the other VM
+        // bytecode-pipeline-only options -- but under -c=native it no longer
+        // means "optimize CCCC's own bytecode" (there is no bytecode; the
+        // native path never runs one), so run_native_backend() now repurposes
+        // it as the level to forward to the host cc instead of erroring.
+        // -f<pass>/-d/--entry/--vm-profile stay rejected: they genuinely only
+        // make sense against the VM's own pipeline, with no host-cc
+        // equivalent to repurpose them as.
+        if (disassemble || entry_name || opt_f_enable || opt_f_disable ||
+            vm_profile) {
             fprintf(stderr, "error: -c=native cannot be combined with VM "
                             "bytecode options\n");
             usage(argv[0], 1);
@@ -3746,7 +3778,7 @@ int main(int argc, const char *argv[]) {
             sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
             libs, libs_count, defines, defines_count, undefs, undefs_count,
             std_arg, (bool)emit_cccc_mode,
-            testing_backend == TESTING_BACKEND_NATIVE);
+            testing_backend == TESTING_BACKEND_NATIVE, opt_level);
         goto BAIL;
     }
 

@@ -3,6 +3,24 @@
 All notable changes to CCCC are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- `-O<n>`/`-O`/`--optimize[=n]` is no longer a hard error under `-c=native`.
+  It used to tune only the VM's own bytecode optimizer, which the native
+  path never runs, so the CLI simply refused the combination -- the host cc
+  therefore always built at its own default (`-O0` for both clang and gcc),
+  which performs no tail-call elimination, so a deeply tail-recursive guest
+  program relying on CCCC's own VM-side TCO guarantee (`-O1`+, `CALLT`)
+  could overflow the host stack natively even though the VM itself runs it
+  in constant stack space. `run_native_backend()` now forwards `-O<n>`
+  verbatim to the host cc instead; with no `-O` on the command line nothing
+  is forwarded and the host's own default is unchanged. `-f<pass>`/`-d`/
+  `--entry`/`--vm-profile` remain rejected -- they have no host-cc
+  equivalent to repurpose them as. See `man/COVERAGE.md`'s tail-call-
+  elimination and `__builtin_dynamic_object_size` divergence rows.
+
 ## [0.3.17] - 2026-08-27
 
 ### Added

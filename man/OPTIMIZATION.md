@@ -498,9 +498,14 @@ Source Code → Parser → AST → Codegen → Bytecode ───┤
 ```
 
 The optimizer is a **VM-only pass** — it rewrites bytecode before the
-interpreter runs it. `-c=native` serialises the (unoptimised) bytecode to C
-and hands it to a system compiler, so `--optimize` is rejected in `-c=native`
-mode and the system compiler does the optimisation instead. See the
+interpreter runs it. `-c=native` serialises the (unoptimised) AST to C and
+hands it to a system compiler, which does its own, unrelated optimisation
+instead. `-O<n>`/`--optimize[=n]` is not rejected in `-c=native` mode: since
+#1159 it is forwarded verbatim as `-O<n>` to that system compiler (with no
+`-O` given, the compiler keeps its own default, `-O0`) — repurposed as "the
+level the host compiler should build at" rather than driving the (nonexistent,
+in this mode) bytecode pipeline. `-f<pass>`/`-fno-<pass>` still have no
+native meaning and remain rejected. See the
 [README](../README.md#compile-natively-production) for the production path.
 
 Optimizations first transform or mark bytecode, then rebuild the text segment

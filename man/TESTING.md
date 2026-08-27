@@ -499,20 +499,27 @@ Three tiers, chosen per test from its header annotations:
   can also force a skip itself with a `CCCC_NATIVE_SKIP[: reason]` header
   annotation, mirroring `CCCC_C4_SKIP`, for behavior that is genuinely
   VM-only rather than a serializer bug (e.g. `cc_run_at`'s sentinel
-  outermost-frame return address, or a tail-call-elimination assertion that
-  can't hold once the native build runs at the host compiler's own `-O0` —
-  `-c=native` passes no optimization flag at all).
+  outermost-frame return address). A tail-call-elimination assertion is no
+  longer forced into this bucket by default (#1159: `-O<n>` is forwarded to
+  the host cc now, so a test carrying its own `-O1` gets that level natively
+  too) — but host TCO is the host optimizer's own heuristic, not a language
+  guarantee, so a specific case can still need a genuine, compiler-family-
+  keyed skip (`NATIVE_SKIP_TESTS_GCC`, `tools/testing/__init__.py`) the way
+  `test_tail_call_narrowing_cast_762.c` does.
 
 **Structural difference from `--c4`:** under `--c4`, `cccc` itself executes
 the bytecode and returns 42. Under `--native`, `cccc`'s own exit code only
 reports whether the *compile* succeeded; the compiled artifact is a second,
 independent binary, and it is *that* binary that is expected to return 42.
 `-I./include` and the test's `CCCC_FLAGS` apply to the compile step only;
-`CCCC_RUN_ARGS` are passed to the child binary, not to `cccc`. `-O<n>`/
-`--optimize=<n>`/`-f<pass>` are stripped from a test's flags before the
-compile step rather than causing a skip — they tune the VM bytecode pipeline
-`-c=native` doesn't use, and `-c=native` hard-errors if it sees them
-verbatim.
+`CCCC_RUN_ARGS` are passed to the child binary, not to `cccc`. `-f<pass>` is
+stripped from a test's flags before the compile step rather than causing a
+skip — it tunes the VM bytecode pipeline `-c=native` doesn't use, and
+`-c=native` hard-errors if it sees it verbatim. `-O<n>`/`-O`/
+`--optimize[=n]`, by contrast, is *not* stripped (#1159): `-c=native` now
+forwards it to the host cc as its own `-O<n>` instead of rejecting it, so a
+test's own optimization level applies to both the VM and (when the test is
+otherwise native-eligible) the native build.
 
 **`[[cccc::test]]` suite files (`--testing=native`, #1033):** unlike
 `--testing=bytecode` (an in-process round-trip, since `cc_load_bytecode` is

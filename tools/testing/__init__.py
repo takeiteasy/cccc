@@ -742,7 +742,18 @@ NATIVE_SKIP_TESTS_CLANG = {
 # always-wired-in empty table (matching NATIVE_SKIP_TESTS_LINUX's own
 # rationale above) rather than removed, so a genuinely family-*and*-platform-
 # universal gcc divergence still has a structural home.
-NATIVE_SKIP_TESTS_GCC = {}
+NATIVE_SKIP_TESTS_GCC = {
+    "test_tail_call_narrowing_cast_762.c": "test_762_identity_cast_tail_"
+                 "recursion_still_tco asserts CCCC's own tail-call "
+                 "elimination via 1M-deep recursion at the file's own "
+                 "CCCC_FLAGS -O1 (#1159: -O<n> is now forwarded verbatim to "
+                 "the host cc under -c=native) -- gcc-16 at -O1 does not "
+                 "eliminate this specific tail call and segfaults; clang "
+                 "does (confirmed: gcc passes at -O2). A real, compiler-"
+                 "family TCO-heuristic gap, not a CCCC bug -- see the "
+                 "sibling test_tail_call_frame_addr_716.c (500k-deep), "
+                 "which passes on both compiler families at the same -O1",
+}
 
 # Entries specific to gcc on Darwin specifically (Homebrew gcc, not Apple's
 # gcc-is-actually-clang symlink) -- checked only when both platform == macos

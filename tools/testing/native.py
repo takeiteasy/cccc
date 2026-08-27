@@ -50,8 +50,13 @@ def _run_testing_suite(idx, test_file, test_name, cccc, script_dir, cccc_args,
     """#1033: compile+run a [[cccc::test]] suite file through the generated
     native harness. `--testing` in per_test_flags is replaced with
     `--testing=native` (bare `--testing` alone means the VM backend, see
-    src/main.c); `-O<n>`/`-f<pass>` are stripped like the single-file path
-    (native.py's own docstring), same reasoning.
+    src/main.c); `-f<pass>` is stripped like the single-file path (native.py's
+    own docstring) -- it tunes the VM bytecode pipeline `-c=native` doesn't
+    use. `-O<n>`/`-O`/`--optimize[=n]`, by contrast, is no longer stripped
+    (#1159): `-c=native` now forwards it verbatim to the host cc instead of
+    rejecting it, so a test whose own CCCC_FLAGS carries e.g. `-O1` (to
+    exercise CALLT tail-call codegen) gets that same level applied to the
+    native build too.
 
     The compiled artifact is a self-contained TAP runner (its own main()) --
     pass/fail is its exit code, matching cc_run_tests's own `passed == n`
@@ -60,9 +65,6 @@ def _run_testing_suite(idx, test_file, test_name, cccc, script_dir, cccc_args,
     testing_flags = [
         f for f in per_test_flags
         if f != "--testing"
-        and not (f.startswith("-O") and len(f) > 2 and f[2].isdigit())
-        and f not in ("-O", "--optimize")
-        and not f.startswith("--optimize=")
         and not f.startswith("-f")
     ]
 
@@ -172,17 +174,16 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
         return _run_testing_suite(idx, test_file, test_name, cccc, script_dir,
                                   cccc_args, per_test_flags, bench, process_timeout)
 
-    # -O<n>/--optimize=<n>/-f<pass> tune the VM bytecode pipeline; -c=native
-    # rejects them outright ("cannot be combined with VM bytecode options",
-    # main.c's opt_level/opt_f_enable/opt_f_disable check). Strip them rather
-    # than skip, mirroring runner.py's is_build_mode handling (runner.py:155-158)
-    # and matrix.py's own -O/--optimize stripping (matrix.py:48-63).
+    # -f<pass> tunes the VM bytecode pipeline; -c=native rejects it outright
+    # ("cannot be combined with VM bytecode options", main.c's opt_f_enable/
+    # opt_f_disable check). Stripped rather than skipped, mirroring
+    # runner.py's is_build_mode handling (runner.py:155-158) and matrix.py's
+    # own -f stripping (matrix.py:48-63). -O<n>/-O/--optimize[=n], by
+    # contrast, is no longer stripped here (#1159): -c=native now forwards it
+    # verbatim to the host cc instead of rejecting it.
     native_flags = [
         f for f in per_test_flags
-        if not (f.startswith("-O") and len(f) > 2 and f[2].isdigit())
-        and f not in ("-O", "--optimize")
-        and not f.startswith("--optimize=")
-        and not f.startswith("-f")
+        if not f.startswith("-f")
     ]
 
     compile_only = is_negative_test or expects_runtime_error or is_diagnostic_test
