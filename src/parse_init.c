@@ -450,6 +450,19 @@ static void string_initializer(VirtualMachine *vm, Token **rest, Token *tok,
         *init = *new_initializer(
             vm, array_of(vm, init->ty->base, tok->ty->array_len), false);
 
+    // Excess check after the is_flexible rewrite above: a flexible array
+    // (`char c[] = "abcd"`) has just been retyped to the string's own
+    // length, so it can never be excess; checking before the rewrite would
+    // read array_len off the still-incomplete array type instead.
+    // tok->ty->array_len includes the trailing NUL, which C drops silently
+    // when the destination has exactly enough room for the string sans NUL
+    // (`char a[4] = "abcd"` is legal, matching gcc/clang) -- hence the -1.
+    if (!init->is_flexible && tok->ty->array_len - 1 > init->ty->array_len)
+        warn_tok(vm, tok, CCCC_WARN_EXCESS_INIT,
+                 "initializer-string for array is too long (%d chars into "
+                 "%d available)",
+                 tok->ty->array_len - 1, init->ty->array_len);
+
     int len = MIN(init->ty->array_len, tok->ty->array_len);
 
     switch (init->ty->base->size) {
@@ -727,7 +740,8 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
         }
     }
 
-    bool first = true;
+    bool first         = true;
+    bool warned_excess = false;
 
     for (int i = 0; !consume_end(rest, tok); i++) {
         if (!first)
@@ -750,7 +764,12 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
         }
 
         // For VLA, check if children[i] exists; for regular arrays, check
-        // array_len
+        // array_len. The VLA arm is deliberately left unwarned -- a VLA's
+        // bound isn't known until runtime, so excess elements can't be
+        // diagnosed statically even in principle (if the bound were an
+        // integer constant expression it wouldn't be a VLA); the resulting
+        // out-of-bounds store is instead caught by the generic runtime
+        // bounds machinery at -2/-3 (#1179).
         if (init->ty->kind == TY_VLA) {
             if (init->children && init->children[i])
                 initializer2(vm, &tok, tok, init->children[i]);
@@ -759,8 +778,14 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
         } else {
             if (i < init->ty->array_len)
                 initializer2(vm, &tok, tok, init->children[i]);
-            else
+            else {
+                if (!warned_excess) {
+                    warned_excess = true;
+                    warn_tok(vm, tok, CCCC_WARN_EXCESS_INIT,
+                             "excess elements in array initializer");
+                }
                 tok = skip_excess_element(vm, tok);
+            }
         }
     }
 }
@@ -778,9 +803,10 @@ static void array_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
 // make CCCC accept syntax neither reference compiler does (tracker #719).
 static void vector_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init) {
-    tok        = skip(vm, tok, "{");
+    tok                = skip(vm, tok, "{");
 
-    bool first = true;
+    bool first         = true;
+    bool warned_excess = false;
     for (int i = 0; !consume_end(rest, tok); i++) {
         if (!first)
             tok = skip(vm, tok, ",");
@@ -793,8 +819,14 @@ static void vector_initializer(VirtualMachine *vm, Token **rest, Token *tok,
 
         if (i < init->ty->vec_len)
             initializer2(vm, &tok, tok, init->children[i]);
-        else
+        else {
+            if (!warned_excess) {
+                warned_excess = true;
+                warn_tok(vm, tok, CCCC_WARN_EXCESS_INIT,
+                         "excess elements in vector initializer");
+            }
             tok = skip_excess_element(vm, tok);
+        }
     }
 }
 
@@ -840,10 +872,11 @@ static void array_initializer2(VirtualMachine *vm, Token **rest, Token *tok,
 // struct-initializer1 = "{" initializer ("," initializer)* ","? "}"
 static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                                 Initializer *init) {
-    tok           = skip(vm, tok, "{");
+    tok                   = skip(vm, tok, "{");
 
-    Member *mem   = init->ty->members;
-    bool    first = true;
+    Member *mem           = init->ty->members;
+    bool    first         = true;
+    bool    warned_excess = false;
 
     while (!consume_end(rest, tok)) {
         if (!first)
@@ -873,6 +906,11 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
             initializer2(vm, &tok, tok, init->children[mem->idx]);
             mem = mem->next;
         } else {
+            if (!warned_excess) {
+                warned_excess = true;
+                warn_tok(vm, tok, CCCC_WARN_EXCESS_INIT,
+                         "excess elements in struct initializer");
+            }
             tok = skip_excess_element(vm, tok);
         }
     }
