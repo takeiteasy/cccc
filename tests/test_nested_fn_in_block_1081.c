@@ -44,7 +44,10 @@
 // bug this fix does NOT cover: it needs the block's *enclosing frame*, which
 // a heap-copyable block's descriptor deliberately never stores. Both back
 // ends now reject that shape with a diagnostic ("#1081 residual") rather
-// than silently miscompiling; filed as its own follow-up.
+// than silently miscompiling -- #1100, closed WONT_FIX (a real fix would
+// reverse the "a block must never retain a live pointer back to its
+// creating frame" invariant this fix was decided on). The refusal is pinned
+// on both back ends by tests/test_nested_fn_call_beyond_block_1100.c.
 //
 // -c=native was ALSO independently broken for this whole shape (not merely
 // rejected like #1080's mirror case) -- it compiled clean and segfaulted at

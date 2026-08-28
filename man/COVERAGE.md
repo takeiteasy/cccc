@@ -1224,6 +1224,7 @@ the complement of "any standard C compiles" — audited directly against every
 | bare reference to a nested function (`int (*p)(int) = inner;`, or passing one as a callback) | `serialize_program.c` (`collect_nested_refs`) | the lowered signature carries a hidden leading `__static_link` parameter no real function-pointer type can express (#1074). The one legal shape — a direct call's own callee — is exempted, not rejected |
 | block literal at file scope | `serialize_expr.c` (`ND_BLOCK_LITERAL` case) | a block's descriptor is a *local*, living on the enclosing function's frame (#965); there is no frame at file scope to hold one |
 | a block literal's own descriptor local, captured by a nested function's static link | `serialize_program.c` (`record_nested_upvar`) | a descriptor has no meaningful value to hand across a static link (distinct from an ordinary `__block`-storage local, which #1080 does support this way) |
+| a direct call to a nested function whose own parent sits *beyond* a block ancestor of the caller (a sibling/cousin call reached only by climbing out of a block first) | `serialize_program.c` (`collect_nested_refs`) | needs the block's *enclosing frame*, which a heap-copyable descriptor deliberately never stores — the same invariant behind #1081's by-value-snapshot decision. Closed `WONT_FIX` (#1100; #1210 later filed as a duplicate). The VM rejects it identically (`codegen_expr.c`, `calling_nested` static-link walk), so this is not a native-only refusal. Distinct from the #1081-supported case, a *variable read* through a block ancestor, which reads the block's own capture snapshot |
 | anonymous `struct`/`union` under `#pragma pack(N)` | `serialize_type.c` (`serialize_anon_aggregate`) | has no tag or typedef name to wrap in its own `#pragma pack(push, N)`/`pop` pair at file scope (#1173) — user-actionable: give it a name |
 | a non-zero store into a member CCCC treats as host-owned layout (`{0}`-then-assign pattern reaching a `from_include` struct's member) | `serialize_expr.c` (`serialize_host_owned_zero_init_chain`) | the member path is CCCC's own projection, not necessarily the host's real layout — emitting the store would be silently unsound rather than merely incomplete (#1103) |
 
@@ -1265,12 +1266,8 @@ them until this audit:
   multi-dimensional VLA doesn't fit that fix — the field would need to be
   `int (*)[][m]`, a pointer to an array of incomplete element type, which
   is illegal C. #1221.
-- **#1081 residual: calling a nested function whose own parent lies beyond a
-  block ancestor** (`serialize_program.c`, `collect_nested_refs`) — needs
-  the block's *enclosing frame*, which a heap-copyable block descriptor
-  deliberately never stores. #1210.
 
-A fifth site, a bitfield initializer wider than 128 bits
+A further site, a bitfield initializer wider than 128 bits
 (`serialize_decl.c`, `serialize_init_bytes`'s `TY_STRUCT` member loop), is
 the same construct class as #1123 rather than a separate gap — tracked there
 as a follow-up note, not its own ticket.
@@ -1808,7 +1805,10 @@ only, never stored past it, with escape analysis to guarantee the block
 never outlives that frame) — significant new scope and safety machinery
 for a shape with no known real-world occurrence, so this stays a
 diagnosed rejection rather than a miscompile, same disposition as #1099
-above.
+above. #1210 was later filed against this same shape (the #1128
+native-refusal audit did not spot #1100) and closed as a duplicate; the
+rejection on both back ends is now pinned by
+`tests/test_nested_fn_call_beyond_block_1100.c`.
 
 A nested (non-`static`) function *definition* whose name matches an
 enclosing file-scope function is supported (#1075): C17 6.2.1p4 treats scope
