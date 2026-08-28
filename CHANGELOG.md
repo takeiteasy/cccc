@@ -61,3 +61,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   Top-level qualifiers are still ignored — the controlling expression is
   lvalue-converted, and `__builtin_types_compatible_p(int, const int)` stays
   `1`. `_Atomic` is treated as a non-qualifier, following GCC.
+- A `_Complex` constant expression now folds at compile time: `I` /
+  `_Complex_I` / `CMPLX()` and `+`/`-`/`*`/`/`/unary-`-`/`conj` over complex
+  constants are usable in a static initializer and other constant-expression
+  contexts (`static double _Complex z = 3.0 + 4.0*I;`,
+  `_Static_assert(cimag(I) == 1.0, …)`) — previously rejected as "not a
+  compile-time constant". Such a global serializes under `-c=native`/`-m` as
+  `__builtin_complex(re, im)` (a zero imaginary part still prints as a bare
+  real literal). The fold mirrors the VM's runtime complex arithmetic
+  bit-for-bit. Fixed in the same change: a `float`-to-`_Complex` cast under
+  `-c=native`/`-m` truncated the real part to an integer.

@@ -322,6 +322,13 @@ int64_t eval(VirtualMachine *vm, Node *node);
 int64_t eval2(VirtualMachine *vm, Node *node, char ***label);
 void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out);
 double eval_double(VirtualMachine *vm, Node *node);
+// Compile-time fold of a _Complex constant expression (#1208). *re / *im
+// receive the two parts as host doubles (a `long double _Complex` element
+// carries only 8 meaningful bytes everywhere in this compiler, matching
+// eval_double for TY_LDOUBLE). Mirrors gen_complex_expr's naive textbook
+// arithmetic (src/codegen_addr.c) so a global initializer and the identical
+// expression in a local fold to the same bits.
+void eval_complex(VirtualMachine *vm, Node *node, double *re, double *im);
 // Compile-time fold of a constant expression at arbitrary integer width
 // (#1122). ty->size bytes are written to dst (little-endian words); ty must
 // be an integer type. Reuses the src/stdlib/wide_bitint.c runtime helpers so

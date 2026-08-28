@@ -111,11 +111,137 @@ double eval_double(VirtualMachine *vm, Node *node) {
                 error_tok(vm, node->tok, "not a compile-time constant");
             return eval_double(vm, expr);
         }
+        case ND_COMPLEX: {
+            // #1208: creal/cimag of a constant complex expression reached in
+            // a *real* constant-expression context (`static double d =
+            // creal(I);`, `_Static_assert(cimag(...) == ...)`). val 1 =
+            // creal, 2 = cimag; val 0 (construction) and 3 (conj) yield a
+            // complex value and never a real one here.
+            if (node->val != 1 && node->val != 2)
+                error_tok(vm, node->tok, "not a compile-time constant");
+            double cre = 0, cim = 0;
+            eval_complex(vm, node->lhs, &cre, &cim);
+            return node->val == 1 ? cre : cim;
+        }
         case ND_NUM:
             return node->fval;
         default:
             error_tok(vm, node->tok, "not a compile-time constant");
             return 0;
+    }
+}
+
+// #1208: compile-time fold of a _Complex constant expression. Mirrors
+// eval_double's node-kind table, but carries both parts. The arithmetic here
+// is deliberately bit-for-bit identical to gen_complex_expr()
+// (src/codegen_addr.c) -- the VM's own runtime complex path -- so a global
+// initializer folded here and the same expression evaluated in a local agree
+// exactly. gen_complex_expr uses the naive textbook formulas (no Smith
+// scaling); so does this.
+void eval_complex(VirtualMachine *vm, Node *node, double *re, double *im) {
+    add_type(vm, node);
+
+    // A real operand undergoes the usual real->complex conversion: (r, 0).
+    // This also covers ND_CAST of a real to a complex type without the arm
+    // below needing to special-case it.
+    if (!is_complex(node->ty)) {
+        *re = eval_double(vm, node);
+        *im = 0.0;
+        return;
+    }
+
+    bool is_f32 = node->ty->base && node->ty->base->kind == TY_FLOAT;
+
+    switch (node->kind) {
+        case ND_COMPLEX:
+            if (node->val == 0) {
+                // Construction: lhs = real, rhs = imaginary (add_type has
+                // already cast both to the element type).
+                *re = eval_double(vm, node->lhs);
+                *im = eval_double(vm, node->rhs);
+            } else if (node->val == 3) {
+                // conj: negate the imaginary part.
+                eval_complex(vm, node->lhs, re, im);
+                *im = -*im;
+            } else {
+                // creal/cimag never carry a complex type themselves.
+                error_tok(vm, node->tok, "not a compile-time constant");
+            }
+            break;
+        case ND_ADD: {
+            double lr, li, rr, ri;
+            eval_complex(vm, node->lhs, &lr, &li);
+            eval_complex(vm, node->rhs, &rr, &ri);
+            *re = lr + rr;
+            *im = li + ri;
+            break;
+        }
+        case ND_SUB: {
+            double lr, li, rr, ri;
+            eval_complex(vm, node->lhs, &lr, &li);
+            eval_complex(vm, node->rhs, &rr, &ri);
+            *re = lr - rr;
+            *im = li - ri;
+            break;
+        }
+        case ND_MUL: {
+            // gen_complex_expr ND_MUL: (ac - bd, ad + bc).
+            double a, b, c, d;
+            eval_complex(vm, node->lhs, &a, &b);
+            eval_complex(vm, node->rhs, &c, &d);
+            *re = a * c - b * d;
+            *im = a * d + b * c;
+            break;
+        }
+        case ND_DIV: {
+            // gen_complex_expr ND_DIV: denom = c*c + d*d;
+            //   re = (a*c + b*d) / denom;  im = (b*c - a*d) / denom.
+            double a, b, c, d;
+            eval_complex(vm, node->lhs, &a, &b);
+            eval_complex(vm, node->rhs, &c, &d);
+            double denom = c * c + d * d;
+            *re          = (a * c + b * d) / denom;
+            *im          = (b * c - a * d) / denom;
+            break;
+        }
+        case ND_NEG:
+            eval_complex(vm, node->lhs, re, im);
+            *re = -*re;
+            *im = -*im;
+            break;
+        case ND_COND:
+            if (eval_double(vm, node->cond))
+                eval_complex(vm, node->then, re, im);
+            else
+                eval_complex(vm, node->els, re, im);
+            break;
+        case ND_COMMA:
+            eval_complex(vm, node->rhs, re, im);
+            break;
+        case ND_CAST:
+            // A complex->complex cast (element-type change); the real->complex
+            // case was handled by the !is_complex head above.
+            eval_complex(vm, node->lhs, re, im);
+            break;
+        case ND_VAR:
+        case ND_MEMBER: {
+            Node *expr = constexpr_expr_for_node(node);
+            if (!expr)
+                error_tok(vm, node->tok, "not a compile-time constant");
+            eval_complex(vm, expr, re, im);
+            break;
+        }
+        default:
+            error_tok(vm, node->tok, "not a compile-time constant");
+            return;
+    }
+
+    // Element type `float`: round both parts to single precision, matching
+    // gen_complex_expr's emit_fround_f32 after each op. Idempotent for the
+    // arms (NEG/conj) where the runtime path skips the explicit round.
+    if (is_f32) {
+        *re = (float)*re;
+        *im = (float)*im;
     }
 }
 

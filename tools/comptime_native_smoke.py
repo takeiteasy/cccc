@@ -621,6 +621,52 @@ def case_union_no_full_member_reconstructs(cccc: Path, tmp: str) -> bool:
                             UNION_NO_FULL_MEMBER_PROGRAM)
 
 
+COMPLEX_GLOBAL_INIT_PROGRAM = (
+    "#include <complex.h>\n"
+    "static double _Complex zc = 3.0 + 4.0 * I;\n"
+    "static float _Complex zf = 1.5f + 2.5f * I;\n"
+    "static double _Complex zm = (2.0 + 1.0 * I) * (3.0 + 4.0 * I);\n"
+    "int main(void) {\n"
+    "    double _Complex lm = (2.0 + 1.0 * I) * (3.0 + 4.0 * I);\n"
+    "    if (creal(lm) != creal(zm) || cimag(lm) != cimag(zm)) return 1;\n"
+    "    return (int)creal(zc) + (int)cimag(zc) + (int)crealf(zf) +\n"
+    "                   (int)cimagf(zf) + (int)creal(zm) + (int)cimag(zm) ==\n"
+    "               3 + 4 + 1 + 2 + 2 + 11\n"
+    "           ? 42\n"
+    "           : 1;\n"
+    "}\n"
+)
+
+
+def case_complex_global_init_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  146: -c=native, a _Complex global with a non-zero imaginary part folds and round-trips (#1208)")
+    # `I` / complex arithmetic in a file-scope initializer used to hard-error
+    # ("not a compile-time constant") before serialization was ever reached
+    # -- there was no compile-time complex constant folder. #1208 adds
+    # eval_complex (src/parse_expr.c), mirroring gen_complex_expr's naive
+    # textbook arithmetic bit-for-bit so a global and the same expression in
+    # a local agree, and serialize_init_bytes emits
+    # `__builtin_complex((elem)re, (elem)im)` for a non-zero imaginary half.
+    return _vm_and_native_run_case(cccc, tmp, "complex_global_init_1208",
+                                   COMPLEX_GLOBAL_INIT_PROGRAM)
+
+
+def case_complex_global_init_m_output(cccc: Path, tmp: str) -> bool:
+    print("  147: -m output for a non-zero-imaginary _Complex global uses __builtin_complex, not a refusal (#1208)")
+    src = Path(tmp) / "complex_global_init_dump_1208.c"
+    write(src, COMPLEX_GLOBAL_INIT_PROGRAM)
+    result = run([str(cccc), "-m", src.name], cwd=tmp)
+    out = result.stdout
+    if "__builtin_complex(" not in out:
+        print(f"    FAIL: -m output missing __builtin_complex(\n    {out}")
+        return False
+    if "cannot serialize initializer" in out:
+        print(f"    FAIL: -m output still refuses the initializer\n    {out}")
+        return False
+    print("    ok")
+    return True
+
+
 # shadow_param(): a nested block re-declaring a parameter's own name (legal
 # C -- the inner `x` shadows the parameter for its block's extent). #926's
 # rename-on-collision must rename the *shadowing local*, never the
@@ -6922,6 +6968,8 @@ CASES = [
     case_union_largest_member,
     case_union_largest_member_m_output,
     case_union_no_full_member_reconstructs,
+    case_complex_global_init_native_round_trip,
+    case_complex_global_init_m_output,
     case_anon_locals_end_to_end,
     case_anon_locals_m_output,
     case_arrays_suite_no_serializer_gaps,

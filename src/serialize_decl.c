@@ -953,6 +953,29 @@ static void serialize_agg_member_list(FILE *f, VirtualMachine *vm,
     }
 }
 
+// #1208: print one real-floating part of a _Complex initializer image.
+// Byte-identical to what serialize_init_bytes's TY_COMPLEX arm used to emit
+// for the (real-only) case -- float via format_float_literal + "f", double/
+// long double via "%.17g" with no suffix (long double is stored as a plain
+// 8-byte double everywhere in this compiler, see the TY_LDOUBLE arm).
+static void serialize_complex_part(FILE *f, SerializeContext *ctx, Type *base,
+                                   const char *p) {
+    if (base && base->kind == TY_FLOAT) {
+        float fv;
+        memcpy(&fv, p, 4);
+        if (!serialize_flonum_special(f, (long double)fv, "f")) {
+            char buf[64];
+            format_float_literal(buf, sizeof buf, (double)fv);
+            fprintf(f, "%sf", buf);
+        }
+    } else {
+        double dv;
+        memcpy(&dv, p, 8);
+        if (!serialize_flonum_special(f, (long double)dv, ""))
+            fprintf(f, "%.17g", dv);
+    }
+}
+
 // Reconstruct a global variable's initializer from its raw `init_data`
 // bytes (plus any Relocations) as C source text, recursing through
 // arrays/vectors/structs/unions. Replaces the old scalar-only dispatch that
@@ -1054,28 +1077,41 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
         }
 
         case TY_COMPLEX: {
-            // #1122: write_gvar_data's TY_COMPLEX arm (src/parse_init.c)
-            // only ever folds a real-valued complex initializer -- this
-            // compiler has no imaginary-literal syntax, so the imaginary
-            // half of init_data is always zero. A real constant assigned to
-            // a complex-typed target performs the usual real->complex
-            // conversion in C, so printing just the real part is exact; no
-            // need to reconstruct an `x + y*I` expression.
-            int part_size = ty->base ? ty->base->size : 8;
-            if (ty->base && ty->base->kind == TY_FLOAT) {
-                float fv;
-                memcpy(&fv, var->init_data + offset, 4);
-                if (!serialize_flonum_special(f, (long double)fv, "f")) {
-                    char buf[64];
-                    format_float_literal(buf, sizeof buf, (double)fv);
-                    fprintf(f, "%sf", buf);
+            // #1122/#1208: real-then-imag contiguous parts, each at stride
+            // ty->base->size (matching complex_part_offset() in codegen).
+            // A zero imaginary half -- the common case, a real constant
+            // converted to complex -- still prints as a bare real literal:
+            // byte-identical to pre-#1208 output, so the native corpus diff
+            // stays minimal. A non-zero imaginary half (now reachable via
+            // eval_complex folding `I`/`CMPLX()`/complex arithmetic) emits
+            // `__builtin_complex((elem)re, (elem)im)` -- the same shape
+            // serialize_expr's ND_COMPLEX construction arm uses, and which
+            // clang and gcc both accept in a static initializer. "Zero
+            // imaginary" is tested on the raw bytes so -0.0 counts as
+            // non-zero and keeps its sign.
+            int         part = ty->base ? ty->base->size : 8;
+            int         psz  = (ty->base && ty->base->kind == TY_FLOAT) ? 4 : 8;
+            const char *ip   = var->init_data + offset + part;
+            bool        imag_zero = true;
+            for (int i = 0; i < psz; i++)
+                if ((unsigned char)ip[i] != 0) {
+                    imag_zero = false;
+                    break;
                 }
-            } else {
-                double dv;
-                memcpy(&dv, var->init_data + offset, part_size >= 8 ? 8 : 4);
-                if (!serialize_flonum_special(f, (long double)dv, ""))
-                    fprintf(f, "%.17g", dv);
+            if (imag_zero) {
+                serialize_complex_part(f, ctx, ty->base,
+                                       var->init_data + offset);
+                return;
             }
+            fprintf(f, "__builtin_complex((");
+            serialize_type(f, ctx, ty->base);
+            fprintf(f, ")");
+            serialize_complex_part(f, ctx, ty->base, var->init_data + offset);
+            fprintf(f, ", (");
+            serialize_type(f, ctx, ty->base);
+            fprintf(f, ")");
+            serialize_complex_part(f, ctx, ty->base, ip);
+            fprintf(f, ")");
             return;
         }
 

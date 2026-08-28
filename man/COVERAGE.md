@@ -1518,9 +1518,23 @@ already documented in this section, now actually reachable: a `_BitInt(N)`
 global with `N` in `(64, 128]` (including `__int128`) serializes under
 `-c=native`/`-m`; one with `N > 128` works under the VM and is refused at
 type-emission under `-c=native`/`-m`, same as any other `_BitInt(N > 128)`
-use. `_Complex` global initializers are real-valued only (this compiler has
-no imaginary-literal syntax), which `serialize_init_bytes`'s new `TY_COMPLEX`
-arm relies on directly.
+use. This compiler still has no imaginary-literal syntax (`3.5i` is a parse
+error), but since #1208 `I` / `_Complex_I` / `CMPLX()` — which desugar to an
+`__cccc_cmplx(...)` node — and `+`/`-`/`*`/`/`/unary-`-`/`conj` over complex
+constants fold at compile time via `eval_complex` (`src/parse_expr.c`), whose
+arithmetic is bit-for-bit identical to `gen_complex_expr`
+(`src/codegen_addr.c`, the VM's own runtime complex path) so a global
+initializer and the same expression in a local agree. `serialize_init_bytes`'s
+`TY_COMPLEX` arm emits `__builtin_complex((elem)re, (elem)im)` when the
+imaginary half is non-zero (both clang and gcc accept that in a static
+initializer) and keeps the bare real literal — byte-identical to pre-#1208
+output — when it is exactly zero. `creal`/`cimag` also fold in an ordinary
+real constant-expression context (`static double d = creal(I);`,
+`_Static_assert`). Found and fixed alongside #1208: a `float -> _Complex`
+cast (the real operand of a construction like `1.5f + 2.5f*I`) was routed
+through the real→integer saturating helper under `-c=native`/`-m` and
+truncated `1.5f` to `1`, because `is_flonum()` is false for `TY_COMPLEX`;
+`serialize_expr`'s `f2i_native` gate now excludes a `TY_COMPLEX` destination.
 
 Found in the same #1121 audit but out of its scope, both now resolved:
 `serialize_type`'s container-by-`size` mapping above picks the *smallest*

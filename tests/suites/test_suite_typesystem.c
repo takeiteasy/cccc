@@ -554,6 +554,18 @@ static _BitInt(128) g_bi128 = -((_BitInt(128))1 << 100);
 static long double     g_ld = 12345.6789L;
 static _Complex double g_cd = 3.5;
 static _Complex float  g_cf = 2.5f;
+// #1208: a complex global with a *non-zero* imaginary part -- `I`/`CMPLX()`
+// and complex arithmetic now fold at compile time (eval_complex), and
+// serialize_init_bytes emits `__builtin_complex(re, im)` under -c=native/-m
+// for these. All three element widths, since the imaginary part's byte
+// stride is base->size (4 / 8 / platform-split for long double).
+static _Complex double g_cd_i = 3.0 + 4.0 * I;
+static _Complex float  g_cf_i = 1.5f + 2.5f * I;
+// `long double _Complex`, not `_Complex long double` -- the latter spelling
+// hits a pre-existing declspec quirk ("invalid type") unrelated to #1208.
+static long double _Complex g_cl_i = 5.0L + 6.0L * I;
+static _Complex double g_cd_mul    = (2.0 + 1.0 * I) * (3.0 + 4.0 * I);
+static _Complex double g_cd_conj   = conj(7.0 + 8.0 * I);
 // #1122: a *narrow* global whose initializer merely contains wide
 // arithmetic used to silently fold wrong -- eval2 evaluated the division in
 // 64 bits and got 2 instead of the correct value below.
@@ -631,6 +643,32 @@ int test_wide_global_init(void) {
     lb.f = ((_BitInt(128))1 << 90) + 7;
     if (gb.f != lb.f)
         return 12;
+
+    // #1208: non-zero-imaginary complex globals, each checked against the
+    // identical expression folded in a local (the folder must match
+    // gen_complex_expr bit-for-bit, not just "not crash").
+    _Complex double l_cd_i = 3.0 + 4.0 * I;
+    if (creal(g_cd_i) != creal(l_cd_i) || cimag(g_cd_i) != cimag(l_cd_i))
+        return 13;
+    _Complex float l_cf_i = 1.5f + 2.5f * I;
+    if (crealf(g_cf_i) != crealf(l_cf_i) || cimagf(g_cf_i) != cimagf(l_cf_i))
+        return 14;
+    long double _Complex l_cl_i = 5.0L + 6.0L * I;
+    if ((double)creall(g_cl_i) != (double)creall(l_cl_i) ||
+        (double)cimagl(g_cl_i) != (double)cimagl(l_cl_i))
+        return 15;
+    _Complex double l_cd_mul = (2.0 + 1.0 * I) * (3.0 + 4.0 * I);
+    if (creal(g_cd_mul) != creal(l_cd_mul) ||
+        cimag(g_cd_mul) != cimag(l_cd_mul))
+        return 16;
+    if (creal(g_cd_mul) != 2.0 || cimag(g_cd_mul) != 11.0)
+        return 17;
+    _Complex double l_cd_conj = conj(7.0 + 8.0 * I);
+    if (creal(g_cd_conj) != creal(l_cd_conj) ||
+        cimag(g_cd_conj) != cimag(l_cd_conj))
+        return 18;
+    if (creal(g_cd_conj) != 7.0 || cimag(g_cd_conj) != -8.0)
+        return 19;
 
     return 42;
 }

@@ -1780,21 +1780,27 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
     }
 
     if (ty->kind == TY_COMPLEX) {
-        // #1122: TY_COMPLEX (size 8/16/32) also used to fall through to the
+        // #1122: TY_COMPLEX (size 8/16/32) used to fall through to the
         // integer scalar tail and crash (or, for _Complex float at size 8,
         // silently write an eval2'd integer bit pattern into the real+imag
-        // pair). This compiler has no imaginary-literal syntax (`3.5if` is
-        // a parse error) and `I`/`_Complex_I` from complex.h is a runtime
-        // value, not a compile-time constant, so a foldable complex
-        // initializer is always real-valued -- eval_double naturally
-        // rejects anything else ("not a compile-time constant") rather than
-        // silently dropping an imaginary part. The imaginary half is left
-        // zero (buf was memset in gvar_initializer).
-        double real = eval_double(vm, init->expr);
-        if (ty->base && ty->base->kind == TY_FLOAT)
-            *(float *)(buf + offset) = (float)real;
-        else
-            *(double *)(buf + offset) = real;
+        // pair). #1208: fold both parts. This compiler still has no
+        // imaginary-literal syntax (`3.5if` is a parse error), but
+        // `I`/`_Complex_I`/`CMPLX()` from complex.h desugar to
+        // `__cccc_cmplx(...)` (an ND_COMPLEX node), which eval_complex now
+        // folds -- so `static double _Complex z = 3.0 + 4.0*I;` is a
+        // constant expression. The imaginary half is written at
+        // `offset + ty->base->size` (the same real-then-imag contiguous
+        // layout complex_part_offset() uses in codegen).
+        double real = 0, imag = 0;
+        eval_complex(vm, init->expr, &real, &imag);
+        int part = ty->base ? ty->base->size : 8;
+        if (ty->base && ty->base->kind == TY_FLOAT) {
+            *(float *)(buf + offset)        = (float)real;
+            *(float *)(buf + offset + part) = (float)imag;
+        } else {
+            *(double *)(buf + offset)        = real;
+            *(double *)(buf + offset + part) = imag;
+        }
         return cur;
     }
 

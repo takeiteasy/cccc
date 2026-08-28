@@ -1479,8 +1479,16 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // scalar broadcast into a vector op wrongly got routed through the
             // integer-saturating helper instead of staying a plain float,
             // corrupting the vector arithmetic itself.
+            // #1208: `is_flonum()` is false for TY_COMPLEX, so without the
+            // explicit exclusion a `float -> _Complex` cast (the real
+            // operand of a complex construction, e.g. `1.5f + 2.5f*I`)
+            // wrongly routed through the integer-saturating helper and
+            // truncated 1.5f to 1. A real->complex cast is not a
+            // real->integer conversion; the per-part real cast inside the
+            // ND_COMPLEX construction arm handles the element type.
             bool f2i_native = src && dst && is_flonum(src) && !is_flonum(dst) &&
                               dst->kind != TY_VECTOR &&
+                              dst->kind != TY_COMPLEX &&
                               !(dst->kind == TY_BITINT && dst->bit_width > 64);
             if (f2i_native) {
                 bool u64_dst =
