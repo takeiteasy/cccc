@@ -406,8 +406,8 @@ int test_generic(void) {
 // a C23 fixed `enum E : T` base wins outright. enum-vs-enum stays a
 // distinct-type mismatch. The same fix also gave _Bool and tagged
 // struct/union associations a working arm.
-enum ug_1223 { UG1 = 1 }; // -> unsigned int
-enum sg_1223 { SG1 = -1 }; // -> int
+enum ug_1223 { UG1 = 1 };           // -> unsigned int
+enum sg_1223 { SG1 = -1 };          // -> int
 enum wg_1223 { WG1 = 0x100000000 }; // -> 8-byte unsigned
 enum other_1223 { OG1 = 1 };
 struct sgen_1223 {
@@ -447,6 +447,30 @@ int test_generic_enum(void) {
     struct sgen_1223 s = {0};
     if (_Generic(s, struct sgen_1223: 9, default: 0) != 9)
         return 9;
+    return 42;
+}
+
+// #1224: C23 6.7.11p2 forbids two associations with compatible types, and
+// CCCC now diagnoses it (see the tests/test_generic_*_fail.c negatives).
+// This pins the pairs that must NOT be flagged as a collision: `long` /
+// `long long` (CCCC models both as one type, and the stdlib headers pair
+// them in a single _Generic), and const-qualified vs unqualified pointee
+// (`char *` / `const char *`, the <string.h> dispatch idiom). The mere
+// fact that this function compiles is the const-pointer half of the test;
+// the return values exercise the long / long long half.
+[[cccc::test(return = 42)]]
+int test_generic_no_false_collision(void) {
+    long x = 0;
+    if (_Generic(x, long: 1, long long: 2, default: 0) != 1)
+        return 1;
+    unsigned long u = 0;
+    if (_Generic(u, unsigned long: 1, unsigned long long: 2, default: 0) != 1)
+        return 2;
+    char *p = 0;
+    if (_Generic(p, char *: 3, const char *: 4, default: 0) != 3)
+        return 3;
+    const char *cp = 0;
+    (void)_Generic(cp, char *: 3, const char *: 4, default: 0);
     return 42;
 }
 

@@ -1017,6 +1017,33 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     return node;
 }
 
+// #1224: whether two _Generic association type-names collide under C23
+// 6.7.11p2 ("no two ... shall specify compatible types"). Two caveats over
+// a bare is_compatible():
+//  - is_compatible() is deliberately lax about qualifiers -- it treats
+//    `char *` and `const char *` as compatible, which is right for its own
+//    callers but would wrongly reject the const-correct <string.h>
+//    dispatch macros. The C notion of compatible types keeps qualifiers,
+//    so require them to agree at the top level and down every matched
+//    pointer level.
+//  - CCCC does not model `long` and `long long` as distinct types (both
+//    are TY_LONG, same size/rank), so it cannot tell a genuine `long:` /
+//    `long:` duplicate from the ubiquitous `long:` / `long long:` pair
+//    that <stdbit.h>/<tgmath.h>/... rely on. Never flag a TY_LONG-vs-
+//    TY_LONG pair -- accepting a rare real duplicate is far better than
+//    rejecting valid stdlib headers.
+static bool assoc_types_collide(Type *a, Type *b) {
+    if (!a || !b)
+        return false;
+    if (a->is_const != b->is_const || a->is_volatile != b->is_volatile)
+        return false;
+    if (a->kind == TY_PTR && b->kind == TY_PTR)
+        return assoc_types_collide(a->base, b->base);
+    if (a->kind == TY_LONG && b->kind == TY_LONG)
+        return false;
+    return is_compatible(a, b);
+}
+
 // generic-selection = "(" assign "," generic-assoc ("," generic-assoc)* ")"
 //
 // generic-assoc = type-name ":" assign
@@ -1045,12 +1072,27 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *match        = NULL;
     Node *default_node = NULL;
 
+    // #1224: C23 6.7.11p2 -- a generic selection has at most one `default`
+    // association, and no two associations may specify mutually compatible
+    // types. gcc and clang both hard-error on a violation; track the
+    // associations seen so far (Level 1 has no parser recovery, so a single
+    // error_tok at the offending arm is the whole diagnostic).
+    bool seen_default = false;
+    struct AssocSeen {
+        Type             *ty;
+        struct AssocSeen *next;
+    } *seen = NULL;
+
     while (!consume(vm, rest, tok, ")")) {
         tok = skip(vm, tok, ",");
 
         if (equal(tok, "default")) {
-            tok        = skip(vm, tok->next, ":");
-            Node *node = assign(vm, &tok, tok);
+            Token *kw = tok;
+            tok       = skip(vm, tok->next, ":");
+            if (seen_default)
+                error_tok(vm, kw, "duplicate 'default' case in '_Generic'");
+            seen_default = true;
+            Node *node   = assign(vm, &tok, tok);
             if (!default_node)
                 default_node = node;
             continue;
@@ -1060,12 +1102,24 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
         // association colon -- a C23 `enum E : T` underlying type may not
         // be spelled here (matching gcc/clang). enum_specifier() consults
         // this flag; save/restore so nested _Generic composes.
-        bool saved_ga                 = vm->compiler.in_generic_assoc;
+        Token *ty_tok                 = tok;
+        bool   saved_ga               = vm->compiler.in_generic_assoc;
         vm->compiler.in_generic_assoc = true;
         Type *t2                      = typename(vm, &tok, tok);
         vm->compiler.in_generic_assoc = saved_ga;
-        tok                           = skip(vm, tok, ":");
-        Node *node                    = assign(vm, &tok, tok);
+
+        for (struct AssocSeen *s = seen; s; s = s->next)
+            if (assoc_types_collide(s->ty, t2))
+                error_tok(vm, ty_tok,
+                          "'_Generic' specifies two compatible types");
+        struct AssocSeen *entry =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(struct AssocSeen));
+        entry->ty   = t2;
+        entry->next = seen;
+        seen        = entry;
+
+        tok         = skip(vm, tok, ":");
+        Node *node  = assign(vm, &tok, tok);
         if (!match && is_compatible(t1, t2))
             match = node;
     }

@@ -46,3 +46,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `enum E : T` underlying type inside an association
   (`_Generic(x, enum E : int : …)`) is a compile error — the `:` there is
   the association colon.
+- `_Generic` now rejects a selection with more than one `default`
+  association or with two associations that specify compatible types
+  (C23 6.7.11p2), matching GCC/clang — previously the first matching arm
+  was taken silently. `long` and `long long` associations in the same
+  `_Generic` are still accepted (CCCC models them as one type), as is the
+  `char *` / `const char *` const-correct dispatch idiom.
