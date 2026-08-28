@@ -17,6 +17,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   ternary `return`), and self-tail-call elimination via loop-and-reassign.
   `examples/ccccl/build.c` is now a plain `Makefile` (cccc can't build
   itself as a `build.c` target yet). See `examples/ccccl/README.md`.
+- `examples/ccccl/` gains a second mode. A `.lisp` file may now carry
+  toplevel executable forms (anything that isn't a `(define ...)`) alongside
+  its defines; they are collected into one synthesized `ccccl_toplevel`
+  function, in file order, with every `define` hoisted so an executable
+  form can call one defined later in the file. When a file has any such
+  form, the comptime pass also synthesizes `int main(void)` itself, so the
+  file is a self-contained program that needs no hand-written host
+  translation unit at all — `cccc -c=native src/ccccl_comptime.c
+  runtime/ccccl_rt.c -DCCCCL_LISP_PATH='"examples/hello.lisp"' -o hello`
+  builds and links it in one step. A file that is pure `define`s is
+  unchanged: no `main`, driven by a hand-written host TU as before. New
+  `examples/hello.lisp` demonstrates program mode.
 - `-c=native`/`-m`/`-c=generated` no longer misidentify a struct with a
   pointer or function-pointer member (a self-referential cons-cell shape,
   or a closure/callback slot) as two colliding tags when it's completed

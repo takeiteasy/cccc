@@ -333,9 +333,27 @@ Node *ccccl_emit_stmt(CccclPlan *plan, CccclPlanFn *fn, Node **bn,
             int   i;
             if (e->child_count == 0)
                 return Quote("$1 = ccccl_nil;", dest);
-            for (i = 0; i < e->child_count - 1; i++)
-                stmts[i] = Quote("$1;", ccccl_emit_val(plan, fn, bn, lobj_ptr,
-                                                       e->children[i]));
+            for (i = 0; i < e->child_count - 1; i++) {
+                int           ci = e->children[i];
+                CccclExprKind ck = plan->exprs[ci].kind;
+                if (ck == CK_IF || ck == CK_COND || ck == CK_LET ||
+                    ck == CK_PROGN) {
+                    /* A control-flow form in non-tail position -- reachable
+                     * only from a toplevel PROGN (a define body's PROGN
+                     * never nests one non-last), and ccccl_emit_val has no
+                     * case for these four. Route it through emit_stmt
+                     * targeting `dest` itself: PROGN's value is its last
+                     * form's, so these earlier writes into `dest` are dead
+                     * stores the host compiler drops -- and reusing `dest`
+                     * (already live via the tail child and the `return`)
+                     * avoids a set-but-unused scratch local under -Wall. */
+                    stmts[i] = ccccl_emit_stmt(plan, fn, bn, lobj_ptr, ci, dest,
+                                               again);
+                } else {
+                    stmts[i] = Quote(
+                        "$1;", ccccl_emit_val(plan, fn, bn, lobj_ptr, ci));
+                }
+            }
             return ccccl_seq(stmts, e->child_count - 1,
                              ccccl_emit_stmt(plan, fn, bn, lobj_ptr,
                                              e->children[e->child_count - 1],
@@ -404,6 +422,8 @@ void ccccl_declare_fn_objs(CccclPlan *plan, Type *lobj_ptr, Obj **fn_objs,
             for (k = 0; k < pf->param_count; k++)
                 FunctionAddParam(obj, pf->bindings[k].c_name, lobj_ptr);
         }
+        if (pf->is_toplevel_body)
+            FunctionSetStatic(obj, 1);
         PublishNode(obj);
         fn_objs[i]    = obj;
 
@@ -508,7 +528,8 @@ void ccccl_compile(void) {
     Obj               *fn_objs[CL_MAX_FNS];
     Obj               *thunk_objs[CL_MAX_FNS];
     Type              *lobj_ty, *lobj_ptr;
-    int                n, i;
+    CccclPlanFn       *prog_fn = NULL;
+    int                n, i, have_prog = 0;
 
     ccccl_reader_init(&reader);
     ccccl_plan_init(&plan);
@@ -522,6 +543,22 @@ void ccccl_compile(void) {
         toplevel_fns[i] = ccccl_declare_toplevel(&plan, forms[i]);
     for (i = 0; i < n; i++)
         ccccl_lower_toplevel_body(&plan, forms[i], toplevel_fns[i]);
+
+    /* "Program" mode: any toplevel form that isn't a `(define ...)` is an
+     * executable form. Collect them into one synthesized `ccccl_toplevel`
+     * function; a generated `main()` (emitted last, below) calls it. A file
+     * with only defines stays "library" mode -- no ccccl_toplevel, no main,
+     * driven by a hand-written host TU as before. */
+    for (i = 0; i < n; i++)
+        if (!ccccl_form_is_define(forms[i])) {
+            have_prog = 1;
+            break;
+        }
+    if (have_prog && !plan.has_error) {
+        prog_fn = ccccl_new_toplevel_fn(&plan);
+        ccccl_lower_toplevel_exprs(&plan, prog_fn, forms, n);
+    }
+
     if (plan.has_error) {
         MacroErrorAt(NULL, "ccccl: %s", plan.error);
         return;
@@ -549,6 +586,19 @@ void ccccl_compile(void) {
     for (i = 0; i < plan.fn_count; i++)
         if (thunk_objs[i])
             ccccl_emit_thunk(&plan.fns[i], thunk_objs[i], lobj_ptr);
+
+    /* Emitted last, so `ccccl_toplevel`'s own definition already precedes it
+     * (no inserted forward declaration). `ccccl_rt_init` /
+     * `ccccl_newline_stdout` resolve because ccccl_rt.h is `#include @shared`
+     * -- the same reason PRINT can call `ccccl_print_stdout`. */
+    if (prog_fn) {
+        Obj *main_obj = MakeFunction("main", GetType("int"));
+        WithFn(main_obj) {
+            FunctionSetBody(main_obj,
+                            Quote("{ ccccl_rt_init(); ccccl_toplevel(); "
+                                  "ccccl_newline_stdout(); return 0; }"));
+        }
+    }
 }
 
 ccccl_compile();

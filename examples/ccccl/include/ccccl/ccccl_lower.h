@@ -135,7 +135,8 @@ static int ccccl_intern_sym(CccclPlan *p, const char *name) {
 static int ccccl_find_fn(CccclPlan *p, const char *lisp_name) {
     int i;
     for (i = 0; i < p->fn_count; i++)
-        if (!p->fns[i].is_lambda && strcmp(p->fns[i].lisp_name, lisp_name) == 0)
+        if (!p->fns[i].is_lambda && !p->fns[i].is_toplevel_body &&
+            strcmp(p->fns[i].lisp_name, lisp_name) == 0)
             return i;
     return -1;
 }
@@ -154,6 +155,7 @@ static CccclPlanFn *ccccl_new_fn(CccclPlan *p, const char *lisp_name,
     fn->body               = -1;
     fn->is_lambda          = is_lambda;
     fn->needs_thunk        = 0;
+    fn->is_toplevel_body   = 0;
     if (lisp_name) {
         strncpy(fn->lisp_name, lisp_name, sizeof(fn->lisp_name) - 1);
         ccccl_mangle(lisp_name, fn->c_name, (int)sizeof(fn->c_name));
@@ -294,6 +296,15 @@ static int ccccl_lower_quote(CccclPlan *p, CccclForm *form) {
 
 static int ccccl_form_is_atom(CccclForm *f, const char *text) {
     return f->kind == CL_FORM_ATOM && strcmp(f->atom, text) == 0;
+}
+
+/* A toplevel `(define ...)` form -- as opposed to a toplevel *executable*
+ * form (any other list, or an atom), which "program"-mode .lisp files carry
+ * alongside their defines. Only checks the head; ccccl_declare_toplevel
+ * validates the rest of the shape. */
+static int ccccl_form_is_define(CccclForm *form) {
+    return form->kind == CL_FORM_PAIR &&
+           ccccl_form_is_atom(form->car, "DEFINE");
 }
 
 /* Lowers a LAMBDA/LABEL form's params+body into `fn` (already created by
@@ -576,21 +587,53 @@ static int ccccl_lower_expr(CccclPlan *p, Scope *sc, CccclForm *e,
  * this, a body-lowering pass sees only the *earlier* defines' names via
  * ccccl_find_fn, so a forward reference (including true mutual recursion
  * between two defines) falls through to the generic runtime-apply path
- * instead of CL_OP_CALL_DIRECT. */
+ * instead of CL_OP_CALL_DIRECT.
+ *
+ * A toplevel form that is *not* a `(define ...)` is an executable form
+ * (see ccccl_lower_toplevel_exprs) -- returns NULL without an error, and
+ * ccccl_compile lowers it in a separate pass. */
 static CccclPlanFn *ccccl_declare_toplevel(CccclPlan *p, CccclForm *form) {
     if (p->has_error)
         return NULL;
-    if (form->kind == CL_FORM_PAIR && ccccl_form_is_atom(form->car, "DEFINE")) {
-        CccclForm  *sig  = form->cdr->car; /* (name params...) */
-        const char *name = sig->car->atom;
-        if (ccccl_find_fn(p, name) >= 0) {
-            ccccl_lower_error(p, "duplicate toplevel define");
+    if (!ccccl_form_is_define(form))
+        return NULL;
+    {
+        CccclForm *sig  = form->cdr->kind == CL_FORM_PAIR ? form->cdr->car : 0;
+        CccclForm *rest = form->cdr->kind == CL_FORM_PAIR ? form->cdr->cdr : 0;
+        if (!sig || sig->kind != CL_FORM_PAIR ||
+            sig->car->kind != CL_FORM_ATOM || !rest ||
+            rest->kind != CL_FORM_PAIR) {
+            ccccl_lower_error(
+                p, "expected (define (name params...) body) at toplevel");
             return NULL;
         }
-        return ccccl_new_fn(p, name, 0);
+        {
+            const char *name = sig->car->atom;
+            if (ccccl_find_fn(p, name) >= 0) {
+                ccccl_lower_error(p, "duplicate toplevel define");
+                return NULL;
+            }
+            return ccccl_new_fn(p, name, 0);
+        }
     }
-    ccccl_lower_error(p, "expected (define (name params...) body) at toplevel");
-    return NULL;
+}
+
+/* The one synthesized function that holds a "program"-mode file's toplevel
+ * executable forms. `ccccl_new_fn` with a NULL name gives it a gensym'd
+ * `ccccl_lambda_N` C name and marks it `is_lambda`; override both -- it is
+ * emitted as `static LObj *ccccl_toplevel(void)` (a plain nullary function,
+ * not the `(captures, args)` closure entry point; the generated `main()`
+ * discards its return), and `is_toplevel_body` keeps ccccl_find_fn from
+ * ever resolving a Lisp call to it. */
+static CccclPlanFn *ccccl_new_toplevel_fn(CccclPlan *p) {
+    CccclPlanFn *fn = ccccl_new_fn(p, NULL, 0);
+    if (p->has_error)
+        return fn;
+    fn->is_lambda        = 0;
+    fn->is_toplevel_body = 1;
+    snprintf(fn->lisp_name, sizeof(fn->lisp_name), "<toplevel>");
+    snprintf(fn->c_name, sizeof(fn->c_name), "ccccl_toplevel");
+    return fn;
 }
 
 /* Lowers a toplevel define's params+body into the CccclPlanFn
@@ -607,6 +650,63 @@ static void ccccl_lower_toplevel_body(CccclPlan *p, CccclForm *form,
         CccclForm *params = sig->cdr;
         ccccl_lower_fn_body(p, fn, NULL, params, body, NULL);
     }
+}
+
+/* Folds `ex[0..n)` (n >= 1) into a CK_PROGN chain, packing
+ * `CL_MAX_CHILDREN - 1` expression slots per node and reserving the last
+ * slot for the nested continuation -- `(progn e0 .. e14 (progn e15 ..))` --
+ * so order and the overall tail value are both preserved past
+ * CL_MAX_CHILDREN forms. Built back to front so an earlier node can point
+ * at an already-created later one. */
+static int ccccl_progn_chain(CccclPlan *p, int *ex, int n) {
+    int       tail  = -1;
+    const int chunk = CL_MAX_CHILDREN - 1;
+    int       start;
+    for (start = ((n - 1) / chunk) * chunk; start >= 0; start -= chunk) {
+        int idx = ccccl_new_expr(p, CK_PROGN);
+        int cnt = n - start;
+        int k;
+        if (cnt > chunk)
+            cnt = chunk;
+        for (k = 0; k < cnt; k++)
+            p->exprs[idx].children[k] = ex[start + k];
+        if (tail >= 0)
+            p->exprs[idx].children[cnt++] = tail;
+        p->exprs[idx].child_count = cnt;
+        tail                      = idx;
+    }
+    return tail;
+}
+
+/* "Program"-mode lowering: every toplevel form that is NOT a `(define ...)`
+ * is an executable form, lowered here into the synthesized `ccccl_toplevel`
+ * function (ccccl_new_toplevel_fn) as one CK_PROGN body, in file order. The
+ * two-pass declare-then-lower in ccccl_compile means a `define` anywhere in
+ * the file -- before or after -- is already visible to ccccl_find_fn, so an
+ * executable form can call any of them. Forms are lowered with is_tail = 0:
+ * nothing at toplevel is a self tail call. */
+static void ccccl_lower_toplevel_exprs(CccclPlan *p, CccclPlanFn *fn,
+                                       CccclForm **forms, int n) {
+    int   ex[64]; /* matches ccccl_read_file's own top-level form cap */
+    int   ne = 0, i;
+    Scope sc;
+    if (p->has_error || !fn)
+        return;
+    sc.fn         = fn;
+    sc.parent     = 0;
+    sc.active_len = 0;
+    for (i = 0; i < n; i++) {
+        if (ccccl_form_is_define(forms[i]))
+            continue;
+        if (ne >= (int)(sizeof(ex) / sizeof(ex[0]))) {
+            ccccl_lower_error(p, "too many toplevel forms");
+            return;
+        }
+        ex[ne++] = ccccl_lower_expr(p, &sc, forms[i], 0);
+        if (p->has_error)
+            return;
+    }
+    fn->body = (ne == 1) ? ex[0] : ccccl_progn_chain(p, ex, ne);
 }
 
 #ifdef __cplusplus

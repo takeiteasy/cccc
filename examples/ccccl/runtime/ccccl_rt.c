@@ -35,6 +35,18 @@ static void ccccl_rt_fatal(const char *msg) {
     exit(1);
 }
 
+/* Two-part variant, so callers can name an operator without `snprintf`.
+ * `snprintf` is a fortify macro (`__builtin___snprintf_chk`) in the macOS
+ * SDK headers; cccc's `-c=native` serializer emits its own plain
+ * `int snprintf(...)` prototype for it when no shared TU pulls <stdio.h>
+ * directly (a "program"-mode .lisp file has no hand-written host TU that
+ * would), and that plain prototype then collides with the macro. `fprintf`
+ * has no `_chk` form, so this path is safe where `snprintf` was not. */
+static void ccccl_rt_fatal2(const char *a, const char *b) {
+    fprintf(stderr, "ccccl: %s%s\n", a, b);
+    exit(1);
+}
+
 static LObj *alloc_cell(void) {
     if (g_cell_next >= CCCCL_RT_ARENA_CELLS)
         ccccl_rt_fatal("cell arena exhausted");
@@ -111,11 +123,8 @@ LObj *ccccl_eq(LObj *a, LObj *b) {
 }
 
 static long ccccl_as_int(LObj *x, const char *who) {
-    if (x->tag != CCCCL_INT) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%s: not a number", who);
-        ccccl_rt_fatal(buf);
-    }
+    if (x->tag != CCCCL_INT)
+        ccccl_rt_fatal2(who, ": not a number");
     return x->as.ival;
 }
 
@@ -214,4 +223,8 @@ void ccccl_print(LObj *x, FILE *out) {
 LObj *ccccl_print_stdout(LObj *x) {
     ccccl_print(x, stdout);
     return x;
+}
+
+void ccccl_newline_stdout(void) {
+    fputc('\n', stdout);
 }

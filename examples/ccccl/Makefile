@@ -14,7 +14,12 @@ CCCC ?= ../../cccc
 CC   ?= cc
 CFLAGS ?= -O2 -Wall
 
-EXAMPLES := append lambda_head mutual reverse fib adder letsum
+# "library" examples: .lisp defines functions only, a hand-written
+# examples/NAME_main.c drives them.  "program" examples: .lisp defines *and*
+# runs toplevel forms, cccc synthesizes main(), no host TU exists.
+LIB_EXAMPLES  := append lambda_head mutual reverse fib adder letsum
+PROG_EXAMPLES := hello
+EXAMPLES      := $(LIB_EXAMPLES) $(PROG_EXAMPLES)
 
 COMPTIME_SRC  := src/ccccl_comptime.c
 COMPTIME_HDRS := include/ccccl/ccccl_ir.h include/ccccl/ccccl_form.h \
@@ -37,10 +42,15 @@ build/%.gen.c: examples/%.lisp $(COMPTIME_SRC) $(COMPTIME_HDRS) $(RT_HDRS) | bui
 	$(CCCC) -c=generated $(COMPTIME_SRC) -Iinclude/ccccl -Iruntime \
 	    -DCCCCL_LISP_PATH='"examples/$*.lisp"' -o $@
 
-# examples/%_main.c is never passed to cccc at all -- plain C, compiled and
-# linked by the system cc alongside the generated output and the runtime.
-build/%: build/%.gen.c examples/%_main.c $(RT_SRC) $(RT_HDRS)
+# Library examples: examples/%_main.c is never passed to cccc at all -- plain
+# C, compiled and linked by the system cc alongside the generated output and
+# the runtime.  Program examples link only the generated output (which
+# carries its own main()) and the runtime.
+$(LIB_EXAMPLES:%=build/%): build/%: build/%.gen.c examples/%_main.c $(RT_SRC) $(RT_HDRS)
 	$(CC) $(CFLAGS) -Iruntime -o $@ examples/$*_main.c build/$*.gen.c $(RT_SRC)
+
+$(PROG_EXAMPLES:%=build/%): build/%: build/%.gen.c $(RT_SRC) $(RT_HDRS)
+	$(CC) $(CFLAGS) -Iruntime -o $@ build/$*.gen.c $(RT_SRC)
 
 check: all
 	@status=0; \
@@ -63,7 +73,9 @@ check: all
 native: | build
 	@status=0; \
 	for ex in $(EXAMPLES); do \
-	    $(CCCC) -c=native $(COMPTIME_SRC) examples/$${ex}_main.c $(RT_SRC) \
+	    main=examples/$${ex}_main.c; \
+	    [ -f "$$main" ] || main=; \
+	    $(CCCC) -c=native $(COMPTIME_SRC) $$main $(RT_SRC) \
 	        -Iinclude/ccccl -Iruntime \
 	        -DCCCCL_LISP_PATH="\"examples/$$ex.lisp\"" \
 	        -o build/$${ex}_native || { status=1; continue; }; \

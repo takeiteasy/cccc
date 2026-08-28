@@ -104,9 +104,16 @@ typedef struct {
 } CccclBinding;
 
 typedef struct {
-    char         lisp_name[CL_NAME_LEN];
-    char         c_name[CL_NAME_LEN + 32];
-    int          is_lambda; /* anonymous, gensym'd C name */
+    char lisp_name[CL_NAME_LEN];
+    char c_name[CL_NAME_LEN + 32];
+    int  is_lambda; /* anonymous, gensym'd C name */
+
+    /* The one synthesized function holding a "program"-mode .lisp file's
+     * toplevel executable forms (see ccccl_lower.h's
+     * ccccl_lower_toplevel_exprs). Named `ccccl_toplevel`, emitted `static`,
+     * called from the generated `main()`. Never a lambda, never has a Lisp
+     * name that could resolve as a call target (ccccl_find_fn skips it). */
+    int          is_toplevel_body;
 
     CccclBinding bindings[CL_MAX_BINDINGS];
     int          binding_count;

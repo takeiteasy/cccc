@@ -20,6 +20,21 @@ every example below. There is no `cccc as target` support in the `build.c`
 DSL yet, so this directory is built with a plain `Makefile`, not
 `cccc --build build.c`.
 
+`append.lisp` above is a *library*: it defines a function and a
+hand-written `examples/append_main.c` calls it. A `.lisp` file that also
+carries toplevel executable forms is a self-contained *program* — the
+comptime pass synthesizes `main()` for it, so no hand-written C is involved
+at all:
+
+```sh
+cccc -c=native src/ccccl_comptime.c runtime/ccccl_rt.c \
+    -Iinclude/ccccl -Iruntime -DCCCCL_LISP_PATH='"examples/hello.lisp"' \
+    -o hello
+./hello   # -> 3628800(DONE)
+```
+
+See [Toplevel forms and `main`](#toplevel-forms-and-main) below.
+
 This is a condensed copy kept as a worked example of cccc's comptime pass,
 not a full project checkout — it has no test suite or `docs/` subdirectory
 of its own, and `make -C examples/ccccl check`/`native` is a separate,
@@ -261,6 +276,56 @@ for the direct self-tail case.
 inside one function, and mutual recursion between two independently-defined
 toplevel `define`s (`examples/mutual.lisp`) all work.
 
+## Toplevel forms and `main`
+
+A `.lisp` file is one of two shapes, chosen automatically by whether it has
+any toplevel form that is **not** a `(define ...)`:
+
+- **library** — `define`s only. Lowers to a set of C functions with no
+  `main`; a hand-written `examples/NAME_main.c` builds the inputs, calls in,
+  and prints. Every example except `hello` is this shape. This is the
+  embedding use case: drop lowered Lisp functions into a larger C program.
+- **program** — `define`s *and* bare executable forms (`(print ...)`,
+  `(let ...)`, a call, …). The executable forms are collected, **in file
+  order**, into one synthesized `static LObj *ccccl_toplevel(void)`, and the
+  comptime pass also synthesizes
+
+  ```c
+  int main(void) {
+      ccccl_rt_init();
+      ccccl_toplevel();
+      ccccl_newline_stdout();   /* one trailing '\n', like every NAME_main.c */
+      return 0;
+  }
+  ```
+
+  so the file is a complete program with no hand-written C anywhere.
+
+Every `define` is hoisted (the two-pass declare-then-lower already does this
+for mutual recursion), so an executable form can call a `define` that
+appears **later** in the file. Order matters only among the executable forms
+themselves — a `define` has no runtime effect, so "interleaved with the
+defines" and "after all the defines" are the same observable behaviour.
+
+```lisp
+;; examples/hello.lisp — a program: runs on its own, no host TU.
+(let ((n 10))            ; executable form, and it calls `fact`...
+  (print (fact n)))
+(print (quote (done)))
+
+(define (fact n)         ; ...which is only defined here, lower down.
+  (if (< n 2) 1 (* n (fact (- n 1)))))
+```
+
+```sh
+make -C examples/ccccl show-hello   # the generated ccccl_toplevel + main
+```
+
+`print` writes no newline of its own, so a program's output is the
+concatenation of its `print` calls followed by the single `\n` the
+generated `main` adds — `hello` prints `3628800` then `(DONE)` then the
+newline, hence `3628800(DONE)` in `examples/hello.expected`.
+
 Deliberately out of scope: strings, characters, `defmacro`, vectors, garbage
 collection (fixed arenas, sized for this project's own examples — see each
 `CL_MAX_*`/`CCCCL_RT_*` constant). Constant folding of fixnum arithmetic at
@@ -279,9 +344,11 @@ this compiler could do, just not one built here.
 | `fib.lisp` | fixnums, `+`/`-`/`<`, `if` |
 | `adder.lisp` | a real lexical closure capture, and a toplevel name used in value position (the `__thunk` path) |
 | `letsum.lisp` | `let` → real C locals, `progn`, `print` (prints the sum twice — once from the Lisp `(print s)`, once from `letsum_main.c` printing the returned value, hence `77` in `letsum.expected`) |
+| `hello.lisp` | *program* mode: toplevel executable forms + a synthesized `main()`, no hand-written `NAME_main.c`; a `define` referenced by an executable form that appears before it (hoisting) |
 
-Each has a `NAME.lisp`, a hand-written `NAME_main.c`, and a `NAME.expected`
-— `make check`/`make native` build, run, and diff every one.
+Every example has a `NAME.lisp` and a `NAME.expected`; the library ones also
+have a hand-written `NAME_main.c` (`hello`, being a program, does not).
+`make check`/`make native` build, run, and diff every one.
 
 ## Lowering, worked example
 

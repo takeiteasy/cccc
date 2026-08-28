@@ -86,8 +86,12 @@ void ccccl_print(LObj *x, FILE *out);
 /* `ccccl_print(x, stdout)`, for generated code: `stdout` is a libc macro,
  * not a plain extern, and is not reliably nameable from a `Quote()`
  * template even via `#include @shared` -- PRINT's codegen calls this
- * instead of spelling `stdout` itself. */
+ * instead of spelling `stdout` itself. `ccccl_newline_stdout` writes a
+ * single '\n' to stdout for the same reason: the synthesized `main()` of a
+ * "program"-mode file calls it once at the end, doing the job the trailing
+ * `fputc('\n', stdout)` of every hand-written `NAME_main.c` does today. */
 LObj *ccccl_print_stdout(LObj *x);
+void ccccl_newline_stdout(void);
 
 #ifdef __cplusplus
 }

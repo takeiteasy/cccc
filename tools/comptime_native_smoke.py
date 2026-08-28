@@ -7136,6 +7136,68 @@ def case_self_ref_fnptr_dup_tag_1233(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# A comptime routine that synthesizes the program's `main` itself -- no
+# `main` anywhere in the source text. examples/ccccl's "program" mode
+# depends on this: a .lisp file with toplevel executable forms has cccc
+# generate `int main(void)` around them, with no hand-written host TU.
+GENERATED_MAIN_PROGRAM = (
+    "[[cccc::comptime]]\n"
+    "void gen_program(void) {\n"
+    "    Obj *m = MakeFunction(\"main\", GetType(\"int\"));\n"
+    "    WithFn(m) {\n"
+    "        FunctionSetBody(m, Quote(\"{ int n = 0; for (int i = 0; i < 7; i++)"
+    " n += 6; return n; }\"));\n"
+    "    }\n"
+    "}\n"
+    "gen_program();\n"
+)
+
+
+def case_comptime_generated_main_is_entry_point(cccc: Path, tmp: str) -> bool:
+    print("  150: a comptime routine that synthesizes `int main(void)` "
+          "itself (no `main` in the source text) -- examples/ccccl's "
+          "\"program\" mode -- yields that generated main as the real entry "
+          "point under the VM, -c=native, and -c=generated alike.")
+    src = Path(tmp) / "generated_main_program.c"
+    write(src, GENERATED_MAIN_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "generated_main_program_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+
+    gen_c = Path(tmp) / "generated_main_program.gen.c"
+    gen = run([str(cccc), "-c=generated", "-o", gen_c.name, src.name], cwd=tmp)
+    if gen.returncode != 0:
+        print(f"    FAIL: -c=generated exited {gen.returncode}\n    {gen.stderr}")
+        return False
+    if "int main(void)" not in gen_c.read_text():
+        print(f"    FAIL: generated C has no synthesized main\n"
+              f"    {gen_c.read_text()}")
+        return False
+    gen_bin = Path(tmp) / "generated_main_program_gen_out"
+    cc_res = run(["cc", "-o", gen_bin.name, gen_c.name], cwd=tmp)
+    if cc_res.returncode != 0:
+        print(f"    FAIL: cc of generated C exited {cc_res.returncode}\n"
+              f"    {cc_res.stderr}")
+        return False
+    if run([f"./{gen_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: generated-C binary did not exit 42")
+        return False
+
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -7290,6 +7352,7 @@ CASES = [
     case_layout_guards_no_flag_and_emit_strict_1172,
     case_shim_used_across_tus_1233,
     case_self_ref_fnptr_dup_tag_1233,
+    case_comptime_generated_main_is_entry_point,
 ]
 
 
@@ -7297,7 +7360,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
