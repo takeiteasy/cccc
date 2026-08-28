@@ -637,11 +637,17 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                 break;
             // #1180: `L` on a float conversion (%Lf/%Le/%Lg/%La) means the
             // argument arrives as a real `long double` -- flag it so the
-            // conversion arm below fetches the wider varargs slot. On any
-            // other conversion the flag is never consulted and `L` is
-            // silently ignored, same as the #829 decimal modifiers.
+            // conversion arm below fetches the wider varargs slot.
+            // #1228: `L` on an integer conversion (%Ld/%Li/%Lu/%Lo/%Lx/%Lb)
+            // is the pre-C99 GNU spelling of `ll` -- glibc still accepts it,
+            // so set STBSP__INTMAX too or `%Ld` would read a 32-bit slot and
+            // desync every later argument (only observable against host glibc
+            // under -c=native, class #1170, but harmless to match). The two
+            // flags are independent: the float arms consult only LONGDOUBLE,
+            // the radixnum / u,i,d arms consult only INTMAX, so whichever
+            // conversion follows picks up exactly the one it needs.
             case 'L':
-                fl |= STBSP__LONGDOUBLE;
+                fl |= STBSP__LONGDOUBLE | STBSP__INTMAX;
                 ++f;
                 break;
             // #829: _Decimal32/64/128 length modifiers. Only meaningful on a
@@ -717,6 +723,12 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
 
             case 'n': // weird write-bytes specifier
             {
+                // BUG (#1230, pre-existing): the length modifier is ignored
+                // here -- %hhn/%hn/%ln/%lln/%Ln all write a plain 4-byte int,
+                // where glibc writes signed char / short / long / long long
+                // respectively. Wider than #1228's %Ld fix; needs its own
+                // change (a modifier-switched store like store_int in
+                // format_scanf.c) plus a matching -F checker arm.
                 int *d = va_arg(va, int *);
                 *d     = tlen + (int)(bf - buf);
             } break;

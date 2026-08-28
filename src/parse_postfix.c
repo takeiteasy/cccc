@@ -581,8 +581,14 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                         case 'd':
                         case 'i':
                         case 'c':
-                            // l/ll/j/t → long; h/hh/none → int (promoted)
-                            if (mod == 3 || mod == 4 || mod == 7 || mod == 8)
+                            // l/ll/j/t → long; h/hh/none → int (promoted).
+                            // #1228: L on an integer conversion is the GNU
+                            // pre-C99 spelling of ll (glibc accepts %Ld), so
+                            // it expects `long` too -- %Lc is nonsense glibc
+                            // rejects, an over-approximation in a warning path
+                            // costs nothing.
+                            if (mod == 3 || mod == 4 || mod == 5 || mod == 7 ||
+                                mod == 8)
                                 expected[num_expected++] = FMT_EXPECT_LONG;
                             else
                                 expected[num_expected++] = FMT_EXPECT_INT;
@@ -592,8 +598,9 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                         case 'x':
                         case 'X':
                             // l/ll/z/j → unsigned long; h/hh/none → unsigned
-                            // int (promoted)
-                            if (mod == 3 || mod == 4 || mod == 6 || mod == 7)
+                            // int (promoted). #1228: L == ll here too.
+                            if (mod == 3 || mod == 4 || mod == 5 || mod == 6 ||
+                                mod == 7)
                                 expected[num_expected++] = FMT_EXPECT_ULONG;
                             else
                                 expected[num_expected++] = FMT_EXPECT_UINT;
@@ -637,7 +644,11 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                     switch (c) {
                         case 'd':
                         case 'i':
-                            if (mod == 3 || mod == 4 || mod == 7 || mod == 8)
+                            // #1228: L == ll here too (scanf %Ld → long long*,
+                            // matching glibc; this checker doesn't distinguish
+                            // long from long long, same as mod == 4).
+                            if (mod == 3 || mod == 4 || mod == 5 || mod == 7 ||
+                                mod == 8)
                                 expected[num_expected++] = FMT_EXPECT_LONG_PTR;
                             else if (mod == 2)
                                 expected[num_expected++] = FMT_EXPECT_SHORT_PTR;
@@ -650,7 +661,8 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                         case 'o':
                         case 'x':
                         case 'X':
-                            if (mod == 3 || mod == 4 || mod == 6 || mod == 7)
+                            if (mod == 3 || mod == 4 || mod == 5 || mod == 6 ||
+                                mod == 7)
                                 expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
                             else
                                 expected[num_expected++] = FMT_EXPECT_UINT_PTR;

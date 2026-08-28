@@ -104,6 +104,13 @@ static void store_int(void *ptr, int lenmod, unsigned long long val) {
         case LEN_ll:
             *(unsigned long long *)ptr = (unsigned long long)val;
             break;
+        case LEN_L:
+            // #1228: `%Ld`/`%Li`/`%Lu`/`%Lx` is the pre-C99 GNU spelling of
+            // `ll` on an integer conversion -- glibc's scanf writes a
+            // `long long` here, so match it rather than falling to the
+            // 4-byte default below.
+            *(unsigned long long *)ptr = (unsigned long long)val;
+            break;
         case LEN_j:
             *(uintmax_t *)ptr = (uintmax_t)val;
             break;
