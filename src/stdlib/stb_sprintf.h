@@ -314,6 +314,18 @@ STBSP__PUBLICDEF void STB_SPRINTF_DECORATE(set_separators)(char pcomma,
 #define STBSP__METRIC_NOSPACE 1024
 #define STBSP__METRIC_1024    2048
 #define STBSP__METRIC_JEDEC   4096
+// #1180: set by `case 'L'` in the size-override switch; consumed by the
+// float conversion arms to fetch a real `long double` off the varargs
+// frame. CCCC's VM widens its 8-byte `long double` (modeled at `double`
+// precision, #491) to the host representation at the FFI boundary
+// (src/ops.c), and for -c=native glibc's own printf receives a genuine
+// `long double` -- either way `%Lf` must pull the wider slot here or the
+// argument frame desyncs. The value is then narrowed back to the `double`
+// this engine formats in.
+#define STBSP__LONGDOUBLE 8192
+#define STBSP__FETCH_FLOAT(va, fl)                                             \
+    (((fl) & STBSP__LONGDOUBLE) ? (double)va_arg(va, long double)              \
+                                : va_arg(va, double))
 
 static void stbsp__lead_sign(stbsp__uint32 fl, char *sign) {
     sign[0] = 0;
@@ -623,11 +635,19 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                     ++f;
                 }
                 break;
+            // #1180: `L` on a float conversion (%Lf/%Le/%Lg/%La) means the
+            // argument arrives as a real `long double` -- flag it so the
+            // conversion arm below fetches the wider varargs slot. On any
+            // other conversion the flag is never consulted and `L` is
+            // silently ignored, same as the #829 decimal modifiers.
+            case 'L':
+                fl |= STBSP__LONGDOUBLE;
+                ++f;
+                break;
             // #829: _Decimal32/64/128 length modifiers. Only meaningful on a
             // float conversion (f/F/e/E/g/G) -- see cccc__dec_stb_render's
             // three call sites below; on any other conversion dec_w is simply
-            // never consulted, same as an 'L' modifier on %d is silently
-            // ignored today.
+            // never consulted, same as an 'L' modifier on %d.
             case 'H':
                 dec_w = 0; // _Decimal32
                 ++f;
@@ -702,14 +722,14 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
             } break;
 
 #ifdef STB_SPRINTF_NOFLOAT
-            case 'A':               // float
-            case 'a':               // hex float
-            case 'G':               // float
-            case 'g':               // float
-            case 'E':               // float
-            case 'e':               // float
-            case 'f':               // float
-                va_arg(va, double); // eat it
+            case 'A':                             // float
+            case 'a':                             // hex float
+            case 'G':                             // float
+            case 'g':                             // float
+            case 'E':                             // float
+            case 'e':                             // float
+            case 'f':                             // float
+                (void)STBSP__FETCH_FLOAT(va, fl); // eat it (#1180: wider if %L)
                 s       = (char *)"No float";
                 l       = 8;
                 lead[0] = 0;
@@ -719,12 +739,12 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                 STBSP__NOTUSED(dp);
                 goto scopy;
 #else
-            case 'A': // hex float
-            case 'a': // hex float
+            case 'A':                            // hex float
+            case 'a':                            // hex float
                 h  = (f[0] == 'A') ? hexu : hex;
-                fv = va_arg(va, double);
+                fv = STBSP__FETCH_FLOAT(va, fl); // #1180
                 if (pr == -1)
-                    pr = 6; // default is 6
+                    pr = 6;                      // default is 6
                 // read the double into a string
                 if (stbsp__real_to_parts((stbsp__int64 *)&n64, &dp, fv))
                     fl |= STBSP__NEGATIVE;
@@ -807,7 +827,7 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                     goto scopy;
                 }
                 h  = (f[0] == 'G') ? hexu : hex;
-                fv = va_arg(va, double);
+                fv = STBSP__FETCH_FLOAT(va, fl); // #1180
                 if (pr == -1)
                     pr = 6;
                 else if (pr == 0)
@@ -860,9 +880,9 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                     goto scopy;
                 }
                 h  = (f[0] == 'E') ? hexu : hex;
-                fv = va_arg(va, double);
+                fv = STBSP__FETCH_FLOAT(va, fl); // #1180
                 if (pr == -1)
-                    pr = 6; // default is 6
+                    pr = 6;                      // default is 6
                 // read the double into a string
                 if (stbsp__real_to_str(&sn, &l, num, &dp, fv, pr | 0x80000000))
                     fl |= STBSP__NEGATIVE;
@@ -939,7 +959,7 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                     dp      = 0;
                     goto scopy;
                 }
-                fv = va_arg(va, double);
+                fv = STBSP__FETCH_FLOAT(va, fl); // #1180
             doafloat:
                 // do kilos
                 if (fl & STBSP__METRIC_SUFFIX) {

@@ -772,9 +772,15 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                           arg_ty->kind == TY_SHORT || arg_ty->kind == TY_LONG);
                     break;
                 case FMT_EXPECT_DOUBLE:
-                    ok = (arg_ty->kind == TY_DOUBLE ||
-                          arg_ty->kind == TY_FLOAT ||
-                          arg_ty->kind == TY_LDOUBLE);
+                    // #1180: a `long double` handed to a plain %f/%e/%g is a
+                    // width mismatch, not a promotion -- CCCC now marshals a
+                    // variadic `long double` as a real ffi_type_longdouble,
+                    // so passing one where the conversion reads a `double`
+                    // desyncs the argument frame (gcc/clang -Wformat flag it
+                    // too). TY_FLOAT is genuinely promoted to double and
+                    // stays accepted.
+                    ok =
+                        (arg_ty->kind == TY_DOUBLE || arg_ty->kind == TY_FLOAT);
                     break;
                 case FMT_EXPECT_STRING:
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&

@@ -53,6 +53,12 @@ typedef struct {
 
 #define CCCC_VAARG_INT    0 // int64 / pointer slot
 #define CCCC_VAARG_DOUBLE 1 // double slot
+// #1180: a %Lf/%Le/%Lg/%La argument. The guest still hands us an 8-byte
+// double slot (CCCC models long double at double precision, #491), but the
+// re-dispatched host call must push a real ffi_type_longdouble so the
+// callee -- host printf, or CCCC's own stb engine which now reads
+// va_arg(va, long double) for %L -- reads the matching width.
+#define CCCC_VAARG_LDOUBLE 2
 
 // Extract the next integer/pointer slot from cccc's va_list.
 static inline int64_t cccc_va_next_i64(cccc_va_list_t *va) {
@@ -125,15 +131,20 @@ cccc_parse_printf_fmt(const char *fmt, int *types, int max_args) {
         if (!*p)
             break;
 
-        // Length modifiers (consume; all floats are passed as double slots).
+        // Length modifiers (consume; all floats are passed as double slots,
+        // except %L<float> -- see CCCC_VAARG_LDOUBLE below and #1180).
         // H/D/DD (#829, _Decimal32/64/128) are consumed here too, but fall
         // through to the 'default' INT/pointer classification below same as
         // any other conversion -- a decimal variadic argument is always
         // passed by pointer (gen_decimal_arg_ptr), i.e. already exactly an
         // int64 slot, so no separate CCCC_VAARG_* class is needed for it.
+        int seen_L = 0;
         while (*p == 'h' || *p == 'l' || *p == 'j' || *p == 'z' || *p == 't' ||
-               *p == 'L' || *p == 'H' || *p == 'D')
+               *p == 'L' || *p == 'H' || *p == 'D') {
+            if (*p == 'L')
+                seen_L = 1;
             p++;
+        }
         if (!*p)
             break;
 
@@ -147,7 +158,8 @@ cccc_parse_printf_fmt(const char *fmt, int *types, int max_args) {
                 case 'G':
                 case 'a':
                 case 'A':
-                    types[n++] = CCCC_VAARG_DOUBLE;
+                    types[n++] =
+                        seen_L ? CCCC_VAARG_LDOUBLE : CCCC_VAARG_DOUBLE;
                     break;
                 default:
                     // d i u o x X c s p n b B [ and unknowns
@@ -215,7 +227,9 @@ cccc_parse_scanf_fmt(const char *fmt, int *types, int max_args) {
 static void cccc_va_extract(cccc_va_list_t *va, const int *types, int n,
                             int64_t *vals) {
     for (int i = 0; i < n; i++) {
-        if (types[i] == CCCC_VAARG_DOUBLE) {
+        if (types[i] == CCCC_VAARG_DOUBLE || types[i] == CCCC_VAARG_LDOUBLE) {
+            // #1180: %Lf included -- the guest slot is an 8-byte double
+            // either way; cccc_ffi_call_variadic widens it if LDOUBLE.
             double d = cccc_va_next_f64(va);
             memcpy(&vals[i], &d, sizeof d);
         } else {
@@ -236,16 +250,28 @@ static long long cccc_ffi_call_variadic(void *func_ptr, int num_fixed,
     // enough.
     ffi_type *arg_type_buf[CCCC_VA_MAX_ARGS + 8];
     void     *arg_ptr_buf[CCCC_VA_MAX_ARGS + 8];
+    // #1180: real host `long double` objects for any CCCC_VAARG_LDOUBLE arg,
+    // widened from the 8-byte double the guest passed. On macOS arm64
+    // ffi_type_longdouble aliases ffi_type_double so this is a no-op there.
+    long double ld_buf[CCCC_VA_MAX_ARGS];
 
     for (int i = 0; i < num_fixed; i++) {
         arg_type_buf[i] = &ffi_type_sint64;
         arg_ptr_buf[i]  = (void *)&fixed_vals[i];
     }
     for (int i = 0; i < n; i++) {
-        arg_type_buf[num_fixed + i] = (types[i] == CCCC_VAARG_DOUBLE)
-                                          ? &ffi_type_double
-                                          : &ffi_type_sint64;
-        arg_ptr_buf[num_fixed + i]  = (void *)&vals[i];
+        if (types[i] == CCCC_VAARG_LDOUBLE) {
+            double d;
+            memcpy(&d, &vals[i], sizeof d);
+            ld_buf[i]                   = (long double)d;
+            arg_type_buf[num_fixed + i] = &ffi_type_longdouble;
+            arg_ptr_buf[num_fixed + i]  = (void *)&ld_buf[i];
+        } else {
+            arg_type_buf[num_fixed + i] = (types[i] == CCCC_VAARG_DOUBLE)
+                                              ? &ffi_type_double
+                                              : &ffi_type_sint64;
+            arg_ptr_buf[num_fixed + i]  = (void *)&vals[i];
+        }
     }
 
     ffi_cif cif;

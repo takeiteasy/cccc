@@ -121,7 +121,12 @@ static void store_int(void *ptr, int lenmod, unsigned long long val) {
 
 static void store_float(void *ptr, int lenmod, long double val) {
     if (lenmod == LEN_L)
-        *(long double *)ptr = val;
+        // #1180: the guest's `long double` object is an 8-byte flat double
+        // (the VM reads it back with a plain FLDR; CCCC models long double
+        // arithmetic at double precision, #491). Storing a host `long
+        // double` here -- 80-bit x87 on Linux/x86-64, binary128 on
+        // Linux/aarch64 -- would write a representation the VM cannot read.
+        *(double *)ptr = (double)val;
     else if (lenmod == LEN_l)
         *(double *)ptr = (double)val;
     else

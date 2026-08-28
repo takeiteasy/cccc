@@ -2659,10 +2659,29 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         if (nargs >= 64)
                             error_tok(vm, arg->tok,
                                       "too many floating-point FFI arguments");
-                        if (arg->ty->kind == TY_FLOAT)
+                        if (arg->ty->kind == TY_FLOAT) {
                             float_arg_mask |= (1ULL << nargs);
-                        else
+                        } else if (arg->ty->kind == TY_LDOUBLE &&
+                                   ffi_arg_is_vararg) {
+                            // #1180: a `long double` in the variadic tail is
+                            // marshalled as a real host `long double`
+                            // (ffi_type_longdouble in
+                            // cccc_call_native_function) so a variadic host
+                            // callee -- glibc's printf %Lf, where `long double`
+                            // is 80-bit x87 on Linux/x86-64
+                            // -- reads the correct width. Encoded as BOTH mask
+                            // bits set, an otherwise-impossible combination, to
+                            // avoid a bytecode-encoding change. A `long double`
+                            // in a FIXED parameter position deliberately keeps
+                            // plain double marshalling: every ...l libc binding
+                            // (sqrtl -> sqrt, ...) is a double-precision shim
+                            // (#491), so widening there would hand a host
+                            // function 16 bytes where it expects 8.
+                            float_arg_mask  |= (1ULL << nargs);
                             double_arg_mask |= (1ULL << nargs);
+                        } else {
+                            double_arg_mask |= (1ULL << nargs);
+                        }
                     } else if (is_vector(arg->ty)) {
                         error_tok(vm, arg->tok,
                                   "vector arguments through FFI calls are not "
@@ -2856,6 +2875,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             uint64_t call_double_arg_mask = 0;
             uint64_t call_float_arg_mask  = 0;
             for (Node *a = node->args; a; a = a->next) {
+                bool call_arg_is_vararg =
+                    is_variadic_call && nargs >= fixed_param_count;
                 if (is_flonum(a->ty)) {
                     if (nargs >= 64)
                         error_tok(
@@ -2864,10 +2885,19 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // Variadic tail args are promoted float->double by the
                     // parser, so a TY_FLOAT arg here is always a fixed
                     // parameter.
-                    if (a->ty->kind == TY_FLOAT)
+                    if (a->ty->kind == TY_FLOAT) {
                         call_float_arg_mask |= (1ULL << nargs);
-                    else
+                    } else if (a->ty->kind == TY_LDOUBLE &&
+                               call_arg_is_vararg) {
+                        // #1180: BOTH bits set == `long double` variadic tail
+                        // arg -- widened to a real host `long double` at the
+                        // FFI boundary. See the CALLF emitter above for the
+                        // full rationale (fixed params stay double).
+                        call_float_arg_mask  |= (1ULL << nargs);
                         call_double_arg_mask |= (1ULL << nargs);
+                    } else {
+                        call_double_arg_mask |= (1ULL << nargs);
+                    }
                 }
                 nargs++;
             }

@@ -3051,7 +3051,8 @@ static inline int op_CALLN_fn(VirtualMachine *vm) {
                 callsite_is_variadic && i >= callsite_fixed_param_count;
             if (i >= 8) {
                 args[i] = vm->sp[i - 8];
-            } else if (i < 64 && (float_arg_mask & (1ULL << i))) {
+            } else if (i < 64 && (float_arg_mask & (1ULL << i)) &&
+                       !(double_arg_mask & (1ULL << i))) {
                 args[i] = (long long)(unsigned int)cccc_freg_raw_f32(
                     vm, FREG_A0 + fp_reg_idx++);
             } else if (i < 64 && (double_arg_mask & (1ULL << i)) &&
@@ -5571,10 +5572,26 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
                              : returns_double ? &ffi_type_double
                                               : &ffi_type_sint64;
 
+    // #1180: BOTH mask bits set marks a `long double` variadic argument (an
+    // otherwise-impossible float+double combination -- see the CALLF/CALLN
+    // emitters in codegen_expr.c). The VM carries it as an 8-byte double bit
+    // pattern in args[i]; it is widened back to a real host `long double`
+    // below so a variadic host callee (glibc printf's %Lf: 80-bit x87 on
+    // Linux/x86-64) reads the correct width. Never set for a FIXED parameter
+    // -- CCCC's ...l libc bindings are double-precision shims (#491), so
+    // those stay plain ffi_type_double. On macOS arm64 ffi_type_longdouble
+    // aliases ffi_type_double, so this is a harmless no-op there.
+    uint64_t     ldouble_arg_mask = double_arg_mask & float_arg_mask;
+    long double *ld_scratch       = NULL;
+
     if (actual_nargs > 0) {
         arg_types = alloca((size_t)actual_nargs * sizeof(ffi_type *));
+        if (ldouble_arg_mask)
+            ld_scratch = alloca((size_t)actual_nargs * sizeof(long double));
         for (int i = 0; i < actual_nargs; i++) {
-            if (i < 64 && (float_arg_mask & (1ULL << i)))
+            if (i < 64 && (ldouble_arg_mask & (1ULL << i)))
+                arg_types[i] = &ffi_type_longdouble;
+            else if (i < 64 && (float_arg_mask & (1ULL << i)))
                 arg_types[i] = &ffi_type_float;
             else if (i < 64 && (double_arg_mask & (1ULL << i)))
                 arg_types[i] = &ffi_type_double;
@@ -5602,8 +5619,18 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
     // little-endian), so &args[i] is also a valid ffi_type_float source.
     void **arg_ptrs =
         alloca((size_t)(actual_nargs > 0 ? actual_nargs : 1) * sizeof(void *));
-    for (int i = 0; i < actual_nargs; i++)
-        arg_ptrs[i] = &args[i];
+    for (int i = 0; i < actual_nargs; i++) {
+        if (i < 64 && (ldouble_arg_mask & (1ULL << i))) {
+            // #1180: widen the carried 8-byte double bit pattern to a real
+            // host `long double` object for libffi to read.
+            double d;
+            memcpy(&d, &args[i], sizeof d);
+            ld_scratch[i] = (long double)d;
+            arg_ptrs[i]   = &ld_scratch[i];
+        } else {
+            arg_ptrs[i] = &args[i];
+        }
+    }
 
     VirtualMachine *saved_ffi_vm = cccc_tls_ffi_vm;
     cccc_tls_ffi_vm              = vm;
@@ -6054,7 +6081,9 @@ static inline int op_CALLF_fn(VirtualMachine *vm) {
 
         if (vm->debug_vm)
             printf("  arg[%d] = 0x%llx (%lld) [%s]\n", i, args[i], args[i],
-                   (i < 64 && (float_arg_mask & (1ULL << i)))    ? "float"
+                   (i < 64 && (float_arg_mask & double_arg_mask & (1ULL << i)))
+                       ? "long double"
+                   : (i < 64 && (float_arg_mask & (1ULL << i)))  ? "float"
                    : (i < 64 && (double_arg_mask & (1ULL << i))) ? "double"
                                                                  : "int");
     }

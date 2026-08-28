@@ -11,6 +11,8 @@
 #include <fenv.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 // [from test_complex]
 struct Box {
@@ -959,6 +961,75 @@ int test_ldouble_size_matches_host(void) {
     _Complex long double cld = 3.0L;
     if (creall(cld) != 3.0L || cimagl(cld) != 0.0L)
         return 3;
+
+    return 42;
+}
+
+// #1180: the printf/scanf `L` length modifier used to be dropped by the VM's
+// formatter -- `printf("%Lf", x)` emitted the literal "Lf" and consumed no
+// argument, desyncing every later conversion. A variadic `long double` is
+// now marshalled as a real host `long double` at the FFI boundary and the
+// formatter reads the matching width; the value is still computed at
+// `double` precision (#491), so every constant here is exactly
+// representable as a double and VM / -c=native output agree.
+static int ld_vfwd(char *buf, int n, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsnprintf(buf, (size_t)n, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+[[cccc::test(return = 42)]]
+int test_printf_long_double_modifier(void) {
+    char buf[64];
+
+    snprintf(buf, sizeof buf, "%Lf", 2.25L);
+    if (__builtin_strcmp(buf, "2.250000") != 0)
+        return 1;
+    snprintf(buf, sizeof buf, "%LF", 2.25L);
+    if (__builtin_strcmp(buf, "2.250000") != 0)
+        return 2;
+    snprintf(buf, sizeof buf, "%Le", 0.5L);
+    if (__builtin_strcmp(buf, "5.000000e-01") != 0)
+        return 3;
+    snprintf(buf, sizeof buf, "%Lg", 0.25L);
+    if (__builtin_strcmp(buf, "0.25") != 0)
+        return 4;
+
+    // Slot-desync guard: the conversion must consume exactly one argument,
+    // so the trailing %d still sees its own.
+    snprintf(buf, sizeof buf, "[%Lf][%d]", 1.5L, 7);
+    if (__builtin_strcmp(buf, "[1.500000][7]") != 0)
+        return 5;
+
+    // %La: hex-float spelling is not portable between the VM's stb engine
+    // and a host libc (x87 vs. normalized leading digit), so only assert
+    // the modifier was honoured -- no literal "La", a 0x prefix present.
+    snprintf(buf, sizeof buf, "%La", 1.5L);
+    if (buf[0] != '0' || buf[1] != 'x')
+        return 6;
+    for (const char *p = buf; p[0] && p[1]; p++)
+        if (p[0] == 'L' && p[1] == 'a')
+            return 7;
+
+    // The v*-family re-dispatch path (va_ffi_helper.h).
+    ld_vfwd(buf, sizeof buf, "%Lf", 2.25L);
+    if (__builtin_strcmp(buf, "2.250000") != 0)
+        return 8;
+
+    // scanf side: %Lf must land a value the VM can read back.
+    long double got = 0.0L;
+    if (sscanf("2.25", "%Lf", &got) != 1)
+        return 9;
+    if (got != 2.25L)
+        return 10;
+
+    // A `long double` in a FIXED parameter position must still bind at
+    // double precision (sqrtl -> sqrt, #491) -- the #1180 widening is
+    // variadic-only.
+    if (sqrtl(2.25L) != 1.5L)
+        return 11;
 
     return 42;
 }

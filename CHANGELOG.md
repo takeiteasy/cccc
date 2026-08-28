@@ -8,6 +8,16 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- `printf`/`snprintf`/`vprintf` and friends now honour the `L` length
+  modifier: `printf("%Lf", x)` formats the `long double` instead of
+  emitting the literal text `"Lf"` and silently swallowing the argument.
+  `%Le`, `%Lg`, `%La` and the uppercase forms, and the `scanf` `%Lf`
+  input path, are fixed the same way. A variadic `long double` argument is
+  now marshalled to a host `long double` at the FFI boundary; the value is
+  still computed at `double` precision. As a consequence, passing a
+  `long double` to a plain `%f`/`%e`/`%g` (no `L`) is now a genuine
+  argument-width mismatch — the `-F` format checker flags it, matching
+  gcc/clang `-Wformat`.
 - A VLA local, or a pointer-to-VLA local initialized from one, can now be
   read across a nested (GNU) function's static link under `-c=native`/`-m`
   — previously rejected outright. A fully multi-dimensional VLA (every

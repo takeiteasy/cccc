@@ -329,7 +329,7 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 | `deprecated("msg")` | C23 | ✓ | Emits `-Wdeprecated` with custom message |
 | `macro` | GNU | ✓ | CCCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
 | `comptime` | GNU | ✓ | CCCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
-| `format(printf/scanf, …)` | GNU | ✓ | Type-check printf/scanf format strings at compile time, including length-modifier-aware argument type validation (`%ld` → `long`, `%zu` → `unsigned long`, `%Lf` → `long double`); gated by `-F`; also accepts GNU/Clang alternate spellings `__printf__`, `gnu_printf`, `printf0`, `__printf0__`, `__scanf__`, `gnu_scanf`, `strftime`, `__strftime__`, `os_log`, `__os_log__` (latter two parsed without validation) |
+| `format(printf/scanf, …)` | GNU | ✓ | Type-check printf/scanf format strings at compile time, including length-modifier-aware argument type validation (`%ld` → `long`, `%zu` → `unsigned long`, `%Lf` → `long double`); gated by `-F`. A `long double` passed to a plain `%f`/`%e`/`%g` (no `L`) is now a width mismatch, not a promotion — the runtime marshals a variadic `long double` as a real `long double` (see the `<float.h>` note and design note below), so the argument frame would desync, matching gcc/clang `-Wformat`. The `%L` conversions themselves are performed at `double` precision, like all `long double` arithmetic. also accepts GNU/Clang alternate spellings `__printf__`, `gnu_printf`, `printf0`, `__printf0__`, `__scanf__`, `gnu_scanf`, `strftime`, `__strftime__`, `os_log`, `__os_log__` (latter two parsed without validation) |
 | `nodiscard` | C23 | ✓ | Warns on discarded return values (`-Wnodiscard`, part of `-Wall`) |
 | `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
 | `noreturn` | C23 / GNU | ✓ | Emits `BTRAP` after calls; warns on returns |
@@ -3048,5 +3048,17 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 > double-precision shim. This is correct for all existing tests and avoids a
 > host-ABI mismatch on Linux/aarch64 where the native `long double` is
 > 128-bit ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
+>
+> A `long double` in the **variadic tail** of an FFI call is the one place
+> the host representation matters: it is widened from the VM's 8-byte
+> double to a real host `long double` (`ffi_type_longdouble`) at the call
+> boundary, so `printf("%Lf", x)` reads the right slot width whether the
+> formatter is host libc or CCCC's own stb engine
+> ([#1180](https://todo.sr.ht/~takeiteasy/cccc/1180)). The value itself is
+> still only `double`-precise. A `long double` in a **fixed** parameter
+> position keeps the plain double binding above — a fixed `...l` parameter
+> and a variadic `%Lf` argument are handled differently on purpose. The
+> `scanf` side stores `%Lf` results as a flat `double` for the same
+> reason (the VM reads the object back with an 8-byte load).
 
 > **Known limitation ([#407](https://todo.sr.ht/~takeiteasy/cccc/407)):** when a user-defined variadic function forwards its `va_list` to `vprintf`/`vfprintf`/`vsprintf`/`vsnprintf`/`vscanf`/`vfscanf`/`vsscanf`, only the *first* variadic argument is passed through correctly; subsequent arguments are garbage. This is a pre-existing VM/FFI limitation, not specific to `%b`/`%B`.
