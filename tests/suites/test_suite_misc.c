@@ -1130,8 +1130,8 @@ int test_printf_n_length_modifier(void) {
         if (si.guard[i] != 0xAA)
             return 6;
 
-    // %ln / %lln / %zn write the full 8-byte object -- pre-poison it and
-    // check the high half landed as zero rather than staying 0xAA.
+    // %ln / %lln / %jn / %zn / %tn write the full 8-byte object -- pre-poison
+    // it and check the high half landed as zero rather than staying 0xAA.
     long lv = (long)0xAAAAAAAAAAAAAAAALL;
     snprintf(buf, sizeof buf, "abcd%ln", &lv);
     if (lv != 4)
@@ -1146,6 +1146,16 @@ int test_printf_n_length_modifier(void) {
     snprintf(buf, sizeof buf, "abcd%zn", &zv);
     if (zv != 4)
         return 9;
+
+    intmax_t jv = (intmax_t)0xAAAAAAAAAAAAAAAALL;
+    snprintf(buf, sizeof buf, "abcd%jn", &jv);
+    if (jv != 4)
+        return 10;
+
+    ptrdiff_t tv = (ptrdiff_t)0xAAAAAAAAAAAAAAAALL;
+    snprintf(buf, sizeof buf, "abcd%tn", &tv);
+    if (tv != 4)
+        return 11;
 
     return 42;
 }

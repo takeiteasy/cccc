@@ -24,9 +24,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `ptrdiff_t` respectively, matching glibc and Apple libc — previously every
   spelling stored a plain 4-byte `int`, truncating a wider store and
   clobbering bytes past a narrower one. The `-F` format checker's `%n` arm
-  is length-modifier-aware to match (`%ln` expects `long *`, not `int *`),
-  on both the `printf` and `scanf` sides. The `scanf` `%n` runtime store was
-  already correct.
+  is length-modifier-aware to match (`%ln` expects an 8-byte integer
+  pointer, not `int *` — either signedness, since `%n` has no signed/unsigned
+  split), on both the `printf` and `scanf` sides. The `scanf` `%n` runtime
+  store was already correct.
 - The `h` / `hh` length modifiers on an integer conversion now truncate:
   `printf("%hd", 65536)` prints `0` and `printf("%hhx", 0x1FF)` prints `ff`,
   matching glibc and Apple libc — previously the modifier was parsed and

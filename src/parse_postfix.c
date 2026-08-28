@@ -430,6 +430,12 @@ enum {
     FMT_EXPECT_DECIMAL32_PTR,  // scanf %Hf → _Decimal32 *
     FMT_EXPECT_DECIMAL64_PTR,  // scanf %Df → _Decimal64 *
     FMT_EXPECT_DECIMAL128_PTR, // scanf %DDf → _Decimal128 *
+    // #1230: %ln/%lln/%Ln/%jn/%zn/%tn -- an 8-byte integer pointer of either
+    // signedness. `%n` has no signed/unsigned conversion split (it just
+    // writes the byte count), and gcc/clang -Wformat accept `long *` and
+    // `unsigned long *` interchangeably here, rejecting only a narrower
+    // pointer. Distinct from FMT_EXPECT_LONG_PTR (which asserts signed).
+    FMT_EXPECT_LONG_PTR_ANYSIGN,
 };
 
 #define MAX_FMT_ARGS 64
@@ -455,7 +461,8 @@ static const char *fmt_type_names[] = {"int",
                                        "_Decimal128",
                                        "_Decimal32 *",
                                        "_Decimal64 *",
-                                       "_Decimal128 *"};
+                                       "_Decimal128 *",
+                                       "long *"};
 
 // Validate format string arguments for __attribute__((format(...)))
 static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
@@ -634,20 +641,22 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             expected[num_expected++] = FMT_EXPECT_POINTER;
                             break;
                         case 'n':
-                            // #1230: %n honours the length modifier the same
-                            // way %d/%u above do -- %hhn→char*, %hn→short*,
-                            // %ln/%lln/%Ln/%jn/%tn→long*, %zn→unsigned long*.
-                            // %Ln == %lln here (the GNU #1228 rule). Bare %n
-                            // stays lenient (int*/char*/short*/long* all pass).
+                            // #1230: %n honours the length modifier -- but
+                            // unlike %d/%u it has no signed/unsigned split, so
+                            // an 8-byte target of either signedness passes,
+                            // matching gcc/clang -Wformat. %hhn→char*,
+                            // %hn→short* (both already sign-agnostic),
+                            // %ln/%lln/%Ln/%jn/%zn/%tn→long*-or-unsigned-long*.
+                            // %Ln == %lln (the GNU #1228 rule). Bare %n stays
+                            // lenient (int*/char*/short*/long* all pass).
                             if (mod == 1)
                                 expected[num_expected++] = FMT_EXPECT_SCHAR_PTR;
                             else if (mod == 2)
                                 expected[num_expected++] = FMT_EXPECT_SHORT_PTR;
                             else if (mod == 3 || mod == 4 || mod == 5 ||
-                                     mod == 7 || mod == 8)
-                                expected[num_expected++] = FMT_EXPECT_LONG_PTR;
-                            else if (mod == 6)
-                                expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
+                                     mod == 6 || mod == 7 || mod == 8)
+                                expected[num_expected++] =
+                                    FMT_EXPECT_LONG_PTR_ANYSIGN;
                             else
                                 expected[num_expected++] = FMT_EXPECT_INT_PTR;
                             break;
@@ -715,17 +724,16 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                         case 'n':
                             // #1230: mirror the printf-side %n arm above (and
                             // the scanf runtime's store_int(), already
-                            // modifier-aware). %hhn→char*, %hn→short*,
-                            // %ln/%lln/%Ln/%jn/%tn→long*, %zn→unsigned long*.
+                            // modifier-aware). Sign-agnostic 8-byte target for
+                            // the wide modifiers, same as gcc/clang -Wformat.
                             if (mod == 1)
                                 expected[num_expected++] = FMT_EXPECT_SCHAR_PTR;
                             else if (mod == 2)
                                 expected[num_expected++] = FMT_EXPECT_SHORT_PTR;
                             else if (mod == 3 || mod == 4 || mod == 5 ||
-                                     mod == 7 || mod == 8)
-                                expected[num_expected++] = FMT_EXPECT_LONG_PTR;
-                            else if (mod == 6)
-                                expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
+                                     mod == 6 || mod == 7 || mod == 8)
+                                expected[num_expected++] =
+                                    FMT_EXPECT_LONG_PTR_ANYSIGN;
                             else
                                 expected[num_expected++] = FMT_EXPECT_INT_PTR;
                             break;
@@ -869,6 +877,10 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
                           arg_ty->base->kind == TY_LONG &&
                           arg_ty->base->is_unsigned);
+                    break;
+                case FMT_EXPECT_LONG_PTR_ANYSIGN:
+                    ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
+                          arg_ty->base->kind == TY_LONG);
                     break;
                 case FMT_EXPECT_SHORT_PTR:
                     ok = (arg_ty->kind == TY_PTR && arg_ty->base &&
