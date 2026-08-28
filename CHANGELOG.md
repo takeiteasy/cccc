@@ -12,3 +12,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   read across a nested (GNU) function's static link under `-c=native`/`-m`
   — previously rejected outright. A fully multi-dimensional VLA (every
   extent runtime-sized) is still rejected, with a narrower diagnostic.
+- VLA brace initialization (`int v[n] = {...}`, a CCCC-only extension no
+  reference compiler accepts) is retained rather than removed — its
+  correctness defects were already resolved by an earlier fix, and excess
+  initializers now have a test pinning the runtime bounds trap that catches
+  them at `-2`/`-3`.
