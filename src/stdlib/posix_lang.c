@@ -24,18 +24,21 @@
 // translation table/range arithmetic lives in exactly one place.
 // *found is set to 0 for an unrecognized canonical item (caller returns ""
 // without touching the host at all), 1 otherwise.
-// #1148 (found, not fixed, while implementing #1146): *found is set here,
-// before the #ifdef, so the #else arm's own *found = 0 for an unrecognized
-// canonical item only ever takes effect on non-Apple hosts -- on macOS this
-// line already committed *found = 1, so an out-of-range nl_item is
-// forwarded to the host raw instead of short-circuiting to "" the way this
-// function's own comment above promises.
 static nl_item guest_to_host_nl_item(nl_item guest_item, int *found) {
-    *found = 1;
-#ifdef __APPLE__
-    return guest_item;
-#else
     long v = (long)guest_item;
+#ifdef __APPLE__
+    // CCCC's canonical numbering already equals macOS's real numbering, so
+    // no translation is needed here -- but validation still is (#1148):
+    // reject the 45-49/54/55 holes in the 0-56 sequence, negatives, and
+    // anything > 56, the same accept set the #else arm below encodes.
+    if ((v >= 0 && v <= 44) || (v >= 50 && v <= 53) || v == 56) {
+        *found = 1;
+        return guest_item;
+    }
+    *found = 0;
+    return (nl_item)0;
+#else
+    *found = 1;
     long host_item;
     switch (v) {
         case 0:

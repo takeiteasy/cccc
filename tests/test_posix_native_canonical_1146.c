@@ -166,6 +166,20 @@ int main(void) {
     if (strcmp(nl_langinfo(DAY_1), "Sunday") != 0)
         return 13;
 
+    // #1148: an unrecognized nl_item (a hole in the 0-56 canonical
+    // sequence, or anything > 56) must short-circuit to "" rather than
+    // forwarding a bogus value to the host -- verified through the
+    // -c=native shim (__cccc_native_guest_to_host_nl_item,
+    // src/shims/canonical_const.c) here, and through the VM's own
+    // guest_to_host_nl_item (src/stdlib/posix_lang.c) in
+    // tests/suites/test_suite_posix.c.
+    char *hole = nl_langinfo((nl_item)45);
+    if (hole == NULL || hole[0] != '\0')
+        return 23;
+    char *oor = nl_langinfo((nl_item)99);
+    if (oor == NULL || oor[0] != '\0')
+        return 24;
+
     // nl_langinfo_l()/newlocale(): same assertion through the "_l" /
     // locale_t path and the LC_ALL_MASK special case.
     locale_t loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);

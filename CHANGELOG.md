@@ -8,6 +8,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- `nl_langinfo`/`nl_langinfo_l` on macOS now correctly return `""` for an
+  unrecognized `nl_item` (a hole in the 0-56 canonical sequence, or
+  anything out of range) instead of forwarding the bogus value straight
+  to the host — previously this validation only ran on Linux. The same
+  fix applies to the `-c=native` shim.
 - `printf`/`snprintf`/`vprintf` and friends now honour the `L` length
   modifier: `printf("%Lf", x)` formats the `long double` instead of
   emitting the literal text `"Lf"` and silently swallowing the argument.

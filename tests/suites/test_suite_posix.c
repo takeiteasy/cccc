@@ -3087,6 +3087,18 @@ int test_posix_langinfo(void) {
     if (!abmon1 || !abmon1[0])
         return 4;
 
+    // #1148: an unrecognized nl_item (a hole in the 0-56 canonical
+    // sequence, or anything > 56) must short-circuit to "" instead of
+    // forwarding a bogus value to the host -- this held on Linux before
+    // the fix, but not on macOS.
+    char *hole = nl_langinfo((nl_item)45);
+    if (hole == NULL || hole[0] != '\0')
+        return 7;
+
+    char *oor = nl_langinfo((nl_item)99);
+    if (oor == NULL || oor[0] != '\0')
+        return 8;
+
     nl_catd cat = catopen("nonexistent_catalog_xyz", NL_CAT_LOCALE);
     if (cat != (nl_catd)-1)
         return 5;
