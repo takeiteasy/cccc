@@ -45,6 +45,38 @@
 // #964: mutually recursive with serialize_stmt -- see the comment on its
 // definition, near ND_BLOCK below.
 
+// #1209: `var` just came into existence at its own in-place declaration
+// (the VLA/pointer-to-VLA sites below, `ctx->current_fn` is `var`'s owning
+// function throughout its body). If some nested descendant reads `var`
+// across a static link, its env field couldn't be filled at the top of the
+// function the way an ordinary upvar's is (nested_upvar_is_deferred()) --
+// fill it here instead, now that `&var` is finally valid.
+//
+// Two things that look like bugs and aren't: a sibling nested function
+// sharing this same env may be called before this assignment runs, and the
+// field goes stale once a block containing `var` exits. Both are safe for
+// the same reason -- a nested function that cannot see `var` in its own
+// lexical scope can never reach a call that would read this field, either
+// before it's first assigned or after `var`'s scope ends.
+static void emit_deferred_nested_upvar_store(FILE *f, VirtualMachine *vm,
+                                             SerializeContext *ctx, int indent,
+                                             Obj *var) {
+    for (int i = 0; i < ctx->nested_envs_len; i++) {
+        NestedEnvEntry *e = &ctx->nested_envs[i];
+        if (e->owner_fn != ctx->current_fn)
+            continue;
+        for (int j = 0; j < e->upvars_len; j++) {
+            if (e->upvars[j] != var)
+                continue;
+            print_indent_level(f, indent);
+            fprintf(f, "__cccc_nenv.__uv%d = (", j);
+            serialize_type_decl(f, ctx, nested_upvar_field_type(vm, var), "");
+            fprintf(f, ")&%s;\n", var->name);
+            return;
+        }
+    }
+}
+
 // Serialize a statement
 void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     Node *node, int indent) {
@@ -79,6 +111,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 print_indent_level(f, indent);
                 serialize_type_decl(f, ctx, var->ty, var->name);
                 fprintf(f, ";\n");
+                emit_deferred_nested_upvar_store(f, vm, ctx, indent, var);
                 break;
             }
             // #973 follow-up: the initializer of a pointer-to-VLA local (see
@@ -102,6 +135,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // value.
                 serialize_expr(f, vm, ctx, node->lhs->rhs, 2);
                 fprintf(f, ";\n");
+                emit_deferred_nested_upvar_store(f, vm, ctx, indent, var);
                 break;
             }
             // An atomic store written as its own statement (the usual case)

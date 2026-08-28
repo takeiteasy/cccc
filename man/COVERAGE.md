@@ -116,7 +116,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
-| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3). A VLA of any dimension — including a multi-dimensional VLA (`int v[n][m]; v[1][2]=...;`) — round-trips through `-m`/`-c=native` as a real C VLA (#964/#971). `&v` has the standard (non-decayed) type `int (*)[n]` — like a fixed-size array's `&a`, it does *not* decay to a pointer to the element type, so `&v + 1` strides a whole row, not one element — and yields the array's real data address (#973); a whole-row assignment to a VLA lvalue (`v[1] = w[2];` where each side is itself a row of a multi-dimensional VLA) is a compile error, "not an lvalue", the same as for a fixed-size array (#974). Pointer-to-VLA-row subtraction (`&v[1] - &v[0]` on a 2-D VLA, both sides `int (*)[m]`) divides by the row's runtime byte size, giving the correct element count in both directions (#976). **Brace initialization is a deliberate CCCC extension** — real GCC/clang reject `int v[n] = {...}` outright ("variable-sized object may not be initialized") — supported for any dimension, including a multi-dimensional VLA (`int v[n][m] = {{1,2},{3,4}}`, #977); a short row or short outer initializer zero-fills the remainder, the same as a fixed-size array's partial initializer — an explicit zero-fill (`ND_MEMZERO`, the runtime `vla_size` byte count) now runs ahead of the initializer, matching every other partial-initializer path; a fresh alloca'd block happening to already read as zero is not relied on, so this holds under `--memory-poisoning`/`-2`/`-3` too (#982) |
+| Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3). A VLA of any dimension — including a multi-dimensional VLA (`int v[n][m]; v[1][2]=...;`) — round-trips through `-m`/`-c=native` as a real C VLA (#964/#971). `&v` has the standard (non-decayed) type `int (*)[n]` — like a fixed-size array's `&a`, it does *not* decay to a pointer to the element type, so `&v + 1` strides a whole row, not one element — and yields the array's real data address (#973); a whole-row assignment to a VLA lvalue (`v[1] = w[2];` where each side is itself a row of a multi-dimensional VLA) is a compile error, "not an lvalue", the same as for a fixed-size array (#974). Pointer-to-VLA-row subtraction (`&v[1] - &v[0]` on a 2-D VLA, both sides `int (*)[m]`) divides by the row's runtime byte size, giving the correct element count in both directions (#976). **Brace initialization is a deliberate CCCC extension** — real GCC/clang reject `int v[n] = {...}` outright ("variable-sized object may not be initialized") — supported for any dimension, including a multi-dimensional VLA (`int v[n][m] = {{1,2},{3,4}}`, #977); a short row or short outer initializer zero-fills the remainder, the same as a fixed-size array's partial initializer — an explicit zero-fill (`ND_MEMZERO`, the runtime `vla_size` byte count) now runs ahead of the initializer, matching every other partial-initializer path; a fresh alloca'd block happening to already read as zero is not relied on, so this holds under `--memory-poisoning`/`-2`/`-3` too (#982). A VLA local (or a pointer-to-VLA local with an initializer) read by a nested function is capturable across the static link, with a fixed multi-dimensional-VLA exception (#1209, see "Nested (GNU) functions" below) |
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | Postfix tails bind directly to the literal — `(struct P){30, 12}.x`, `(int[]){1,2,3}[0]`, and `((struct T *){p})->m` all parse (C99 6.5.2p5); `&` of a member through a literal serializes with the & bound inside the literal's initializer chain (#1102) | |
@@ -1258,12 +1258,16 @@ them until this audit:
   initializer** (`serialize_decl.c`, `serialize_init_bytes`'s final
   fallback) — `_Complex` has a well-known two-part host layout that could be
   reconstructed as a compound literal. #1208.
-- **#1074 residual: a VLA, or a pointer-to-VLA local, read by a nested
-  function** (`serialize_program.c`, `record_nested_upvar`) — accepted at
-  the time the general nested-function static-link lowering landed; no
-  fixed-address slot exists to hand across the link because the VLA's
-  declaration can't be hoisted ahead of its own length expression (#964).
-  #1209.
+- **#1074/#1209 residual: a fully multi-dimensional VLA (every extent
+  runtime-sized, `int v[n][m]`) read by a nested function**
+  (`serialize_program.c`, `record_nested_upvar`) — #1209 fixed a 1-D VLA
+  local, a VLA with a fixed inner extent (`int v[n][3]`), and a
+  pointer-to-VLA local with an initializer, by erasing the outermost extent
+  of the env-struct field to an incomplete array (`T (*)[]`) and deferring
+  the field assignment to the VLA's own in-place declaration site. A fully
+  multi-dimensional VLA doesn't fit that fix — the field would need to be
+  `int (*)[][m]`, a pointer to an array of incomplete element type, which
+  is illegal C. #1221.
 - **#1081 residual: calling a nested function whose own parent lies beyond a
   block ancestor** (`serialize_program.c`, `collect_nested_refs`) — needs
   the block's *enclosing frame*, which a heap-copyable block descriptor
@@ -1699,14 +1703,25 @@ local/param reference from inside a nested body is rewritten to
 `(*env->__uvK)` instead of the bare (otherwise out-of-scope-at-file-scope)
 identifier.
 
-Two shapes have no portable lowering and are rejected with a diagnostic
-naming the construct, rather than serialized wrong, per this file's own
-"explicit diagnosed rejection, never silent divergence" rule (a third,
-distinct shape involving a block ancestor is rejected too — see #1100
-below): a
-variable-length-array local (or a not-yet-declared-at-that-point
-pointer-to-VLA local) read by a nested function, since its declaration can't
-be hoisted ahead of the point that would need `&var`; and any bare
+A VLA local, or a pointer-to-VLA local whose own declarator reads a runtime
+variable, read by a nested function IS supported (#1209) — its declaration
+can't be hoisted ahead of the point that would need `&var` (#964), so
+instead the env-struct field's outermost VLA extent is erased to an
+incomplete array (`T (*)[]`, the same spelling C already uses for a
+flexible array member) and the field is assigned at the VLA's own in-place
+declaration site, once `&var` is finally valid, rather than at the top of
+the function with every other upvar. `serialize_nested_upvar_ref()`'s
+`(*env->__uvK)` rewrite needed no change — the erased pointer dereferences
+and decays exactly like the original. Only a fully multi-dimensional VLA
+(every extent runtime-sized, `int v[n][m]`) doesn't fit this: the field
+would need to be `int (*)[][m]`, a pointer to an array of incomplete
+element type, illegal C — still rejected with a diagnostic naming the
+construct rather than serialized wrong (#1221).
+
+One shape has no portable lowering and is rejected with a diagnostic
+naming the construct instead, per this file's own "explicit diagnosed
+rejection, never silent divergence" rule (a second, distinct shape
+involving a block ancestor is rejected too — see #1100 below): any bare
 reference to a nested function's own value that ISN'T the direct callee of
 a call to it (e.g. `int (*fp)(int) = inner;`, or passing `inner` as a
 callback) — the hoisted signature's extra leading `__static_link` parameter

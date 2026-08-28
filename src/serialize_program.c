@@ -2080,6 +2080,43 @@ static int add_nested_upvar(Obj ***upvars_out, int *len, int *cap, Obj *var) {
     return (*len)++;
 }
 
+// #1209: true when `var`'s own address can't exist until its in-place
+// declaration runs -- a VLA local, or a pointer-to-VLA local whose own
+// declarator reads a runtime variable (Obj.deferred_vla_ptr_init, cccc.h).
+// Such an upvar's env field is filled at its declaration site
+// (serialize_stmt.c's node_is_vla_ptr_assign/node_is_deferred_vla_ptr_init
+// cases) instead of serialize_function's usual top-of-function loop
+// (serialize_decl.c) -- see record_nested_upvar()'s #1209 comment for why.
+bool nested_upvar_is_deferred(Obj *var) {
+    return (var->ty && var->ty->kind == TY_VLA) ||
+           var->deferred_vla_ptr_init != NULL;
+}
+
+// #1209: the env-struct field type for upvar `var`. A VLA (or pointer-to-
+// VLA) upvar can't use its own declared type as the field type -- the
+// length expression it embeds isn't in scope at file scope, where the env
+// struct is defined -- so its outermost VLA extent is erased to an
+// incomplete array (`T (*)[]`), the same spelling C already uses for a
+// flexible array member; serialize_type_decl already knows how to print
+// `array_len < 0` that way. record_nested_upvar() rejects the one shape
+// this can't represent (a multi-dimensional VLA, every extent runtime-
+// sized) before it ever reaches here, so nested_upvar_is_deferred() being
+// true is exactly the condition under which the erasure below applies.
+Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var) {
+    // #1080: a __block-storage upvar's own C storage is already a pointer
+    // to the shared heap box (T *) -- the env field holding its address is
+    // one level deeper, T **, so serialize_nested_upvar_ref() can deref
+    // twice to reach the value.
+    if (var->is_block_var)
+        return pointer_to(vm, pointer_to(vm, var->ty));
+    if (var->ty && var->ty->kind == TY_VLA)
+        return pointer_to(vm, array_of(vm, var->ty->base, -1));
+    if (var->deferred_vla_ptr_init)
+        return pointer_to(
+            vm, pointer_to(vm, array_of(vm, var->ty->base->base, -1)));
+    return pointer_to(vm, var->ty);
+}
+
 // #1074: `node` (inside nested function `fn`'s own body) reads/writes
 // `var`, which -- per the caller's own scan -- belongs to some ancestor of
 // `fn`, not to `fn` itself. Reject the three shapes serialize_nested_
@@ -2136,29 +2173,56 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
     if (!owner)
         return; // defensive only -- the real scope chain guarantees this
 
-    // #964: a VLA's declaration can't be hoisted ahead of the point it
+    // #1209: a VLA's declaration can't be hoisted ahead of the point it
     // reads its own length expression -- serialize_function's hoist loop
-    // skips it for exactly this reason (see its own #964 comment), so no
-    // `&var` is available yet when the owning function's env would need to
-    // be initialized.
+    // skips it for exactly this reason (#964) -- so no `&var` exists yet
+    // when the owning function's env would ordinarily be initialized, at
+    // the top of its body. Fixed by deferring both problems to the VLA's
+    // own in-place declaration site instead (serialize_stmt.c's
+    // node_is_vla_ptr_assign/node_is_deferred_vla_ptr_init cases): the
+    // env field's type erases the VLA's outermost extent to an incomplete
+    // array (`T (*)[]`, the same spelling C already uses for a flexible
+    // array member -- serialize_type_decl's `array_len < 0` case), and the
+    // field is assigned there, once `&var` is finally valid, rather than
+    // in serialize_function's usual top-of-function loop
+    // (serialize_decl.c). A multi-dimensional VLA (every extent runtime-
+    // sized, `int v[n][m]`) doesn't fit this: the field would need to be
+    // `int (*)[][m]`, a pointer to an array of incomplete element type,
+    // which is illegal C -- still rejected below, tracked as #1221.
     if (var->ty && var->ty->kind == TY_VLA) {
-        error_tok(vm, node->tok ? node->tok : fn->tok,
-                  "cannot serialize to native code: variable-length-array "
-                  "local '%s', read by a nested function, has no fixed "
-                  "address to hand across the static link (#1074)",
-                  var->name);
+        if (type_contains_vla(var->ty->base)) {
+            error_tok(vm, node->tok ? node->tok : fn->tok,
+                      "cannot serialize to native code: multi-dimensional "
+                      "variable-length-array local '%s' (every dimension "
+                      "runtime-sized), read by a nested function, has no "
+                      "env-struct field type an incomplete array can "
+                      "express (#1221)",
+                      var->name);
+            return;
+        }
+        NestedEnvEntry *e = find_or_create_nested_env(vm, ctx, owner);
+        add_nested_upvar(&e->upvars, &e->upvars_len, &e->upvars_cap, var);
         return;
     }
-    // #973: same reasoning, for a pointer-to-VLA local whose own declarator
-    // reads a runtime variable and is likewise emitted in place rather than
-    // hoisted.
+    // #1209: same fix, for a pointer-to-VLA local whose own declarator
+    // reads a runtime variable and is likewise emitted in place rather
+    // than hoisted (#973) -- the env field is `T (**)[]` (one more level
+    // of indirection than the VLA-local case, since `var` itself is
+    // already a pointer). Rejected below for the same multi-dimensional
+    // reason as above, on the VLA it points into.
     if (var->deferred_vla_ptr_init) {
-        error_tok(vm, node->tok ? node->tok : fn->tok,
-                  "cannot serialize to native code: pointer-to-VLA local "
-                  "'%s', read by a nested function, is declared too late "
-                  "for the static-link environment to capture its address "
-                  "(#1074)",
-                  var->name);
+        if (type_contains_vla(var->ty->base->base)) {
+            error_tok(vm, node->tok ? node->tok : fn->tok,
+                      "cannot serialize to native code: pointer to a "
+                      "multi-dimensional variable-length-array local '%s' "
+                      "(every dimension runtime-sized), read by a nested "
+                      "function, has no env-struct field type an "
+                      "incomplete array can express (#1221)",
+                      var->name);
+            return;
+        }
+        NestedEnvEntry *e = find_or_create_nested_env(vm, ctx, owner);
+        add_nested_upvar(&e->upvars, &e->upvars_len, &e->upvars_cap, var);
         return;
     }
     // #965/#1080: a block descriptor local itself (block_desc_of) has no
@@ -2392,15 +2456,7 @@ static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
             char field_name[16];
             snprintf(field_name, sizeof(field_name), "__uv%d", j);
             fprintf(f, "    ");
-            // #1080: a __block-storage upvar's own C storage is already a
-            // pointer to the shared heap box (T *) -- the env field holding
-            // its address is one level deeper, T **, so
-            // serialize_nested_upvar_ref() can deref twice to reach the
-            // value.
-            Type *field_ty =
-                e->upvars[j]->is_block_var
-                    ? pointer_to(vm, pointer_to(vm, e->upvars[j]->ty))
-                    : pointer_to(vm, e->upvars[j]->ty);
+            Type *field_ty = nested_upvar_field_type(vm, e->upvars[j]);
             serialize_type_decl(f, ctx, field_ty, field_name);
             fprintf(f, ";\n");
         }

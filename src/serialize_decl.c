@@ -641,9 +641,18 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             fprintf(f, "    %s __cccc_nenv;\n", __ne->env_struct_name);
             fprintf(f, "    __cccc_nenv.__up = %s;\n",
                     fn->is_nested ? "__static_link" : "(void *)0");
-            for (int __uv_i = 0; __uv_i < __ne->upvars_len; __uv_i++)
+            for (int __uv_i = 0; __uv_i < __ne->upvars_len; __uv_i++) {
+                // #1209: a VLA (or pointer-to-VLA) upvar has no valid
+                // address yet at this point -- its own declaration hasn't
+                // run -- so its field is left uninitialized here and
+                // assigned instead at its in-place declaration site
+                // (serialize_stmt.c), once `&var` is finally valid. See
+                // nested_upvar_is_deferred()'s own comment.
+                if (nested_upvar_is_deferred(__ne->upvars[__uv_i]))
+                    continue;
                 fprintf(f, "    __cccc_nenv.__uv%d = &%s;\n", __uv_i,
                         __ne->upvars[__uv_i]->name);
+            }
             break;
         }
 

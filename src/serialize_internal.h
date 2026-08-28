@@ -274,6 +274,7 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
 bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                Obj *obj);
 bool is_noop_expr(Node *node);
+bool nested_upvar_is_deferred(Obj *var);
 bool nested_var_is_own(Obj *fn, Obj *var);
 bool obj_vec_contains(ObjVec *vec, Obj *obj);
 bool path_basename_is(const char *path, const char *name);
@@ -296,6 +297,7 @@ const char *find_block_env(SerializeContext *ctx, Obj *block_fn);
 const LabelOwner *find_label_owner(SerializeContext *ctx, const char *name);
 int block_capture_index(Obj *block_fn, Obj *var);
 Obj *serialize_find_global(VirtualMachine *vm, const char *name);
+Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var);
 TypeName *find_typedef_name(SerializeContext *ctx, Type *ty);
 TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty);
 unsigned __int128 decode_wide_digits(const char *digits, int base);
