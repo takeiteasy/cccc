@@ -641,11 +641,14 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
             // #1228: `L` on an integer conversion (%Ld/%Li/%Lu/%Lo/%Lx/%Lb)
             // is the pre-C99 GNU spelling of `ll` -- glibc still accepts it,
             // so set STBSP__INTMAX too or `%Ld` would read a 32-bit slot and
-            // desync every later argument (only observable against host glibc
-            // under -c=native, class #1170, but harmless to match). The two
-            // flags are independent: the float arms consult only LONGDOUBLE,
-            // the radixnum / u,i,d arms consult only INTMAX, so whichever
-            // conversion follows picks up exactly the one it needs.
+            // desync every later argument. ISO C leaves this undefined and
+            // BSD/Apple libc treats `L` as a no-op here, so following glibc
+            // is a deliberate VM/-c=native divergence on a non-glibc host --
+            // tracked in #1231, documented in man/COVERAGE.md's serialized-
+            // output table. The two flags are independent: the float arms
+            // consult only LONGDOUBLE, the radixnum / u,i,d arms consult only
+            // INTMAX, so whichever conversion follows picks up the one it
+            // needs.
             case 'L':
                 fl |= STBSP__LONGDOUBLE | STBSP__INTMAX;
                 ++f;
