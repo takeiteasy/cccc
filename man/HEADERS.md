@@ -115,7 +115,7 @@ by default). Two things follow from that:
   non-gnu `--std=c89` too (pedantic-warn, not error), so forwarding a
   strict ISO spelling to the host would reject programs cccc itself
   accepts. `-Wpedantic`/other CCCC warning flags are not forwarded to the
-  host at all. See `man/NATIVE.md`'s "`-c=native` scope"
+  host at all. See `man/NATIVE.md`'s "`-c=native` scope for v0.4.0"
   section for the full dialect statement and required host flags
   (`-lm`/`-pthread`/`-fsigned-char`).
 - CCCC's own bundled include directory is never forwarded as a plain `-I`

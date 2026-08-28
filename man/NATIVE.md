@@ -44,9 +44,9 @@ below for why `-fsigned-char` in particular is required, not optional.
 
 ---
 
-## `-c=native` scope
+## `-c=native` scope for v0.4.0
 
-`-c=native`'s current scope is parity — the floor, not the ceiling. Any program that
+`-c=native` v1 (parity) is the floor, not the ceiling. Any program that
 already passes on the VM should produce correct native output too, on the
 two currently-supported platform × arch combinations (macOS/Linux ×
 aarch64/x86_64), using the real host's standard library wherever CCCC's own
@@ -339,15 +339,15 @@ plain `char` is not universally signed (glibc/aarch64 defines
 `__CHAR_UNSIGNED__`); its absence produces silently wrong answers on aarch64
 Linux, not a compile failure.
 
-### Future direction: a universal C lowerer (tracked as #1055)
+### v2 — universal C lowerer (v0.5.0, tracked as #1055)
 
 A larger direction — CCCC as a genuinely portable C compiler that runs any
 valid C (including its own supported extensions) on *any* host, POSIX or
 not, polyfilling missing platform facilities rather than just targeting the
 two platforms the VM itself already supports — is real and worth pursuing,
 but is a different product bet (portability over parity) and a much bigger
-undertaking. Deliberately not folded into the parity scope above — tracked
-separately as #1055, not yet started.
+undertaking. Deliberately not folded into the v0.4.0 work above — tracked as
+the v2 epic, #1055, targeting v0.5.0.
 
 ## Serialized-output divergences
 
@@ -373,7 +373,23 @@ they are listed here rather than left to be discovered:
 | Tail-call elimination (`CALLT`, unconditional) | guaranteed: the VM reuses the caller's frame, so an arbitrarily deep tail-recursive call runs in constant stack space | best-effort, not guaranteed. The native build's TCO is the host cc's own heuristic, not part of any C standard. `-O<n>` is forwarded verbatim to the host cc (#1159); the deep-recursion tail-call tests pass `-O2` so both clang and gcc-16 eliminate the call (gcc's `-O1` heuristic does not, for some shapes). With no `-O` on the command line the host builds at its own `-O0` and does no TCO |
 | `long`/`long long` on a real header's declaration, re-declared by `-c=native` | n/a — the VM parses and executes CCCC's own tokens directly, so no re-declaration ever happens | CCCC's type system has no distinct `long long` kind — both collapse to the same internal `long` representation (identical on every LP64 target CCCC supports) — so `-c=native` always re-emits a `long long` parameter/return as `long`. A header compiled alongside the generated TU that itself spells the type `long long` then sees two non-identical declarations for the same function and the host compiler rejects the TU with "conflicting types". Not serializer-fixable without a distinct type kind to preserve the original spelling (#1234); until then, a project's own headers should spell 64-bit integers `long`, not `long long`, if they are meant to be linked against `-c=native` output — `examples/ccccl`'s runtime does this |
 | `sizeof`/`_Alignof` of a `from_include` type, reached through a bitfield width (`int x : sizeof(struct statfs);`) or a global initializer's byte image (`serialize_init_bytes`) — including an array dimension on a struct/union *member*, or on an *initialized* global | folds against CCCC's own (correct-for-the-VM) type projection | stays folded. A bitfield width determines the *containing struct's own layout*, which CCCC also emits — re-materializing the width would make the host compute different member offsets than CCCC folded for the rest of that struct, actively unsound rather than merely incomplete, so this is not attempted (#1099, `WONT_FIX`). An initialized global's byte image is sized off the folded value by `serialize_init_bytes`; re-materializing only its declared dimension would desync the two (same reasoning, member arrays inherit it via the enclosing aggregate; also `WONT_FIX`). A bare `sizeof(T)`/`_Alignof(T)` *expression* (#1031), a *local or uninitialized-global* array dimension, a `case` label, and an enum value (#1095) all re-materialize the operator textually against the real host layout instead — see `man/HEADERS.md`. A `_Static_assert(sizeof(struct statfs) == N, "...")` condition depending on one of these types is a distinct case, not merely a re-materialization gap: CCCC's parser evaluates it against its own projection, so only a passing assertion ever reaches the serializer, which used to emit no `_Static_assert` construct at all — a host whose real layout would fail the same check compiled anyway. `-c=native` now re-emits the assert (both file- and block-scope forms) for the host to genuinely re-check it, gated on the condition actually depending on a host-owned `from_include` struct/union layout *and* the assert being written in a command-line input file — so one of CCCC's own bundled headers' own per-platform layout asserts (`include/sys/stat.h`, `signal.h`, `fts.h`, `aio.h`, etc.) is never re-emitted against the wrong host (#1098) |
-`_Decimal32`/`_Decimal64`/`_Decimal128` declarations and literals (the `df`/ `dd`/`dl` suffix) pass through to `-m`/`-c=native` output as plain GNU decimal syntax — the only host-compiler-dependent construct in this document, rather than a fixed divergence or a fixed hard error. gcc implements the GNU decimal extension (confirmed on both macOS `gcc-16` and Linux gcc 15.2, both predefining `__DEC64_MAX__`) and the output compiles and runs correctly there; clang implements none of it, on either platform, and rejects the syntax outright ("GNU decimal type extension not supported") — see the compiler-family row above (`test_suite_decimal.c`, `NATIVE_SKIP_TESTS_CLANG`). Since a real passthrough path exists on gcc, the serializer cannot hard-refuse unconditionally without regressing that working configuration; instead it emits a guarded `#error` preamble (`serialize_decimal_native_guard()`, src/serialize_program.c`) the moment any decimal type is used anywhere in the program, deferring the actual refuse-or-not decision to whichever host compiler reads the output (`#if !defined(__DEC64_MAX__)`) — giving clang a cccc-branded diagnostic instead of its own confusing one, with no effect on gcc (#1113).
+`_Decimal32`/`_Decimal64`/`_Decimal128` declarations and literals (the `df`/
+`dd`/`dl` suffix) pass through to `-m`/`-c=native` output as plain GNU decimal
+syntax — the only host-compiler-dependent construct in this document, rather
+than a fixed divergence or a fixed hard error. gcc implements the GNU decimal
+extension (confirmed on both macOS `gcc-16` and Linux gcc 15.2, both
+predefining `__DEC64_MAX__`) and the output compiles and runs correctly there;
+clang implements none of it, on either platform, and rejects the syntax
+outright ("GNU decimal type extension not supported") — see the compiler-family
+row above (`test_suite_decimal.c`, `NATIVE_SKIP_TESTS_CLANG`). Since a real
+passthrough path exists on gcc, the serializer cannot hard-refuse
+unconditionally without regressing that working configuration; instead it
+emits a guarded `#error` preamble (`serialize_decimal_native_guard()`,
+`src/serialize_program.c`) the moment any decimal type is used anywhere in the
+program, deferring the actual refuse-or-not decision to whichever host
+compiler reads the output (`#if !defined(__DEC64_MAX__)`) — giving clang a
+cccc-branded diagnostic instead of its own confusing one, with no effect on
+gcc (#1113).
 
 Two decimal constructs remain genuine hard errors, independent of host
 compiler, because no host — gcc included — has an equivalent to lower to:
