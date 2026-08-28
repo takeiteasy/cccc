@@ -3048,7 +3048,13 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 > repointed to the corresponding `double` libc symbol or wrapped in a thin
 > double-precision shim. This is correct for all existing tests and avoids a
 > host-ABI mismatch on Linux/aarch64 where the native `long double` is
-> 128-bit ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)).
+> 128-bit ([#491](https://todo.sr.ht/~takeiteasy/cccc/491)). The same applies
+> on the **return** side: `strtold`/`wcstold` — the only registered functions
+> that genuinely return a host `long double` — bind through a shim that
+> narrows the result to `double` in C, so libffi is never told to read a
+> `long double` return register that the VM has no slot for
+> ([#1229](https://todo.sr.ht/~takeiteasy/cccc/1229)). No FFI entry uses a
+> `long double` return type.
 >
 > A `long double` in the **variadic tail** of an FFI call is the one place
 > the host representation matters: it is widened from the VM's 8-byte

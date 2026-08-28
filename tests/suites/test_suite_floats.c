@@ -1034,6 +1034,28 @@ int test_printf_long_double_modifier(void) {
     return 42;
 }
 
+// #1228's runtime `%Ld` coverage lives in the standalone,
+// native-skipped tests/test_printf_L_integer_modifier.c: treating `L` as
+// `ll` on an integer conversion is a glibc extension that BSD/Apple libc
+// does not share, so the -c=native round-trip is host-libc-dependent and
+// can't run in this suite.
+
+// #1229: strtold was registered with a `double` FFI return type. Correct on
+// macOS arm64 (`long double == double`); on Linux it made libffi read the
+// wrong return register. It now binds through a double-narrowing shim, so
+// this holds on every platform. (On macOS arm64 this assertion passes with
+// or without the fix -- its real coverage is the Linux CI.)
+[[cccc::test(return = 42)]]
+int test_strtold_return(void) {
+    char  *end = 0;
+    double v   = (double)strtold("2.25 rest", &end);
+    if (v != 2.25)
+        return 1;
+    if (!end || __builtin_strcmp(end, " rest") != 0)
+        return 2;
+    return 42;
+}
+
 #pragma cccc suite end
 
 // [from test_nexttoward.c]

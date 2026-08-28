@@ -565,6 +565,19 @@ static unsigned long cccc_strtoul(const char *nptr, char **endptr, int base) {
     return (unsigned long)cccc_strtoull(nptr, endptr, base);
 }
 
+// #1229: bind the real host strtold but narrow its result to `double` in C,
+// the same double-precision-shim convention the math.h `...l` family follows
+// (#491): the VM models `long double` as an 8-byte double and has no FFI
+// return slot for a real host `long double`, so registering bare strtold with
+// returns_double=1 would have libffi read xmm0 where glibc's strtold left an
+// 80-bit x87 value in st(0) (garbage on Linux/x86-64; binary128 register on
+// Linux/aarch64). Letting the host compiler emit the narrowing keeps the ABI
+// correct and the precision outcome identical to an ffi_type_longdouble
+// return path. On macOS arm64 `long double == double` so this is a no-op.
+static double cccc_strtold(const char *nptr, char **endptr) {
+    return (double)strtold(nptr, endptr);
+}
+
 // #832: strtod32/64/128's FFI trampoline. `long long`-uniform, like every
 // other decimal shim entry point (src/stdlib/decimal.c's cccc_dec_strtod) --
 // no BID type appears in a VM header. include/stdlib.h's strtod32/64/128
@@ -586,8 +599,8 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "atoll", (void *)atoll, 1, 0);   // returns long long
     cc_register_cfunc(vm, "strtod", (void *)strtod, 2, 1); // returns double
     cc_register_cfunc(vm, "strtof", (void *)strtof, 2, 2); // returns float
-    cc_register_cfunc(vm, "strtold", (void *)strtold, 2,
-                      1); // returns long double
+    cc_register_cfunc(vm, "strtold", (void *)cccc_strtold, 2,
+                      1); // #1229: double-narrowing shim, see cccc_strtold
     cc_register_cfunc(vm, "strtol", (void *)cccc_strtol, 3, 0);
     cc_register_cfunc(vm, "strtoll", (void *)cccc_strtoll, 3, 0);
     cc_register_cfunc(vm, "strtoul", (void *)cccc_strtoul, 3, 0);

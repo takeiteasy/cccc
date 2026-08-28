@@ -55,6 +55,15 @@ static long long wrap_wcsncmp(long long a, long long b, long long n) {
     return (long long)wcsncmp((const wchar_t *)a, (const wchar_t *)b,
                               (size_t)n);
 }
+// #1229: narrow the host wcstold result to `double` in C -- the VM has no
+// FFI return slot for a real host `long double`, so registering bare wcstold
+// with returns_double=1 would have libffi misread the return register on
+// Linux (st(0) on x86-64, a wider fp reg on aarch64). Same double-precision
+// shim convention as strtold / the math.h `...l` family (#491). No-op on
+// macOS arm64 where `long double == double`.
+static double cccc_wcstold(const wchar_t *nptr, wchar_t **endptr) {
+    return (double)wcstold(nptr, endptr);
+}
 static long long wrap_iswalnum(long long c) {
     return (long long)iswalnum((wint_t)c);
 }
@@ -387,7 +396,8 @@ void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc_ex(vm, "wcstod", (void *)wcstod, 2, 1, 0);
     cc_register_cfunc_ex(vm, "wcstof", (void *)wcstof, 2, 2,
                          0); // returns float (#777: was incorrectly 1/double)
-    cc_register_cfunc_ex(vm, "wcstold", (void *)wcstold, 2, 1, 0);
+    cc_register_cfunc_ex(vm, "wcstold", (void *)cccc_wcstold, 2, 1,
+                         0); // #1229: double-narrowing shim, see cccc_wcstold
     cc_register_cfunc(vm, "wcstol", (void *)wcstol, 3, 0);
     cc_register_cfunc(vm, "wcstoll", (void *)wcstoll, 3, 0);
     cc_register_cfunc(vm, "wcstoul", (void *)wcstoul, 3, 0);
