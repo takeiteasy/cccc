@@ -166,10 +166,134 @@ static void print_escaped_string_fp(FILE *f, const char *s) {
     }
 }
 
+// Forward decls: tok_line_no/tok_col_no are defined below (after
+// vdiagnostic_at, which historically came first in this file) but the
+// #966 expansion-note formatters need them.
+static int tok_line_no(Token *tok);
+static int tok_col_no(Token *tok);
+
+// #966: comptime expansion backtrace ("note: in expansion of ..." chain).
+// Capped so a recursion-limit blowup (default depth 256) doesn't print
+// hundreds of note lines; the remainder is summarized in one line instead.
+#define EXPANSION_NOTE_DEPTH_CAP 8
+
+// Which chain a diagnostic at `tok` should walk: the origin stamped on the
+// token itself (it survived past the end of the expansion that produced
+// it) takes priority; the live expansion stack is the fallback, for an
+// error raised *while* comptime code is still executing. tok may be NULL
+// (error_at/warn_at report by raw source location, not by token).
+static ExpansionFrame *resolve_expansion_chain(VirtualMachine *vm, Token *tok) {
+    if (tok && tok->expansion)
+        return tok->expansion;
+    return vm ? vm->compiler.expansion_stack : NULL;
+}
+
+// One frame's note text, no "note: " prefix or trailing newline -- callers
+// add those per output mode (plain text vs. JSON).
+static char *format_expansion_frame(VirtualMachine *vm, ExpansionFrame *fr) {
+    int         line_no = fr->call_tok ? tok_line_no(fr->call_tok) : 0;
+    int         col_no  = fr->call_tok ? tok_col_no(fr->call_tok) : 0;
+    const char *fname =
+        (fr->call_tok && fr->call_tok->file) ? fr->call_tok->file->name : "?";
+    const char *name = fr->name ? fr->name : "?";
+    switch (fr->kind) {
+        case EXPANSION_ATTR_HANDLER:
+            if (fr->target_desc)
+                return arena_format(vm,
+                                    "while handling attribute '@%s' on '%s' "
+                                    "at %s:%d:%d",
+                                    name, fr->target_desc, fname, line_no,
+                                    col_no);
+            return arena_format(vm,
+                                "while handling attribute '@%s' at %s:%d:%d",
+                                name, fname, line_no, col_no);
+        case EXPANSION_FILE_SCOPE:
+            return arena_format(vm,
+                                "in file-scope generation by '%s' at %s:%d:%d",
+                                name, fname, line_no, col_no);
+        case EXPANSION_MACRO_CALL:
+        default:
+            return arena_format(vm, "in expansion of macro '%s' at %s:%d:%d",
+                                name, fname, line_no, col_no);
+    }
+}
+
+// Direct-mode (unbuffered stderr) note printing, capped at
+// EXPANSION_NOTE_DEPTH_CAP with a "... N more" summary line.
+static void print_expansion_notes(FILE *f, VirtualMachine *vm,
+                                  ExpansionFrame *chain) {
+    int total = 0;
+    for (ExpansionFrame *fr = chain; fr; fr = fr->parent)
+        total++;
+    int i = 0;
+    for (ExpansionFrame *fr = chain; fr && i < EXPANSION_NOTE_DEPTH_CAP;
+         fr                 = fr->parent, i++)
+        fprintf(f, "  note: %s\n", format_expansion_frame(vm, fr));
+    if (total > EXPANSION_NOTE_DEPTH_CAP) {
+        int rest = total - EXPANSION_NOTE_DEPTH_CAP;
+        fprintf(f, "  note: ... %d more expansion frame%s\n", rest,
+                rest == 1 ? "" : "s");
+    }
+}
+
+// Buffered-mode note collection: one CompileError node (severity 2) per
+// frame, capped the same way as print_expansion_notes. Attached to
+// CompileError.notes by the collect blocks in error_at/error_tok/
+// error_tok_recover/warn_tok, and printed verbatim by cc_print_all_errors.
+static CompileError *build_expansion_notes(VirtualMachine *vm,
+                                           ExpansionFrame *chain) {
+    if (!vm || !chain)
+        return NULL;
+    int total = 0;
+    for (ExpansionFrame *fr = chain; fr; fr = fr->parent)
+        total++;
+    CompileError *head = NULL, *tail = NULL;
+    int           i = 0;
+    for (ExpansionFrame *fr = chain; fr && i < EXPANSION_NOTE_DEPTH_CAP;
+         fr                 = fr->parent, i++) {
+        CompileError *note =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        memset(note, 0, sizeof(CompileError));
+        note->message =
+            arena_format(vm, "  note: %s\n", format_expansion_frame(vm, fr));
+        note->filename = (fr->call_tok && fr->call_tok->file)
+                             ? fr->call_tok->file->name
+                             : NULL;
+        note->line_no  = fr->call_tok ? tok_line_no(fr->call_tok) : 0;
+        note->col_no   = fr->call_tok ? tok_col_no(fr->call_tok) : 0;
+        note->severity = 2; // note
+        if (!head)
+            head = tail = note;
+        else {
+            tail->next = note;
+            tail       = note;
+        }
+    }
+    if (total > EXPANSION_NOTE_DEPTH_CAP) {
+        int           rest = total - EXPANSION_NOTE_DEPTH_CAP;
+        CompileError *note =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+        memset(note, 0, sizeof(CompileError));
+        note->message  = arena_format(vm,
+                                      "  note: ... %d more expansion "
+                                      "frame%s\n",
+                                      rest, rest == 1 ? "" : "s");
+        note->severity = 2;
+        if (!head)
+            head = tail = note;
+        else {
+            tail->next = note;
+            tail       = note;
+        }
+    }
+    return head;
+}
+
 //               ^ error: <message here>
 static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
                            int line_no, char *loc, const char *kind,
-                           const char *warn_name, char *fmt, va_list ap) {
+                           const char *warn_name, ExpansionFrame *chain,
+                           char *fmt, va_list ap) {
     // Guard: loc must be within the file's contents buffer.
     // Synthesized tokens (e.g. incremental $@k placeholders) may have their
     // loc rewritten to arena memory; clamp to input start so display_width
@@ -202,9 +326,37 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
                 col_no);
         print_escaped_string_fp(stderr, plain_msg);
         if (warn_name)
-            fprintf(stderr, "\",\"option\":\"-W%s\"}\n", warn_name);
+            fprintf(stderr, "\",\"option\":\"-W%s\"", warn_name);
         else
-            fprintf(stderr, "\",\"option\":null}\n");
+            fprintf(stderr, "\",\"option\":null");
+        if (chain) {
+            fprintf(stderr, ",\"notes\":[");
+            int total = 0;
+            for (ExpansionFrame *fr = chain; fr; fr = fr->parent)
+                total++;
+            int i = 0;
+            for (ExpansionFrame *fr = chain; fr && i < EXPANSION_NOTE_DEPTH_CAP;
+                 fr                 = fr->parent, i++) {
+                if (i)
+                    fprintf(stderr, ",");
+                char *note_msg = format_expansion_frame(vm, fr);
+                fprintf(stderr, "{\"file\":\"");
+                print_escaped_string_fp(stderr,
+                                        fr->call_tok && fr->call_tok->file
+                                            ? fr->call_tok->file->name
+                                            : "?");
+                fprintf(stderr, "\",\"line\":%d,\"column\":%d,\"message\":\"",
+                        fr->call_tok ? tok_line_no(fr->call_tok) : 0,
+                        fr->call_tok ? tok_col_no(fr->call_tok) : 0);
+                print_escaped_string_fp(stderr, note_msg);
+                fprintf(stderr, "\"}");
+            }
+            fprintf(stderr, "]");
+            if (total > EXPANSION_NOTE_DEPTH_CAP)
+                fprintf(stderr, ",\"notes_truncated\":%d",
+                        total - EXPANSION_NOTE_DEPTH_CAP);
+        }
+        fprintf(stderr, "}\n");
         vm->error_message = NULL;
         return;
     }
@@ -255,6 +407,7 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
             snprintf(msg + pos, 4096 - pos, "\n");
 
         vm->error_message = msg;
+        vm->pending_notes = build_expansion_notes(vm, chain);
         return; // Don't print to stderr or exit
     }
 
@@ -271,11 +424,15 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
     if (warn_name)
         fprintf(stderr, " [-W%s]", warn_name);
     fprintf(stderr, "\n");
+    if (chain)
+        print_expansion_notes(stderr, vm, chain);
 }
 
 static void verror_at(VirtualMachine *vm, char *filename, char *input,
-                      int line_no, char *loc, char *fmt, va_list ap) {
-    vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, fmt, ap);
+                      int line_no, char *loc, ExpansionFrame *chain, char *fmt,
+                      va_list ap) {
+    vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, chain, fmt,
+                   ap);
 }
 
 // Compute line number from a token's location if it hasn't been set yet.
@@ -304,6 +461,38 @@ static int tok_col_no(Token *tok) {
     return (int)(tok->loc - line_start) + 1;
 }
 
+// Shared tail of error_at/error_tok/error_tok_recover's collect-errors
+// block: wrap vm->error_message (+ vm->pending_notes, #966) in a
+// CompileError and append it to vm->errors. Returns the new node (already
+// appended) or NULL if collection isn't active. Consumes and clears both
+// vm->error_message and vm->pending_notes.
+static CompileError *collect_compile_error(VirtualMachine *vm, char *filename,
+                                           int line_no, int col_no) {
+    if (!(vm && vm->collect_errors && vm->error_message))
+        return NULL;
+    CompileError *err =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
+    err->message   = vm->error_message;
+    err->filename  = filename;
+    err->line_no   = line_no;
+    err->col_no    = col_no;
+    err->severity  = 0; // error
+    err->warn_name = NULL;
+    err->next      = NULL;
+    err->notes     = vm->pending_notes;
+
+    if (!vm->errors) {
+        vm->errors = vm->errors_tail = err;
+    } else {
+        vm->errors_tail->next = err;
+        vm->errors_tail       = err;
+    }
+    vm->error_count++;
+    vm->error_message = NULL; // Clear so it's not reused
+    vm->pending_notes = NULL;
+    return err;
+}
+
 void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
     int line_no = 1;
     for (char *p = vm->compiler.current_file->contents; p < loc; p++)
@@ -319,34 +508,15 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
         col_no++;
     }
 
-    va_list ap;
+    ExpansionFrame *chain = resolve_expansion_chain(vm, NULL);
+    va_list         ap;
     va_start(ap, fmt);
     verror_at(vm, vm->compiler.current_file->name,
-              vm->compiler.current_file->contents, line_no, loc, fmt, ap);
+              vm->compiler.current_file->contents, line_no, loc, chain, fmt,
+              ap);
     va_end(ap);
 
-    // Collect error if error collection is enabled
-    if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err =
-            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message   = vm->error_message;
-        err->filename  = vm->compiler.current_file->name;
-        err->line_no   = line_no;
-        err->col_no    = col_no;
-        err->severity  = 0; // error
-        err->warn_name = NULL;
-        err->next      = NULL;
-
-        // Append to list
-        if (!vm->errors) {
-            vm->errors = vm->errors_tail = err;
-        } else {
-            vm->errors_tail->next = err;
-            vm->errors_tail       = err;
-        }
-        vm->error_count++;
-        vm->error_message = NULL; // Clear so it's not reused
-    }
+    collect_compile_error(vm, vm->compiler.current_file->name, line_no, col_no);
 
     // Always use longjmp/exit (Level 1: no parser recovery)
     if (vm && vm->error_jmp_buf) {
@@ -356,37 +526,17 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
 }
 
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
-    int     line_no = tok_line_no(tok);
-    int     col_no  = tok_col_no(tok);
+    int             line_no = tok_line_no(tok);
+    int             col_no  = tok_col_no(tok);
 
-    va_list ap;
+    ExpansionFrame *chain   = resolve_expansion_chain(vm, tok);
+    va_list         ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt,
-              ap);
+    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
+              chain, fmt, ap);
     va_end(ap);
 
-    // Collect error if error collection is enabled
-    if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err =
-            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message   = vm->error_message;
-        err->filename  = tok->file->name;
-        err->line_no   = line_no;
-        err->col_no    = col_no;
-        err->severity  = 0; // error
-        err->warn_name = NULL;
-        err->next      = NULL;
-
-        // Append to list
-        if (!vm->errors) {
-            vm->errors = vm->errors_tail = err;
-        } else {
-            vm->errors_tail->next = err;
-            vm->errors_tail       = err;
-        }
-        vm->error_count++;
-        vm->error_message = NULL; // Clear so it's not reused
-    }
+    collect_compile_error(vm, tok->file->name, line_no, col_no);
 
     // Always use longjmp/exit (Level 1: no parser recovery)
     if (vm && vm->error_jmp_buf) {
@@ -399,37 +549,17 @@ void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
 // Returns true if parsing should continue with recovery, false if max errors
 // hit
 bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
-    int     line_no = tok_line_no(tok);
-    int     col_no  = tok_col_no(tok);
+    int             line_no = tok_line_no(tok);
+    int             col_no  = tok_col_no(tok);
 
-    va_list ap;
+    ExpansionFrame *chain   = resolve_expansion_chain(vm, tok);
+    va_list         ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc, fmt,
-              ap);
+    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
+              chain, fmt, ap);
     va_end(ap);
 
-    // Collect error if error collection is enabled
-    if (vm && vm->collect_errors && vm->error_message) {
-        CompileError *err =
-            arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
-        err->message   = vm->error_message;
-        err->filename  = tok->file->name;
-        err->line_no   = line_no;
-        err->col_no    = col_no;
-        err->severity  = 0; // error
-        err->warn_name = NULL;
-        err->next      = NULL;
-
-        // Append to list
-        if (!vm->errors) {
-            vm->errors = vm->errors_tail = err;
-        } else {
-            vm->errors_tail->next = err;
-            vm->errors_tail       = err;
-        }
-        vm->error_count++;
-        vm->error_message = NULL; // Clear so it's not reused
-
+    if (collect_compile_error(vm, tok->file->name, line_no, col_no)) {
         // Check if we've hit max errors
         if (vm->max_errors > 0 && vm->error_count >= vm->max_errors) {
             // Too many errors, bail out
@@ -473,10 +603,11 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
         (vm->warnings_as_errors && !(vm->compiler.warning_no_errors & mask)) ||
         (eff_werror & mask);
 
-    va_list ap;
+    ExpansionFrame *chain = resolve_expansion_chain(vm, tok);
+    va_list         ap;
     va_start(ap, fmt);
     vdiagnostic_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
-                   is_error ? "error" : "warning", warn_name, fmt, ap);
+                   is_error ? "error" : "warning", warn_name, chain, fmt, ap);
     va_end(ap);
 
     // If error_jmp_buf is set but collect_errors is false, print the warning
@@ -485,6 +616,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
         vm->error_message) {
         fprintf(stderr, "%s", vm->error_message);
         vm->error_message = NULL;
+        vm->pending_notes = NULL;
     }
 
     // If this warning is treated as an error, collect it as an error and abort.
@@ -499,6 +631,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
             err->severity  = 0; // error (not warning)
             err->warn_name = warn_name;
             err->next      = NULL;
+            err->notes     = vm->pending_notes;
 
             // Append to list
             if (!vm->errors) {
@@ -509,6 +642,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
             }
             vm->error_count++; // Count as error
             vm->error_message = NULL;
+            vm->pending_notes = NULL;
         }
 
         // Use longjmp like error_tok
@@ -529,6 +663,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
         err->severity  = 1; // warning
         err->warn_name = warn_name;
         err->next      = NULL;
+        err->notes     = vm->pending_notes;
 
         // Append to list
         if (!vm->errors) {
@@ -539,6 +674,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
         }
         vm->warning_count++;
         vm->error_message = NULL; // Clear so it's not reused
+        vm->pending_notes = NULL;
     }
 }
 
@@ -571,7 +707,8 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
     va_start(ap, fmt);
     vdiagnostic_at(vm, vm->compiler.current_file->name,
                    vm->compiler.current_file->contents, line_no, loc,
-                   is_error ? "error" : "warning", warn_name, fmt, ap);
+                   is_error ? "error" : "warning", warn_name,
+                   resolve_expansion_chain(vm, NULL), fmt, ap);
     va_end(ap);
 
     if (vm->error_jmp_buf && !vm->collect_errors && !is_error &&
@@ -2265,6 +2402,10 @@ void cc_print_all_errors(VirtualMachine *vm) {
 
     while (err) {
         fprintf(stderr, "%s", err->message);
+        // #966: expansion-backtrace notes, innermost first; not counted in
+        // the error/warning tally below.
+        for (CompileError *note = err->notes; note; note = note->next)
+            fprintf(stderr, "%s", note->message);
         if (err->severity == 0) {
             error_num++;
         } else {

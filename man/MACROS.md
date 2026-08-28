@@ -2011,6 +2011,34 @@ started under the debugger, and CCCC suppresses VM debug tracing while invoking
 macro functions. Use `$dump_*` helpers and source-located diagnostics for macro
 debugging.
 
+### Expansion backtrace
+
+A diagnostic raised against generated code carries a note chain back to the
+source that produced it, so a bug several macro/attribute frames deep does
+not just point at an anonymous `<cccc macro: ...>` location:
+
+```
+<quote>:1: undefined_thing
+           ^ error: undefined variable 'undefined_thing'
+  note: in expansion of macro 'inner' at foo.c:12:5
+  note: while handling attribute '@serialize' on 'struct Point' at foo.c:4:1
+```
+
+Each frame names one of: an ordinary macro call (`in expansion of macro
+'NAME'`), an `@attr` handler running against its target decl (`while
+handling attribute '@NAME' on 'DESC'`), or pre-parse file-scope generation
+(`in file-scope generation by 'NAME'`) — reported innermost call first. The
+chain is capped at 8 frames; a deeper stack (e.g. one that hit
+`macro_recursion_limit`) prints a `... N more expansion frames` summary
+line instead of the rest. Under `-j` (JSON diagnostics) the same chain is
+the diagnostic object's `"notes"` array, one `{"file","line","column",
+"message"}` object per frame.
+
+The chain follows automatically from the location helpers above —
+`SetToken`, `CopyLocation`, `SyntheticToken`, and the default
+macro-invocation location every builder-created node gets — with no extra
+call needed to opt in.
+
 ### macroexpand — macro expansion
 
 Two functions are provided, matching Lisp's `macroexpand-1` / `macroexpand`

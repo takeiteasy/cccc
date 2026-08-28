@@ -334,6 +334,11 @@ def _run_single_test_body(idx, test_file, cccc, script_dir, use_leaks, platform,
         or "undefined global" in output
         or "unknown warning option" in output
         or (not started_running and "expected" in output and "got" in output)
+        # -j (JSON diagnostics, #966): cc_print_all_errors's "N error(s)
+        # generated" summary is suppressed in JSON mode, so a JSON-mode
+        # negative test needs its own marker -- the diagnostic object's own
+        # severity field.
+        or '"severity":"error"' in output
     )
 
     crashed = exit_code in (134, 139, 136, 141, -6, -11, -8, -13)

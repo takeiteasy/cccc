@@ -1252,7 +1252,44 @@ typedef struct Token {
     // thing to struct_union_decl. Read off the `struct`/`union` keyword
     // token by struct_union_decl (src/parse_types.c).
     int pack_align;
+
+    // Comptime expansion-origin chain stamped when this token is created by
+    // (or attached to a node created by) comptime code, mirroring
+    // diag_warnings/pack_align above. NULL for an ordinary source token.
+    // Set on an arena-allocated *copy* of the call-site token in
+    // execute_macro_fn (src/macros.c) and on synthetic tokens in
+    // __builtin_ast_synthetic_token (src/reflection.c) -- never on the real
+    // source token, which is shared with the un-expanded input. Walked by
+    // the diagnostic printer (src/tokenize.c) to print "note: in expansion
+    // of ..." lines (#966).
+    struct ExpansionFrame *expansion;
 } Token;
+
+/*!
+ @brief Kind tag for an ExpansionFrame (see below): what kind of comptime
+ activity produced the generated code a diagnostic points at.
+*/
+typedef enum {
+    EXPANSION_MACRO_CALL,   // inline/expression- or declaration-position macro
+    EXPANSION_ATTR_HANDLER, // @attr handler running against a decl
+    EXPANSION_FILE_SCOPE,   // pre-parse file-scope generation
+} ExpansionKind;
+
+/*!
+ @brief One frame of the comptime expansion backtrace (#966): "this
+ diagnostic's token was produced while running macro/attribute X, invoked
+ from source location call_tok". Arena-allocated in
+ vm->compiler.parser_arena (same lifetime as Node/CompileError), so a
+ pointer snapshot on a Token outlives the frame's pop from the live stack.
+*/
+typedef struct ExpansionFrame {
+    ExpansionKind kind;
+    char         *name;        // macro or attribute name
+    Token        *call_tok;    // where the user wrote the invocation
+    char         *target_desc; // e.g. "struct Point" (attr frames only)
+    Token        *target_tok;  // the decl's own token (attr frames only)
+    struct ExpansionFrame *parent;
+} ExpansionFrame;
 
 /*!
  @brief Kind tag for the `Type` structure describing C types.
@@ -3219,8 +3256,12 @@ typedef struct CompileError {
     char       *filename;  /**< Source file name where the error occurred. */
     int         line_no;   /**< Line number in the source file. */
     int         col_no;    /**< Column number in the source file. */
-    int         severity;  /**< 0 for error, 1 for warning. */
+    int         severity;  /**< 0 for error, 1 for warning, 2 for a note. */
     const char *warn_name; // Warning option name, or NULL for errors
+    struct CompileError
+        *notes; /**< Comptime expansion backtrace (#966), one CompileError
+                    node (severity 2) per frame, innermost first. NULL for
+                    an ordinary diagnostic with no generated-code origin. */
 } CompileError;
 
 /*!
@@ -3453,9 +3494,12 @@ typedef struct Compiler {
                                   // initialized
     int    macro_recursion_limit; // 0 = unlimited, default = 256
     Token *macro_call_tok;        // Active macro invocation token
-    Node **macro_vararg_nodes;    // Active inline macro variadic AST args
-    char **macro_vararg_strs;     // Active global macro variadic string args
-    int    macro_vararg_count;    // Number of active variadic args
+    ExpansionFrame
+        *expansion_stack;         // Live comptime expansion backtrace (#966);
+                          // pushed/popped by execute_macro_fn (src/macros.c)
+    Node **macro_vararg_nodes;     // Active inline macro variadic AST args
+    char **macro_vararg_strs;      // Active global macro variadic string args
+    int    macro_vararg_count;     // Number of active variadic args
     bool macro_vararg_string_mode; // True when varargs are char* token strings
     Scope *macro_context_scope; // Parser scope produced by compiling the macro
                                 // program
@@ -4347,6 +4391,10 @@ struct VirtualMachine {
     jmp_buf
          *error_jmp_buf; // Jump buffer for error handling (NULL = use exit())
     char *error_message; // Last error message (when using longjmp)
+    CompileError *pending_notes; // #966: expansion-backtrace notes for the
+                                 // diagnostic that just produced error_message;
+                                 // consumed (and reset to NULL) by the same
+                                 // collect block that consumes error_message.
 
     // Error collection (for reporting multiple errors)
     CompileError *errors;        // Linked list of collected errors

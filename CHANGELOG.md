@@ -8,6 +8,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- A compile error or warning against code produced by a comptime macro,
+  an `@attr` handler, or file-scope generation now carries a "note: in
+  expansion of ..." backtrace back to the source that produced it —
+  previously the diagnostic pointed only at the generated location, with
+  no record of how the compiler got there. Under `-j` (JSON diagnostics)
+  the same chain is a `"notes"` array on the diagnostic object. See
+  `man/MACROS.md` § Expansion backtrace.
 - `nl_langinfo`/`nl_langinfo_l` on macOS now correctly return `""` for an
   unrecognized `nl_item` (a hole in the 0-56 canonical sequence, or
   anything out of range) instead of forwarding the bogus value straight

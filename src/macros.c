@@ -2018,10 +2018,20 @@ static void setup_macro_call_slots(VirtualMachine *vm, long long *fixed_args,
 }
 
 // Execute a macro function and return the generated AST node
-static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
-                              Node *args, int arg_count,
-                              long long *fixed_arg_values,
-                              int        fixed_arg_count) {
+// #966: describes the expansion frame execute_macro_fn should push while
+// this call runs. NULL (the common case, via the wrapper below) means an
+// ordinary EXPANSION_MACRO_CALL frame named after pm->name.
+typedef struct ExpansionFrameHint {
+    ExpansionKind kind;
+    char         *target_desc; // e.g. "struct Point" (attr frames only)
+    Token        *target_tok;  // the decl's own token (attr frames only)
+} ExpansionFrameHint;
+
+static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
+                                 Token *call_tok, Node *args, int arg_count,
+                                 long long                *fixed_arg_values,
+                                 int                       fixed_arg_count,
+                                 const ExpansionFrameHint *hint) {
     if (!pm || !pm->is_compiled || !pm->compiled_fn)
         return NULL;
 
@@ -2052,7 +2062,35 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     char **saved_vararg_strs        = vm->compiler.macro_vararg_strs;
     int    saved_vararg_count       = vm->compiler.macro_vararg_count;
     bool   saved_vararg_string_mode = vm->compiler.macro_vararg_string_mode;
-    vm->compiler.macro_call_tok     = call_tok;
+
+    // #966: push an expansion frame and stamp macro_call_tok with a copy of
+    // call_tok carrying it, so every builder-created node this macro
+    // produces (reflection.c:672 defaults new nodes' tok to macro_call_tok)
+    // inherits an origin that survives past this function's return. Never
+    // mutate the real call_tok -- it is shared with the un-expanded source.
+    ExpansionFrame *saved_expansion_stack = vm->compiler.expansion_stack;
+    ExpansionFrame *frame =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(ExpansionFrame));
+    frame->kind = hint ? hint->kind : EXPANSION_MACRO_CALL;
+    frame->name =
+        (hint && hint->kind == EXPANSION_ATTR_HANDLER && pm->attribute_name)
+            ? pm->attribute_name
+            : pm->name;
+    frame->call_tok              = call_tok;
+    frame->target_desc           = hint ? hint->target_desc : NULL;
+    frame->target_tok            = hint ? hint->target_tok : NULL;
+    frame->parent                = saved_expansion_stack;
+    vm->compiler.expansion_stack = frame;
+
+    Token *stamped_call_tok      = NULL;
+    if (call_tok) {
+        stamped_call_tok =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+        *stamped_call_tok           = *call_tok;
+        stamped_call_tok->next      = NULL;
+        stamped_call_tok->expansion = frame;
+    }
+    vm->compiler.macro_call_tok = stamped_call_tok;
 
     // Reset stack for macro execution
     vm->sp = vm->initial_sp;
@@ -2131,6 +2169,7 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     vm->compiler.current_fn               = saved_current_fn;
     vm->compiler.macro_call_tok           = saved_macro_call_tok;
+    vm->compiler.expansion_stack          = saved_expansion_stack;
     vm->compiler.macro_vararg_nodes       = saved_vararg_nodes;
     vm->compiler.macro_vararg_strs        = saved_vararg_strs;
     vm->compiler.macro_vararg_count       = saved_vararg_count;
@@ -2146,6 +2185,16 @@ static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
                result->kind);
 
     return result;
+}
+
+// Plain macro-call wrapper (EXPANSION_MACRO_CALL frame) -- kept as the name
+// every pre-#966 call site already uses.
+static Node *execute_macro_fn(VirtualMachine *vm, MacroFn *pm, Token *call_tok,
+                              Node *args, int arg_count,
+                              long long *fixed_arg_values,
+                              int        fixed_arg_count) {
+    return execute_macro_fn_ex(vm, pm, call_tok, args, arg_count,
+                               fixed_arg_values, fixed_arg_count, NULL);
 }
 
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
@@ -2216,8 +2265,29 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
         vm->compiler.macro_vararg_string_mode = false;
     }
 
-    Node *result = execute_macro_fn(vm, pm, tok, NULL, total_args, fixed_values,
-                                    fixed_count);
+    // #966: describe the attribute-handler frame -- target_desc is e.g.
+    // "struct Point", target_tok is the decl's own token (falls back to the
+    // @attr token itself, use->tok, when the target has none). The
+    // struct/union/enum tag comes from the underlying Type when the target
+    // is ATTR_TARGET_TYPE; other target kinds print bare.
+    const char *tag = "";
+    if (target->kind == ATTR_TARGET_TYPE && target->ty) {
+        if (target->ty->kind == TY_STRUCT)
+            tag = "struct ";
+        else if (target->ty->kind == TY_UNION)
+            tag = "union ";
+        else if (target->ty->kind == TY_ENUM)
+            tag = "enum ";
+    }
+    char *target_desc =
+        target->name ? arena_format(vm, "%s%s", tag, target->name) : NULL;
+    ExpansionFrameHint hint = {
+        .kind        = EXPANSION_ATTR_HANDLER,
+        .target_desc = target_desc,
+        .target_tok  = target->tok ? target->tok : tok,
+    };
+    Node *result = execute_macro_fn_ex(vm, pm, tok, NULL, total_args,
+                                       fixed_values, fixed_count, &hint);
     (void)result;
 
     vm->compiler.macro_vararg_nodes       = saved_vararg_nodes;
@@ -2899,9 +2969,17 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                         bool saved_emit_recording =
                             vm->compiler.macro_emit_recording;
                         vm->compiler.macro_emit_recording = true;
-                        Node *block_result =
-                            execute_macro_fn(vm, pm, tok, NULL, arg_count,
-                                             fixed_args, fixed_count);
+                        // #966: pre-parse file-scope generation is a
+                        // distinct mechanism from AST-splice macro calls
+                        // (transform_node) -- tag its frame accordingly so
+                        // the note chain reads "in file-scope generation
+                        // by ..." rather than "in expansion of macro ...".
+                        ExpansionFrameHint file_scope_hint = {
+                            .kind = EXPANSION_FILE_SCOPE,
+                        };
+                        Node *block_result = execute_macro_fn_ex(
+                            vm, pm, tok, NULL, arg_count, fixed_args,
+                            fixed_count, &file_scope_hint);
                         vm->compiler.macro_emit_recording =
                             saved_emit_recording;
                         vm->compiler.macro_vararg_nodes = saved_vararg_nodes;

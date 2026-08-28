@@ -298,6 +298,22 @@ Example output:
 }
 ```
 
+#### Generated Code
+
+Code produced by a comptime macro, an `@attr` handler, or file-scope
+generation carries its own synthetic file/line (e.g. `<cccc macro:
+label>:1:1` for `SyntheticToken`, or the macro's call-site location by
+default) rather than a location in the real source file — there is no
+line-for-line mapping back to a template the way a preprocessor macro
+expansion has one. What generated code does carry is an **expansion
+origin**: the chain of macro calls / attribute handlers / file-scope
+generation that produced it, walked by the diagnostic printer to render
+the `note: in expansion of ...` chain described in
+[MACROS.md § Expansion backtrace](MACROS.md#expansion-backtrace). This is
+compiler-diagnostics plumbing, not part of the source-map/PC-symbolization
+API above — it isn't queryable through `cc_pc_to_source`/
+`cc_get_source_location`, only surfaced on a compile error or warning.
+
 #### Instruction Encoding
 
 The VM text segment uses 32-bit instruction words. Operands that need 64 bits,

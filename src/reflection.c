@@ -100,6 +100,10 @@ Token *__builtin_ast_synthetic_token(const char *label) {
     tok->filename = file->display_name;
     tok->line_no  = 1;
     tok->col_no   = 1;
+    // #966: stamp the live expansion chain so a diagnostic against this
+    // synthetic token (which otherwise carries no source position at all)
+    // still gets an "in expansion of ..." backtrace.
+    tok->expansion = vm->compiler.expansion_stack;
     return tok;
 }
 
