@@ -149,7 +149,7 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
     // prefix the user actually typed. CCCC's own frontend is uniformly
     // permissive -- c_std_gnu (Compiler.c_std_gnu) has no reader left
     // besides this function, and the serializer emits a fixed GNU C11
-    // floor no matter what --std= was passed (see man/COVERAGE.md) -- so a
+    // floor no matter what --std= was passed (see man/NATIVE.md) -- so a
     // strict ISO `c<NN>` spelling forwarded to the host compiler is a
     // promise the rest of CCCC does not keep. A real host GCC's strict
     // `-std=c89` rejects constructs (`//` comments, mixed declarations,
@@ -416,7 +416,7 @@ static int run_native_backend(
     // a spawn per native compile with nothing plausible to fall back to.
     // Scope: this only covers the compile -c=native drives itself -- -m/
     // -c=generated output compiled by hand still needs the flag passed
-    // explicitly (documented in man/COVERAGE.md).
+    // explicitly (documented in man/NATIVE.md).
     argv_push(&cc_args, "-fsigned-char");
     // #1159: -O<n> used to be a hard error under -c=native (it tunes the VM's
     // own bytecode pipeline, which the native path never runs), so the host
@@ -435,7 +435,7 @@ static int run_native_backend(
     // line means opt_level == 0 and nothing is forwarded, so the host's own
     // default (-O0) is unchanged from before this fix -- every existing
     // divergence this project documents as depending on that default (e.g.
-    // __builtin_dynamic_object_size, man/COVERAGE.md) keeps its meaning.
+    // __builtin_dynamic_object_size, man/NATIVE.md) keeps its meaning.
     if (opt_level != 0) {
         char buf[2] = {(char)('0' + opt_level), '\0'};
         push_owned_flag(&cc_args, &owned, "-O", buf);
@@ -555,7 +555,7 @@ static void usage(const char *argv0, int exit_code) {
            "guards emitted next to\n");
     printf("\t                         every aggregate definition in "
            "-m/-c=generated/-c=native\n");
-    printf("\t                         output (see man/COVERAGE.md); on by "
+    printf("\t                         output (see man/NATIVE.md); on by "
            "default\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, etc.)\n");

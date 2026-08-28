@@ -15,7 +15,7 @@
 // distinction that doesn't exist for scanf input), so Linux fails only
 // the one %B-via-scanf case rather than the whole file the way macOS
 // does. Permanent platform gap, same disposition as reallocarray (#1028)
-// and the fmaximum family (#1037) -- see COVERAGE.md.
+// and the fmaximum family (#1037) -- see NATIVE.md.
 
 #include <stdio.h>
 #include <stdarg.h>

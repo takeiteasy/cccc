@@ -1753,7 +1753,7 @@ def case_vla_partial_init_native_round_trip(cccc: Path, tmp: str) -> bool:
 # node kind in statement position is a silently-valid null statement) -- see
 # tests/test_serialize_expr_vla.c's own comment for the general rule this
 # repeats -- so each of the four cases below is a VM-42-then-native-42
-# round trip, covering the capture matrix COVERAGE.md:197 claims the VM
+# round trip, covering the capture matrix NATIVE.md:197 claims the VM
 # supports: plain by-value capture, __block mutation, transitive/nested
 # capture plus Block_copy escape, and a __block aggregate's partial brace
 # initializer (the one case that exercises ND_MEMZERO's new is_block_var
@@ -5474,7 +5474,7 @@ def case_layout_const_sites_native_round_trip(cccc: Path, tmp: str) -> bool:
           "same 'leave the inconsistent case folded' rule as the "
           "initialized-global exclusion). Bitfield widths and an "
           "initialized global's byte image remain open (#1099, WONT_FIX "
-          "-- see man/COVERAGE.md's own entry for why those two are "
+          "-- see man/NATIVE.md's own entry for why those two are "
           "actively unsound to fix the same way, not merely deferred); "
           "_Static_assert re-emission is #1098, a separate case below. "
           "Asserts -m output prints "
@@ -6627,7 +6627,7 @@ struct lg1172_with_ts {
 struct lg1172_with_ts g_ts;
 
 // A truly tagless, alias-less aggregate has no name to write the assert
-// with at all -- documented residual, man/COVERAGE.md. Used only via a
+// with at all -- documented residual, man/NATIVE.md. Used only via a
 // pointer here so it still needs a real (inline, unnamed) definition.
 struct lg1172_holds_anon {
     struct { int x; int y; } *p;

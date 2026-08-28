@@ -3,7 +3,7 @@
 // _Alignas(N) were retained on Type (is_packed, align)/Member (align) but
 // never re-emitted by -c=native/-m, so a struct's native layout silently
 // diverged from the VM's -- see the admissibility-rule discussion in
-// man/COVERAGE.md. Every assertion here is sizeof/offsetof/_Alignof, so the
+// man/NATIVE.md. Every assertion here is sizeof/offsetof/_Alignof, so the
 // same numbers a real GCC/clang would compute for the emitted C are checked
 // directly, not just VM-internal consistency.
 //

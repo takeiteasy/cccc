@@ -4113,7 +4113,7 @@ int test_aio_write_read_roundtrip(void) {
 }
 
 // test_aio_fsync (#931) -- aio_fsync() had zero test coverage even though it
-// is documented as supported (COVERAGE.md's <aio.h> row, #804) and wrapped in
+// is documented as supported (STDLIB.md's <aio.h> row, #804) and wrapped in
 // src/stdlib/posix.c (wrap_aio_fsync). Submits an aio_write, reaps it, then
 // submits an aio_fsync(O_SYNC, ...) and an aio_fsync(O_DSYNC, ...) against the
 // same fd, verifying each reaches a terminal state with aio_error() == 0 and

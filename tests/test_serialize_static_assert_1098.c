@@ -4,7 +4,7 @@
 // parse time -- a failing assertion is a compile error, so only a passing
 // one ever reaches the serializer. Before this fix, the serializer never
 // emitted `_Static_assert` at all (see #1031/#1095's own residual writeup
-// in man/HEADERS.md and man/COVERAGE.md), so a host whose real layout
+// in man/HEADERS.md and man/NATIVE.md), so a host whose real layout
 // would fail the same check compiled anyway. `-c=native` now re-emits the
 // assert -- gated on the condition actually depending on a host-owned
 // layout (type_layout_is_host_owned()) AND the assert being written in a

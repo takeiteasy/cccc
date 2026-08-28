@@ -1404,7 +1404,7 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
 
 // #1129/#1163: packed/aligned(N) were retained on Type (is_packed, align)
 // but never re-emitted, so a struct's native layout silently diverged from
-// the VM's -- see the admissibility-rule discussion in COVERAGE.md. Shared
+// the VM's -- see the admissibility-rule discussion in NATIVE.md. Shared
 // by both aggregate-body emitters below (tagged/typedef'd and anonymous)
 // since the two loops were otherwise identical.
 //
@@ -1804,7 +1804,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             // #965: on the default (non `-fblocks`) lowering path a block value
             // is always a pointer to the common-initial-sequence descriptor
             // struct emitted by serialize_block_preamble() -- see the "Blocks"
-            // entry in COVERAGE.md's serialized-output-divergences section.
+            // entry in NATIVE.md's serialized-output-divergences section.
             // TY_BLOCK never needs a case in serialize_type_decl (unlike
             // TY_PTR/TY_ARRAY/TY_VLA/TY_FUNC): it's already an atomic
             // pointer-sized type here, not a container recursing into a base,
@@ -2188,7 +2188,7 @@ static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
 // output either). stdarg.h's va_list and setjmp.h's jmp_buf specifically
 // use the *opposite* strategy from an ordinary from_include type: CCCC's
 // own layout is deliberately widened to cover every supported host's real
-// one (see their own man/COVERAGE.md entries), so the *guest-folded*
+// one (see their own man/NATIVE.md entries), so the *guest-folded*
 // sizeof/_Alignof is already a safe, correct-by-construction upper bound
 // on purpose -- re-materializing the operator would replace that safe
 // padded literal with whatever the real host's own (possibly smaller, via
@@ -2388,7 +2388,7 @@ static bool type_contains_compiler_owned_layout(SerializeContext *ctx, Type *ty,
 //     (include/sys/stat.h, signal.h, fts.h, aio.h, mqueue.h, ndbm.h --
 //     same trap serialize_static_assert()'s own doc comment warns about);
 //     re-deriving a second, unconditional guard here would duplicate or
-//     conflict with those. Documented residual, man/COVERAGE.md.
+//     conflict with those. Documented residual, man/NATIVE.md.
 //   - No name to write the assert with at all (neither tag nor alias).
 //   - type_layout_is_host_owned(): `ty` defers to the host's own real
 //     layout already (an ordinary from_include struct/union/enum) -- no

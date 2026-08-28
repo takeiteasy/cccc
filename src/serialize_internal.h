@@ -236,7 +236,7 @@ typedef struct {
     // array dimension must stay folded (the containing aggregate's layout,
     // and every other member's offset, is computed from that folded value
     // -- re-materializing would desync them, the same reasoning that rules
-    // out bitfield widths, see man/COVERAGE.md), an INITIALIZED global's
+    // out bitfield widths, see man/NATIVE.md), an INITIALIZED global's
     // dimension must stay folded (serialize_init_bytes' own byte image is
     // still sized off the folded value -- re-materializing only the
     // dimension would make the array declaration and its initializer

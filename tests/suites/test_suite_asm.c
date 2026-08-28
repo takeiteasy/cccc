@@ -10,7 +10,7 @@
 // evaluate host assembly inside the VM -- it would mean either compiling the
 // snippet separately and calling out to it, or parsing every host dialect
 // into one uniform behaviour -- so the divergence cannot be merged from the
-// VM side and is documented rather than papered over (COVERAGE.md,
+// VM side and is documented rather than papered over (NATIVE.md,
 // "Serialized-output divergences"). The fake-mnemonic cases below are the
 // concrete blocker: no real assembler accepts them anywhere, so they can
 // only ever run through the VM.

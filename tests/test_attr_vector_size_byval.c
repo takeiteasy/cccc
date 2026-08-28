@@ -2,7 +2,7 @@
 // #72). Vectors are passed/returned by memory, reusing the struct-by-value
 // ABI (pointer-passing for args via a caller-side scratch copy, RETBUF
 // rotating pool for returns) rather than the register FReg/GReg convention --
-// a 128-bit vector doesn't fit an 8-byte arg slot. See COVERAGE.md.
+// a 128-bit vector doesn't fit an 8-byte arg slot. See VM.md.
 
 typedef float v4sf __attribute__((vector_size(16)));
 typedef int   v4si __attribute__((vector_size(16)));

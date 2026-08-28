@@ -41,7 +41,7 @@
  * RTLD_SELF/RTLD_MAIN_ONLY). cccc_rt_dlsym (src/vm.c) resolves its handle
  * argument through the VM's own dynamic-library registry, not a raw host
  * handle, so a pseudo-handle would behave differently between the VM and
- * -c=native -- see man/COVERAGE.md's <dlfcn.h> entry. */
+ * -c=native -- see man/STDLIB.md's <dlfcn.h> entry. */
 #define RTLD_LAZY   __CCCC_RTLD_LAZY__
 #define RTLD_NOW    __CCCC_RTLD_NOW__
 #define RTLD_LOCAL  __CCCC_RTLD_LOCAL__

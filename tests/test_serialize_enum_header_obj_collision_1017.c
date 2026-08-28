@@ -43,7 +43,7 @@
 // This warning does not appear in tools/comptime_native_smoke.py: those
 // cases assert VM 42 -> native 42, but this collision's whole point is
 // that the generated output does *not* compile, so there is nothing to
-// link or run. See man/COVERAGE.md's #1017 paragraph for the residual this
+// link or run. See man/NATIVE.md's #1017 paragraph for the residual this
 // leaves for the host compiler to report, and the neighbouring #1016 tests
 // (tests/test_serialize_dup_enum_obj_1016.c,
 // tests/test_serialize_enum_obj_no_collision_1016.c) for the

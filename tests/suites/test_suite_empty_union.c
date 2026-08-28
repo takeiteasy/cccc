@@ -12,7 +12,7 @@
 // (measured directly: clang -std=gnu23, second %d prints an address).
 // CCCC accepts empty unions as an extension; *using* one as a variadic
 // argument only has defined semantics under the VM. Not serializer-fixable
-// -- see COVERAGE.md "Serialized-output divergences".
+// -- see NATIVE.md "Serialized-output divergences".
 
 #include <stdio.h>
 

@@ -419,7 +419,7 @@ enum tc_1175_wide_unsigned { TC_1175_WU = 0x100000000LL };
 enum tc_1175_wide_mixed { TC_1175_WM_NEG = -1, TC_1175_WM = 0x100000000LL };
 enum tc_1175_narrow_unsigned { TC_1175_NU = 0x80000000ULL };
 // A value near INT64_MAX rather than UINT64_MAX -- enumerator values are
-// stored as int64_t (see the comment above and man/COVERAGE.md:182), a
+// stored as int64_t (see the comment above and man/COVERAGE.md:185), a
 // separate, pre-existing representation limit that already loses
 // information for a value past INT64_MAX (e.g. 0xFFFFFFFFFFFFFFFFULL folds
 // to -1 before #1175's own underlying-type selection ever runs) -- out of

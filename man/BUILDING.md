@@ -990,8 +990,8 @@ if (triple && strstr(triple, "aarch64"))
 **"Bootstrap" here means the stage0 `src/std.c` chicken-and-egg** described
 below — a real host `cc` builds every stage. It does **not** mean compiling
 cccc with cccc; nothing in this repo does that today. That's a distinct,
-tracked future direction — self-hosting, v0.5.0 scope — see #1055's own
-tickets if you're looking for it.
+tracked future direction — self-hosting is out of scope for #1055 too — see
+that ticket's own children if you're looking for it.
 
 The repo-root `Makefile` is a bare-minimum bootstrap: it builds just enough
 of a `cccc` (no `libbacktrace`, no readline — both optional, gated behind
@@ -1210,3 +1210,4 @@ link/archive-step staleness check.
 - [man/TESTING.md](TESTING.md) — `--testing` mode, the working analog this mode mirrors.
 - [man/MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
 - [man/COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
+- [man/NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations.

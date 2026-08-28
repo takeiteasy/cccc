@@ -5,7 +5,7 @@
 //
 // Frame/return address, trap and dynamic object size pass straight back
 // through to the identical host builtin. Two of them diverge in *value*
-// rather than in spelling, by design (see COVERAGE.md):
+// rather than in spelling, by design (see NATIVE.md):
 //
 //   - `__builtin_return_address` yields a VM bytecode pc under the VM and a
 //     real host return address natively — both are "the return address n

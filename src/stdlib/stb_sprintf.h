@@ -678,7 +678,7 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
             // desync every later argument. ISO C leaves this undefined and
             // BSD/Apple libc treats `L` as a no-op here, so following glibc
             // is a deliberate VM/-c=native divergence on a non-glibc host --
-            // tracked in #1231, documented in man/COVERAGE.md's serialized-
+            // tracked in #1231, documented in man/NATIVE.md's serialized-
             // output table. The two flags are independent: the float arms
             // consult only LONGDOUBLE, the radixnum / u,i,d arms consult only
             // INTMAX, so whichever conversion follows picks up the one it

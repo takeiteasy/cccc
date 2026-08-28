@@ -150,7 +150,7 @@ union tc_bf1176_union_unnamed {
 // or __int128) now gets _Alignof 16, matching the __int128 host container
 // -c=native/-m always lowers it to. This is deliberately NOT what clang's
 // own native _BitInt(65..128) does on x86_64 (align 8 there) -- see
-// bitint_type() (src/type.c) and man/COVERAGE.md's Serialized-output
+// bitint_type() (src/type.c) and man/NATIVE.md's Serialized-output
 // divergences section for the cross-target rationale. __int128 itself is
 // aligned 16 on every target in clang/gcc, with no such divergence.
 struct tc_bi1135_i128_member {
