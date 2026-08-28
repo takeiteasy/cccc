@@ -52,3 +52,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   was taken silently. `long` and `long long` associations in the same
   `_Generic` are still accepted (CCCC models them as one type), as is the
   `char *` / `const char *` const-correct dispatch idiom.
+- `_Generic` arm *selection* and `__builtin_types_compatible_p` now honor
+  pointee qualifiers: a `char *` / `const char *` pair resolves by the
+  controlling type rather than by listing order (so `<string.h>`'s
+  const-correct `strchr`/`strrchr`/`strstr`/`strpbrk` dispatch macros yield
+  the right return type independent of arm order), and
+  `__builtin_types_compatible_p(char *, const char *)` is now `0` (was `1`).
+  Top-level qualifiers are still ignored — the controlling expression is
+  lvalue-converted, and `__builtin_types_compatible_p(int, const int)` stays
+  `1`. `_Atomic` is treated as a non-qualifier, following GCC.

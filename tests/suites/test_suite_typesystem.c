@@ -474,6 +474,68 @@ int test_generic_no_false_collision(void) {
     return 42;
 }
 
+// #1225: _Generic *selection* (not just the collision diagnostic) honors
+// pointee qualifiers, so the matched arm no longer depends on arm order for
+// a `char *` / `const char *` pair -- this is what makes <string.h>'s
+// const-correct dispatch macros pick the right return type. A top-level
+// qualifier on an association is stripped from the controlling expression by
+// lvalue conversion, so such an arm can never be selected (matches
+// gcc/clang). __builtin_types_compatible_p follows the same rule below the
+// top level while ignoring top-level qualifiers.
+[[cccc::test(return = 42)]]
+int test_generic_pointee_qualifiers(void) {
+    char       *p  = 0;
+    const char *cp = 0;
+
+    // both arm orders: the controlling type decides, not the listing order
+    if (_Generic(p, char *: 1, const char *: 2, default: 0) != 1)
+        return 1;
+    if (_Generic(p, const char *: 2, char *: 1, default: 0) != 1)
+        return 2;
+    if (_Generic(cp, char *: 1, const char *: 2, default: 0) != 2)
+        return 3;
+    if (_Generic(cp, const char *: 2, char *: 1, default: 0) != 2)
+        return 4;
+
+    // one level down
+    char       **pp  = 0;
+    const char **cpp = 0;
+    if (_Generic(pp, char **: 1, const char **: 2, default: 0) != 1)
+        return 5;
+    if (_Generic(cpp, char **: 1, const char **: 2, default: 0) != 2)
+        return 6;
+
+    // a top-level-qualified association is unreachable after lvalue
+    // conversion: an unqualified `int` control never picks the `const int`
+    // arm regardless of order
+    if (_Generic((int)0, const int: 1, int: 2, default: 0) != 2)
+        return 7;
+
+    // __builtin_types_compatible_p: pointee qualifiers count, top-level do
+    // not
+    if (__builtin_types_compatible_p(char *, const char *))
+        return 8;
+    if (!__builtin_types_compatible_p(int, const int))
+        return 9;
+    if (__builtin_types_compatible_p(char **, const char **))
+        return 10;
+    if (!__builtin_types_compatible_p(char *restrict, char *))
+        return 11;
+    // qualifier on an intermediate pointer level still counts
+    if (__builtin_types_compatible_p(char *const *, char **))
+        return 12;
+    if (__builtin_types_compatible_p(char *restrict *, char **))
+        return 13;
+
+    // the controlling expression's own top-level `restrict` is stripped by
+    // lvalue conversion, so a plain `char *` arm still matches
+    char *restrict rp = 0;
+    if (_Generic(rp, char *: 1, default: 0) != 1)
+        return 14;
+
+    return 42;
+}
+
 // #1122: file-scope initializers wider than 8 bytes (__int128,
 // _BitInt(65..128), long double, _Complex) used to crash write_gvar_data
 // (`internal error at src/parse_init.c:1601`) at parse time -- and, for the

@@ -250,15 +250,44 @@ static Type *enum_compat_type(Type *ty) {
     return ty->is_unsigned ? ty_uint : ty_int;
 }
 
-bool is_compatible(Type *t1, Type *t2) {
+// #1225: two spellings of "compatible types". The default (`strict` false,
+// reached via is_compatible()) is deliberately qualifier-*insensitive* --
+// C 6.5.16.1/6.5.9p2 let a `char *` and a `const char *` be assigned and
+// compared, so the pointer-conversion and vector-operand diagnostics that
+// call is_compatible() must not fire on a qualifier mismatch. The strict
+// spelling (compat_q, reached via is_compatible_qualified*()) keeps
+// qualifiers below the top level, which is the C notion the _Generic arm
+// match and __builtin_types_compatible_p want.
+static bool quals_match(Type *a, Type *b) {
+    // `_Atomic` is a specifier, not a cvr-qualifier; gcc's
+    // __builtin_types_compatible_p(_Atomic int, int) is 1 (clang says 0 --
+    // #1226 tracks the clang-family divergence, CCCC follows gcc for now),
+    // so it stays out of this comparison.
+    return a->is_const == b->is_const && a->is_volatile == b->is_volatile &&
+           a->is_restrict == b->is_restrict;
+}
+
+static bool compat_body(Type *t1, Type *t2, bool strict);
+
+static bool compat_q(Type *t1, Type *t2, bool strict) {
+    if (strict && !quals_match(t1, t2))
+        return false;
+    return compat_body(t1, t2, strict);
+}
+
+static bool compat_body(Type *t1, Type *t2, bool strict) {
     if (t1 == t2)
         return true;
 
+    // #1225: unwrap `origin` into compat_body, never compat_q. copy_type()
+    // sets origin, and a qualified Type is a copy-with-flag of its
+    // unqualified original -- re-running the qualifier check after the
+    // unwrap would compare against the stripped original and always fail.
     if (t1->origin)
-        return is_compatible(t1->origin, t2);
+        return compat_body(t1->origin, t2, strict);
 
     if (t2->origin)
-        return is_compatible(t1, t2->origin);
+        return compat_body(t1, t2->origin, strict);
 
     // #1223: enum-vs-enum stays incompatible (two separately-declared enums
     // are distinct types even at identical width/signedness -- verified
@@ -268,9 +297,9 @@ bool is_compatible(Type *t1, Type *t2) {
     // since an enum underlying type can never itself be TY_ENUM
     // (parse_types.c rejects that).
     if (t1->kind == TY_ENUM && t2->kind != TY_ENUM)
-        return is_compatible(enum_compat_type(t1), t2);
+        return compat_body(enum_compat_type(t1), t2, strict);
     if (t2->kind == TY_ENUM && t1->kind != TY_ENUM)
-        return is_compatible(t1, enum_compat_type(t2));
+        return compat_body(t1, enum_compat_type(t2), strict);
 
     if (t1->kind != t2->kind)
         return false;
@@ -290,11 +319,17 @@ bool is_compatible(Type *t1, Type *t2) {
         case TY_DECIMAL128:
             return true;
         case TY_COMPLEX:
-            return is_compatible(t1->base, t2->base);
+            return compat_q(t1->base, t2->base, strict);
         case TY_PTR:
-            return is_compatible(t1->base, t2->base);
+            // #1225: the pointee's qualifiers count under `strict` -- this
+            // is where `char *` and `const char *` diverge.
+            return compat_q(t1->base, t2->base, strict);
         case TY_FUNC: {
-            if (!is_compatible(t1->return_ty, t2->return_ty))
+            // Return and parameter types are compared after adjustment,
+            // which drops their top-level qualifiers (C: `void(const int)`
+            // and `void(int)` are compatible) -- recurse via compat_body,
+            // not compat_q.
+            if (!compat_body(t1->return_ty, t2->return_ty, strict))
                 return false;
             if (t1->is_variadic != t2->is_variadic)
                 return false;
@@ -302,12 +337,17 @@ bool is_compatible(Type *t1, Type *t2) {
             Type *p1 = t1->params;
             Type *p2 = t2->params;
             for (; p1 && p2; p1 = p1->next, p2 = p2->next)
-                if (!is_compatible(p1, p2))
+                if (!compat_body(p1, p2, strict))
                     return false;
             return p1 == NULL && p2 == NULL;
         }
         case TY_ARRAY:
-            if (!is_compatible(t1->base, t2->base))
+            // A qualifier on the element type qualifies the array itself,
+            // i.e. it is top-level: `char[3]` and `const char[3]` are
+            // compatible (verified against gcc-16/clang). Skip exactly this
+            // one level via compat_body; qualifiers nested deeper still
+            // count.
+            if (!compat_body(t1->base, t2->base, strict))
                 return false;
             return t1->array_len < 0 && t2->array_len < 0 &&
                    t1->array_len == t2->array_len;
@@ -318,10 +358,28 @@ bool is_compatible(Type *t1, Type *t2) {
             return true;
         case TY_VECTOR:
             return t1->vec_len == t2->vec_len &&
-                   is_compatible(t1->base, t2->base);
+                   compat_q(t1->base, t2->base, strict);
         default:
             return false;
     }
+}
+
+bool is_compatible(Type *t1, Type *t2) {
+    return compat_body(t1, t2, false);
+}
+
+// #1225: compatible with pointee (and deeper) qualifiers honored, but
+// top-level qualifiers ignored -- the rule __builtin_types_compatible_p
+// follows.
+bool is_compatible_qualified(Type *t1, Type *t2) {
+    return compat_body(t1, t2, true);
+}
+
+// #1225: as is_compatible_qualified() but also compares the top-level
+// qualifiers. Used for _Generic arm selection / collision, where lvalue
+// conversion has already stripped the controlling type's own qualifiers.
+bool is_compatible_qualified_strict(Type *t1, Type *t2) {
+    return compat_q(t1, t2, true);
 }
 
 Type *copy_type(VirtualMachine *vm, Type *ty) {

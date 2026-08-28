@@ -1035,13 +1035,17 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
 static bool assoc_types_collide(Type *a, Type *b) {
     if (!a || !b)
         return false;
-    if (a->is_const != b->is_const || a->is_volatile != b->is_volatile)
+    if (a->is_const != b->is_const || a->is_volatile != b->is_volatile ||
+        a->is_restrict != b->is_restrict)
         return false;
     if (a->kind == TY_PTR && b->kind == TY_PTR)
         return assoc_types_collide(a->base, b->base);
     if (a->kind == TY_LONG && b->kind == TY_LONG)
         return false;
-    return is_compatible(a, b);
+    // #1225: is_compatible_qualified() honors pointee qualifiers, so the
+    // explicit TY_PTR recursion above is what still lets the long/long-long
+    // guard reach every pointer level (`long *:` / `long long *:`).
+    return is_compatible_qualified(a, b);
 }
 
 // generic-selection = "(" assign "," generic-assoc ("," generic-assoc)* ")"
@@ -1063,11 +1067,15 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     t1              = copy_type(vm, t1);
     t1->is_const    = false;
     t1->is_volatile = false;
-    // origin is deliberately kept: it is the only link back to the
-    // original Type*, so an association naming a tagged type (`struct S`,
-    // `enum G`) still matches its own controlling expression by identity
-    // (#1223). is_compatible never reads is_const/is_volatile, so the
-    // strips above stay safe.
+    t1->is_restrict = false;
+    // These strips are the lvalue conversion of the controlling expression
+    // (C23 6.7.11p3): all three top-level qualifiers are dropped before any
+    // arm is matched. Since #1225 the arm match compares qualifiers, so an
+    // association naming a top-level-qualified type (`const int:`) can now
+    // never be selected -- matching gcc/clang. origin is deliberately kept:
+    // it is the only link back to the original Type*, so an association
+    // naming a tagged type (`struct S`, `enum G`) still matches its own
+    // controlling expression by identity (#1223).
 
     Node *match        = NULL;
     Node *default_node = NULL;
@@ -1120,7 +1128,7 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
 
         tok         = skip(vm, tok, ":");
         Node *node  = assign(vm, &tok, tok);
-        if (!match && is_compatible(t1, t2))
+        if (!match && is_compatible_qualified_strict(t1, t2))
             match = node;
     }
 
@@ -1463,7 +1471,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok      = skip(vm, tok, ",");
         Type *t2 = typename(vm, &tok, tok);
         *rest    = skip(vm, tok, ")");
-        return new_num(vm, is_compatible(t1, t2), start);
+        // #1225: honors pointee (and deeper) qualifiers -- `char *` and
+        // `const char *` are not compatible -- but ignores top-level
+        // qualifiers, matching gcc/clang.
+        return new_num(vm, is_compatible_qualified(t1, t2), start);
     }
 
     // __builtin_classify_type(expr) (GCC extension): returns a small integer

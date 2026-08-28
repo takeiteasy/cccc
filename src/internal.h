@@ -813,6 +813,8 @@ bool cccc_dec_strtod(int w, void *dst, const char *s, char **endptr, int env);
 // include/decimal_math.h.
 void register_decimal_math_functions(VirtualMachine *vm);
 bool is_compatible(Type *t1, Type *t2);
+bool is_compatible_qualified(Type *t1, Type *t2);
+bool is_compatible_qualified_strict(Type *t1, Type *t2);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);
 Type *func_type(VirtualMachine *vm, Type *return_ty);
