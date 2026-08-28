@@ -945,6 +945,21 @@ int test_ldouble_size_matches_host(void) {
     _Static_assert(sizeof(struct ld_pair) == 32, "cccc");
 #endif
 
+    // #1227: `long double _Complex` must resolve regardless of specifier
+    // order (C23 6.7.2p2) -- `_Complex`/`_Imaginary` landing before `long`
+    // used to hit an intermediate `COMPLEX + LONG` state with no case in
+    // declspec's per-token resolution table and wrongly errored.
+    _Static_assert(sizeof(_Complex long double) == sizeof(long double _Complex),
+                   "cccc");
+    _Static_assert(sizeof(long _Complex double) == sizeof(long double _Complex),
+                   "cccc");
+    _Static_assert(_Alignof(_Imaginary long double) ==
+                       _Alignof(long double _Complex),
+                   "cccc");
+    _Complex long double cld = 3.0L;
+    if (creall(cld) != 3.0L || cimagl(cld) != 0.0L)
+        return 3;
+
     return 42;
 }
 

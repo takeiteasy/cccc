@@ -1250,10 +1250,11 @@ The remaining gaps below are plain ISO C the serializer could, in principle,
 reconstruct but doesn't yet — accepted at the time, with no ticket carrying
 them until this audit:
 
-- **`_Complex` (and any other type with no verified byte layout) as a global
-  initializer** (`serialize_decl.c`, `serialize_init_bytes`'s final
-  fallback) — `_Complex` has a well-known two-part host layout that could be
-  reconstructed as a compound literal. #1208.
+- ~~**`_Complex` as a global initializer**~~ — resolved (#1208): a
+  `_Complex` constant expression folds at compile time (`eval_complex`) and
+  `serialize_init_bytes` emits `__builtin_complex(re, im)` for a non-zero
+  imaginary part. The generic final fallback still refuses any *other* type
+  with no verified byte layout, by design.
 - **#1074/#1209 residual: a fully multi-dimensional VLA (every extent
   runtime-sized, `int v[n][m]`) read by a nested function**
   (`serialize_program.c`, `record_nested_upvar`) — #1209 fixed a 1-D VLA

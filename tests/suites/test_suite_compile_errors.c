@@ -51,6 +51,17 @@ void test_complex_comparison_order(void) {
     (void)(z < CMPLX(2.0, 3.0));
 }
 
+// --- Complex-integer (GNU extension) is unsupported ---
+// #1227: `_Complex long double` in any specifier order now parses, but a
+// bare `_Complex long` with no `double` is GNU's complex-integer extension,
+// which cccc has no type for -- it must still be rejected, not silently
+// resolved as `long double _Complex`.
+[[cccc::test(expect_compile_error = true)]]
+void test_complex_long_integer_rejected(void) {
+    _Complex long n = 0;
+    (void)n;
+}
+
 // --- Const violations ---
 
 [[cccc::test(expect_compile_error = true)]]

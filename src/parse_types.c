@@ -580,19 +580,23 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
             case LONG + DOUBLE:
                 ty = ty_ldouble;
                 break;
+            case COMPLEX + LONG:
+            case IMAGINARY + LONG:
+                // #1227: `_Complex`/`_Imaginary` seen before `double`.
+                // C23 6.7.2p2 makes specifier order irrelevant, so this is
+                // just `long double _Complex` mid-parse -- defer, exactly as
+                // the `LONG + DOUBLE` case above defers the mirror order.
+                // `ty` keeps its previous value; the concrete type is set
+                // when `double` arrives (`LONG + DOUBLE + COMPLEX` below).
+                // If `double` never arrives, the check at `declspec_done:`
+                // rejects it: `_Complex long` with no `double` is GNU's
+                // complex-integer extension, which cccc does not support.
+                break;
             case LONG + DOUBLE + COMPLEX:
             case LONG + DOUBLE + IMAGINARY:
                 ty = ty_ldcomplex;
                 break;
             default:
-                // BUG (#1227): this table resolves after every specifier
-                // token, so `_Complex long double` / `long _Complex double`
-                // hit the intermediate `COMPLEX + LONG` (no case here) and
-                // wrongly error, even though C23 6.7.2p2 makes specifier
-                // order irrelevant and `long double _Complex` works. Fix
-                // needs a deferred `COMPLEX + LONG` case plus an end-of-
-                // declspec check so `_Complex long` (GNU complex-integer,
-                // unsupported) still errors -- see the ticket.
                 error_tok(vm, tok, "invalid type");
         }
 
@@ -602,6 +606,18 @@ declspec_done:
     if (counter == 0 && !vm->compiler.in_type_lookahead)
         warn_tok(vm, start, CCCC_WARN_IMPLICIT_INT,
                  "type specifier missing, defaults to 'int'");
+
+    // #1227: `COMPLEX + LONG` / `IMAGINARY + LONG` is deferred above so
+    // `_Complex long double` parses regardless of specifier order. A bare
+    // `_Complex long` / `_Imaginary long` that never reached `double` is
+    // GNU's complex-integer extension -- cccc has no complex-integer type,
+    // so reject it here rather than let `ty` keep the stale scalar/complex
+    // value the last resolved token left. (LONG's carry trick means
+    // `long long` clears the LONG bit, so this never fires for `long long`
+    // forms, which the switch's own `default` already rejects with `_Complex`.)
+    if ((counter & (COMPLEX | IMAGINARY)) && (counter & LONG) &&
+        !(counter & DOUBLE))
+        error_tok(vm, start, "invalid type");
 
     if (attr && (attr->is_maybe_unused || attr->is_deprecated)) {
         ty                  = copy_type(vm, ty);

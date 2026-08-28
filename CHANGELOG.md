@@ -61,6 +61,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   Top-level qualifiers are still ignored — the controlling expression is
   lvalue-converted, and `__builtin_types_compatible_p(int, const int)` stays
   `1`. `_Atomic` is treated as a non-qualifier, following GCC.
+- `long double _Complex` is now accepted in every specifier order
+  (`_Complex long double`, `long _Complex double`, …), matching C's
+  order-independent type specifiers — previously the orderings that put
+  `_Complex`/`_Imaginary` before `long` were rejected as "invalid type". A
+  bare `_Complex long` / `_Complex int` (GNU's complex-integer extension,
+  which CCCC does not implement) is still rejected.
 - A `_Complex` constant expression now folds at compile time: `I` /
   `_Complex_I` / `CMPLX()` and `+`/`-`/`*`/`/`/unary-`-`/`conj` over complex
   constants are usable in a static initializer and other constant-expression
