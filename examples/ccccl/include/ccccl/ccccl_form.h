@@ -1,17 +1,22 @@
-/* ccccl_reader.h — S-expression reader, comptime-side.
+/* ccccl_form.h — S-expression reader, comptime-side.
  *
- * Pure C, header-only, fixed arenas -- see the file comment in
- * ccccl_plan.h for why (compiled twice: plain `cc` for tests, and inside
- * the cccc comptime VM). This reader produces its own private form-tree
+ * Pure C, header-only, fixed arenas — compiled twice: plain `cc` for
+ * ordinary use, and inside the cccc comptime VM via `#include @comptime`
+ * from src/ccccl_comptime.c. This reader produces its own private form-tree
  * representation (CccclForm); it has nothing to do with the runtime's LObj,
  * which exists only in the generated program, not at compile time.
  *
  * `fopen`/`fgetc`/`fclose` are used directly and are confirmed to work
  * inside cccc's comptime VM once the including file routes them with
- * `#include @comptime <stdio.h>` (see docs/ARCHITECTURE.md).
+ * `#include @comptime <stdio.h>`.
+ *
+ * Three form kinds: ATOM (a symbol, upper-cased -- `append` reads as
+ * `APPEND`), PAIR (a cons cell), and INT (a fixnum literal: an optional
+ * leading `-` followed by one or more digits, delimiter-terminated the
+ * same way an atom is).
  */
-#ifndef CCCCL_READER_H
-#define CCCCL_READER_H
+#ifndef CCCCL_FORM_H
+#define CCCCL_FORM_H
 
 #include <stdio.h>
 
@@ -23,13 +28,18 @@ extern "C" {
 #define CL_READ_MAX_ATOM_CHARS 65536
 #define CL_READ_MAX_LEN        64
 
-typedef enum CccclFormKind { CL_FORM_ATOM, CL_FORM_PAIR } CccclFormKind;
+typedef enum CccclFormKind {
+    CL_FORM_ATOM,
+    CL_FORM_PAIR,
+    CL_FORM_INT
+} CccclFormKind;
 
 typedef struct CccclForm CccclForm;
 struct CccclForm {
     CccclFormKind kind;
-    char atom[CL_READ_MAX_LEN]; /* upper-cased, matching SectorLISP style */
-    CccclForm *car, *cdr;       /* PAIR only; NULL cdr means the list end   */
+    char          atom[CL_READ_MAX_LEN]; /* ATOM only, upper-cased */
+    long long     ival;                  /* INT only */
+    CccclForm    *car, *cdr; /* PAIR only; NULL cdr means the list end */
 };
 
 typedef struct {
@@ -130,6 +140,31 @@ static CccclForm *ccccl_read_list(CccclReader *r, CccclLexer *lx) {
     }
 }
 
+/* An atom token is an INT iff it is an optional leading '-' followed by at
+ * least one digit and nothing else -- `-` alone, or `1a`, stays an ATOM
+ * (matching a Lisp reader's usual "a lone sign or any non-digit tail keeps
+ * it a symbol" rule). */
+static int ccccl_token_is_int(const char *buf, int n, long long *out) {
+    int       i   = 0;
+    int       neg = 0;
+    long long v   = 0;
+    if (n == 0)
+        return 0;
+    if (buf[0] == '-') {
+        neg = 1;
+        i   = 1;
+    }
+    if (i >= n)
+        return 0; /* lone '-' */
+    for (; i < n; i++) {
+        if (buf[i] < '0' || buf[i] > '9')
+            return 0;
+        v = v * 10 + (buf[i] - '0');
+    }
+    *out = neg ? -v : v;
+    return 1;
+}
+
 static CccclForm *ccccl_read_form(CccclReader *r, CccclLexer *lx) {
     ccccl_lex_skip_ws(lx);
     {
@@ -159,21 +194,32 @@ static CccclForm *ccccl_read_form(CccclReader *r, CccclLexer *lx) {
             int  n = 0;
             while (!ccccl_is_delim(ccccl_lex_peek(lx))) {
                 int ch = ccccl_lex_peek(lx);
-                if (n < CL_READ_MAX_LEN - 1) {
-                    if (ch >= 'a' && ch <= 'z')
-                        ch = ch - 'a' + 'A'; /* uppercase */
+                if (n < CL_READ_MAX_LEN - 1)
                     buf[n++] = (char)ch;
-                }
                 lx->pos++;
             }
-            buf[n] = '\0';
+            {
+                long long ival;
+                if (ccccl_token_is_int(buf, n, &ival)) {
+                    CccclForm *a = ccccl_read_alloc(r);
+                    a->kind      = CL_FORM_INT;
+                    a->ival      = ival;
+                    a->car = a->cdr = NULL;
+                    return a;
+                }
+            }
             {
                 CccclForm *a = ccccl_read_alloc(r);
                 int        i;
                 a->kind = CL_FORM_ATOM;
                 a->car = a->cdr = NULL;
-                for (i = 0; i <= n; i++)
-                    a->atom[i] = buf[i];
+                for (i = 0; i < n; i++) {
+                    char ch = buf[i];
+                    if (ch >= 'a' && ch <= 'z')
+                        ch = (char)(ch - 'a' + 'A');
+                    a->atom[i] = ch;
+                }
+                a->atom[n] = '\0';
                 return a;
             }
         }
@@ -225,4 +271,4 @@ static int ccccl_read_file(CccclReader *r, const char *path, CccclForm **out,
 }
 #endif
 
-#endif /* CCCCL_READER_H */
+#endif /* CCCCL_FORM_H */

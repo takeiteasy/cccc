@@ -47,11 +47,53 @@
 // #964: mutually recursive with serialize_stmt -- see the comment on its
 // definition, near ND_BLOCK below.
 
+// #1233: a recursion guard for the TY_PTR case below. Comparing two
+// independently-parsed occurrences of a self-referential struct (`struct S {
+// struct S *next; };`, the shape of any cons-cell-style runtime type) walks
+// member `next`'s pointer type back into the very same pair of struct Types
+// being compared -- without this, that recursion never terminates. A small
+// fixed-depth stack of in-progress pairs breaks the cycle the standard
+// equirecursive way: once a pair is already being compared higher up the
+// call stack, assume it equal (co-inductively) rather than re-deriving it.
+// Not thread-safe -- same_type_or_origin() and its callers only ever run
+// during the single-threaded `-c=native`/`-c=generated`/`-m` serialize pass.
+#define SAME_TYPE_PTR_STACK_MAX 64
+static Type *g_same_type_ptr_stack_a[SAME_TYPE_PTR_STACK_MAX];
+static Type *g_same_type_ptr_stack_b[SAME_TYPE_PTR_STACK_MAX];
+static int   g_same_type_ptr_stack_len = 0;
+
 static bool same_type_or_origin(Type *a, Type *b) {
     for (Type *pa = a; pa; pa = pa->origin)
         for (Type *pb = b; pb; pb = pb->origin)
             if (pa == pb)
                 return true;
+
+    // #1233: two independently-parsed (e.g. per-TU) pointer types can never
+    // share an origin-chain node, so without a structural fallback here, any
+    // aggregate with a pointer member -- true of nearly every non-trivial
+    // runtime/ABI struct -- can never be proven structurally identical
+    // across TUs even when byte-for-byte the same layout. This is what let
+    // rename_colliding_type_tags() (src/serialize_program.c) treat a single
+    // struct, merely completed independently in two TUs, as two distinct
+    // colliding groups and rename one of them -- see that ticket for the
+    // full symptom (a renamed spelling with no body, since the real body is
+    // supplied by a verbatim-replayed header under the original spelling).
+    if (a && b && a->kind == TY_PTR && b->kind == TY_PTR) {
+        for (int i = 0; i < g_same_type_ptr_stack_len; i++)
+            if ((g_same_type_ptr_stack_a[i] == a &&
+                 g_same_type_ptr_stack_b[i] == b) ||
+                (g_same_type_ptr_stack_a[i] == b &&
+                 g_same_type_ptr_stack_b[i] == a))
+                return true; // cycle: already assumed equal higher up
+        if (g_same_type_ptr_stack_len >= SAME_TYPE_PTR_STACK_MAX)
+            return true; // depth cap: assume equal rather than infinite-loop
+        g_same_type_ptr_stack_a[g_same_type_ptr_stack_len] = a;
+        g_same_type_ptr_stack_b[g_same_type_ptr_stack_len] = b;
+        g_same_type_ptr_stack_len++;
+        bool result = same_type_or_origin(a->base, b->base);
+        g_same_type_ptr_stack_len--;
+        return result;
+    }
 
     if (a && b && a->kind == b->kind &&
         (a->kind == TY_STRUCT || a->kind == TY_UNION)) {
@@ -96,6 +138,25 @@ static bool same_type_or_origin(Type *a, Type *b) {
                 return false;
         }
         return ma == NULL && mb == NULL;
+    }
+
+    // #1233: same gap as TY_PTR above, one level removed -- a struct member
+    // whose type is a function pointer (e.g. a callback/closure slot, `LObj
+    // *(*fn)(LObj *args, LObj *env)`) never structurally deduped across TUs
+    // either, since nothing recursed into TY_FUNC's own return type/param
+    // chain. `params` is itself a Type linked list (one node per parameter,
+    // walked via `->next`); no name to compare, only each parameter's type.
+    if (a && b && a->kind == TY_FUNC && b->kind == TY_FUNC) {
+        if (a->is_variadic != b->is_variadic)
+            return false;
+        if (!same_type_or_origin(a->return_ty, b->return_ty))
+            return false;
+        Type *pa = a->params;
+        Type *pb = b->params;
+        for (; pa && pb; pa = pa->next, pb = pb->next)
+            if (!same_type_or_origin(pa, pb))
+                return false;
+        return pa == NULL && pb == NULL;
     }
 
     // #1006: two command-line input files can each independently declare an

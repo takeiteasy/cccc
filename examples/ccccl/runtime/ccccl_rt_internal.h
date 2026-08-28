@@ -15,17 +15,17 @@
 #ifndef CCCCL_RT_MAX_SYMS
 #define CCCCL_RT_MAX_SYMS 1024
 #endif
+#ifndef CCCCL_RT_MAX_INTS
+#define CCCCL_RT_MAX_INTS 65536
+#endif
 
-typedef enum LObjTag { CCCCL_ATOM, CCCCL_PAIR, CCCCL_FN } LObjTag;
+typedef enum LObjTag {
+    CCCCL_ATOM,
+    CCCCL_PAIR,
+    CCCCL_INT,
+    CCCCL_CLOSURE
+} LObjTag;
 
-/* atom.name is a pointer into a private string pool (see ccccl_intern in
- * ccccl_rt.c), not a fixed-size buffer: symbol names have no length cap,
- * and LObj stays three words regardless of how long an interned name is --
- * a fixed inline buffer would size every LObj (cons cells included) to the
- * longest symbol name allowed. Every union member below is a named typedef
- * rather than an inline anonymous struct, which is no longer required now
- * that LObj is fully opaque outside this file (nothing else parses this
- * struct at all), but there is no reason to revert something this cheap. */
 typedef struct {
     const char *name;
 } LObjAtom;
@@ -34,7 +34,7 @@ typedef struct {
 } LObjPair;
 typedef struct {
     CccclFn fn;
-    LObj   *env;
+    LObj   *captures;
 } LObjClosure;
 
 struct LObj {
@@ -42,6 +42,7 @@ struct LObj {
     union {
         LObjAtom    atom;
         LObjPair    pair;
+        long        ival;
         LObjClosure closure;
     } as;
 };

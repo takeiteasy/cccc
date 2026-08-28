@@ -7,7 +7,8 @@
 #include <stdio.h>
 #include "ccccl_rt.h"
 
-extern LObj *append(LObj *args, LObj *env);
+extern LObj *append(LObj *x, LObj *y);
+extern LObj *letters(void);
 
 static LObj *list2(LObj *a, LObj *b) {
     return ccccl_cons(a, ccccl_cons(b, ccccl_nil));
@@ -18,10 +19,13 @@ int main(void) {
 
     ccccl_rt_init();
 
-    xs     = list2(ccccl_intern("A"), ccccl_intern("B"));
-    ys     = list2(ccccl_intern("C"), ccccl_intern("D"));
+    xs = list2(ccccl_intern("A"), ccccl_intern("B"));
+    ys = list2(ccccl_intern("C"), ccccl_intern("D"));
 
-    result = append(ccccl_cons(xs, ccccl_cons(ys, ccccl_nil)), ccccl_nil);
+    /* letters() returns (E F G), a quoted list literal built once at
+     * comptime -- appending it on proves both append() and QUOTE in the
+     * same run. */
+    result = append(append(xs, ys), letters());
 
     ccccl_print(result, stdout);
     fputc('\n', stdout);

@@ -213,11 +213,31 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                         .global_aliases[vm->compiler.global_aliases_count]
                         .canonical = canonical;
                     vm->compiler.global_aliases_count++;
-
-                    canonical->is_used         |= obj->is_used;
-                    canonical->is_maybe_unused |= obj->is_maybe_unused;
-                    canonical->is_deprecated   |= obj->is_deprecated;
                 }
+
+                // #1233: unlike the offset propagation above, is_used/
+                // is_maybe_unused/is_deprecated need to reach the canonical
+                // Obj for *every* alias, function or not -- each TU parses
+                // its own copy of a shared prototype (e.g. a bundled
+                // header's `extern FILE *__cccc_stderr(void);`, reached
+                // through every TU that includes <stdio.h>) as its own
+                // distinct Obj, and only the alias actually called within
+                // that TU's own body has is_used set. A function alias used
+                // to fall outside this block entirely (scoped to
+                // `!obj->is_function` purely for the offset-propagation
+                // reason above, which has nothing to do with is_used) --
+                // the canonical Obj kept whatever is_used it started with,
+                // silently losing every other TU's usage. This is what let
+                // -c=native's own accessor-shim gating (native_accessor_
+                // shims, src/serialize_shims.c, matched by checking
+                // obj->is_used on the merged program's canonical Obj) skip
+                // emitting `__cccc_stdout`/`__cccc_stderr` whenever the only
+                // call site lived in a non-primary TU -- "use of undeclared
+                // identifier '__cccc_stderr'" from the host compiler with no
+                // cccc-side diagnostic at all.
+                canonical->is_used         |= obj->is_used;
+                canonical->is_maybe_unused |= obj->is_maybe_unused;
+                canonical->is_deprecated   |= obj->is_deprecated;
             }
 
             // Only add canonical objects to the merged list

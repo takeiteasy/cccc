@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include "ccccl_rt.h"
 
-extern LObj *evenp(LObj *args, LObj *env);
+extern LObj *evenp(LObj *x);
 
 int main(void) {
     LObj *xs;
@@ -20,7 +20,7 @@ int main(void) {
                    ccccl_cons(ccccl_intern("C"),
                               ccccl_cons(ccccl_intern("D"), ccccl_nil))));
 
-    ccccl_print(evenp(ccccl_cons(xs, ccccl_nil), ccccl_nil), stdout);
+    ccccl_print(evenp(xs), stdout);
     fputc('\n', stdout);
     return 0;
 }

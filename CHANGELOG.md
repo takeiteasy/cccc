@@ -8,6 +8,36 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- `examples/ccccl/`, the comptime-Lisp worked example, has been rebuilt from
+  scratch against the current comptime API: a tree IR (replacing the old
+  flat postfix op-list), lexical scoping with real C parameters and
+  closures captured by index (replacing dynamic, environment-passing
+  scoping), fixnums/`if`/`let`/`progn`/quoted lists/`print` added to the
+  language, statement-form emission (real `if`/`else`, not one nested
+  ternary `return`), and self-tail-call elimination via loop-and-reassign.
+  `examples/ccccl/build.c` is now a plain `Makefile` (cccc can't build
+  itself as a `build.c` target yet). See `examples/ccccl/README.md`.
+- `-c=native`/`-m`/`-c=generated` no longer misidentify a struct with a
+  pointer or function-pointer member (a self-referential cons-cell shape,
+  or a closure/callback slot) as two colliding tags when it's completed
+  independently in more than one translation unit, even though every field
+  is byte-for-byte identical. `same_type_or_origin()` had no structural
+  fallback for `TY_PTR`/`TY_FUNC` — only pointer-identity via each type's
+  `->origin` chain, which two separately-parsed TUs' pointer/function types
+  never share — so `rename_colliding_type_tags()` renamed one occurrence to
+  `<Tag>__cccc_dup<N>`, a spelling that never gets a body (the real one is
+  supplied verbatim by the other TU's own struct text under the original
+  name), failing the host compile with "incomplete definition of type" /
+  "conflicting types" and no cccc-side diagnostic at all.
+- A multi-translation-unit `-c=native`/`-m`/`-c=generated` build now
+  correctly emits a native-accessor shim (`__cccc_stdout`/`__cccc_stderr`/
+  etc., behind `stdio.h`'s `#define stdout __cccc_stdout()` and similar)
+  whenever any TU actually calls it — previously `cc_link_progs()`'s
+  cross-TU merge only propagated a *non-function* alias's `is_used` flag
+  onto the canonical `Obj`, so a used function alias from a non-canonical
+  TU was silently dropped and the shim's definition never emitted, failing
+  the host compile with "use of undeclared identifier" and no cccc-side
+  diagnostic.
 - A compile error or warning against code produced by a comptime macro,
   an `@attr` handler, or file-scope generation now carries a "note: in
   expansion of ..." backtrace back to the source that produced it —

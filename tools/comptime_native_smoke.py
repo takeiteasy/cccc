@@ -6942,6 +6942,200 @@ def case_layout_guards_no_flag_and_emit_strict_1172(cccc: Path, tmp: str) -> boo
     return True
 
 
+SELF_REF_1233_HEADER = (
+    "#pragma once\n"
+    "typedef struct SelfRef1233 SelfRef1233;\n"
+    "typedef int (*SrFn1233)(SelfRef1233 *);\n"
+)
+
+# Two ordinary (non-`@shared`, no comptime involved) .c files, each
+# INDEPENDENTLY completing the same opaque tag with the identical shape --
+# a self-referential pointer member (`next`) and a function-pointer member
+# (`fn`), the two member kinds same_type_or_origin() (src/serialize_type.c)
+# had no structural fallback for (#1233). Each TU's own parse creates its
+# own distinct Type* for `struct SelfRef1233`, same as any two TUs parsing
+# a shared header separately; with same_type_strong() unable to prove them
+# structurally equal, rename_colliding_type_tags() (src/serialize_program.c)
+# used to treat them as two colliding groups and rename one to
+# `SelfRef1233__cccc_dup0` -- but that spelling never gets a body (the real
+# one is supplied by the OTHER TU's own verbatim struct text under the
+# original name), so the host compile failed with "incomplete definition
+# of type" / "conflicting types", not a diagnosable cccc-side error.
+SELF_REF_1233_TU_A = (
+    '#include "self_ref_1233_smoke.h"\n'
+    "struct SelfRef1233 { struct SelfRef1233 *next; SrFn1233 fn; int val; };\n"
+    "static int double_1233(SelfRef1233 *n) { return n->val * 2; }\n"
+    "SelfRef1233 *make_node_1233_a(int val) {\n"
+    "    static SelfRef1233 n;\n"
+    "    n.next = 0;\n"
+    "    n.fn = double_1233;\n"
+    "    n.val = val;\n"
+    "    return &n;\n"
+    "}\n"
+    "int call_fn_1233_a(SelfRef1233 *n) { return n->fn(n); }\n"
+)
+
+# Independently completes the identical shape again -- its own Type*, never
+# unified with TU A's by pointer identity, only by structural comparison.
+SELF_REF_1233_TU_B = (
+    '#include "self_ref_1233_smoke.h"\n'
+    "struct SelfRef1233 { struct SelfRef1233 *next; SrFn1233 fn; int val; };\n"
+    "static int triple_1233(SelfRef1233 *n) { return n->val * 3; }\n"
+    "SelfRef1233 *make_node_1233_b(int val) {\n"
+    "    static SelfRef1233 n;\n"
+    "    n.next = 0;\n"
+    "    n.fn = triple_1233;\n"
+    "    n.val = val;\n"
+    "    return &n;\n"
+    "}\n"
+    "int call_fn_1233_b(SelfRef1233 *n) { return n->fn(n); }\n"
+    "int chain_1233(SelfRef1233 *a, SelfRef1233 *b) {\n"
+    "    a->next = b;\n"
+    "    return a->next->val;\n"
+    "}\n"
+)
+
+SELF_REF_1233_MAIN = (
+    '#include "self_ref_1233_smoke.h"\n'
+    "SelfRef1233 *make_node_1233_a(int val);\n"
+    "SelfRef1233 *make_node_1233_b(int val);\n"
+    "int call_fn_1233_a(SelfRef1233 *n);\n"
+    "int call_fn_1233_b(SelfRef1233 *n);\n"
+    "int chain_1233(SelfRef1233 *a, SelfRef1233 *b);\n"
+    "int main(void) {\n"
+    "    SelfRef1233 *a = make_node_1233_a(10);\n"
+    "    SelfRef1233 *b = make_node_1233_b(7);\n"
+    "    if (call_fn_1233_a(a) != 20) return 1;\n"
+    "    if (call_fn_1233_b(b) != 21) return 2;\n"
+    "    if (chain_1233(a, b) != 7) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+SHIM_USED_1233_TU_A = (
+    "#include <stdio.h>\n"
+    "int unrelated_1233(int x) { return x + 1; }\n"
+)
+
+# The only call site for `stderr` (CCCC's stdio.h polyfill expands it, at
+# preprocessing time, to a call to the internal accessor shim
+# __cccc_stderr()) in the whole program -- deliberately in a *second* TU
+# from the one below that also #includes <stdio.h> but never calls it.
+# cc_link_progs (src/linker.c) merges each TU's own independently-parsed
+# `extern FILE *__cccc_stderr(void);` prototype Obj into one canonical Obj
+# per symbol; before #1233, `canonical->is_used |= obj->is_used;` ran only
+# for non-function Objs (an offset-propagation concern that has nothing to
+# do with is_used), so a used *function* alias from a non-canonical TU
+# never reached the canonical Obj -- native_accessor_shims' gating
+# (serialize_shims.c, keyed on obj->is_used) then never emitted the shim's
+# definition, and the host compile failed on "use of undeclared identifier
+# '__cccc_stderr'" with no cccc-side diagnostic.
+SHIM_USED_1233_TU_B = (
+    "#include <stdio.h>\n"
+    "int report_1233(int x) {\n"
+    "    fprintf(stderr, \"shim_used_1233: %d\\n\", x);\n"
+    "    return x;\n"
+    "}\n"
+)
+
+SHIM_USED_1233_MAIN = (
+    "int unrelated_1233(int x);\n"
+    "int report_1233(int x);\n"
+    "int main(void) { return report_1233(unrelated_1233(41)); }\n"
+)
+
+
+def case_shim_used_across_tus_1233(cccc: Path, tmp: str) -> bool:
+    print("  148: -c=native, a native-accessor shim (__cccc_stderr, behind "
+          "stdio.h's `#define stderr __cccc_stderr()`) whose only call site "
+          "lives in a TU other than the one whose own prototype Obj ends up "
+          "canonical after multi-TU merge must still be emitted (#1233). "
+          "cc_link_progs used to OR is_used across TU-duplicate Objs only "
+          "for non-functions; a used function alias from a non-canonical "
+          "TU was silently dropped. Asserts -m output actually defines the "
+          "shim, plus VM 42 -> native 42, TU order chosen so the *unused* "
+          "TU's own copy of the prototype becomes canonical.")
+    write(Path(tmp) / "shim_used_1233_a.c", SHIM_USED_1233_TU_A)
+    write(Path(tmp) / "shim_used_1233_b.c", SHIM_USED_1233_TU_B)
+    write(Path(tmp) / "shim_used_1233_main.c", SHIM_USED_1233_MAIN)
+    order = ["shim_used_1233_a.c", "shim_used_1233_b.c", "shim_used_1233_main.c"]
+
+    m_result = run([str(cccc), "-m", *order], cwd=tmp)
+    if "__cccc_stderr(void)" not in m_result.stdout:
+        print(f"    FAIL: -m output never defines __cccc_stderr despite a "
+              f"real call site\n    {m_result.stdout}")
+        return False
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "shim_used_1233_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_self_ref_fnptr_dup_tag_1233(cccc: Path, tmp: str) -> bool:
+    print("  149: -c=native, a struct with a self-referential pointer "
+          "member and a function-pointer member (the cons-cell/closure "
+          "shape examples/ccccl's LObj uses) completed independently in "
+          "two ordinary .c files must NOT be treated as a tag collision "
+          "(#1233). same_type_or_origin() had no TY_PTR or TY_FUNC "
+          "fallback -- only the origin-chain pointer-identity check, which "
+          "two separately-parsed TUs' pointer/function types never share -- "
+          "so a struct built only from scalar members structurally deduped "
+          "across TUs (existing coverage above) but one with a pointer or "
+          "function-pointer member never did, even byte-for-byte identical. "
+          "Asserts -m output spells the tag exactly one way (no "
+          "`__cccc_dup` suffix anywhere), plus VM 42 -> native 42 exercising "
+          "both TUs' own completions of the type.")
+    write(Path(tmp) / "self_ref_1233_smoke.h", SELF_REF_1233_HEADER)
+    tu_a = Path(tmp) / "self_ref_1233_smoke_a.c"
+    tu_b = Path(tmp) / "self_ref_1233_smoke_b.c"
+    tu_main = Path(tmp) / "self_ref_1233_smoke_main.c"
+    write(tu_a, SELF_REF_1233_TU_A)
+    write(tu_b, SELF_REF_1233_TU_B)
+    write(tu_main, SELF_REF_1233_MAIN)
+    order = [tu_a.name, tu_b.name, tu_main.name]
+
+    m_result = run([str(cccc), "-m", *order], cwd=tmp)
+    if "__cccc_dup" in m_result.stdout:
+        print(f"    FAIL: -m output renamed the tag despite both TUs "
+              f"completing it identically\n    {m_result.stdout}")
+        return False
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "self_ref_1233_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -7094,6 +7288,8 @@ CASES = [
     case_layout_guards_gcc_clean_1172,
     case_layout_guards_exclusions_1172,
     case_layout_guards_no_flag_and_emit_strict_1172,
+    case_shim_used_across_tus_1233,
+    case_self_ref_fnptr_dup_tag_1233,
 ]
 
 
