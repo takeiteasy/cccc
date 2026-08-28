@@ -406,14 +406,15 @@ int test_enum_switch(void) {
     }
 }
 
-// #1175: an enum with no fixed `: type` underlying type now widens past the
-// plain-`int` default when an enumerator wouldn't fit in 32 bits, matching
-// gcc-16/clang exactly (both widen as an extension predating C23's own
-// 6.7.2.2 "must be able to represent every enumerator" requirement). Values
-// already survived before this fix (stored as int64_t) -- this pins the
+// #1175/#1205: an enum with no fixed `: type` underlying type now widens
+// past the plain-`int` default when an enumerator wouldn't fit in 32 bits
+// (#1175), and an all-non-negative enum that fits `int` becomes `unsigned
+// int` rather than staying signed (#1205) -- both match gcc-16/clang
+// exactly (both widen/unsign as an extension predating C23's own 6.7.2.2
+// "must be able to represent every enumerator" requirement). Values already
+// survived before #1175 (stored as int64_t) -- this pins the
 // sizeof/_Alignof/signedness selection specifically. Verified against
-// gcc-16/clang for every shape below; `enum tc_1175_small` is a deliberate,
-// documented exception (see the assertion below).
+// gcc-16/clang for every shape below, `-std=c17` and default C23 alike.
 enum tc_1175_wide_unsigned { TC_1175_WU = 0x100000000LL };
 enum tc_1175_wide_mixed { TC_1175_WM_NEG = -1, TC_1175_WM = 0x100000000LL };
 enum tc_1175_narrow_unsigned { TC_1175_NU = 0x80000000ULL };
@@ -426,6 +427,21 @@ enum tc_1175_narrow_unsigned { TC_1175_NU = 0x80000000ULL };
 enum tc_1175_wide_unsigned64 { TC_1175_WU64 = 0x7FFFFFFF00000000ULL };
 enum tc_1175_small { TC_1175_SMALL = 1 };
 enum tc_1175_neg { TC_1175_NEG = -1 };
+
+// #1205 regression: a body with no `: type` of its own, completing a
+// forward declaration that HAD one, must adopt the forward declaration's
+// fixed base rather than let #1205's own selection guess from the
+// enumerator values -- gcc-16/clang both reject this exact program
+// outright (C23 6.7.2.2p4 requires a redeclaration to repeat the fixed
+// type), so CCCC's behavior here is unconstrained by the standard, but it
+// must not silently flip from signed to unsigned relative to what a
+// forward declaration already fixed (a real regression #1205 introduced
+// before this guard: `enum E : int;` then `enum E { A = 1 };` used to stay
+// signed by coincidence pre-#1205, since the default was signed `int`
+// too -- post-#1205 the body's own all-non-negative selection would have
+// silently made it unsigned instead, contradicting the declared `: int`).
+enum tc_1205_fwd_decl : int;
+enum tc_1205_fwd_decl { TC_1205_FWD = 1 };
 
 [[cccc::test(return = 42)]]
 int test_wide_enum_underlying_type(void) {
@@ -457,19 +473,25 @@ int test_wide_enum_underlying_type(void) {
     if ((enum tc_1175_wide_unsigned64) - 1 < 0)
         return 5; // must be unsigned
 
-    // A small all-non-negative enum: gcc/clang give `unsigned int` here,
-    // cccc deliberately keeps plain `int` (signed) -- sizeof/_Alignof agree
-    // at 4/4 either way, so this is outside #1170's layout-parity bar, and
-    // it's a separate, documented divergence (follow-up filed against
-    // #1170), not a #1175 regression. Only the layout is pinned here
-    // (agrees on both VM and every host); deliberately no runtime
-    // signedness check like the shapes above -- this file is also
-    // recompiled and re-run natively (see man/TESTING.md's native
-    // round-trip mode), and a real host compiler picks `unsigned int` here
-    // where the VM picks signed `int`, so a `(enum tc_1175_small)-1 < 0`
-    // check would itself disagree between VM and native, not a bug in
-    // either, just this exact deliberately-unfixed gap.
+    // #1205: a small all-non-negative enum -- gcc/clang give `unsigned int`
+    // here, and cccc now matches (previously stayed plain signed `int`, see
+    // git history for the old deliberate-divergence comment this replaced).
+    // sizeof/_Alignof already agreed at 4/4 either way; the new part is the
+    // runtime signedness check, which VM and native now agree on too.
     _Static_assert(sizeof(enum tc_1175_small) == 4, "cccc");
+    _Static_assert(_Alignof(enum tc_1175_small) == 4, "cccc");
+    if ((enum tc_1175_small) - 1 < 0)
+        return 6; // must be unsigned
+
+    // #1205: the enumerator IDENTIFIER's own type is still plain `int` per
+    // C17/C23 6.7.2.2p3 even though the enum type itself (above) is
+    // `unsigned int` -- only a fixed `enum E : type` base changes the
+    // enumerators' own type. `-1 < TC_1175_SMALL` must stay true (int vs.
+    // int, ordinary signed comparison), where `(enum tc_1175_small)-1 < 0`
+    // above is false (unsigned comparison after the cast forces the enum
+    // type). Verified this exact split against gcc-16/clang.
+    if (!(-1 < TC_1175_SMALL))
+        return 8;
 
     // A small negative-only enum was already correct before #1175 --
     // regression guard.
@@ -477,6 +499,13 @@ int test_wide_enum_underlying_type(void) {
     _Static_assert(_Alignof(enum tc_1175_neg) == 4, "cccc");
     if (!((enum tc_1175_neg) - 1 < 0))
         return 7;
+
+    // #1205: a completed body must adopt a forward declaration's fixed
+    // base rather than re-guess -- stays signed `int`, matching `: int`.
+    _Static_assert(sizeof(enum tc_1205_fwd_decl) == 4, "cccc");
+    _Static_assert(_Alignof(enum tc_1205_fwd_decl) == 4, "cccc");
+    if (!((enum tc_1205_fwd_decl) - 1 < 0))
+        return 9;
 
     return 42;
 }

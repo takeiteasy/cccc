@@ -675,6 +675,12 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
         return;
 
     collect_type(ctx, node->ty);
+    // #1205: an enumerator reference's own node->ty is ty_int (C17/C23
+    // 6.7.2.2p3), not the enum type -- without this, an enum referenced
+    // only via its enumerators (never sizeof'd, never used as an object's
+    // type) is never collected and its tag definition is silently dropped.
+    if (node->enum_source_ty)
+        collect_type(ctx, node->enum_source_ty);
     if (node->var)
         collect_type(ctx, node->var->ty);
     if (node->member)

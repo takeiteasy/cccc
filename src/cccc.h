@@ -1413,6 +1413,13 @@ struct Type {
     EnumConstant *enum_constants;
     struct Type  *enum_base_type; // C23: underlying type (NULL = default int)
     Token *enum_tag; // tag name token (survives declarator name-overwrite)
+    // #1205: set when this enum has no fixed `enum_base_type` and every
+    // enumerator fit `int` -- the enum's own compatible type is `unsigned
+    // int` (matching gcc-16/clang), but C17/C23 6.7.2.2p3 still gives each
+    // *enumerator identifier* type `int`. Enumerator-use sites (see
+    // parse_postfix.c's enum lookup) check this to type references `int`
+    // while the enum type itself stays unsigned.
+    bool enum_members_are_int;
 
     // Function type
     struct Type *return_ty;
@@ -1752,6 +1759,13 @@ struct Node {
     bool         is_fallthrough;     // [[fallthrough]] on a null statement
     bool         is_sizeof_ptr_expr; // ND_NUM from sizeof(pointer_type) — for
                                      // -Wsizeof-pointer-memaccess
+    // #1205: ND_NUM folded from an enumerator reference whose own type
+    // (num->ty) is ty_int per C17/C23 6.7.2.2p3, not the enum type it
+    // belongs to (enum_members_are_int, see parse_postfix.c) -- kept here so
+    // serialize_type.c's collect_node_types() still discovers and emits the
+    // enum's tag definition even though the use site's own node->ty no
+    // longer names it. NULL for every other ND_NUM.
+    Type *enum_source_ty;
     // #1031: ND_NUM folded from sizeof/_Alignof of this type -- -c=native
     // re-materializes the operator textually (`sizeof(struct statfs)`
     // rather than the folded literal `56ULL`) when the type's layout is

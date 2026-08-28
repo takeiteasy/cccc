@@ -24,3 +24,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   deliberately excluded: its length isn't known until runtime, so excess
   elements there stay caught by the runtime bounds trap above, not this
   warning.
+- A small all-non-negative enum (every enumerator fits `int`, no fixed `:
+  type` underlying type) now gets underlying type `unsigned int`, matching
+  gcc/clang exactly — previously stayed plain signed `int`. Each enumerator
+  *identifier* still has type `int` per C17/C23 6.7.2.2p3, unless the enum
+  has a fixed underlying type of its own.

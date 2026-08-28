@@ -2876,7 +2876,17 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 Node *num = new_num(vm, sc->enum_val, tok);
                 // Use the enum's own type so size/signedness are correct for
                 // enums with a C23 underlying type (e.g. unsigned long).
-                num->ty = sc->enum_ty;
+                // #1205: except when the enum has no fixed underlying type
+                // and every enumerator fit `int` -- the enum type itself is
+                // `unsigned int` there (matching gcc-16/clang), but
+                // C17/C23 6.7.2.2p3 still types each enumerator identifier
+                // `int`, not the enum's own compatible type.
+                if (sc->enum_ty->enum_members_are_int) {
+                    num->ty             = ty_int;
+                    num->enum_source_ty = sc->enum_ty; // #1205, see cccc.h
+                } else {
+                    num->ty = sc->enum_ty;
+                }
                 // #1095: propagate layout provenance from the enumerator's
                 // own `= sizeof(T)` (see VarScope.enum_layout_ty's own
                 // comment) so this USE, not just the enum body, flows

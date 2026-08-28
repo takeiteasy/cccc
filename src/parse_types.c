@@ -1415,17 +1415,40 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         val++;
     }
 
-    // #1175: select the underlying type from the enumerator values actually
-    // seen, matching gcc-16/clang -- C23 6.7.2.2 requires the type be able
-    // to represent every enumerator, and both reference compilers widen past
-    // `int` for this as an extension predating C23. Only when the enum has
-    // no explicit `enum E : type` of its own (ty->enum_base_type set above,
-    // which must keep winning unconditionally) and only ever *widens* size
-    // past the plain-`int` default -- a small all-non-negative enum stays
-    // `int` (signed) here even though both gcc and clang give it `unsigned
-    // int`; that's a separate, deliberately out-of-scope divergence (doesn't
-    // move sizeof/_Alignof) filed as a follow-up to #1170, not folded in.
-    if (!ty->enum_base_type && !first_enum) {
+    // #1175/#1205: select the underlying type from the enumerator values
+    // actually seen, matching gcc-16/clang -- C23 6.7.2.2 requires the type
+    // be able to represent every enumerator, and both reference compilers
+    // widen past `int` for this as an extension predating C23. Only when the
+    // enum has no explicit `enum E : type` of its own (ty->enum_base_type
+    // set above, which must keep winning unconditionally).
+    //
+    // #1205: an all-non-negative enum that fits `int` is `unsigned int` on
+    // gcc-16/clang too -- verified directly, not just the >INT32_MAX case
+    // #1175 already handled. C17/C23 6.7.2.2p3 still gives each *enumerator
+    // identifier* type `int` even when the enum's own compatible type is
+    // `unsigned int` (unlike a fixed `: type` base, which the enumerators
+    // take on too) -- ty->enum_members_are_int records that split so the
+    // enumerator-use site (parse_postfix.c) can type references `int` while
+    // this Type itself is unsigned. Verified: `enum G { G1 = 1 };
+    // (enum G)-1 < 0` is false and `-1 < G1` is true on both gcc-16 and
+    // clang, `-std=c17` and `-std=c23` alike.
+    // #1205: a completed body with no `: type` of its own, following a
+    // forward declaration that HAD one (`enum E : int; enum E { A = 1 };`),
+    // is ill-formed C23 (6.7.2.2p4 requires a redeclaration to repeat the
+    // fixed type) -- both gcc-16 and clang reject it outright, verified
+    // directly. CCCC doesn't diagnose that (a pre-existing, wider gap, not
+    // this fix's scope), but it must not let this selection silently widen
+    // or unsign past what the forward declaration already fixed -- adopt
+    // the existing tag's base instead of guessing from the enumerator
+    // values, so `install_tag_definition`'s own wholesale `*existing = *ty`
+    // overwrite below can't drop a real fixed base #1205 never asked to
+    // touch.
+    if (existing_tag && existing_tag->enum_base_type) {
+        ty->enum_base_type = existing_tag->enum_base_type;
+        ty->size           = existing_tag->enum_base_type->size;
+        ty->align          = existing_tag->enum_base_type->align;
+        ty->is_unsigned    = existing_tag->enum_base_type->is_unsigned;
+    } else if (!ty->enum_base_type && !first_enum) {
         if (any_neg) {
             // Signed: needs to hold min_val and max_uval both.
             if (min_val >= INT32_MIN && max_uval <= INT32_MAX) {
@@ -1438,11 +1461,15 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
             ty->size        = 8;
             ty->align       = 8;
             ty->is_unsigned = true;
-        } else if (max_uval > INT32_MAX) {
-            ty->is_unsigned = true; // stays 4/4
+        } else {
+            // Non-negative and fits `int` (<= INT32_MAX) or `unsigned int`
+            // (<= UINT32_MAX) either way -- both stay 4/4 unsigned; #1205's
+            // fix is folding the <= INT32_MAX case into this arm instead of
+            // leaving it plain signed `int`.
+            ty->is_unsigned = true;
+            if (max_uval <= INT32_MAX)
+                ty->enum_members_are_int = true; // #1205
         }
-        // else: plain non-negative, small -- leave as default int (4/4,
-        // signed), see comment above.
     }
 
     return install_tag_definition(vm, tag, ty, "enum");
