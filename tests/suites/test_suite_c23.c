@@ -275,6 +275,15 @@ enum Color : unsigned int {
     RED   = 1,
 };
 
+// #1223: a C23 fixed `enum E : T` base is the enum's compatible type, so a
+// _Generic association naming T matches an operand of that enum type. An
+// underlying type may NOT be respelled inside the association itself
+// (`_Generic(x, enum Width : short : ...)`) -- see the negative test
+// tests/suites/test_generic_enum_assoc_underlying_fail.c.
+enum Width : short {
+    W_ONE = 1,
+};
+
 // [from test_c23_wb_suffix]
 // Test C23 wb/uwb integer literal suffixes (ticket #395, wide literals #452)
 // These produce _BitInt(N) / unsigned _BitInt(N) values where N is the
@@ -1559,6 +1568,32 @@ int test_c23_tag_redeclarations(void) {
     if (c != 2)
         return 3;
     if (RED != 1 || GREEN != 2)
+        return 4;
+    return 42;
+}
+
+// #1223: _Generic matches a fixed-base enum against its underlying type.
+[[cccc::test(return = 42)]]
+int test_c23_generic_enum_fixed_base(void) {
+    enum Width w = W_ONE;
+    // `enum Width : short` -> compatible type is `short`
+    if (_Generic(w, short: 1, int: 2, unsigned int: 3, default: 0) != 1)
+        return 1;
+    // `enum Color : unsigned int` -> compatible type is `unsigned int`
+    enum Color c = RED;
+    if (_Generic(c, short: 1, int: 2, unsigned int: 3, default: 0) != 3)
+        return 2;
+    // symmetric: a `short` operand matches an `enum Width` association
+    short s = 1;
+    if (_Generic(s, enum Width: 4, default: 0) != 4)
+        return 3;
+    // #1223: a *braced* enum definition inside an association keeps its
+    // underlying type -- the `{` disambiguates it from the association
+    // colon, so it is not the rejected `enum Tag : T :` reference form.
+    // `s` is `short`, the freshly defined enum's underlying type, so the
+    // arm matches. cccc follows gcc here (clang rejects defining a type in
+    // an association outright).
+    if (_Generic(s, enum NewGen: short{NG1 = 1}: 5, default: 0) != 5)
         return 4;
     return 42;
 }

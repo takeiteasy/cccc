@@ -398,6 +398,58 @@ int test_generic(void) {
     return 42; // Success
 }
 
+// #1223: a _Generic controlling expression of enumerated type matches an
+// association naming its implementation-defined underlying integer type
+// (and vice versa), exactly as gcc/clang do. An all-non-negative enum that
+// fits `int` has underlying type `unsigned int` (#1205); a negative
+// enumerator keeps it `int`; a value past UINT32_MAX widens it to 8 bytes;
+// a C23 fixed `enum E : T` base wins outright. enum-vs-enum stays a
+// distinct-type mismatch. The same fix also gave _Bool and tagged
+// struct/union associations a working arm.
+enum ug_1223 { UG1 = 1 }; // -> unsigned int
+enum sg_1223 { SG1 = -1 }; // -> int
+enum wg_1223 { WG1 = 0x100000000 }; // -> 8-byte unsigned
+enum other_1223 { OG1 = 1 };
+struct sgen_1223 {
+    int a;
+};
+
+[[cccc::test(return = 42)]]
+int test_generic_enum(void) {
+    // all-non-negative small enum: underlying type is `unsigned int`
+    if (_Generic((enum ug_1223)0, unsigned int: 1, int: 2, default: 0) != 1)
+        return 1;
+    // enum with a negative enumerator: stays `int`
+    if (_Generic((enum sg_1223)0, unsigned int: 1, int: 2, default: 0) != 2)
+        return 2;
+    // value beyond UINT32_MAX: widened to an 8-byte type (one arm only --
+    // is_compatible does not distinguish long from long long)
+    if (_Generic((enum wg_1223)0, long: 3, unsigned long: 3, default: 0) != 3)
+        return 3;
+    // matching direction is symmetric: integer controlling expr, enum arm
+    if (_Generic(0u, enum ug_1223: 4, default: 0) != 4)
+        return 4;
+    // an association naming the enum's own tag still matches by identity
+    enum ug_1223 e = UG1;
+    if (_Generic(e, enum ug_1223: 5, default: 0) != 5)
+        return 5;
+    // two separately declared enums are NOT compatible
+    if (__builtin_types_compatible_p(enum ug_1223, enum other_1223))
+        return 6;
+    // enum <-> its underlying type IS compatible per the builtin
+    if (!__builtin_types_compatible_p(enum ug_1223, unsigned int))
+        return 7;
+    // _Bool association arm now works (was falling through to default)
+    _Bool b = 1;
+    if (_Generic(b, _Bool: 8, int: 9, default: 0) != 8)
+        return 8;
+    // tagged struct association arm now works (control type keeps origin)
+    struct sgen_1223 s = {0};
+    if (_Generic(s, struct sgen_1223: 9, default: 0) != 9)
+        return 9;
+    return 42;
+}
+
 // #1122: file-scope initializers wider than 8 bytes (__int128,
 // _BitInt(65..128), long double, _Complex) used to crash write_gvar_data
 // (`internal error at src/parse_init.c:1601`) at parse time -- and, for the

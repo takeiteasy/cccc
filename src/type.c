@@ -235,6 +235,21 @@ bool is_error_type(Type *ty) {
     return ty && ty->kind == TY_ERROR;
 }
 
+// #1223: an enumerated type is compatible with the implementation-defined
+// integer type it was given (C17/C23 6.7.2.2), which is what gcc/clang
+// report from __builtin_types_compatible_p and match in a _Generic arm.
+// enum_specifier() (parse_types.c) already stamps size/align/is_unsigned
+// from that choice, so this reads them back rather than re-deriving. No
+// VirtualMachine is in scope here, so only the pre-built singletons may
+// be returned -- never a freshly constructed Type.
+static Type *enum_compat_type(Type *ty) {
+    if (ty->enum_base_type)
+        return ty->enum_base_type;
+    if (ty->size == 8)
+        return ty->is_unsigned ? ty_ulong : ty_long;
+    return ty->is_unsigned ? ty_uint : ty_int;
+}
+
 bool is_compatible(Type *t1, Type *t2) {
     if (t1 == t2)
         return true;
@@ -245,6 +260,18 @@ bool is_compatible(Type *t1, Type *t2) {
     if (t2->origin)
         return is_compatible(t1, t2->origin);
 
+    // #1223: enum-vs-enum stays incompatible (two separately-declared enums
+    // are distinct types even at identical width/signedness -- verified
+    // against gcc-16/clang); only enum-vs-integer maps through its
+    // underlying type. The `kind != TY_ENUM` guards keep enum-vs-enum
+    // falling through to the switch's `default: false`; no recursion risk
+    // since an enum underlying type can never itself be TY_ENUM
+    // (parse_types.c rejects that).
+    if (t1->kind == TY_ENUM && t2->kind != TY_ENUM)
+        return is_compatible(enum_compat_type(t1), t2);
+    if (t2->kind == TY_ENUM && t1->kind != TY_ENUM)
+        return is_compatible(t1, enum_compat_type(t2));
+
     if (t1->kind != t2->kind)
         return false;
 
@@ -254,6 +281,7 @@ bool is_compatible(Type *t1, Type *t2) {
         case TY_INT:
         case TY_LONG:
             return t1->is_unsigned == t2->is_unsigned;
+        case TY_BOOL:
         case TY_FLOAT:
         case TY_DOUBLE:
         case TY_LDOUBLE:

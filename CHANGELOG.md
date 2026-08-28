@@ -36,3 +36,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   padding. A union whose largest member is itself an anonymous struct/union
   no longer crashes the serializer either — it's flattened into transparent
   designators in the enclosing initializer.
+- `_Generic` and `__builtin_types_compatible_p` now match a controlling
+  expression of enumerated type against an association naming its
+  underlying integer type (`_Generic((enum G){0}, unsigned int: …)` for an
+  all-non-negative `enum G`), and the reverse direction too, matching
+  gcc/clang. Two separately declared enums remain mutually incompatible. A
+  `_Bool` association arm and a tagged `struct`/`union` association arm now
+  match instead of falling through to `default`. Spelling a C23
+  `enum E : T` underlying type inside an association
+  (`_Generic(x, enum E : int : …)`) is a compile error — the `:` there is
+  the association colon.

@@ -1033,10 +1033,14 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
         t1 = pointer_to(vm, t1);
     else if (t1->kind == TY_ARRAY)
         t1 = pointer_to(vm, t1->base);
-    t1                 = copy_type(vm, t1);
-    t1->is_const       = false;
-    t1->is_volatile    = false;
-    t1->origin         = NULL;
+    t1              = copy_type(vm, t1);
+    t1->is_const    = false;
+    t1->is_volatile = false;
+    // origin is deliberately kept: it is the only link back to the
+    // original Type*, so an association naming a tagged type (`struct S`,
+    // `enum G`) still matches its own controlling expression by identity
+    // (#1223). is_compatible never reads is_const/is_volatile, so the
+    // strips above stay safe.
 
     Node *match        = NULL;
     Node *default_node = NULL;
@@ -1052,9 +1056,16 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
             continue;
         }
 
-        Type *t2   = typename(vm, &tok, tok);
-        tok        = skip(vm, tok, ":");
-        Node *node = assign(vm, &tok, tok);
+        // #1223: inside an association the next `:` is always the
+        // association colon -- a C23 `enum E : T` underlying type may not
+        // be spelled here (matching gcc/clang). enum_specifier() consults
+        // this flag; save/restore so nested _Generic composes.
+        bool saved_ga                 = vm->compiler.in_generic_assoc;
+        vm->compiler.in_generic_assoc = true;
+        Type *t2                      = typename(vm, &tok, tok);
+        vm->compiler.in_generic_assoc = saved_ga;
+        tok                           = skip(vm, tok, ":");
+        Node *node                    = assign(vm, &tok, tok);
         if (!match && is_compatible(t1, t2))
             match = node;
     }

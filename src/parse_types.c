@@ -1255,8 +1255,38 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         tok          = tok->next;
     }
 
-    // C23: optional underlying type `: integer-type`
-    if (equal(tok, ":")) {
+    // C23: optional underlying type `: integer-type`.
+    bool parse_enum_base = equal(tok, ":");
+    // #1223: inside a _Generic association the `:` after a bare `enum Tag`
+    // is the association colon, not an underlying-type introducer -- an
+    // enum *reference* may not restate its underlying type there (gcc/clang:
+    // "'enum' underlying type may not be specified here"). A braced
+    // *definition* (`enum Tag : T { ... }`) is still fine -- the `{`
+    // disambiguates. Distinguish by scanning past the prospective base type
+    // for a `{` (definition, keep parsing the base) vs a `:` or association
+    // terminator (reference -- leave the colon for the association parse; a
+    // second `:` is the diagnosed error).
+    if (parse_enum_base && vm->compiler.in_generic_assoc) {
+        if (!is_typename(vm, tok->next)) {
+            // bare `enum Tag :` -- the colon is the association's; leave it
+            // unconsumed. (A value expression can never start with a
+            // typename token, so this can't misfire on `enum G: (expr)`.)
+            parse_enum_base = false;
+        } else {
+            Token *scan = tok->next;
+            while (scan && !equal(scan, "{") && !equal(scan, ":") &&
+                   !equal(scan, ";") && !equal(scan, ")") && !equal(scan, ","))
+                scan = scan->next;
+            if (!scan || !equal(scan, "{")) {
+                if (scan && equal(scan, ":"))
+                    error_tok(
+                        vm, tok,
+                        "'enum' underlying type may not be specified here");
+                parse_enum_base = false;
+            }
+        }
+    }
+    if (parse_enum_base) {
         tok             = tok->next;
         Token *base_tok = tok;
         Type  *base_ty  = typename(vm, &tok, tok);
