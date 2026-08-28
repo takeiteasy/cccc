@@ -1392,11 +1392,22 @@ struct Type {
     int      size; /**< sizeof() value in bytes. */
     int      align;       /**< Alignment requirement in bytes. */
     bool     is_unsigned; // unsigned or signed
-    bool     is_atomic;   // true if _Atomic
-    bool     is_const;    // true if const-qualified
-    bool     is_volatile; // true if volatile-qualified
-    bool     is_restrict; // true if restrict-qualified
-    struct Type *origin;  // for type compatibility check
+    // #1234: serialization-only spelling flag. CCCC has no distinct
+    // `long long` kind -- `long` and `long long` share TY_LONG (identical
+    // representation on every LP64 target CCCC supports), so this bit records
+    // only which of the two spellings a `long long` declaration used, for
+    // -c=native/-m to reproduce it. It denotes the *same type* as a plain
+    // TY_LONG: never consult it for compatibility, integer rank, usual
+    // arithmetic conversions, or _Generic selection (see
+    // src/parse_postfix.c:1089-1102, which documents that _Generic
+    // deliberately cannot tell the two apart). Only src/serialize_type.c's
+    // TY_LONG arm reads it.
+    bool         is_long_long;
+    bool         is_atomic;   // true if _Atomic
+    bool         is_const;    // true if const-qualified
+    bool         is_volatile; // true if volatile-qualified
+    bool         is_restrict; // true if restrict-qualified
+    struct Type *origin;      // for type compatibility check
 
     // Pointer-to or array-of type. We intentionally use the same member
     // to represent pointer/array duality in C.
@@ -2053,6 +2064,17 @@ struct Node {
     // *object* expression, not the assigned variable -- unrelated to this
     // flag's purpose.
     bool is_rmw_temp_addr;
+
+    // #1235: marks the outer ND_CAST that new_inc_dec() (src/parse_postfix.c)
+    // wraps around a postfix `A++`/`A--` desugar
+    // (`(typeof A)((A += 1) + -1)`). Pure annotation, read only by the
+    // serializer: in a discard context (an expression statement, a for-loop
+    // update clause) serialize_discard_expr() (src/serialize_expr.c) peels
+    // this cast and the dead value-reconstructing `+ -1` term, emitting just
+    // the `(tmp = &A, *tmp = *tmp + 1)` store so the output is
+    // -Wunused-value-clean. VM codegen never looks at it -- `A++` semantics
+    // are unchanged.
+    bool is_inc_dec_result;
 
     // #1018: which <stdarg.h> macro (if any) this node is the parsed
     // __builtin_va_*() wrapper for. The node itself is always the

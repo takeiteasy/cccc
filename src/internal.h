@@ -656,6 +656,11 @@ extern Type *ty_ushort;
 extern Type *ty_uint;
 extern Type *ty_ulong;
 
+// #1234: TY_LONG with the is_long_long spelling bit set (same type as
+// ty_long/ty_ulong -- serialization spelling only).
+extern Type *ty_llong;
+extern Type *ty_ullong;
+
 extern Type *ty_float;
 extern Type *ty_double;
 extern Type *ty_ldouble;

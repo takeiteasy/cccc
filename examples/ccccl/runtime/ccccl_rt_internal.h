@@ -42,7 +42,7 @@ struct LObj {
     union {
         LObjAtom    atom;
         LObjPair    pair;
-        long        ival;
+        long long   ival;
         LObjClosure closure;
     } as;
 };

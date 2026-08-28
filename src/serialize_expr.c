@@ -2471,3 +2471,35 @@ void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     }
     serialize_expr_raw(f, vm, ctx, node, parent_prec);
 }
+
+// #1235: new_inc_dec() lowers a postfix `A++` to
+// `(typeof A)((A += 1) + -1)`, and to_assign() further lowers the `+= 1`
+// into `(tmp = &A, *tmp = *tmp + 1)`. The trailing `+ -1` reconstructs the
+// pre-increment value `A++` must yield -- dead in any value-discarding
+// position, and its own `-Wunused-value` trigger. In such a position the
+// caller routes the node here instead of serialize_expr(): peel the
+// is_inc_dec_result cast and the compensating ND_ADD and emit only the
+// store. Structural, so `A--` (compensating term `+ 1`), a pointer operand
+// (term scaled by the element size) and a floating operand (`+ -1.0`) are
+// all handled without a per-case check. Anything else is forwarded intact.
+void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                            Node *node, int parent_prec) {
+    if (node && node->kind == ND_CAST && node->is_inc_dec_result) {
+        // Shape: ND_CAST(is_inc_dec_result) -> ND_ADD(<rmw>, <compensating>),
+        // where <rmw> is to_assign()'s `(tmp = &A, *tmp = *tmp + n)` comma,
+        // usually wrapped in a promotion ND_CAST that usual_arith_conv()
+        // inserted (a no-op int->int for a plain int operand, a real
+        // (double)/(T *) for a float/pointer operand). Descend to the comma
+        // and emit only that -- the surrounding cast and the compensating
+        // term both exist solely to reconstruct `A++`'s value, dead here.
+        Node *rmw = node->lhs;
+        if (rmw && rmw->kind == ND_ADD && rmw->lhs) {
+            rmw = rmw->lhs;
+            while (rmw && rmw->kind == ND_CAST && rmw->lhs)
+                rmw = rmw->lhs;
+            serialize_expr(f, vm, ctx, rmw, parent_prec);
+            return;
+        }
+    }
+    serialize_expr(f, vm, ctx, node, parent_prec);
+}

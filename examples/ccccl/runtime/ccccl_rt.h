@@ -39,7 +39,7 @@ extern LObj *ccccl_t;   /* the T atom */
 void ccccl_rt_init(void);
 
 LObj *ccccl_intern(const char *name);
-LObj *ccccl_int(long v);
+LObj *ccccl_int(long long v);
 
 LObj *ccccl_cons(LObj *a, LObj *d);
 LObj *ccccl_car(LObj *x);

@@ -79,7 +79,7 @@ LObj *ccccl_intern(const char *name) {
     }
 }
 
-LObj *ccccl_int(long v) {
+LObj *ccccl_int(long long v) {
     LObj *n;
     if (g_int_next >= CCCCL_RT_MAX_INTS)
         ccccl_rt_fatal("int arena exhausted");
@@ -122,7 +122,7 @@ LObj *ccccl_eq(LObj *a, LObj *b) {
     return ccccl_nil;
 }
 
-static long ccccl_as_int(LObj *x, const char *who) {
+static long long ccccl_as_int(LObj *x, const char *who) {
     if (x->tag != CCCCL_INT)
         ccccl_rt_fatal2(who, ": not a number");
     return x->as.ival;
@@ -138,13 +138,13 @@ LObj *ccccl_mul(LObj *a, LObj *b) {
     return ccccl_int(ccccl_as_int(a, "*") * ccccl_as_int(b, "*"));
 }
 LObj *ccccl_div(LObj *a, LObj *b) {
-    long bv = ccccl_as_int(b, "/");
+    long long bv = ccccl_as_int(b, "/");
     if (bv == 0)
         ccccl_rt_fatal("/: division by zero");
     return ccccl_int(ccccl_as_int(a, "/") / bv);
 }
 LObj *ccccl_mod(LObj *a, LObj *b) {
-    long bv = ccccl_as_int(b, "mod");
+    long long bv = ccccl_as_int(b, "mod");
     if (bv == 0)
         ccccl_rt_fatal("mod: division by zero");
     return ccccl_int(ccccl_as_int(a, "mod") % bv);
@@ -191,7 +191,7 @@ LObj *ccccl_closure_self(CccclFn fn, LObj *captures, int self_slot) {
 
 void ccccl_print(LObj *x, FILE *out) {
     if (x->tag == CCCCL_INT) {
-        fprintf(out, "%ld", x->as.ival);
+        fprintf(out, "%lld", x->as.ival);
         return;
     }
     if (x->tag == CCCCL_CLOSURE) {

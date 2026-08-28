@@ -547,19 +547,28 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                 break;
             case LONG:
             case LONG + INT:
-            case LONG + LONG:
-            case LONG + LONG + INT:
             case SIGNED + LONG:
             case SIGNED + LONG + INT:
+                ty = ty_long;
+                break;
+            // #1234: `long long` is the same type as `long` on every LP64
+            // target CCCC supports (the LONG carry trick above makes these
+            // case constants distinct from the single-`long` ones); ty_llong
+            // differs only in the is_long_long spelling bit the -c=native
+            // serializer reproduces.
+            case LONG + LONG:
+            case LONG + LONG + INT:
             case SIGNED + LONG + LONG:
             case SIGNED + LONG + LONG + INT:
-                ty = ty_long;
+                ty = ty_llong;
                 break;
             case UNSIGNED + LONG:
             case UNSIGNED + LONG + INT:
+                ty = ty_ulong;
+                break;
             case UNSIGNED + LONG + LONG:
             case UNSIGNED + LONG + LONG + INT:
-                ty = ty_ulong;
+                ty = ty_ullong;
                 break;
             case FLOAT:
                 ty = ty_float;

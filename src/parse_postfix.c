@@ -172,12 +172,16 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
 static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
                          int addend) {
     add_type(vm, node);
-    return new_cast(
+    Node *cast = new_cast(
         vm,
         new_add(vm,
                 to_assign(vm, new_add(vm, node, new_num(vm, addend, tok), tok)),
                 new_num(vm, -addend, tok), tok),
         node->ty);
+    // #1235: let the -c=native serializer recognise this shape and drop the
+    // dead `+ -addend` value-reconstruction term in a discard context.
+    cast->is_inc_dec_result = true;
+    return cast;
 }
 
 static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,

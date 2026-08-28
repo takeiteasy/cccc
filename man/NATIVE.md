@@ -353,7 +353,7 @@ the v2 epic, #1055, targeting v0.5.0.
 
 `-c=native`, `-m` and `-c=generated` re-emit the program as C and hand it to a
 host compiler. The rule everywhere else in this document is that the emitted C
-behaves as the VM behaves. Sixteen constructs cannot fully honour that, and
+behaves as the VM behaves. Fifteen constructs cannot fully honour that, and
 they are listed here rather than left to be discovered:
 
 | Construct | VM | Serialized output |
@@ -371,7 +371,6 @@ they are listed here rather than left to be discovered:
 | `__attribute__((constructor(N)))`/`(destructor(N))`'s priority argument, under gcc on Darwin specifically | codegen honours the numeric priority in the VM's own init/fini ordering | Darwin gcc (Homebrew, not Apple's `gcc`-is-actually-`clang` symlink) rejects the priority argument outright ("constructor priorities are not supported"); clang supports it and this round-trips there, as does gcc on Linux. Permanent, `WONT_FIX` gcc/Darwin gap (#1186) — `NATIVE_SKIP_TESTS_GCC_MACOS`, which needs both the platform and compiler-family axis since the group passes under gcc on Linux (`tools/testing/__init__.py`, split out from the platform-less `NATIVE_SKIP_TESTS_GCC` by #1193 after it wrongly suppressed the test there too). The identical gap in `tools/comptime_native_smoke.py`'s own case 114 (`case_ctor_dtor_native_round_trip`) is quarantined the same two-axis way via `SMOKE_CASE_SKIPS_GCC_MACOS` (#1196), that script's separate case-function-keyed skip table |
 | a `void`-returning entry function that falls off its end | codegen unconditionally loads 0 into the return register at the end of the entry function, regardless of its declared return type, so the process always exits 0 (#1031) | no equivalent injection — the host compiler leaves a `void main`'s exit status undefined, so it is whatever the ABI happened to leave in the return register (observed values are not stable across hosts/compilers) |
 | Tail-call elimination (`CALLT`, unconditional) | guaranteed: the VM reuses the caller's frame, so an arbitrarily deep tail-recursive call runs in constant stack space | best-effort, not guaranteed. The native build's TCO is the host cc's own heuristic, not part of any C standard. `-O<n>` is forwarded verbatim to the host cc (#1159); the deep-recursion tail-call tests pass `-O2` so both clang and gcc-16 eliminate the call (gcc's `-O1` heuristic does not, for some shapes). With no `-O` on the command line the host builds at its own `-O0` and does no TCO |
-| `long`/`long long` on a real header's declaration, re-declared by `-c=native` | n/a — the VM parses and executes CCCC's own tokens directly, so no re-declaration ever happens | CCCC's type system has no distinct `long long` kind — both collapse to the same internal `long` representation (identical on every LP64 target CCCC supports) — so `-c=native` always re-emits a `long long` parameter/return as `long`. A header compiled alongside the generated TU that itself spells the type `long long` then sees two non-identical declarations for the same function and the host compiler rejects the TU with "conflicting types". Not serializer-fixable without a distinct type kind to preserve the original spelling (#1234); until then, a project's own headers should spell 64-bit integers `long`, not `long long`, if they are meant to be linked against `-c=native` output — `examples/ccccl`'s runtime does this |
 | `sizeof`/`_Alignof` of a `from_include` type, reached through a bitfield width (`int x : sizeof(struct statfs);`) or a global initializer's byte image (`serialize_init_bytes`) — including an array dimension on a struct/union *member*, or on an *initialized* global | folds against CCCC's own (correct-for-the-VM) type projection | stays folded. A bitfield width determines the *containing struct's own layout*, which CCCC also emits — re-materializing the width would make the host compute different member offsets than CCCC folded for the rest of that struct, actively unsound rather than merely incomplete, so this is not attempted (#1099, `WONT_FIX`). An initialized global's byte image is sized off the folded value by `serialize_init_bytes`; re-materializing only its declared dimension would desync the two (same reasoning, member arrays inherit it via the enclosing aggregate; also `WONT_FIX`). A bare `sizeof(T)`/`_Alignof(T)` *expression* (#1031), a *local or uninitialized-global* array dimension, a `case` label, and an enum value (#1095) all re-materialize the operator textually against the real host layout instead — see `man/HEADERS.md`. A `_Static_assert(sizeof(struct statfs) == N, "...")` condition depending on one of these types is a distinct case, not merely a re-materialization gap: CCCC's parser evaluates it against its own projection, so only a passing assertion ever reaches the serializer, which used to emit no `_Static_assert` construct at all — a host whose real layout would fail the same check compiled anyway. `-c=native` now re-emits the assert (both file- and block-scope forms) for the host to genuinely re-check it, gated on the condition actually depending on a host-owned `from_include` struct/union layout *and* the assert being written in a command-line input file — so one of CCCC's own bundled headers' own per-platform layout asserts (`include/sys/stat.h`, `signal.h`, `fts.h`, `aio.h`, etc.) is never re-emitted against the wrong host (#1098) |
 `_Decimal32`/`_Decimal64`/`_Decimal128` declarations and literals (the `df`/
 `dd`/`dl` suffix) pass through to `-m`/`-c=native` output as plain GNU decimal
@@ -897,6 +896,33 @@ header-supplied suppression the ordinary function-prototype pass already
 had (factored into one shared predicate), deliberately without adopting
 that other pass's `is_implicit`/macro-generated skip arms — those would
 reintroduce the "nothing in scope" bug #999 fixed in the first place.
+
+A parameter or return declared `long long` keeps that spelling in
+`-c=native`/`-m` output (#1234). CCCC's type system has no distinct
+`long long` kind — `long` and `long long` share one internal representation
+(identical on every LP64 target CCCC supports) — and the serializer used to
+spell every such type `long` unconditionally. A header compiled as ordinary
+C alongside the generated TU (its `#include` replayed verbatim) that itself
+writes `long long` then saw two non-identical declarations for one function
+and the host compiler rejected the TU with "conflicting types". A
+serialization-only spelling bit on the type (`Type.is_long_long`, set by the
+`long long` declspec, read only by `serialize_type`) now reproduces the
+original spelling. It records spelling only: `long` and `long long` remain
+the same type for compatibility, integer rank, usual arithmetic conversions,
+and `_Generic` selection, exactly as before — nothing about how the VM or
+the host computes with the value changes.
+
+A postfix `A++`/`A--` is emitted in its lowered read-modify-write form —
+`(typeof A)((A += 1) + -1)`, with the `+= 1` itself lowered to a
+`(tmp = &A, *tmp = *tmp + 1)` comma — rather than re-sugared back to `A++`.
+The trailing `+ -1` reconstructs the pre-increment value the expression
+yields. In a value-discarding position (a `for`-loop update clause, an
+expression statement) that value is never read, so the compensating term is
+dropped and only the `(tmp = &A, *tmp = *tmp + 1)` store is emitted (#1235) —
+without it, every `for (i = 0; i < n; i++)` in the output drew a
+`-Wunused-value` warning. A `++`/`--` whose value *is* used (`j = i++;`)
+keeps the full form.
+
 Separately, a translation unit holding only typedefs/prototypes and no
 definitions is not a compile failure — `parse()`'s own contract returns
 `NULL` for that case, previously treated by `main.c`'s per-TU loop as

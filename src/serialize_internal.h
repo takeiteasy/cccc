@@ -318,6 +318,14 @@ void serialize_atomic_addr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     Node *node, int parent_prec);
+// #1235: like serialize_expr(), but for a value-discarding position (an
+// expression statement, a for-loop update clause). If `node` is the ND_CAST
+// new_inc_dec() tags with is_inc_dec_result, emits only the underlying
+// `(tmp = &A, *tmp = *tmp + 1)` store -- dropping the cast and the dead
+// `+ -addend` term that otherwise trips -Wunused-value. Any other node is
+// forwarded to serialize_expr() unchanged.
+void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                            Node *node, int parent_prec);
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         Obj *fn);
 void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,

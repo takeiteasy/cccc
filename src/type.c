@@ -38,8 +38,14 @@ Type *ty_ushort    = &(Type){TY_SHORT, 2, 2, true};
 Type *ty_uint      = &(Type){TY_INT, 4, 4, true};
 Type *ty_ulong     = &(Type){TY_LONG, 8, 8, true};
 
-Type *ty_float     = &(Type){TY_FLOAT, 4, 4};
-Type *ty_double    = &(Type){TY_DOUBLE, 8, 8};
+// #1234: same type as ty_long/ty_ulong (TY_LONG, 8/8) -- the is_long_long
+// bit is a serialization-only spelling channel, see struct Type's comment.
+Type *ty_llong = &(Type){TY_LONG, 8, 8, .is_long_long = true};
+Type *ty_ullong =
+    &(Type){TY_LONG, 8, 8, .is_unsigned = true, .is_long_long = true};
+
+Type *ty_float  = &(Type){TY_FLOAT, 4, 4};
+Type *ty_double = &(Type){TY_DOUBLE, 8, 8};
 
 // #1174: `long double`'s size/align is NOT the same across every supported
 // platform, unlike every other scalar type declared in this file. On macOS

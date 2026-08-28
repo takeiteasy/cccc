@@ -7198,6 +7198,146 @@ def case_comptime_generated_main_is_entry_point(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1234: a header spelling a parameter/return `long long` is compiled as
+# ordinary C alongside the -c=native output (its `#include` is replayed
+# verbatim). CCCC has no distinct `long long` kind -- `long`/`long long`
+# share TY_LONG -- so the serializer used to re-emit the same function as
+# `long f(long)`, a "conflicting types" error against the replayed header.
+LONG_LONG_1234_HEADER = (
+    "#ifndef LL_1234_SMOKE_H\n"
+    "#define LL_1234_SMOKE_H\n"
+    "long long ll_triple(long long v);\n"
+    "#endif\n"
+)
+LONG_LONG_1234_TU = (
+    "#include \"ll_1234_smoke.h\"\n"
+    "long long ll_triple(long long v) { return v * 3; }\n"
+    "int main(void) { return (int)ll_triple(14); }\n"
+)
+
+
+def case_long_long_header_prototype_1234(cccc: Path, tmp: str) -> bool:
+    print("  151: -c=native, a header that spells a parameter/return "
+          "`long long` (idiomatic, portable) must not collide with the "
+          "serializer's own re-emitted declaration for the same function "
+          "(#1234). CCCC has no distinct `long long` type kind -- both "
+          "collapse to TY_LONG -- and the serializer used to spell every "
+          "TY_LONG `long`, so the generated TU carried `long ll_triple(long)` "
+          "next to the replayed `#include`'s `long long ll_triple(long long)`, "
+          "a hard \"conflicting types\" error. A serialization-only "
+          "Type.is_long_long spelling bit now preserves the original "
+          "`long long`. Asserts -m output spells `long long ll_triple`, plus "
+          "VM 42 -> native 42.")
+    write(Path(tmp) / "ll_1234_smoke.h", LONG_LONG_1234_HEADER)
+    src = Path(tmp) / "ll_1234_smoke.c"
+    write(src, LONG_LONG_1234_TU)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "long long ll_triple" not in m_result.stdout:
+        print(f"    FAIL: -m output did not preserve the `long long` spelling\n"
+              f"    {m_result.stdout}")
+        return False
+
+    if run([str(cccc), src.name], cwd=tmp).returncode != 42:
+        print("    FAIL: VM did not exit 42")
+        return False
+
+    out_bin = Path(tmp) / "ll_1234_smoke_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
+# #1235: new_inc_dec() lowers `A++` to `(typeof A)((A += 1) + -1)`. In a
+# discard context the `+ -1` is dead and clang/gcc flag it -Wunused-value;
+# serialize_discard_expr() peels it for a for-update clause and a bare
+# `i++;` statement, but keeps it in value position.
+INC_DEC_DISCARD_1235_TU = (
+    "int main(void) {\n"
+    "    int a[4] = {0, 0, 0, 0};\n"
+    "    int i;\n"
+    "    int *p;\n"
+    "    double d;\n"
+    "    for (i = 0; i < 4; i++) a[i] = i + 1;\n"
+    "    for (p = a; p < a + 4; p++) *p += 10;\n"
+    "    for (d = 0.0; d < 3.0; d++) ;\n"
+    "    i--; p--; d--;\n"
+    "    int j = i++;\n"
+    "    int s = a[0] + a[1] + a[2] + a[3];\n"
+    "    return s + i + j + (int)d - (int)(p - a) - 14;\n"
+    "}\n"
+)
+
+
+def case_inc_dec_discard_no_unused_value_1235(cccc: Path, tmp: str) -> bool:
+    print("  152: -c=native, a postfix `i++`/`i--` in a value-discarding "
+          "position (a for-loop update clause, a bare `i++;` statement) must "
+          "not emit the dead `+ -1` value-reconstruction term new_inc_dec() "
+          "adds -- clang/gcc flag it -Wunused-value on every such loop "
+          "(#1235). serialize_discard_expr() peels the cast and that term at "
+          "those two sites; a value-position use (`j = i++;`) keeps it. "
+          "Asserts the -m text drops `+ -1` at the discard sites but keeps it "
+          "for the value use, that a real cc accepts the output under "
+          "`-Wunused-value -Werror`, plus VM 42 -> native 42.")
+    src = Path(tmp) / "inc_dec_discard_1235.c"
+    write(src, INC_DEC_DISCARD_1235_TU)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    m_out = m_result.stdout
+    # The for-update clause and the bare `i--;`/`p--;`/`d--;` statements must
+    # not carry a `+ -1` / `+ 1` compensating term; the `int j = i++;` line
+    # must still have one.
+    for line in m_out.splitlines():
+        stripped = line.strip()
+        # The compensating term is `+ -1` (`+ -1.0` for a float operand); the
+        # genuine increment `*tmp = *tmp + 1` is a different, expected shape.
+        if stripped.startswith("for (") and ("+ -1)" in stripped or
+                                              "+ -1.0" in stripped):
+            print(f"    FAIL: for-update clause kept the compensating term\n"
+                  f"    {stripped}")
+            return False
+    if "j = (" not in m_out or "+ -1" not in m_out:
+        print(f"    FAIL: value-position `j = i++` lost its compensating term\n"
+              f"    {m_out}")
+        return False
+
+    if run([str(cccc), src.name], cwd=tmp).returncode != 42:
+        print("    FAIL: VM did not exit 42")
+        return False
+
+    gen_c = Path(tmp) / "inc_dec_discard_1235_gen.c"
+    gen_c.write_text(m_out)
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if real_cc:
+        werror = run(
+            [real_cc, "-std=gnu11", "-Wunused-value", "-Werror",
+             "-Wno-unused-variable", "-c", gen_c.name, "-o", "/dev/null"],
+            cwd=tmp)
+        if werror.returncode != 0:
+            print(f"    FAIL: -Wunused-value -Werror rejected the output\n"
+                  f"    {werror.stderr}")
+            return False
+
+    out_bin = Path(tmp) / "inc_dec_discard_1235_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -7353,6 +7493,8 @@ CASES = [
     case_shim_used_across_tus_1233,
     case_self_ref_fnptr_dup_tag_1233,
     case_comptime_generated_main_is_entry_point,
+    case_long_long_header_prototype_1234,
+    case_inc_dec_discard_no_unused_value_1235,
 ]
 
 

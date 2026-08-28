@@ -1712,7 +1712,14 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             fprintf(f, "%sint", ty->is_unsigned ? "unsigned " : "");
             break;
         case TY_LONG:
-            fprintf(f, "%slong", ty->is_unsigned ? "unsigned " : "");
+            // #1234: CCCC has no distinct `long long` kind -- it shares
+            // TY_LONG with `long` (same representation on every LP64 target).
+            // is_long_long is a spelling-only bit recording that a declaration
+            // wrote `long long`, so a real header the output also #includes
+            // that spells the type `long long` doesn't collide with a
+            // re-emitted `long` prototype ("conflicting types").
+            fprintf(f, "%s%s", ty->is_unsigned ? "unsigned " : "",
+                    ty->is_long_long ? "long long" : "long");
             break;
         case TY_FLOAT:
             fprintf(f, "float");

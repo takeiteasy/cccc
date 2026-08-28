@@ -147,7 +147,10 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 break;
             }
             print_indent_level(f, indent);
-            serialize_expr(f, vm, ctx, node->lhs, 0);
+            // #1235: a bare `A++;`/`A--;` statement discards its value -- emit
+            // the underlying store without the dead value-reconstruction term
+            // that otherwise trips -Wunused-value.
+            serialize_discard_expr(f, vm, ctx, node->lhs, 0);
             fprintf(f, ";\n");
             break;
 
@@ -251,7 +254,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 serialize_expr(f, vm, ctx, node->cond, 0);
             fprintf(f, "; ");
             if (node->inc)
-                serialize_expr(f, vm, ctx, node->inc, 0);
+                // #1235: the update clause discards its value -- drop the dead
+                // `+ -1` term a postfix `i++` would otherwise leave here.
+                serialize_discard_expr(f, vm, ctx, node->inc, 0);
             fprintf(f, ")\n");
             {
                 // #1005: push a jump frame so a break/continue in the body
