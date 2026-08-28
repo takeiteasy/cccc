@@ -29,7 +29,7 @@
 
 #ifdef _WIN32
 /* Windows FFI registration doesn't wire up __cccc_errno_ptr (POSIX-only
- * stdlib, not a tested CCCC target -- see man/COVERAGE.md); errno stays a
+ * stdlib, not a tested CCCC target -- see man/STDLIB.md); errno stays a
  * plain, host-disconnected guest global here as before. */
 extern int errno;
 #else

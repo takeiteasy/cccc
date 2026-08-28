@@ -617,7 +617,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    // #1130/COVERAGE.md "asm(...) statement spelling is pending": accept
+    // #1130/NATIVE.md "asm(...) statement spelling is pending": accept
     // the __-wrapped alternate-keyword spellings too, not just bare "asm"
     // -- matches is_asm_label_tok's acceptance of all three for asm("sym")
     // declarator labels (parse_types.c).

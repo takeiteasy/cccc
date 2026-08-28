@@ -475,7 +475,7 @@ Three tiers, chosen per test from its header annotations:
   and non-`--testing` tests with `CCCC_EXPECT_STDERR`/`CCCC_REJECT_STDERR`
   assert the compile *succeeds*, but are not run — the exit-255
   runtime-safety-violation trap is a VM-only convention (`-c=native` warns
-  and drops the safety flags that produce it, see `#935` in COVERAGE.md's
+  and drops the safety flags that produce it, see `#935` in NATIVE.md's
   Serialized-output divergences), and a diagnostic test's
   `CCCC_EXPECT_STDERR` assertion is already covered by the normal (VM) test
   run — this tier only guards against a serializer regression turning a
@@ -610,9 +610,9 @@ prototype is ever synthesized for the guessed implicit signature.
 `tests/suites/test_suite_asm.c` is likewise a permanent, deliberate skip
 rather than a tracked gap: inline asm is a VM
 no-op but serializes verbatim into host-assembler input (#1119, see
-[COVERAGE.md](COVERAGE.md#serialized-output-divergences)), so its fake-
+[NATIVE.md](NATIVE.md#serialized-output-divergences)), so its fake-
 mnemonic cases can only ever run through the VM. Those are recorded in
-[COVERAGE.md](COVERAGE.md#serialized-output-divergences), not tracked as
+[NATIVE.md](NATIVE.md#serialized-output-divergences), not tracked as
 serializer bugs. `tests/suites/test_suite_asm_std_c11.c` (#1130) is a
 separate, natively-compilable file covering the same statement (and
 declarator-label) spellings with real (empty) assembly the host accepts —
@@ -620,7 +620,7 @@ not skipped, and not to be confused with the permanent skip above.
 
 `NATIVE_SKIP_TESTS_GCC_MACOS` also carries three entries for the
 `-c=native` layout guards (see
-[COVERAGE.md](COVERAGE.md#layout-guards-static_assert-next-to-every-emitted-aggregate)):
+[NATIVE.md](NATIVE.md#layout-guards-static_assert-next-to-every-emitted-aggregate)):
 `test_suite_layout_guards_1172.c`, `test_suite_attributes_layout_1129.c`, and
 `test_bitfield_unnamed_aligned_1165.c` all instantiate a struct shape whose
 unnamed-bit-field alignment/size contribution is the real AAPCS64 rule
@@ -1055,7 +1055,7 @@ explicitly for the `linux-aarch64` job (and are, in
 gcc, which rejects `-std=c23` (though a `-c=native` compile — with no
 explicit `--std=`, or with one, as of #1073 — no longer *fails* outright on
 such a host, since #1053's `-std` ladder now probes both the
-implicit-default and explicit-`--std=` cases; see COVERAGE.md's
+implicit-default and explicit-`--std=` cases; see NATIVE.md's
 "Serialized-output divergences" section for the ladder it falls back
 through). These are three separate compiler-selection mechanisms — `CC` for
 `make bootstrap`'s recursive `make cccc` steps (plain `CC ?= cc` in the
@@ -1116,7 +1116,7 @@ host) and system-wide (`kern.aiomax`, 90), and a request keeps its slot even
 after it *completes* until `aio_return()` reaps it, so `aio_write()`/
 `lio_listio()` can fail synchronously with `EAGAIN` on a loaded shared host
 through no fault of the guest or of CCCC (see the `<aio.h>` row of
-[COVERAGE.md](COVERAGE.md) for the full writeup). This is not a CCCC bug and
+[STDLIB.md](STDLIB.md) for the full writeup). This is not a CCCC bug and
 is not emulated around — it's a real host limit.
 
 **Convention used here, follow it for future host-limitation flakes:**

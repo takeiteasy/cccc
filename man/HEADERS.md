@@ -84,6 +84,19 @@ Two different classifications drive the rules above:
   compiler `-c=native` shells out to; unrelated to header search but
   documented here since the interaction below is easy to miss.
 
+### Pragma suppression in system-header mode
+
+When `--use-system-headers` is active (or a file is marked as a system header
+via `is_system_header`), CCCC suppresses:
+
+- "unknown pragma ignored" — e.g. `#pragma GCC system_header`,
+  `#pragma clang assume_nonnull begin/end`
+- "unknown warning option" — e.g. Clang-specific `-W` names in
+  `#pragma clang diagnostic ignored`
+
+These are common in real SDK headers and are informational hints to the native
+compiler that have no meaning in CCCC's VM execution.
+
 ## `-c=native` and auto-captured includes
 
 `-c=native` emits C and hands it to a real host compiler (`cc`/`clang`/`gcc`
@@ -102,7 +115,7 @@ by default). Two things follow from that:
   non-gnu `--std=c89` too (pedantic-warn, not error), so forwarding a
   strict ISO spelling to the host would reject programs cccc itself
   accepts. `-Wpedantic`/other CCCC warning flags are not forwarded to the
-  host at all. See `man/COVERAGE.md`'s "`-c=native` scope for v0.4.0"
+  host at all. See `man/NATIVE.md`'s "`-c=native` scope for v0.4.0"
   section for the full dialect statement and required host flags
   (`-lm`/`-pthread`/`-fsigned-char`).
 - CCCC's own bundled include directory is never forwarded as a plain `-I`
@@ -1040,7 +1053,7 @@ round-trips). Gated on two conditions, both required:
   gate they would be re-emitted and fail against the real host layout for
   reasons the user never wrote.
 
-Documented in `man/COVERAGE.md`'s Serialized-output divergences table.
+Documented in `man/NATIVE.md`'s Serialized-output divergences table.
 
 **A struct/union/enum referenced ONLY through one of these re-materialized
 sites had no definition emitted at all — fixed, not merely deferred
@@ -1150,7 +1163,7 @@ also makes its *enclosing* struct host-owned (e.g. `struct sigaction`'s own
 `va_list`/`jmp_buf` compiler-owned carve-out (`type_header_is_compiler_
 owned()`) is untouched — both are non-aggregates too, but resolve through
 the same identity lookup and stay excluded by header ownership rather than
-by kind. See `man/COVERAGE.md`'s `<signal.h>` entry and Serialized-output
+by kind. See `man/STDLIB.md`'s `<signal.h>` entry and `man/NATIVE.md`'s Serialized-output
 divergences table; `time_t`/`size_t`/`off_t`/`pid_t` were never affected by
 either #1168 or #1169 (uniform layout on every supported target, and
 `size_t`/friends are already compiler-owned via `stddef.h`/`stdint.h`).

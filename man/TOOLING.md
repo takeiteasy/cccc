@@ -1,6 +1,6 @@
 # Developer Tooling
 
-Reference for CCCC's interactive debugger, warning system, profiling, benchmarks, and fuzzing harnesses.
+Reference for CCCC's interactive debugger, REPL, warning system, profiling, and fuzzing harnesses. Benchmark methodology/results live in [BENCHMARKS.md](BENCHMARKS.md); `--use-system-headers` and related header-resolution flags live in [HEADERS.md](HEADERS.md).
 
 ---
 
@@ -225,8 +225,8 @@ shim that resolves a VM bytecode offset through the VM's own symbol/source-map
 table — neither exists natively, so both are a hard compile error under
 `-c=native`/`-m`/`-c=generated`. `__builtin_return_address` alone still
 serializes and runs there, mapping to a real host return address instead of a
-VM bytecode offset — see [COVERAGE.md § Serialized-output
-divergences](COVERAGE.md#serialized-output-divergences).
+VM bytecode offset — see [NATIVE.md § Serialized-output
+divergences](NATIVE.md#serialized-output-divergences).
 
 #### Embedder C API
 
@@ -683,7 +683,7 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `sentinel` — warns on a call to a function marked `sentinel`/`sentinel(N)` whose expected trailing variadic argument is not a literal, pointer-typed `NULL` (`NULL`/`(void*)0`/`nullptr`); a literal but non-pointer-typed `0` gets a distinct "bare 0 is not a pointer" message, and a fully-missing terminator gets "missing sentinel in function call". Also warns if the call doesn't supply enough variadic arguments for the sentinel position to exist. Purely syntactic (no flow analysis — a variable holding `NULL` still warns); part of `-Wall`. Applying `sentinel` to a non-variadic function is a separate, declaration-time warning under `attributes` (see above), not this flag
 - `designated-init` — warns on a positional member initializer (`{1, 2}`, or the positional tail of a mixed literal like `{.a=1, 2}`) targeting a struct type marked `__attribute__((designated_init))`/`[[gnu::designated_init]]`. Purely syntactic, parse-time-only; a brace-less copy-initializer (`struct S a = b;`) and C23 empty-init `{}` are never flagged. Unlike GCC, **standalone only — not part of `-Wall` or `-Wextra`**, since CCCC enables no warnings by default
 - `int-conversion` — warns on an implicit conversion between an integer and a pointer with no cast (e.g. `const char *p = 'a';` or `int n = some_ptr;`), covering assignment/scalar initialization, `return`, and prototyped call arguments. Suppressed when the source is the null pointer constant `0`, matching the standard exemption for `T *p = 0;`. Not checked for file-scope/global initializers (those take a separate constant-evaluation path). Part of `-Wall`
-- `native-name-collision` — `-m`/`-c=native`/`-c=generated` only: warns when the serializer's rename passes (see [COVERAGE.md § Serialized Output Divergences](COVERAGE.md#serialized-output-divergences) for the full #1014/#1015/#1016 background) find a colliding name it cannot rename apart, so the generated C is left with a genuine collision for the host compiler to report. Currently covers one case: a header-exposed `enum`'s enumerator colliding with a plain file-scope identifier (a `static`, an `extern` global, or a function) declared in a translation unit that does not include that header — neither the enumerator (the replayed `#include` binds it textually) nor the Obj (renaming it would change an emitted symbol, or widen an existing "only rename dups" rule) can safely be renamed. Points at the colliding declaration and names the enumerator and the header that exposes it, so the user isn't left with only the host compiler's own diagnostic — which under `-c=native` names a temporary file that is deleted before the invocation returns. Part of `-Wall`
+- `native-name-collision` — `-m`/`-c=native`/`-c=generated` only: warns when the serializer's rename passes (see [NATIVE.md § Serialized Output Divergences](NATIVE.md#serialized-output-divergences) for the full #1014/#1015/#1016 background) find a colliding name it cannot rename apart, so the generated C is left with a genuine collision for the host compiler to report. Currently covers one case: a header-exposed `enum`'s enumerator colliding with a plain file-scope identifier (a `static`, an `extern` global, or a function) declared in a translation unit that does not include that header — neither the enumerator (the replayed `#include` binds it textually) nor the Obj (renaming it would change an emitted symbol, or widen an existing "only rename dups" rule) can safely be renamed. Points at the colliding declaration and names the enumerator and the header that exposes it, so the user isn't left with only the host compiler's own diagnostic — which under `-c=native` names a temporary file that is deleted before the invocation returns. Part of `-Wall`
 - `excess-init` — warns when a brace initializer supplies more elements than the target holds: a fixed-size array (`int a[1] = {1, 2, 3};`), a struct (`struct S s = {1, 2, 3};`, including the positional tail of a mixed literal past the last designator-reached member, e.g. `{.b = 1, 2}`), a GNU `vector_size` vector, or a string initializer too long for its destination array (`char c[3] = "abcd";`) — the last case names how many characters were supplied against how many were available, matching GCC's wording; an exact-fit string with the trailing NUL dropped (`char a[4] = "abcd";`) is legal C and never flagged. Warns once per initializer list, not once per surplus element (unlike GCC), so a nested excess (`int a[2][1] = {{1, 2}, {3}};`) warns once on the inner list that actually overflows. A flexible-size array/string (`int x[] = {...}`/`char c[] = "..."`) and a flexible array member are never flagged — their length comes from the initializer itself, so there is no fixed bound to exceed. Deliberately excludes VLA brace initialization (`int v[n] = {...}`): a VLA's bound isn't known until runtime, so excess elements there aren't statically checkable even in principle — the resulting out-of-bounds store is instead caught by the ordinary runtime bounds machinery at `-2`/`-3`. Part of `-Wall`
 
 `implicit-function-declaration` is a hard error, not merely a warning, at
@@ -820,126 +820,6 @@ All profiling output is written to `profile/`:
 
 ---
 
-## Benchmarks
-
-A focused cross-compiler benchmark suite that measures the cost of the **CCCC bytecode VM** by comparing it against **GCC** (across `-O0` through `-O3`). Every benchmark is plain C99/C11, so the comparison is apples-to-apples.
-
-VM execution speed is an explicit non-goal, so there is **one** CCCC
-configuration (the VM has no optimiser; `-O<n>` only affects `-c=native`).
-The numbers below are from before the optimiser was removed and are kept
-only for the shape of the gap — re-run `make bench-compare` for current
-figures against the single `cccc` column.
-
-For production builds, CCCC also offers a `-c=native` mode that hands macro-expanded C to `cc` / `clang` / `gcc` — that path bypasses the VM entirely and matches the `gcc*` columns below. The benchmarks in this document are deliberately scoped to the VM, because that is the part CCCC is responsible for.
-
-### Quick Start
-
-```bash
-make bench-compare            # full run: 3 timed iterations per (bench, config), ~10 min
-make bench-compare-quick      # 2 iterations, ~5 min, good for quick checks
-python3 tools/bench.py --filter fib.c    # run a single benchmark
-python3 tools/bench.py --filter fib.c --vm-profile   # also write opcode profile JSON
-```
-
-Sample output:
-
-```
-====================================================================================================
- CCCC vs GCC benchmark results (median ms, lower is better)
-====================================================================================================
-benchmark    cccc     gcc-O0   gcc-O1   gcc-O2   gcc-O3
------------  -------  -------  -------  -------  -------
-ackermann    682.9    16.6     16.4     4.3      6.0
-fib          573.7    7.5      8.8      4.1      7.3
-mandelbrot   6101.2   62.0     30.4     29.4     28.4
-matrix_mul   5014.6   24.6     5.7      4.0      3.8
-sieve        9660.6   36.2     24.4     21.2     20.4
-(pre-#1214 `cccc` column; the removed optimiser's best geomean was ~1.25x
-this. Re-run for current numbers.)
-
-Correctness: all benchmarks produce identical output
-```
-
-> **Note:** The `gcc*` columns use Homebrew GCC-15 (auto-detected by `bench.py` when the system `gcc` is Apple Clang). GCC-15 is substantially faster than Apple Clang on some workloads — notably `ackermann` (deep recursion) and `fib` — so the `×` ratios for those benchmarks are larger than they were when earlier runs used Clang. The `cccc*` absolute timings are directly comparable with older runs.
-
-Two always-on lowerings keep the interpreter from being needlessly slow (they are not tunable):
-- **#227 — inlined threaded dispatch**: opcode logic embedded directly at each computed-goto label (~1.2–1.7× on VM-bound workloads).
-- **#250 — fused local load/store opcodes**: `LEA3+LDR/STR` two-opcode sequence replaced by a single `LDR_LOCAL_*`/`STR_LOCAL_*` (~23% geomean improvement).
-
-Everything the VM optimiser used to add on top (scalar/FP local promotion, indexed load/store fusion, opcode fusion, CSE, dead-call elimination) was removed in #1214 — it was ~1.25× geomean best case and frequently net-negative on recursion-heavy code, which did not justify its footprint.
-
-Re-run `make bench-compare` to get numbers for your machine.
-
-JSON output is also written to `profile/bench-results/run-<UTC>.json` for tracking over time.
-
-### The Benchmark Suite
-
-All programs are portable C99/C11, exit with code `42` (so the standard `tools/tests.py` smoke-runs them for free), and print a single canonical `result: …` line on stdout. Each takes a single optional compile-time size via `-DBENCH_N=<value>` (default tuned for ~1-15s on `cccc` default).
-
-| Benchmark | What it measures | Default size | Result |
-|-----------|------------------|--------------|--------|
-| `fib.c` | Recursive Fibonacci, call overhead, int math | `n = 30` | `result: 832040` |
-| `sieve.c` | Sieve of Eratosthenes, array access, int math | `limit = 10,000,000` | prime count + sum |
-| `nqueens.c` | 10-queens backtracking, branching, recursion | `N = 10` | `result: 724` |
-| `matrix_mul.c` | 200×200 double matrix multiply, FP, cache | `N = 200` | `result: <checksum>` |
-| `quicksort.c` | Quicksort 100k random ints, recursion, arrays | `N = 100,000` | sorted-array sum |
-| `mandelbrot.c` | 400×400 mandelbrot, 200 iters, FP, branching | `400×400, 200` | total iter count |
-| `binary_tree.c` | BST insert + inorder traversal, pointer chasing, malloc | `N = 100,000` | visit count + sum |
-| `ackermann.c` | `ack(3, 8)`, deep recursion, stack pressure | `M=3, N=8` | `result: 2045` |
-
-### How It Works
-
-`tools/bench.py` does the following for each benchmark:
-
-1. **Compile** the source with GCC at every optimization level (cached in `build/`).
-2. **Run** CCCC on the source directly — this measures the full parse+execute cost.
-3. **Run** the prebuilt GCC binaries.
-4. **Time** each run with `time.perf_counter()`; discard `N` warmup runs, time `R` runs, take min/median/mean.
-5. **Verify** that every config's stdout matches the CCCC reference. A mismatch is flagged and causes a non-zero exit.
-6. **Report** as a human-readable table + a JSON file.
-
-With `--vm-profile`, CCCC configs also write dynamic opcode count
-profiles to `profile/bench-results/vm-profile-<UTC>/`.
-
-### What's Being Measured
-
-- **`cccc*`** — end-to-end wall time: source on disk → bytecode compilation → VM startup → bytecode execution → exit.
-- **`gcc*`** — execution time of a prebuilt native binary.
-
-### Correctness
-
-C11 leaves some leeway for floating-point contraction (FMA), which can produce bit-different results between `-O0` and `-O2`. To keep the comparison fair, `tools/bench.py` compiles GCC with `-ffp-contract=off -std=c11`. The VM never contracts `a*b+c`, so its outputs match GCC `-ffp-contract=off` exactly.
-
-### Tips for Clean Numbers
-
-- **Close other apps** to reduce noise.
-- **Run multiple iterations** (`--runs 5` or more) for benchmarks under ~50ms.
-- **Use `--filter`** to iterate on a single benchmark.
-- **Use `--vm-profile`** when optimizing bytecode generation or VM dispatch.
-- **Compare JSON files over time** — `profile/bench-results/run-*.json` includes compiler versions, host info, and run settings.
-
-### Adding a New Benchmark
-
-1. Drop a `<name>.c` in `tests/benchmarks/`.
-2. The contract: plain C99/C11, optionally `#define BENCH_N <default>`, print `result: <value>`, `return 42`.
-3. `python3 tools/bench.py --filter "<name>.c"` to verify it runs and matches GCC.
-4. The standard `tools/tests.py` will pick it up automatically (exit code 42).
-
-### Reading the Report
-
-- **`median ms`** — middle value of the timed runs.
-- **`min ms`** — fastest run; useful as a lower bound.
-- **`stable`** — whether every run produced identical stdout.
-- **Speedup vs gcc -O2** — `median_ms / median_gcc_O2_ms`. Above 1.0× means slower than gcc -O2.
-- **`geomean`** — geometric mean of per-benchmark ratios; the right "overall" comparison number.
-
-### Cross-Compiler Flag Notes
-
-- `tools/bench.py` auto-detects when the system `gcc` is actually Apple Clang (on macOS) and switches to a Homebrew `gcc-15`/`gcc-14`/etc. if available. Pass `--gcc PATH` to override.
-- Add clang to the matrix by editing `CCCC_CONFIGS` / `GCC_CONFIGS` in `tools/bench.py`.
-
----
-
 ## Fuzzing
 
 Fuzzing harnesses and scripts for CCCC using AFL++ and libFuzzer.
@@ -1030,77 +910,6 @@ make clean          # remove corpus, output, and crash directories
 ```
 
 ---
-
-## System Headers
-
-By default CCCC resolves all standard C library `#include` directives to its
-own polyfill headers from `./include/`. This ensures portability and correct
-VM-ABI types regardless of the host SDK. Three CLI flags let you point CCCC at
-real macOS/Linux SDK headers instead:
-
-### `--use-system-headers`
-
-For standard headers that are **not** compiler-owned (see list below), search
-`-isystem` / `--sysroot` directories **before** falling back to the CCCC
-polyfill in `./include/`. Useful for testing CCCC against real SDK headers.
-
-```bash
-./cccc --use-system-headers -isystem /usr/include program.c
-./cccc --use-system-headers --sysroot "$(xcrun --show-sdk-path)" program.c
-```
-
-### `--no-builtin-includes`
-
-Combine with `--use-system-headers` to **disable the polyfill fallback** for
-non-owned standard headers. The include fails with "cannot open file" if the
-SDK copy is not present in any configured system include path. Compiler-owned
-headers (see below) are still resolved from CCCC.
-
-```bash
-./cccc --use-system-headers --no-builtin-includes \
-       --sysroot "$(xcrun --show-sdk-path)" program.c
-```
-
-### `--sysroot <path>`
-
-Set the SDK root. Automatically adds `<path>/usr/include` (and
-`<path>/usr/local/include` if present) to the system include path list and
-implies `--use-system-headers`.
-
-```bash
-./cccc --sysroot "$(xcrun --show-sdk-path)" program.c
-```
-
-### Compiler-owned headers (never overridden)
-
-These headers are tightly coupled to CCCC's VM ABI and are always resolved from
-CCCC's own copies, even when `--use-system-headers` or `--no-builtin-includes`
-is active:
-
-| Header | Reason |
-|--------|--------|
-| `stdarg.h` | `va_list` layout matches CCCC's register-spill ABI |
-| `setjmp.h` | `jmp_buf` layout matches CCCC's `SETJMP`/`LONGJMP` opcodes |
-| `stdbool.h` | Authoritative C23 boolean type definitions |
-| `stddef.h` | Authoritative `ptrdiff_t`, `size_t`, `nullptr_t` definitions |
-| `stdint.h` | Authoritative fixed-width integer types |
-| `inttypes.h` | Companion to `stdint.h` |
-| `complex.h` | `creal`/`cimag`/`CMPLX` etc. lower to CCCC's `__cccc_*` builtins, not real `_Complex`-argument-passing ABI |
-| `stdatomic.h` | `atomic_load`/`atomic_store`/`atomic_fetch_*` lower to CCCC's `__builtin_atomic_*` VM builtins |
-| `stdckdint.h` | `ckd_add`/`ckd_sub`/`ckd_mul` lower to CCCC's checked-arithmetic VM builtins |
-
-### Pragma suppression in system-header mode
-
-When `--use-system-headers` is active (or a file is marked as a system header
-via `is_system_header`), CCCC suppresses:
-
-- "unknown pragma ignored" — e.g. `#pragma GCC system_header`,
-  `#pragma clang assume_nonnull begin/end`
-- "unknown warning option" — e.g. Clang-specific `-W` names in
-  `#pragma clang diagnostic ignored`
-
-These are common in real SDK headers and are informational hints to the native
-compiler that have no meaning in CCCC's VM execution.
 
 ## Stdlib FFI Registration Audit
 

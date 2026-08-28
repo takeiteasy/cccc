@@ -8,7 +8,7 @@
 // match VM behaviour; this one cannot be, because there is no way to
 // evaluate host assembly inside the VM at all. Native output therefore hands
 // the asm to the host compiler and the divergence is documented rather than
-// papered over. See COVERAGE.md.
+// papered over. See NATIVE.md.
 //
 // #1130: emitted as __asm__(...), not bare asm(...) -- asm is a GNU
 // alternate keyword GCC disables under a strict ISO -std=cNN, which would

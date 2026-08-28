@@ -652,7 +652,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
     same max-epoch resolution and live-epoch trust check as layer 3 above.
     Using that builtin anywhere in the program activates this bookkeeping on
     its own, independently of `-1`/`-2`/`-3` — see [VM.md](VM.md)'s
-    `DYNOBJSZ`/`STKTAG` opcode rows and [COVERAGE.md](COVERAGE.md)'s
+    `DYNOBJSZ`/`STKTAG` opcode rows and [STDLIB.md](STDLIB.md)'s
     `__builtin_dynamic_object_size` entry.
   - **Lazy per-function push (#703):** activation is scoped to the functions
     that actually need it, not every call in the program. `ENT3` pushes a

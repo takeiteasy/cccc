@@ -214,9 +214,9 @@ NATIVE_SKIP_TESTS = {
     # same #1018 fix as test_attr_vector_size_variadic.c above. #1034's
     # last survivor is now gone too.
 
-    # --- by-design divergence, not a bug: see COVERAGE.md ---
+    # --- by-design divergence, not a bug: see NATIVE.md ---
     "test_c4.c": "old-style implicit-int main() -- VM leniency the host "
-                 "compiler doesn't share, see COVERAGE.md Serialized-output "
+                 "compiler doesn't share, see NATIVE.md Serialized-output "
                  "divergences",
     "test_edge_void_main_stray_block.c": "asserts a `void main()` that "
                  "falls off its end -- codegen unconditionally loads 0 "
@@ -225,13 +225,13 @@ NATIVE_SKIP_TESTS = {
                  "exits 0; the host compiler leaves a void main's exit "
                  "status undefined (the test's own header already calls "
                  "this UB), so native inherits whatever the ABI left in "
-                 "the return register, see COVERAGE.md Serialized-output "
+                 "the return register, see NATIVE.md Serialized-output "
                  "divergences (#1031)",
     "test_sys_ioctl_standalone.c": "asserts CCCC's VM-side wrap_ioctl() "
                  "request-code allowlist (#795) rejects an unverified raw "
                  "ioctl request; -c=native calls the real host ioctl() "
                  "directly, which has no such allowlist to reject with, "
-                 "see COVERAGE.md Serialized-output divergences",
+                 "see NATIVE.md Serialized-output divergences",
     # test_alloca_no_block_reclaim.c/test_main_bad_argc_error.c/
     # test_warning_main_bad_params.c: moved to NATIVE_SKIP_TESTS_CLANG
     # (#1186) -- each turned out to be a clang-specific divergence (all
@@ -239,16 +239,16 @@ NATIVE_SKIP_TESTS = {
     "test_warning_declarations_default.c": "source deliberately falls off "
                  "the end of a non-void function to test the default "
                  "return-type warning; the host compiler treats it as a "
-                 "hard error rather than a warning, see COVERAGE.md",
+                 "hard error rather than a warning, see NATIVE.md",
     "test_warning_return_type.c": "source deliberately falls off the end "
                  "of a non-void function to test -Wreturn-type; the host "
                  "compiler treats it as a hard error rather than a "
-                 "warning, see COVERAGE.md",
+                 "warning, see NATIVE.md",
     "test_warning_implicit_function_ffi.c": "source deliberately calls an "
                  "undeclared function to test "
                  "-Wimplicit-function-declaration; -c=native is always a "
                  "hard error for implicit function declaration regardless "
-                 "of --std= (#1144), see COVERAGE.md",
+                 "of --std= (#1144), see NATIVE.md",
     # --- #1144: implicit function declaration is a hard error at C99+ and
     # always under -c=native (regardless of --std=), matching every real
     # host C compiler at C99+. These three deliberately pin --std=c89 to
@@ -261,19 +261,19 @@ NATIVE_SKIP_TESTS = {
                  "-Wimplicit-function-declaration as a warning; -c=native "
                  "is always a hard error for implicit function "
                  "declaration regardless of --std= (#1144), see "
-                 "COVERAGE.md",
+                 "NATIVE.md",
     "test_implicit_function_c89_1144.c": "source deliberately calls an "
                  "undeclared FFI-registered function (pinned to "
                  "--std=c89) to test implicit function declaration "
                  "staying a warning at that standard; -c=native is "
                  "always a hard error for implicit function declaration "
-                 "regardless of --std= (#1144), see COVERAGE.md",
+                 "regardless of --std= (#1144), see NATIVE.md",
     "test_warning_declarations_suppressed.c": "source deliberately calls "
                  "an undeclared function (pinned to --std=c89) to test "
                  "-Wno-implicit-function-declaration suppression; "
                  "-c=native is always a hard error for implicit function "
                  "declaration regardless of --std= (#1144), see "
-                 "COVERAGE.md",
+                 "NATIVE.md",
     # test_use_system_headers_pragma_suppress.c: moved to
     # NATIVE_SKIP_TESTS_CLANG (#1186) -- only clang recognizes
     # `#pragma clang assume_nonnull` at all, so gcc's own compile is
@@ -468,7 +468,7 @@ NATIVE_SKIP_TESTS = {
     # enforce. Fixed by serialize_dlfcn_shims() (src/serialize_shims.c): a
     # registry shim reproducing the VM's own dynamic-library bookkeeping
     # (cccc_rt_dlopen/dlsym/dlclose/dlerror, src/vm.c) instead of forwarding
-    # straight to libdl -- see man/COVERAGE.md's <dlfcn.h> entry for the
+    # straight to libdl -- see man/STDLIB.md's <dlfcn.h> entry for the
     # shape and its residuals. A second, unrelated blocker found while
     # verifying this (#1151, RESOLVED): the #999 reloc-forward-declare loop
     # emitted a conflicting prototype for a libc function only referenced
@@ -488,7 +488,7 @@ NATIVE_SKIP_TESTS = {
     # by moving the asm coverage to test_suite_asm.c below -- so misc is
     # back on the native corpus.
 
-    # --- by-design divergence, permanent: see COVERAGE.md ---
+    # --- by-design divergence, permanent: see NATIVE.md ---
     # Inline asm is a VM no-op by default but serializes verbatim into plain
     # asm("...") for the host assembler: there is no way to evaluate host
     # assembly inside the VM (it would mean separately compiling each
@@ -500,7 +500,7 @@ NATIVE_SKIP_TESTS = {
     # arch-guarded with CCCC's predefined __x86_64__-style macros inside the
     # file itself, and the whole suite is split out of test_suite_misc.c and
     # skipped natively rather than extending [[cccc::test]] with per-test
-    # native controls). See COVERAGE.md Serialized-output divergences.
+    # native controls). See NATIVE.md Serialized-output divergences.
     "test_suite_asm.c": "inline asm: VM no-op vs verbatim host-assembler "
                  "input is a documented divergence (#1119), not a bug",
     # test_suite_empty_union.c: passing a zero-sized union through varargs
@@ -508,7 +508,7 @@ NATIVE_SKIP_TESTS = {
     # as 0) but hands the host ABI garbage from a register -- an inherent
     # VM-leniency divergence with no host equivalent to merge to, not
     # serializer-fixable (#1120, unmasked by #1118). Permanent; see
-    # COVERAGE.md Serialized-output divergences.
+    # NATIVE.md Serialized-output divergences.
     "test_suite_empty_union.c": "zero-sized union through varargs is a "
                  "documented VM-vs-host divergence (#1120), not a bug",
     # test_suite_printf_c23.c: printf's %b/%B round-trip fine on Linux
@@ -562,7 +562,7 @@ NATIVE_SKIP_TESTS_MACOS = {
     # and real glibc's choice (saturate) differs from CCCC's VM (return 0)
     # while both conform. RESOLVED (#1066, the test's over-specified value
     # checks relaxed to check FE_INVALID only; see include/math.h's
-    # fromfp/ufromfp comment and COVERAGE.md for the corrected contract). A
+    # fromfp/ufromfp comment and STDLIB.md for the corrected contract). A
     # fifth blocker (#1079) surfaced once (1)-(4) were fixed:
     # cccc_setpayload_impl/cccc_setpayloadf_impl (src/stdlib/math.c) left
     # the destination untouched on a failed setpayload*/setpayloadsig*
@@ -657,16 +657,16 @@ NATIVE_SKIP_TESTS_CLANG = {
                  "restore pair scoped to the VLA's block, unlike the VM's "
                  "separate per-AllocKind lifetimes (#981) -- gcc does not "
                  "reuse the slot the same way (confirmed: passes under "
-                 "CCCC_NATIVE_CC=gcc), see COVERAGE.md Serialized-output "
+                 "CCCC_NATIVE_CC=gcc), see NATIVE.md Serialized-output "
                  "divergences",
     "test_main_bad_argc_error.c": "source is deliberately a bad main() "
                  "signature to test -Wmain; clang treats it as a hard "
                  "error rather than a warning, gcc only warns (confirmed: "
-                 "passes under CCCC_NATIVE_CC=gcc), see COVERAGE.md",
+                 "passes under CCCC_NATIVE_CC=gcc), see NATIVE.md",
     "test_warning_main_bad_params.c": "source is deliberately a bad main() "
                  "signature to test -Wmain; clang treats it as a hard "
                  "error rather than a warning, gcc only warns (confirmed: "
-                 "passes under CCCC_NATIVE_CC=gcc), see COVERAGE.md",
+                 "passes under CCCC_NATIVE_CC=gcc), see NATIVE.md",
     "test_use_system_headers_pragma_suppress.c": "source deliberately "
                  "leaves an unterminated '#pragma clang assume_nonnull' "
                  "open across the file to test pragma-noise suppression; "
@@ -767,7 +767,7 @@ NATIVE_SKIP_TESTS_GCC_MACOS = {
                  "a permanent gcc/Darwin gap, so #1172's own "
                  "_Static_assert layout guard genuinely hard-fails under "
                  "CCCC_NATIVE_CC=gcc-16 (confirmed: passes under clang, "
-                 "the default host cc), see man/COVERAGE.md's layout-"
+                 "the default host cc), see man/NATIVE.md's layout-"
                  "guards entry",
     "test_suite_attributes_layout_1129.c": "#1172's layout guard emits "
                  "a live _Static_assert(sizeof(struct "

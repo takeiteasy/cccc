@@ -8,7 +8,7 @@
 // drives both the VM bytecode optimizer (the normal, unrelated meaning) and,
 // under -c=native, the host compiler's own optimization level. Regression
 // coverage for the CLI accepting `-O2 -c=native` at all, not for any
-// optimization-quality difference (see man/COVERAGE.md's tail-call-
+// optimization-quality difference (see man/NATIVE.md's tail-call-
 // elimination divergence row for a case that actually depends on the level).
 int add(int a, int b) {
     return a + b;

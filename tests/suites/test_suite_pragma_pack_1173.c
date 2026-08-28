@@ -5,7 +5,7 @@
 // struct) into -c=native/-m output, where the host compiler *does* honour
 // it -- the folded sizeof/offsets and the host's real layout disagreed, and
 // the emitted C wrote out of bounds (confirmed under AddressSanitizer on
-// both gcc-16 and clang, see man/COVERAGE.md's prior #pragma pack row).
+// both gcc-16 and clang, see man/NATIVE.md's prior #pragma pack row).
 // #pragma pack(N) is now fully honoured: parsed into a push/pop stack
 // (mirroring #pragma GCC diagnostic push/pop's own mechanism), applied
 // during struct_decl/union_decl's layout computation

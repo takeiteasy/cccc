@@ -5,7 +5,7 @@
 // eval() consumer kept only the folded int64_t and stayed folded against
 // CCCC's own (possibly stale/wrong) guest projection -- #1095 closes three
 // of those: array dimensions, `case` labels, and enum values (see
-// man/HEADERS.md and man/COVERAGE.md for the residual that's still open,
+// man/HEADERS.md and man/NATIVE.md for the residual that's still open,
 // WONT_FIX per #1099: bitfield widths and an initialized global's byte
 // image, plus an array dimension appearing on a struct/union member.
 // `_Static_assert` was a separate, since-closed case -- see #1098 and
@@ -27,7 +27,7 @@
 // malloc'd buffer gets one -- a stack local has no reliable adjacency
 // guarantee to build one on (unlike two members of the same struct, and a
 // struct MEMBER's own array dimension is deliberately excluded from
-// re-materialization, see man/COVERAGE.md's bitfield-width reasoning, so
+// re-materialization, see man/NATIVE.md's bitfield-width reasoning, so
 // wrapping `buf` in a struct here would just test the fold path, not the
 // fix). Pre-#1095, `buf` stays CCCC's own guest-folded ~56 bytes even
 // under -c=native, so the real host statfs() (~2100 bytes on macOS)

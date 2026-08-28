@@ -2419,7 +2419,7 @@ static char *resolve_embedded_relative_header(VirtualMachine *vm,
 // deliberately use the opposite strategy from an ordinary from_include
 // type (widen CCCC's own layout to cover every supported host's real one,
 // so the *guest-folded* constant stays a safe upper bound on purpose --
-// see their own man/COVERAGE.md entries) -- re-materializing the operator
+// see their own man/NATIVE.md entries) -- re-materializing the operator
 // for them would defeat that, replacing the safe padded literal with
 // whatever the real host's own (possibly smaller, via the header's own
 // #include_next hand-off) va_list/jmp_buf size happens to be.
@@ -5032,7 +5032,7 @@ static int read_pack_align(VirtualMachine *vm, Token *tok) {
 // Parses `pack(N)`, `pack()`, `pack(push[, ident][, N])`, and
 // `pack(pop[, ident])` -- the GCC/MSVC-compatible subset (#1173). `tok` is
 // the "pack" token itself. Unlike the previous behavior (accepted, parsed,
-// silently never honoured -- COVERAGE.md's own prior claim), any other form
+// silently never honoured -- NATIVE.md's own prior claim), any other form
 // is a hard error rather than a silent fallthrough to "unknown pragma
 // ignored", which would just recreate the same bug under a narrower name.
 static Token *handle_pragma_pack(VirtualMachine *vm, Token *tok) {

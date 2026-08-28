@@ -989,7 +989,7 @@ int cc_run_at1(VirtualMachine *vm, Pc entry, void *arg);
 // atexit handlers/destructors run. Drains TSS/pthread-key destructors for
 // the main thread's ThreadRecord, but ONLY if pthread_exit() was actually
 // called by main -- a plain `return` from main() must NOT run them (matches
-// glibc; see man/COVERAGE.md's <threads.h> row). No-op if pthread_exit()
+// glibc; see man/NATIVE.md's <threads.h> row). No-op if pthread_exit()
 // was never called on the main thread. Implemented in stdlib/pthread.c
 // (stubbed out under _WIN32, same as the rest of that file).
 void cccc_pthread_run_main_tss_destructors(VirtualMachine *vm);

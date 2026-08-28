@@ -425,7 +425,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // though the VM does not execute it by default (--asm-passthru opts
             // into VM execution): there is no way to evaluate host assembly in
             // the VM, so native output hands it to the host compiler. See
-            // COVERAGE.md.
+            // NATIVE.md.
             //
             // #1130: emit the __-wrapped __asm__ spelling, not bare asm --
             // asm is a GNU alternate keyword that GCC disables under a

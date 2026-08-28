@@ -1210,3 +1210,4 @@ link/archive-step staleness check.
 - [man/TESTING.md](TESTING.md) — `--testing` mode, the working analog this mode mirrors.
 - [man/MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
 - [man/COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
+- [man/NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations.

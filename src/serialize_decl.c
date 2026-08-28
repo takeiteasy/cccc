@@ -126,7 +126,7 @@ bool type_is_cccc_va_list(Type *ty) {
 // passing a va_list-typed argument gets its own va_copy'd statement
 // expression there instead, which covers this case too (and, since it's
 // not narrowed to bodiless callees, indirect calls through a function
-// pointer as well). See man/COVERAGE.md's <stdarg.h> row for the full
+// pointer as well). See man/STDLIB.md's <stdarg.h> row for the full
 // writeup.
 static const char *va_list_shim_param_name(char *buf, size_t bufsz,
                                            const char *orig) {

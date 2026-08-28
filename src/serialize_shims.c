@@ -894,7 +894,7 @@ void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // (src/stdlib/posix_poll.c). Not atomic like the real syscall -- a
     // signal delivered between the mask swap and poll()'s wait is not
     // guaranteed to interrupt it -- exactly the same accepted, documented
-    // limitation as the VM's own emulation (see man/COVERAGE.md's
+    // limitation as the VM's own emulation (see man/NATIVE.md's
     // <poll.h> entry). Unlike before #1146, this now DOES translate
     // pollfd.events/revents through the same
     // __cccc_native_poll_marshal_in/out helpers plain poll() uses just

@@ -1029,7 +1029,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // dimensions, case labels, and enum values now share this
                 // exact helper (see their own call sites). Bitfield widths,
                 // _Static_assert, and a global initializer's byte image
-                // remain -- see man/COVERAGE.md's own entry for why those
+                // remain -- see man/NATIVE.md's own entry for why those
                 // three are not merely deferred.
             } else if (node->ty && node->ty->kind == TY_BITINT &&
                        node->ty->bit_width > 64 && node->wide_digits) {
@@ -1894,7 +1894,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // The *value* diverges by design: under the VM this is a bytecode
             // pc cast to void*, natively it is a real host return address. Both
             // are "the return address n frames up" in their own runtime, which
-            // is the most faithful mapping available -- see COVERAGE.md.
+            // is the most faithful mapping available -- see NATIVE.md.
             fprintf(f, "__builtin_return_address(%lld)", (long long)node->val);
             break;
 
@@ -2354,7 +2354,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
 
         default:
             // #963c: every reachable NodeKind is expected to have an explicit
-            // case above (see COVERAGE.md's "Serialized-output divergences"
+            // case above (see NATIVE.md's "Serialized-output divergences"
             // section for the constructs that are intentionally dropped with a
             // diagnostic rather than serialized). This used to emit
             // "/* unsupported expr kind N */" and keep going -- in expression

@@ -18,7 +18,7 @@ Guides live in [`man/`](man/) (linked throughout below); generated API docs for 
   - Custom attribute handlers (`@comptime(attribute("name"))`) that run when a file-scope declaration is parsed
   - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)`/`QuoteN(...)` templates with `$1`/`$$`/`$@` splicing, the `$identifier` reflect operator, `Gensym`, and a full AST builder API (`MakeFunction`, `MakeVarRef`, `MakeLocalVarUnique`, ...)
   - `#pragma cccc comptime begin/end` blocks, `@comptime`/`@shared`/`@emit` include and `#define` routing, comptime variables, C23 `constexpr` readback, and a bundled macro standard library in `reflection.h`
-- **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build
+- **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build (see [NATIVE.md](man/NATIVE.md))
   - This is the production path: full toolchain performance, system libraries, no VM overhead
   - `-o <file>` names the produced executable; defaults to `./a.out` if omitted. The temporary C source is removed after the build
   - `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
@@ -92,7 +92,7 @@ Options:
 	                         compiler that understands the dialect explicitly
 	   --no-layout-guards    Suppress the _Static_assert layout guards emitted next to
 	                         every aggregate definition in -m/-c=generated/-c=native
-	                         output (see man/COVERAGE.md); on by default
+	                         output (see man/NATIVE.md); on by default
 	-j/--json                Emit JSON for all eligible output (diagnostics, header declarations, etc.)
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step

@@ -722,7 +722,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // This deliberately skips the MARKP provenance emission below:
             // VLA/alloca storage carries a real AllocHeader resolved via
             // sorted_allocs/DYNOBJSZ (see __builtin_dynamic_object_size in
-            // COVERAGE.md), not provenance tracking, and the skipped MARKP
+            // STDLIB.md), not provenance tracking, and the skipped MARKP
             // would have fired on the wrong address (the slot) with the wrong
             // size (8, the pointer's own size) anyway.
             if (node->lhs->ty && node->lhs->ty->kind == TY_VLA) {
