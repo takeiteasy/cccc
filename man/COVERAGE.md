@@ -1250,10 +1250,6 @@ The remaining gaps below are plain ISO C the serializer could, in principle,
 reconstruct but doesn't yet — accepted at the time, with no ticket carrying
 them until this audit:
 
-- **Union global initializer with no member spanning the full object**
-  (`serialize_decl.c`, `serialize_init_bytes`'s `TY_UNION` case) — e.g.
-  `union U { char c[3]; short s; } u = {...}` where the largest member is
-  smaller than the union's own padded size. #1207.
 - **`_Complex` (and any other type with no verified byte layout) as a global
   initializer** (`serialize_decl.c`, `serialize_init_bytes`'s final
   fallback) — `_Complex` has a well-known two-part host layout that could be

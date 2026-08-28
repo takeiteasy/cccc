@@ -497,14 +497,18 @@ handling to come back out as valid, semantically faithful C:
   initializer slot backed by a `Relocation` (address of another global, a
   string literal, a function) resolves the real symbol reference instead of
   printing the placeholder-zeroed bytes. A union initializes through its
-  **largest** member (recursing if that member is itself an aggregate) —
-  byte-exact whenever some member spans the union's full (alignment-padded)
-  size, which is the normal case.
-- **Unsupported shapes fail loudly.** A union with no member spanning its
-  full size (alignment padding can make the largest-*by-size* member still
-  fall short — e.g. `union { char c[5]; int x; }` pads to 8 bytes but no
-  member is 8 bytes wide) and `_Complex` global initializers have no
-  verified byte-exact reconstruction and are refused with a `cannot
+  **largest** member (recursing if that member is itself an aggregate),
+  reconstructed byte-exact even when no member spans the union's full
+  (alignment-padded) size (#1207) — every union member sits at offset 0, so
+  a member smaller than the union itself can never have written past its
+  own size; the untouched tail is always zero, relocation-free alignment
+  padding a host compiler zero-fills for static storage the same way it
+  already does for ordinary struct padding. An anonymous struct/union
+  member (largest or otherwise) is flattened into transparent designators
+  in the enclosing initializer (C11 §6.7.2.1p13) rather than a nested
+  brace, `serialize_agg_member_list`'s shared struct/union helper.
+- **Unsupported shapes fail loudly.** `_Complex` global initializers with
+  no verified byte-exact reconstruction are refused with a `cannot
   serialize initializer` diagnostic naming the variable, rather than
   emitting a guess that would silently change the program's data. There is
   no equivalent gap for non-global (local/stack) initializers — those are

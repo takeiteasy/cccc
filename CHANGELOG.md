@@ -29,3 +29,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   gcc/clang exactly — previously stayed plain signed `int`. Each enumerator
   *identifier* still has type `int` per C17/C23 6.7.2.2p3, unless the enum
   has a fixed underlying type of its own.
+- A global union initializer where no member spans the union's full
+  (alignment-padded) size — e.g. `union U { char c[3]; short s; }` — now
+  serializes under `-c=native`/`-m` instead of being refused; the untouched
+  tail past the largest member is always zero, relocation-free alignment
+  padding. A union whose largest member is itself an anonymous struct/union
+  no longer crashes the serializer either — it's flattened into transparent
+  designators in the enclosing initializer.

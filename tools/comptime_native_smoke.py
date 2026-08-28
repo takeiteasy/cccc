@@ -91,11 +91,12 @@ Cases:
   19. #918 regression, direct assertion: `-m` output for case 18's program
       names the largest member (`.l =`), not the one actually written
       (`.c`).
-  20. #918 regression: a union whose largest-by-size member doesn't span
-      the union's full (alignment-padded) size has no member that can
-      losslessly reconstruct it -- `-c=native` must fail with a named
-      `cannot serialize` diagnostic, never a placeholder or a guessed
-      initializer that silently changes the program's data.
+  20. #1207 (was a #918 hard-refusal, relaxed by #1207): a union whose
+      largest-by-size member doesn't span the union's full (alignment-
+      padded) size must still compile and run under `-c=native` -- the
+      untouched tail past the largest member is always zero, relocation-
+      free alignment padding, so it round-trips byte-exact without any
+      member needing to span the whole object.
   21. #925/#926/#927 regression: a `-c=native` compile+run exercising all
       three at once -- a static local array read back across two calls, a
       file-scope pointer initialized from a non-char-array compound literal
@@ -594,29 +595,30 @@ def case_union_largest_member_m_output(cccc: Path, tmp: str) -> bool:
     return True
 
 
-def case_unserializable_union_hard_errors(cccc: Path, tmp: str) -> bool:
-    print("  20: -c=native, a union whose largest member doesn't span alignment padding fails loudly (#918)")
-    src = Path(tmp) / "union_no_full_member_918.c"
+UNION_NO_FULL_MEMBER_PROGRAM = (
+    "union U { char c[5]; int x; };\n"
+    "union U u = {.c = {1,2,3,4,5}};\n"
+    "int main(void) {\n"
+    "    return u.c[0]+u.c[1]+u.c[2]+u.c[3]+u.c[4] == 15 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_union_no_full_member_reconstructs(cccc: Path, tmp: str) -> bool:
+    print("  20: -c=native, a union whose largest member doesn't span alignment padding still round-trips (#1207)")
     # union { char c[5]; int x; }: by raw size char[5] (5 bytes) is the
     # largest member, but int's 4-byte alignment pads the union itself to
-    # 8 bytes -- char[5] does not span the full object, so no member here
-    # can losslessly reconstruct it. Must fail loudly (a named diagnostic),
-    # not emit a plausible-but-wrong initializer or a placeholder the host
-    # compiler chokes on.
-    write(src, (
-        "union U { char c[5]; int x; };\n"
-        "union U u = {.c = {1,2,3,4,5}};\n"
-        "int main(void) { return 42; }\n"
-    ))
-    result = run([str(cccc), "-c=native", "-o", "union_no_full_member_918_out", src.name], cwd=tmp)
-    if result.returncode == 0:
-        print("    FAIL: compile succeeded; expected a hard 'cannot serialize' diagnostic")
-        return False
-    if "cannot serialize" not in result.stderr:
-        print(f"    FAIL: expected a 'cannot serialize' diagnostic on stderr, got:\n    {result.stderr}")
-        return False
-    print("    ok")
-    return True
+    # 8 bytes -- char[5] does not span the full object. #918 originally had
+    # this refuse to serialize (no member spans the whole object); #1207
+    # relaxed that: every union member sits at offset 0, so the untouched
+    # [5, 8) tail is always zero, relocation-free alignment padding
+    # write_gvar_data() already zeroed, which a host compiler zero-fills for
+    # static storage the same way it does for ordinary struct padding --
+    # nothing needs to span the whole object for a byte-exact
+    # reconstruction. See tests/test_native_union_padded_init_1207.c for the
+    # fuller shape coverage (nested-in-struct offset, anonymous member).
+    return _native_run_case(cccc, tmp, "union_no_full_member_1207",
+                            UNION_NO_FULL_MEMBER_PROGRAM)
 
 
 # shadow_param(): a nested block re-declaring a parameter's own name (legal
@@ -6919,7 +6921,7 @@ CASES = [
     case_ptr_arith_and_init_m_output,
     case_union_largest_member,
     case_union_largest_member_m_output,
-    case_unserializable_union_hard_errors,
+    case_union_no_full_member_reconstructs,
     case_anon_locals_end_to_end,
     case_anon_locals_m_output,
     case_arrays_suite_no_serializer_gaps,

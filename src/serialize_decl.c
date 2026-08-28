@@ -290,6 +290,9 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
                                  int offset);
 
 // #1044: look up a label by the same pointer-identity key a Relocation's
+// own label field uses (a per-VM char** identity, see #1044's own comment
+// on serialize_reloc_init() below) -- kept here since the forward
+// declaration above is otherwise unused code motion; unrelated to it.
 // `*rel->label` carries (see LabelOwner's own comment). NULL if `name`
 // doesn't match any label collect_deferred_static_labels() found -- the
 // ordinary case for every relocation target that resolves to a real Obj.
@@ -707,6 +710,19 @@ static Relocation *serialize_find_reloc(Obj *var, int offset) {
 static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
                                  SerializeContext *ctx, Obj *var, Type *ty,
                                  int offset);
+// #1207: emits the comma-separated ".name = value" entries of a struct or
+// union initializer with NO enclosing braces -- the caller (serialize_init_
+// bytes' TY_STRUCT/TY_UNION cases) prints those. Factored out so an
+// anonymous struct/union member (C11 6.7.2.1p13: its own fields are
+// directly designatable in the enclosing initializer) can be flattened
+// into the SAME brace level as its parent, instead of nested braces --
+// which is also what makes a union whose largest member is itself
+// anonymous serializable at all (see the TY_UNION arm below). `*first`
+// tracks whether a leading ", " is needed, shared across a whole flattened
+// chain so commas land correctly regardless of nesting depth.
+static void serialize_agg_member_list(FILE *f, VirtualMachine *vm,
+                                      SerializeContext *ctx, Obj *var, Type *ty,
+                                      int offset, bool *first);
 
 // A pointer-typed initializer slot backed by a Relocation (#918 defect C):
 // previously the zeroed init_data bytes were printed verbatim as a null
@@ -796,6 +812,147 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm,
     fprintf(f, ")((char *)&%s + %lld)", target->name, (long long)rel->addend);
 }
 
+// #1207: TY_STRUCT's member walk, factored out of serialize_init_bytes()
+// so a TY_UNION's largest-member reconstruction (below) can share it -- a
+// union whose largest member is itself a struct/union recurses back into
+// this same function rather than serialize_init_bytes()'s own bracing.
+static void serialize_agg_member_list(FILE *f, VirtualMachine *vm,
+                                      SerializeContext *ctx, Obj *var, Type *ty,
+                                      int offset, bool *first) {
+    if (ty->kind == TY_UNION) {
+        // #1115/#1207: an empty (0-byte) union has no members to designate
+        // at all -- nothing to flatten, nothing to recurse into. The
+        // caller's own enclosing braces (already printed) are enough;
+        // matches serialize_init_bytes()'s own TY_UNION short-circuit for
+        // an empty union reached directly (as an object, not as an
+        // anonymous member). Must come before the `!largest` check below,
+        // which is a genuine internal-inconsistency error, not this
+        // ordinary case.
+        if (ty->size == 0)
+            return;
+        // Reconstruct via the largest member (first on a tie). #1207: every
+        // union member sits at offset 0, so no member's bytes can extend
+        // past largest->ty->size -- gvar_initializer() (parse_init.c)
+        // allocates init_data at exactly ty->size and memsets it to 0
+        // before write_gvar_data() runs, so [largest->ty->size, ty->size)
+        // is always zero, relocation-free alignment padding, which a host
+        // compiler zero-fills for static storage the same way it already
+        // does for ordinary struct padding -- no member needs to span the
+        // whole object for this to be byte-exact. (The ticket's suggested
+        // fix -- a synthetic full-width byte view -- buys nothing over
+        // this: there is no non-zero byte a fuller view could recover that
+        // this doesn't already know is zero.) The assertion below is
+        // defensive, not a real refusal path -- it would only fire on an
+        // internal inconsistency (a Relocation or non-zero byte where
+        // write_gvar_data() should never have left one).
+        Member *largest = NULL;
+        for (Member *m = ty->members; m; m = m->next)
+            if (!largest || m->ty->size > largest->ty->size)
+                largest = m;
+        if (!largest)
+            error("cccc: cannot serialize initializer for global '%s' in "
+                  "native mode: union has no members",
+                  var->name);
+        for (int i = offset + largest->ty->size; i < offset + ty->size; i++)
+            if (var->init_data[i] != 0 || serialize_find_reloc(var, i))
+                error("cccc: cannot serialize initializer for global '%s' "
+                      "in native mode: union's padding past its largest "
+                      "member is unexpectedly non-zero (internal "
+                      "inconsistency)",
+                      var->name);
+        if (largest->name) {
+            if (!*first)
+                fprintf(f, ", ");
+            *first = false;
+            fprintf(f, ".%.*s = ", largest->name->len, largest->name->loc);
+            serialize_init_bytes(f, vm, ctx, var, largest->ty, offset);
+        } else {
+            // #1207: the largest member is itself anonymous -- flatten
+            // through its own fields (or, if it's a union too, its own
+            // largest member) as transparent designators in THIS same
+            // brace level (C11 6.7.2.1p13), rather than a nested union
+            // dispatch this function's caller never sees.
+            serialize_agg_member_list(f, vm, ctx, var, largest->ty, offset,
+                                      first);
+        }
+        return;
+    }
+
+    // TY_STRUCT: every member is designated (unless anonymous, or an
+    // unnamed bitfield -- pure padding, nothing to designate).
+    for (Member *m = ty->members; m; m = m->next) {
+        if (m->is_bitfield && !m->name)
+            continue;
+        if (!m->name && !m->is_bitfield) {
+            // #1207: an anonymous struct/union member -- flatten its own
+            // fields into this same brace level (C11 6.7.2.1p13) instead
+            // of a nested `{ ... }`.
+            serialize_agg_member_list(f, vm, ctx, var, m->ty,
+                                      offset + m->offset, first);
+            continue;
+        }
+        if (!*first)
+            fprintf(f, ", ");
+        *first = false;
+        if (m->name)
+            fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
+        if (m->is_bitfield) {
+            // #1126 (RESOLVED): the old code read the storage unit with a
+            // memcpy clamped to 8 bytes regardless of m->ty->size (16 for a
+            // wide-_BitInt-typed bitfield, e.g. `_BitInt(128) f : 100;`),
+            // so any bit at or above bit 64 of the field's value was
+            // silently dropped. Extract byte-granularly instead over the
+            // field's exact [bit_offset, bit_offset+bit_width) span --
+            // mirrors __cccc_bitfield_extract (src/stdlib/wide_bitint.c,
+            // #1125's runtime counterpart) and never over-reads the
+            // object, so it's correct for any bit_offset/bit_width
+            // combination, not just the wide case.
+            if (m->bit_width > 128)
+                error("cccc: cannot serialize initializer for "
+                      "global '%s' in native mode: bitfield wider "
+                      "than 128 bits",
+                      var->name);
+            int               start = m->offset * 8 + m->bit_offset;
+            unsigned __int128 bits  = 0;
+            for (int i = 0; i < m->bit_width; i++) {
+                int b = start + i;
+                if ((var->init_data[offset + b / 8] >> (b % 8)) & 1)
+                    bits |= (unsigned __int128)1 << i;
+            }
+            bool     is_signed = !m->ty->is_unsigned && m->ty->kind != TY_BOOL;
+            __int128 sbits     = (__int128)bits;
+            if (is_signed && m->bit_width < 128 &&
+                (bits & ((unsigned __int128)1 << (m->bit_width - 1))))
+                sbits -= (__int128)1 << m->bit_width;
+            if (m->bit_width < 64) {
+                // Always in range for %lld/%lluu at this width -- no
+                // most-negative-literal hazard (that only bites at
+                // bit_width >= 64, handled by the hex arm below).
+                if (is_signed)
+                    fprintf(f, "%lld", (long long)sbits);
+                else
+                    fprintf(f, "%lluu", (unsigned long long)bits);
+            } else {
+                // bit_width >= 64: a sign-extended INT64_MIN printed as
+                // %lld would be "-9223372036854775808", not a valid `long
+                // long` constant in C -- and an unsigned value may not fit
+                // 64 bits either. Use the same 128-bit hex literal shape as
+                // the TY_BITINT scalar arm below.
+                unsigned __int128 uv =
+                    is_signed ? (unsigned __int128)sbits : bits;
+                fprintf(f,
+                        "((%s__int128)(((unsigned __int128)0x%llxULL "
+                        "<< 64) | 0x%llxULL))",
+                        is_signed ? "" : "unsigned ",
+                        (unsigned long long)(uint64_t)(uv >> 64),
+                        (unsigned long long)(uint64_t)uv);
+            }
+        } else {
+            serialize_init_bytes(f, vm, ctx, var, m->ty, offset + m->offset);
+        }
+    }
+}
+
 // Reconstruct a global variable's initializer from its raw `init_data`
 // bytes (plus any Relocations) as C source text, recursing through
 // arrays/vectors/structs/unions. Replaces the old scalar-only dispatch that
@@ -848,105 +1005,23 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
         case TY_STRUCT: {
             fprintf(f, "{ ");
             bool first = true;
-            for (Member *m = ty->members; m; m = m->next) {
-                if (m->is_bitfield && !m->name)
-                    continue; // anonymous bitfield: padding, nothing to
-                              // designate
-                if (!first)
-                    fprintf(f, ", ");
-                first = false;
-                if (m->name)
-                    fprintf(f, ".%.*s = ", m->name->len, m->name->loc);
-                if (m->is_bitfield) {
-                    // #1126 (RESOLVED): the old code read the storage unit
-                    // with a memcpy clamped to 8 bytes regardless of
-                    // m->ty->size (16 for a wide-_BitInt-typed bitfield,
-                    // e.g. `_BitInt(128) f : 100;`), so any bit at or above
-                    // bit 64 of the field's value was silently dropped.
-                    // Extract byte-granularly instead over the field's exact
-                    // [bit_offset, bit_offset+bit_width) span -- mirrors
-                    // __cccc_bitfield_extract (src/stdlib/wide_bitint.c,
-                    // #1125's runtime counterpart) and never over-reads the
-                    // object, so it's correct for any bit_offset/bit_width
-                    // combination, not just the wide case.
-                    if (m->bit_width > 128)
-                        error("cccc: cannot serialize initializer for "
-                              "global '%s' in native mode: bitfield wider "
-                              "than 128 bits",
-                              var->name);
-                    int               start = m->offset * 8 + m->bit_offset;
-                    unsigned __int128 bits  = 0;
-                    for (int i = 0; i < m->bit_width; i++) {
-                        int b = start + i;
-                        if ((var->init_data[offset + b / 8] >> (b % 8)) & 1)
-                            bits |= (unsigned __int128)1 << i;
-                    }
-                    bool is_signed =
-                        !m->ty->is_unsigned && m->ty->kind != TY_BOOL;
-                    __int128 sbits = (__int128)bits;
-                    if (is_signed && m->bit_width < 128 &&
-                        (bits & ((unsigned __int128)1 << (m->bit_width - 1))))
-                        sbits -= (__int128)1 << m->bit_width;
-                    if (m->bit_width < 64) {
-                        // Always in range for %lld/%lluu at this width -- no
-                        // most-negative-literal hazard (that only bites at
-                        // bit_width >= 64, handled by the hex arm below).
-                        if (is_signed)
-                            fprintf(f, "%lld", (long long)sbits);
-                        else
-                            fprintf(f, "%lluu", (unsigned long long)bits);
-                    } else {
-                        // bit_width >= 64: a sign-extended INT64_MIN printed
-                        // as %lld would be "-9223372036854775808", not a
-                        // valid `long long` constant in C -- and an unsigned
-                        // value may not fit 64 bits either. Use the same
-                        // 128-bit hex literal shape as the TY_BITINT scalar
-                        // arm below.
-                        unsigned __int128 uv =
-                            is_signed ? (unsigned __int128)sbits : bits;
-                        fprintf(f,
-                                "((%s__int128)(((unsigned __int128)0x%llxULL "
-                                "<< 64) | 0x%llxULL))",
-                                is_signed ? "" : "unsigned ",
-                                (unsigned long long)(uint64_t)(uv >> 64),
-                                (unsigned long long)(uint64_t)uv);
-                    }
-                } else {
-                    serialize_init_bytes(f, vm, ctx, var, m->ty,
-                                         offset + m->offset);
-                }
-            }
+            serialize_agg_member_list(f, vm, ctx, var, ty, offset, &first);
             fprintf(f, " }");
             return;
         }
 
         case TY_UNION: {
-            // #1115: an empty (0-byte) union has no members at all, so the
-            // largest-member reconstruction below would refuse it -- but there
-            // is nothing to reconstruct. An empty brace initializer is
-            // accepted by every host for a zero-sized object and matches the
-            // VM's own semantics exactly (no bytes to represent).
+            // #1115: an empty (0-byte) union has no members at all -- an
+            // empty brace initializer is accepted by every host for a
+            // zero-sized object and matches the VM's own semantics exactly
+            // (no bytes to represent).
             if (ty->size == 0) {
                 fprintf(f, "{ }");
                 return;
             }
-            // Reconstruct via the largest member (first on a tie) -- byte-exact
-            // whenever some member spans the whole object, which is the normal
-            // case; a union with no full-size member falls through to the
-            // "cannot serialize" error below via the recursive call, since no
-            // member type here can losslessly represent the other members'
-            // bytes either.
-            Member *largest = NULL;
-            for (Member *m = ty->members; m; m = m->next)
-                if (!largest || m->ty->size > largest->ty->size)
-                    largest = m;
-            if (!largest || largest->ty->size < ty->size)
-                error("cccc: cannot serialize initializer for global '%s' in "
-                      "native mode: union has no member spanning the full "
-                      "%d-byte object",
-                      var->name, ty->size);
-            fprintf(f, "{ .%.*s = ", largest->name->len, largest->name->loc);
-            serialize_init_bytes(f, vm, ctx, var, largest->ty, offset);
+            fprintf(f, "{ ");
+            bool first = true;
+            serialize_agg_member_list(f, vm, ctx, var, ty, offset, &first);
             fprintf(f, " }");
             return;
         }
@@ -1082,10 +1157,11 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
               var->name, ty->bit_width);
     }
 
-    // TY_COMPLEX and anything else with no verified byte layout here: fail
-    // loudly rather than guess (#918's whole point -- emitting a plausible-
-    // but-wrong initializer is the bug class being fixed, not a shape to
-    // reproduce for cases this function doesn't yet handle).
+    // Any kind with no verified byte layout here (TY_COMPLEX has had its own
+    // case since #1122 -- this comment used to name it, stale since then):
+    // fail loudly rather than guess (#918's whole point -- emitting a
+    // plausible-but-wrong initializer is the bug class being fixed, not a
+    // shape to reproduce for cases this function doesn't yet handle).
     error("cccc: cannot serialize initializer for global '%s' in native "
           "mode: unsupported initializer type (kind %d)",
           var->name, ty->kind);
