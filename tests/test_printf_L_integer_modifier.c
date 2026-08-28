@@ -1,7 +1,7 @@
-// CCCC_NATIVE_SKIP: %Ld/%Li/%Lu/%Lo/%Lx treating `L` as `ll` on an integer
-// conversion is a glibc extension (the C standard leaves `L` on `d` etc.
-// undefined); BSD/Apple libc reads a 32-bit slot instead, so the -c=native
-// round-trip output is host-libc-dependent -- see man/COVERAGE.md
+// CCCC_NATIVE_SKIP: %Ld/%Li/%Lu/%Lo/%Lx/%Ln treating `L` as `ll` on an
+// integer conversion is a glibc extension (the C standard leaves `L` on `d`
+// etc. undefined); BSD/Apple libc reads/writes a 32-bit slot instead, so the
+// -c=native round-trip output is host-libc-dependent -- see man/COVERAGE.md
 // "Serialized-output divergences" and #1170. The VM formatter deliberately
 // follows glibc here.
 /*
@@ -11,6 +11,10 @@
  * conversion in the same call. `L` on d/i/u/o/x/X is now the same
  * wide-integer flag as `ll`, in both the printf and scanf directions,
  * matching glibc.
+ *
+ * #1230: the printf `%n` conversion had the same float-only blind spot, so
+ * `%Ln` stored a 4-byte int. It now writes a `long long`, matching `%lln`
+ * and glibc. (scanf `%Ln` already stored 8 bytes via store_int since #1228.)
  */
 
 #include "stdio.h"
@@ -51,6 +55,20 @@ int main(void) {
         return 7;
     if (got != big)
         return 8;
+
+    // printf `%Ln`: `L` == `ll`, so it writes a full 8-byte `long long`.
+    // Pre-poison the high half and confirm it landed as zero.
+    long long nll = (long long)0xAAAAAAAAAAAAAAAALL;
+    snprintf(buf, sizeof buf, "abcd%Ln", &nll);
+    if (nll != 4)
+        return 9;
+
+    // scanf `%Ln` likewise stores 8 bytes (store_int, LEN_L == LEN_ll).
+    long long nsc = (long long)0xAAAAAAAAAAAAAAAALL;
+    if (sscanf("abcdef", "abcd%Ln", &nsc) != 0)
+        return 10;
+    if (nsc != 4)
+        return 11;
 
     return 42;
 }

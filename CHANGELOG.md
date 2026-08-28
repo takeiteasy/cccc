@@ -18,6 +18,19 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `long double` to a plain `%f`/`%e`/`%g` (no `L`) is now a genuine
   argument-width mismatch — the `-F` format checker flags it, matching
   gcc/clang `-Wformat`.
+- The `printf` `%n` conversion now honours its length modifier: `%hhn` /
+  `%hn` / `%ln` / `%lln` / `%jn` / `%zn` / `%tn` / `%Ln` write a
+  `signed char` / `short` / `long` / `long long` / `intmax_t` / `size_t` /
+  `ptrdiff_t` respectively, matching glibc and Apple libc — previously every
+  spelling stored a plain 4-byte `int`, truncating a wider store and
+  clobbering bytes past a narrower one. The `-F` format checker's `%n` arm
+  is length-modifier-aware to match (`%ln` expects `long *`, not `int *`),
+  on both the `printf` and `scanf` sides. The `scanf` `%n` runtime store was
+  already correct.
+- The `h` / `hh` length modifiers on an integer conversion now truncate:
+  `printf("%hd", 65536)` prints `0` and `printf("%hhx", 0x1FF)` prints `ff`,
+  matching glibc and Apple libc — previously the modifier was parsed and
+  discarded.
 - A VLA local, or a pointer-to-VLA local initialized from one, can now be
   read across a nested (GNU) function's static link under `-c=native`/`-m`
   — previously rejected outright. A fully multi-dimensional VLA (every

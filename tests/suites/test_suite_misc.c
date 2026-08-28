@@ -1083,6 +1083,107 @@ int test_snprintf(void) {
     return 42;
 }
 
+// #1230: the printf `%n` conversion honours its length modifier -- it used
+// to store a plain 4-byte int for every spelling. Each modifier gets a
+// layout-guaranteed guard (a struct whose first member is the target and
+// whose trailing bytes are poisoned) so the "did not write past the object"
+// half of the check is real. glibc and Apple libc agree on all of these, so
+// this runs under --native too. %Ln lives in the native-skipped
+// tests/test_printf_L_integer_modifier.c instead.
+[[cccc::test(return = 42)]]
+int test_printf_n_length_modifier(void) {
+    char buf[32];
+
+    struct {
+        signed char   v;
+        unsigned char guard[7];
+    } sc;
+    __builtin_memset(&sc, 0xAA, sizeof sc);
+    snprintf(buf, sizeof buf, "abcd%hhn", &sc.v);
+    if (sc.v != 4)
+        return 1;
+    for (int i = 0; i < 7; i++)
+        if (sc.guard[i] != 0xAA)
+            return 2; // %hhn wrote past the one byte it was given
+
+    struct {
+        short         v;
+        unsigned char guard[6];
+    } sh;
+    __builtin_memset(&sh, 0xAA, sizeof sh);
+    snprintf(buf, sizeof buf, "abcd%hn", &sh.v);
+    if (sh.v != 4)
+        return 3;
+    for (int i = 0; i < 6; i++)
+        if (sh.guard[i] != 0xAA)
+            return 4;
+
+    struct {
+        int           v;
+        unsigned char guard[4];
+    } si;
+    __builtin_memset(&si, 0xAA, sizeof si);
+    snprintf(buf, sizeof buf, "abcd%n", &si.v);
+    if (si.v != 4)
+        return 5;
+    for (int i = 0; i < 4; i++)
+        if (si.guard[i] != 0xAA)
+            return 6;
+
+    // %ln / %lln / %zn write the full 8-byte object -- pre-poison it and
+    // check the high half landed as zero rather than staying 0xAA.
+    long lv = (long)0xAAAAAAAAAAAAAAAALL;
+    snprintf(buf, sizeof buf, "abcd%ln", &lv);
+    if (lv != 4)
+        return 7;
+
+    long long llv = (long long)0xAAAAAAAAAAAAAAAALL;
+    snprintf(buf, sizeof buf, "abcd%lln", &llv);
+    if (llv != 4)
+        return 8;
+
+    size_t zv = (size_t)0xAAAAAAAAAAAAAAAAULL;
+    snprintf(buf, sizeof buf, "abcd%zn", &zv);
+    if (zv != 4)
+        return 9;
+
+    return 42;
+}
+
+// #1232: `h`/`hh` on an integer conversion truncate the promoted argument
+// (STBSP__HALFWIDTH was set but never consulted), matching glibc and Apple
+// libc. Found while fixing #1230's `%n` gap; fixed in the same change.
+[[cccc::test(return = 42)]]
+int test_printf_h_integer_truncation(void) {
+    char buf[32];
+
+    snprintf(buf, sizeof buf, "%hd", 65536); // wraps mod 2^16 -> 0
+    if (__builtin_strcmp(buf, "0") != 0)
+        return 1;
+
+    snprintf(buf, sizeof buf, "%hd", -1); // still -1, sign preserved
+    if (__builtin_strcmp(buf, "-1") != 0)
+        return 2;
+
+    snprintf(buf, sizeof buf, "%hhd", 256); // wraps mod 2^8 -> 0
+    if (__builtin_strcmp(buf, "0") != 0)
+        return 3;
+
+    snprintf(buf, sizeof buf, "%hhd", -1);
+    if (__builtin_strcmp(buf, "-1") != 0)
+        return 4;
+
+    snprintf(buf, sizeof buf, "%hhx", 0x1FF); // low byte only
+    if (__builtin_strcmp(buf, "ff") != 0)
+        return 5;
+
+    snprintf(buf, sizeof buf, "%hu", 65537); // wraps mod 2^16 -> 1
+    if (__builtin_strcmp(buf, "1") != 0)
+        return 6;
+
+    return 42;
+}
+
 // [from test_sprintf_sscanf]
 [[cccc::test(return = 42)]]
 int test_sprintf_sscanf(void) {

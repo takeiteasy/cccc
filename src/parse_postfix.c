@@ -634,7 +634,22 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             expected[num_expected++] = FMT_EXPECT_POINTER;
                             break;
                         case 'n':
-                            expected[num_expected++] = FMT_EXPECT_INT_PTR;
+                            // #1230: %n honours the length modifier the same
+                            // way %d/%u above do -- %hhn→char*, %hn→short*,
+                            // %ln/%lln/%Ln/%jn/%tn→long*, %zn→unsigned long*.
+                            // %Ln == %lln here (the GNU #1228 rule). Bare %n
+                            // stays lenient (int*/char*/short*/long* all pass).
+                            if (mod == 1)
+                                expected[num_expected++] = FMT_EXPECT_SCHAR_PTR;
+                            else if (mod == 2)
+                                expected[num_expected++] = FMT_EXPECT_SHORT_PTR;
+                            else if (mod == 3 || mod == 4 || mod == 5 ||
+                                     mod == 7 || mod == 8)
+                                expected[num_expected++] = FMT_EXPECT_LONG_PTR;
+                            else if (mod == 6)
+                                expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_INT_PTR;
                             break;
                         default:
                             expected[num_expected++] = FMT_EXPECT_INT;
@@ -698,7 +713,21 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             expected[num_expected++] = FMT_EXPECT_POINTER;
                             break;
                         case 'n':
-                            expected[num_expected++] = FMT_EXPECT_INT_PTR;
+                            // #1230: mirror the printf-side %n arm above (and
+                            // the scanf runtime's store_int(), already
+                            // modifier-aware). %hhn→char*, %hn→short*,
+                            // %ln/%lln/%Ln/%jn/%tn→long*, %zn→unsigned long*.
+                            if (mod == 1)
+                                expected[num_expected++] = FMT_EXPECT_SCHAR_PTR;
+                            else if (mod == 2)
+                                expected[num_expected++] = FMT_EXPECT_SHORT_PTR;
+                            else if (mod == 3 || mod == 4 || mod == 5 ||
+                                     mod == 7 || mod == 8)
+                                expected[num_expected++] = FMT_EXPECT_LONG_PTR;
+                            else if (mod == 6)
+                                expected[num_expected++] = FMT_EXPECT_ULONG_PTR;
+                            else
+                                expected[num_expected++] = FMT_EXPECT_INT_PTR;
                             break;
                         default:
                             expected[num_expected++] = FMT_EXPECT_INT_PTR;

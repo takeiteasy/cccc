@@ -204,6 +204,7 @@ PERFORMANCE vs MSVC 2008 32-/64-bit (GCC is even slower than MSVC):
 
 #include <stdarg.h>         // for va_arg(), va_list()
 #include <stddef.h>         // size_t, ptrdiff_t
+#include <stdint.h>         // intmax_t -- #1230's modifier-aware %n store
 #include <string.h>         // strlen() -- #829's cccc__dec_stb_render
 
 #ifndef STB_SPRINTF_MIN
@@ -427,6 +428,26 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
         stbsp__int32  fw, pr, tz;
         stbsp__uint32 fl;
         int dec_w; // #829: -1, or 0/1/2 for a _Decimal32/64/128 length modifier
+        // #1230/#1232: which integer length modifier was parsed, so `%n`
+        // stores the right width (#1230) and `%hd`/`%hhd` truncate (#1232).
+        // `fl`'s STBSP__HALFWIDTH can't carry this (it collapses `h` and `hh`,
+        // and nothing ever reads it).
+        // Encoding mirrors format_scanf.c's LEN_* enum so the two engines read
+        // alike: 0 none, 1 hh, 2 h, 3 l, 4 ll, 5 L, 6 z, 7 j, 8 t. `L` on an
+        // integer conversion is the GNU pre-C99 spelling of `ll` (#1228), so it
+        // maps to the same wide-integer store as LEN_ll.
+        enum {
+            STBSP__LM_NONE = 0,
+            STBSP__LM_hh,
+            STBSP__LM_h,
+            STBSP__LM_l,
+            STBSP__LM_ll,
+            STBSP__LM_L,
+            STBSP__LM_z,
+            STBSP__LM_j,
+            STBSP__LM_t
+        };
+        int lenmod;
 
 // macros for the callback buffer stuff
 #define stbsp__chk_cb_bufL(bytes)                                              \
@@ -503,11 +524,12 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
         ++f;
 
         // ok, we have a percent, read the modifiers first
-        fw    = 0;
-        pr    = -1;
-        fl    = 0;
-        tz    = 0;
-        dec_w = -1;
+        fw     = 0;
+        pr     = -1;
+        fl     = 0;
+        tz     = 0;
+        dec_w  = -1;
+        lenmod = STBSP__LM_NONE;
 
         // flags
         for (;;) {
@@ -595,43 +617,55 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
         switch (f[0]) {
             // are we halfwidth?
             case 'h':
-                fl |= STBSP__HALFWIDTH;
+                fl     |= STBSP__HALFWIDTH;
+                lenmod  = STBSP__LM_h;     // #1230
                 ++f;
-                if (f[0] == 'h')
-                    ++f; // QUARTERWIDTH
+                if (f[0] == 'h') {
+                    lenmod = STBSP__LM_hh; // #1230: QUARTERWIDTH
+                    ++f;
+                }
                 break;
             // are we 64-bit (unix style)
             case 'l':
-                fl |= ((sizeof(long) == 8) ? STBSP__INTMAX : 0);
+                fl     |= ((sizeof(long) == 8) ? STBSP__INTMAX : 0);
+                lenmod  = STBSP__LM_l; // #1230
                 ++f;
                 if (f[0] == 'l') {
-                    fl |= STBSP__INTMAX;
+                    fl     |= STBSP__INTMAX;
+                    lenmod  = STBSP__LM_ll; // #1230
                     ++f;
                 }
                 break;
             // are we 64-bit on intmax? (c99)
             case 'j':
-                fl |= (sizeof(size_t) == 8) ? STBSP__INTMAX : 0;
+                fl     |= (sizeof(size_t) == 8) ? STBSP__INTMAX : 0;
+                lenmod  = STBSP__LM_j; // #1230
                 ++f;
                 break;
             // are we 64-bit on size_t or ptrdiff_t? (c99)
             case 'z':
-                fl |= (sizeof(ptrdiff_t) == 8) ? STBSP__INTMAX : 0;
+                fl     |= (sizeof(ptrdiff_t) == 8) ? STBSP__INTMAX : 0;
+                lenmod  = STBSP__LM_z; // #1230
                 ++f;
                 break;
             case 't':
-                fl |= (sizeof(ptrdiff_t) == 8) ? STBSP__INTMAX : 0;
+                fl     |= (sizeof(ptrdiff_t) == 8) ? STBSP__INTMAX : 0;
+                lenmod  = STBSP__LM_t; // #1230
                 ++f;
                 break;
             // are we 64-bit (msft style)
             case 'I':
                 if ((f[1] == '6') && (f[2] == '4')) {
-                    fl |= STBSP__INTMAX;
-                    f  += 3;
+                    fl     |= STBSP__INTMAX;
+                    lenmod  = STBSP__LM_ll;   // #1230
+                    f      += 3;
                 } else if ((f[1] == '3') && (f[2] == '2')) {
-                    f += 3;
+                    lenmod  = STBSP__LM_NONE; // #1230: plain int
+                    f      += 3;
                 } else {
-                    fl |= ((sizeof(void *) == 8) ? STBSP__INTMAX : 0);
+                    fl     |= ((sizeof(void *) == 8) ? STBSP__INTMAX : 0);
+                    lenmod  = (sizeof(void *) == 8) ? STBSP__LM_ll
+                                                    : STBSP__LM_NONE; // #1230
                     ++f;
                 }
                 break;
@@ -650,7 +684,8 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
             // INTMAX, so whichever conversion follows picks up the one it
             // needs.
             case 'L':
-                fl |= STBSP__LONGDOUBLE | STBSP__INTMAX;
+                fl     |= STBSP__LONGDOUBLE | STBSP__INTMAX;
+                lenmod  = STBSP__LM_L; // #1230 (== ll on an integer conversion)
                 ++f;
                 break;
             // #829: _Decimal32/64/128 length modifiers. Only meaningful on a
@@ -726,14 +761,42 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
 
             case 'n': // weird write-bytes specifier
             {
-                // BUG (#1230, pre-existing): the length modifier is ignored
-                // here -- %hhn/%hn/%ln/%lln/%Ln all write a plain 4-byte int,
-                // where glibc writes signed char / short / long / long long
-                // respectively. Wider than #1228's %Ld fix; needs its own
-                // change (a modifier-switched store like store_int in
-                // format_scanf.c) plus a matching -F checker arm.
-                int *d = va_arg(va, int *);
-                *d     = tlen + (int)(bf - buf);
+                // #1230: honour the length modifier, mirroring store_int() in
+                // src/stdlib/format_scanf.c so the printf and scanf %n stores
+                // agree. glibc and Apple libc both write exactly the modifier's
+                // width here; storing a plain 4-byte int (as this arm used to)
+                // both diverges from -c=native and clobbers 2/3 bytes past a
+                // `signed char *`/`short *` the caller sized correctly.
+                void              *d = va_arg(va, void *);
+                unsigned long long v =
+                    (unsigned long long)(tlen + (int)(bf - buf));
+                switch (lenmod) {
+                    case STBSP__LM_hh:
+                        *(signed char *)d = (signed char)v;
+                        break;
+                    case STBSP__LM_h:
+                        *(short *)d = (short)v;
+                        break;
+                    case STBSP__LM_l:
+                        *(long *)d = (long)v;
+                        break;
+                    case STBSP__LM_ll:
+                    case STBSP__LM_L: // #1228: `L` == `ll` on an int conversion
+                        *(long long *)d = (long long)v;
+                        break;
+                    case STBSP__LM_j:
+                        *(intmax_t *)d = (intmax_t)v;
+                        break;
+                    case STBSP__LM_z:
+                        *(size_t *)d = (size_t)v;
+                        break;
+                    case STBSP__LM_t:
+                        *(ptrdiff_t *)d = (ptrdiff_t)v;
+                        break;
+                    default:
+                        *(int *)d = (int)v;
+                        break;
+                }
             } break;
 
 #ifdef STB_SPRINTF_NOFLOAT
@@ -1198,6 +1261,14 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                     n64 = va_arg(va, stbsp__uint64);
                 else
                     n64 = va_arg(va, stbsp__uint32);
+                // #1232: `h`/`hh` truncate to unsigned short / unsigned char
+                // before conversion, matching glibc and Apple libc (e.g.
+                // `%hhx` of 0x1FF prints "ff"). STBSP__HALFWIDTH was set but
+                // never consulted here; found while fixing #1230's `%n` gap.
+                if (lenmod == STBSP__LM_h)
+                    n64 = (unsigned short)n64;
+                else if (lenmod == STBSP__LM_hh)
+                    n64 = (unsigned char)n64;
 
                 s  = num + STBSP__NUMSZ;
                 dp = 0;
@@ -1247,7 +1318,21 @@ STBSP__PUBLICDEF int STB_SPRINTF_DECORATE(vsprintfcb)(STBSP_SPRINTFCB *callback,
                     }
                 } else {
                     stbsp__int32 i = va_arg(va, stbsp__int32);
-                    n64            = (stbsp__uint32)i;
+                    // #1232: `h`/`hh` narrow the promoted slot before the
+                    // sign/abs logic, so `%hd` of 65536 prints "0" and `%hd`
+                    // of -1 still prints "-1" (glibc and Apple libc agree).
+                    if (f[0] == 'u') {
+                        if (lenmod == STBSP__LM_h)
+                            i = (stbsp__int32)(unsigned short)i;
+                        else if (lenmod == STBSP__LM_hh)
+                            i = (stbsp__int32)(unsigned char)i;
+                    } else {
+                        if (lenmod == STBSP__LM_h)
+                            i = (short)i;
+                        else if (lenmod == STBSP__LM_hh)
+                            i = (signed char)i;
+                    }
+                    n64 = (stbsp__uint32)i;
                     if ((f[0] != 'u') && (i < 0)) {
                         n64  = (stbsp__uint32)-i;
                         fl  |= STBSP__NEGATIVE;
