@@ -585,6 +585,14 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                 ty = ty_ldcomplex;
                 break;
             default:
+                // BUG (#1227): this table resolves after every specifier
+                // token, so `_Complex long double` / `long _Complex double`
+                // hit the intermediate `COMPLEX + LONG` (no case here) and
+                // wrongly error, even though C23 6.7.2p2 makes specifier
+                // order irrelevant and `long double _Complex` works. Fix
+                // needs a deferred `COMPLEX + LONG` case plus an end-of-
+                // declspec check so `_Complex long` (GNU complex-integer,
+                // unsupported) still errors -- see the ticket.
                 error_tok(vm, tok, "invalid type");
         }
 
