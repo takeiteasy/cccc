@@ -1,8 +1,7 @@
 name: Docs
 
-# GitHub-side "regular push" CI is docs-only (see man/TESTING.md's
-# Continuous Integration section and CLAUDE.md's Branching notes):
-# builds the Doxygen HTML for the three public headers under
+# GitHub-side "regular push" CI is docs-only (see CLAUDE.md's Branching
+# notes): builds the Doxygen HTML for the three public headers under
 # include/cccc/ and publishes it to GitHub Pages
 # (https://takeiteasy.github.io/cccc/) on every push to `trunk`. `trunk` is
 # pushed to both `origin` (sr.ht) and `github` on every push to keep them
@@ -15,7 +14,7 @@ name: Docs
 # The full build+test+package for the three supported quadrants (Linux
 # amd64/aarch64, macOS arm64) only runs at release time, via
 # .github/workflows/release.yml (triggered by a `v*` tag push) -- not on
-# every push. See man/RELEASING.md.
+# every push. See CLAUDE.md's Branching notes.
 #
 # pull_request builds (WARN_AS_ERROR in Doxyfile makes this a real
 # completeness gate on @param/@return coverage) but never deploys -- a PR

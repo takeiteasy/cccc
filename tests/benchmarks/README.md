@@ -28,8 +28,6 @@ python3 tools/bench.py --no-c4 --filter fib.c    # skip the cccc-c4* (precompile
 python3 tools/bench.py --filter fib.c --vm-profile # write VM opcode profiles too
 ```
 
-See [man/BENCHMARKS.md](../man/BENCHMARKS.md) for the full guide — how the runner works, how to read the table, and how to add new benchmarks.
-
 ## Results
 
 Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, host info, and per-`cccc-c4*` `compile_ms` (the one-time cost of producing the bytecode file). All of this is included so results are reproducible and comparable across machines.

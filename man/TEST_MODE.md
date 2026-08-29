@@ -1,0 +1,1342 @@
+# CCCC Test Framework (`[[cccc::test]]`)
+
+CCCC includes a built-in test framework for writing tests directly in C,
+using the `[[cccc::test]]` attribute to mark test functions and `Assert*`
+macros for assertions. This is a guide to writing and running them.
+
+Internal notes on the test directory layout, audit harnesses, the native
+round-trip serializer test, and CI live in the internal `TESTING.md`.
+
+## Writing Tests
+
+Mark a function as a test with `[[cccc::test]]`, `__attribute__((test))`,
+`@test`, `__test`, or `__test__`. Test functions must take no arguments; they may return `void`, `int`,
+`double`, `float`, or `char *`:
+
+```c
+[[cccc::test]]
+void test_addition(void) {
+    AssertEq(1 + 1, 2);
+}
+
+// Equivalent shorthands:
+__attribute__((test))
+void test_with_gnu_attr(void) { AssertEq(2 * 3, 6); }
+
+@test
+void test_with_at_prefix(void) { AssertEq(10 - 8, 2); }
+```
+
+Multiple test functions can coexist in the same file:
+
+```c
+[[cccc::test]]
+void test_strings(void) {
+    AssertStrEq("hello", "hello");
+}
+
+[[cccc::test]]
+void test_pointers(void) {
+    int x = 42;
+    AssertNotNull(&x);
+}
+```
+
+No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`.
+
+### Multi-file `--testing` invocations
+
+`cccc --testing a.c b.c` compiles both files as independent translation
+units, exactly like an ordinary multi-file build. The assertion macros and
+`__builtin_assert_*` declarations are injected into *every* input file's own
+parse stream, so `[[cccc::test]]` functions can live in any file regardless
+of its position on the command line — `cccc -t helper.c tests.c` and
+`cccc -t tests.c helper.c` behave identically.
+
+A `--testing` run that collects zero `[[cccc::test]]` functions across every
+input file is a hard error (`error: --testing: no [[cccc::test]] functions
+found in any input file`, exit 1), not a silent `TAP version 13 / 1..0` pass
+— this catches an invocation whose test file's declarations never reached
+the parser. A `--test=GLOB`/`--test-suite=` filter that matches nothing is
+unaffected and keeps exiting 0 (that's a filter miss, not a broken build).
+
+### Programmatic test generation via emit blocks
+
+`[[cccc::test]]` (and `[[cccc::test_setup]]` / `[[cccc::test_teardown]]`) inside
+`#pragma cccc emit begin...end` blocks are scanned and registered, enabling
+comptime macros to generate test functions programmatically:
+
+```c
+#pragma cccc comptime begin
+#pragma cccc emit begin
+[[cccc::test]]
+void generated_test(void) { }   // registered and run under --testing
+#pragma cccc emit end
+#pragma cccc comptime end
+```
+
+Note that C preprocessor macros (`AssertEq`, `Assert`, etc.) are not expanded
+inside emit blocks. Use the underlying `__builtin_assert_*` functions directly,
+or structure the test body so that assertions live outside the emit block.
+
+### Programmatic test registration via AST API
+
+When building functions through the AST API (`MakeFunction` + `PublishNode`),
+use `AddAttribute` to register and configure the function as a test entry.
+Suite, display name, timeout, and all other test options are expressed inline
+in the attribute string — the same options available in `[[cccc::test(...)]]`:
+
+```c
+[[cccc::comptime]]
+void gen_tests(void) {
+    Obj *fn = MakeFunction("my_generated_test", GetType("void"));
+    WithFn(fn) { FunctionSetBody(fn, Quote("return;")); }
+    PublishNode(fn);
+
+    // All test options inline — same syntax as [[cccc::test(...)]]
+    AddAttribute(fn, "cccc::test(suite=\"generated\", name=\"my test name\", timeout=5000)");
+}
+gen_tests();
+```
+
+| Helper | Effect |
+|---|---|
+| `AddAttribute(fn, "cccc::test")` | Register as `[[cccc::test]]` |
+| `AddAttribute(fn, "cccc::test(suite=\"s\")")` | Register with suite |
+| `AddAttribute(fn, "cccc::test(name=\"n\")")` | Register with display name |
+| `AddAttribute(fn, "cccc::test(timeout=5000)")` | Register with timeout |
+| `MarkAsTest(fn)` | Shorthand for `AddAttribute(fn, "cccc::test")` |
+
+For error patterns, return assertions, and per-test compiler flags, use the
+full `[[cccc::test(...)]]` attribute string inside `AddAttribute` — all options
+from the attribute syntax are available. See [MACROS.md](MACROS.md) for details.
+
+### Custom display names
+
+Give a test a human-readable name with the `name` option. The display name appears in TAP output and is used for glob filtering; the C function name is unchanged:
+
+```c
+[[cccc::test(name = "addition is commutative")]]
+void test_add_commutative(void) {
+    AssertEq(1 + 2, 2 + 1);
+}
+```
+
+`name`, `suite`, `error`, `exit_code`, `timeout`, `error_count`, `return`, `return_epsilon`, `flags`, `expect_stderr`, `reject_stderr`, `expect_stdout`, and `reject_stdout` may all be combined in one attribute (with the exception that `exit_code` is mutually exclusive with `error` and `return`).
+
+## Test Suites
+
+Tests can be grouped into named suites. Two syntaxes are supported.
+
+### Attribute argument
+
+Specify the suite directly on the test attribute:
+
+```c
+[[cccc::test(suite = "math")]]
+void test_add(void) {
+    AssertEq(1 + 1, 2);
+}
+
+[[cccc::test(suite = "math")]]
+void test_mul(void) {
+    AssertEq(6 * 7, 42);
+}
+```
+
+Suite names can include `/` to form a hierarchical path (e.g. `suite = "math/trig"`).
+
+### Pragma block
+
+Wrap a run of test functions in a pragma block to assign them all to the same suite:
+
+```c
+#pragma cccc suite begin "strings"
+
+[[cccc::test]]
+void test_equality(void) {
+    AssertStrEq("foo", "foo");
+}
+
+[[cccc::test]]
+void test_empty(void) {
+    AssertStrEq("", "");
+}
+
+#pragma cccc suite end
+```
+
+### Nested suite blocks
+
+Pragma blocks can be nested to form a hierarchical suite path. The separator is `/`.
+
+```c
+#pragma cccc suite begin "math"
+
+[[cccc::test]]
+void test_basic_add(void) { AssertEq(1 + 1, 2); }  // suite: "math"
+
+#pragma cccc suite begin "trig"
+
+[[cccc::test]]
+void test_sin(void) { ... }  // suite: "math/trig"
+
+[[cccc::test]]
+void test_cos(void) { ... }  // suite: "math/trig"
+
+#pragma cccc suite end  // end "trig"
+
+[[cccc::test]]
+void test_basic_mul(void) { AssertEq(3 * 3, 9); }  // suite: "math"
+
+#pragma cccc suite end  // end "math"
+```
+
+Every `#pragma cccc suite begin` must have a matching `#pragma cccc suite end`. An unclosed block at end-of-file is a compile error.
+
+Tests outside any block or attribute have no suite.
+
+### Filtering by suite
+
+Use `--test-suite=NAME` to run only tests whose suite matches `NAME`:
+
+- **Exact match:** `--test-suite=math` runs tests with suite exactly `math`.
+- **Prefix/sub-suite match:** `--test-suite=math` also runs `math/trig`, `math/algebra`, and any deeper nesting — anything whose suite path starts with `math/`.
+- **Glob:** If `NAME` contains glob metacharacters (`*`, `?`, `[`), it is matched with `fnmatch` against the full suite path. For example, `--test-suite='math/*'` selects all direct children of `math`.
+
+```bash
+./cccc --testing --test-suite=math       myfile.c  # math + all sub-suites
+./cccc --testing --test-suite=math/trig  myfile.c  # only math/trig (and deeper)
+./cccc --testing --test-suite='math/*'   myfile.c  # glob: direct children only
+```
+
+> **Note:** Setup/teardown hooks are matched against suites by exact name by default.
+> A hook scoped to `math` does **not** automatically run for `math/trig` tests
+> unless the hook is declared with the `inherit` keyword (see [Setup and Teardown](#setup-and-teardown)).
+
+## Test-File Header Directives
+
+Legacy single-file tests (`tests/test_*.c` and `tests/suites/test_suite_*.c`,
+as opposed to the `[[cccc::test]]` per-function attribute API above) are
+driven by `CCCC_*`/`EXPECT_*` directive comments in the file's leading
+header comment block, parsed by `tools/testing/header.py`'s
+`parse_test_header()` and consumed by `tools/testing/runner.py`,
+`tools/triage_tests.py`, and `tools/audit_test_headers.py`.
+
+| Directive | Value | Meaning |
+|---|---|---|
+| `EXPECT_COMPILE_ERROR` | bare | The file must fail to compile (see [Negative Tests](#negative-tests) below). |
+| `EXPECT_RUNTIME_ERROR` | bare | The compiled program must exit via the runtime-safety-violation trap (see [Runtime Safety Violations](#runtime-safety-violations)). |
+| `CCCC_FLAGS:` | flags | Extra command-line flags passed to `cccc` for this test only. |
+| `CCCC_RUN_ARGS:` | args | Arguments passed to the compiled/run program after `--`, not to `cccc` itself. |
+| `CCCC_EXPECT_STDOUT:` | regex | stdout must match this regex. |
+| `CCCC_REJECT_STDOUT:` | regex | stdout must **not** match this regex. |
+| `CCCC_EXPECT_STDERR:` | regex | stderr must match this regex. |
+| `CCCC_REJECT_STDERR:` | regex | stderr must **not** match this regex. |
+| `CCCC_NATIVE_SKIP[: reason]` | bare or reason | Skip this test under `--native`. |
+| `CCCC_EXPECT_LEAK[: reason]` | bare or reason | This test is expected to leak under `--leaks`; the reason is informational only. |
+| `CCCC_LEAKS_KEEP_VM_HEAP` | bare | Force the VM-heap-backed allocator under `--leaks`. |
+
+Only one instance of a given directive is honored per file (repeating it
+overwrites the earlier value, it does not accumulate) — combine multiple
+required substrings into one regex with lookaheads,
+`(?=[\s\S]*first)(?=[\s\S]*second)`, the pattern already used throughout the
+corpus, rather than repeating `CCCC_EXPECT_STDOUT:` more than once.
+
+**Anchoring rule (#1153).** A directive is only recognised when it is
+*anchored*: the first token of its comment line (after stripping a leading
+`//`, `/*`, or ` * ` continuation marker), each directive on its own single
+physical line. `EXPECT_COMPILE_ERROR`/`EXPECT_RUNTIME_ERROR` may share a
+line with one immediately-following directive (the widely-used
+`// EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2` idiom); no other directive
+combination does. The parser reads the whole leading comment block (blank
+lines don't end it — an explanatory paragraph, a blank line, then the
+directive block is a common and supported layout — but the first genuine
+code line does), not a fixed line-count window, so a directive is never
+silently dropped just because prose above it pushed it past some line
+number. `.clang-format`'s `CommentPragmas` setting excludes every directive
+comment from line-wrap reflow, so a `clang-format` pass can never wrap one
+onto a continuation line the parser would then fail to see — a directive
+must still fit its own single line, since the parser deliberately does not
+join continuation lines (a wrapped regex's tail and any following prose are
+indistinguishable once split across lines).
+
+`tools/audit_test_headers.py` (wired into the `test` build target as the
+`audit_test_headers` sub-suite) hard-fails CI if a known directive name
+appears unanchored (wrapped or merged into prose), appears after the header
+block ends, is spelled with a typo, or has an empty/non-regex value — the
+recurrence guard for the whole class of bug #1153 fixed. The typo check also
+catches a *bare*-spelled directive typo with no colon to anchor a scan on
+(`CCCC_NATIVE_SKP`, `EXPECT_COMPILE_ERR`) via a Levenshtein-distance-2
+near-miss against the known directive names, plus a same-components
+different-order check (`CCCC_SKIP_NATIVE` vs. the real `CCCC_NATIVE_SKIP`)
+that distance alone can miss (#1158).
+
+## Negative Tests
+
+Mark a test with `error = "pattern"` to assert that the function body fails to compile with a diagnostic matching the given substring:
+
+```c
+[[cccc::test(error = "undefined variable")]]
+void test_undefined_var(void) {
+    int x = not_declared;
+}
+```
+
+The test passes if compilation of the body produces at least one error whose message contains `pattern`. It fails if the code compiles without error, or if no error matches the pattern.
+
+Both `suite` and `error` may be combined:
+
+```c
+[[cccc::test(suite = "negative", error = "undefined variable")]]
+void test_combined(void) {
+    int x = also_not_declared;
+}
+```
+
+Negative test bodies are compiled in error-collection mode; their errors are absorbed and never propagate to the rest of the compilation. The test result is computed at compile time.
+
+### Asserting any compile error
+
+Use `expect_compile_error = true` when you want to assert that the function body fails to compile but do not need to match a specific error message:
+
+```c
+[[cccc::test(expect_compile_error = true)]]
+void test_bad_bitfield(void) {
+    struct S { int x : -1; };
+}
+```
+
+The test passes if at least one compile error is produced. It fails if the code compiles without error.
+
+This is more explicit than `error = ""` (empty string, which matches any message). When both `expect_compile_error = true` and `error = "pattern"` are set, `expect_compile_error` is redundant and a `-Wattributes` warning is emitted.
+
+**Limitation:** only parse-time errors are catchable this way. Errors that fire during code generation — such as comptime macro expansion errors, unresolved external symbols, and global-initialiser type checks — occur after the function body is parsed and cannot be asserted with this mechanism. Use a legacy `// EXPECT_COMPILE_ERROR` test file for those cases.
+
+### Expected error count
+
+Add `error_count` with a comparison operator to assert something about the number of compilation errors produced. The supported operators are `=` (or `==`), `!=`, `<`, `<=`, `>`, and `>=`. When no operator is written, `=` is assumed:
+
+```c
+[[cccc::test(error = "undefined variable", error_count = 1)]]
+void test_exactly_one_error(void) {
+    int x = not_declared;
+}
+
+[[cccc::test(error = "undefined", error_count > 1)]]
+void test_more_than_one_error(void) {
+    int a = x + y;  // two undeclared variables
+}
+
+[[cccc::test(error = "undefined", error_count != 1)]]
+void test_not_exactly_one(void) {
+    int a = x + y;  // two errors, so != 1 passes
+}
+```
+
+The test passes only if: (1) at least one error matches the `error` pattern, and
+(2) the `error_count` assertion holds.  A count mismatch is reported as a failed
+negative test with a descriptive message.
+
+### Negated pattern matching
+
+Use `error != "pattern"` to assert that no compilation error contains the given substring. The function body must still produce at least one error (it is still a negative test):
+
+```c
+[[cccc::test(error != "cannot convert")]]
+void test_no_type_error(void) {
+    int x = undefined_var;  // undeclared error, but no type conversion error
+}
+```
+
+The test passes if at least one error is produced and none of them contain the pattern. It fails if any error matches the pattern.
+
+### Return value assertion
+
+Use `return = value` to assert that a test function returns a specific value. The comparison type is inferred from the literal:
+
+**Integer** (and `char`/`enum`): the function's return value is compared as a 64-bit integer. `char` and `enum` values must be written as their numeric equivalent — enum *names* (`return = GREEN`) are not resolved and will silently skip the assertion.
+
+```c
+[[cccc::test(return = 42)]]
+int test_the_answer(void) {
+    return 6 * 7;
+}
+
+[[cccc::test(return = -1)]]
+int test_neg(void) {
+    return -1;
+}
+
+[[cccc::test(return = 65)]]
+int test_char_a(void) {
+    return (int)'A';  // 'A' == 65; use the integer value, not the char literal
+}
+
+// enum: write the integer value, not the enum name
+// [[cccc::test(return = 1)]]  ← correct
+// [[cccc::test(return = GREEN)]]  ← warns and skips assertion (enum names not supported)
+```
+
+Passing an unrecognized operand (such as an enum name) emits a `-Wattributes` warning and skips the assertion rather than silently passing:
+
+```
+warning: unrecognized return= operand 'GREEN'; assertion skipped (enum names not supported, use the integer value)
+```
+
+**Float/double**: the return value is compared within an absolute tolerance of `1e-9` for `=`/`!=`. For ordered comparisons (`<`, `>`, etc.) no tolerance is applied.
+
+```c
+[[cccc::test(return = 3.14)]]
+double test_pi(void) {
+    return 3.14;
+}
+```
+
+Use `return_epsilon` to override the tolerance for a specific test:
+
+```c
+[[cccc::test(return = 3.14159, return_epsilon = 1e-5)]]
+double test_approx_pi(void) {
+    return compute_pi();  // passes if within 1e-5 of 3.14159
+}
+```
+
+`return_epsilon` only applies to `=` and `!=`; ordered comparisons use exact values regardless.
+
+**String** (`char *`): the returned pointer is compared to the literal using `strcmp`.
+
+```c
+[[cccc::test(return = "ok")]]
+const char *test_status(void) {
+    return "ok";
+}
+```
+
+**Struct / union**: use an inline compound literal to assert a struct or union return value. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
+
+```c
+struct Point { int x; int y; };
+
+[[cccc::test(return = (struct Point){.x = 1, .y = 2})]]
+struct Point test_make_point(void) {
+    return (struct Point){.x = 1, .y = 2};
+}
+```
+
+Mixed field types are supported:
+
+```c
+struct Named { char *label; int code; };
+
+[[cccc::test(return = (struct Named){.label = "ok", .code = 0})]]
+struct Named test_result(void) {
+    return (struct Named){.label = "ok", .code = 0};
+}
+```
+
+Struct assertions support `=` and `!=` operators only; ordered comparisons (`<`, `<=`, `>`, `>=`) are not meaningful for structs and produce a `-Wattributes` warning with the assertion skipped.
+
+If the assertion fails:
+
+```
+expected return value = (struct Point){.x = 1, .y = 2}, got {.x = 99, .y = 2}
+```
+
+**Nested fields**: a field that is itself a struct, union, or array can be asserted with a nested compound literal. The nested literal may repeat the `(struct|union TAG)` prefix or, more commonly, be a bare brace list — its type is inferred from the field being initialized. Nesting recurses to a maximum of 8 levels; a literal nested deeper than that produces a `-Wattributes` warning and the whole assertion is skipped.
+
+```c
+struct Inner { int a; int b; };
+struct Outer { struct Inner p; int z; };
+
+[[cccc::test(return = (struct Outer){.p = {.a = 1, .b = 2}, .z = 3})]]
+struct Outer make_outer(void) {
+    return (struct Outer){.p = {.a = 1, .b = 2}, .z = 3};
+}
+```
+
+A field omitted from a nested literal is expected to be zero, recursively — an entirely omitted nested field means all of its own fields are expected to be zero.
+
+**Anonymous struct/union members**: an anonymous member's fields are addressed directly by the outer struct's own designators, matching C's own anonymous-member lookup rules — there is no extra level of nesting in the literal.
+
+```c
+struct WithAnon {
+    struct { int x; int y; }; // anonymous
+    int z;
+};
+
+[[cccc::test(return = (struct WithAnon){.x = 1, .y = 2, .z = 3})]]
+struct WithAnon make(void) {
+    return (struct WithAnon){.x = 1, .y = 2, .z = 3};
+}
+```
+
+**Arrays**: array-typed fields are asserted with a brace list of positional (undesignated) elements, matched left-to-right; elements past the end of the list are expected to be zero. A `char[]` field may instead be compared against a string literal, following C zero-initialisation semantics (bytes past the literal's terminating `NUL` are expected to be zero).
+
+```c
+struct Buf { int values[5]; char label[8]; };
+
+[[cccc::test(return = (struct Buf){.values = {1, 2, 3}, .label = "hi"})]]
+struct Buf make_buf(void) {
+    struct Buf r = {0};
+    r.values[0] = 1; r.values[1] = 2; r.values[2] = 3;
+    r.label[0] = 'h'; r.label[1] = 'i';
+    return r;
+}
+```
+
+An array of structs takes a positional list of (optionally `(struct TAG)`-prefixed) nested literals: `.items = {(struct Pair){.a=1,.b=2}, (struct Pair){.a=3,.b=4}}`.
+
+**Unions**: union arms alias the same storage, so — unlike a struct — an arm *not* named in the literal is not asserted on at all (it is not "expected zero", since reading it back would just reinterpret whichever arm actually was asserted). Only the arms named in the literal are compared.
+
+```c
+union Val { int i; float f; };
+
+[[cccc::test(return = (union Val){.i = 0x3f800000})]]
+union Val make_val(void) {
+    return (union Val){.i = 0x3f800000}; // .f is not checked
+}
+```
+
+**Scope limitations** — the following are not supported and are deferred to follow-up tickets:
+
+- *Bitfields* — a bitfield member is compared as its whole storage unit, not its individual bit-width.
+- *Non-`char *` pointer fields* — pointer fields other than `char *` are read as integers.
+- *Pre-declared constants* — field values must be compile-time literals; named constants (enum names, `#define` values) are not resolved in this context (see [ticket #349](https://todo.sr.ht/~takeiteasy/cccc/349)).
+
+**Comparison operators** (`=`, `!=`, `<`, `<=`, `>`, `>=`): use a comparison operator instead of equality. The default (no operator) is `=`.
+
+```c
+[[cccc::test(return > 0)]]
+int test_positive(void) {
+    return 42;
+}
+
+[[cccc::test(return != 0)]]
+int test_nonzero(void) {
+    return -1;
+}
+```
+
+If the assertion fails, the test is reported as failed with a message showing the expected and actual values:
+
+```
+expected return value = 42, got 7
+expected return string = "ok", got "err"
+```
+
+`return` may be combined with other options:
+
+```c
+[[cccc::test(return = 42, name = "answer is correct", suite = "math")]]
+int test_the_answer(void) {
+    return 6 * 7;
+}
+```
+
+`Assert*` macros and the `return` assertion are independent — both must pass for the test to pass.
+
+## Exit Code Tests
+
+Mark a test with `exit_code = N` to assert that the function produces a specific process exit code when run. This covers both explicit `exit()` calls and crash-induced signal deaths:
+
+```c
+// Test passes when the function exits with code 0 (normal return)
+[[cccc::test(exit_code = 0)]]
+int test_clean_exit(void) {
+    return 0;
+}
+
+// Test passes when the function calls exit(42)
+[[cccc::test(exit_code = 42)]]
+void test_explicit_exit(void) {
+    exit(42);
+}
+
+// Test passes when the function segfaults (SIGSEGV = signal 11 → exit code 139)
+[[cccc::test(exit_code = 139)]]
+int test_segfault(void) {
+    volatile int *p = (volatile int *)0;
+    return *p;
+}
+```
+
+Exit codes follow the shell convention: a normal exit via `return` or `exit(N)` produces exit code `N` (0–127); a process killed by signal `S` produces exit code `128 + S`. Common signal exit codes:
+
+| Signal | Number | Exit code |
+|--------|--------|-----------|
+| SIGSEGV | 11 | 139 |
+| SIGABRT | 6 | 134 |
+| SIGBUS | 10 | 138 |
+| SIGFPE | 8 | 136 |
+| SIGILL | 4 | 132 |
+
+`exit_code` may be combined with `suite`, `name`, and `timeout`. It is **mutually exclusive** with `error =` (compile-time) and `return =` (can't read a crashed child's return register); combining them emits a `-Wattributes` warning and the conflicting argument is ignored.
+
+When a test does not produce the expected exit code, the failure message shows both the expected and actual values:
+
+```
+expected exit_code 139, got 0
+```
+
+### Timeout interaction
+
+`exit_code` tests respect the per-test `timeout =` and global `--test-timeout` settings. A test that hangs beyond its timeout is killed with `SIGKILL` and reported as `TIMEOUT`.
+
+### Limitations
+
+- `exit_code` tests are run in a forked subprocess. Setup hooks run in the parent (before the fork) so their state is visible to the child; teardown hooks run in the parent (after the child exits).
+- Global state changes made inside an `exit_code` test are not visible to subsequent tests (the child process exits and the parent restores its own snapshot as usual).
+- `exit_code` tests are skipped on non-POSIX platforms where `fork` is unavailable.
+
+## Runtime Safety Violations
+
+A runtime safety violation inside an ordinary (non-`exit_code`) `[[cccc::test]]`
+body — an uninitialized read, a bounds error, use-after-free, and the other
+checks documented in [SAFETY.md](SAFETY.md) — aborts the test function
+mid-body and reports `not ok`, with a message naming the opcode that
+aborted:
+
+```
+not ok 1 - test_reads_uninitialized_local
+  ---
+  message: runtime safety violation (CHKI at pc 9) -- see the diagnostic above
+  ...
+```
+
+The violation's own diagnostic banner (e.g. `UNINITIALIZED VARIABLE READ`)
+is printed directly above this message, since it comes from the same
+mechanism used outside `--testing` mode. Code after the trap point —
+including any `Assert*` call or `printf` meant to prove non-completion —
+never runs, exactly as it wouldn't outside `--testing`. A fault inside a
+setup or teardown hook is attributed the same way. Use an `exit_code =`
+test (above) instead if the point of the test is to assert on the specific
+exit code a crash produces.
+
+## Setup and Teardown
+
+The framework supports lifecycle hooks that run before and/or after tests. Use
+`[[cccc::test_setup]]`, `__attribute__((test_setup))`, or `@test_setup` to mark
+setup hooks (and the equivalent `test_teardown` forms for teardown). Hook
+functions must have signature `void name(void)`.
+
+### Global hooks (run around every test)
+
+A hook with no arguments runs before (or after) every test in the file:
+
+```c
+[[cccc::test_setup]]
+void global_setup(void) {
+    // runs before each test
+}
+
+[[cccc::test_teardown]]
+void global_teardown(void) {
+    // runs after each test
+}
+```
+
+### Name-pattern hooks
+
+Use `name = "glob"` to run a hook only around tests whose display name matches the glob pattern:
+
+```c
+[[cccc::test_setup(name = "db_*")]]
+void db_setup(void) {
+    // runs before tests whose display name starts with "db_"
+}
+```
+
+Standard glob wildcards (`*`, `?`, `[...]`) are supported. The pattern is matched against the display name (set via `name = "..."` on `[[cccc::test]]`) or the C function name if no display name is set.
+
+### Suite per-test hooks
+
+Use `suite = "name"` to run a hook before (or after) every test in the named suite:
+
+```c
+[[cccc::test_setup(suite = "network")]]
+void network_setup(void) {
+    // runs before each test in the "network" suite — exact match only
+}
+```
+
+### Suite hook inheritance
+
+By default, a hook scoped to `suite = "math"` runs only for tests whose suite is
+exactly `"math"`. Add the `inherit` keyword to also cover all sub-suites
+(`"math/trig"`, `"math/trig/advanced"`, etc.):
+
+```c
+[[cccc::test_setup(suite = "math", inherit)]]
+void math_setup(void) {
+    // runs before each test in "math" AND any "math/*" sub-suite
+}
+```
+
+The `inherit` flag uses the same `/`-boundary prefix rule as `--test-suite` filtering,
+so a hook on `"math"` does **not** accidentally match `"mathematics"`.
+
+`inherit` can be combined with `once` to wrap an entire subtree with a single
+setup/teardown pair:
+
+```c
+[[cccc::test_setup(suite = "math", once, inherit)]]
+void math_once_setup(void) {
+    // fires once before the first "math" or "math/*" test
+}
+
+[[cccc::test_teardown(suite = "math", once, inherit)]]
+void math_once_teardown(void) {
+    // fires once after the last "math" or "math/*" test leaves the subtree
+}
+```
+
+The once-hook lifecycle is **streaming**: as tests move from one sub-suite to another,
+the framework closes hooks that no longer cover the current test (innermost-first)
+and opens hooks that newly cover it (outermost-first). A parent suite hook stays
+open across a dip into a child block — it does **not** re-fire when the suite
+re-enters the parent scope after visiting a child.
+
+### Suite once-hooks
+
+Add `once` to run a hook exactly once at the start (or end) of a suite, rather than around each individual test. This is useful for expensive shared fixtures:
+
+```c
+[[cccc::test_setup(suite = "db", once)]]
+void open_db(void) {
+    // runs once before the first test in the "db" suite
+}
+
+[[cccc::test_teardown(suite = "db", once)]]
+void close_db(void) {
+    // runs once after the last test in the "db" suite
+}
+```
+
+The global state modified by a `once` setup persists across all tests in the suite — each test restores the post-once-setup snapshot rather than the initial compiled state.
+
+### Name-pattern once-hooks
+
+The `once` keyword can also be combined with `name = "glob"` to run a hook
+exactly once before the first test matching the glob, or after all tests
+complete (for teardown):
+
+```c
+static int g_initialised = 0;
+
+[[cccc::test_setup(name = "needs_init_*", once)]]
+void lazy_init(void) {
+    g_initialised = 1;
+}
+
+[[cccc::test(name = "needs_init_a")]]
+void test_a(void) {
+    AssertEq(g_initialised, 1); // lazy_init fired before this test
+}
+
+[[cccc::test(name = "needs_init_b")]]
+void test_b(void) {
+    // g_initialised is still 1 — the data snapshot was taken after
+    // lazy_init, so its state is visible to all subsequent tests.
+    AssertEq(g_initialised, 1);
+}
+```
+
+The data segment is snapshotted after the once-setup runs, so its state is
+visible to all subsequent tests — not just those matching the glob.  This
+behaviour mirrors suite-level once-hooks.
+
+### Execution order
+
+For each positive test, hooks run in this order:
+
+1. Per-test setup hooks (global, suite, and name-pattern that match, in declaration order)
+2. The test itself
+3. Per-test teardown hooks (global, suite, and name-pattern that match, in declaration order)
+
+Suite `once` hooks run at suite boundaries:
+
+- `once` setup: before the first test in the suite (before per-test hooks for that test)
+- `once` teardown: after the last test in the suite (after per-test hooks for that test)
+
+If a setup hook fails (via `Assert`), the test is skipped and the test is marked as failed. Teardown hooks still run after the failed setup.
+
+If the test itself fails, teardown hooks still run. Teardown is only skipped on timeout, because the VM state is unknown after `SIGALRM`.
+
+## Global State Reset
+
+Global variables are automatically reset to their initial (compile-time) values before each positive test runs. This means tests can safely modify global state without affecting each other:
+
+```c
+static int g_count = 0;
+
+[[cccc::test]]
+void test_a(void) {
+    g_count = 99;   // modifies g_count
+    AssertEq(g_count, 99);
+}
+
+[[cccc::test]]
+void test_b(void) {
+    // g_count is reset to 0 before this test; test_a's modification is gone
+    AssertEq(g_count, 0);
+}
+```
+
+The reset happens after per-test setup hooks are scheduled but before they run — each test (including its setup hooks) sees the initial snapshot.
+
+For suites with `once` setup hooks, each test in the suite restores the post-once-setup snapshot rather than the original initial snapshot, so the shared state established by `once` setup persists across the suite's tests.
+
+## Mode predefined macros
+
+When CCCC starts it defines exactly one of three mutually-exclusive macros
+depending on the active mode:
+
+| Macro | Defined when |
+|---|---|
+| `__CCCC_TEST_MODE__` | `--testing` is active |
+| `__CCCC_BUILD_MODE__` | `--build` is active |
+| `__CCCC_COMP_MODE__` | Neither (normal compilation) |
+
+Use `#ifdef` / `#ifndef` to branch at compile time:
+
+```c
+#ifdef __CCCC_TEST_MODE__
+#include "tests/shared_fixtures.h"
+#endif
+```
+
+## Conditional directives (`@test`)
+
+Any preprocessor directive can be gated on `--testing` mode by prefixing it
+with a `@test` route attribute.  When `--testing` is active the route token is
+stripped and the directive is processed normally; when it is inactive the
+directive is silently skipped.  All three attribute spellings are accepted:
+
+```c
+#define @test            TEST_TIMEOUT_MS 5000   // @-prefix
+#define [[cccc::test]]   TEST_TIMEOUT_MS 5000   // C23
+#define __attribute__((test)) TEST_TIMEOUT_MS 5000 // GNU
+```
+
+This extends to `#include`, `#ifdef`, `#ifndef`, `#undef`, and every other
+preprocessor directive:
+
+```c
+#include @test "tests/shared_fixtures.h"
+
+#define @test TEST_TIMEOUT_MS 5000
+
+#ifdef @test TEST_TIMEOUT_MS
+#  define TIMEOUT TEST_TIMEOUT_MS
+#endif                              // plain #endif — no route needed
+```
+
+When `--testing` is inactive, an `@test #ifdef`/`#ifndef`/`#if` is rewritten
+as `#if 0` internally so the conditional stack stays balanced.  A plain
+`#endif` (without `@test`) closes it correctly.  The `#else` branch under an
+inactive `@test` conditional **runs** normally.
+
+These are the first-class equivalents of the `__CCCC_TEST_MODE__` guard style:
+
+```c
+// Old style                            // New style
+#ifdef __CCCC_TEST_MODE__               #define @test TEST_TIMEOUT_MS 5000
+#define TEST_TIMEOUT_MS 5000
+#endif
+
+#ifdef __CCCC_TEST_MODE__               #include @test "tests/shared_fixtures.h"
+#include "tests/shared_fixtures.h"
+#endif
+```
+
+## Optional feature build matrix
+
+Tests that exercise an opt-in feature must pass in **both** configurations.
+Decimal floating-point (#402, `CCCC_HAS_DECIMAL=1`) is the current example:
+`tests/suites/test_suite_decimal.c` and `test_suite_c23.c`'s
+`test_c23_decimal` guard everything except size/alignment/struct-layout
+checks behind `#ifdef __STDC_IEC_60559_DFP__`, so the same file returns 42
+in the default build (decimal is a compile error there) and exercises real
+BID-backed arithmetic when the flag is on:
+
+```bash
+python3 tools/tests.py                                   # default build
+tools/fetch_intel_bid.sh && make CCCC_HAS_DECIMAL=1
+python3 tools/tests.py                                   # decimal-enabled build
+python3 tools/tests.py --match "*decimal*"                # focused
+python3 tools/tests.py --native                            # native round-trip
+```
+
+Negative tests that only make sense in one configuration (e.g. a decimal
+literal being a diagnostic *because* the library isn't linked) aren't
+encoded as checked-in `EXPECT_COMPILE_ERROR` files, since `tools/tests.py`
+runs every test against whichever single `cccc` binary already exists —
+there's no per-test build-config selector yet. Verify those by hand against
+each build instead.
+
+`tests/test_decimal_fold_clean_fenv.c` (#832) is deliberately a standalone
+file with a plain `main()`, not a `[[cccc::test]]` case inside
+`test_suite_decimal.c`: it asserts `fetestexcept(FE_ALL_EXCEPT) == 0` as the
+very first statement, guarding against compile-time decimal constant folding
+(or comptime macro execution) leaving the host FP environment dirty before
+the guest program starts. Folding that assertion into the ~30-case suite
+would make it order-dependent on sibling tests that legitimately divide or
+`printf` a decimal value — either could set a flag the assertion would then
+misattribute.
+
+## Running Tests
+
+```
+./cccc --testing myfile.c
+```
+
+Select the output format with `--test-format`:
+
+| Format   | Flag                        | Use case              |
+|----------|-----------------------------|-----------------------|
+| TAP      | `--test-format=tap` (default) | CI systems, `prove` |
+| Plain    | `--test-format=plain`       | Human-readable terminal |
+| JSON     | `--test-format=json`        | Machine-readable, CI integration |
+
+### TAP format
+
+[TAP version 13](https://testanything.org/) output. Suite changes are emitted as comments:
+
+```
+TAP version 13
+1..5
+ok 1 - test_assert_true
+# Suite: math
+ok 2 - test_add
+ok 3 - test_mul
+# Suite: strings
+ok 4 - test_equality
+not ok 5 - test_empty
+  ---
+  message: "foo" != "" ("foo" != "") (myfile.c:30)
+  ...
+```
+
+### Plain format
+
+Human-readable output that mimics the Python test runner's style, with check/cross prefixes and a summary block:
+
+```
+Running 5 tests...
+  ✓ test_assert_true
+── math ──
+  ✓ test_add
+  ✓ test_mul
+── strings ──
+  ✓ test_equality
+  ✗ test_empty ("foo" != "" ("foo" != "") (myfile.c:30))
+
+=======================
+Test Results Summary
+=======================
+Total:          5
+Passed:         4
+Failed:         1
+```
+
+### JSON format
+
+Line-delimited JSON objects, one per test, wrapped in an array:
+
+```json
+[
+  {"name":"test_assert_true","status":"pass"},
+  {"name":"test_add","suite":"math","status":"pass"},
+  {"name":"test_mul","suite":"math","status":"pass"},
+  {"name":"test_equality","suite":"strings","status":"pass"},
+  {"name":"test_empty","suite":"strings","status":"fail","message":"\"foo\" != \"\" (\"foo\" != \"\") (myfile.c:30)"}
+]
+```
+
+The process exits with code `0` if all tests pass, `1` if any fail.
+
+### Testing backends (`--testing[=vm|native]`)
+
+`--testing`/`-t` takes an optional backend selector. Bare `-t`/`--testing`
+(no `=`) means `=vm` — the default, in-process behaviour described above.
+
+`--testing=native` serializes the harness itself into a standalone native
+binary — see "`[[cccc::test]]` suite files (`--testing=native`, #1033)"
+above for what it covers and its v1 scope cuts.
+
+### Combining `--testing` with `-c` (compile pre-pass)
+
+`--testing`/`-t` (the VM backend) can be combined with `-c=native`, where
+the test suite acts as a pre-pass guard in front of the compile: the suite
+runs first, and only if every collected `[[cccc::test]]` passes does the
+compile step proceed, building an executable through the host toolchain.
+Any test failure (or a run that hits its timeout) exits nonzero without
+producing an artifact, so an artifact's existence certifies that the suite
+was green at compile time:
+
+```
+./cccc --testing -c=native -o prog myfile.c       # tests, then host compile
+```
+
+The gate is independent of `--fail-fast`: that flag only stops the test
+*run* after the first failure, while any failing test blocks the compile
+regardless. The same guard applies to `--testing --build` — a build script
+whose suite fails is refused before any target compiles.
+
+`--testing=native` is unaffected by all this (that combination is
+`--testing`'s own compile-and-run-the-harness mode, not a VM pre-pass in
+front of a separate `-c=native`). `-c=generated` also combines with
+`--testing`, but is *not* suite-guarded: its portable-C serialization runs
+before the test dispatch (the serialized output is emitted regardless of
+the suite's result) — the combination exists so tooling can inspect
+generated output with `--testing`-active preprocessing, e.g. the `@test`
+route-token leak check.
+
+### `--test-run[=LEVEL]`: smoke-test the program itself before compiling
+
+Where `--testing -c=native` guards compilation behind a passing `[[cccc::test]]` suite, `--test-run[=LEVEL]` guards it behind a single VM execution of the program's own `main()` under safety instrumentation -- a "does this crash under CCCC's safety checks" smoke test, with no test functions involved.
+
+```
+./cccc --test-run program.c                          # VM run at safety=max, then compile native
+./cccc --test-run=basic program.c                     # VM run at a lower safety preset
+```
+
+- `LEVEL` accepts the same values as `--safety=`: `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`. Bare `--test-run` (no `=LEVEL`) is `max`.
+- The smoke-test run happens in a forked child process, so it never touches the compiled program's actual global/heap state -- the eventual native artifact still starts from the source's real compile-time initializers, not whatever the smoke test's `main()` left them as.
+- Success is "ran to completion without a VM-detected safety violation (bounds/UAF/CFI/uninitialized-read/etc.), a real crash (signal), or a hang" -- capped at `--test-timeout` seconds (default 30s when unset). The program's own exit code is **not** checked: a CLI that legitimately returns nonzero on bad input is not a `--test-run` failure. A safety violation alone (no accompanying crash) still refuses to compile; a bare memory leak with no other violation does not.
+- Implies `-c=native` when no `-c=FMT` is given (matching bare `-c`'s own default); an explicit `-c=native` still picks the format. `-o`'s default-filename behavior (`./a.out`) applies the same as plain `-c`.
+- Not compatible with `--repl`, `--build`, `--testing`, `-d`, or the frontend output modes (`-E`/`-M`/`--ast`/`-j`/`-J`) -- none of these have a compile step for `--test-run` to guard.
+
+## Filtering Tests
+
+Run a subset of tests without modifying the source file.
+
+### By name (glob pattern)
+
+```
+./cccc --testing --test='test_assert_*' myfile.c
+```
+
+Standard glob wildcards (`*`, `?`, `[...]`) are supported. The pattern matches against the display name (or C function name if no display name is set).
+
+### By suite
+
+```
+./cccc --testing --test-suite=math myfile.c
+```
+
+Only tests belonging to the named suite are run.
+
+### List without running
+
+```
+./cccc --testing --list-tests myfile.c
+```
+
+Prints all test names (and their suites) without executing them:
+
+```
+# Tests (5 total):
+test_assert_true
+test_add                                 [suite: math]
+test_mul                                 [suite: math]
+test_equality                            [suite: strings]
+test_empty                               [suite: strings]
+```
+
+`--test`, `--test-suite`, `--list-tests`, and `--test-format` all imply `--testing`, so the flag can be omitted when using them.
+
+### Stop after first failure
+
+```
+./cccc --testing --fail-fast myfile.c
+```
+
+Stops after the first failing test. Passes and failures already emitted remain in the TAP output; subsequent tests are not run.
+
+### Per-test timeout
+
+Set a global timeout for all tests:
+
+```
+./cccc --testing --test-timeout=5 myfile.c
+```
+
+Kills any test that runs longer than 5 seconds. Timed-out tests are reported in the selected format (e.g. `not ok N # TIMEOUT` in TAP, `✗ name (TIMEOUT)` in plain, `"status":"timeout"` in JSON). Remaining tests continue to run. Uses `SIGALRM` internally; test code that also installs `SIGALRM` handlers may interfere.
+
+### Per-function timeout
+
+Override the global timeout for a specific test with `timeout = <ms>`:
+
+```c
+[[cccc::test(timeout = 200)]]
+void test_fast_operation(void) {
+    // fails if this runs longer than 200ms
+}
+```
+
+The timeout value is in milliseconds. When set, it takes precedence over the
+global `--test-timeout` for that test.  Uses `setitimer(ITIMER_REAL)` for
+sub-second precision.
+
+## Per-test compiler flags
+
+Override the compiler flags for a specific test with `flags = "..."`:
+
+```c
+[[cccc::test(flags = "--bounds-checks")]]
+void test_with_bounds(void) {
+    int arr[3] = {1, 2, 3};
+    AssertEq(arr[0], 1);
+}
+
+[[cccc::test(flags = "--safety=1 --overflow-checks")]]
+void test_safety(void) {
+    AssertEq(1 + 1, 2);
+}
+```
+
+The `flags` value is a whitespace-separated string of CCCC CLI flags. Any flag
+accepted by `cccc` for safety or warnings can be used:
+
+**Safety check flags:** `-b`/`--bounds-checks`, `--overflow-checks`, `--type-checks`,
+`--stack-canaries`, `--heap-canaries`, `--uaf-detection`, `--pointer-sanitizer`,
+`--memory-leak-detection`, `--memory-tagging`, `--uninitialized-detection`,
+`--stack-instrumentation`, `--alignment-checks`, `--provenance-tracking`,
+`--invalid-arithmetic`, `--format-string-checks`, `--random-canaries`,
+`--memory-poisoning`, `--thread-safety`, `--dangling-pointers`, `-V`/`--require-vm-heap`,
+`-C`/`--control-flow-integrity`, `--ffi-errors-fatal`,
+`--ffi-allow=NAME` (additive; adds to any suite-level allow list)
+
+Note: in the test-dialect, `-V`/`--require-vm-heap` means "this test requires
+the VM heap" and forces it on — the opposite of the CLI's `-V`/`--no-vm-heap`
+(which disables it). The dialect keeps `-V`/`--require-vm-heap` rather than the
+CLI name because per-test flags take precedence over the CLI (see Semantics
+below): a heap-dependent test declared with `-V` keeps the VM heap active for
+itself even when the suite is run under `--leaks`, which injects the CLI `-V`
+to expose guest allocations. The CLI's disable flag is deliberately not
+accepted here — `flags="--no-vm-heap"` would force the heap *on*, the opposite
+of what its name says.
+
+**Safety presets:** `-0`/`-1`/`-2`/`-3` and `--safety=none|basic|standard|max`
+
+`-O<n>` is **not** a per-test flag: the VM has no optimiser, so it would do
+nothing. (A test that needs an optimising host build for its `-c=native`
+round-trip leg carries `-O2` in its file-scope `CCCC_FLAGS:` comment, which
+the runner forwards to the host cc.)
+
+**Warning flags** (affect compilation diagnostics for this test's lazy recompile):
+- `-W<name>` / `-Wno-<name>` — enable/disable a warning category
+- `-Wall`, `-Wextra`, `-Wpedantic`, `-Wstrict-prototypes`, etc.
+- `-Werror` — treat all enabled warnings as errors for this test
+- `-Werror=<name>` — promote one warning category to an error
+- `-Wno-error=<name>` — demote one category (reverses a previous `-Werror=<name>`)
+
+```c
+[[cccc::test(return = 42, flags = "-Wpedantic")]]
+int test_pedantic_clean(void) { return 42; }
+
+[[cccc::test(return = 42, flags = "--bounds-checks")]]
+int test_bounds(void) { int a[1] = {42}; return a[0]; }
+```
+
+Unknown flags are a hard compile error referencing the test name.
+
+### Flags that must stay at file scope
+
+Some flags affect parsing or preprocessing at tokenisation time and cannot be
+applied per-test because the lazy recompile only re-runs codegen/semantics.
+Use a dedicated suite file with the flag in its `CCCC_FLAGS:` comment instead:
+
+| Flag | Suite file pattern |
+|------|--------------------|
+| `--std=c89`/`c99`/`c11`/`c17`/`c23` | `test_suite_std_c89.c`, `test_suite_std_c17.c`, … |
+| `--ffi-deny=NAME` | `test_suite_ffi_deny.c` (one file per deny set) |
+| `--disable-ffi` | `test_suite_ffi_disable.c` |
+
+### Semantics
+
+Because safety flags are baked into bytecode generation (not applied at
+runtime), `flags=` triggers a **lazy recompile** of the whole
+program immediately before the test runs. Adjacent tests that share the same
+flag set share one compile; only tests with a `flags=` attribute pay any
+recompile cost — unflagged tests run on the initial compile.
+
+Per-test flags take precedence over everything, including CLI-level flags
+passed to `cccc` directly and file-scope `#pragma cccc config(...)` settings.
+Bits not mentioned in `flags=` inherit the base (CLI + `#pragma config`)
+configuration.
+
+### Interaction with `#pragma cccc config(...)`
+
+`flags=` is for one-off per-test overrides. `#pragma cccc config(...)` (see
+[SAFETY.md](SAFETY.md)) is the file-scope mechanism for declaring common
+options. Both can coexist: per-test `flags=` takes precedence over
+`#pragma config` for that test.
+
+### Native mode
+
+`flags=` applies only to the bytecode/VM execution path. Under
+`--testing=native` (#1033) a test carrying a `flags=` delta is not
+silently ignored — it is individually marked `SKIP` in the generated TAP
+output, since a per-test safety/warning configuration would
+need a separate native binary per test, which v1 doesn't attempt.
+
+## Per-test output assertions
+
+Four attribute keys let a suite test assert on the text printed to stdout or
+stderr during the test function (and any setup hooks that run before it):
+
+| Key | Passes when... |
+|-----|----------------|
+| `expect_stderr = "regex"` | stderr **matches** the POSIX ERE pattern |
+| `reject_stderr = "regex"` | stderr does **not** match the POSIX ERE pattern |
+| `expect_stdout = "regex"` | stdout **matches** the POSIX ERE pattern |
+| `reject_stdout = "regex"` | stdout does **not** match the POSIX ERE pattern |
+
+Matching uses `regcomp(REG_EXTENDED)` + `regexec()` — equivalent to Python's
+`re.search()` with `re.MULTILINE` (pattern is searched anywhere in the output).
+
+```c
+// Test passes only if the warning appears on stderr.
+[[cccc::test(flags = "-Wattributes",
+             expect_stderr = "warning: unrecognized return= operand")]]
+int test_unrecognized_operand(void) {
+    return 42;
+}
+
+// Test passes only if "fatal" never appears in stderr.
+[[cccc::test(reject_stderr = "fatal")]]
+void test_no_fatal_output(void) {
+    printf("hello\n");
+}
+
+// Test passes only if stdout contains the expected line.
+[[cccc::test(expect_stdout = "result: 42")]]
+void test_prints_result(void) {
+    printf("result: %d\n", 6 * 7);
+}
+```
+
+All four keys can be combined in one attribute and with all other
+`[[cccc::test(...)]]` keys.
+
+When `flags = "..."` is also present, `expect_stderr`/`reject_stderr` capture
+output from both the lazy-recompile phase and the test-execution phase.
+The recompile invokes `cc_compile()` (code generation only — not
+preprocessing or parsing), so any gen-phase diagnostics are
+also captured and prepended to the test-execution output before the pattern check.
+
+**Note:** Parse-time diagnostics (such as `-W` warnings emitted during
+tokenisation or attribute parsing) are produced before `cc_run_tests()` sets up
+any capture pipes and cannot be matched with `expect_stderr` in a suite test.
+Tests that assert on parse-time warnings must remain as legacy files using
+`CCCC_FLAGS:` and `CCCC_EXPECT_STDERR:`.
+
+**Limitations:**
+- Output capture is not supported for `exit_code =` tests (the subprocess
+  runs in a forked child; future ticket).
+- Capture is not available on non-POSIX platforms.
+
+## Assertion Macros
+
+All assertion macros use the `$` prefix and are injected automatically in `--testing` mode.
+
+### Basic Validity
+
+| Macro | Description |
+|-------|-------------|
+| `Assert(cond)` | Fails if `cond` is false |
+| `AssertTrue(cond)` | Alias for `Assert(cond)` |
+| `AssertFalse(cond)` | Fails if `cond` is true |
+| `AssertFail()` | Always fails |
+| `AssertFailMsg(msg)` | Always fails with a custom message |
+
+### Integer Comparisons
+
+| Macro | Description |
+|-------|-------------|
+| `AssertEq(a, b)` | Fails if `a != b` |
+| `AssertNeq(a, b)` | Fails if `a == b` |
+| `AssertGt(a, b)` | Fails if `a <= b` |
+| `AssertLt(a, b)` | Fails if `a >= b` |
+| `AssertGe(a, b)` | Fails if `a < b` |
+| `AssertLe(a, b)` | Fails if `a > b` |
+| `AssertWithin(d, e, a)` | Fails if `\|e - a\| > d` |
+
+### Bitwise
+
+| Macro | Description |
+|-------|-------------|
+| `AssertBits(m, e, a)` | Fails if `(a & m) != (e & m)` |
+| `AssertBitHigh(b, a)` | Fails if bit `b` of `a` is low |
+| `AssertBitLow(b, a)` | Fails if bit `b` of `a` is high |
+
+### Floating Point
+
+| Macro | Description |
+|-------|-------------|
+| `AssertFloatWithin(d, e, a)` | Fails if `\|e - a\| > d` (float) |
+| `AssertDoubleWithin(d, e, a)` | Fails if `\|e - a\| > d` (double) |
+| `AssertFloatEq(e, a)` | Fails if `\|e - a\| > 1e-6` |
+| `AssertDoubleEq(e, a)` | Fails if `\|e - a\| > 1e-15` |
+
+### Pointers
+
+| Macro | Description |
+|-------|-------------|
+| `AssertNull(p)` | Fails if `p` is not null |
+| `AssertNotNull(p)` | Fails if `p` is null |
+
+### Strings
+
+| Macro | Description |
+|-------|-------------|
+| `AssertStrEq(a, b)` | Fails if strings `a` and `b` differ |
+| `AssertStrEqLen(a, b, len)` | Fails if first `len` chars differ |
+
+### Memory
+
+| Macro | Description |
+|-------|-------------|
+| `AssertMemEq(e, a, len)` | Fails if `memcmp(e, a, len) != 0` |
+
+### Arrays
+
+| Macro | Description |
+|-------|-------------|
+| `AssertArrayEq(e, a, cnt)` | Fails if `e[0..cnt-1] != a[0..cnt-1]` (memcmp) |
+| `AssertEachEq(e, a, cnt)` | Fails if any `a[i] != e` (element-wise) |
+
+### Message-appending variants
+
+Append `_msg` to any assertion to add a custom message string to the failure diagnostics:
+
+| Macro | Description |
+|-------|-------------|
+| `AssertMsg(cond, msg)` | `Assert` with custom message |
+| `AssertTrueMsg(cond, msg)` | `AssertTrue` with custom message |
+| `AssertFalseMsg(cond, msg)` | `AssertFalse` with custom message |
+| `AssertEqMsg(a, b, msg)` | `AssertEq` with custom message |
+| `AssertStrEqMsg(a, b, msg)` | `AssertStrEq` with custom message |
+| `AssertNullMsg(p, msg)` | `AssertNull` with custom message |
+| `AssertNotNullMsg(p, msg)` | `AssertNotNull` with custom message |
+| `AssertBitsMsg(m, e, a, msg)` | `AssertBits` with custom message |
+
+When an assertion fails, the test is marked `not ok` and a diagnostic block is printed with the condition and source location. The remaining tests continue to run.
+
+## Limitations
+
+- Test functions must take no arguments and return `void`, `int`, `double`, `float`, `char *`, or a flat struct/union. Use `return = value` to assert on the return value.
+- `return =` assertions support integer literals, float literals, string literals, and compound struct/union literals (`(struct T){.f = v, ...}`). Enum names (`return = GREEN`) and character literals (`return = 'A'`) are not resolved — use the integer value instead (`return = 1`, `return = 65`). Unrecognized operands produce a `-Wattributes` warning and skip the assertion.
+- Struct `return =` supports nested struct/union/array fields and anonymous struct/union members (recursing to a maximum of 8 levels), in addition to scalar and `char *` fields. Bitfield members and non-`char *` pointer fields are not supported.
+- Setup and teardown hook functions must also have signature `void name(void)`.
+- Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
+- Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `Assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.
+- Setup/teardown hooks match suites by exact name by default. Add `inherit` to also cover sub-suites.
+- **Negative test bodies are matched against error substrings.** Use a substring that is specific enough to avoid false matches but not so specific that it breaks with minor message wording changes.
+- **`exit_code =` tests are skipped on non-POSIX platforms** where `fork(2)` is not available.
+- `--test-timeout` uses `SIGALRM`; test code that also uses `alarm()` or installs a `SIGALRM` handler will interfere with the timeout mechanism.
+- **`flags=` triggers a whole-program recompile.** The recompile is lazy (only when the required config changes), but setup/teardown hook once-snapshots taken before a recompile are discarded and re-taken under the new compile. If a once-setup hook leaves per-test state in global variables, that state may not survive across recompile boundaries.
+- **`flags=` supports safety and warning flags.** Flags that affect tokenisation, preprocessing, or output format (e.g. `--std=`, `--include`, `-D`) cannot be per-test and will be rejected as unknown flags.

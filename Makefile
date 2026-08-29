@@ -35,7 +35,7 @@ UNAME_S := $(shell uname -s)
 # tools/generate_stdlib.c needs to produce the real src/std.c (the private
 # headers it needs are found on disk via -I./include instead). Once std.c
 # exists on disk it always wins (self-correcting: no explicit step needed to
-# switch back). See man/BUILDING.md.
+# switch back). See man/BUILD.md.
 ifeq ($(wildcard src/std.c),)
 STDLIB_SRC := src/std_stub.c
 else

@@ -9,51 +9,60 @@ CCCC adds compile-time macro expansion and AST building capabilities on top of t
 
 Currently targets **MacOS** (aarch64) and **Linux** (aarch64/x86_64). Windows support is planned but not started. Release builds are published at [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases).
 
-Guides live in [`man/`](man/) (linked throughout below); generated API docs for the public headers (`building.h`, `reflection.h`, `testing.h`) are published at [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
+Generated API docs for the public headers (`building.h`, `reflection.h`, `testing.h`) are published at [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
 
-## Features
+## Comptime example
 
-- **Compile-time macros** — C functions annotated with `[[cccc::comptime]]`, `__attribute__((comptime))`, the `@comptime` shorthand, or the `__comptime`/`__comptime__` keywords that CCCC compiles and runs during compilation to generate functions, globals, and types or rewrite call sites (see [MACROS.md](man/MACROS.md))
-  - Global generation via file-scope calls (run before the main parse; generated definitions are auto-forward-declared) and call-site expansion via inline `Node *` macros (replace the call with a returned AST during macro expansion)
-  - Custom attribute handlers (`@comptime(attribute("name"))`) that run when a file-scope declaration is parsed
-  - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)`/`QuoteN(...)` templates with `$1`/`$$`/`$@` splicing, the `$identifier` reflect operator, `Gensym`, and a full AST builder API (`MakeFunction`, `MakeVarRef`, `MakeLocalVarUnique`, ...)
-  - `#pragma cccc comptime begin/end` blocks, `@comptime`/`@shared`/`@emit` include and `#define` routing, comptime variables, C23 `constexpr` readback, and a bundled macro standard library in `reflection.h`
-- **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build (see [NATIVE.md](man/NATIVE.md))
-  - This is the production path: full toolchain performance, system libraries, no VM overhead
-  - `-o <file>` names the produced executable; defaults to `./a.out` if omitted. The temporary C source is removed after the build
-  - `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
-- **Register-based bytecode VM** — compiles C to a portable instruction set with 32 integer and 32 floating-point registers, then executes it in a built-in interpreter (see [VM.md](man/VM.md))
-  - Powers compile-time macro execution
-  - Serves as a toolchain-free, introspectable runtime for the safety suite, debugger, and profiler
-  - Use it for portability, sandboxing, and quick iteration without a system compiler
-  - Supports POSIX `pthread` programs through a correctness-first VM GIL; bytecode execution is serialized, while blocking pthread calls release the GIL
-- **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](man/SAFETY.md))
-  - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
-  - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
-  - `--test-run[=LEVEL]` smoke-tests the program under the VM at a safety preset and refuses to compile on a crash/safety violation (see [TESTING.md](man/TESTING.md))
-- **Interactive debugger** — GDB-like source-level debugging (see [TOOLING.md](man/TOOLING.md))
-  - Breakpoints (line, function, conditional), watchpoints, register and memory inspection
-  - Source map export API for IDE integrations (`cc_output_source_map_json`)
-- **Interactive REPL** — top-level read-eval-print loop for declarations and expressions (see [TOOLING.md](man/TOOLING.md))
-  - `-r`/`--repl`; declarations persist and compile incrementally across the session, expressions print a typed result
-  - Multi-line continuation, `:type`/`:load`/`:help`/`:quit` session commands, optional readline history
-- **URL includes & embeds** — fetch headers and data directly from URLs with `#include <https://...>` and `#embed <https://...>`; build with `CCCC_HAS_CURL=1 ./cccc --build build.c` (optional, requires libcurl)
-- **Real IEEE-754-2008 decimal floating-point** — `_Decimal32/64/128` arithmetic, `<decimal_math.h>` transcendentals (`sqrtd64`, `powd128`, ...), `strtod32/64/128`, `fesetround()`-aware rounding and `fetestexcept()`-visible exceptions, and compile-time constant folding, via the Intel BID library; build with `tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 ./cccc --build build.c` (optional, never vendored; see [VM.md](man/VM.md#decimal-floating-point))
-- **Built-in test framework** — `[[cccc::test]]`, `__attribute__((test))`, or `@test` attribute and `Assert*` macros for writing tests in C (see [TESTING.md](man/TESTING.md))
-  - Run with `--testing`; outputs TAP 13 format; no external dependencies or includes needed
-  - `#include [[cccc::test]] "fixtures.h"` conditionally includes a file only in `--testing` mode
-- **Mode predefined macros** — `__CCCC_BUILD_MODE__`, `__CCCC_TEST_MODE__`, or `__CCCC_COMP_MODE__` is defined at compile time to reflect the active execution mode, enabling `#ifdef`-based mode branching
-- **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [COVERAGE.md](man/COVERAGE.md))
-  - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `comptime`/`test` (the `macro` alias is deprecated)
-  - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
-  - `-E`/`-m`/`-c=generated`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
-- **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [TOOLING.md](man/TOOLING.md))
-  - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
-- **JSON reflection output** — dump all function, struct, union, enum, and global definitions
-  - `./cccc --ffi-decls -o lib.json lib.h` — useful for generating FFI wrappers
-- **VM heap** — built-in allocator that intercepts `malloc`/`free`/`calloc`/`realloc` at compile time
-  - On by default at every safety level, including `-0`; pass `-V`/`--no-vm-heap` to opt back into the
-    host allocator (only valid at safety level 0 — `-1`/`-2`/`-3` require the VM heap)
+A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can fold constants, build AST fragments with `Quote(...)` templates (`$1` splices an argument in), and emit whole declarations into the program:
+
+```c
+#include <stdio.h>
+
+// (1) A call-site macro: the call below is replaced by this template.
+@comptime Node *square(Node *x) { return Quote("($1) * ($1)", x); }
+
+// (2) A comptime helper in a global initializer — folded to a constant.
+@comptime Node *pow2(Node *k) { return Quote("1 << ($1)", k); }
+
+// (3) A file-scope macro that emits real declarations into the program.
+@comptime Node *emit_vec2(void) {
+    return Quote("{ struct Vec2 { int x, y; };"
+                 "  int vec2_dot(struct Vec2 a, struct Vec2 b) {"
+                 "      return a.x * b.x + a.y * b.y; } }");
+}
+emit_vec2();
+
+int TABLE_SIZE = pow2(8);              // 256, computed at compile time
+
+int main(void) {
+    struct Vec2 a = { 3, 4 };
+    struct Vec2 b = { square(2), 5 };  // square(2) -> (2) * (2)
+    printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // prints: 256 32
+    return 0;
+}
+```
+
+The same source runs on the VM (`cccc demo.c`) or lowers to a native binary (`cccc -c=native -o demo demo.c`). See [MACROS.md](man/MACROS.md) for the full API.
+
+## Guides
+
+Guides live in [`man/`](man/):
+
+| Guide | Covers |
+|---|---|
+| [BUILD.md](man/BUILD.md) | Building `cccc` itself — `make` stage0 vs the `--build` full build, `CCCC_HAS_*` feature knobs |
+| [BUILD_MODE.md](man/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
+| [MACROS.md](man/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
+| [NATIVE.md](man/NATIVE.md) | `-c=native` — serialising the compiled program back to portable C and handing it to a real host compiler |
+| [HEADERS.md](man/HEADERS.md) | `#include` resolution: CCCC's bundled headers, project headers, `--use-system-headers`, host-header hand-off |
+| [SAFETY.md](man/SAFETY.md) | The runtime memory-safety suite — safety levels `-0`…`-3` and the individual detectors |
+| [TEST_MODE.md](man/TEST_MODE.md) | Writing tests in C with `[[cccc::test]]` and the `Assert*` macros |
+| [DEBUGGER.md](man/DEBUGGER.md) | The interactive source-level debugger (`-g`), auto-debug-on-crash, the source-map API |
+| [REPL.md](man/REPL.md) | The interactive read-eval-print loop (`-r`) |
+| [WARNINGS.md](man/WARNINGS.md) | `-W` warning categories, `-Werror`, pragma suppression, machine-readable output |
+| [COVERAGE.md](man/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
+| [ATTRIBUTES.md](man/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
+| [STDLIB.md](man/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
 
 ## Usage
 
@@ -73,10 +82,6 @@ Options:
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
-	   --url-cache-dir <path> Directory for caching #include/#embed <https://...> fetches
-	   --url-cache-clear     Clear the URL fetch cache and exit
-	   --url-timeout=SECONDS Set URL fetch timeout in seconds (default: 30)
-	   --url-max-size=SIZE   Cap fetched URL payload size (e.g., 50MB, default: 10MB)
 	-D/--define <macro>[=def] Define a macro
 	-U/--undef <macro>       Undefine a macro
 	-a/--ast                 Dump AST
@@ -132,7 +137,7 @@ Testing Options:
 	                         harness itself and runs
 	                         it as a standalone binary via CCCC_NATIVE_CC (implies -c=native;
 	                         [[cccc::test_setup/teardown]] hooks and negative tests are not
-	                         supported under =native, see man/TESTING.md)
+	                         supported under =native, see man/TEST_MODE.md)
 	   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)
 	   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);
 	                         glob metacharacters (*?[) switch to fnmatch (implies --testing)
@@ -268,195 +273,6 @@ Example:
 	./build/cccc -I ./include -D DEBUG -o prog prog.c
 	echo 'int main() { return 42; }' | ./build/cccc -
 ```
-
-## Building
-
-`make` is a bare-minimum bootstrap: it builds just enough of a `cccc` to run
-`./cccc --build build.c`, which is the real build system from there on.
-
-```bash
-make                       # bootstrap: produce ./cccc
-./cccc --build build.c     # everything else (default target: cccc)
-./cccc --build build.c --build-list-targets
-```
-
-On a fresh clone, `./cccc --build build.c` does its own regen of the
-embedded stdlib table as part of its default build. If you need a working
-`cccc` from the plain Makefile alone (no `--build`), use `make bootstrap`
-instead of `make` — see [man/BUILDING.md](man/BUILDING.md).
-
-Produces:
-- `cccc` — compiler executable (C source → VM bytecode, or → native via `-c=native`)
-- `build/lib/libcccc.dylib` (macOS) or `build/lib/libcccc.so` (Linux) — shared library
-  for embedding CCCC in other applications, via `./cccc --build build.c --build-target=libcccc`
-
-CCCC requires libffi for native FFI calls. Both the Makefile and `build.c` use
-`pkg-config libffi` when available, with Homebrew and common Unix fallbacks.
-
-URL includes and embeds (`#include <https://...>` / `#embed <https://...>`) are
-an optional feature requiring libcurl:
-`CCCC_HAS_CURL=1 ./cccc --build build.c`. Fetched files are cached in the
-directory set by `--url-cache-dir` (default `$TMPDIR/.cccc`, capped at
-`--url-max-size`, default 10MB, with a `--url-timeout` of 30s), and curl-enabled
-builds predefine `__CCCC_HAS_CURL__` so code can feature-detect. The
-`__has_include()`/`__has_embed()` probes are URL-aware in those builds too:
-both fetch into the same shared cache (cache-first) so they agree with each
-other and with what a real `#include`/`#embed` would do; non-curl builds
-report 0 for URLs.
-
-Host C stack traces on crash (the `src/backtrace/` library) are on by default
-in every `build.c` target and require no extra system dependencies — they
-are vendored directly in the repo. On macOS, run
-`./cccc --build build.c --build-target=dsym` after building to unlock full
-`file:line` resolution in crash traces (see
-[TOOLING.md](man/TOOLING.md#host-c-backtrace-on-crash)).
-
-Real decimal floating-point is an optional feature requiring the Intel BID
-library, which is fetched and built on demand (never vendored):
-`tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 ./cccc --build build.c` (see
-[VM.md](man/VM.md#decimal-floating-point)).
-
-`CCCC_HAS_BACKTRACE=0 ./cccc --build build.c` opts every target out of
-vendored backtrace support in one build.
-
-`make -f tools/Makefile.backup <target>` is the pre-cut, full-featured
-Makefile (`test`/`clean`/sanitizers/`afl`/`bench`/`profile-*`), kept as an
-escape hatch for when there is no working `cccc` yet. Not maintained going
-forward.
-
-### Compile Natively (production)
-
-`-c=native` is the production path: CCCC preprocesses, expands compile-time macros, then hands the resulting C to a real system compiler. `-o <file>` names the output executable; if omitted it defaults to `./a.out` (matching `cc`/`clang`/`gcc`). The temporary C source is removed after the build.
-
-```bash
-# Bare -c defaults to native; no -o writes ./a.out (build only — does not run)
-./cccc -c program.c
-
-# Write a native executable to a named path
-./cccc -c=native -o program program.c
-
-# Override compiler selection
-CCCC_NATIVE_CC=clang ./cccc -c=native -o program program.c
-
-# Forward include / define / library flags to the underlying compiler
-./cccc -c=native -I./include -DDEBUG -L./lib -lz -o app app.c
-```
-
-Native mode runs CCCC's preprocessing and compile-time macro stages first, then passes serialized C to `CCCC_NATIVE_CC` when set, otherwise `cc`, `clang`, or `gcc`. `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, `--std=`, `-O<n>` (forwarded verbatim to the host cc), and generated-output attribute policy from `--attr-target=` are forwarded through the frontend; VM-only options (bytecode output, disassembler, debugger, profiler, `-0`…`-3` safety levels) are rejected in this mode. To run the binary afterwards, invoke it directly: `./program`. Plain runtime `#include <stdio.h>` (and other real system headers) works here — CCCC avoids re-emitting its own polyfill typedefs where they'd collide with the real ones; see [HEADERS.md](man/HEADERS.md) for the full header resolution search order and CCCC's own bundled headers, which resolve with zero configuration from any directory.
-
-### Run in the VM
-
-Without `-c=native` (or `-c=generated`), CCCC compiles C to bytecode in memory and runs it immediately in its built-in interpreter — there is no on-disk bytecode artifact. Use this when you want a toolchain-free, introspectable, or sandboxed runtime — for macro bodies, quick iteration, the debugger, the safety suite, or `--vm-profile`.
-
-```bash
-# Compile and run immediately on the VM
-./cccc program.c
-
-# Multiple input files
-./cccc main.c utils.c helpers.c
-
-# With preprocessor flags
-./cccc -I./include -DDEBUG main.c
-
-# Disassemble compiled bytecode to stdout instead of running it
-./cccc -d program.c
-```
-
-A leading `#!` (shebang) line on the command-line input file is ignored, so a
-`.c` file can carry `#!/usr/bin/env cccc`, be marked executable, and run
-directly — dispatch through `env` is the kernel/shell's job, not cccc's.
-
-Bytecode uses 32-bit instruction words; 64-bit immediates are split across two consecutive words. See [VM.md](man/VM.md) for the full instruction set and ABI.
-
-## Running Tests
-
-```bash
-python3 tools/tests.py                     # Full test suite
-python3 tools/tests.py --match "*embed*"   # Run only tests matching a glob pattern
-python3 tools/tests.py -j 4                # Run with 4 parallel workers
-python3 tools/tests.py -2                  # Run all tests under safety level 2
-python3 tools/tests.py --leaks             # Enable leak detection (leaks on macOS, valgrind on Linux)
-python3 tools/tests.py --native            # Native round-trip: compile each eligible test with -c=native, then run it
-# I recommend running --leaks with -j (takes a long time synchronously)
-```
-
-`./cccc --build build.c --build-target=test` calls `tools/run_tests.py`, the
-unified orchestrator that runs: source-mode suite, the native round-trip,
-the macOS host-signal debugger integration (skipped on other
-platforms), the REPL and conditional-breakpoint PTY integrations, the
-SQLite smoke test, and the `src/stdlib` FFI registration audit
-(`--build-target=audit_ffi`). Run sub-suites standalone with
-`python3 tools/tests.py` or `python3 tools/tests.py --native`. See
-[TESTING.md](man/TESTING.md) for details.
-
-`make -f tools/Makefile.backup test` (the pre-cut, full-featured Makefile,
-kept as an escape hatch) is the equivalent when there is no working `cccc`
-yet.
-
-### Linux with Colima
-
-Two Linux platforms are supported, each using a named Colima profile and the
-same staged build+smoke+test workflow via `--build-target`:
-
-```bash
-./cccc --build build.c --build-target=linux_amd64_build     # nerdctl build
-./cccc --build build.c --build-target=linux_amd64_smoke     # + uname/file/exit-42 check
-./cccc --build build.c --build-target=linux_amd64_test       # + full suite (5-way sharded)
-
-./cccc --build build.c --build-target=linux_aarch64_build
-./cccc --build build.c --build-target=linux_aarch64_smoke
-./cccc --build build.c --build-target=linux_aarch64_test
-```
-
-`linux_amd64_msan_test` builds `cccc-msan` and runs the full suite against it
-in the amd64 container — MSan is Linux-only. Expect a nontrivial failure
-count from a known, documented uninstrumented-libc/libffi blind spot (#844),
-not a regression signal on its own.
-
-**Linux/amd64 (VZ/Rosetta)** — create the profile once:
-
-```bash
-colima start cccc-linux-amd64 --runtime containerd --arch aarch64 \
-  --vm-type vz --vz-rosetta --cpu 4 --memory 4
-```
-
-The amd64 image is tagged `cccc-linux-amd64`.
-
-**Linux/aarch64 (native arm64)** — create the profile once:
-
-```bash
-colima start cccc-linux-arm64 --runtime containerd --arch aarch64 \
-  --vm-type vz --cpu 4 --memory 4
-```
-
-See [TESTING.md](man/TESTING.md#architecture-build-and-test-workflows) for
-the full walkthrough, including why the amd64 test target shards the suite
-5 ways and the exact Colima/Rosetta gotchas.
-
-The arm64 test target runs `tools/run_tests.py` in one unbatched pass (no
-Rosetta binfmt limit on native arm64). Override `LINUX_ARM64_PROFILE` or
-`LINUX_ARM64_IMAGE` when using different names.
-
-Architecture-specific results and known failures are in [TESTING.md](man/TESTING.md).
-
-### Sanitizer Builds
-
-```bash
-./cccc --build build.c --build-target=cccc_asan     # Build cccc-asan with AddressSanitizer + UBSan
-./cccc --build build.c --build-target=cccc_ubsan    # Build cccc-ubsan with UndefinedBehaviorSanitizer
-./cccc --build build.c --build-target=cccc_tsan     # Build cccc-tsan with ThreadSanitizer
-./cccc --build build.c --build-target=cccc_msan     # Build cccc-msan with MemorySanitizer (Linux only)
-./cccc --build build.c --build-target=sanitizers    # all four in one graph
-
-# Run the test suite with a sanitizer binary
-python3 tools/tests.py --asan -j 4
-python3 tools/tests.py --ubsan -j 4
-```
-
-On macOS, `cccc-asan` carries a built-in suppression for a heap over-read
-inside Apple's own `strfmon()` (not a CCCC bug -- confirmed with a standalone
-`clang -fsanitize=address` program; glibc is unaffected). See the
-`__asan_default_suppressions` hook in `src/stdlib/posix_lang.c`.
 
 ## Credits 
 

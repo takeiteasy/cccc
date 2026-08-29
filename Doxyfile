@@ -7,7 +7,7 @@
 #
 # Run via `./cccc --build build.c --build-target=docs` (see build.c's `docs`
 # target) or directly with `doxygen Doxyfile` from the repo root. Output is
-# gitignored (build/docs/) and never committed -- see man/BUILDING.md for the
+# gitignored (build/docs/) and never committed -- see man/BUILD.md for the
 # build-target writeup.
 
 PROJECT_NAME             = CCCC

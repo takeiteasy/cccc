@@ -1,7 +1,6 @@
 /* decimal_math.h - <math.h> transcendentals for _Decimal32/64/128 (C23,
  * tracker #828, phase 2 of #402). bid{32,64,128}_{sqrt,exp,log,pow,sin,
- * cos,...} via the Intel BID library, opt-in with CCCC_HAS_DECIMAL=1 (see
- * man/VM.md's Decimal Floating-Point section).
+ * cos,...} via the Intel BID library, opt-in with CCCC_HAS_DECIMAL=1.
  *
  * This entire header is a compile error without CCCC_HAS_DECIMAL: unlike
  * <math.h>'s binary-float functions, there is no fallback here (real

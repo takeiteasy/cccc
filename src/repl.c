@@ -20,7 +20,7 @@
 // Interactive top-level read-eval-print loop (ticket #661), distinct from
 // the breakpoint-time debugger REPL in src/debugger.c.
 //
-// Architecture summary (see man/TOOLING.md "Interactive REPL" for the
+// Architecture summary (see man/REPL.md for the
 // user-facing description):
 //   - One VM and one persistent global Scope live for the whole session.
 //     parse() is called exactly once, on an empty token stream, to enter

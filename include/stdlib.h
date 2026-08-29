@@ -40,8 +40,8 @@ extern unsigned long long int strtoull(const char *nptr, char **endptr,
 /* Thin wrappers over __cccc_dec_strtod (src/stdlib/decimal.c's */
 /* cccc_dec_strtod via src/stdlib/stdlib.c's FFI trampoline) -- no new */
 /* opcode, same pattern <decimal_math.h>'s functions use. Decimal return by */
-/* value from a guest static inline is already supported (struct-ABI reuse, */
-/* see man/VM.md); no decimal value crosses the FFI boundary itself. */
+/* value from a guest static inline is already supported (struct-ABI      */
+/* reuse); no decimal value crosses the FFI boundary itself.              */
 #ifdef __STDC_IEC_60559_DFP__
 extern long long __cccc_dec_strtod(long long w, long long dst, long long s,
                                    long long endp);

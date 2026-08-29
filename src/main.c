@@ -114,7 +114,7 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
 // explicitly on the CCCC command line -- a plain `cccc foo.c -c=native`
 // relied entirely on the host cc's own default standard, which can be
 // older (e.g. Ubuntu's plain `cc` -> gcc defaults to gnu17, see
-// man/TESTING.md), silently rejecting any C23 construct the serializer
+// man/NATIVE.md), silently rejecting any C23 construct the serializer
 // legitimately emitted even though the VM run succeeded. Forwarding
 // CCCC's resolved default unconditionally isn't safe either -- a host cc
 // that doesn't recognize "-std=gnu23" at all would then fail *every*
@@ -627,7 +627,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         [[cccc::test_setup/teardown]] hooks "
            "and negative tests are not\n");
     printf("\t                         supported under =native, see "
-           "man/TESTING.md)\n");
+           "man/TEST_MODE.md)\n");
     printf("\t   --test=GLOB           Run only tests whose name matches GLOB "
            "(implies --testing)\n");
     printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites "
@@ -2945,7 +2945,7 @@ int main(int argc, const char *argv[]) {
             test_run_ok = false;
         } else if (WIFEXITED(status) && WEXITSTATUS(status) == 255) {
             // 255 is CCCC's own runtime/safety-error exit convention (see
-            // man/TESTING.md's EXPECT_RUNTIME_ERROR), delivered as a normal
+            // man/TEST_MODE.md's EXPECT_RUNTIME_ERROR), delivered as a normal
             // process exit rather than a host signal -- a VM-detected
             // safety violation (bounds/UAF/CFI/uninit/etc.) reaches here,
             // not WIFSIGNALED above, so it needs its own check.

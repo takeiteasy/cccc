@@ -3,13 +3,13 @@ name: Release
 # Builds and publishes GitHub release artifacts for the three supported
 # platform quadrants on every `v*` tag push (#883). ci.yml's linux-aarch64/
 # macos-arm64 jobs (and this workflow's linux-amd64 job, which
-# ci.yml deliberately omits -- sr.ht already covers amd64 per-push CI, see
-# man/RELEASING.md) share the same bootstrap->build shape; this workflow
+# ci.yml deliberately omits -- sr.ht already covers amd64 per-push CI)
+# share the same bootstrap->build shape; this workflow
 # additionally builds the `release` target (build.c, host -O2 -g -DNDEBUG)
 # instead of the debug default, and runs the full test suite against that
 # exact release binary before packaging it -- an artifact that skipped the
 # optimized-build audit on its own platform defeats the point of gating on
-# it (see man/RELEASING.md's Audit gate section).
+# it (the audit gate).
 #
 # workflow_dispatch lets a fixed release be re-run against an existing tag
 # (e.g. after fixing a platform-specific build bug the first run surfaced)

@@ -49,7 +49,7 @@ arity) are generated from it by `tools/gen_reflection_ffi.py` and
 builtin means editing `reflection.h` and writing its definition in
 `src/reflection.c` (or `src/macros.c`, for the handful that need direct
 compiler state) — nothing else; the FFI table picks it up on the next
-build. See [BUILDING.md](BUILDING.md) for the generated-file/regeneration
+build. See [BUILD.md](BUILD.md) for the generated-file/regeneration
 details.
 
 `reflection.h` also hand-copies three of the compiler's internal enums for
@@ -57,8 +57,7 @@ macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, a deliberate
 subset), and `AttrTargetKind` (`ATTR_TARGET_*`, an exact copy). Their
 numeric values must match `src/cccc.h`'s internal `TypeKind`/`NodeKind`/
 `AttrTargetKind` exactly; `tools/audit_reflection_enums.py` (wired into the
-`test` build target) fails the build if they drift — see
-[TESTING.md](TESTING.md#reflection-enum-parity-audit).
+`test` build target) fails the build if they drift.
 
 ## Return-Value Model
 
@@ -918,8 +917,7 @@ declaration-only header's types visible to comptime code any more.
 `-c=native` re-emits a plain `#include`d file's own `#include` line verbatim
 for the downstream system compiler; a file that itself uses this routing
 syntax is never re-emitted that way, since none of it means anything outside
-CCCC — see [`#include`d files that use cccc-only routing](HEADERS.md#included-files-that-use-cccc-only-routing)
-in man/HEADERS.md.
+CCCC.
 
 All three forms accept the three interchangeable spelling styles:
 

@@ -18,7 +18,7 @@
 # nothing, used only to bootstrap the comptime machinery
 # tools/generate_stdlib.c needs to produce the real src/std.c. Once std.c
 # exists on disk it always wins (self-correcting: no explicit step needed to
-# switch back). See man/BUILDING.md.
+# switch back). See man/BUILD.md.
 ifeq ($(wildcard src/std.c),)
 STDLIB_SRC := src/std_stub.c
 else

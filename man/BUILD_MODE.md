@@ -7,10 +7,11 @@ runner compiles and links them with the system toolchain (`cc` / `ar` / `ld`).
 
 There is no DSL and no separate config language: the build script is C, compiled
 by the same preprocessor / parser / VM as every other CCCC source file. The mode
-mirrors `--testing` (see [TESTING.md](TESTING.md)) and reuses the
+mirrors `--testing` (see [TEST_MODE.md](TEST_MODE.md)) and reuses the
 `[[cccc::comptime]]` interception machinery (see [MACROS.md](MACROS.md)).
 
-> Native output is supported. See [Scope](#scope) for what is deferred.
+This guide is about writing `build.c` scripts for your own project. To build
+`cccc` itself, see [BUILD.md](BUILD.md).
 
 ## Quick start
 
@@ -98,10 +99,10 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
-| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD` (#851, see "Incremental builds and header dependencies" below), gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check (#851). Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc, #1198), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
-| `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. (#559) |
-| `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. (#560) |
-| `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. (#558) |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD`, gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
+| `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. |
+| `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. |
+| `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. |
 
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only / output options (`-c`, `-d`/`--disassemble`,
@@ -132,7 +133,7 @@ The toolchain used to compile/link `--build` targets themselves (including
 cccc's own bootstrap) is selected via `CCCC_BUILD_CC` (else `cc` / `clang` /
 `gcc`); `ar` is selected via `CCCC_BUILD_AR` (else `ar`). This is a separate
 env var from `CCCC_NATIVE_CC`, which only selects the compiler `-c=native`
-hands its *generated* C to (#1198) — setting `CCCC_NATIVE_CC` to test
+hands its *generated* C to — setting `CCCC_NATIVE_CC` to test
 `-c=native` under a different compiler no longer affects which compiler
 builds `--build` targets.
 
@@ -235,7 +236,7 @@ These are the first-class equivalents of the `__CCCC_BUILD_MODE__` guard style:
 Use them to split large build scripts across multiple files without polluting
 normal compilation, and to define build-only constants cleanly.
 
-## Discoverable factory functions (#540)
+## Discoverable factory functions
 
 `[[cccc::build_target]]` tags a *factory function* — an alternative to putting
 everything inside `build_main`. Each factory is a self-contained, individually
@@ -283,7 +284,7 @@ for (int i = 0; i < n; i++)
 ```
 
 `kind=native` is the only supported value (on-disk bytecode targets were
-removed, #1215) -- it exists mainly so the attribute has an explicit form to
+removed) -- it exists mainly so the attribute has an explicit form to
 match its C23/GNU spellings below.
 
 The attribute accepts C23 and GNU forms:
@@ -326,11 +327,11 @@ BuildTarget *DynamicLib(Builder *ctx, const char *name);
 void SetOutput(BuildTarget *t, const char *path);
 void AddSource(BuildTarget *t, const char *path);
 
-// Output path resolution (#842)
+// Output path resolution
 const char *TargetOutput(BuildTarget *t);          // resolved on-disk output path
 void        DeclareOutput(BuildTarget *t, const char *path); // record a RunCustom step's output
 
-// Source-set ergonomics (#542)
+// Source-set ergonomics
 void AddSourcesGlob(BuildTarget *t, const char *pattern); // POSIX glob(3)
 void AddSourceStr(BuildTarget *t, const char *name, const char *content);
                                          // write content to <out_dir>/gen/<name>
@@ -342,11 +343,11 @@ void AddDefine(BuildTarget *t, const char *name, const char *value);
 void AddUndef(BuildTarget *t, const char *name);
 void AddCFlag(BuildTarget *t, const char *flag);
 void AddLdFlag(BuildTarget *t, const char *flag);
-void SetTargetEnv(BuildTarget *t, const char *name, const char *value); // (#842)
+void SetTargetEnv(BuildTarget *t, const char *name, const char *value); //
 
 // Dependencies
 void LinkWith(BuildTarget *t, BuildTarget *dep); // build before + -l<dep>
-void DependsOn(BuildTarget *t, BuildTarget *dep); // build before, no linker flag (#544)
+void DependsOn(BuildTarget *t, BuildTarget *dep); // build before, no linker flag
 void AddLib(BuildTarget *t, const char *name);     // -l<name>
 void AddLibPath(BuildTarget *t, const char *path); // -L<path>
 
@@ -354,50 +355,50 @@ void AddLibPath(BuildTarget *t, const char *path); // -L<path>
 const char  *GetEnv(Builder *ctx, const char *name);         // env var value or NULL
 const char  *CaptureCommand(Builder *ctx, const char *cmd);  // stdout of sh -c cmd (stripped), or NULL
 int          FileExists(Builder *ctx, const char *path);     // 1 if path exists (any node type)
-int          DirExists(Builder *ctx, const char *path);      // 1 if path exists and is a directory (#561)
-const char **GlobFiles(Builder *ctx, const char *pattern);   // NULL-terminated array of matched paths (#561)
-const char  *ReadFile(Builder *ctx, const char *path);       // file contents as string (≤4 MB) or NULL (#561)
-int          WriteFile(Builder *ctx, const char *path, const char *content); // write string to file (#561)
-int          SetCwd(Builder *ctx, const char *path);         // chdir; saves original CWD for auto-restore (#569)
-const char  *GetCwd(Builder *ctx);                           // current working directory (#569)
-int          CopyFile(Builder *ctx, const char *src, const char *dst); // copy file (#569)
-int          MoveFile(Builder *ctx, const char *src, const char *dst); // rename/move file, EXDEV fallback (#569)
-int          DeleteFile(Builder *ctx, const char *path);     // delete file (#569)
-int          MkDir(Builder *ctx, const char *path);          // mkdir -p (#569)
-int          DeleteDir(Builder *ctx, const char *path);      // rm -rf, no symlink follow (#569)
+int          DirExists(Builder *ctx, const char *path);      // 1 if path exists and is a directory
+const char **GlobFiles(Builder *ctx, const char *pattern);   // NULL-terminated array of matched paths
+const char  *ReadFile(Builder *ctx, const char *path);       // file contents as string (≤4 MB) or NULL
+int          WriteFile(Builder *ctx, const char *path, const char *content); // write string to file
+int          SetCwd(Builder *ctx, const char *path);         // chdir; saves original CWD for auto-restore
+const char  *GetCwd(Builder *ctx);                           // current working directory
+int          CopyFile(Builder *ctx, const char *src, const char *dst); // copy file
+int          MoveFile(Builder *ctx, const char *src, const char *dst); // rename/move file, EXDEV fallback
+int          DeleteFile(Builder *ctx, const char *path);     // delete file
+int          MkDir(Builder *ctx, const char *path);          // mkdir -p
+int          DeleteDir(Builder *ctx, const char *path);      // rm -rf, no symlink follow
 
-// Toolchain probing (#543, #559)
+// Toolchain probing
 int          HaveTool(Builder *ctx, const char *name);       // 1 if tool in PATH + allowed
-const char  *FindTool(Builder *ctx, const char *name);       // full path if found + allowed, or NULL (#559)
+const char  *FindTool(Builder *ctx, const char *name);       // full path if found + allowed, or NULL
 int          PkgConfig(BuildTarget *t, const char *pkg);     // run pkg-config, add flags
-void         AddFramework(BuildTarget *t, const char *name); // macOS -framework Name shorthand (#559)
+void         AddFramework(BuildTarget *t, const char *name); // macOS -framework Name shorthand
 
-// Build options (#559)
+// Build options
 const char  *GetBuildOption(Builder *ctx, const char *name); // value of --build-option=key=value or NULL
 int          HaveBuildOption(Builder *ctx, const char *name); // 1 if --build-option=key[=...] was passed
 
-// User args (#558) — positional args after -- on the CLI
+// User args — positional args after -- on the CLI
 int          BuildArgc(Builder *ctx);                // number of args after --
 const char  *BuildArgv(Builder *ctx, int i);         // i-th arg (0-based), or NULL
 
-// Install (#560)
+// Install
 void SetInstallPrefix(Builder *ctx, const char *path); // override install root (default: PREFIX or /usr/local)
 void InstallArtifact(Builder *ctx, BuildTarget *t);    // register t for installation (requires --build-install)
 int  BuildWantsInstall(Builder *ctx);                  // 1 if --build-install was passed
 
-// Custom steps (#544)
+// Custom steps
 BuildTarget *RunCustom(Builder *ctx, const char *name, const char *cmd);
 
-// Profile (#548)
+// Profile
 void        SetProfile(BuildTarget *t, const char *profile); // per-target profile override
 const char *BuildProfile(Builder *ctx);  // global profile name (or NULL)
 
-// Cross-compilation (#547)
+// Cross-compilation
 void        SetTargetTriple(BuildTarget *t, const char *triple); // --target=<triple> (clang-style)
 void        SetToolchain(BuildTarget *t, const char *cc);        // override CC binary per-target
 const char *BuildTargetTriple(Builder *ctx); // global triple from --build-triple (or NULL)
 
-// Factory reflection (#540)
+// Factory reflection
 int         BuildTargetCount(Builder *ctx);     // number of [[cccc::build_target]] factories
 const char *BuildTargetName(Builder *ctx, int i); // name of factory i (0-based)
 
@@ -411,7 +412,7 @@ int BuildDefault(Builder *ctx);           // run_all + summary
 entry's return value reflects the real build status (this is why
 `return BuildDefault();` is the idiomatic last line).
 
-### Referencing a target's own output (#842)
+### Referencing a target's own output
 
 **`TargetOutput(t)`** returns the on-disk path `t` will produce, so a
 `RunCustom` command can reference a binary a dependency target just built
@@ -437,7 +438,7 @@ whatever **`DeclareOutput(t, path)`** recorded — verbatim, not joined onto
 may be called more than once on the same target (e.g. a codegen step that
 produces two files); `TargetOutput()` returns the **first** one recorded.
 
-**`AddInput(t, path)`** (#851) records a file a `RunCustom` step reads.
+**`AddInput(t, path)`** records a file a `RunCustom` step reads.
 Combined with `DeclareOutput`, this gives `build_target()` a real "up to
 date" skip check: if the target has at least one declared input and one
 declared output, and every output exists and is at least as new as every
@@ -473,20 +474,20 @@ invocation. That shell also has no `VAR=value cmd` env-prefix syntax (a
 real POSIX shell feature it doesn't implement); use `env VAR=value cmd
 args...` inside a `RunCustom` command instead.
 
-### Source-set ergonomics (#542)
+### Source-set ergonomics
 
 **`AddSourcesGlob(t, pattern)`** expands a POSIX `glob(3)` pattern relative to
 the current working directory and adds each match as a source file,
 **immediately** — at the point this call is made, before the rest of the
 build entry runs. Matches are returned in sorted order (deterministic across
-machines/runs — #851):
+machines/runs):
 
 ```c
 AddSourcesGlob(lib, "src/lib/**/*.c");    // all .c under src/lib/
 AddSourcesGlob(app, "src/platform/*.c");  // platform-specific sources
 ```
 
-**`AddSourcesGlobDeferred(t, pattern)`** (#851) is the same expansion, but
+**`AddSourcesGlobDeferred(t, pattern)`** is the same expansion, but
 deferred to `build_target()` time — after `t`'s dependencies (e.g. a
 `RunCustom` codegen step) have already run. Use this when a pattern needs to
 match a file a dependency creates during this same build; `AddSourcesGlob`
@@ -518,7 +519,7 @@ AddSourceStr(core, "version.c",
     "const char *version(void) { return \"1.0\"; }\n");
 ```
 
-### Incremental builds and header dependencies (#851)
+### Incremental builds and header dependencies
 
 Under `--build-cache`, every native compile also gets `-MMD -MF
 <objdir>/<stem>.d`, giving the incremental cache visibility into headers a
@@ -626,7 +627,7 @@ WriteFile(ctx, "build/gen/config.h",
     "#define CCCC_VERSION \"1.0\"\n");
 ```
 
-### Working directory and file operations (#569)
+### Working directory and file operations
 
 **`SetCwd(ctx, path)`** changes the process working directory to `path`. The
 original CWD is saved on the first call and automatically restored when the build
@@ -673,7 +674,7 @@ if (WriteFile(ctx, "build/gen/config.h", contents) != 0) {
 }
 ```
 
-### Toolchain probing (#543, #559)
+### Toolchain probing
 
 **`HaveTool(ctx, name)`** returns 1 when `name` is executable (found in `$PATH`)
 and not blocked by `--build-tool-allow`:
@@ -714,29 +715,7 @@ is set, the tool name must appear in it or the probe/spawn is refused.
 `"CaptureCommand"` to allow it when an allowlist is active. `cc`/`ar`/`ld`
 invocations by the host runner bypass the allowlist entirely.
 
-### Optional feature knobs (`CCCC_HAS_*` env vars)
-
-A handful of guest-visible features are off by default because they pull in
-an extra host dependency most builds don't need. Each is gated behind its
-own `CCCC_HAS_*` environment variable, read by `build.c`'s
-`maybe_add_curl`/`maybe_add_decimal`/`maybe_add_ndbm` (and mirrored in
-`tools/Makefile.backup` for the escape-hatch Makefile) and republished into
-the guest macro namespace so headers can guard on it (e.g. `__CCCC_HAS_NDBM__`
-in `src/preprocess.c`):
-
-| Env var | Feature | Extra dependency |
-|---|---|---|
-| `CCCC_HAS_CURL=1` | URL-based `#include`/`#embed` directives (plus URL-aware `__has_include()`/`__has_embed()` probes); fetch knobs: `--url-cache-dir`, `--url-cache-clear`, `--url-timeout`, `--url-max-size` | `libcurl` |
-| `CCCC_HAS_DECIMAL=1` | `_Decimal32/64/128` via the Intel BID library | never vendored — run `tools/fetch_intel_bid.sh` first |
-| `CCCC_HAS_NDBM=1` | `<ndbm.h>` on Linux (macOS/BSD have it natively, no knob needed there) | `libgdbm-compat-dev` (links `-lgdbm_compat`) |
-| `CCCC_HAS_BACKTRACE=0` | opts *out* of the vendored libbacktrace (nicer crash traces); on by default | — |
-
-```
-CCCC_HAS_NDBM=1 ./cccc --build build.c
-CCCC_HAS_NDBM=1 make -f tools/Makefile.backup cccc
-```
-
-### Build options (#559)
+### Build options
 
 Zig-style typed build options let users parameterise a build script from the
 command line without hacking environment variables.  Pass one or more
@@ -769,7 +748,7 @@ int build_main(Builder *ctx) {
 **`HaveBuildOption(ctx, name)`** returns 1 if `--build-option=name` (with or
 without a value) was passed.
 
-### Passing arguments to the build entry (#558)
+### Passing arguments to the build entry
 
 User-facing build steps (e.g. `install`, `test`, `clean`) can be passed as
 positional arguments after `--` on the command line:
@@ -802,7 +781,7 @@ int build_main(Builder *ctx) {
 **`BuildArgv(ctx, i)`** returns the `i`-th argument (0-based), or `NULL` if
 `i` is out of range.
 
-### Install (#560)
+### Install
 
 The install API copies built artifacts to a system prefix after a successful
 build.  Activate it with `--build-install` on the command line; without that
@@ -845,7 +824,7 @@ int build_main(Builder *ctx) {
 The `--build-dry-run` flag is respected: install steps print their destination
 paths without copying.
 
-### Build profiles (#548)
+### Build profiles
 
 Four named profiles expose standard flag presets for compile steps:
 
@@ -879,12 +858,12 @@ with `AddUndef(t, "NDEBUG")`).
 
 `BuildProfile(ctx)` returns the global profile name (or `NULL` if none is set).
 
-### Custom steps (#544)
+### Custom steps
 
 **`RunCustom(ctx, name, cmd)`** registers an arbitrary shell command as a build
 step in the DAG. The command runs through a vendored bourne-compatible shell
 (`src/build_shell.c`) supporting pipes, `<`/`>` redirection, `;`/`&`
-sequencing, and `&&`/`||` with real short-circuit semantics (#846). The
+sequencing, and `&&`/`||` with real short-circuit semantics. The
 step's exit code is propagated — a non-zero exit stops the build, and a
 malformed command is itself a non-zero exit (never a silent no-op).
 
@@ -932,7 +911,7 @@ AddInput(gen, "tools/gen.py");
 DeclareOutput(gen, "include/gen.h");
 ```
 
-### Cross-compilation (#547)
+### Cross-compilation
 
 Two mechanisms let a build script target a different architecture or OS than the
 host.  They can be used independently or together.
@@ -985,153 +964,11 @@ if (triple && strstr(triple, "aarch64"))
 > Cross-compilation tests use `--build-dry-run` to verify the correct flags
 > appear in output without requiring a cross-toolchain on the host.
 
-## Bootstrapping (`Makefile` + `build.c`, #842)
+## Bootstrapping
 
-**"Bootstrap" here means the stage0 `src/std.c` chicken-and-egg** described
-below — a real host `cc` builds every stage. It does **not** mean compiling
-cccc with cccc; nothing in this repo does that today. That's a distinct,
-tracked future direction — self-hosting is out of scope for #1055 too — see
-that ticket's own children if you're looking for it.
-
-The repo-root `Makefile` is a bare-minimum bootstrap: it builds just enough
-of a `cccc` (no `libbacktrace`, no readline — both optional, gated behind
-their own `#ifdef`s) to run `./cccc --build build.c`, which is the real
-build system for this repo from there on. `make -f tools/Makefile.backup
-<target>` is the pre-cut, full-featured Makefile, kept as an escape hatch
-for when there is no working `cccc` yet.
-
-**`src/std.c`** (the embedded-stdlib header table this repo's own `cccc`
-needs to run comptime code) is a gitignored **build artifact**, never
-committed. `./cccc --build build.c`'s default build is a two-pass build:
-
-1. `cccc-pass1` is compiled against whatever `src/std.c` is currently on disk.
-2. `cccc-pass1` regenerates `src/std.c` from `tools/generate_stdlib.c`, via
-   `tools/regen_stdlib.sh`'s atomic `mktemp`+`cmp`+`mv` recipe (a literal
-   `> src/std.c` shell redirect would truncate the file before the generator
-   writes a byte; the vendored `RunCustom` shell has no `set -e`/`mktemp`
-   built in, hence the separate script).
-3. The real `cccc` is (re)compiled against the regenerated `src/std.c`.
-
-`src/std.c` can therefore never go stale, and `make stdlib` no longer
-exists. A fresh clone has no `src/std.c` yet; `src/std_stub.c` (committed —
-its three accessors just return `0`, nothing embedded) is what the Makefile
-links against in that case. The stage0 compiler needing a private header —
-`implicit_reflection_tokens()` in `src/macros.c` needs `reflection.h` to run
-any comptime code at all; `cc_run_build`/`cc_run_tests` need `building.h`/
-`testing.h` — falls back to resolving `cccc/<name>.h` on disk via the normal
-`-I` include search path (`tokenize_private_header()` in
-`src/preprocess.c`), which works as long as `include/` is reachable via `-I`
-(`tools/regen_stdlib.sh` always passes `-I./include`). So the stage0-to-full
-path on a fresh clone is:
-
-```sh
-make bootstrap                       # stage0 (src/std_stub.c) -> regen the
-                                      # real src/std.c -> unconditional relink
-./cccc --build build.c               # now works; its own two-pass regen is
-                                      # a no-op from here on
-```
-
-`make bootstrap` (#857) is `$(MAKE) cccc` (links against `src/std_stub.c` on
-a fresh clone), `sh tools/regen_stdlib.sh ./cccc`, then an `rm -f cccc` and
-a second `$(MAKE) cccc` against the now-real `src/std.c`. The `rm -f` is
-required, not cosmetic: a plain second `make cccc` relies on `make`'s
-mtime-based dependency check, and `regen_stdlib.sh`'s `mv` can land
-`src/std.c`'s mtime in the same clock tick as the just-linked binary on a
-fast filesystem/CI runner — `make` treats an *equal* mtime as up to date,
-not stale, and silently skips the relink (`make: 'cccc' is up to date.`),
-leaving the stage0 binary permanently linked against the stub. Removing the
-binary first forces an unconditional relink regardless of mtime comparison.
-(`SRCS` picks `src/std.c` over the stub automatically once it exists on
-disk — this only needs a *recursive* `$(MAKE)` because that choice is made
-by `$(wildcard src/std.c)` at make-parse time, once per invocation.)
-
-**`src/reflection_ffi_protos.inc`** and **`src/reflection_ffi_register.inc`**
-(the comptime-builtin FFI table: an `extern` prototype and a
-`cc_register_cfunc`/`cc_register_variadic_cfunc` call per builtin) are
-generated from `include/cccc/reflection.h` by `tools/gen_reflection_ffi.py`
-and `#include`'d by both `src/macros.c` (FFI registration) and
-`src/reflection.c` (the actual definitions) — so any drift between a
-`reflection.h` prototype and its definition is now a compile error, not a
-silently-broken comptime builtin. Unlike `src/std.c`, these two files **are
-committed**: they're pure-Python-generated (no `cccc` binary needed), so
-committing them keeps the Makefile's stage0 invariant intact — a fresh clone
-with nothing but a system `cc` and libffi still builds with plain `make`,
-no `python3` required. `./cccc --build build.c`'s default build regenerates
-them via the `reflection_ffi_gen` step; run `python3
-tools/gen_reflection_ffi.py` directly to refresh them by hand, or `--check`
-to verify they're current without writing (this is what the `test` build
-target's `reflection_ffi_check` sub-suite runs).
-
-**`src/shims.inc`** (the `-c=native` support-shim text table: one
-`static const char CCCC_SHIM_<group>_<name>[]` per shim chunk) is generated
-from the ordinary C under **`src/shims/`** by `tools/gen_shims.py` and
-`#include`'d by `src/serialize_shims.c`, which references each constant by
-name where it used to hold the same text as a hand-escaped `fprintf` string
-literal — so a mistyped chunk name is now a compile error, not a
-silently-missing shim. `src/shims/` has one `.c` file per emitter group
-(`native_accessor`, `reallocarray`, `threads`, `uchar`, `posix_compat`,
-`canonical_const`, `dlfcn`, `c23_fromfp`); within each, chunks are delimited
-by `// >>> shim: <name>` … `// <<< shim`, whole-line `//` comments and
-blank lines at a chunk's edges are dropped, and the emitted text is
-otherwise byte-for-byte what the old string literals produced. These files
-are **never compiled** — they are source-of-truth text only; the gating
-logic and rationale for each shim stay in `src/serialize_shims.c` next to
-the code that selects it. Like the reflection `.inc`s and unlike `src/std.c`,
-`src/shims.inc` **is committed** (pure-Python-generated, so plain `make`
-needs no `python3` — stage0 invariant intact). `./cccc --build build.c`'s
-default build regenerates it via the `shims_gen` step; run `python3
-tools/gen_shims.py` to refresh by hand, or `--check` to verify without
-writing (the `test` build target's `shims_check` sub-suite).
-
-`build.c` itself, once bootstrapped, covers what used to be Makefile
-targets: `cccc_asan`/`cccc_ubsan`/`cccc_tsan`/`cccc_msan`/`sanitizers`,
-`fuzz_harness`, `libcccc`, `clean`, `host_tests`, `test`/`test_suites`/
-`test_legacy`, `sqlite_smoke`, `audit_ffi`, `audit_reflection_enums`,
-`reflection_ffi_gen`/`reflection_ffi_check`, `shims_gen`/`shims_check`, `bench`/`bench_compare`/`bench_compare_quick`/
-`bench_compare_json`, `profile_cpu`/`profile_mem`, `dsym`, `afl`/`afl_asan`,
-`docs` (Doxygen HTML API docs), and `stdlib_gen` (the two-pass regen alone,
-no final rebuild).
-
-**`docs`** generates Doxygen HTML for the three public headers
-(`include/cccc/building.h`, `reflection.h`, `testing.h`) into
-`build/docs/html/` via `doxygen Doxyfile` at the repo root. It's a pure
-source scan — no `cccc` binary is built — but it needs `doxygen` on `PATH`
-(`brew install doxygen` / `apt install doxygen`); the target checks with
-`HaveTool` and fails with an install hint rather than silently no-opping if
-it's missing. It is **not** part of the default build (`build_main()`), so a
-fresh clone never needs doxygen installed. Output is gitignored
-(`build/docs/`) and never committed — regenerate it locally when you want to
-browse the API docs, or see the published copy at
-<https://takeiteasy.github.io/cccc/>. **Not run in sr.ht CI**
-(`.builds/linux-amd64.yml`): that manifest carried a `docs` task through
-#909-#911, but sr.ht's `ubuntu/lts` image started shipping a doxygen
-version that hangs (not just warns) when `graphviz`'s `dot` binary is
-absent — `dot` was never a declared CI package — timing out every job's
-docs step regardless of what the commit touched (first seen ~2026-08-07).
-The task was dropped rather than chased further; docs generation now lives
-entirely on the GitHub side instead (`.github/workflows/ci.yml`, which
-installs `graphviz` alongside `doxygen`), built and published to GitHub
-Pages on every push to `trunk` — see man/TESTING.md's Continuous
-Integration section. The public headers document with Doxygen tags
-(`@brief`/`@details`/`@param`/
-`@return`, either `/*!` or `/**` delimiters — both are equivalent to
-Doxygen); the older HeaderDoc-style tags (`@abstract`, `@discussion`,
-`@function`, `@define`) that used to appear alongside them were retired in
-favor of this.
-
-The full staged cross-platform workflow is also covered (#850):
-`linux_amd64_build`/`linux_amd64_smoke`/`linux_amd64_test` (5-way sharded),
-`linux_aarch64_build`/`linux_aarch64_smoke`/`linux_aarch64_test`, and
-`linux_amd64_msan_test`. The smoke and sharded-test recipes need `$(...)`
-command substitution, `$?` exit-code capture, and (for the amd64 shard loop)
-a fail-flag accumulator across a `for` loop — none of which the vendored
-build shell (`src/build_shell.c`) supports — so those are delegated to real
-shell scripts (`tools/linux_container_smoke.sh`, `tools/linux_amd64_test.sh`,
-`tools/linux_amd64_msan_test.sh`) rather than inlined into `RunCustom`
-command strings. See [man/TESTING.md](TESTING.md#architecture-build-and-test-workflows)
-for the full walkthrough of each, including the required Colima setup.
-
-`./cccc --build build.c --build-list-targets` lists them all.
+`--build` is also how CCCC builds itself. That path — the stage0 `make`
+compiler, the two-pass `src/std.c` regen, and the full target list `build.c`
+exposes — is covered in [BUILD.md](BUILD.md).
 
 ## Tool allowlist (`--build-tool-allow`)
 
@@ -1167,47 +1004,18 @@ available regardless of `--ffi-allow`/`--ffi-deny`/`--disable-ffi`.
 For gating which **tool executables** may be probed or run via `RunCustom`,
 use `--build-tool-allow` (see above).
 
-## Scope
+## Not yet supported
 
-**Current release:** the `--build` mode, `[[cccc::build]]` entry resolution,
-the auto-injected `building.h`, the three native target kinds, the core builder
-API, a host-side runner with topological sort, `--build-out-dir`,
-`--build-dry-run`, `--build-target=NAME` registered-name selection with
-transitive dependency pruning, the inverted FFI default,
-`AddSourcesGlob` / `AddSourceStr` / `ExcludeSource` (#542),
-`HaveTool` / `PkgConfig` / `--build-tool-allow` (#543),
-`RunCustom` / `DependsOn` (#544),
-`--build-jobs` / `--build-keep-going` / `--build-quiet` / `--build-verbose` (#541),
-target-level parallel `-j` across DAG nodes (#557),
-`[[cccc::build_target]]` discoverable factory functions with `--build-list-targets`
-and `BuildTargetCount` / `BuildTargetName` reflection (#540),
-build profiles (`debug` / `release` / `relwithdebinfo` / `minsizerel`) via
-`--build-profile` and `SetProfile` (#548),
-cross-compilation via `--build-triple` / `SetTargetTriple` and
-`--build-cc` / `SetToolchain` (#547),
-`GetEnv` / `CaptureCommand` / `FileExists` environment and filesystem helpers,
-`--build-cache[=PATH]` incremental builds with mtime + content-hash CAS (#546),
-`FindTool` / `AddFramework` / `GetBuildOption` / `HaveBuildOption` /
-`--build-option=KEY=VALUE` (#559),
-`InstallArtifact` / `SetInstallPrefix` / `BuildWantsInstall` / `--build-install` (#560),
-`DirExists` / `GlobFiles` / `ReadFile` / `WriteFile` filesystem helpers (#561),
-a self-hosting `build.c` at Makefile parity (#549, #842) — see
-"Bootstrapping" above for the full target list,
-`TargetOutput` / `DeclareOutput` for referencing a target's resolved output
-path, `SetTargetEnv` for per-target compiler-child environment variables,
-and a duplicate-target-name diagnostic (#842),
-`__CCCC_BUILD_MODE__` / `__CCCC_TEST_MODE__` / `__CCCC_COMP_MODE__` predefined
-mode macros (#575), `#include [[cccc::build]]` / `#include [[cccc::test]]`
-conditional include directives (#570), and, from #851:
-`AddSourcesGlobDeferred` for glob expansion deferred to build time,
-`AddInput` giving `RunCustom` targets a real "up to date" skip check,
-multiple `DeclareOutput` calls per target, `-MMD`/`.d` header-dependency
-tracking folded into both the mtime and content-hash cache levels, and a
-link/archive-step staleness check.
+Everything the builder API declares is implemented for the three native
+target kinds. There is no self-hosting (compiling `cccc` with `cccc`), no
+on-disk bytecode-target output, and idle `-j` slots are not redistributed
+between a parallel target build and its children (see
+[Parallel builds](#parallel-builds)).
 
 ## See also
 
-- [man/TESTING.md](TESTING.md) — `--testing` mode, the working analog this mode mirrors.
-- [man/MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
-- [man/COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
-- [man/NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations.
+- [BUILD.md](BUILD.md) — building `cccc` itself (`make` stage0 vs `--build`).
+- [TEST_MODE.md](TEST_MODE.md) — `--testing` mode, the working analog this mode mirrors.
+- [MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
+- [COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
+- [NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations.

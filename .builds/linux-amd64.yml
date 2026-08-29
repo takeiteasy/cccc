@@ -60,8 +60,7 @@ tasks:
       cd cccc
       set -e
       python3 tools/run_tests.py --binary build/cccc -j 8
-      # No `docs` task here (dropped, see man/BUILDING.md's docs-target
-      # section and man/TESTING.md's CI writeup): sr.ht's ubuntu/lts image
+      # No `docs` task here (dropped): sr.ht's ubuntu/lts image
       # started shipping a doxygen version that hangs -- not just warns --
       # when graphviz's `dot` binary is absent (never installed here; it's
       # only an apt-suggested package, not a dependency), timing out every

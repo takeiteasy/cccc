@@ -406,7 +406,7 @@ static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
 
 /* Reads one shell word, performing quote removal, backslash escaping and
  * $VAR/${VAR} expansion as it goes (see the module-level RunCustom grammar
- * notes in man/BUILDING.md). Unlike the old raw-slice reader, the decoded
+ * notes in man/BUILD_MODE.md). Unlike the old raw-slice reader, the decoded
  * content can differ in length from the source text, so the returned token
  * always owns a heap buffer (`owned = true`). */
 static shell_token_t read_word(shell_lexer_t *l) {
