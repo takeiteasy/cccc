@@ -43,6 +43,10 @@ build succeeded (2 targets, 0 errors)
 
 A runnable example lives in [`examples/build_demo/`](../examples/build_demo).
 
+`build.c` is a naming convention, not a requirement — the build script is
+just the path passed to `--build`, so `cccc --build tools/mybuild.c` works
+identically.
+
 ## How it works
 
 ```
@@ -150,6 +154,11 @@ order:
 2. **Attribute:** a function tagged `[[cccc::build]]`. Exactly one is required;
    more than one is an ambiguity error listing every candidate.
 3. **Default name:** a function named `build_main`.
+
+A `[[cccc::build]]`-tagged function can be named anything — the tag alone
+resolves it. The `build_main` fallback only applies when a script has no
+`[[cccc::build]]` attribute and no `--build-entry` flag at all; it is not a
+second requirement layered on top of the attribute.
 
 The attribute accepts the C23 and GNU forms, like `[[cccc::comptime]]`:
 
