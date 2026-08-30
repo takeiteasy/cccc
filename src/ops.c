@@ -6125,7 +6125,7 @@ static inline int op_RETBUF_fn(VirtualMachine *vm) {
     }
     int idx = vm->runtime_return_buffer_index % count;
     if (!vm->compiler.return_buffer_pool[idx]) {
-        printf("error: return buffer pool was not rehydrated\n");
+        printf("error: return buffer pool was never allocated\n");
         return -1;
     }
     vm->runtime_return_buffer_index = (idx + 1) % count;

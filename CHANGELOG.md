@@ -13,3 +13,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `-c=native`/`-c=generated`.
 - Fixed: a struct-returning call left a dead, unused local in every
   generated wrapper around it.
+- Fixed: a `[[cccc::comptime]]` function returning a struct/union/vector by
+  value crashed the comptime interpreter with "return buffer pool was never
+  allocated"; a fault during comptime execution now aborts the build with a
+  diagnostic instead of silently continuing.
+- Fixed: a `#include @comptime`/`#include @shared` directive immediately
+  followed by a `[[cccc::comptime]]` definition written on one line
+  segfaulted the compiler; a related shape corrupted the comptime macro
+  isolation stack instead.

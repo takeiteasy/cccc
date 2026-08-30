@@ -155,6 +155,26 @@ static Token *copy_macro_token(VirtualMachine *vm, Token *tok) {
     return copy;
 }
 
+// Every chunk build_combined_macro_tokens() splices into the synthesized
+// comptime program (a routed #include/#define line, a macro prototype, a
+// macro body, a stripped declaration, a scope marker, the trailing EOF) is a
+// genuine file-scope construct in that program and so genuinely begins a
+// line. copy_macro_token() otherwise preserves the source token's at_bol
+// verbatim, which is only correct *within* a chunk copied from one
+// contiguous run of original tokens -- the token immediately following an
+// appended chunk can carry at_bol=false from its own original context (e.g.
+// a `[[cccc::comptime]] void t(void) { ... }` written on one line). Without
+// forcing the boundary, preprocess2()'s skip_line()/copy_line() (which scan
+// forward "while (!tok->at_bol)" to find the end of a directive line) walk
+// straight through the chunk boundary, off the end of the synthesized list,
+// and dereference NULL -- or, on a multi-line body, walk past a
+// TK_MACRO_SCOPE_PUSH/POP marker and desync the isolation stack (#283).
+static Token *copy_macro_token_bol(VirtualMachine *vm, Token *tok) {
+    Token *copy  = copy_macro_token(vm, tok);
+    copy->at_bol = true;
+    return copy;
+}
+
 static Token *new_macro_punct(VirtualMachine *vm, char *str, Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
@@ -173,7 +193,8 @@ static Token *new_macro_punct(VirtualMachine *vm, char *str, Token *tmpl) {
 static Token *new_macro_eof(VirtualMachine *vm, Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
-    tok->kind = TK_EOF;
+    tok->kind   = TK_EOF;
+    tok->at_bol = true;
     if (tmpl) {
         tok->loc      = tmpl->loc;
         tok->len      = tmpl->len;
@@ -192,9 +213,10 @@ static Token *new_macro_scope_marker(VirtualMachine *vm, TokenKind kind,
                                      Token *tmpl) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     memset(tok, 0, sizeof(Token));
-    tok->kind = kind;
-    tok->loc  = "";
-    tok->len  = 0;
+    tok->kind   = kind;
+    tok->loc    = "";
+    tok->len    = 0;
+    tok->at_bol = true;
     if (tmpl) {
         tok->file     = tmpl->file;
         tok->filename = tmpl->filename;
@@ -206,13 +228,16 @@ static Token *new_macro_scope_marker(VirtualMachine *vm, TokenKind kind,
 
 static Token *append_macro_prototype(VirtualMachine *vm, Token *cur,
                                      MacroFn *pm) {
-    Token *last = pm->body_tokens;
+    Token *last  = pm->body_tokens;
+    bool   first = true;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
          tok        = tok->next) {
         last = tok;
         if (equal(tok, "{"))
             break;
-        cur = cur->next = copy_macro_token(vm, tok);
+        cur = cur->next =
+            first ? copy_macro_token_bol(vm, tok) : copy_macro_token(vm, tok);
+        first = false;
     }
     cur = cur->next = new_macro_punct(vm, ";", last);
     return cur;
@@ -220,19 +245,26 @@ static Token *append_macro_prototype(VirtualMachine *vm, Token *cur,
 
 static Token *append_macro_definition(VirtualMachine *vm, Token *cur,
                                       MacroFn *pm) {
-    Token *last = pm->body_tokens;
+    Token *last  = pm->body_tokens;
+    bool   first = true;
     for (Token *tok = pm->body_tokens; tok && tok->kind != TK_EOF;
          tok        = tok->next) {
         last = tok;
-        cur = cur->next = copy_macro_token(vm, tok);
+        cur  = cur->next =
+            first ? copy_macro_token_bol(vm, tok) : copy_macro_token(vm, tok);
+        first = false;
     }
     (void)last;
     return cur;
 }
 
 static Token *append_token_list(VirtualMachine *vm, Token *cur, Token *tokens) {
-    for (Token *tok = tokens; tok && tok->kind != TK_EOF; tok = tok->next)
-        cur = cur->next = copy_macro_token(vm, tok);
+    bool first = true;
+    for (Token *tok = tokens; tok && tok->kind != TK_EOF; tok = tok->next) {
+        cur = cur->next =
+            first ? copy_macro_token_bol(vm, tok) : copy_macro_token(vm, tok);
+        first = false;
+    }
     return cur;
 }
 
@@ -1089,9 +1121,13 @@ static bool comptime_var_uses_init_fn(ComptimeVar *cv) {
 // Produces a declaration without its initializer, e.g. "int buf_size ;"
 static Token *append_decl_stripped(VirtualMachine *vm, Token *cur,
                                    Token *decl_tokens, Token *eq_tok) {
+    bool first = true;
     for (Token *t = decl_tokens; t && t->kind != TK_EOF && t != eq_tok;
-         t        = t->next)
-        cur = cur->next = copy_macro_token(vm, t);
+         t        = t->next) {
+        cur = cur->next =
+            first ? copy_macro_token_bol(vm, t) : copy_macro_token(vm, t);
+        first = false;
+    }
     cur = cur->next = new_macro_punct(vm, ";", eq_tok);
     return cur;
 }
@@ -1495,8 +1531,10 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->debug_vm          = 0;
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
-    cccc_reset_getopt_state(); // #1041
-    int eval_rc = vm_eval(vm);
+    cccc_reset_getopt_state();    // #1041
+    vm->runtime_fault    = false; // no stale fault from an earlier vm_eval
+    vm->runtime_fault_op = NULL;
+    int eval_rc          = vm_eval(vm);
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm         = saved_debug;
 
@@ -1512,6 +1550,15 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
         error_tok(vm, init_fn->tok,
                   "compile-time execution terminated by host signal %d",
                   vm->dbg.host_fault_signal);
+    // A plain opcode-handler fault (e.g. RETBUF finding an unallocated pool)
+    // is not CCCC_HOST_SIGNAL_RC -- it returns -1 through the normal dispatch
+    // path (see cccc_vm_note_fault/VM_TRAP_OR_RETURN, src/vm.c). Left
+    // unchecked, the comptime var initializer silently aborts mid-run and the
+    // build carries on as if nothing happened.
+    else if (vm->runtime_fault)
+        error_tok(vm, init_fn->tok,
+                  "compile-time execution aborted (opcode '%s' faulted)",
+                  vm->runtime_fault_op ? vm->runtime_fault_op : "?");
 
     if (vm->debug_vm)
         printf("__builtin_comptime_init completed.\n");
@@ -1893,6 +1940,16 @@ static bool compile_macro_program(VirtualMachine *vm) {
     //         constant initializer bytes (init_data path).
     init_macro_globals(vm, macro_prog);
 
+    // The RETBUF pool must exist before any comptime function body executes a
+    // struct/union/vector/wide-_BitInt-returning call or return statement.
+    // compile_macro_program() codegens comptime bodies directly via
+    // gen_function() below rather than going through gen() or
+    // cc_repl_compile_new(), so neither of those existing call sites cover
+    // this pass -- without this, RETBUF faults with "return buffer pool was
+    // never allocated" the first time a comptime function returns an
+    // aggregate by value. Idempotent, so harmless if gen() already ran.
+    cc_alloc_return_buffer_pool(vm);
+
     // Step 2: generate bytecode for all functions, including the synthesized
     //         __builtin_comptime_init helper produced by
     //         build_combined_macro_tokens.
@@ -2146,11 +2203,13 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
 
     // Execute the macro function
     int saved_debug = vm->debug_vm;
-    vm->debug_vm    = 0;       // Disable debug output during macro execution
+    vm->debug_vm    = 0;          // Disable debug output during macro execution
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
-    cccc_reset_getopt_state(); // #1041
-    int eval_rc = vm_eval(vm);
+    cccc_reset_getopt_state();    // #1041
+    vm->runtime_fault    = false; // no stale fault from an earlier vm_eval
+    vm->runtime_fault_op = NULL;
+    int eval_rc          = vm_eval(vm);
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;
 
@@ -2180,6 +2239,16 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
         error_tok(vm, call_tok,
                   "compile-time macro execution terminated by host signal %d",
                   vm->dbg.host_fault_signal);
+    // A plain opcode-handler fault (e.g. RETBUF finding an unallocated pool)
+    // is not CCCC_HOST_SIGNAL_RC -- it returns -1 through the normal dispatch
+    // path (see cccc_vm_note_fault/VM_TRAP_OR_RETURN, src/vm.c). Left
+    // unchecked, the comptime function silently aborts mid-run and 'result'
+    // (whatever regs[REG_A0] happened to hold) gets spliced in as if the
+    // macro had completed normally.
+    else if (vm->runtime_fault)
+        error_tok(vm, call_tok,
+                  "compile-time macro '%s' aborted (opcode '%s' faulted)",
+                  pm->name, vm->runtime_fault_op ? vm->runtime_fault_op : "?");
 
     if (vm->debug_vm && result)
         printf("Macro function '%s' returned node of kind %d\n", pm->name,

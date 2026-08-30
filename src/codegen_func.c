@@ -296,15 +296,17 @@ static void sort_init_entries(CCCCInitEntry *list, int count, bool ascending) {
 
 // Allocate the RETBUF rotating pool (struct/union/vector/wide-_BitInt
 // returns) at the current end of the data segment. Idempotent -- guarded on
-// slot 0 being unset, the same check src/bytecode.c's incremental-cache
-// adoption path (~line 1354) already uses for this resource -- so it is
-// safe to call from both gen()'s whole-program pass and
-// cc_repl_compile_new()'s incremental pass without double-allocating.
+// slot 0 being unset -- so it is safe to call from gen()'s whole-program
+// pass, cc_repl_compile_new()'s incremental pass, and
+// compile_macro_program()'s comptime pass without double-allocating.
 // cc_repl_compile_new() must call this too: before #666 it never did, so
 // any REPL expression (or debugger conditional-breakpoint expression, which
 // shares cc_repl_compile_new) returning a struct/union/vector hit "return
-// buffer pool was not rehydrated" at RETBUF-execution time.
-static void alloc_return_buffer_pool(VirtualMachine *vm) {
+// buffer pool was never allocated" at RETBUF-execution time.
+// compile_macro_program() (src/macros.c) must call it for the same reason: a
+// [[cccc::comptime]] function body returning a struct/union/vector by value hit
+// the identical fault before this call site existed.
+void cc_alloc_return_buffer_pool(VirtualMachine *vm) {
     if (vm->compiler.return_buffer_pool[0] != NULL)
         return;
     for (int i = 0; i < RETURN_BUFFER_POOL_SIZE; i++) {
@@ -405,7 +407,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     // Allocate return buffer pool for struct/union returns at end of data
     // segment
-    alloc_return_buffer_pool(vm);
+    cc_alloc_return_buffer_pool(vm);
 
     // Pre-pass: Assign stack offsets for all functions
     // This is critical for nested functions, which are compiled before their
@@ -630,7 +632,7 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     // statement -- allocated here (not inside the !vm->text_seg block
     // above) so it is correct regardless of whether this call or an earlier
     // whole-program gen() allocated the segments first. Idempotent.
-    alloc_return_buffer_pool(vm);
+    cc_alloc_return_buffer_pool(vm);
 
     // Count and collect the new non-function globals, oldest-first (the list
     // is built by prepending, so walking old_head..globals gives newest-first).

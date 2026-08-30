@@ -3877,8 +3877,8 @@ typedef struct Compiler {
     // Struct/union return buffer pool (copy-before-return approach)
     char *return_buffer_pool[RETURN_BUFFER_POOL_SIZE]; // Pool of return buffers
     long long
-        return_buffer_offsets[RETURN_BUFFER_POOL_SIZE]; // Data offsets
-                                                        // serialized in .c4
+        return_buffer_offsets[RETURN_BUFFER_POOL_SIZE]; // Data-segment
+                                                        // offset of each slot
     int return_buffer_count; // Number of active return buffers
     int return_buffer_index; // Current buffer index (rotates 0-7)
     int return_buffer_size;  // Size of each buffer (1024 bytes)
@@ -4924,6 +4924,17 @@ void cc_compile(VirtualMachine *vm, Obj *prog);
              still target any previously-compiled function.
 */
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head);
+
+/*!
+ @brief Allocate the RETBUF rotating pool (struct/union/vector/wide-_BitInt
+        by-value returns) at the current end of the data segment.
+ @param vm The virtual machine.
+ @discussion Idempotent -- guarded on slot 0 being unset -- so it is safe to
+             call from gen()'s whole-program pass, cc_repl_compile_new()'s
+             incremental pass, and compile_macro_program()'s comptime pass
+             without double-allocating.
+*/
+void cc_alloc_return_buffer_pool(VirtualMachine *vm);
 
 /*!
  @brief Captured compiler scope/globals/locals state, taken before parsing

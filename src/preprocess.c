@@ -212,9 +212,20 @@ static Token *skip_line(VirtualMachine *vm, Token *tok) {
     if (tok->at_bol)
         return tok;
     warn_tok(vm, tok, CCCC_WARN_EXTRA_TOKENS, "extra tokens after directive");
-    while (!tok->at_bol)
-        tok = tok->next;
-    return tok;
+    // Defence in depth: every token list this walks is expected to end in a
+    // TK_EOF with at_bol set (the tokenizer sets it on the real EOF; any
+    // synthesized token list must too -- see copy_macro_token_bol() in
+    // src/macros.c). Stop at TK_EOF rather than walking a chunk boundary
+    // that lost at_bol and dereferencing past the end of the list -- callers
+    // all assume the returned token is dereferenceable, so fall back to the
+    // last TK_EOF seen (or tok itself if the walk never finds one) instead
+    // of NULL.
+    Token *last = tok;
+    while (tok && tok->kind != TK_EOF && !tok->at_bol) {
+        last = tok;
+        tok  = tok->next;
+    }
+    return tok ? tok : last;
 }
 
 // #1155: a captured `#include` line's operand can carry incidental internal
@@ -1176,7 +1187,12 @@ static Token *copy_line(VirtualMachine *vm, Token **rest, Token *tok) {
     Token  head = {};
     Token *cur  = &head;
 
-    for (; !tok->at_bol; tok = tok->next)
+    // Defence in depth: stop at TK_EOF too, not just at_bol -- see the
+    // matching comment on skip_line() above. A well-formed token list always
+    // has at_bol set on its terminating TK_EOF, so this is normally
+    // unreachable; it exists so a future chunk-boundary bug fails safe
+    // instead of walking off the end of the list.
+    for (; tok->kind != TK_EOF && !tok->at_bol; tok = tok->next)
         cur = cur->next = copy_token(vm, tok);
 
     cur->next = new_eof(vm, tok);
