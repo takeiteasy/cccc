@@ -2117,6 +2117,12 @@ struct Obj {
     int  align;    // alignment
     bool is_used;
     bool is_maybe_unused;
+    // #18/#19 buffalo: a caller-side struct-return slot allocated by
+    // funcall() (parse_postfix.c) for every struct/union-returning call.
+    // VM codegen (RETBUF/VSTR) reads it purely as a frame offset -- no
+    // serialize_*.c file ever references the Obj itself -- so the
+    // serializer must never declare it; see serialize_decl.c's hoist loop.
+    bool is_ret_buffer;
     bool is_deprecated;
     bool is_noreturn;
     bool is_nodiscard;

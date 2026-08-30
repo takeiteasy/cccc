@@ -1075,8 +1075,10 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
 
     // If a function returns a struct, it is caller's responsibility
     // to allocate a space for the return value.
-    if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION)
-        node->ret_buffer = new_lvar(vm, "", 0, node->ty);
+    if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
+        node->ret_buffer                = new_lvar(vm, "", 0, node->ty);
+        node->ret_buffer->is_ret_buffer = true;
+    }
     return node;
 }
 

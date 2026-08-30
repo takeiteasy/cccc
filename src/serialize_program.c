@@ -2389,6 +2389,11 @@ static void hoist_compiler_temp_anon_types(FILE *f, VirtualMachine *vm,
         for (Obj *var = obj->locals; var; var = var->next) {
             if (var->is_param || !var->name || var->name[0] != '\0')
                 continue;
+            // #18/#19 buffalo: never declared (serialize_decl.c's hoist
+            // loop skips it outright), so its type never needs a file-scope
+            // home either.
+            if (var->is_ret_buffer)
+                continue;
             if (type_needs_anon_aggregate(ctx, var->ty))
                 hoist_local_type_to_file_scope(f, vm, ctx, var->ty);
         }

@@ -22,6 +22,7 @@
 // macro calls in the AST
 
 #include "./internal.h"
+#include "./parse_internal.h" // find_tag_in_current_scope, #18 buffalo tracker
 #include <fenv.h> // host fenv.h -- #832 comptime fenv barrier (see below)
 
 // #832: guards a comptime (compile-time macro) vm_eval() call against
@@ -2590,6 +2591,84 @@ static void init_vm_segments_for_macros(VirtualMachine *vm) {
 // Inline macro pre-parse execution
 // ---------------------------------------------------------------------------
 
+// #18 (buffalo tracker): the forward declaration synthesize_forward_decl_
+// tokens() builds below is prepended to the *head* of every input token
+// stream, ahead of the file's own declarations -- so for a struct/union
+// return type or param it always has to be spelled `struct %s`/`union %s`
+// (a tag forward-reference is legal C before the tag's own definition; a
+// bare typedef name is not yet visible at that position, since the file's
+// typedef hasn't been parsed yet). write_type_str() below has always used
+// `ty->name` for that spelling. That is correct for a genuinely tagged
+// struct (nothing else can overwrite a definition's own name), but for
+// `typedef struct { ... } Pair;` -- no tag at all -- `ty->name` is the
+// *typedef* name, overwritten onto this Type object by declarator()
+// (parse_types.c) the same way it would overwrite any other declarator's
+// name. Spelling that as `struct Pair` synthesizes a reference to a tag
+// that was never declared; the reparse dutifully mints a brand new,
+// forever-incomplete `struct Pair` unrelated to the real (complete)
+// anonymous struct, and every site typed from the generated function's
+// signature -- notably a caller's ret_buffer temp -- is left incomplete.
+//
+// Fixed by installing "Pair" as a real tag *only in the scope lookup*
+// find_tag() (parse_core.c) consults on reparse -- push_tag_scope()'s
+// TagScopeNode, matched by name content (parse_core.c:410-424), not by
+// Type identity -- while leaving Type.struct_tag NULL and never recording
+// a TypeNameRecord for it. That is the narrowest thing that works:
+// - find_tag() on the reparsed `struct Pair` reference now resolves to
+//   this exact (already complete) Type object instead of minting a new
+//   incomplete one;
+// - the serializer's find_tag_name() (serialize_type.c) never sees this as
+//   a tag (its ctx->tags come only from TypeNameRecord, via collect_
+//   scope_names() -- none was pushed here), and tag_spelling_mismatch()
+//   independently blocks it too (ty->struct_tag stays NULL) -- so
+//   TY_STRUCT/TY_UNION spelling still falls through to the typedef alias,
+//   exactly the already-working tagless path (see cellB.c/cellD.c
+//   controls: an anonymous typedef with no reflection round-trips fine);
+// - aggregate_typedef_is_definition() (serialize_type.c) is likewise
+//   unaffected (still keyed off type_has_tag_for_owner(), which is a
+//   ctx->tags/TypeNameRecord query), so serialize_struct_def still emits
+//   the single combined `typedef struct { ... } Pair;` form -- exactly one
+//   emitter owns this type's definition, as before.
+//
+// An earlier version of this fix set Type.struct_tag (mirroring reflect_
+// push_tag_scope's shape, reflection.c) and pushed a TypeNameRecord too --
+// that made find_tag_name_for_provenance/aggregate_typedef_is_definition
+// see a real tag, so serialize_struct_def took the *tagged* arm
+// (`struct Pair { ... };`) while serialize_typedef_alias, no longer
+// short-circuited by aggregate_typedef_is_definition, ALSO emitted a
+// standalone `typedef struct Pair Pair;` -- three disagreeing spellings of
+// one Type for three emitters that each now thought they owned it.
+// Deliberately not repeated here.
+static void install_tag_alias_for_reparse(VirtualMachine *vm, Type *ty) {
+    if (!vm || !ty || !vm->compiler.scope)
+        return;
+    while (ty->kind == TY_PTR || ty->kind == TY_ARRAY)
+        ty = ty->base;
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
+        return;
+    if (ty->struct_tag || !ty->name)
+        return; // already tagged, or no name at all to reference by
+
+    // #997-style redefinition guard: if a distinct tag of this name already
+    // exists in the current scope (vanishingly unlikely -- it would mean
+    // the source itself declares e.g. both `struct Pair {...};` and
+    // `typedef struct {...} Pair;` -- but cheap to check), leave ty->name
+    // alone; the existing #18 bug (an incomplete synthesized tag) is a far
+    // smaller problem than corrupting an unrelated tag's scope entry.
+    if (find_tag_in_current_scope(vm, ty->name))
+        return;
+
+    TagScopeNode *node =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(TagScopeNode));
+    node->name               = ty->name->loc;
+    node->name_len           = ty->name->len;
+    node->ty                 = ty;
+    node->next               = vm->compiler.scope->tags;
+    vm->compiler.scope->tags = node;
+    hashmap_put2_borrowed(&vm->compiler.scope->tag_map, node->name,
+                          node->name_len, node);
+}
+
 // Write a C-syntax type string into buf[0..bufsize).
 // Returns number of characters written (not counting the NUL).
 // Handles primitives, pointer chains, struct/union/enum tags, and falls back
@@ -2683,6 +2762,11 @@ static Token *synthesize_forward_decl_tokens(VirtualMachine *vm, Obj *fn) {
     char *p   = buf;
     char *end = buf + sizeof(buf) - 2; // leave room for ";\n\0"
 
+    // #18: see install_tag_alias_for_reparse()'s own comment.
+    install_tag_alias_for_reparse(vm, fn->ty->return_ty);
+    for (Type *pt = fn->ty->params; pt; pt = pt->next)
+        install_tag_alias_for_reparse(vm, pt);
+
     // Return type
     p += write_type_str(fn->ty->return_ty, p, (int)(end - p));
 
@@ -2731,6 +2815,9 @@ static Token *synthesize_global_decl_tokens(VirtualMachine *vm, Obj *var) {
     char *end  = buf + sizeof(buf) - 2;
 
     p         += snprintf(p, end - p, "extern ");
+
+    // #18: see synthesize_forward_decl_tokens's identical call.
+    install_tag_alias_for_reparse(vm, var->ty);
 
     // For array types, emit base_type name[len1][len2]... syntax.
     // Walk the type chain to collect dimensions, then emit them after the name.

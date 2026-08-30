@@ -7338,6 +7338,156 @@ def case_inc_dec_discard_no_unused_value_1235(cccc: Path, tmp: str) -> bool:
     return True
 
 
+ANON_TYPEDEF_SIGNATURE_18_TU = (
+    "typedef struct { int a; int b; } Pair;\n"
+    "typedef struct { int scale; } Ctx;\n"
+    "Pair mk_pair(Ctx *c);\n"
+    "Pair mk_pair(Ctx *c) {\n"
+    "    Pair p; p.a = c->scale; p.b = c->scale * 2; return p;\n"
+    "}\n"
+    "[[cccc::comptime]]\n"
+    "void generate_anon_typedef_wrapper_18(void) {\n"
+    "    Obj *fn = MakeFunction(\"wrap_pair_18\", GetType(\"Pair\"));\n"
+    "    FunctionAddParam(fn, \"c\", MakePointer(GetType(\"Ctx\")));\n"
+    "    WithFn(fn) {\n"
+    "        FunctionSetBody(fn, Quote(\"return mk_pair($1);\", "
+    "MakeParamRef(fn, \"c\")));\n"
+    "    }\n"
+    "}\n"
+    "generate_anon_typedef_wrapper_18();\n"
+    "int main(void) {\n"
+    "    Ctx c = {20};\n"
+    "    Pair p = wrap_pair_18(&c);\n"
+    "    if (p.a != 20 || p.b != 40) return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_anon_typedef_signature_18(cccc: Path, tmp: str) -> bool:
+    print("  153: buffalo tracker #18 -- synthesize_forward_decl_tokens() "
+          "(macros.c) prepends a forward declaration for every "
+          "comptime-generated function, spelling an aggregate return/param "
+          "type as `struct %s`/`union %s` from Type.name. For a tagless "
+          "`typedef struct { ... } Pair;` Type.name is the typedef name, "
+          "not a tag -- the synthesized `struct Pair wrap_pair_18(Ctx *);` "
+          "referenced a tag that was never declared, and reparsing it "
+          "minted a brand new, forever-incomplete `struct Pair` under "
+          "-c=native ('variable has incomplete type struct Pair', matching "
+          "the ticket verbatim). install_tag_alias_for_reparse() now "
+          "installs the tagless Type as a scope-only tag alias (matched by "
+          "name on reparse, like find_tag()'s own lookup) without touching "
+          "Type.struct_tag or recording a TypeNameRecord, so the "
+          "serializer's tag machinery is unaffected and still emits the "
+          "single combined `typedef struct { ... } Pair;` form. Asserts VM "
+          "42 -> -c=native 42, matching the exact shape (a tagless struct "
+          "return AND a tagless struct pointer param) the ticket names.")
+    src = Path(tmp) / "anon_typedef_signature_18.c"
+    write(src, ANON_TYPEDEF_SIGNATURE_18_TU)
+
+    if run([str(cccc), src.name], cwd=tmp).returncode != 42:
+        print("    FAIL: VM did not exit 42")
+        return False
+
+    out_bin = Path(tmp) / "anon_typedef_signature_18_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
+RET_BUFFER_UNUSED_19_TU = (
+    "struct Pair { int a; int b; };\n"
+    "struct Pair mk_19(int a, int b) {\n"
+    "    struct Pair p; p.a = a; p.b = b; return p;\n"
+    "}\n"
+    "struct Pair wrap_tail_19(void) { return mk_19(1, 2); }\n"
+    "int use_init_19(void) {\n"
+    "    struct Pair p = mk_19(3, 4);\n"
+    "    return p.a + p.b;\n"
+    "}\n"
+    "int use_subexpr_19(void) {\n"
+    "    struct Pair p;\n"
+    "    p = mk_19(5, 6);\n"
+    "    return p.a + p.b;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    struct Pair w = wrap_tail_19();\n"
+    "    if (w.a != 1 || w.b != 2) return 1;\n"
+    "    if (use_init_19() != 7) return 2;\n"
+    "    if (use_subexpr_19() != 11) return 3;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_ret_buffer_unused_local_19(cccc: Path, tmp: str) -> bool:
+    print("  154: buffalo tracker #19 -- a struct-returning call allocates "
+          "a caller-side ret_buffer temp (funcall(), parse_postfix.c) that "
+          "is a VM-codegen-only concept (RETBUF/VSTR read it as a frame "
+          "offset; no serialize_*.c file ever names the Obj). Before the "
+          "fix, serialize_decl.c's hoist loop declared it anyway in EVERY "
+          "generated wrapper around a struct-returning call -- tail return, "
+          "initializer, and sub-expression alike -- as a dead "
+          "`struct S __cccc_tmpN;`, always -Wunused-variable under any "
+          "warning build. Obj.is_ret_buffer now makes the hoist loop skip "
+          "it. Unlike case 152 above, this asserts -Wunused-variable "
+          "cleanly with NO exemption (the dead ret_buffer temp was the "
+          "whole finding; #18/#19's own char *__alloca_size__ dead-local "
+          "class is a separate, accepted limitation and this TU carries no "
+          "va_list/K&R shape that would trip it), plus VM 42 -> "
+          "-c=generated compiles clean -> native 42.")
+    src = Path(tmp) / "ret_buffer_unused_19.c"
+    write(src, RET_BUFFER_UNUSED_19_TU)
+
+    if run([str(cccc), src.name], cwd=tmp).returncode != 42:
+        print("    FAIL: VM did not exit 42")
+        return False
+
+    gen_result = run([str(cccc), "-c=generated", "-o", "ret_buffer_unused_19_gen.c",
+                      src.name], cwd=tmp)
+    if gen_result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {gen_result.returncode}\n"
+              f"    {gen_result.stderr}")
+        return False
+
+    gen_c = Path(tmp) / "ret_buffer_unused_19_gen.c"
+    gen_text = gen_c.read_text()
+    if "__cccc_tmp" in gen_text:
+        print(f"    FAIL: generated output still carries a dead __cccc_tmp "
+              f"local\n    {gen_text}")
+        return False
+
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if real_cc:
+        werror = run(
+            [real_cc, "-std=gnu11", "-Wall", "-Werror", "-c", gen_c.name,
+             "-o", "/dev/null"],
+            cwd=tmp)
+        if werror.returncode != 0:
+            print(f"    FAIL: -Wall -Werror rejected the generated output "
+                  f"(no -Wno-unused-variable exemption)\n    {werror.stderr}")
+            return False
+
+    out_bin = Path(tmp) / "ret_buffer_unused_19_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -7495,6 +7645,8 @@ CASES = [
     case_comptime_generated_main_is_entry_point,
     case_long_long_header_prototype_1234,
     case_inc_dec_discard_no_unused_value_1235,
+    case_anon_typedef_signature_18,
+    case_ret_buffer_unused_local_19,
 ]
 
 

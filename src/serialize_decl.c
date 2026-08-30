@@ -452,6 +452,20 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             if (is_actual_param)
                 continue;
 
+            // #18/#19 buffalo: a caller-side struct-return slot (funcall(),
+            // parse_postfix.c) is a VM-codegen-only concept -- RETBUF/VSTR
+            // read it purely as a frame offset, and no ND_VAR node in the
+            // serialized body ever names it (see serialize_expr.c's
+            // ND_FUNCALL case, which lowers the call to plain C and never
+            // mentions ret_buffer). Declaring it here just to leave it
+            // unused triggers -Wunused-variable in every generated wrapper
+            // around a struct-returning call. Skip before the __cccc_tmp%d
+            // naming below so the counter -- and every other temp's name --
+            // is unaffected by whether a given call happens to return a
+            // struct.
+            if (var->is_ret_buffer)
+                continue;
+
             if (var->name[0] == '\0')
                 // Compiler-synthesized temporaries (e.g. from ++/--/op=
                 // desugaring) have an empty name; give them one so they can
