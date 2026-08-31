@@ -512,6 +512,18 @@ Multiple emit includes with the same emitted `#include` line are deduplicated.
 Other emitted directives keep source order and are not deduplicated, so they can
 wrap file-scope macro calls and the declarations those calls generate.
 
+A plain, unconditional captured directive (an ordinary `#include`, not one
+guarded by an `#ifdef @emit`/`#if @emit` shell) is guaranteed to appear ahead
+of every generated declaration in the output, even if the source line that
+produced it appears later in the file — so a generated global whose type
+comes from an `#include @shared`d header always has that header's `#include`
+in scope. A directive still inside a conditional shell keeps its original,
+interleaved position instead. If a generated global's type comes from a
+header reached only through `#include @comptime`/`@build`/`@test` — routes
+that are never replayed into `-c=generated` output at all — `cccc` reports a
+compile error naming the type rather than writing C nothing declares it in;
+route the header with `#include @shared` instead so it's captured too.
+
 `--emit-only`/`[[cccc::emit]]` (above) controls *which* directives are
 captured into `-c=generated` output. A separate, similarly-named flag, `--emit-cccc`,
 controls a different axis entirely: *whether the captured/serialized output

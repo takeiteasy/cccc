@@ -3816,12 +3816,36 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // skipped there (not yet hoisted), then hoisted/emitted here -- verified
     // no double-emission against the #989 regression case.
     //
-    // Residual, not fixed here: in the generated_only branch below, a
-    // captured #include is replayed via CCCC_EMIT_SOURCE events interleaved
-    // with generated functions (pinned there by #953), so a header-type
-    // capture in *generated* code can still precede its #include -- filed
-    // as #995.
+    // #1241: the #995 residual above (a header-type capture in *generated*
+    // code preceding its own #include) has a sibling that's not about block
+    // captures at all -- an @shared-included header's typedef/tag being
+    // referenced by a *published global's* forward declaration (the #928
+    // loop just below) or by serialize_type_defs_for_owner/
+    // serialize_block_preamble themselves, all of which run ahead of this
+    // branch's own CCCC_EMIT_SOURCE replay loop further down. Unlike #995,
+    // this case is fixable without touching #953's pinned interleave: every
+    // auto-captured #include (and any other plain, unconditional emit
+    // directive) is recorded during preprocessing, so it always sits in a
+    // contiguous run at the *head* of emit_events_head, strictly before the
+    // first CCCC_EMIT_OBJECT event -- there is nothing upstream of the
+    // first published object that could depend on emission order. Replay
+    // that leading run now, before any of the passes below, and resume the
+    // main replay loop from where it left off (replay_start) so nothing is
+    // printed twice. Stop at the first conditional-compilation shell
+    // (#ifdef @emit and friends, test_emit_ordered_ifdef.c) -- that one
+    // must stay interleaved at its pinned position, matching #953.
+    EmitEvent *replay_start = vm->compiler.emit_events_head;
     if (generated_only && vm->compiler.emit_events_head) {
+        bool printed_any = false;
+        while (replay_start && replay_start->kind == CCCC_EMIT_SOURCE &&
+               !line_is_conditional_directive(replay_start->source)) {
+            fprintf(f, "%s\n", replay_start->source);
+            printed_any  = true;
+            replay_start = replay_start->next;
+        }
+        if (printed_any)
+            fprintf(f, "\n");
+
         serialize_type_defs_for_owner(f, &ctx, NULL);
         serialize_block_preamble(f, vm, &ctx, prog);
         serialize_nested_preamble(f, vm, &ctx, prog);      // #1074
@@ -3853,6 +3877,29 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             // collect_deferred_static_labels()'s own comment.
             if (var_is_deferred_label_static(&ctx, obj))
                 continue;
+            // #1241: this global's own type is a header typedef that
+            // nothing in the generated output ever declares (the header
+            // was reached only via a route -- @comptime/@build/@test --
+            // that's never replayed into -c=generated output). Ordering
+            // can't fix this the way the leading-directive hoist above
+            // fixes a merely-late #include; fail loudly instead of writing
+            // C the host compiler will reject with "unknown type name".
+            TypeName *uncaptured =
+                find_generated_uncaptured_typedef(&ctx, obj->ty);
+            // #1241: an anonymous compiler-synthesized global (e.g. a
+            // file-scope CompoundLiteral()/InitArray() temp, #928) carries
+            // no obj->tok at all -- fall back to the current macro
+            // invocation's own call-site token (vm->compiler.macro_call_tok)
+            // so the diagnostic still points somewhere real instead of
+            // dereferencing NULL.
+            if (uncaptured)
+                error_tok(vm, obj->tok ? obj->tok : vm->compiler.macro_call_tok,
+                          "generated global '%s' uses type '%.*s' from a "
+                          "header that is not included in the generated "
+                          "output; route the header with `#include @shared` "
+                          "instead of `@comptime`/`@build`/`@test` so it is "
+                          "emitted too",
+                          obj->name, uncaptured->name_len, uncaptured->name);
             fprintf(f, obj->is_static ? "static " : "extern ");
             if (obj->is_tls) // #1022: see serialize_global_var's own comment
                 fprintf(f, "_Thread_local ");
@@ -3884,7 +3931,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // ones exactly where they were and only forward-declares what a
         // caller actually needs.
         ObjVec declared = {0};
-        for (EmitEvent *ev = vm->compiler.emit_events_head; ev; ev = ev->next) {
+        // #1241: resume after the leading run already replayed above --
+        // replay_start is either the first conditional-shell CCCC_EMIT_SOURCE
+        // event or the first CCCC_EMIT_OBJECT event, whichever comes first,
+        // so nothing between emit_events_head and replay_start is an object
+        // this loop would otherwise need to see.
+        for (EmitEvent *ev = replay_start; ev; ev = ev->next) {
             if (ev->kind == CCCC_EMIT_SOURCE) {
                 fprintf(f, "%s\n", ev->source);
                 continue;

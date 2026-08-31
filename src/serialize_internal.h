@@ -300,6 +300,8 @@ Obj *serialize_find_global(VirtualMachine *vm, const char *name);
 Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var);
 TypeName *find_typedef_name(SerializeContext *ctx, Type *ty);
 TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty);
+TypeName *find_generated_uncaptured_typedef(SerializeContext *ctx,
+                                            Type             *ty); // #1241
 unsigned __int128 decode_wide_digits(const char *digits, int base);
 void collect_generated_call_targets(Node *node, ObjVec *out);
 void collect_obj_types(SerializeContext *ctx, Obj *obj);

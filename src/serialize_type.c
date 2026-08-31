@@ -2248,6 +2248,53 @@ static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
             path_is_captured(ctx, provenance_source->file_path));
 }
 
+// #1241: `-c=generated` skips header typedefs unconditionally under
+// generated_only ("output is consumed alongside normal headers",
+// SerializeContext.generated_only's own comment) -- fine when the header
+// really is replayed into the output (an @shared include reaches
+// cc_serialize_program's leading directive replay, see the #1241 comment
+// there), but silent when it isn't: a typedef reached only via a
+// never-captured route (`#include @comptime`) has nothing anywhere in the
+// generated file that declares it, yet nothing previously noticed. Tags are
+// deliberately excluded here -- a struct/union/enum from a non-captured
+// header is re-derived (its full definition serialized, with layout
+// guards), so it's never left dangling the way a typedef *alias* is;
+// type_def_is_from_include_suppressed()'s own tag-priority ordering just
+// above is the reason a tagged type doesn't hit this at all. Only checked
+// under generated_only: the !generated_only path (-c=native, plain -m) has
+// no equivalent gap -- #993 already guarantees any header a type is
+// actually reachable through is replayed ahead of everything that could
+// use it.
+//
+// #1168/#1169: deliberately uses find_typedef_name_exact()'s pointer-
+// identity walk, NOT find_typedef_name()'s structural fallback -- the same
+// trap type_layout_is_host_owned()/type_contains_compiler_owned_layout()
+// already document and guard against. A bare scalar global's element type
+// (e.g. plain `int`) structurally matches ANY from_include typedef sharing
+// its representation, which would misreport an ordinary `int`/`long` array
+// as "uses an uncaptured header typedef" the moment some unrelated header
+// typedefs the same builtin. The identity walk only ever resolves a Type
+// that really is a copy_type() of the named typedef (parse_typedef()'s own
+// discipline for a non-aggregate alias), so a plain builtin never matches.
+TypeName *find_generated_uncaptured_typedef(SerializeContext *ctx, Type *ty) {
+    if (!ty || !ctx->generated_only || ctx->emit_strict)
+        return NULL;
+    // Peel down to the named type a published global's own declaration
+    // would reference -- an array-of-typedef or pointer-to-typedef global
+    // hits this exactly like a plain one.
+    while (ty &&
+           (ty->kind == TY_ARRAY || ty->kind == TY_PTR || ty->kind == TY_VLA))
+        ty = ty->base;
+    if (!ty || find_tag_name(ctx, ty))
+        return NULL;
+    TypeName *alias = find_typedef_name_exact(ctx, ty);
+    if (!alias || !alias->from_include || alias->always_emit)
+        return NULL;
+    if (path_is_captured(ctx, alias->file_path))
+        return NULL;
+    return alias;
+}
+
 // #1031: true when `ty`'s from_include-suppressed definition is owned by
 // one of is_compiler_owned_header()'s fixed list (stdarg.h/setjmp.h/etc,
 // src/preprocess.c) -- excluded from type_layout_is_host_owned() below

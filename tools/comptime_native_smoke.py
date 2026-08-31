@@ -7488,6 +7488,89 @@ def case_ret_buffer_unused_local_19(cccc: Path, tmp: str) -> bool:
     return True
 
 
+SHARED_TYPEDEF_1241_HEADER = (
+    "#ifndef SHARED_TYPEDEF_1241_H\n"
+    "#define SHARED_TYPEDEF_1241_H\n"
+    "typedef unsigned char MyByte1241;\n"
+    "#endif\n"
+)
+
+GVAR_SHARED_TYPEDEF_1241_PROGRAM = (
+    '#include @shared "shared_typedef_1241.h"\n'
+    "#include @comptime <stdio.h>\n"
+    "[[cccc::comptime]]\n"
+    "void gen(void) {\n"
+    "    Type *byte_ty = GetType(\"MyByte1241\");\n"
+    "    Obj *v = GlobalVar(\"my_table_1241\", MakeArray(MakeConst(byte_ty), 4));\n"
+    "    unsigned char data[4] = {1, 2, 3, 4};\n"
+    "    GlobalVarSetInitData(v, data, 4);\n"
+    "    GlobalVarSetStatic(v, 1);\n"
+    "    PublishNodeAt(v, SyntheticToken(\"my_table_1241\"));\n"
+    "}\n"
+    "gen();\n"
+    "\n"
+    "int main(void) {\n"
+    "    return my_table_1241[0] + my_table_1241[1] + my_table_1241[2] + "
+    "my_table_1241[3] + 32;\n"
+    "}\n"
+)
+
+
+def case_generated_shared_typedef_global_1241(cccc: Path, tmp: str) -> bool:
+    print("  155: -c=generated output for a published global whose element "
+          "type is a typedef from an `#include @shared` header is valid, "
+          "compilable C (#1241) -- the auto-generated forward-declaration "
+          "block used to be written ahead of the replayed #include that "
+          "declares the typedef ('unknown type name' from a real host cc, "
+          "with cccc itself exiting 0). Fixed by replaying the leading run "
+          "of plain emit directives -- including this @shared #include -- "
+          "before the forward-declaration block runs. This is the one "
+          "assertion that actually reproduces the ticket: a shape-only "
+          "check can't see a host cc rejecting the output cccc happily "
+          "wrote and exited 0 on.")
+    write(Path(tmp) / "shared_typedef_1241.h", SHARED_TYPEDEF_1241_HEADER)
+    src = Path(tmp) / "gvar_shared_typedef_1241.c"
+    write(src, GVAR_SHARED_TYPEDEF_1241_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_path = Path(tmp) / "gvar_shared_typedef_1241.gen.c"
+    gen_result = run([str(cccc), "-c=generated", "-o", out_path.name, src.name],
+                      cwd=tmp)
+    if gen_result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {gen_result.returncode}\n"
+              f"    {gen_result.stderr}")
+        return False
+    out = out_path.read_text()
+    if out.find('#include "shared_typedef_1241.h"') > out.find(
+            "static const MyByte1241 my_table_1241"):
+        print(f"    FAIL: -c=generated output still places the forward "
+              f"declaration ahead of the #include\n    {out}")
+        return False
+
+    obj = Path(tmp) / "gvar_shared_typedef_1241.o"
+    cc_result = run(["cc", "-c", out_path.name, "-o", str(obj)], cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -c=generated output\n"
+              f"    {cc_result.stderr}\n    {out}")
+        return False
+
+    out_bin = Path(tmp) / "gvar_shared_typedef_1241_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -7647,6 +7730,7 @@ CASES = [
     case_inc_dec_discard_no_unused_value_1235,
     case_anon_typedef_signature_18,
     case_ret_buffer_unused_local_19,
+    case_generated_shared_typedef_global_1241,
 ]
 
 

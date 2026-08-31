@@ -113,6 +113,12 @@ real host compiler, so header handling shifts:
 - The `--std=` value is forwarded only as a flag-spelling probe; the
   emitted dialect is a fixed GNU C11 floor regardless (see
   [NATIVE.md](NATIVE.md)).
+- A comptime-generated declaration's type must come from a header that is
+  actually captured into the output — an `#include @shared`d header
+  qualifies; one reached only via `#include @comptime`/`@build`/`@test`
+  does not, and `-c=generated` reports a compile error rather than writing
+  C nothing declares the type in. See
+  [MACROS.md](MACROS.md#emit-directives-and-includes-in-generated-output).
 
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 
