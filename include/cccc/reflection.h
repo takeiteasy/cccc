@@ -397,7 +397,7 @@ Node *__builtin_quote(const char *tmpl, ...);
 Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count);
 
 /*! @brief Deferred (unparsed) quasi-quote: captures a template and its splice
- *           arguments without parsing it (ticket #1242).
+ *           arguments without parsing it.
  * @param tmpl A C expression or statement as a string literal with `$N` / `$@N`
  *             splice points, exactly as for Quote(). Copied, not parsed, here.
  * @param ... Node* arguments corresponding to the splice points.
@@ -1468,7 +1468,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 #define QuoteN(tmpl, nodes, count) __builtin_quote_n(tmpl, nodes, count)
 /*! @def QuoteLazy
  * @brief Capture a C code template and its splice arguments without parsing
- * it (ticket #1242); the template is parsed only once spliced into another
+ * it; the template is parsed only once spliced into another
  * Quote()/QuoteLazy() template or passed to FunctionSetBody, at that splice
  * site's own scope and loop context.
  * @param tmpl A C expression or statement as a string literal with splice
@@ -1478,7 +1478,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @note Use this instead of Quote() when the fragment references a variable,
  * or uses break/continue targeting a loop, that only exists once the
  * fragment lands at its splice site -- see @ref Quote for ordinary
- * (eager) quasi-quoting. Not valid as a $@N list-splice argument. */
+ * (eager) quasi-quoting. Not valid as a `$@N` list-splice argument. */
 #define QuoteLazy(tmpl, ...) __builtin_quote_lazy(tmpl, ##__VA_ARGS__)
 /*! @def QuoteLazyN
  * @brief Array-form QuoteLazy; validates the splice count at the capture
