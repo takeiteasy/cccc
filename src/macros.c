@@ -394,6 +394,12 @@ typedef struct ComptimeDecl {
     const char *filename;
     bool        has_top_level_eq;
     bool initializer_self_contained; // meaningful only if has_top_level_eq
+    // #1247: true when this range is a function *definition*'s signature --
+    // `end` points at the body's '{' (not a ';', there isn't one) so a
+    // definition never has its body copied into the spliced-in program.
+    // materialize_comptime_range appends a synthetic ';' in this case, since
+    // cc_parse_splice_range expects an ordinary terminated declaration.
+    bool              synth_semi;
     ComptimeDeclState state;
 } ComptimeDecl;
 
@@ -592,8 +598,11 @@ static Token *extract_declarator_name(Token *seg_start, Token *seg_last,
 // eagerly here. Conservative throughout: any segment whose declared name
 // can't be confidently identified is simply not registered, which just
 // means it stays invisible to demand-driven resolution.
+// `is_definition` is true when `semi` is a function definition's opening
+// '{' rather than a terminating ';' -- see ComptimeDecl.synth_semi.
 static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
-                              bool has_top_level_eq, Token *eq_tok) {
+                              bool has_top_level_eq, Token *eq_tok,
+                              bool is_definition) {
     if (!start->filename)
         return;
     File *file = start->file;
@@ -611,14 +620,15 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
     ComptimeDecl *decl =
         arena_alloc(&vm->compiler.parser_arena, sizeof(ComptimeDecl));
     decl->start            = start;
-    decl->end              = semi->next;
+    decl->end              = is_definition ? semi : semi->next;
     decl->file             = file;
     decl->filename         = start->filename;
     decl->has_top_level_eq = has_top_level_eq;
     decl->initializer_self_contained =
         has_top_level_eq && eq_tok &&
         initializer_is_self_contained(eq_tok, semi);
-    decl->state = CD_NEW;
+    decl->synth_semi = is_definition;
+    decl->state      = CD_NEW;
 
     // --- tag: only the first "struct|union|enum IDENT" pair AT DEPTH 0 is
     // inspected. A pair inside a function declarator's parameter list (e.g.
@@ -785,14 +795,30 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
 
                     if (equal(tok, "{") && prev_sig && equal(prev_sig, ")")) {
                         is_function_body = true;
-                        Token *close     = find_matching_brace(tok);
-                        tok              = close ? close->next : tok->next;
+                        // #1247: a function *definition*'s signature was
+                        // previously invisible to the index -- only a
+                        // separately written prototype ("void f(void);")
+                        // registered as CDK_PROTO, so a Quote()d/reflected
+                        // call to a function that is only ever defined (no
+                        // forward declaration) couldn't resolve. Index the
+                        // signature here, same as an ordinary prototype
+                        // would be, using this '{' as the (non-';') range
+                        // terminator. Guarded on !has_top_level_eq to
+                        // exclude the one other shape that reaches here with
+                        // prev_sig == ")": a file-scope compound-literal
+                        // initializer ("struct S s = (struct S){1};"),
+                        // which is not a function definition at all.
+                        if (!has_top_level_eq)
+                            index_declaration(vm, start, tok, false, NULL,
+                                              true);
+                        Token *close = find_matching_brace(tok);
+                        tok          = close ? close->next : tok->next;
                         break;
                     }
 
                     if (equal(tok, ";")) {
                         index_declaration(vm, start, tok, has_top_level_eq,
-                                          eq_tok);
+                                          eq_tok, false);
                         tok = tok->next;
                         break;
                     }
@@ -826,14 +852,21 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
 
 // Copy [start, end) (the range recorded on a ComptimeDecl) into a fresh,
 // EOF-terminated token list via copy_macro_token, so the runtime stream
-// itself is never mutated or re-linked by the reentrant parse.
+// itself is never mutated or re-linked by the reentrant parse. `synth_semi`
+// (ComptimeDecl.synth_semi, #1247) appends a synthetic ';' before the EOF --
+// `end` there is a function definition's '{', so the copied range is just
+// the bare signature and needs its own terminator for
+// cc_parse_splice_range (parse_decl.c) to see an ordinary declaration.
 static Token *materialize_comptime_range(VirtualMachine *vm, Token *start,
-                                         Token *end) {
+                                         Token *end, bool synth_semi) {
     Token  head = {};
     Token *cur  = &head;
     for (Token *t = start; t && t != end && t->kind != TK_EOF; t = t->next)
         cur = cur->next = copy_macro_token(vm, t);
-    cur->next = new_macro_eof(vm, cur != &head ? cur : start);
+    Token *last = cur != &head ? cur : start;
+    if (synth_semi)
+        cur = cur->next = new_macro_punct(vm, (char *)";", last);
+    cur->next = new_macro_eof(vm, last);
     return head.next;
 }
 
@@ -943,11 +976,11 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
         }
     }
 
-    decl->state = CD_IN_PROGRESS;
-    Token *materialized =
-        materialize_comptime_range(vm, decl->start, decl->end);
-    bool ok     = cc_parse_splice_range(vm, materialized);
-    decl->state = ok ? CD_DONE : CD_FAILED;
+    decl->state         = CD_IN_PROGRESS;
+    Token *materialized = materialize_comptime_range(vm, decl->start, decl->end,
+                                                     decl->synth_semi);
+    bool   ok           = cc_parse_splice_range(vm, materialized);
+    decl->state         = ok ? CD_DONE : CD_FAILED;
     return ok;
 }
 

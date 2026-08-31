@@ -104,10 +104,13 @@ Global-generation macros compile and execute **before the main parse begins**.
 The macro program has CCCC's private `reflection.h` API plus **demand-driven
 access** to file-scope declarations from the preprocessed source: typedefs,
 struct/union/enum tags (and their enumerators), function prototypes, `extern`
-declarations, and declarations without function bodies. Nothing is forwarded
-up front — a declaration resolves into the comptime program only when
-comptime code actually references its name (directly, or via a
-`reflection.h` lookup like `GetType("Name")`/`VarRef("name")`/
+declarations, and declarations without function bodies. A function
+**definition** resolves the same way, by its signature alone — the body is
+never parsed into the comptime program, only the declarator a plain
+prototype would have registered. Nothing is forwarded up front — a
+declaration resolves into the comptime program only when comptime code
+actually references its name (directly, via a `Quote()`/`QuoteN()` template,
+or via a `reflection.h` lookup like `GetType("Name")`/`VarRef("name")`/
 `FindGlobal("name")`), and only once, regardless of how many places
 reference it.
 
@@ -161,8 +164,22 @@ value is what the comptime pass sees.
 
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
 used by global-generation macros, but it does not compile arbitrary non-macro
-program definitions into the macro VM. Function bodies and file-scope macro
-calls are always skipped.
+program definitions into the macro VM. Function *bodies* and file-scope macro
+calls are always skipped — a function definition's signature is indexed the
+same as a prototype, but its body is never parsed into the comptime program.
+
+Names inside a `Quote()`/`QuoteN()` template resolve through this same
+demand-driven index, at whatever point the template is parsed — which for a
+template built by a **file-scope-called** comptime function (`gen();` at file
+scope, as opposed to one only ever called from inside another function's
+body) is *after* the comptime program's own parse has already finished. A
+template built that way can still name a type, tag, enum constant, or
+function the same as comptime source can — but not a plain file-scope
+*variable* (see the initialized-global rule just below): by the time such a
+template's tokens are parsed, the comptime program's data segment has
+already been allocated, so there is no slot left to splice a variable's
+storage into. That reference produces the usual `undefined variable`, not a
+silent no-op.
 
 An initialized global (an object, not a type or prototype) is narrower: it is
 only resolved when declared directly in the **main source file**, and only
