@@ -2482,10 +2482,17 @@ void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
     (void)result;
 }
 
-// Recursively transform macro calls in an AST node
-static Node *transform_node(VirtualMachine *vm, Node *node, int depth);
+// Recursively transform macro calls in an AST node. `stmt_pos` is true only
+// when `node` sits in statement-list position (reached via the ND_EXPR_STMT
+// branch below, or a macro's own re-expanded result inheriting that
+// context) -- it is the sole signal that determines whether a macro
+// returning a statement-kind node (ND_BLOCK, ND_IF, ...) is being used
+// somewhere that can actually hold one (#1248).
+static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
+                            bool stmt_pos);
 
-static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
+static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
+                            bool stmt_pos) {
     if (!node)
         return NULL;
 
@@ -2566,12 +2573,37 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
             return placeholder;
         }
 
+        // #1248: a macro returning a statement-kind node (ND_BLOCK from a
+        // multi-statement Quote(), an `if`/`for`/`return`/..., -- see
+        // node_is_stmt_kind()) can only be spliced where a statement is
+        // valid. Statement position lifts it via the ND_EXPR_STMT branch
+        // below; anywhere else (an assignment RHS, a call argument, ...) it
+        // would otherwise reach codegen as a bare, unsupported expression
+        // node. Catch it here with a clear diagnostic instead.
+        if (!stmt_pos && node_is_stmt_kind(result)) {
+            error_tok(vm, node->tok,
+                      "comptime function '%s' returned a statement and "
+                      "cannot be used in expression position; return an "
+                      "expression node, or wrap the template in a GNU "
+                      "statement expression -- Quote(\"({ ... })\")",
+                      node->macro_name);
+            Node *placeholder =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+            memset(placeholder, 0, sizeof(Node));
+            placeholder->kind = ND_NUM;
+            placeholder->val  = 0;
+            placeholder->ty   = ty_int;
+            placeholder->tok  = node->tok;
+            return placeholder;
+        }
+
         // Run add_type on the result to ensure types are set
         add_type(vm, result);
 
         // Recursively transform in case the macro result contains more
-        // macro calls
-        return transform_node(vm, result, depth + 1);
+        // macro calls -- inherit stmt_pos so a macro that returns another
+        // macro call keeps the position it was itself called in.
+        return transform_node(vm, result, depth + 1, stmt_pos);
     }
 
     // For ND_EXPR_STMT: if the inner expression is replaced by a statement-kind
@@ -2584,12 +2616,9 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
     // statement.  We attach them via ->next so the body traversal above picks
     // them up in subsequent loop iterations.
     if (node->kind == ND_EXPR_STMT) {
-        node->lhs = transform_node(vm, node->lhs, depth);
+        node->lhs = transform_node(vm, node->lhs, depth, /*stmt_pos=*/true);
         if (node->lhs) {
-            NodeKind k = node->lhs->kind;
-            if (k == ND_RETURN || k == ND_IF || k == ND_FOR || k == ND_DO ||
-                k == ND_SWITCH || k == ND_BLOCK || k == ND_GOTO ||
-                k == ND_LABEL || k == ND_EXPR_STMT) {
+            if (node_is_stmt_kind(node->lhs)) {
                 Node *lifted = node->lhs;
                 // Re-attach the sibling chain so statements after the macro
                 // call are not dropped.  Walk to the tail of the lifted node
@@ -2607,49 +2636,55 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth) {
         return node;
     }
 
-    // Recursively transform all child nodes
-    node->lhs  = transform_node(vm, node->lhs, depth);
-    node->rhs  = transform_node(vm, node->rhs, depth);
-    node->cond = transform_node(vm, node->cond, depth);
-    node->then = transform_node(vm, node->then, depth);
-    node->els  = transform_node(vm, node->els, depth);
-    node->init = transform_node(vm, node->init, depth);
-    node->inc  = transform_node(vm, node->inc, depth);
+    // Recursively transform all child nodes. None of these fields is a
+    // statement-list position for a bare macro call (a macro call parsed as
+    // a statement is always wrapped in ND_EXPR_STMT, handled above), so all
+    // pass stmt_pos=false.
+    node->lhs  = transform_node(vm, node->lhs, depth, false);
+    node->rhs  = transform_node(vm, node->rhs, depth, false);
+    node->cond = transform_node(vm, node->cond, depth, false);
+    node->then = transform_node(vm, node->then, depth, false);
+    node->els  = transform_node(vm, node->els, depth, false);
+    node->init = transform_node(vm, node->init, depth, false);
+    node->inc  = transform_node(vm, node->inc, depth, false);
     // #1018: va_ap/va_last/va_src (Node.va_form's annotation trees,
     // src/cccc.h) are independently-parsed subtrees, not aliases into this
     // node's own lhs/rhs/etc -- a macro call inside one of them needs the
     // same expansion pass as any other child field.
-    node->va_ap   = transform_node(vm, node->va_ap, depth);
-    node->va_last = transform_node(vm, node->va_last, depth);
-    node->va_src  = transform_node(vm, node->va_src, depth);
+    node->va_ap   = transform_node(vm, node->va_ap, depth, false);
+    node->va_last = transform_node(vm, node->va_last, depth, false);
+    node->va_src  = transform_node(vm, node->va_src, depth, false);
 
-    // For ND_BLOCK, body is a chain of statements linked via ->next
-    // We need to transform each statement in the chain
+    // For ND_BLOCK, body is a chain of statements linked via ->next. Each
+    // element is itself a statement node (an ND_EXPR_STMT if it started life
+    // as a bare call), never a bare ND_MACRO_CALL, so stmt_pos=false here is
+    // correct -- the ND_EXPR_STMT branch above is what actually marks its
+    // own lhs as stmt_pos=true.
     if (node->body) {
-        node->body = transform_node(vm, node->body, depth);
+        node->body = transform_node(vm, node->body, depth, false);
         // Also transform sibling statements in the chain
         for (Node *stmt = node->body; stmt; stmt = stmt->next) {
             if (stmt->next) {
-                stmt->next = transform_node(vm, stmt->next, depth);
+                stmt->next = transform_node(vm, stmt->next, depth, false);
             }
         }
     }
 
-    // Transform argument lists (also a chain)
+    // Transform argument lists (also a chain) -- always expression position.
     if (node->args) {
-        node->args = transform_node(vm, node->args, depth);
+        node->args = transform_node(vm, node->args, depth, false);
         for (Node *arg = node->args; arg && arg->next; arg = arg->next) {
-            arg->next = transform_node(vm, arg->next, depth);
+            arg->next = transform_node(vm, arg->next, depth, false);
         }
     }
 
     // Transform case lists for switch
     for (Node *c = node->case_next; c; c = c->case_next) {
-        c->body = transform_node(vm, c->body, depth);
+        c->body = transform_node(vm, c->body, depth, false);
     }
     if (node->default_case) {
         node->default_case->body =
-            transform_node(vm, node->default_case->body, depth);
+            transform_node(vm, node->default_case->body, depth, false);
     }
 
     return node;
@@ -3447,7 +3482,8 @@ Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node) {
         return NULL;
     // transform_node handles all ND_MACRO_CALL expansion, type annotation,
     // void/return-type checks, NULL-result errors, and recursive re-expansion.
-    return transform_node(vm, node, 0);
+    // Deferred global initializers are always expression position.
+    return transform_node(vm, node, 0, false);
 }
 
 // Expand all macro calls in the program
@@ -3487,8 +3523,11 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
         vm->compiler.current_fn = fn;
         vm->compiler.locals     = fn->locals;
 
-        // Transform the function body
-        fn->body = transform_node(vm, fn->body, 0);
+        // Transform the function body. fn->body is the function's own
+        // ND_BLOCK, not itself a bare macro call, so stmt_pos here is moot --
+        // its ->body chain is walked with stmt_pos=false and the
+        // ND_EXPR_STMT branch marks statement position per-element.
+        fn->body = transform_node(vm, fn->body, 0, false);
 
         // Flush new locals (created by quote templates) back into fn->locals.
         fn->locals = vm->compiler.locals;
@@ -3504,7 +3543,8 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
         if (var->is_function)
             continue;
         if (var->init_expr) {
-            var->init_expr = transform_node(vm, var->init_expr, 0);
+            // Global initializer: always expression position.
+            var->init_expr = transform_node(vm, var->init_expr, 0, false);
         }
     }
 

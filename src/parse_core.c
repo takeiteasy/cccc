@@ -792,6 +792,35 @@ bool node_has_side_effects(Node *n) {
     return false;
 }
 
+// Shared classifier for "is this node a statement, not an expression" --
+// used wherever a comptime macro's returned Node* has to be checked against
+// the syntactic position it landed in (transform_node's ND_MACRO_CALL/
+// ND_EXPR_STMT handling in macros.c, cc_quote_expand_lazy's want_stmt wrap in
+// reflection.c). Previously duplicated as two separately-maintained 9-kind
+// inline lists; kept to exactly those nine kinds here too, so unifying them
+// is a pure refactor with no behavior change. ND_GOTO_EXPR (labels-as-values)
+// and ND_CASE/ND_ASM are deliberately not included -- widening this set
+// changes both call sites' behavior and is out of scope where this was
+// introduced (#1248); see that ticket's follow-ups.
+bool node_is_stmt_kind(Node *n) {
+    if (!n)
+        return false;
+    switch (n->kind) {
+        case ND_RETURN:
+        case ND_IF:
+        case ND_FOR:
+        case ND_DO:
+        case ND_SWITCH:
+        case ND_BLOCK:
+        case ND_GOTO:
+        case ND_LABEL:
+        case ND_EXPR_STMT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // Resolves a checked pointer's bounds expression(s) from the raw token
 // span(s) captured at attribute-parse time (Type.checked_bounds_arg1/arg2 --
 // see its comment for why resolution is deferred) into real Node* ASTs, once

@@ -69,7 +69,7 @@ on which execution form you use.
 
 | Call context | Return value |
 |--------------|--------------|
-| Expression position (`int x = mac()`) | Must return a non-NULL `Node *`. NULL is a compile error. |
+| Expression position (`int x = mac()`) | Must return a non-NULL `Node *` that is itself an **expression** node. NULL is a compile error, and so is a statement-kind return (see [Statement returns in expression position](#statement-returns-in-expression-position) below). |
 | Global variable initializer (`int G = mac()`) | Must return a `Node *` that evaluates to an integer or float constant. Pointer/struct results are not supported. See [Comptime functions in global initializers](#comptime-functions-in-global-initializers). |
 | Declaration position (file-scope `mac();`) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
@@ -87,6 +87,50 @@ emit_helpers();
 
 `Node *` macros may still return NULL in declaration position without error. The
 old `return MakeIntLiteral(0)` idiom still works but is no longer needed.
+
+### Statement returns in expression position
+
+`Quote()` auto-wraps a multi-statement template in braces, so it's easy to end
+up with an `ND_BLOCK` (or another statement-kind node — an `if`, a `for`, a
+bare `return`, ...) as a macro's return value:
+
+```c
+[[cccc::comptime]]
+Node *gen(void) {
+    return Quote("int i; i = 3; return i;"); // multi-statement -> ND_BLOCK
+}
+
+int r = gen(); // error: comptime function 'gen' returned a statement and
+               // cannot be used in expression position
+```
+
+Called in *statement* position (`gen();` on its own, at file or block scope)
+this is fine — the statement splices in directly. Used in expression position
+it is a compile error, because a statement isn't a value the surrounding
+expression can consume.
+
+To produce a value from a multi-statement template, wrap it in a GNU
+statement expression, `({ ... })`, whose last statement (an expression
+statement) supplies the value:
+
+```c
+[[cccc::comptime]]
+Node *gen(void) {
+    return Quote("({ int i; i = 3; i; })"); // ND_STMT_EXPR, value == i
+}
+
+int r = gen(); // r == 3
+```
+
+Careful: a `return` *inside* `({ ... })` returns from the **enclosing
+function**, not from the statement expression — it does not supply the
+statement expression's value. Don't reach for `return` when you mean "the
+value of this block is..."; end the block in a plain expression statement
+instead, as above.
+
+The same rule applies to `QuoteLazy()`/`QuoteLazyN()` fragments spliced in
+expression position — see
+[Deferred templates with `QuoteLazy`](#deferred-templates-with-quotelazy).
 
 ## Execution Model
 
@@ -1544,7 +1588,13 @@ int main(void) {
 ```
 
 A `QuoteLazy()` fragment splices in either statement or expression position,
-exactly like an ordinary `$N`. It can also splice another `QuoteLazy()`
+exactly like an ordinary `$N` — but if the fragment parses to a statement
+(e.g. a multi-statement template) and is spliced at an expression-position
+`$N`, that's a compile error ("fragment '...' is a statement and cannot be
+spliced in expression position"), the same rule and the same fix (a GNU
+statement expression, `({ ... })`) as for an eagerly-`Quote()`d template —
+see [Statement returns in expression position](#statement-returns-in-expression-position).
+It can also splice another `QuoteLazy()`
 fragment (lazy-in-lazy composition), and the same fragment can be spliced
 more than once — each splice re-parses it independently, so two loops built
 from the same `QuoteLazy()` result get their own, unrelated `break` targets

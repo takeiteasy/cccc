@@ -4073,12 +4073,7 @@ Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt) {
     if (!result)
         return result;
 
-    bool is_stmt_kind = result->kind == ND_BLOCK || result->kind == ND_IF ||
-                        result->kind == ND_FOR || result->kind == ND_DO ||
-                        result->kind == ND_SWITCH ||
-                        result->kind == ND_RETURN || result->kind == ND_GOTO ||
-                        result->kind == ND_LABEL ||
-                        result->kind == ND_EXPR_STMT;
+    bool is_stmt_kind = node_is_stmt_kind(result);
 
     if (want_stmt) {
         if (is_stmt_kind)
