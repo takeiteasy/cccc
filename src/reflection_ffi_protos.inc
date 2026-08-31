@@ -22,6 +22,8 @@ extern void __builtin_macro_warning_at(Node *node, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 extern Node * __builtin_quote(const char *tmpl, ...);
 extern Node * __builtin_quote_n(const char *tmpl, Node **nodes, int count);
+extern Node * __builtin_quote_lazy(const char *tmpl, ...);
+extern Node * __builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count);
 extern Node * __builtin_node_list(Node **nodes, int count);
 extern Type * __builtin_ast_find_type(const char *name);
 extern bool __builtin_ast_type_exists(const char *name);

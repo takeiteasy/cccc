@@ -3007,6 +3007,17 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (sc->var->is_deprecated)
                     warn_deprecated_use(vm, tok, obj_display_name(sc->var),
                                         sc->var->deprecated_msg);
+                // #1242: a $k placeholder whose argument was a QuoteLazy()
+                // fragment materialises here, in expression position --
+                // inside this parse's own live scope chain -- instead of
+                // becoming an ordinary ND_VAR reference to the placeholder.
+                // (Statement position is handled earlier, in expr_stmt(),
+                // src/parse_stmt.c, so a fragment that is itself a
+                // statement -- e.g. containing `break;` -- never has to
+                // round-trip through here.)
+                if (sc->var->lazy_quote)
+                    return cc_quote_expand_lazy(vm, sc->var->lazy_quote,
+                                                /*want_stmt=*/false);
                 return new_var_node(vm, sc->var, tok);
             }
             if (sc->enum_ty) {

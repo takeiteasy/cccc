@@ -21,3 +21,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   followed by a `[[cccc::comptime]]` definition written on one line
   segfaulted the compiler; a related shape corrupted the comptime macro
   isolation stack instead.
+- Added: `QuoteLazy(tmpl, ...)`/`QuoteLazyN(tmpl, nodes, count)`, a deferred
+  form of `Quote`/`QuoteN` that captures a template without parsing it, so a
+  loop-body fragment built by its own call can use `break`/`continue` or
+  reference a variable that is only in scope once it is spliced into a
+  separately-built outer `Quote()`/`QuoteLazy()` template.

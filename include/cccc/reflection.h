@@ -396,6 +396,41 @@ Node *__builtin_quote(const char *tmpl, ...);
  */
 Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count);
 
+/*! @brief Deferred (unparsed) quasi-quote: captures a template and its splice
+ *           arguments without parsing it (ticket #1242).
+ * @param tmpl A C expression or statement as a string literal with `$N` / `$@N`
+ *             splice points, exactly as for Quote(). Copied, not parsed, here.
+ * @param ... Node* arguments corresponding to the splice points.
+ * @return An opaque `ND_QUOTE_LAZY` node. It is not a usable AST fragment by
+ *           itself -- it must be spliced into another `Quote()`/`QuoteLazy()`
+ *           template (as a `$N` argument, in either statement or expression
+ *           position) or passed to `FunctionSetBody`. At that splice site the
+ *           template is tokenized and parsed for the first time, inside the
+ *           splice site's own scope and loop context -- so the fragment can
+ *           reference a variable that is only in scope there, and a `break`/
+ *           `continue` inside it binds to a `for`/`while`/`switch` built by a
+ *           separate, outer `Quote()`/`QuoteLazy()` call.
+ * @details Not valid as a `$@N` list-splice argument -- list splices require
+ *             already-parsed nodes; use `Quote()`/`QuoteN()` for those.
+ *             Splicing the same `QuoteLazy()` result more than once re-parses
+ *             it at each site, producing an independent fragment each time
+ *             (any locals it declares are not shared -- use `Gensym` if that
+ *             matters). The variadic form supports up to 64 splice nodes; use
+ *             QuoteLazyN for larger node arrays. Convenience wrapper:
+ *             QuoteLazy(tmpl, ...).
+ */
+Node *__builtin_quote_lazy(const char *tmpl, ...);
+
+/*! @brief Array-form deferred quasi-quote; see __builtin_quote_lazy.
+ * @param tmpl Template string with `$N` / `$@N` splice points.
+ * @param nodes Array of Node* splice arguments.
+ * @param count Length of the nodes array. If any $K in the template exceeds
+ *              count, a compile-time error is emitted at this call.
+ * @return An opaque `ND_QUOTE_LAZY` node; see __builtin_quote_lazy.
+ * @details Convenience wrapper: QuoteLazyN(tmpl, nodes, count).
+ */
+Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count);
+
 /*! @brief Build a `->next`-linked node chain from an array, returning the
  *           head.  Use the result as the argument to a `$@k` list splice.
  * @param nodes Array of Node* to link together.  Linking stops at the first
@@ -1431,6 +1466,29 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @note See @ref Quote for the multi-statement and trailing-token parsing
  * rules. */
 #define QuoteN(tmpl, nodes, count) __builtin_quote_n(tmpl, nodes, count)
+/*! @def QuoteLazy
+ * @brief Capture a C code template and its splice arguments without parsing
+ * it (ticket #1242); the template is parsed only once spliced into another
+ * Quote()/QuoteLazy() template or passed to FunctionSetBody, at that splice
+ * site's own scope and loop context.
+ * @param tmpl A C expression or statement as a string literal with splice
+ * points, exactly as for Quote().
+ * @param ... Node* arguments corresponding to the splice points (up to 64; use
+ * QuoteLazyN for more).
+ * @note Use this instead of Quote() when the fragment references a variable,
+ * or uses break/continue targeting a loop, that only exists once the
+ * fragment lands at its splice site -- see @ref Quote for ordinary
+ * (eager) quasi-quoting. Not valid as a $@N list-splice argument. */
+#define QuoteLazy(tmpl, ...) __builtin_quote_lazy(tmpl, ##__VA_ARGS__)
+/*! @def QuoteLazyN
+ * @brief Array-form QuoteLazy; validates the splice count at the capture
+ * site and supports more nodes than QuoteLazy's variadic form.
+ * @param tmpl Template string with `$N` / `$@N` splice points.
+ * @param nodes Array of Node* splice arguments.
+ * @param count Length of the nodes array.
+ * @note See @ref QuoteLazy. */
+#define QuoteLazyN(tmpl, nodes, count)                                         \
+    __builtin_quote_lazy_n(tmpl, nodes, count)
 // Build a ->next-linked chain from a compound-literal array for $@k splices:
 //   NodeList((Node*[]){ a, b, c }, 3)
 /*! @def NodeList

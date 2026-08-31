@@ -959,9 +959,50 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         return new_node(vm, ND_BLOCK, tok);
     }
 
+    // #1242: a lone `$k;` in statement position materialises a QuoteLazy()
+    // fragment right here -- inside this stmt()'s own live scope chain and
+    // brk_label/cont_label -- rather than as an ordinary expression-statement
+    // over a $k placeholder ND_VAR. Guard on the '$'+digit shape AND the
+    // very next token actually being ';' before calling find_var: this is
+    // only the "$k IS the whole statement" shortcut, not a general "an
+    // expression-statement starts with $k" rule -- `$1 + 0;` or `$1(x);`
+    // must fall through to the ordinary expr()/primary() path below, where a
+    // lazy placeholder used as a sub-expression is handled instead (and, if
+    // it turns out to hold a statement-kind fragment, diagnosed there rather
+    // than silently only consuming `$1` and leaving `+ 0;` behind for
+    // skip(vm, tok->next, ";") to choke on). Other '$'-prefixed forms (the
+    // $identifier reflect operator, $dump_*/$forward_declare) are
+    // '$'+alpha/'_', not '$'+digit, so this never touches them regardless.
+    if (tok->kind == TK_IDENT && tok->len > 1 && tok->loc[0] == '$' &&
+        tok->loc[1] >= '0' && tok->loc[1] <= '9' && equal(tok->next, ";")) {
+        VarScope *vs = find_var(vm, tok);
+        if (vs && vs->var && vs->var->lazy_quote) {
+            Node *node = cc_quote_expand_lazy(vm, vs->var->lazy_quote,
+                                              /*want_stmt=*/true);
+            *rest      = skip(vm, tok->next, ";");
+            return node;
+        }
+    }
+
     Node *node = new_node(vm, ND_EXPR_STMT, tok);
     node->lhs  = expr(vm, &tok, tok);
-    *rest      = skip(vm, tok, ";");
+
+    // #1242: name the fix when a quote placeholder ($k or $@k -- any of
+    // them, not only splice/lazy ones) in statement position is missing its
+    // trailing ';' (e.g. a bare `{ $1 }` instead of `{ $1; }`), rather than
+    // the generic "expected ';'" -- scoped to quote placeholders (their name
+    // always starts with '$', which no ordinary C identifier can) so
+    // ordinary code sees no change.
+    if (!equal(tok, ";") && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var && node->lhs->var->name &&
+        node->lhs->var->name[0] == '$')
+        error_tok(vm, tok,
+                  "quote placeholder '%s' in statement position must be "
+                  "followed by ';' -- write `{ %s; }`, not `{ %s }`",
+                  node->lhs->var->name, node->lhs->var->name,
+                  node->lhs->var->name);
+
+    *rest = skip(vm, tok, ";");
 
     add_type(vm, node->lhs);
     if (node->lhs && !(node->lhs->kind == ND_CAST && node->lhs->ty &&

@@ -4025,6 +4025,23 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         }
 
+        case ND_QUOTE_LAZY:
+            // #1242: see the matching case in src/type.c's add_type -- a
+            // QuoteLazy() fragment reaching codegen means it was never
+            // spliced into anything that materialised it.
+            if (node->tok)
+                error_tok(vm, node->tok,
+                          "QuoteLazy fragment was never spliced; a "
+                          "QuoteLazy() template only expands at a $N splice "
+                          "point inside another Quote()/QuoteLazy() "
+                          "template, or via FunctionSetBody");
+            else
+                error("QuoteLazy fragment was never spliced; a QuoteLazy() "
+                      "template only expands at a $N splice point inside "
+                      "another Quote()/QuoteLazy() template, or via "
+                      "FunctionSetBody");
+            return;
+
         default:
             error_tok(vm, node->tok,
                       "codegen: unsupported expression node kind %d",

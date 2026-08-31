@@ -1268,6 +1268,11 @@ Node *sum2(Node *a, Node *b) {
 Do not mix `$N` and `$$` in one template. Use `QuoteN(tmpl, nodes, count)`
 when splice nodes are already in an array.
 
+A `$N`/`$@N` placeholder in **statement-list position** needs its own
+trailing `;`, exactly like any other statement: `"{ $1; }"`, not `"{ $1 }"`
+— the latter is invalid C for the same reason `{ x }` is, and is reported at
+the placeholder itself.
+
 ### List splicing with `$@N` and `$@`
 
 `$@k;` in **statement-list position** expands an entire `->next`-linked node
@@ -1473,6 +1478,73 @@ reliable way to tell them apart from `main`'s own locals afterward —
 required `WithFn(fn2)` wrapper rather than silently misattaching them (which
 previously produced broken generated C, or a genuine frame-slot aliasing
 hazard depending on the two functions' relative layout).
+
+### Deferred templates with `QuoteLazy`
+
+`Quote(tmpl, ...)` tokenizes and parses its template **immediately**, at the
+point of the call — so a fragment built by its own `Quote()` call is
+validated (`break`/`continue`, variable scope) against whatever's in scope
+*right then*, not against the loop or block it is later spliced into. That
+makes a natural comptime pattern fail: building a loop body once and
+composing it into a `for`/`while` template built separately.
+
+```c
+[[cccc::comptime]]
+void gen(void) {
+    Obj *fn = MakeFunction("f", GetType("int"));
+    WithFn(fn) {
+        Node *body = Quote("if (i == 3) break;"); // fails: no loop yet, no `i`
+        Node *loop = Quote(
+            "int i; for (i = 0; i < 10; i++) { $1; } return i;", body);
+        FunctionSetBody(fn, loop);
+    }
+}
+```
+
+`QuoteLazy(tmpl, ...)` / `QuoteLazyN(tmpl, nodes, count)` capture the
+template text and splice arguments **without parsing them**. The template is
+only tokenized and parsed once it is actually spliced in — at a `$N` splice
+point inside another `Quote()`/`QuoteLazy()` template, or passed directly to
+`FunctionSetBody` — at that splice site's own scope and loop labels. Simply
+replacing the inner `Quote()` with `QuoteLazy()` above makes it work:
+
+```c
+[[cccc::comptime]]
+void gen(void) {
+    Obj *fn = MakeFunction("f", GetType("int"));
+    WithFn(fn) {
+        Node *body = QuoteLazy("if (i == 3) break;");
+        Node *loop = Quote(
+            "int i; for (i = 0; i < 10; i++) { $1; } return i;", body);
+        FunctionSetBody(fn, loop);
+    }
+}
+gen();
+
+int main(void) {
+    return f() == 3 ? 42 : 1;
+}
+```
+
+A `QuoteLazy()` fragment splices in either statement or expression position,
+exactly like an ordinary `$N`. It can also splice another `QuoteLazy()`
+fragment (lazy-in-lazy composition), and the same fragment can be spliced
+more than once — each splice re-parses it independently, so two loops built
+from the same `QuoteLazy()` result get their own, unrelated `break` targets
+and locals (a fragment that declares a local, spliced twice into the same
+scope, declares it twice — use `Gensym` if that matters).
+
+A `QuoteLazy()` result is **not** valid as a `$@N` list-splice argument —
+`$@N` expects an already-parsed `->next`-linked node chain
+(`NodeList()`/`Quote()`), not a deferred template — and is rejected as soon
+as it's registered. Build the chain with ordinary `Quote()`/`NodeList()`
+elements; a `QuoteLazy()` fragment can still appear alongside such a chain in
+the same template, as an ordinary `$N`.
+
+A `QuoteLazy()` result that is never spliced into anything — returned
+directly into expression position, say — is a compile-time error ("QuoteLazy
+fragment was never spliced") rather than reaching codegen with a meaningless
+type.
 
 ## Type And Symbol Reflection
 
@@ -2173,6 +2245,10 @@ Underlying functions: `__builtin_macroexpand_1(Node *node)` and
 | `TokenFromNode(node)` | Opaque source token attached to a node |
 | `SetToken(node, tok)` | Attach a token to a node and return the node |
 | `CopyLocation(dst, src)` | Copy source location from one node to another |
+| `Quote(tmpl, ...)` | Parse a C template string, splicing `$N`/`$@N` argument nodes, immediately |
+| `QuoteN(tmpl, nodes, count)` | Array-form `Quote`; validates the splice count |
+| `QuoteLazy(tmpl, ...)` | Capture a template and its splice arguments without parsing; parsed only once spliced in, at the splice site's own scope/loop context |
+| `QuoteLazyN(tmpl, nodes, count)` | Array-form `QuoteLazy` |
 | `NodeList(arr, count)` | Build a `->next`-linked node chain from an array for use as a `$@k` splice argument |
 | `MakeBinary(op, l, r)` | Binary expression |
 | `MakeUnary(op, operand)` | Unary expression |

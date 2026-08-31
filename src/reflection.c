@@ -2256,6 +2256,17 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     if (!vm || !fn || !body)
         return;
 
+    // #1242: a QuoteLazy() fragment passed directly to FunctionSetBody
+    // (rather than spliced into an outer Quote()/QuoteLazy() template) is
+    // materialised here, in the current parser context -- WithFn(fn)'s
+    // context when wrapped, matching the eager-Quote() convention
+    // documented in "Quote inside generated function bodies".
+    if (body->kind == ND_QUOTE_LAZY) {
+        body = cc_quote_expand_lazy(vm, body, /*want_stmt=*/true);
+        if (!body)
+            return;
+    }
+
     // If body is not already a block, wrap it
     if (body->kind != ND_BLOCK) {
         Node *block = alloc_node(vm, ND_BLOCK);
@@ -3126,6 +3137,13 @@ static void emit_ast_gen(FILE *f, Node *node) {
             emit_ast_gen(f, node->lhs);
             fprintf(f, ", /* type */ NULL)");
             break;
+        case ND_QUOTE_LAZY:
+            // #1242: should always have been materialised by
+            // cc_quote_expand_lazy() before reaching here; explicit case so
+            // it doesn't fall into the binary/unary default below and emit
+            // nonsense from lhs/rhs (which this kind doesn't use).
+            fprintf(f, "/* QUOTE_LAZY(?) -- unspliced QuoteLazy fragment */");
+            break;
         default:
             // Binary / unary operators: emit via __builtin_ast_binary /
             // __builtin_ast_unary
@@ -3335,9 +3353,17 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
                                    Node *arg_node) {
     int name_len = (int)strlen(name);
 
-    // Derive type from the argument node if available
-    Type *ty = ty_long; // safe fallback
-    if (arg_node) {
+    // Derive type from the argument node if available. #1242: a QuoteLazy()
+    // fragment is not yet parsed, so it has no meaningful type and must not
+    // be run through add_type -- add_type hard-errors on ND_QUOTE_LAZY
+    // (see src/type.c), since the only legitimate way that kind is ever
+    // consumed is via cc_quote_expand_lazy(), never through ordinary type
+    // inference. The placeholder Obj stays ty_long (never substituted as a
+    // value -- it is replaced wholesale by the materialised fragment before
+    // add_type ever sees the surrounding tree).
+    Type *ty      = ty_long; // safe fallback
+    bool  is_lazy = arg_node && arg_node->kind == ND_QUOTE_LAZY;
+    if (arg_node && !is_lazy) {
         add_type(vm, arg_node);
         if (arg_node->ty)
             ty = arg_node->ty;
@@ -3348,6 +3374,8 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
     var->name  = name;
     var->ty    = ty;
     var->align = ty->align;
+    if (is_lazy)
+        var->lazy_quote = arg_node;
     // #894: a $k/$@k quote placeholder behaves like a local pseudo-variable
     // (scoped to this one quote_core call, never a real global with
     // data-segment storage) -- mark it is_local so the #887 guard in
@@ -3761,6 +3789,18 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
     for (int k = 1; k <= max_index && k <= 64; k++) {
         if (!(splice_mask & ((uint64_t)1 << (k - 1))))
             continue;
+        // #1242: a $@k list splice expects an already-parsed ->next-linked
+        // node chain (NodeList()/splice_chain_for); a QuoteLazy() fragment
+        // is neither parsed nor a chain, so reject it here, before any
+        // parsing happens, rather than failing confusingly deep inside
+        // quote_substitute's body-splice walk.
+        Node *splice_arg = (k - 1 < n) ? nodes[k - 1] : NULL;
+        if (splice_arg && splice_arg->kind == ND_QUOTE_LAZY)
+            error_tok(vm, toks,
+                      "__builtin_quote: $@%d cannot bind a QuoteLazy "
+                      "fragment; list splices require already-parsed "
+                      "nodes (build the chain with Quote()/NodeList())",
+                      k);
         char *name = arena_format(vm, "$@%d", k);
         // Type doesn't matter for splice placeholders — the whole
         // ND_EXPR_STMT wrapper is discarded during substitution.
@@ -3848,14 +3888,12 @@ Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count) {
     return quote_core(vm, tmpl, nodes, count);
 }
 
-Node *__builtin_quote(const char *tmpl, ...) {
-    VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !tmpl)
-        return NULL;
-
-    // Scan the raw template string to derive max splice index without
-    // tokenising (avoids double arena allocation in quote_core).
-    // Handles $N, $$, $@N, and $@ forms.
+// Scan the raw template string to derive the max splice index referenced,
+// without tokenising (avoids double arena allocation in quote_core and lets
+// the variadic builtins size their va_arg collection before parsing).
+// Handles $N, $$, $@N, and $@ forms. Shared by __builtin_quote and the
+// #1242 QuoteLazy builtins.
+static int quote_scan_max_index_raw(const char *tmpl) {
     int max_index  = 0;
     int incr_count = 0;
 
@@ -3898,6 +3936,15 @@ Node *__builtin_quote(const char *tmpl, ...) {
         }
         // lone $ followed by anything else: not a splice point, ignore
     }
+    return max_index;
+}
+
+Node *__builtin_quote(const char *tmpl, ...) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !tmpl)
+        return NULL;
+
+    int max_index = quote_scan_max_index_raw(tmpl);
 
     // Collect exactly max_index nodes from va_args
     int   n = (max_index < 64) ? max_index : 64;
@@ -3911,6 +3958,151 @@ Node *__builtin_quote(const char *tmpl, ...) {
     va_end(ap);
 
     return quote_core(vm, tmpl, arg_buf, n);
+}
+
+// ----------------------------------------------------------------------
+// #1242: QuoteLazy / QuoteLazyN -- deferred (unparsed) quasi-quotes.
+//
+// quote_core (above) parses its template eagerly, at the call site, so a
+// fragment built by its own Quote() call is validated (break/continue,
+// variable scope) against whatever parser context happens to be live right
+// then -- not the context it will actually land in once spliced into a
+// separately-built outer template. __builtin_quote_lazy/_lazy_n instead
+// capture the template text and splice-argument nodes verbatim, without
+// tokenising or parsing, and return an ND_QUOTE_LAZY placeholder node. The
+// template is only ever tokenized+parsed by cc_quote_expand_lazy() (below),
+// which re-enters quote_core at the fragment's actual splice site -- inside
+// the enclosing template's own scope chain and (if any) brk_label/
+// cont_label -- so `break`/`continue`/free variable references resolve
+// exactly as they would if the whole thing had been written as one
+// template.
+// ----------------------------------------------------------------------
+
+// Shared capture path for __builtin_quote_lazy/__builtin_quote_lazy_n:
+// arena-copy the template text and the (already max_index-validated)
+// argument array into an ND_QUOTE_LAZY node.
+static Node *quote_lazy_capture(VirtualMachine *vm, const char *tmpl,
+                                Node **nodes, int n) {
+    Node *node = alloc_node(vm, ND_QUOTE_LAZY);
+    // Copy now: `tmpl` is a guest string literal owned by the comptime
+    // program's own memory, which may be torn down before this fragment is
+    // ever spliced (unlike quote_core's eager path, which consumes `tmpl`
+    // immediately and never needs to keep it alive past this call).
+    node->quote_tmpl     = arena_strdup(vm, (char *)tmpl);
+    node->lazy_arg_count = n;
+    if (n > 0) {
+        node->lazy_args =
+            arena_alloc(&vm->compiler.parser_arena, (size_t)n * sizeof(Node *));
+        // Deliberately NOT ->next-linked: a $@N argument is itself a
+        // ->next-linked chain (NodeList()/splice_chain_for), and any slot
+        // may legitimately be NULL (quote_core tolerates nodes[k-1] ==
+        // NULL for an index never actually passed). Positional identity is
+        // what the eventual quote_core re-parse needs, so this must stay a
+        // plain indexed array.
+        memcpy(node->lazy_args, nodes, (size_t)n * sizeof(Node *));
+    }
+    return node;
+}
+
+Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !tmpl || (!nodes && count > 0))
+        return NULL;
+
+    // quote_core defers this check until the fragment is actually parsed;
+    // QuoteLazyN validates eagerly at the capture site instead, so a wrong
+    // count is reported where the caller wrote it rather than deep inside
+    // some later, unrelated splice.
+    int max_index = quote_scan_max_index_raw(tmpl);
+    if (max_index > count) {
+        if (vm->compiler.macro_call_tok)
+            error_tok(vm, vm->compiler.macro_call_tok,
+                      "__builtin_quote_lazy_n: template references $%d but "
+                      "only %d argument%s supplied",
+                      max_index, count, count == 1 ? "" : "s");
+        else
+            error("__builtin_quote_lazy_n: template references $%d but "
+                  "only %d argument%s supplied",
+                  max_index, count, count == 1 ? "" : "s");
+        return NULL;
+    }
+    return quote_lazy_capture(vm, tmpl, nodes, count);
+}
+
+Node *__builtin_quote_lazy(const char *tmpl, ...) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !tmpl)
+        return NULL;
+
+    int   max_index = quote_scan_max_index_raw(tmpl);
+    int   n         = (max_index < 64) ? max_index : 64;
+    Node *arg_buf[64];
+    memset(arg_buf, 0, sizeof(arg_buf));
+
+    va_list ap;
+    va_start(ap, tmpl);
+    for (int i = 0; i < n; i++)
+        arg_buf[i] = va_arg(ap, Node *);
+    va_end(ap);
+
+    return quote_lazy_capture(vm, tmpl, arg_buf, n);
+}
+
+// Materialise a QuoteLazy fragment at its splice site: tokenize and parse
+// `lazy->quote_tmpl` for the first time, right now, inside the caller's real
+// parser context (whatever vm->compiler.scope/brk_label/cont_label/
+// current_fn currently are). This is the whole mechanism behind #1242 --
+// quote_core itself is already safely reentrant (its placeholder Scope is a
+// stack local properly chained/unchained, and comptime_splice_active is
+// saved/restored around the inner parse), so no additional state save/
+// restore is needed here.
+//
+// want_stmt selects statement- vs expression-position splicing:
+//   - want_stmt && result isn't already a statement kind: wrap in
+//     ND_EXPR_STMT (mirrors expr_stmt(), parse_stmt.c) so it can sit
+//     directly in a block's ->body chain.
+//   - !want_stmt && result is a statement kind: that fragment cannot be
+//     used as an expression operand -- error rather than producing a
+//     malformed tree.
+Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt) {
+    if (!lazy || lazy->kind != ND_QUOTE_LAZY)
+        return lazy;
+
+    Node *result =
+        quote_core(vm, lazy->quote_tmpl, lazy->lazy_args, lazy->lazy_arg_count);
+    if (!result)
+        return result;
+
+    bool is_stmt_kind = result->kind == ND_BLOCK || result->kind == ND_IF ||
+                        result->kind == ND_FOR || result->kind == ND_DO ||
+                        result->kind == ND_SWITCH ||
+                        result->kind == ND_RETURN || result->kind == ND_GOTO ||
+                        result->kind == ND_LABEL ||
+                        result->kind == ND_EXPR_STMT;
+
+    if (want_stmt) {
+        if (is_stmt_kind)
+            return result;
+        Node *wrap = alloc_node(vm, ND_EXPR_STMT);
+        wrap->tok  = lazy->tok;
+        wrap->lhs  = result;
+        add_type(vm, wrap->lhs);
+        return wrap;
+    }
+
+    if (is_stmt_kind) {
+        if (lazy->tok)
+            error_tok(vm, lazy->tok,
+                      "QuoteLazy: fragment '%s' is a statement and cannot "
+                      "be spliced in expression position",
+                      lazy->quote_tmpl);
+        else
+            error("QuoteLazy: fragment '%s' is a statement and cannot be "
+                  "spliced in expression position",
+                  lazy->quote_tmpl);
+        return result;
+    }
+    return result;
 }
 
 // Build a ->next-linked chain from an array of nodes and return the head.

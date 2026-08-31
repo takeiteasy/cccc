@@ -1288,6 +1288,26 @@ void add_type(VirtualMachine *vm, Node *node) {
                 node->ty = ty_int; // Fallback
             }
             return;
+        case ND_QUOTE_LAZY:
+            // #1242: a QuoteLazy()/QuoteLazyN() fragment is only ever
+            // legitimately consumed by cc_quote_expand_lazy() (splice-site
+            // materialization in stmt()/primary()/FunctionSetBody), which
+            // replaces it before add_type ever runs over the surrounding
+            // tree. Reaching here means the fragment was used somewhere
+            // that never spliced it in -- e.g. returned directly from a
+            // comptime function into ordinary expression position.
+            if (node->tok)
+                error_tok(vm, node->tok,
+                          "QuoteLazy fragment was never spliced; a "
+                          "QuoteLazy() template only expands at a $N splice "
+                          "point inside another Quote()/QuoteLazy() "
+                          "template, or via FunctionSetBody");
+            else
+                error("QuoteLazy fragment was never spliced; a QuoteLazy() "
+                      "template only expands at a $N splice point inside "
+                      "another Quote()/QuoteLazy() template, or via "
+                      "FunctionSetBody");
+            return;
         default:
             return;
     }

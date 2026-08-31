@@ -125,6 +125,8 @@ static const char *node_kind_name(NodeKind kind) {
             return "ASTORE";
         case ND_FENCE:
             return "FENCE";
+        case ND_QUOTE_LAZY:
+            return "QUOTE_LAZY";
         case ND_FRAME_ADDR:
             return "FRAME_ADDR";
         case ND_RETURN_ADDR:

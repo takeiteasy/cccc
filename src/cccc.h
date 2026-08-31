@@ -1729,6 +1729,22 @@ typedef enum {
                    // never read by the VM); val = 1 for the signal fence, 0
                    // for the thread fence; ty = void. No opcode -- see
                    // codegen_expr.c's ND_FENCE case for why.
+    ND_QUOTE_LAZY =
+        64, // Deferred (unparsed) Quote()/QuoteN() template, produced by
+            // QuoteLazy()/QuoteLazyN() (#1242). quote_tmpl = the raw
+            // template string (arena copy); lazy_args/lazy_arg_count =
+            // the caller's splice-argument Node* array, captured verbatim
+            // (never ->next-linked -- a $@N argument is itself a
+            // ->next-linked chain and must not be disturbed). Parsed by
+            // cc_quote_lazy_materialize() (reflection.c) only once spliced
+            // into a real parse context (stmt()/primary()/FunctionSetBody),
+            // so it sees the splice site's own scope and loop labels.
+            // add_type() is a no-op on this kind -- it is legitimately
+            // still unmaterialised when a placeholder Obj referencing it is
+            // type-derived (quote_push_placeholder). Must never reach
+            // serialize/codegen or the __builtin_ast_* re-emitter
+            // (reflection.c dump_node_as_builder_calls-style switch) --
+            // those raise "QuoteLazy fragment was never spliced".
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
@@ -1907,6 +1923,15 @@ struct Node {
     int  init_start_index; // Positional field/element index for ND_INIT_SPLICE
     bool init_inferred_array; // True when array length must be finalized
                               // post-splice
+
+    // ND_QUOTE_LAZY (#1242): a deferred QuoteLazy()/QuoteLazyN() template.
+    // lazy_args is a plain arena-allocated array (capped at 64, matching
+    // quote_core's arg_nodes bound) -- NOT ->next-linked, since a $@N
+    // argument is itself a ->next-linked chain that must survive intact
+    // until quote_substitute walks it.
+    char         *quote_tmpl;
+    struct Node **lazy_args;
+    int           lazy_arg_count;
 
     // Numeric literal
     int64_t     val;
@@ -2230,7 +2255,15 @@ struct Obj {
     bool is_implicit;        // synthesized by an implicit function declaration
     bool is_macro_generated; // true if created by a #pragma macro via
                              // $function/$global_var
-    bool is_splice_placeholder; // true for $@k vars synthesised by quote_core
+    bool  is_splice_placeholder; // true for $@k vars synthesised by quote_core
+    Node *lazy_quote; // #1242: for a $k placeholder whose argument was a
+                      // QuoteLazy()/QuoteLazyN() fragment -- the
+                      // ND_QUOTE_LAZY node to parse at this placeholder's
+                      // splice site, via cc_quote_expand_lazy(). Set only by
+                      // quote_push_placeholder, alongside
+                      // is_splice_placeholder (which stays reserved for the
+                      // $@k list-splice case; a lazy $k is a distinct,
+                      // orthogonal flavour of placeholder).
 
     // Global variable
     bool is_tentative;
@@ -4831,6 +4864,16 @@ bool cc_comptime_resolve_type_name(VirtualMachine *vm, const char *name,
                                    int len);
 bool cc_comptime_resolve_value_name(VirtualMachine *vm, const char *name,
                                     int len);
+
+// #1242: materialize a QuoteLazy()/QuoteLazyN() fragment (an ND_QUOTE_LAZY
+// node) at its splice site -- tokenizes and parses lazy->quote_tmpl right
+// now, inside the caller's own live parser context (scope chain,
+// brk_label/cont_label, current_fn), so a break/continue or free variable
+// reference inside the fragment resolves against the loop/scope it is
+// actually being spliced into rather than whatever was live when the
+// fragment was captured. want_stmt selects statement- vs expression-
+// position splicing. Defined in src/reflection.c, next to quote_core.
+Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt);
 
 /*!
  @brief Expand all macro calls in the AST.

@@ -20,6 +20,8 @@ cc_register_variadic_cfunc(vm, "__builtin_macro_error_at", (void *)__builtin_mac
 cc_register_variadic_cfunc(vm, "__builtin_macro_warning_at", (void *)__builtin_macro_warning_at, 2, 0);
 cc_register_variadic_cfunc(vm, "__builtin_quote", (void *)__builtin_quote, 1, 0);
 cc_register_cfunc(vm, "__builtin_quote_n", (void *)__builtin_quote_n, 3, 0);
+cc_register_variadic_cfunc(vm, "__builtin_quote_lazy", (void *)__builtin_quote_lazy, 1, 0);
+cc_register_cfunc(vm, "__builtin_quote_lazy_n", (void *)__builtin_quote_lazy_n, 3, 0);
 cc_register_cfunc(vm, "__builtin_node_list", (void *)__builtin_node_list, 2, 0);
 cc_register_cfunc(vm, "__builtin_ast_find_type", (void *)__builtin_ast_find_type, 1, 0);
 cc_register_cfunc(vm, "__builtin_ast_type_exists", (void *)__builtin_ast_type_exists, 1, 0);

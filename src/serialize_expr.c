@@ -2325,7 +2325,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
 
         case ND_MACRO_CALL:
         case ND_INIT_SPLICE:
-            // #963c: both are comptime-internal and are consumed before this
+        case ND_QUOTE_LAZY:
+            // #963c/#1242: all three are comptime-internal and are consumed
+            // before this
             // function ever runs -- ND_MACRO_CALL is compiled away by
             // compile_all_macros/cc_eager_expand_macro_call during
             // cc_expand_macros (main.c), which always runs ahead of the
