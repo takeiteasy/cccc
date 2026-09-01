@@ -401,6 +401,17 @@ typedef struct ComptimeDecl {
     // cc_parse_splice_range expects an ordinary terminated declaration.
     bool              synth_semi;
     ComptimeDeclState state;
+    // #1243: for a function *definition* only, the token just past the '}'
+    // that closes its body (NULL for every other declaration kind). The
+    // ordinary resolver paths above splice the signature only (`end` /
+    // `synth_semi`); this range is used by splice_missing_macro_fn_bodies()
+    // to pull the whole body into the comptime program when comptime code
+    // actually calls the function. `body_spliced` / `body_failed` track
+    // that second, independent splice -- `state` above is about the
+    // signature splice and may already be CD_DONE when the body sweep runs.
+    Token *def_end;
+    bool   body_spliced;
+    bool   body_failed;
 } ComptimeDecl;
 
 // One name -> declaration registration, chained on hashmap-key collision.
@@ -629,6 +640,14 @@ static void index_declaration(VirtualMachine *vm, Token *start, Token *semi,
         initializer_is_self_contained(eq_tok, semi);
     decl->synth_semi = is_definition;
     decl->state      = CD_NEW;
+    // #1243: record the full definition range (through the closing '}') so a
+    // later call from comptime code can pull the whole body in, not just the
+    // signature. `semi` is the body's opening '{' when is_definition.
+    decl->def_end = NULL;
+    if (is_definition) {
+        Token *close  = find_matching_brace(semi);
+        decl->def_end = close ? close->next : NULL;
+    }
 
     // --- tag: only the first "struct|union|enum IDENT" pair AT DEPTH 0 is
     // inspected. A pair inside a function declarator's parameter list (e.g.
@@ -1788,7 +1807,12 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
         Pc   loc    = vm->compiler.call_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
-            error("undefined function in macro bytecode: %s", fn->name);
+            error("undefined function in macro bytecode: '%s' -- comptime "
+                  "code calls it but no body is available to the comptime "
+                  "pass; define it in a source file cccc is given, or pull "
+                  "the definition in textually with "
+                  "'#include @comptime \"file.c\"'",
+                  fn->name);
         vm->text_seg[loc] = (Pc)fn_def->code_addr;
     }
 
@@ -1797,8 +1821,110 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
         Pc   loc    = vm->compiler.func_addr_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
         if (!fn_def)
-            error("undefined function address in macro bytecode: %s", fn->name);
+            error("undefined function address in macro bytecode: '%s' -- "
+                  "comptime code takes its address but no body is available "
+                  "to the comptime pass; define it in a source file cccc is "
+                  "given, or pull the definition in textually with "
+                  "'#include @comptime \"file.c\"'",
+                  fn->name);
         cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+    }
+}
+
+// #1243: after the comptime program has been parsed, some of its file-scope
+// declarations may be functions the comptime code calls but for which only a
+// signature was ever spliced in (comptime_index_splice / #1247 forward the
+// prototype range, never the body). Without a body those calls would fail at
+// patch_macro_call_addresses with "no body ... available to the comptime
+// pass". If the function is actually *defined* somewhere in the command-line
+// input set, the comptime declaration index recorded that definition's full
+// range (ComptimeDecl.def_end); splice the whole body in here so the call
+// resolves -- matching what #894 already does for declarations.
+//
+// Runs while in_macro_mode is still true (so spliced-in globals get
+// data-segment storage in init_macro_globals and spliced-in bodies get
+// codegen'd in Step 2), between compile_macro_program's find_macro_function
+// verification loop and Step 1. Iterates to a fixed point: a freshly
+// spliced body can itself call another not-yet-forwarded function. Bounded
+// -- each productive round adds at least one body, and body_spliced /
+// body_failed stop a decl being retried.
+//
+// Degrade, never regress: a body that cannot be parsed in the isolated
+// comptime context leaves body_failed set and the signature in place; if
+// the function is genuinely called, patch_macro_call_addresses then fires
+// its (unchanged) diagnostic, exactly as before this pass existed.
+static ComptimeDecl *find_comptime_fn_definition(VirtualMachine *vm,
+                                                 const char     *name) {
+    ComptimeDeclName *chain = hashmap_get2(&vm->compiler.comptime_decl_index,
+                                           name, (int)strlen(name));
+    ComptimeDecl     *pick  = NULL;
+    for (ComptimeDeclName *r = chain; r; r = r->next) {
+        ComptimeDecl *d = r->decl;
+        if (!d->def_end || d->body_spliced || d->body_failed)
+            continue;
+        if (!pick)
+            pick = d;
+        // Prefer a definition in the primary file when several inputs define
+        // the same name -- same tie-break comptime_index_splice applies.
+        if (vm->compiler.primary_file && d->file == vm->compiler.primary_file)
+            return d;
+    }
+    return pick;
+}
+
+static void splice_missing_macro_fn_bodies(VirtualMachine *vm,
+                                           Obj           **macro_prog) {
+    for (;;) {
+        bool progress = false;
+        for (Obj *fn = *macro_prog; fn; fn = fn->next) {
+            if (!fn->is_function || fn->body)
+                continue;
+            ComptimeDecl *def = find_comptime_fn_definition(vm, fn->name);
+            if (!def)
+                continue;
+
+            def->body_spliced = true;
+            Token *materialized =
+                materialize_comptime_range(vm, def->start, def->def_end,
+                                           /*synth_semi=*/false);
+
+            // This forwarding is speculative -- driven by a bodyless prototype
+            // in the comptime program, not by a confirmed call -- so a splice
+            // that fails must leave NO trace, or a body for a function nobody
+            // calls could fail the whole compile. cc_parse_splice_range
+            // restores scope/locals but not the error list or a partial Obj
+            // prepended onto vm->compiler.globals, so snapshot both here and
+            // rewind them on failure (mirrors the negative-test body rewind in
+            // parse_decl.c).
+            Obj          *globals_before = vm->compiler.globals;
+            int           pre_err_count  = vm->error_count;
+            CompileError *pre_err_tail   = vm->errors_tail;
+            bool          ok = cc_parse_splice_range(vm, materialized);
+            if (!ok) {
+                def->body_failed     = true;
+                def->body_spliced    = false;
+                vm->compiler.globals = globals_before;
+                if (pre_err_tail)
+                    pre_err_tail->next = NULL;
+                else
+                    vm->errors = NULL;
+                vm->errors_tail = pre_err_tail;
+                vm->error_count = pre_err_count;
+                continue;
+            }
+            // new_gvar (parse_core.c) prepends, so re-read the head: the
+            // spliced body (and any globals it declared) are now in front of
+            // the pointer captured from parse(). function() may instead
+            // attach the body to the existing in-scope prototype Obj, in
+            // which case the head is unchanged -- re-reading is still
+            // correct, and body_spliced (set above) is what actually stops
+            // this decl being retried, so the fixed-point loop terminates
+            // regardless.
+            *macro_prog = vm->compiler.globals;
+            progress    = true;
+        }
+        if (!progress)
+            break;
     }
 }
 
@@ -1968,6 +2094,15 @@ static bool compile_macro_program(VirtualMachine *vm) {
         macros[i]->compiled_fn = func;
         macros[i]->is_compiled = true;
     }
+
+    // #1243: pull in the bodies of ordinary functions the comptime code
+    // calls but only has a signature for (definitions living in another
+    // command-line input file, or reached only via a declaration-only
+    // header). Must run before Step 1 so any globals those bodies declare
+    // get data-segment storage, and before Step 2 so the bodies get
+    // codegen'd. Updates macro_prog in place -- the spliced declarations
+    // prepend onto vm->compiler.globals.
+    splice_missing_macro_fn_bodies(vm, &macro_prog);
 
     // Step 1: allocate data segment storage for all globals and memcpy any
     //         constant initializer bytes (init_data path).

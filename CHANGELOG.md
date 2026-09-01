@@ -8,6 +8,15 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Added: `[[cccc::comptime]]` code can call an ordinary C function whose
+  definition lives in another source file passed to cccc in the same
+  invocation (the conventional `.h`/`.c` split), not only one whose body is
+  textually present in the translation unit. The definition's body — and any
+  functions it calls, transitively — is pulled into the comptime program on
+  demand when a call to it is generated. A function that is only declared
+  (defined in a separately-linked object, or missing) still cannot be called
+  from comptime code, now with a diagnostic that names the two supported ways
+  to make the body reachable.
 - Fixed: a comptime-generated function whose signature named a tagless
   `typedef struct { ... } T;` produced an incomplete type under
   `-c=native`/`-c=generated`.

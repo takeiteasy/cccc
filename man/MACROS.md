@@ -150,14 +150,24 @@ The macro program has CCCC's private `reflection.h` API plus **demand-driven
 access** to file-scope declarations from the preprocessed source: typedefs,
 struct/union/enum tags (and their enumerators), function prototypes, `extern`
 declarations, and declarations without function bodies. A function
-**definition** resolves the same way, by its signature alone — the body is
-never parsed into the comptime program, only the declarator a plain
-prototype would have registered. Nothing is forwarded up front — a
-declaration resolves into the comptime program only when comptime code
-actually references its name (directly, via a `Quote()`/`QuoteN()` template,
-or via a `reflection.h` lookup like `GetType("Name")`/`VarRef("name")`/
-`FindGlobal("name")`), and only once, regardless of how many places
-reference it.
+**definition** resolves by its signature first, exactly as a plain prototype
+would — but if comptime code goes on to actually *call* that function (or
+take its address), the definition's whole body is pulled into the comptime
+program too, so the call resolves. This works wherever the definition lives:
+the primary file, another `.c` on the command line, or a file reached only
+through a declaration-only header. A conventional `.h` (declarations) + `.c`
+(definitions, compiled and linked separately) split is therefore usable for
+comptime-callable code — see
+[Comptime-callable code across files](#comptime-callable-code-across-files).
+Nothing is forwarded up front — a declaration resolves into the comptime
+program only when comptime code actually references its name (directly, via a
+`Quote()`/`QuoteN()` template, or via a `reflection.h` lookup like
+`GetType("Name")`/`VarRef("name")`/`FindGlobal("name")`), once, regardless of
+how many places reference it. A function whose signature has resolved and
+whose definition is among the input files then has its body forwarded too; if
+that body cannot compile in the isolated comptime context it is dropped
+silently unless comptime code actually calls the function, in which case the
+call is a compile error.
 
 This applies to declarations from **any non-system file** in the
 translation unit — the primary source file, a header that defines
@@ -208,10 +218,11 @@ survives even if the source file later `#define`s the same name — the CLI
 value is what the comptime pass sees.
 
 This makes included types and prototypes visible to `[[cccc::comptime]]` helpers
-used by global-generation macros, but it does not compile arbitrary non-macro
-program definitions into the macro VM. Function *bodies* and file-scope macro
-calls are always skipped — a function definition's signature is indexed the
-same as a prototype, but its body is never parsed into the comptime program.
+used by global-generation macros. A function definition's signature is indexed
+the same as a prototype; its body is parsed into the comptime program only if
+comptime code actually calls it (see
+[Comptime-callable code across files](#comptime-callable-code-across-files)).
+File-scope macro calls are always skipped.
 
 Names inside a `Quote()`/`QuoteN()` template resolve through this same
 demand-driven index, at whatever point the template is parsed — which for a
@@ -298,6 +309,56 @@ pointing at `#define @shared`, `@shared` include routing, `-D`, or
 point, not a bug in ordinary preprocessing. A comptime compile that collects
 any such error aborts cleanly (with diagnostics) rather than compiling and
 executing the partial/invalid program.
+
+### Comptime-callable code across files
+
+A helper an ordinary program splits into a header of declarations and a `.c`
+of definitions is callable from `[[cccc::comptime]]` code, provided the `.c`
+is one of the source files handed to cccc in the same invocation. The
+comptime pass indexes file-scope declarations across every input file, so a
+`[[cccc::comptime]]` body can name `helper_double` from a plain header; when
+the body generates a call to it, the definition's body is pulled in from
+whichever input file defines it, and any functions *that* body calls are
+pulled in the same way, transitively.
+
+```c
+/* helper.h — declaration only */
+int helper_double(int n);
+```
+
+```c
+/* helper.c — definition, a separate command-line input */
+int helper_double(int n) { return n * 2; }
+```
+
+```c
+/* main.c */
+#include @comptime "helper.h"
+
+[[cccc::comptime]]
+void gen(void) {
+    Obj *fn = MakeFunction("f", GetType("int"));
+    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(helper_double(21))));
+}
+gen();
+
+int main(void) { return f(); }   /* f() == 42, evaluated at compile time */
+```
+
+```
+cccc main.c helper.c
+```
+
+The `helper.h` include can be `@comptime`, `@shared`, or a plain `#include`
+whose declarations resolve on demand — routing only affects whether the
+header's own `#define` macros and types also reach runtime code. What matters
+is that `helper.c` is passed to cccc: a definition compiled to an object file
+and linked separately is invisible to the comptime pass, and calling it
+produces `undefined function in macro bytecode`. The same error is reported if
+a forwarded body cannot be compiled in the isolated comptime context — for
+instance it calls a third function the comptime pass has no body for, or uses
+a `#define` macro that never reached comptime (see
+[Include scoping](#include-scoping)) — and comptime code calls it anyway.
 
 ### Macro isolation between comptime functions
 
@@ -2529,10 +2590,14 @@ The canonical form used in this document and in CCCC examples is `[[cccc::compti
   variadic tail can receive additional call-site arguments.
 - Macro code runs at compile time and cannot inspect runtime values.
 - Global-generation macros compile before the main parse. They can see safe
-  file-scope declarations from preprocessed includes and source, but arbitrary
-  non-macro function bodies are not compiled into the macro VM. A
-  constant-initialized global declared in the main source file is visible
-  (its snapshot value, not a live reference — see
+  file-scope declarations from preprocessed includes and source. An ordinary
+  C function the comptime code calls has its body compiled into the macro VM
+  on demand, as long as that function is *defined* in one of the source files
+  cccc is given; a function that is only declared (its definition compiled
+  and linked separately, or missing entirely) still cannot be called from
+  comptime code, and a body that fails to compile in the isolated comptime
+  context is a compile error. A constant-initialized global declared in the
+  main source file is visible (its snapshot value, not a live reference — see
   [Pre-parse macro declaration context](#pre-parse-macro-declaration-context));
   any other initialized global is not.
 - Global-generation macros run before the main parse, so generated definitions
