@@ -8,6 +8,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: cross-file `[[cccc::comptime]]` body forwarding pulled in a
+  definition for *every* bodyless prototype in the comptime program, not
+  only the ones comptime code calls. A `#include @shared` header that also
+  declared a module's runtime-only functions made cccc try to compile those
+  bodies in the isolated comptime context; the ones that could not
+  (file-static state, `<stdio.h>`) left a malformed AST that crashed
+  `-c=native`/`-c=generated` code generation. Forwarding is now
+  demand-driven — a prototype nothing references is left alone.
+- Fixed: `cccc -c=generated`, `-E`, and `--ffi-decls` exited 0 after
+  printing an error when the output file could not be opened; `-c=native`
+  went on to invoke the host compiler after a serialization error instead
+  of failing. All now exit non-zero.
 - Fixed: `<string.h>` and `<locale.h>` did not define `NULL`, which C
   requires of both. `#include <string.h>` followed by a bare `NULL` failed
   with "undefined variable 'NULL'".

@@ -511,6 +511,11 @@ bool is_union_member_access(Node *node) {
 }
 
 bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
+    // Defence in depth: a malformed AST (e.g. an ND_MEMBER recovery node with
+    // a NULL lhs) must not segfault codegen. false = "not a known local
+    // frame address", i.e. keep the runtime check -- the conservative answer.
+    if (!node)
+        return false;
     switch (node->kind) {
         case ND_VAR: {
             Obj *var = node->var;

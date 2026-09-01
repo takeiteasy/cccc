@@ -422,6 +422,32 @@ def _run_header_resolution_suite():
         return f"FAILED ({e})", False
 
 
+def _run_cli_exit_code_suite():
+    """Run the CLI exit-code smoke tests (#1260).
+
+    Drives the built cccc through main.c's non-compile exit paths and
+    asserts each exits non-zero after printing an error -- a class the
+    per-test-file harness (which classifies by stderr text) cannot see.
+    Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "cli_exit_code_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cli_exit_code_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_host_attribute_link_smoke_suite():
     """Run the host __attribute__-stripping duplicate-symbol link smoke
     test (#1199).
@@ -1023,6 +1049,14 @@ def main():
     hdr_status, ok_hdr = _run_header_resolution_suite()
     print(f"  {hdr_status}")
     suite_results["header_resolution_smoke"] = ok_hdr
+
+    # --- CLI exit-code smoke (#1260) ---
+    print()
+    print("[ cli_exit_code_smoke ]")
+    wedge.arm("cli_exit_code_smoke", scalar_phase_timeout)
+    cli_ec_status, ok_cli_ec = _run_cli_exit_code_suite()
+    print(f"  {cli_ec_status}")
+    suite_results["cli_exit_code_smoke"] = ok_cli_ec
 
     # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
     print()

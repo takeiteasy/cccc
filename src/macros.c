@@ -1872,12 +1872,88 @@ static ComptimeDecl *find_comptime_fn_definition(VirtualMachine *vm,
     return pick;
 }
 
+// Does any expression in `root`'s tree reference `target` -- as a call, an
+// address-of, or a bare mention? An ordinary-recursion walk would blow the
+// host stack on a deep tree, so use an explicit worklist (the same lesson as
+// the labels-as-values static walker, #1044); pointer identity on node->var
+// catches every reference form (ND_FUNCALL's callee is an ND_VAR in its lhs,
+// &fn is ND_ADDR over the same, a function-pointer table entry is a bare
+// ND_VAR).
+static bool node_refs_obj(Node *root, Obj *target) {
+    if (!root || !target)
+        return false;
+    Node  *inline_stack[64];
+    Node **stack = inline_stack;
+    int    cap = 64, top = 0;
+    bool   found = false;
+    stack[top++] = root;
+    while (top > 0) {
+        Node *n = stack[--top];
+        if (!n)
+            continue;
+        if (n->var == target) {
+            found = true;
+            break;
+        }
+        Node *kids[] = {n->next, n->lhs,  n->rhs, n->cond, n->then,
+                        n->els,  n->init, n->inc, n->body, n->args};
+        for (size_t i = 0; i < sizeof(kids) / sizeof(kids[0]); i++) {
+            if (!kids[i])
+                continue;
+            if (top >= cap) {
+                int    ncap  = cap * 2;
+                Node **grown = (stack == inline_stack)
+                                   ? malloc(ncap * sizeof(Node *))
+                                   : realloc(stack, ncap * sizeof(Node *));
+                if (!grown)
+                    error("out of memory walking comptime program");
+                if (stack == inline_stack)
+                    memcpy(grown, inline_stack, cap * sizeof(Node *));
+                stack = grown;
+                cap   = ncap;
+            }
+            stack[top++] = kids[i];
+        }
+    }
+    if (stack != inline_stack)
+        free(stack);
+    return found;
+}
+
+// Is `target` referenced from anything already in the comptime program? #1243
+// forwarding is demand-driven: a bodyless prototype only gets its definition
+// pulled in when comptime code actually names it (directly, or transitively
+// from an already-forwarded body -- the fixed-point loop below re-checks each
+// round). A `#include @shared` header of a runtime-only module leaves dozens
+// of prototypes bodyless in the comptime program; speculatively forwarding
+// every one of them dragged in file-static helpers that cannot parse in the
+// isolated comptime context (#1261).
+static bool macro_prog_refs_obj(Obj *macro_prog, Obj *target) {
+    for (Obj *o = macro_prog; o; o = o->next) {
+        if (o == target)
+            continue;
+        if (o->is_function && o->body && node_refs_obj(o->body, target))
+            return true;
+        if (o->init_expr && node_refs_obj(o->init_expr, target))
+            return true;
+        // A comptime-side static function-pointer table (#309) names its
+        // targets through relocations, with no Node behind the reference.
+        for (Relocation *r = o->rel; r; r = r->next)
+            if (r->label && *r->label && target->name &&
+                strcmp(*r->label, target->name) == 0)
+                return true;
+    }
+    return false;
+}
+
 static void splice_missing_macro_fn_bodies(VirtualMachine *vm,
                                            Obj           **macro_prog) {
     for (;;) {
         bool progress = false;
         for (Obj *fn = *macro_prog; fn; fn = fn->next) {
             if (!fn->is_function || fn->body)
+                continue;
+            if (!macro_prog_refs_obj(*macro_prog, fn))
                 continue;
             ComptimeDecl *def = find_comptime_fn_definition(vm, fn->name);
             if (!def)
@@ -1897,12 +1973,22 @@ static void splice_missing_macro_fn_bodies(VirtualMachine *vm,
             // rewind them on failure (mirrors the negative-test body rewind in
             // parse_decl.c).
             Obj          *globals_before = vm->compiler.globals;
+            Obj           fn_before      = *fn;
             int           pre_err_count  = vm->error_count;
             CompileError *pre_err_tail   = vm->errors_tail;
             bool          ok = cc_parse_splice_range(vm, materialized);
             if (!ok) {
-                def->body_failed     = true;
-                def->body_spliced    = false;
+                def->body_failed  = true;
+                def->body_spliced = false;
+                // function() (parse_decl.c) may have attached the body (and
+                // locals/params/is_definition/...) directly onto the
+                // already-in-scope prototype Obj, which is NOT on the
+                // globals-head being rewound below. Restore the whole struct
+                // so a half-parsed error body can't reach Step-2 codegen
+                // (#1261). fn->next is unchanged by the splice (new_gvar
+                // prepends to the head, rewound separately), so a plain
+                // whole-struct copy-back is safe.
+                *fn                  = fn_before;
                 vm->compiler.globals = globals_before;
                 if (pre_err_tail)
                     pre_err_tail->next = NULL;

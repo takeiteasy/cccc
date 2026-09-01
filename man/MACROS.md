@@ -368,6 +368,15 @@ instance it calls a third function the comptime pass has no body for, or uses
 a `#define` macro that never reached comptime (see
 [Include scoping](#include-scoping)) — and comptime code calls it anyway.
 
+Forwarding is strictly demand-driven. A prototype that reaches the comptime
+program through a `@shared` (or plain) header but is never named by any
+comptime code — the usual case for a `@shared` header that also declares a
+module's runtime-only functions — costs nothing: its definition is not
+pulled in, so a body that could not compile in the isolated comptime context
+is never even attempted. Only a function a comptime body actually calls (or
+takes the address of), directly or transitively through another forwarded
+body, has its definition forwarded.
+
 ### Macro isolation between comptime functions
 
 All `[[cccc::comptime]]` function bodies are assembled into a single

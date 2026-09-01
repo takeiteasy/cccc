@@ -280,9 +280,21 @@ static int run_native_backend(
     // cc_clear_errors() pairing, e.g. the one right before the -m/
     // -c=generated bail-out this function's sibling call site guards) right
     // here or it's silently dropped.
+    bool serialize_failed = cc_has_errors(vm);
     if (cc_has_errors(vm) || vm->warning_count > 0) {
         cc_print_all_errors(vm);
         cc_clear_errors(vm);
+    }
+    // #1260: cc_serialize_program() reports an unserializable construct via
+    // the error list, not a return value -- without this the driver went on
+    // to spawn cc on a partial .c and, if that happened to compile, exited 0.
+    if (serialize_failed) {
+        fclose(f);
+        unlink(source_path);
+        free(source_path);
+        free(exe_path);
+        free(cc);
+        return 1;
     }
     if (fclose(f) != 0) {
         fprintf(stderr, "error: failed to write %s: %s\n", source_path,
@@ -2619,6 +2631,7 @@ int main(int argc, const char *argv[]) {
         input_tokens[i] = cc_preprocess(&vm, input_files[i]);
         if (!input_tokens[i]) {
             fprintf(stderr, "error: failed to preprocess %s\n", input_files[i]);
+            exit_code = 1;
             goto BAIL;
         }
 
@@ -2653,6 +2666,7 @@ int main(int argc, const char *argv[]) {
             if (!f) {
                 fprintf(stderr, "error: failed to open output file %s\n",
                         out_file);
+                exit_code = 1;
                 goto BAIL;
             }
 
@@ -2735,12 +2749,14 @@ int main(int argc, const char *argv[]) {
             merged_prog = input_progs[0];
         } else if (!merged_prog) {
             fprintf(stderr, "error: failed to link programs for JSON output\n");
+            exit_code = 1;
             goto BAIL;
         }
 
         FILE *f = out_file ? fopen(out_file, "w") : stdout;
         if (!f) {
             fprintf(stderr, "error: failed to open output file %s\n", out_file);
+            exit_code = 1;
             goto BAIL;
         }
         cc_output_json(f, merged_prog);
@@ -2797,6 +2813,7 @@ int main(int argc, const char *argv[]) {
         FILE *f = out_file ? fopen(out_file, "w") : stdout;
         if (!f) {
             fprintf(stderr, "error: failed to open output file %s\n", out_file);
+            exit_code = 1;
             goto BAIL;
         }
         // #924: checked here (post-preprocess) rather than in the CLI-only
@@ -2833,11 +2850,15 @@ int main(int argc, const char *argv[]) {
         // checkpoint's print+clear pairing, not strictly required.
         if (cc_has_errors(&vm) || vm.warning_count > 0) {
             cc_print_all_errors(&vm);
+            if (cc_has_errors(&vm))
+                exit_code = 1;
             cc_clear_errors(&vm);
         }
         if (f != stdout) {
             fclose(f);
-            if (compile_format == COMPILE_GENERATED)
+            // #1260: don't advertise a written file when serialization
+            // errored -- what's on disk is partial or empty.
+            if (compile_format == COMPILE_GENERATED && exit_code == 0)
                 fprintf(stderr, "Generated C written to %s\n", out_file);
         }
         goto BAIL;
