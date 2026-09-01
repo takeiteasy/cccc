@@ -258,6 +258,19 @@ naming `[[cccc::comptime]]` variables (see
 [Comptime Variables](#comptime-variables)) or `#define @shared` as the
 supported ways to make the value visible instead.
 
+Reading a global that *does* satisfy the rule above from the comptime
+body's own source does not create a lasting alias to it, either. Doing so
+splices a copy of the object into the comptime program itself, with its own
+storage in the comptime program's data segment — it is a snapshot, not a
+window onto the runtime translation unit's copy. A `Quote()` template built
+later by the same comptime function still cannot name that global: it now
+resolves the comptime program's copy (the wrong one) rather than the
+runtime one, and is rejected the same way as any other out-of-reach
+variable reference, naming the comptime-copy relationship explicitly in the
+error. There is no supported way to write into a runtime global from a
+`Quote()` template by name; use the function's return value, an out
+parameter, or `[[cccc::comptime]]` variables instead.
+
 A `typedef` (or a struct/union/enum type definition) written directly inside a
 `#pragma cccc comptime begin/end` region, or marked with `[[cccc::comptime]]`
 itself, is passed through into the main source file's token stream unchanged —
@@ -1613,6 +1626,47 @@ directly into expression position, say — is a compile-time error ("QuoteLazy
 fragment was never spliced") rather than reaching codegen with a meaningless
 type.
 
+### `break`/`continue` in a builder loop's body
+
+`MakeWhile`, `MakeFor`, and `MakeDoWhile` each give the loop node its own
+`break`/`continue` targets, the same way the parser does for an ordinary
+`while`/`for`/`do`. A `QuoteLazy()` body passed straight to one of these
+builders is expanded under those targets, so `break`/`continue` inside it
+bind correctly:
+
+```c
+Node *loop = MakeWhile(MakeIntLiteral(1), QuoteLazy("{ break; }"));
+```
+
+An **eager** `Quote()` body cannot work the same way, for the same reason a
+`QuoteLazy()`-only fix couldn't cover the whole picture: C evaluates a
+function call's arguments before the call runs, so `Quote("{ break; }")` is
+already fully parsed — and its `break` already bound to whatever loop was
+in scope at the call site — before `MakeWhile` ever runs to create the new
+loop and its labels:
+
+```c
+Node *loop = MakeWhile(MakeIntLiteral(1), Quote("{ break; }")); // stray break
+```
+
+`WithLoop(loop) { ... }` / `LoopSetBody(loop, body)` solve this the way
+`WithFn`/`FunctionSetBody` solve the equivalent problem for function bodies:
+build the loop with a `NULL` body first, then attach an eager `Quote()`
+template from *inside* a `WithLoop` block, so its `break`/`continue` resolve
+against the loop's targets as it's parsed:
+
+```c
+Node *loop = MakeWhile(MakeIntLiteral(1), NULL);
+WithLoop(loop) {
+    LoopSetBody(loop, Quote("{ break; }"));
+}
+```
+
+`WithLoop` blocks nest correctly with loops built inside a `Quote()`
+template and with builder loops nested inside each other — each loop's
+`break`/`continue` targets are only visible for the duration of its own
+`WithLoop` block (or its own `QuoteLazy()` body expansion).
+
 ## Type And Symbol Reflection
 
 Macros can inspect types and global symbols that are visible at the macro
@@ -2341,6 +2395,8 @@ Underlying functions: `__builtin_macroexpand_1(Node *node)` and
 | `MakeWhile(cond, body)` | While loop |
 | `MakeFor(init, cond, inc, body)` | For loop |
 | `MakeDoWhile(body, cond)` | Do-while loop |
+| `WithLoop(loop) { ... }` | Set `loop` as the current loop context for the block so a `Quote()` template built inside it resolves `break`/`continue` against `loop` |
+| `LoopSetBody(loop, body)` | Set `loop`'s body; expands a `QuoteLazy()` fragment under `loop`'s own `break`/`continue` targets |
 
 ### Function Builder APIs
 
