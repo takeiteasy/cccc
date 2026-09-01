@@ -1389,6 +1389,9 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
                 error_tok(vm, node->tok, "use of undeclared label '%s'",
                           node->label);
             node->unique_label = target->unique_label;
+            // BUG (#1255): keeps state consistent but does not suppress the
+            // -Wunused "unused label" warning, which resolve_goto_labels()
+            // already emitted at parse time, before this pass runs.
             target->label_used = true;
             // A cleanup chain recorded while parsing the template is
             // meaningless at this splice site. Do not attempt to compute the
