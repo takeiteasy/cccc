@@ -13,6 +13,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `-c=native`/`-c=generated`.
 - Fixed: a struct-returning call left a dead, unused local in every
   generated wrapper around it.
+- Added: `WithLoop(loop) { ... }` / `LoopSetBody(loop, body)`, a scoped
+  reflection API for attaching an eagerly-parsed `Quote()` body to a
+  builder-constructed loop (`MakeWhile`/`MakeFor`/`MakeDoWhile`) so its
+  `break`/`continue` resolve against that loop.
+- Fixed: `MakeWhile`/`MakeFor`/`MakeDoWhile` never assigned their loop
+  node's break/continue targets, so a `break`/`continue` in an attached
+  body had nothing to bind to.
+- Fixed: a `Quote()` template could silently resolve and write a comptime
+  program's own spliced copy of a same-named runtime global, instead of
+  the runtime global itself, with no diagnostic; this is now a compile
+  error.
 - Fixed: a `[[cccc::comptime]]` function returning a struct/union/vector by
   value crashed the comptime interpreter with "return buffer pool was never
   allocated"; a fault during comptime execution now aborts the build with a
