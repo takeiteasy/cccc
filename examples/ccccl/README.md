@@ -7,7 +7,8 @@ translation unit, and the result is plain, portable C that needs no `cccc`
 (or `ccccl`) to build or run.
 
 ```sh
-cccc -c=native src/ccccl_comptime.c examples/append_main.c runtime/ccccl_rt.c \
+cccc -c=native src/ccccl_comptime.c src/ccccl_ir.c src/ccccl_form.c \
+    src/ccccl_lower.c examples/append_main.c runtime/ccccl_rt.c \
     -Iinclude/ccccl -Iruntime -DCCCCL_LISP_PATH='"examples/append.lisp"' \
     -o append
 ./append   # -> (A B C D E F G)
@@ -27,7 +28,8 @@ comptime pass synthesizes `main()` for it, so no hand-written C is involved
 at all:
 
 ```sh
-cccc -c=native src/ccccl_comptime.c runtime/ccccl_rt.c \
+cccc -c=native src/ccccl_comptime.c src/ccccl_ir.c src/ccccl_form.c \
+    src/ccccl_lower.c runtime/ccccl_rt.c \
     -Iinclude/ccccl -Iruntime -DCCCCL_LISP_PATH='"examples/hello.lisp"' \
     -o hello
 ./hello   # -> 3628800(DONE)
@@ -53,11 +55,16 @@ source, only a runtime data-layout contract:
 - **The runtime universe** — `runtime/ccccl_rt.{h,c}`, ordinary C with zero
   `cccc` dependency, linked into the final program by the system `cc`.
 
-The one file that bridges them is `src/ccccl_comptime.c` — the only file
-ever passed to `cccc`. Everything else on the comptime side
-(`include/ccccl/ccccl_form.h`, `ccccl_ir.h`, `ccccl_lower.h`) is plain,
-dependency-free C, pulled into the comptime VM via `#include @comptime` from
-`ccccl_comptime.c`. `runtime/ccccl_rt.h` is pulled in with
+The file that bridges them is `src/ccccl_comptime.c`, the `Node*`-building
+emitter. The rest of the comptime side — the reader, the tree IR, and the
+lowering pass — is plain, dependency-free C split the conventional way into
+declaration headers (`include/ccccl/ccccl_form.h`, `ccccl_ir.h`,
+`ccccl_lower.h`) and their definitions (`src/ccccl_form.c`, `ccccl_ir.c`,
+`ccccl_lower.c`). Every one of these `.c` files is passed to `cccc` on the
+command line alongside `ccccl_comptime.c`; the headers are routed
+`#include @comptime`, and cccc forwards the bodies into the comptime program
+on demand as the emitter calls them. They are compile-time only — never
+linked into an example binary. `runtime/ccccl_rt.h` is pulled in with
 `#include @shared` instead — that is what lets generated code reference the
 runtime's `ccccl_nil`/`ccccl_t` globals directly; a bare extern variable
 reached only through a plain `#include` is rejected by `Quote()`'s
@@ -102,8 +109,8 @@ directory regressed.
 ## Invoking cccc directly
 
 ```sh
-cccc -c=generated src/ccccl_comptime.c \
-    -Iinclude/ccccl -Iruntime \
+cccc -c=generated src/ccccl_comptime.c src/ccccl_ir.c src/ccccl_form.c \
+    src/ccccl_lower.c -Iinclude/ccccl -Iruntime \
     -D CCCCL_LISP_PATH='"examples/append.lisp"' \
     -o build/append.gen.c
 ```
@@ -115,6 +122,9 @@ cccc -c=generated src/ccccl_comptime.c \
   all — `-c=generated` only serializes macro-touched content. It is
   ordinary C, compiled and linked by the system `cc` alongside the
   generated output and `runtime/ccccl_rt.c`.
+- `-c=generated` replays the comptime modules' own `#include "ccccl_*.h"`
+  lines into the generated C, so the `cc` step needs `-Iinclude/ccccl` too
+  (the headers are declaration-only; nothing from them is linked).
 
 ## Scoping
 
@@ -124,7 +134,7 @@ lowered function gets real, named C parameters:
 `(define (append x y) ...)` becomes `LObj *append(LObj *x, LObj *y)`, not
 `LObj *append(LObj *args, LObj *env)` reading its arguments back out of a
 runtime assoc-list. Name resolution happens once, at lowering time (a scope
-stack in `ccccl_lower.h`), not on every variable reference at runtime — an
+stack in `ccccl_lower.c`), not on every variable reference at runtime — an
 unbound symbol is a comptime error (`MacroErrorAt`, with the source
 position), not a silent `NIL`. A `LAMBDA`/`LABEL`'s free variables are
 collected during lowering and captured **positionally**, by index, at the
@@ -355,10 +365,10 @@ have a hand-written `NAME_main.c` (`hello`, being a program, does not).
 `(define (append x y) (cond ((eq x nil) y) (t (cons (car x) (append (cdr x) y)))))`
 lowers through three stages:
 
-1. **Reader** (`ccccl_form.h`) produces a `CccclForm` tree: a `PAIR` whose
+1. **Reader** (`ccccl_form.c`) produces a `CccclForm` tree: a `PAIR` whose
    `car` is the atom `DEFINE`.
-2. **Lowering** (`ccccl_lower.h`) creates a `CccclPlanFn` named `append` and
-   lowers the body into a `CccclExpr` **tree** (`ccccl_ir.h`) — a `COND`
+2. **Lowering** (`ccccl_lower.c`) creates a `CccclPlanFn` named `append` and
+   lowers the body into a `CccclExpr` **tree** (`ccccl_ir.h` types) — a `COND`
    clause's predicate and value are just child expressions of the `COND`
    node, walked by ordinary recursive descent. This replaced an earlier
    flat, postfix op-list design (`CccclOp` plus a *separate* `cond_ops[]`

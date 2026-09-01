@@ -21,9 +21,16 @@ LIB_EXAMPLES  := append lambda_head mutual reverse fib adder letsum
 PROG_EXAMPLES := hello
 EXAMPLES      := $(LIB_EXAMPLES) $(PROG_EXAMPLES)
 
-COMPTIME_SRC  := src/ccccl_comptime.c
-COMPTIME_HDRS := include/ccccl/ccccl_ir.h include/ccccl/ccccl_form.h \
-                 include/ccccl/ccccl_lower.h
+# src/ccccl_comptime.c is the file that drives the pass; the reader / IR /
+# lowering modules are ordinary .h/.c pairs it pulls in with
+# `#include @comptime` and cccc forwards on demand (the cross-file
+# comptime-call support). They are compile-time only -- never linked into an
+# example binary -- so they appear on the cccc command line but not the `cc`
+# link line.
+COMPTIME_SRC     := src/ccccl_comptime.c
+COMPTIME_MODULES := src/ccccl_ir.c src/ccccl_form.c src/ccccl_lower.c
+COMPTIME_HDRS    := include/ccccl/ccccl_ir.h include/ccccl/ccccl_form.h \
+                    include/ccccl/ccccl_lower.h
 RT_SRC        := runtime/ccccl_rt.c
 RT_HDRS       := runtime/ccccl_rt.h runtime/ccccl_rt_internal.h
 
@@ -38,19 +45,25 @@ build:
 # The comptime pass: src/ccccl_comptime.c is the only file ever passed to
 # cccc (see its own file comment for why). -D rather than a source #define
 # for the input path -- comptime bodies don't see ordinary source #define's.
-build/%.gen.c: examples/%.lisp $(COMPTIME_SRC) $(COMPTIME_HDRS) $(RT_HDRS) | build
-	$(CCCC) -c=generated $(COMPTIME_SRC) -Iinclude/ccccl -Iruntime \
+build/%.gen.c: examples/%.lisp $(COMPTIME_SRC) $(COMPTIME_MODULES) $(COMPTIME_HDRS) $(RT_HDRS) | build
+	$(CCCC) -c=generated $(COMPTIME_SRC) $(COMPTIME_MODULES) \
+	    -Iinclude/ccccl -Iruntime \
 	    -DCCCCL_LISP_PATH='"examples/$*.lisp"' -o $@
 
 # Library examples: examples/%_main.c is never passed to cccc at all -- plain
 # C, compiled and linked by the system cc alongside the generated output and
 # the runtime.  Program examples link only the generated output (which
 # carries its own main()) and the runtime.
+#
+# -Iinclude/ccccl on the cc line: -c=generated replays the comptime modules'
+# own `#include "ccccl_*.h"` lines into the generated C (declaration-only
+# headers -- the definitions ran at compile time and are not linked here), so
+# the header directory has to be reachable when cc reads the .gen.c.
 $(LIB_EXAMPLES:%=build/%): build/%: build/%.gen.c examples/%_main.c $(RT_SRC) $(RT_HDRS)
-	$(CC) $(CFLAGS) -Iruntime -o $@ examples/$*_main.c build/$*.gen.c $(RT_SRC)
+	$(CC) $(CFLAGS) -Iinclude/ccccl -Iruntime -o $@ examples/$*_main.c build/$*.gen.c $(RT_SRC)
 
 $(PROG_EXAMPLES:%=build/%): build/%: build/%.gen.c $(RT_SRC) $(RT_HDRS)
-	$(CC) $(CFLAGS) -Iruntime -o $@ build/$*.gen.c $(RT_SRC)
+	$(CC) $(CFLAGS) -Iinclude/ccccl -Iruntime -o $@ build/$*.gen.c $(RT_SRC)
 
 check: all
 	@status=0; \
@@ -75,7 +88,7 @@ native: | build
 	for ex in $(EXAMPLES); do \
 	    main=examples/$${ex}_main.c; \
 	    [ -f "$$main" ] || main=; \
-	    $(CCCC) -c=native $(COMPTIME_SRC) $$main $(RT_SRC) \
+	    $(CCCC) -c=native $(COMPTIME_SRC) $(COMPTIME_MODULES) $$main $(RT_SRC) \
 	        -Iinclude/ccccl -Iruntime \
 	        -DCCCCL_LISP_PATH="\"examples/$$ex.lisp\"" \
 	        -o build/$${ex}_native || { status=1; continue; }; \

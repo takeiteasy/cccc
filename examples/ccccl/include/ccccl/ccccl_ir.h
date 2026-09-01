@@ -156,13 +156,7 @@ typedef struct {
     int  has_error;
 } CccclPlan;
 
-static void ccccl_plan_init(CccclPlan *p) {
-    p->expr_count = 0;
-    p->fn_count   = 0;
-    p->sym_count  = 0;
-    p->error[0]   = '\0';
-    p->has_error  = 0;
-}
+void ccccl_plan_init(CccclPlan *p);
 
 #ifdef __cplusplus
 }
