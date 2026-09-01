@@ -3890,6 +3890,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     EmitEvent *replay_start = vm->compiler.emit_events_head;
     if (generated_only && vm->compiler.emit_events_head) {
         bool printed_any = false;
+        // #1263: a captured `#ifndef X`/`#endif` shell whose only body was a
+        // `#define` that a command-line `-D` pre-empted is replayed by the
+        // main loop below with an empty body -- inert but noisy. An empty
+        // conditional shell should be dropped from generated output.
         while (replay_start && replay_start->kind == CCCC_EMIT_SOURCE &&
                !line_is_conditional_directive(replay_start->source)) {
             fprintf(f, "%s\n", replay_start->source);
