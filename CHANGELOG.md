@@ -28,6 +28,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   value crashed the comptime interpreter with "return buffer pool was never
   allocated"; a fault during comptime execution now aborts the build with a
   diagnostic instead of silently continuing.
+- Fixed: a comptime macro or `QuoteLazy()` fragment that produced a computed
+  `goto *p`, a bare `case` label, or an `asm(...)` statement was not
+  recognised as a statement, so in statement position it failed with an
+  opaque "unsupported expression node kind" instead of splicing in, and in
+  expression position it skipped the clear "returned a statement" diagnostic.
+  `Quote("asm(\"...\");")` also now parses cleanly regardless of the trailing
+  semicolon.
 - Fixed: a `#include @comptime`/`#include @shared` directive immediately
   followed by a `[[cccc::comptime]]` definition written on one line
   segfaulted the compiler; a related shape corrupted the comptime macro

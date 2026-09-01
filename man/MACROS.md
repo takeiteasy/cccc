@@ -92,7 +92,8 @@ old `return MakeIntLiteral(0)` idiom still works but is no longer needed.
 
 `Quote()` auto-wraps a multi-statement template in braces, so it's easy to end
 up with an `ND_BLOCK` (or another statement-kind node — an `if`, a `for`, a
-bare `return`, ...) as a macro's return value:
+bare `return`, a `switch` or bare `case` label, a `goto` or computed
+`goto *p`, an `asm(...)` statement, ...) as a macro's return value:
 
 ```c
 [[cccc::comptime]]
@@ -1602,9 +1603,11 @@ int main(void) {
 
 A `QuoteLazy()` fragment splices in either statement or expression position,
 exactly like an ordinary `$N` — but if the fragment parses to a statement
-(e.g. a multi-statement template) and is spliced at an expression-position
-`$N`, that's a compile error ("fragment '...' is a statement and cannot be
-spliced in expression position"), the same rule and the same fix (a GNU
+(a multi-statement template, or a single statement such as a `goto`,
+computed `goto *p`, bare `case` label, or `asm(...)`) and is spliced at an
+expression-position `$N`, that's a compile error ("fragment '...' is a
+statement and cannot be spliced in expression position"), the same rule and
+the same fix (a GNU
 statement expression, `({ ... })`) as for an eagerly-`Quote()`d template —
 see [Statement returns in expression position](#statement-returns-in-expression-position).
 It can also splice another `QuoteLazy()`

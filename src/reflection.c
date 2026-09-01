@@ -3804,6 +3804,12 @@ static bool quote_is_stmt(Token *tok) {
                 return true;
     }
 
+    // An `asm(...)` statement: `asm` is a keyword, but the GNU-spelled
+    // `__asm__` / `__asm` aliases stmt() also accepts (parse_stmt.c) are
+    // plain identifiers -- match all three by text regardless of kind.
+    if (equal(tok, "asm") || equal(tok, "__asm__") || equal(tok, "__asm"))
+        return true;
+
     // If the last non-EOF token is ';' it is an expression-statement
     for (Token *t = tok; t && t->kind != TK_EOF; t = t->next)
         if (!t->next || t->next->kind == TK_EOF)

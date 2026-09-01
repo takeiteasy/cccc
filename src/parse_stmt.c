@@ -52,7 +52,7 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
 }
 
 // asm-stmt = ("asm" | "__asm__" | "__asm") ("volatile" | "inline")* "("
-//            string-literal ")"
+//            string-literal ")" ";"
 static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_ASM, tok);
     tok        = tok->next;
@@ -65,7 +65,15 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         error_tok(vm, tok, "expected string literal, found '%.*s'", tok->len,
                   tok->loc);
     node->asm_str = tok->str;
-    *rest         = skip(vm, tok->next, ")");
+    tok           = skip(vm, tok->next, ")");
+    // The trailing ';' is part of the statement. In a block it was previously
+    // left for the body loop to consume as an empty statement; consuming it
+    // here also lets `Quote("asm(\"...\");")` parse cleanly (quote_core rejects
+    // any tokens left over after the single parsed statement). Tolerated as
+    // optional to preserve cccc's existing leniency about a missing ';'.
+    if (equal(tok, ";"))
+        tok = tok->next;
+    *rest = tok;
     return node;
 }
 

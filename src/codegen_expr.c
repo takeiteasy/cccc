@@ -3732,6 +3732,14 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         case ND_LABEL_VAL: {
             // Label address: &&label (GCC extension for computed goto)
             // Emit LTA3 with placeholder offset that will be patched later
+            //
+            // BUG (#1253): a `&&forward_label` taken inside a
+            // Quote()/QuoteLazy() template (label defined later in the same
+            // template) resolves to the wrong PC -- a subsequent `goto *p`
+            // jumps into hyperspace and typically stack-overflows.
+            // `&&backward_label` and `&&label` in ordinary (non-quoted) code
+            // are fine. Root cause is in the quote parse's label-resolution
+            // pass, not here.
             Pc label_addr_loc = emit_lta3(vm, dest_reg, 0);
             // Record patch location so it gets resolved when label is defined
             add_label_patch(node->unique_label ? node->unique_label

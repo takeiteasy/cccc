@@ -802,12 +802,19 @@ bool node_has_side_effects(Node *n) {
 // used wherever a comptime macro's returned Node* has to be checked against
 // the syntactic position it landed in (transform_node's ND_MACRO_CALL/
 // ND_EXPR_STMT handling in macros.c, cc_quote_expand_lazy's want_stmt wrap in
-// reflection.c). Previously duplicated as two separately-maintained 9-kind
-// inline lists; kept to exactly those nine kinds here too, so unifying them
-// is a pure refactor with no behavior change. ND_GOTO_EXPR (labels-as-values)
-// and ND_CASE/ND_ASM are deliberately not included -- widening this set
-// changes both call sites' behavior and is out of scope where this was
-// introduced (#1248); see that ticket's follow-ups.
+// reflection.c). In statement position such a node splices in directly; in
+// expression position it is a compile error, and it must never reach codegen
+// as a bare expression (gen_expr has no arm for any of these kinds and would
+// abort with an opaque "unsupported expression node kind N").
+//
+// Invariant: this set is exactly the node kinds gen_stmt() handles in
+// src/codegen_stmt.c -- a kind that codegen treats as a statement is one
+// this classifier must recognise. Keep the two in sync: adding a statement
+// kind to gen_stmt() means adding it here too.
+//
+// Not included, on purpose: ND_LABEL_VAL (`&&label`), which sits right next
+// to ND_LABEL in the NodeKind enum but is an *expression* producing a label
+// address.
 bool node_is_stmt_kind(Node *n) {
     if (!n)
         return false;
@@ -817,10 +824,13 @@ bool node_is_stmt_kind(Node *n) {
         case ND_FOR:
         case ND_DO:
         case ND_SWITCH:
+        case ND_CASE:
         case ND_BLOCK:
         case ND_GOTO:
+        case ND_GOTO_EXPR:
         case ND_LABEL:
         case ND_EXPR_STMT:
+        case ND_ASM:
             return true;
         default:
             return false;
