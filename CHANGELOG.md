@@ -8,6 +8,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: the guard that stops a `Quote()` template from silently resolving a
+  comptime program's own spliced copy of a same-named runtime global also
+  rejected a declaration-only `extern` brought in with `#include @shared`,
+  which has no comptime-side storage to shadow and is legitimately named from
+  a template. A generated program can again refer to a shared runtime
+  constant by name.
 - Added: `[[cccc::comptime]]` code can call an ordinary C function whose
   definition lives in another source file passed to cccc in the same
   invocation (the conventional `.h`/`.c` split), not only one whose body is

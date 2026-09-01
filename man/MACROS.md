@@ -279,9 +279,17 @@ later by the same comptime function still cannot name that global: it now
 resolves the comptime program's copy (the wrong one) rather than the
 runtime one, and is rejected the same way as any other out-of-reach
 variable reference, naming the comptime-copy relationship explicitly in the
-error. There is no supported way to write into a runtime global from a
-`Quote()` template by name; use the function's return value, an out
+error. There is no supported way to write into a runtime *defined* global
+from a `Quote()` template by name; use the function's return value, an out
 parameter, or `[[cccc::comptime]]` variables instead.
+
+A declaration-only `extern` brought into scope with `#include @shared` is
+the exception: it has no storage of its own in either program, so there is
+no comptime-side copy to shadow. A `Quote()` template may name it freely —
+codegen emits a plain symbol reference that the system linker resolves
+against the definition in whichever translation unit or object provides it.
+This is how a generated program refers to shared runtime constants (an
+interned sentinel value, a lookup table) by name.
 
 A `typedef` (or a struct/union/enum type definition) written directly inside a
 `#pragma cccc comptime begin/end` region, or marked with `[[cccc::comptime]]`

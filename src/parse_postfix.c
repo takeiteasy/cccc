@@ -2994,7 +2994,16 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         bool hid_macro_program_global = false;
         if (!vm->compiler.in_macro_mode && sc && sc->var &&
             !sc->var->is_local && !sc->var->is_function &&
-            sc->var->is_macro_program_global) {
+            sc->var->is_macro_program_global && sc->var->is_definition) {
+            // #1258: only hide a global the comptime program actually
+            // *defines* (storage in its own data segment) -- that is the
+            // shadowing hazard #1250 guards against. A declaration-only
+            // extern brought in via `#include @shared` (e.g. `extern LObj
+            // *ccccl_nil;`) has no storage of its own in either program;
+            // codegen emits a plain symbol reference the system linker
+            // resolves, so naming it from a Quote() template is legitimate
+            // (that is the entire purpose of @shared) and must still
+            // resolve here.
             sc                       = NULL;
             hid_macro_program_global = true;
         }
