@@ -5656,6 +5656,23 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                       // path once that's known
         {
             ComptimeCtxEntry *_ac = ctx_top(vm);
+            // #1262: under -c=generated, an unrouted directive from a
+            // *non-primary* command-line input is not replayed. Additional
+            // inputs there are comptime-support modules (their bodies are
+            // forwarded into the comptime program by #1243, on demand) --
+            // none of their runtime code reaches the serialized output, so
+            // their own #include/#define scaffolding has no business in it
+            // either, and a downstream `cc` should not need the extra -I to
+            // resolve a leaked quoted include. -c=native/-m are unaffected
+            // (the whole program is emitted there, so #1006's widening still
+            // applies); an @emit/@shared route still opts a directive in
+            // from any file.
+            bool _ac_generated_nonprimary =
+                vm->compiler.emit_generated_only &&
+                directive_route == INCLUDE_ROUTE_NORMAL && start->file &&
+                start->file != vm->compiler.primary_file &&
+                cc_file_is_command_line_input(vm, start->file->name) &&
+                !cc_file_is_cccc_only(vm, start->file->name);
             // #1022 (found closing #1022's own pthread.h work): a
             // cccc-only header's (is_cccc_supplied_only_header --
             // stdbit.h/uchar.h/threads.h/Availability.h/decimal_math.h)
@@ -5676,7 +5693,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // inside one -- widen the gate to also auto-capture from a
             // cccc-only includer, not just a command-line input file.
             if (!vm->compiler.emit_strict && !vm->compiler.in_macro_mode &&
-                start->file &&
+                !_ac_generated_nonprimary && start->file &&
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
                 !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start) &&

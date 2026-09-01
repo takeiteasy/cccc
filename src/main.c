@@ -2371,6 +2371,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.comptime_include_all    = comptime_include_all;
     vm.compiler.allow_comptime_pp_bleed = allow_comptime_pp_bleed;
     vm.compiler.emit_strict             = emit_only;
+    vm.compiler.emit_generated_only     = (bool)emit_generated_only;
     vm.compiler.attr_target             = attr_target;
     vm.compiler.emit_cccc               = (bool)emit_cccc_mode;
     vm.compiler.no_layout_guards        = (bool)no_layout_guards_mode;

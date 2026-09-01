@@ -61,6 +61,15 @@ static void fenv_barrier_end(int saved_round) {
 // Generated from include/cccc/reflection.h -- see tools/gen_reflection_ffi.py.
 #include "reflection_ffi_protos.inc"
 
+// NOTE: unlike cc_record_emit_object below, this does NOT dedup -- so two
+// command-line inputs each carrying an identical `#include <stdio.h>` are
+// both replayed into -c=generated output (the `push_emit_directive` sibling
+// path that feeds -c=native/-m dedups includes; this one does not). #1262
+// narrowed generated-mode auto-capture to the primary input only, which
+// removes the multi-file duplicate in practice; a single file with two
+// identical includes would still double here. Left as-is: the emit-event
+// list is deliberately ordered and order-preserving, and a duplicate inert
+// include is harmless.
 void cc_record_emit_source(VirtualMachine *vm, const char *source) {
     if (!vm || !source || !*source)
         return;

@@ -102,10 +102,16 @@ compiler that have no meaning in CCCC's VM execution.
 Under `-c=native` (and `-m` / `-c=generated`), CCCC emits C and hands it to a
 real host compiler, so header handling shifts:
 
-- CCCC re-emits the primary source file's own top-level `#include` lines
-  verbatim into the generated C, and forwards the flags a host compiler
-  needs to resolve them (`-I` for the source file's own directory, the
-  real SDK search path).
+- CCCC re-emits the source's own top-level `#include` lines verbatim into
+  the generated C, and forwards the flags a host compiler needs to resolve
+  them (`-I` for the source file's own directory, the real SDK search
+  path). Under `-c=native` / `-m` this covers every command-line input,
+  since the whole program is emitted. Under `-c=generated` only the
+  **primary** input's directives are replayed: additional inputs there are
+  comptime-support modules whose runtime code never reaches the output, so
+  their `#include`/`#define` scaffolding would only be dead weight (and
+  force an extra `-I` on the downstream `cc`). Route a directive with
+  `@emit` or `@shared` to opt one in from such a file.
 - Where a user `-I`/`-isystem` entry also contains CCCC's own bundled
   headers, it is demoted to `-idirafter` so the real host header always
   wins — CCCC's bundled copies are VM polyfills and must not shadow the

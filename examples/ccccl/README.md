@@ -122,9 +122,12 @@ cccc -c=generated src/ccccl_comptime.c src/ccccl_ir.c src/ccccl_form.c \
   all — `-c=generated` only serializes macro-touched content. It is
   ordinary C, compiled and linked by the system `cc` alongside the
   generated output and `runtime/ccccl_rt.c`.
-- `-c=generated` replays the comptime modules' own `#include "ccccl_*.h"`
-  lines into the generated C, so the `cc` step needs `-Iinclude/ccccl` too
-  (the headers are declaration-only; nothing from them is linked).
+- `-c=generated` replays only the primary input's own directives. The
+  reader/IR/lowering modules are additional inputs whose bodies are
+  forwarded into the comptime program but whose runtime code is never
+  emitted, so their `#include "ccccl_*.h"` lines stay out of the generated
+  C and the `cc` step needs only `-Iruntime` (for `ccccl_rt.h`, replayed
+  from `ccccl_comptime.c`'s own `#include @shared`).
 
 ## Scoping
 

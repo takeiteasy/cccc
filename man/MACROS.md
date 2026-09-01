@@ -638,6 +638,15 @@ This auto-capture applies to any directive from the primary source file that
 is not inside a `#pragma cccc comptime` block: `#include`, `#define`,
 `#ifdef`/`#endif`, and others.
 
+Auto-capture is limited to the **primary** input. When several files are
+passed to `-c=generated` — typically because comptime code calls into ordinary
+functions defined in separate `.c` modules, whose bodies CCCC forwards into the
+comptime program — those extra modules contribute no runtime code to the
+serialized output, so their own `#include`/`#define` lines are not replayed
+either. If one of them has a directive that genuinely belongs in the generated
+C, route it with `@emit` (or `@shared` for a header the generated code needs
+in scope); a routed directive is emitted from any input file.
+
 If you need the old behavior (emit only explicitly tagged content), pass
 `--emit-only` alongside `-c=generated`. In that mode you must annotate each directive
 with `[[cccc::emit]]`, `@emit`, or `__attribute__((emit))` to include it:

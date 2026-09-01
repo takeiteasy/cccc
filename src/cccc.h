@@ -3779,6 +3779,14 @@ typedef struct Compiler {
                                  // serialized output
     int emit_strict; // --emit-only: suppress auto-capture; only explicitly
                      // tagged content appears in -c=generated output
+    bool emit_generated_only; // -c=generated (not -m alone): narrows
+                              // auto-capture so only the primary input's own
+                              // unrouted directives are replayed. Additional
+                              // command-line inputs are comptime-support
+                              // modules whose runtime code never reaches the
+                              // output, so neither does their scaffolding --
+                              // route a directive with @emit/@shared to opt
+                              // one in from such a file.
     StringArray comptime_pending_includes; // #include [[cccc::comptime]]
                                            // filenames queued for comptime pass
     StringArray

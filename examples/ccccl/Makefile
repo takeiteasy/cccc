@@ -55,15 +55,15 @@ build/%.gen.c: examples/%.lisp $(COMPTIME_SRC) $(COMPTIME_MODULES) $(COMPTIME_HD
 # the runtime.  Program examples link only the generated output (which
 # carries its own main()) and the runtime.
 #
-# -Iinclude/ccccl on the cc line: -c=generated replays the comptime modules'
-# own `#include "ccccl_*.h"` lines into the generated C (declaration-only
-# headers -- the definitions ran at compile time and are not linked here), so
-# the header directory has to be reachable when cc reads the .gen.c.
+# The cc line only needs -Iruntime (for ccccl_rt.h): -c=generated replays
+# the primary input's own directives, and the comptime-only reader/IR/
+# lowering modules are additional inputs whose scaffolding is not emitted --
+# so nothing in the .gen.c references include/ccccl/ anymore.
 $(LIB_EXAMPLES:%=build/%): build/%: build/%.gen.c examples/%_main.c $(RT_SRC) $(RT_HDRS)
-	$(CC) $(CFLAGS) -Iinclude/ccccl -Iruntime -o $@ examples/$*_main.c build/$*.gen.c $(RT_SRC)
+	$(CC) $(CFLAGS) -Iruntime -o $@ examples/$*_main.c build/$*.gen.c $(RT_SRC)
 
 $(PROG_EXAMPLES:%=build/%): build/%: build/%.gen.c $(RT_SRC) $(RT_HDRS)
-	$(CC) $(CFLAGS) -Iinclude/ccccl -Iruntime -o $@ build/$*.gen.c $(RT_SRC)
+	$(CC) $(CFLAGS) -Iruntime -o $@ build/$*.gen.c $(RT_SRC)
 
 check: all
 	@status=0; \
