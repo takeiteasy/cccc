@@ -34,6 +34,8 @@
 #ifndef __LOCALE_H
 #define __LOCALE_H
 
+#include "stddef.h" /* C requires <locale.h> to define NULL */
+
 #define LC_ALL      0
 #define LC_COLLATE  1
 #define LC_CTYPE    2

@@ -3,6 +3,8 @@
 #ifndef __STRING_H
 #define __STRING_H
 
+#include "stddef.h" /* C requires <string.h> to define NULL (and size_t) */
+
 extern void *memcpy(void *dest, const void *src, long n);
 extern void *memmove(void *dest, const void *src, long n);
 extern void *memset(void *s, int c, long n);

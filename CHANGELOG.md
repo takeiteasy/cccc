@@ -8,6 +8,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: `<string.h>` and `<locale.h>` did not define `NULL`, which C
+  requires of both. `#include <string.h>` followed by a bare `NULL` failed
+  with "undefined variable 'NULL'".
 - Fixed: the guard that stops a `Quote()` template from silently resolving a
   comptime program's own spliced copy of a same-named runtime global also
   rejected a declaration-only `extern` brought in with `#include @shared`,
