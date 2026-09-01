@@ -5,16 +5,21 @@
 // wrapped node reached codegen and failed with "unsupported expression node
 // kind 34".
 //
-// The label target is resolved backwards (goto skip; ... spin: ...) rather
-// than forwards: a `&&forward_label` taken inside a Quote() template is a
-// separate, pre-existing label-resolution bug, tracked independently.
+// The template also exercises label resolution inside a Quote() template:
+// `goto skip` (a named jump), `&&spin` (a label address taken before the
+// label), and the spliced `goto *p`. `witness` is set on the fall-through
+// path into `skip:` and checked after the computed goto lands, so this test
+// fails loudly if `goto skip` ever silently no-ops again (it used to: a
+// template goto emitted no jump at all, control fell straight into `spin:`
+// and `goto *p` never ran).
 
 [[cccc::comptime]]
 Node *gen(void) {
     Node *frag = QuoteLazy("goto *p;");
-    return Quote("{ int r = 1; void *p; p = &&spin; goto skip;"
-                 "  spin: r = 42; return r;"
-                 "  skip: ; $1; return r; }",
+    return Quote("{ int r = 1; int witness = 0; void *p; p = &&spin;"
+                 "  goto skip;"
+                 "  spin: return (r == 42 && witness == 1) ? 42 : 1;"
+                 "  skip: witness = 1; r = 42; $1; return 2; }",
                  frag);
 }
 

@@ -116,14 +116,30 @@ static int cleanup_lca_depth(CleanupChainNode *g, CleanupChainNode *l) {
     return g ? g->depth : 0;
 }
 
-// This function matches gotos or labels-as-values with labels.
+// Match every ND_GOTO / ND_LABEL_VAL ref in the goto_next-linked range
+// [refs, refs_end) against every ND_LABEL in [labels, labels_end), by name.
+// Both ranges run newest-first; *_end is exclusive and NULL means "to the end
+// of the list". A matched ref gets the label's `unique_label` (copied by
+// pointer — the serializer matches unique labels by pointer identity, see
+// src/serialize_internal.h). Returns true iff every ref in the range matched.
 //
-// We cannot resolve gotos as we parse a function because gotos
-// can refer a label that appears later in the function.
-// So, we need to do this after we parse the entire function.
-static void resolve_goto_labels(VirtualMachine *vm) {
-    for (Node *x = vm->compiler.gotos; x; x = x->goto_next) {
-        for (Node *y = vm->compiler.labels; y; y = y->goto_next) {
+//   set_cleanup_depth   compute cleanup_target_depth / the jump-into-cleanup
+//                       warning for matched ND_GOTOs (meaningful only when the
+//                       refs and labels share one parse's cleanup chains)
+//   diagnose_undeclared error_tok() on an unmatched ref
+//
+// This is the shared core of resolve_goto_labels() (whole-function, run once
+// after a function body parse) and quote_core()'s hygienic in-template pass.
+bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
+                          Node *labels, Node *labels_end,
+                          bool set_cleanup_depth, bool diagnose_undeclared) {
+    bool all_resolved = true;
+    for (Node *x = refs; x != refs_end; x = x->goto_next) {
+        if (x->unique_label) // already bound (e.g. an earlier pass)
+            continue;
+        for (Node *y = labels; y != labels_end; y = y->goto_next) {
+            if (!x->label || !y->label)
+                continue;
             if (strlen(x->label) == strlen(y->label) &&
                 strncmp(x->label, y->label, strlen(y->label)) == 0) {
                 x->unique_label = y->unique_label;
@@ -131,7 +147,7 @@ static void resolve_goto_labels(VirtualMachine *vm) {
                 // (labels-as-values, `&&label`) also flows through this loop
                 // but merely takes an address — it neither exits nor enters
                 // scopes.
-                if (x->kind == ND_GOTO) {
+                if (x->kind == ND_GOTO && set_cleanup_depth) {
                     // The goto must clean up every active cleanup scope that
                     // the label is not inside of, i.e. everything below their
                     // lowest common ancestor. Using the LCA depth (rather than
@@ -157,9 +173,25 @@ static void resolve_goto_labels(VirtualMachine *vm) {
             }
         }
 
-        if (x->unique_label == NULL)
-            error_tok(vm, x->tok->next, "use of undeclared label");
+        if (x->unique_label == NULL) {
+            all_resolved = false;
+            if (diagnose_undeclared)
+                error_tok(vm, x->tok->next, "use of undeclared label");
+        }
     }
+    return all_resolved;
+}
+
+// This function matches gotos or labels-as-values with labels.
+//
+// We cannot resolve gotos as we parse a function because gotos
+// can refer a label that appears later in the function.
+// So, we need to do this after we parse the entire function.
+static void resolve_goto_labels(VirtualMachine *vm) {
+    cc_match_goto_labels(vm, vm->compiler.gotos, NULL, vm->compiler.labels,
+                         NULL,
+                         /*set_cleanup_depth=*/true,
+                         /*diagnose_undeclared=*/true);
 
     for (Node *label = vm->compiler.labels; label; label = label->goto_next)
         if (!label->label_used && !label->label_maybe_unused)

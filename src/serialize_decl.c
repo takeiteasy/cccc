@@ -377,6 +377,10 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     serialize_function_signature(f, ctx, fn, /*with_asm_label=*/!fn->body);
 
     if (fn->body) {
+        // #1253: rename duplicate labels a hygienic Quote() template left in
+        // this body so the emitted C has no repeated label in one function.
+        serialize_dedupe_function_labels(vm, fn->body);
+
         fprintf(f, " {\n");
         Obj *saved_fn   = ctx->current_fn;
         ctx->current_fn = fn;

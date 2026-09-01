@@ -4790,6 +4790,33 @@ Node *cc_parse_stmt(VirtualMachine *vm, Token **rest, Token *tok);
  @return AST node representing the parsed compound statement.
 */
 Node *cc_parse_compound_stmt(VirtualMachine *vm, Token **rest, Token *tok);
+
+/*!
+ @brief Match ND_GOTO / ND_LABEL_VAL refs against ND_LABEL definitions by name.
+ @details Operates on the goto_next-linked ranges [refs, refs_end) and
+             [labels, labels_end) (both newest-first; a NULL *_end means "to the
+             end of the list"). A matched ref receives the label's unique_label
+             (by pointer). Shared by resolve_goto_labels() and the hygienic
+             in-template pass in quote_core().
+ @param set_cleanup_depth Compute cleanup_target_depth for matched ND_GOTOs.
+ @param diagnose_undeclared Emit "use of undeclared label" for an unmatched ref.
+ @return true iff every ref in the range matched a label.
+*/
+bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
+                          Node *labels, Node *labels_end,
+                          bool set_cleanup_depth, bool diagnose_undeclared);
+
+/*!
+ @brief Bind any still-unresolved ND_GOTO / ND_LABEL_VAL refs in a function
+             body against the ND_LABEL definitions physically present in that
+             body.
+ @details Post-macro-expansion pass: a label reference produced inside a
+             Quote()/QuoteLazy() template and spliced into `fn` is resolved
+             here against a label the enclosing function defines. An unmatched
+             ref is a hard "use of undeclared label" error. Idempotent.
+*/
+void cc_resolve_body_label_refs(VirtualMachine *vm, Obj *fn);
+
 int64_t cc_eval(VirtualMachine *vm, Node *node);
 double cc_eval_double(VirtualMachine *vm, Node *node);
 void cc_init_parser(VirtualMachine *vm);

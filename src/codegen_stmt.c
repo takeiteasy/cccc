@@ -597,28 +597,36 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             return;
         }
 
-        case ND_GOTO:
+        case ND_GOTO: {
             // Emit cleanup calls for any scopes being exited, then jump.
-            // By the time codegen runs, resolve_goto_labels has already set
-            // unique_label and cleanup_target_depth on all gotos (named, break,
-            // continue), so there is only one path here.
-            if (node->unique_label) {
-                if (g_cleanup_scope)
-                    emit_cleanups_to_depth(vm, node->cleanup_target_depth);
-                emit(vm, JMP);
-                Pc patch            = emit_word_ptr(vm);
-                vm->text_seg[patch] = 0;
-                add_label_patch(node->unique_label, patch, false);
-            }
+            // By the time codegen runs, resolve_goto_labels (or, for a label
+            // reference produced inside a Quote()/QuoteLazy() template,
+            // quote_core's hygienic pass / cc_resolve_body_label_refs) has set
+            // unique_label and cleanup_target_depth on every goto (named,
+            // break, continue). A NULL here is a compiler bug, not a
+            // fall-through.
+            if (!node->unique_label)
+                error_tok(vm, node->tok,
+                          "internal error: unresolved goto to label '%s'",
+                          node->label ? node->label : "?");
+            if (g_cleanup_scope)
+                emit_cleanups_to_depth(vm, node->cleanup_target_depth);
+            emit(vm, JMP);
+            Pc patch            = emit_word_ptr(vm);
+            vm->text_seg[patch] = 0;
+            add_label_patch(node->unique_label, patch, false);
             return;
+        }
 
         case ND_LABEL:
-            // Named label statement - define the label and generate the body
-            if (node->unique_label) {
-                define_label(vm, node->unique_label);
-            } else if (node->label) {
-                define_label(vm, node->label);
-            }
+            // Named label statement - define the label and generate the body.
+            // unique_label is always set post-resolution; the raw-name branch
+            // would silently mismatch a patch keyed on a `.L..N` and is a bug.
+            if (!node->unique_label)
+                error_tok(vm, node->tok,
+                          "internal error: label '%s' was never resolved",
+                          node->label ? node->label : "?");
+            define_label(vm, node->unique_label);
             gen_stmt(vm, node->lhs);
             return;
 

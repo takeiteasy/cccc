@@ -553,12 +553,24 @@ void patch_labels(VirtualMachine *vm) {
         hashmap_put(&label_map, label_defs[i].name,
                     (void *)(uintptr_t)label_defs[i].offset);
 
+    // A defined-name set, so a patch that finds no entry can be told apart
+    // from a label that (impossibly) sits at offset 0 -- an unresolved patch
+    // is a compiler bug (a goto/&&label whose target was never emitted),
+    // previously silenced by the bare `if (!offset) continue`.
+    HashMap defined_names = {};
+    for (int i = 0; i < num_label_defs; i++)
+        hashmap_put(&defined_names, label_defs[i].name, (void *)1);
+
     for (int i = 0; i < num_label_patches; i++) {
         char *name   = label_patches[i].name;
         Pc    patch  = label_patches[i].patch_location;
         Pc    offset = (Pc)(uintptr_t)hashmap_get(&label_map, name);
-        if (!offset)
+        if (!offset) {
+            if (!hashmap_get(&defined_names, name))
+                error("codegen: internal error: unresolved label patch '%s'",
+                      name);
             continue;
+        }
 
         if (label_patches[i].text_relative) {
             cc_write_i64_at(vm, patch, cc_pc_to_byte_offset(offset));
@@ -568,4 +580,5 @@ void patch_labels(VirtualMachine *vm) {
     }
 
     hashmap_deinit(&label_map);
+    hashmap_deinit(&defined_names);
 }

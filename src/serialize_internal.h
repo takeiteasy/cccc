@@ -330,6 +330,10 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                             Node *node, int parent_prec);
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         Obj *fn);
+// #1253: give a fresh source spelling to each duplicate ND_LABEL a hygienic
+// Quote() template produced in `body`, rewriting references keyed by
+// unique_label. Called once per function body before it is emitted.
+void serialize_dedupe_function_labels(VirtualMachine *vm, Node *body);
 void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
                                   bool with_asm_label);
 void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,

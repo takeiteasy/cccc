@@ -1670,6 +1670,35 @@ template and with builder loops nested inside each other — each loop's
 `break`/`continue` targets are only visible for the duration of its own
 `WithLoop` block (or its own `QuoteLazy()` body expansion).
 
+### Labels inside templates
+
+`goto`, a named label (`done:`), a label address (`&&done`), and a computed
+`goto *p` all work inside a `Quote()`/`QuoteLazy()` template. A template's
+labels are **hygienic** — private to that template:
+
+- A reference and its target defined in the **same** template bind to each
+  other, regardless of order (`&&fwd` before `fwd:` is fine).
+- Two expansions of one label-bearing template in the same function each get
+  their own private copy of the label; a `goto` in one expansion never lands
+  in the other.
+- A `goto` (or `&&label`) in a template whose target the template does *not*
+  define is a free reference, resolved after expansion against a label the
+  **enclosing function** defines. `Quote("goto cleanup;")` spliced into a
+  function with a `cleanup:` label jumps there.
+- The reverse does **not** work: the enclosing function cannot `goto` a label
+  that only a template defines — that is `use of undeclared label`, matching
+  the diagnostic an eager `Quote()` has always produced for this shape.
+- A `goto` that a template contributes and that lands on a label in a scope
+  holding `__attribute__((cleanup))` variables is diagnosed: the exited-scope
+  set is not computed for a jump that crosses the template boundary.
+
+A still-unresolved label reference reaching code generation is an internal
+error, not silently-wrong code.
+
+`-Wunused` runs before templates are expanded, so a function label whose only
+`goto` comes from a spliced template is reported as unused; annotate it
+(`done: __attribute__((unused));`) if you compile with that warning on.
+
 ## Type And Symbol Reflection
 
 Macros can inspect types and global symbols that are visible at the macro

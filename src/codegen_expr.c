@@ -3730,21 +3730,21 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
 
         case ND_LABEL_VAL: {
-            // Label address: &&label (GCC extension for computed goto)
-            // Emit LTA3 with placeholder offset that will be patched later
-            //
-            // BUG (#1253): a `&&forward_label` taken inside a
-            // Quote()/QuoteLazy() template (label defined later in the same
-            // template) resolves to the wrong PC -- a subsequent `goto *p`
-            // jumps into hyperspace and typically stack-overflows.
-            // `&&backward_label` and `&&label` in ordinary (non-quoted) code
-            // are fine. Root cause is in the quote parse's label-resolution
-            // pass, not here.
+            // Label address: &&label (GCC extension for computed goto).
+            // Emit LTA3 with a placeholder offset patched once the label is
+            // defined. unique_label is set by resolve_goto_labels or, for a
+            // reference produced inside a Quote()/QuoteLazy() template, by
+            // quote_core's hygienic pass / cc_resolve_body_label_refs. A NULL
+            // here means resolution missed it -- patching the raw source name
+            // would key the patch on a name no define_label() ever emits (they
+            // emit `.L..N`), leaving LTA3 at offset 0 and crashing a later
+            // `goto *p`.
+            if (!node->unique_label)
+                error_tok(vm, node->tok,
+                          "internal error: unresolved label address '&&%s'",
+                          node->label ? node->label : "?");
             Pc label_addr_loc = emit_lta3(vm, dest_reg, 0);
-            // Record patch location so it gets resolved when label is defined
-            add_label_patch(node->unique_label ? node->unique_label
-                                               : node->label,
-                            label_addr_loc, true);
+            add_label_patch(node->unique_label, label_addr_loc, true);
             return;
         }
 

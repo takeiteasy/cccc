@@ -257,6 +257,59 @@ static void ast_walk_1044(Node *root, void (*visit)(Node *, void *),
     free(seen.slots);
 }
 
+// #1253: a Quote()/QuoteLazy() template that defines a label is hygienic --
+// two expansions of it in one function each get their own ND_LABEL with a
+// distinct `unique_label` but the *same* source spelling. That is fine for
+// the VM (labels match by unique_label pointer) but the serializer prints
+// source spellings, so `-c=native`/`-c=generated` would emit two identical C
+// labels in one function. Give every expansion after the first a fresh
+// spelling, and rewrite the goto/&&label references that resolve to it (they
+// carry the same `unique_label`, so keyed matching by that string is exact).
+typedef struct {
+    VirtualMachine *vm;
+    HashMap         first_seen; // source spelling -> first unique_label
+    HashMap         renames;    // unique_label -> fresh spelling
+    int             counter;
+} LabelDedupeCtx;
+
+static void label_dedupe_scan(Node *n, void *vctx) {
+    if (n->kind != ND_LABEL || !n->unique_label || !n->label)
+        return;
+    LabelDedupeCtx *d     = vctx;
+    char           *first = hashmap_get(&d->first_seen, n->label);
+    if (!first) {
+        hashmap_put(&d->first_seen, n->label, n->unique_label);
+        return;
+    }
+    if (first == n->unique_label || hashmap_get(&d->renames, n->unique_label))
+        return; // same label reached twice, or already renamed
+    char *fresh = arena_format(d->vm, "%s__cccc_q%d", n->label, d->counter++);
+    hashmap_put(&d->renames, n->unique_label, fresh);
+}
+
+static void label_dedupe_apply(Node *n, void *vctx) {
+    if ((n->kind != ND_LABEL && n->kind != ND_GOTO &&
+         n->kind != ND_LABEL_VAL) ||
+        !n->unique_label)
+        return;
+    LabelDedupeCtx *d     = vctx;
+    char           *fresh = hashmap_get(&d->renames, n->unique_label);
+    if (fresh)
+        n->label = fresh;
+}
+
+// Run over one function body before it is serialized.
+void serialize_dedupe_function_labels(VirtualMachine *vm, Node *body) {
+    if (!body)
+        return;
+    LabelDedupeCtx d = {.vm = vm};
+    ast_walk_1044(body, label_dedupe_scan, &d);
+    if (d.renames.buckets)
+        ast_walk_1044(body, label_dedupe_apply, &d);
+    hashmap_deinit(&d.first_seen);
+    hashmap_deinit(&d.renames);
+}
+
 typedef struct {
     SerializeContext *ctx;
     Obj              *owner_fn;

@@ -1329,6 +1329,108 @@ static int64_t objsize_effective_remaining(Obj *var, int64_t offset,
     return root_size - offset;
 }
 
+// --- #1253: post-expansion label resolution for Quote()/QuoteLazy() templates.
+//
+// quote_core()'s hygienic pass binds a template's label references to labels
+// the *same template* defines. A `goto host_label;` written in a template and
+// spliced into a function is a free reference: it survives with
+// unique_label == NULL and must be bound against a label the enclosing
+// function physically defines, which only exists as an assembled AST after
+// macro expansion. This walk does that binding.
+
+static bool label_tok_is_template(Node *n) {
+    return n && n->tok && n->tok->filename &&
+           strcmp(n->tok->filename, "<quote>") == 0;
+}
+
+// Pass 1: collect ND_LABEL name -> the ND_LABEL node. A real (non-<quote>)
+// label wins over a template label of the same name, so a free template
+// `goto X` binds to the enclosing function's own `X:` rather than to some
+// other template expansion's private `X:`.
+static void collect_body_labels(Node *node, HashMap *map) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_BLOCK_LITERAL)
+            continue; // a block literal's synthetic fn owns its own labels
+        if (node->kind == ND_LABEL && node->label && node->unique_label) {
+            Node *have = hashmap_get(map, node->label);
+            if (!have || !label_tok_is_template(node))
+                hashmap_put(map, node->label, node);
+        }
+        collect_body_labels(node->lhs, map);
+        collect_body_labels(node->rhs, map);
+        collect_body_labels(node->cond, map);
+        collect_body_labels(node->then, map);
+        collect_body_labels(node->els, map);
+        collect_body_labels(node->init, map);
+        collect_body_labels(node->inc, map);
+        collect_body_labels(node->body, map);
+        collect_body_labels(node->va_ap, map);
+        collect_body_labels(node->va_last, map);
+        collect_body_labels(node->va_src, map);
+        for (Node *a = node->args; a; a = a->next)
+            collect_body_labels(a, map);
+        for (Node *c = node->case_next; c; c = c->case_next)
+            collect_body_labels(c->body, map);
+        if (node->default_case)
+            collect_body_labels(node->default_case->body, map);
+    }
+}
+
+// Pass 2: bind any still-free ND_GOTO / ND_LABEL_VAL. break/continue gotos
+// carry unique_label already (and no ->label), so they are never touched.
+static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_BLOCK_LITERAL)
+            continue;
+        if ((node->kind == ND_GOTO || node->kind == ND_LABEL_VAL) &&
+            node->unique_label == NULL && node->label) {
+            Node *target = hashmap_get(map, node->label);
+            if (!target)
+                error_tok(vm, node->tok, "use of undeclared label '%s'",
+                          node->label);
+            node->unique_label = target->unique_label;
+            target->label_used = true;
+            // A cleanup chain recorded while parsing the template is
+            // meaningless at this splice site. Do not attempt to compute the
+            // exited-scope set; warn if either end sits in a cleanup scope.
+            if (node->kind == ND_GOTO) {
+                node->cleanup_target_depth = 0;
+                if (node->cleanup_chain)
+                    warn_tok(vm, node->tok, CCCC_WARN_ATTRIBUTES,
+                             "goto from a macro template targets a label in "
+                             "the enclosing function; __attribute__((cleanup)) "
+                             "scopes are not unwound for this jump");
+            }
+        }
+        bind_free_label_refs(vm, node->lhs, map);
+        bind_free_label_refs(vm, node->rhs, map);
+        bind_free_label_refs(vm, node->cond, map);
+        bind_free_label_refs(vm, node->then, map);
+        bind_free_label_refs(vm, node->els, map);
+        bind_free_label_refs(vm, node->init, map);
+        bind_free_label_refs(vm, node->inc, map);
+        bind_free_label_refs(vm, node->body, map);
+        bind_free_label_refs(vm, node->va_ap, map);
+        bind_free_label_refs(vm, node->va_last, map);
+        bind_free_label_refs(vm, node->va_src, map);
+        for (Node *a = node->args; a; a = a->next)
+            bind_free_label_refs(vm, a, map);
+        for (Node *c = node->case_next; c; c = c->case_next)
+            bind_free_label_refs(vm, c->body, map);
+        if (node->default_case)
+            bind_free_label_refs(vm, node->default_case->body, map);
+    }
+}
+
+void cc_resolve_body_label_refs(VirtualMachine *vm, Obj *fn) {
+    if (!fn || !fn->body)
+        return;
+    HashMap map = {0};
+    collect_body_labels(fn->body, &map);
+    bind_free_label_refs(vm, fn->body, &map);
+    hashmap_deinit(&map);
+}
+
 void resolve_objsize_queries(VirtualMachine *vm, Node *body) {
     // Always scan, even when *this* function has no pending queries of its
     // own: a nested function or block can reassign / take the address of a

@@ -2326,6 +2326,10 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     // This is necessary for code generation to work correctly
     add_type(vm, fn->body);
 
+    // #1253: bind free `goto label` / `&&label` references produced by a
+    // Quote() template against labels this body defines.
+    cc_resolve_body_label_refs(vm, fn);
+
     // #996: locals declared while building this body (e.g. `int x = 1;`
     // inside a Quote() template, or MakeLocalVar/MakeCompoundLiteral) are
     // always prepended to vm->compiler.locals, never to fn->locals directly
@@ -2626,6 +2630,11 @@ void __builtin_ast_pop_fn(void) {
     // Flush vars added inside the block back into the inner function.
     if (vm->compiler.current_fn)
         vm->compiler.current_fn->locals = vm->compiler.locals;
+    // #1253: a WithFn(fn) { ... Quote(...) ... } body attached by any means
+    // gets its free template label references bound here, before the inner
+    // function context is popped.
+    if (vm->compiler.current_fn && vm->compiler.current_fn->body)
+        cc_resolve_body_label_refs(vm, vm->compiler.current_fn);
     int d                   = --_fn_context_depth;
     vm->compiler.current_fn = _fn_context_stack[d];
     vm->compiler.locals     = _fn_locals_stack[d]; // restore outer locals
@@ -3973,15 +3982,75 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
     // quoted template).
     bool saved_splice_active            = vm->compiler.comptime_splice_active;
     vm->compiler.comptime_splice_active = true;
-    Token *rest                         = NULL;
-    Node  *result                       = NULL;
-    bool   parsed_as_stmt               = quote_is_stmt(toks);
+
+    // Template labels/gotos are hygienic: they must be resolved against each
+    // other here, not leak onto whichever function's goto/label worklists
+    // happen to be live. Snapshot the list heads so the entries this parse
+    // prepends form a well-defined range [head, saved_*). During a post-parse
+    // macro-expansion pass the live cleanup chain is stale arena state from
+    // whichever function parsed last, so zero it for the template parse; on
+    // the lazy-in-host-parse path it is genuinely the splice site's and is
+    // kept.
+    Node             *saved_gotos       = vm->compiler.gotos;
+    Node             *saved_labels      = vm->compiler.labels;
+    CleanupChainNode *saved_clean_chain = vm->compiler.cur_cleanup_chain;
+    int               saved_clean_depth = vm->compiler.cleanup_scope_depth;
+    if (vm->compiler.in_macro_expansion) {
+        vm->compiler.cur_cleanup_chain   = NULL;
+        vm->compiler.cleanup_scope_depth = 0;
+    }
+
+    Token *rest           = NULL;
+    Node  *result         = NULL;
+    bool   parsed_as_stmt = quote_is_stmt(toks);
     if (parsed_as_stmt) {
         result = cc_parse_stmt(vm, &rest, toks);
     } else {
         result = cc_parse_expr(vm, &rest, toks);
     }
     vm->compiler.comptime_splice_active = saved_splice_active;
+    vm->compiler.cur_cleanup_chain      = saved_clean_chain;
+    vm->compiler.cleanup_scope_depth    = saved_clean_depth;
+
+    // Resolve this template's own label references against its own labels,
+    // then splice the resolved range out of the worklists. Every template
+    // label is removed (matched or not) so it stays private.
+    //
+    // A template goto/label-address that matched a template label is removed
+    // too. An *unmatched* ref is a free reference to a label the enclosing
+    // context must provide:
+    //   - under in_macro_expansion (the common case: Quote() runs from
+    //     comptime execution during cc_expand_macros): pull it off the
+    //     worklist as well. No parse-time resolve_goto_labels() will ever run
+    //     again; cc_resolve_body_label_refs() binds it against the assembled
+    //     function body after the whole template is spliced in -- this is also
+    //     what binds `Quote("{ $1; done: ; }", QuoteLazy("goto done;"))`,
+    //     where the inner fragment's goto and the outer template's label only
+    //     meet once both live in the same function body.
+    //   - otherwise (a fragment materialised inline during an ordinary host
+    //     parse): keep it on the worklist so that parse's own trailing
+    //     resolve_goto_labels() sees it.
+    cc_match_goto_labels(vm, vm->compiler.gotos, saved_gotos,
+                         vm->compiler.labels, saved_labels,
+                         /*set_cleanup_depth=*/true,
+                         /*diagnose_undeclared=*/false);
+    {
+        Node  head_g = {0};
+        Node *tail_g = &head_g;
+        for (Node *x = vm->compiler.gotos; x && x != saved_gotos;) {
+            Node *nx = x->goto_next;
+            bool  keep =
+                (x->unique_label == NULL) && !vm->compiler.in_macro_expansion;
+            if (keep) {
+                tail_g->goto_next = x;
+                tail_g            = x;
+            }
+            x = nx;
+        }
+        tail_g->goto_next   = saved_gotos;
+        vm->compiler.gotos  = head_g.goto_next;
+        vm->compiler.labels = saved_labels; // every template label unlinked
+    }
 
     // #955: previously any tokens left over after the single parsed
     // statement/expression were silently discarded -- e.g. an unbraced

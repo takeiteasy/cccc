@@ -44,3 +44,15 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   loop-body fragment built by its own call can use `break`/`continue` or
   reference a variable that is only in scope once it is spliced into a
   separately-built outer `Quote()`/`QuoteLazy()` template.
+- Fixed: a label reference inside a `Quote()`/`QuoteLazy()` template was never
+  resolved — comptime expansion is a post-parse pass, so a `goto label` in a
+  template emitted no jump (a silent fall-through) and `&&label` yielded a
+  null code address that crashed a later `goto *p` with a spurious stack
+  overflow. Template labels are now hygienic (private to the template), a
+  `goto` may target a label in the enclosing function, and any still-
+  unresolved label reference is a hard internal error rather than
+  silently-wrong code.
+- Changed: a `goto` in the enclosing function can no longer target a label
+  defined only inside a `Quote()`/`QuoteLazy()` template spliced into it —
+  it is `use of undeclared label`, matching what an eager `Quote()` already
+  reported and making the eager and deferred paths consistent.

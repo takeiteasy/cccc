@@ -3529,6 +3529,10 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
         // ND_EXPR_STMT branch marks statement position per-element.
         fn->body = transform_node(vm, fn->body, 0, false);
 
+        // #1253: bind any `goto host_label` / `&&host_label` a Quote() template
+        // spliced into this body left as a free reference.
+        cc_resolve_body_label_refs(vm, fn);
+
         // Flush new locals (created by quote templates) back into fn->locals.
         fn->locals = vm->compiler.locals;
     }
